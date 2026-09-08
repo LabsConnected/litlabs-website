@@ -16,6 +16,13 @@ describe("Studio intent routing", () => {
     expect(detectIntent("Open the preview")?.intent).toBe("open_preview");
   });
 
+  it("does not let a trailing preview request hijack a build brief", () => {
+    const intent = detectIntent(
+      "Create a responsive landing page for a fictional Michigan music venue. Show me the finished preview.",
+    );
+    expect(intent?.intent).toBe("generate_code");
+  });
+
   it("routes health and approval requests to their dedicated surfaces", () => {
     expect(detectIntent("Run project health checks")?.intent).toBe("project_health");
     expect(detectIntent("What needs approval?")?.intent).toBe("open_approvals");

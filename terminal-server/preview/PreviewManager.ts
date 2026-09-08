@@ -19,10 +19,13 @@
  * for the logs endpoint.
  */
 
-import { spawn, type ChildProcess } from "child_process";
+import { execFile, spawn, type ChildProcess } from "child_process";
 import { existsSync, readFileSync, statSync } from "fs";
 import { delimiter as PATH_DELIMITER, dirname, join, resolve } from "path";
+import { promisify } from "util";
 import { getWorkspace, type WorkspaceDescriptor } from "../workspace/WorkspaceManager";
+
+const execFileAsync = promisify(execFile);
 
 export type PreviewStatus = "stopped" | "starting" | "ready" | "failed" | "restarting";
 
@@ -62,7 +65,8 @@ export type PreviewErrorCode =
   | "preview_port_never_ready"
   | "preview_spawn_error"
   | "preview_no_free_port"
-  | "preview_no_dev_command";
+  | "preview_no_dev_command"
+  | "preview_dependency_install_failed";
 
 export class PreviewError extends Error {
   readonly code: PreviewErrorCode;
@@ -256,6 +260,69 @@ function lookupExecutable(name: string, pathStr: string, isWin: boolean): string
     }
   }
   return null;
+}
+
+function redactDiagnosticText(value: unknown): string {
+  return String(value ?? "")
+    .replace(/(token|secret|password|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]")
+    .slice(-4000);
+}
+
+async function installWorkspaceDependencies(
+  root: string,
+  packageManager: string,
+  executable: string,
+): Promise<void> {
+  if (!existsSync(join(root, "package.json")) || packageManager === "npx") return;
+
+  const args = executable === "corepack"
+    ? ["pnpm", "install", "--prefer-offline"]
+    : ["install", "--prefer-offline"];
+  if (packageManager === "pnpm" && existsSync(join(root, "pnpm-lock.yaml"))) {
+    args.push("--frozen-lockfile");
+  }
+
+  const childPath = buildChildPath(root);
+  const nodeBinDir = process.env.NODE_BIN_DIR?.trim();
+  const env: Record<string, string> = {
+    ...process.env,
+    PATH: nodeBinDir ? `${nodeBinDir}${PATH_DELIMITER}${childPath}` : childPath,
+    NODE_ENV: "development",
+    NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
+  } as Record<string, string>;
+
+  const resolvedExecutable = lookupExecutable(executable, childPath, process.platform === "win32") ?? executable;
+  try {
+    await execFileAsync(resolvedExecutable, args, {
+      cwd: root,
+      env,
+      timeout: 300_000,
+      maxBuffer: 8 * 1024 * 1024,
+      shell: process.platform === "win32"
+        ? (process.env.ComSpec ?? process.env.COMSPEC ?? `${process.env.SystemRoot ?? "C:\\Windows"}\\System32\\cmd.exe`)
+        : false,
+    });
+  } catch (error) {
+    const failure = error as { code?: number | string; message?: string; stdout?: string; stderr?: string };
+    const command = `${resolvedExecutable} ${args.join(" ")}`;
+    const stderr = redactDiagnosticText(failure.stderr);
+    const stdout = redactDiagnosticText(failure.stdout);
+    const failureMessage = redactDiagnosticText(failure.message);
+    const exitCode = typeof failure.code === "number" ? failure.code : null;
+    throw new PreviewError(
+      "preview_dependency_install_failed",
+      `Dependency install failed${exitCode === null ? "" : ` (exit ${exitCode})`}: ${stderr || stdout || failureMessage || "unknown error"}`,
+      {
+        command,
+        cwd: root,
+        packageManager,
+        exitCode,
+        stderr,
+        stdout,
+        suggestedRemediation: "Repair the workspace dependency store and retry preview startup.",
+      },
+    );
+  }
 }
 
 // ─── Framework detection ───────────────────────────────────────────
@@ -456,6 +523,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
 
   // Resolve the package manager BEFORE spawning. If it is genuinely
   // unavailable, fail with a typed error — never surface a bare exit 127.
+  let resolvedPackageManager: ResolvedPackageManager | null = null;
   if (detected.packageManager !== "npx") {
     const resolved = resolvePackageManager(detected.packageManager, ws.root);
     if (!resolved.found) {
@@ -499,6 +567,15 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
       releasePort(port);
       throw err;
     }
+    resolvedPackageManager = resolved;
+  }
+
+  if (resolvedPackageManager) {
+    await installWorkspaceDependencies(
+      ws.root,
+      detected.packageManager,
+      resolvedPackageManager.executable,
+    );
   }
 
   const port = allocatePort();
@@ -599,7 +676,11 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
           `PATH: ${childPath}`;
       } else {
         runtime.errorCode = "preview_dev_server_failed";
-        runtime.error = `Dev server process exited (code=${code}, signal=${signal})`;
+        const recentOutput = redactDiagnosticText(runtime.logs.slice(-20).join("\n"));
+        runtime.error = [
+          `Dev server process exited (code=${code}, signal=${signal})`,
+          recentOutput ? `Recent output:\n${recentOutput}` : "",
+        ].filter(Boolean).join("\n");
       }
       runtime.status = "failed";
     }
