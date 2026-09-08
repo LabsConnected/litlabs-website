@@ -331,12 +331,8 @@ export default function CommandComposer({
         boxShadow: "0 -8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(155,77,255,0.06)",
       }}
     >
-      {/* Context line: repository · branch · AUTO/ACT toggle */}
-      <div
-        className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[10px] font-medium"
-        style={{ color: "var(--text-muted)" }}
-        data-testid="studio-workspace-context"
-      >
+      {/* Context line: workspace · repository · branch */}
+      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[10px] font-medium" style={{ color: "var(--text-muted)" }} data-testid="studio-workspace-context">
         {contextLine?.workspace && <span className="min-w-0 max-w-full truncate">{contextLine.workspace}</span>}
         {(contextLine?.repo || contextLine?.branch) && (
           <span className="flex min-w-0 max-w-full items-center gap-1.5">
@@ -347,9 +343,6 @@ export default function CommandComposer({
             {contextLine.branch && <span className="shrink-0">{contextLine.branch}</span>}
           </span>
         )}
-
-        {/* Execution mode is now in the top bar (AUTO ▾).
-            The composer focuses on intent pills and tool modes only. */}
       </div>
 
       {contextLine?.selectedElement && (

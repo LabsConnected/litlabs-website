@@ -135,8 +135,12 @@ export function Header({
         <Text color={localColor} dimColor={localRuntime === "ready"}>{localIcon} {localLabel}</Text>
       );
     }
-    // SIGNED OUT is a secondary indicator — shown alongside the primary badge
-    if (signedIn === false) {
+    // Auth is a secondary indicator — shown alongside the primary badge.
+    if (signedIn === true) {
+      rightBadges.push(
+        <Text color={COLORS.success}>● SIGNED IN</Text>
+      );
+    } else if (signedIn === false) {
       rightBadges.push(
         <Text color={COLORS.error}>● SIGNED OUT</Text>
       );
