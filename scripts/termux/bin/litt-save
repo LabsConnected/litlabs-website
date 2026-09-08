@@ -54,11 +54,8 @@ echo "===== WORKSPACE DEPS ====="
 pnpm build:workspace-deps
 
 echo
-echo "===== TYPESCRIPT ====="
-(
-  cd packages/litt-cli
-  pnpm exec tsc --noEmit
-)
+echo "===== TYPE CHECK ====="
+pnpm type-check
 
 echo
 echo "===== SAFETY PATCH ====="
