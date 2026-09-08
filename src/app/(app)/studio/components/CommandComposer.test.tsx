@@ -207,6 +207,22 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
     expect(input.parentElement?.className).toContain("flex-wrap");
   });
 
+  it("renders the active workspace context above the composer", () => {
+    render(
+      <CommandComposer
+        value=""
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        contextLine={{ workspace: "Michigan Music Venue" }}
+        busy={false}
+      />,
+    );
+
+    expect(screen.getByTestId("studio-workspace-context").textContent).toContain(
+      "Michigan Music Venue",
+    );
+  });
+
   it("shows the active model picker without an execution-mode dropdown", () => {
     const onSend = vi.fn();
     render(

@@ -58,6 +58,7 @@ const STATUS_LABELS: Record<VoiceState, string> = {
 };
 
 export interface ComposerContextLine {
+  workspace?: string;
   repo?: string;
   branch?: string;
   permissionMode?: string;
@@ -326,23 +327,18 @@ export default function CommandComposer({
         boxShadow: "0 -8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(155,77,255,0.06)",
       }}
     >
-      {/* Context line: repository · branch · AUTO/ACT toggle */}
-      <div className="flex min-w-0 items-center gap-2 px-1">
-        {contextLine && (contextLine.repo || contextLine.branch) && (
-          <div
-            className="flex min-w-0 items-center gap-1.5 text-[10px] font-medium"
-            style={{ color: "var(--text-muted)" }}
-          >
+      {/* Context line: workspace · repository · branch */}
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[10px] font-medium" style={{ color: "var(--text-muted)" }} data-testid="studio-workspace-context">
+        {contextLine?.workspace && <span className="min-w-0 truncate">{contextLine.workspace}</span>}
+        {(contextLine?.repo || contextLine?.branch) && (
+          <span className="flex min-w-0 items-center gap-1.5">
             {contextLine.repo && <span className="truncate max-w-[200px]">{contextLine.repo}</span>}
             {contextLine.repo && contextLine.branch && (
               <span style={{ color: "var(--studio-border-strong)" }}>·</span>
             )}
             {contextLine.branch && <span className="shrink-0">{contextLine.branch}</span>}
-          </div>
+          </span>
         )}
-
-        {/* Execution mode is now in the top bar (AUTO ▾).
-            The composer focuses on intent pills and tool modes only. */}
       </div>
 
       {/* LiTT mode quick-select — Image / Music / Video / Code / Website

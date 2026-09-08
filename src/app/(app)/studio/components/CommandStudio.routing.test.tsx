@@ -632,11 +632,16 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.getByTestId("litt-mobile-trigger")).toBeTruthy();
     });
 
-    it("mobile trigger opens a real LiTT sheet with chat and composer", async () => {
+    it("mobile trigger opens a real LiTT sheet with chat, composer, and workspace context", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
       const { user } = await renderCommandStudio();
+      expect(screen.getByRole("button", { name: "Ask LiTT to build" })).toBeTruthy();
       await user.click(screen.getByTestId("litt-mobile-trigger"));
       expect(screen.getByTestId("litt-mobile-sheet")).toBeTruthy();
+      expect(screen.getByTestId("studio-workspace-context")).toHaveTextContent(
+        "Private LiTT workspace — created when you send",
+      );
+      expect(screen.getByRole("button", { name: /send message/i })).toBeTruthy();
       // Closing returns to workspace-only mobile state.
       await user.click(screen.getByTestId("litt-mobile-sheet-close"));
       expect(screen.queryByTestId("litt-mobile-sheet")).toBeNull();
