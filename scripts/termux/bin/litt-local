@@ -1,93 +1,187 @@
 #!/data/data/com.termux/files/usr/bin/bash
 set -euo pipefail
 
-source "$HOME/.config/litt/termux.env"
+# ── Bootstrap ────────────────────────────────────────────────────────
+#
+# A brand-new git worktree has no node_modules (no tsx binary) and no
+# built dist/ output for the workspace packages litt-cli imports at
+# runtime (@litt/models, @litt/agent-core). Without this check,
+# `litt-local` fails deep into startup — first "spawn tsx ENOENT", then
+# (after a manual install) "Cannot find .../dist/index.js" one package
+# at a time — instead of just bootstrapping itself.
+#
+# These functions are self-contained (no sourcing from the target
+# repo) because the installed launcher at $PREFIX/bin/litt-local runs
+# against whichever worktree/branch the caller cd'd into, which may
+# not itself carry this fix yet.
+#
+# Sourcing this file (as the regression tests do) only defines the
+# functions below — litt_local_main only runs when the file is
+# executed directly, via the BASH_SOURCE/$0 guard at the bottom.
 
-# Prefer the Git project/worktree from which litt-local was invoked.
-# Explicit LITT_RUN_REPO still wins; canonical LITT_REPO is the fallback.
-CALLER_REPO="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
-RUN_REPO="${LITT_RUN_REPO:-${CALLER_REPO:-$LITT_REPO}}"
+# Workspace packages litt-cli imports directly and needs built before
+# `pnpm exec tsx packages/litt-cli/src/index.ts` can run.
+LITT_LOCAL_BUILD_PACKAGES=(litt-models litt-agent-core)
 
-cd "$RUN_REPO" || {
-  echo "❌ LiTT repository missing: $RUN_REPO"
-  exit 1
+# True (exit 0) when node_modules or the tsx binary it provides is
+# missing, i.e. `pnpm install` has never run in this worktree.
+litt_local_needs_install() {
+  local repo_root="$1"
+  [ ! -d "$repo_root/node_modules" ] && return 0
+  [ ! -x "$repo_root/node_modules/.bin/tsx" ] && return 0
+  return 1
 }
 
-BRANCH="$(git branch --show-current)"
+# True (exit 0) when any required workspace package's dist/index.js is
+# missing, or older than its own src/ — i.e. a build has never run, or
+# has gone stale since.
+litt_local_needs_build() {
+  local repo_root="$1"
+  local pkg dist_file src_dir
+  for pkg in "${LITT_LOCAL_BUILD_PACKAGES[@]}"; do
+    dist_file="$repo_root/packages/$pkg/dist/index.js"
+    src_dir="$repo_root/packages/$pkg/src"
+    if [ ! -f "$dist_file" ]; then
+      return 0
+    fi
+    if [ -d "$src_dir" ] && [ -n "$(find "$src_dir" -type f -newer "$dist_file" 2>/dev/null | head -n 1)" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
 
-# LiTT may be launched from canonical main for local use/testing.
-# Code changes must still be made in a feature branch/worktree.
-if [ "$BRANCH" = "main" ]; then
-  LITT_WORK_MODE="CANONICAL / RUN"
-else
-  LITT_WORK_MODE="FEATURE / DEV"
-fi
+# Ensures repo_root is ready to run litt-cli from source: installs
+# dependencies and/or builds workspace packages only when actually
+# needed. Prints a status line for each step it takes; stays silent
+# (and fast) when the worktree is already bootstrapped. Returns
+# non-zero with a clear error on install/build failure — the caller
+# is expected to stop rather than continue into a crash.
+litt_local_bootstrap() {
+  local repo_root="$1"
 
-if curl --max-time 2 -fsS "$LITT_OLLAMA_LAN/api/tags" >/dev/null 2>&1; then
-  OLLAMA="$LITT_OLLAMA_LAN"
-  CONNECTION="LAN"
-elif curl --max-time 3 -fsS "$LITT_OLLAMA_TAILSCALE/api/tags" >/dev/null 2>&1; then
-  OLLAMA="$LITT_OLLAMA_TAILSCALE"
-  CONNECTION="TAILSCALE"
-else
-  echo "❌ Ollama PC is unreachable."
+  if litt_local_needs_install "$repo_root"; then
+    echo "◬ Fresh worktree detected — installing dependencies"
+    if ! (cd "$repo_root" && pnpm install --frozen-lockfile); then
+      echo "❌ Dependency install failed (pnpm install --frozen-lockfile)." >&2
+      echo "   Fix the error above, then re-run litt-local." >&2
+      return 1
+    fi
+    echo "✅ Dependencies installed"
+    echo
+  fi
+
+  if litt_local_needs_build "$repo_root"; then
+    echo "◬ Building LiTT workspace dependencies"
+    if ! (cd "$repo_root" && pnpm --filter '@litlabs/litt-cli...' build); then
+      echo "❌ Workspace build failed (pnpm --filter '@litlabs/litt-cli...' build)." >&2
+      echo "   Fix the error above, then re-run litt-local." >&2
+      return 1
+    fi
+    echo "✅ Workspace build complete"
+    echo
+  fi
+
+  return 0
+}
+
+litt_local_main() {
+  source "$HOME/.config/litt/termux.env"
+
+  # Prefer the Git project/worktree from which litt-local was invoked.
+  # Explicit LITT_RUN_REPO still wins; canonical LITT_REPO is the fallback.
+  CALLER_REPO="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
+  RUN_REPO="${LITT_RUN_REPO:-${CALLER_REPO:-$LITT_REPO}}"
+
+  cd "$RUN_REPO" || {
+    echo "❌ LiTT repository missing: $RUN_REPO"
+    exit 1
+  }
+
+  litt_local_bootstrap "$RUN_REPO" || exit 1
+
+  BRANCH="$(git branch --show-current)"
+
+  # LiTT may be launched from canonical main for local use/testing.
+  # Code changes must still be made in a feature branch/worktree.
+  if [ "$BRANCH" = "main" ]; then
+    LITT_WORK_MODE="CANONICAL / RUN"
+  else
+    LITT_WORK_MODE="FEATURE / DEV"
+  fi
+
+  if curl --max-time 2 -fsS "$LITT_OLLAMA_LAN/api/tags" >/dev/null 2>&1; then
+    OLLAMA="$LITT_OLLAMA_LAN"
+    CONNECTION="LAN"
+  elif curl --max-time 3 -fsS "$LITT_OLLAMA_TAILSCALE/api/tags" >/dev/null 2>&1; then
+    OLLAMA="$LITT_OLLAMA_TAILSCALE"
+    CONNECTION="TAILSCALE"
+  else
+    echo "❌ Ollama PC is unreachable."
+    echo
+    echo "LAN:"
+    echo "  $LITT_OLLAMA_LAN"
+    echo
+    echo "Tailscale:"
+    echo "  $LITT_OLLAMA_TAILSCALE"
+    exit 1
+  fi
+
+  export LITT_LOCAL_MODE=1
+  export OLLAMA_HOST_PC="$OLLAMA"
+  export OLLAMA_HOST="$OLLAMA"
+
   echo
-  echo "LAN:"
-  echo "  $LITT_OLLAMA_LAN"
+  echo "◬ LiTT LOCAL"
+  echo "────────────────────────────────────────"
+  echo "Repo:    $RUN_REPO"
+  echo "Branch:  $BRANCH"
+  echo "Ollama:  $OLLAMA ($CONNECTION)"
+  echo "Model:   $LITT_LOCAL_MODEL"
+  echo "Git:     $(git status --porcelain | wc -l | tr -d ' ') changed file(s)"
+  echo "────────────────────────────────────────"
   echo
-  echo "Tailscale:"
-  echo "  $LITT_OLLAMA_TAILSCALE"
-  exit 1
+
+  MODEL_LOADED="$(
+    curl --max-time 3 -fsS "$OLLAMA/api/ps" 2>/dev/null |
+      jq -r --arg model "$LITT_LOCAL_MODEL" \
+        '[.models[]? | select(.name == $model or .model == $model)] | length' \
+        2>/dev/null || echo 0
+  )"
+
+  if [ "$MODEL_LOADED" = "0" ]; then
+    echo "🔥 Warming $LITT_LOCAL_MODEL..."
+
+    curl --max-time 30 -fsS "$OLLAMA/api/chat" \
+      -H 'Content-Type: application/json' \
+      -d "{
+        \"model\":\"$LITT_LOCAL_MODEL\",
+        \"stream\":false,
+        \"keep_alive\":\"30m\",
+        \"options\":{
+          \"num_ctx\":4096,
+          \"num_predict\":1,
+          \"temperature\":0
+        },
+        \"messages\":[
+          {\"role\":\"user\",\"content\":\".\"}
+        ]
+      }" >/dev/null || {
+        echo "⚠️ Model warm-up did not finish, starting LiTT anyway."
+      }
+  else
+    echo "✅ $LITT_LOCAL_MODEL already warm"
+  fi
+
+  echo
+  echo "🚀 Starting LiTT..."
+  echo
+
+  exec pnpm exec tsx packages/litt-cli/src/index.ts "$@"
+}
+
+# Only auto-run when executed directly — sourcing this file (as the
+# regression tests do) must only define the functions above.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  litt_local_main "$@"
 fi
-
-export LITT_LOCAL_MODE=1
-export OLLAMA_HOST_PC="$OLLAMA"
-export OLLAMA_HOST="$OLLAMA"
-
-echo
-echo "◬ LiTT LOCAL"
-echo "────────────────────────────────────────"
-echo "Repo:    $RUN_REPO"
-echo "Branch:  $BRANCH"
-echo "Ollama:  $OLLAMA ($CONNECTION)"
-echo "Model:   $LITT_LOCAL_MODEL"
-echo "Git:     $(git status --porcelain | wc -l | tr -d ' ') changed file(s)"
-echo "────────────────────────────────────────"
-echo
-
-MODEL_LOADED="$(
-  curl --max-time 3 -fsS "$OLLAMA/api/ps" 2>/dev/null |
-    jq -r --arg model "$LITT_LOCAL_MODEL" \
-      '[.models[]? | select(.name == $model or .model == $model)] | length' \
-      2>/dev/null || echo 0
-)"
-
-if [ "$MODEL_LOADED" = "0" ]; then
-  echo "🔥 Warming $LITT_LOCAL_MODEL..."
-
-  curl --max-time 30 -fsS "$OLLAMA/api/chat" \
-    -H 'Content-Type: application/json' \
-    -d "{
-      \"model\":\"$LITT_LOCAL_MODEL\",
-      \"stream\":false,
-      \"keep_alive\":\"30m\",
-      \"options\":{
-        \"num_ctx\":4096,
-        \"num_predict\":1,
-        \"temperature\":0
-      },
-      \"messages\":[
-        {\"role\":\"user\",\"content\":\".\"}
-      ]
-    }" >/dev/null || {
-      echo "⚠️ Model warm-up did not finish, starting LiTT anyway."
-    }
-else
-  echo "✅ $LITT_LOCAL_MODEL already warm"
-fi
-
-echo
-echo "🚀 Starting LiTT..."
-echo
-
-exec pnpm exec tsx packages/litt-cli/src/index.ts "$@"
