@@ -31,7 +31,7 @@ import { generateCodeVerifier, generateCodeChallenge, generateState } from "../l
 import { createCredentialStore } from "../lib/auth/credential-store.js";
 import { startAuthServer } from "../lib/auth/auth-server.js";
 import { exchangeCodeForTokens, refreshAccessToken, revokeToken, fetchUserInfo } from "../lib/auth/token-exchange.js";
-import { ClerkCliAuth } from "../lib/auth/clerk-auth.js";
+import { ClerkCliAuth, defaultCredentialStorageKind } from "../lib/auth/clerk-auth.js";
 import { AuthError } from "../lib/auth/types.js";
 import { resolveAuthConfig, hasAuthConfig, getIssuer, getTerminalUrl, DEFAULT_TERMINAL_URL } from "../lib/auth/auth-config.js";
 import { getAuthSession, resetAuthSession } from "../lib/auth/auth-session.js";
@@ -1772,5 +1772,36 @@ describe("Browser Launcher — no real process launches", () => {
     // Probed via the fake only.
     expect(fake.execSyncCalls.length).toBeGreaterThan(0);
     expect(fake.execSyncCalls.every((c) => c.includes("termux-open-url"))).toBe(true);
+  });
+});
+
+
+describe("Termux credential storage selection", () => {
+  const originalTermuxVersion = process.env.TERMUX_VERSION;
+  const originalPrefix = process.env.PREFIX;
+
+  afterEach(() => {
+    if (originalTermuxVersion === undefined) {
+      delete process.env.TERMUX_VERSION;
+    } else {
+      process.env.TERMUX_VERSION = originalTermuxVersion;
+    }
+
+    if (originalPrefix === undefined) {
+      delete process.env.PREFIX;
+    } else {
+      process.env.PREFIX = originalPrefix;
+    }
+  });
+
+  it("uses file storage on Termux", () => {
+    process.env.TERMUX_VERSION = "0.118.3";
+    expect(defaultCredentialStorageKind()).toBe("file");
+  });
+
+  it("uses keychain storage outside Termux", () => {
+    delete process.env.TERMUX_VERSION;
+    process.env.PREFIX = "/usr";
+    expect(defaultCredentialStorageKind()).toBe("keychain");
   });
 });
