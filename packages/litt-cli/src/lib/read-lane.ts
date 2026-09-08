@@ -78,7 +78,10 @@ export function matchReadTools(input: string): ReadMatch | null {
   ];
 
   // ─── Git status (files changed, diff, changes) ───
-  const statusSignals = ["files changed", "what changed", "changes", "diff"];
+  const statusSignals = [
+    "git status", "current git status",
+    "files changed", "what changed", "changes", "diff",
+  ];
 
   // ─── Git log (commits, recent commits) ───
   const logSignals = ["recent commits", "commits", "git log", "show log", "show commits"];
@@ -138,11 +141,10 @@ export function matchReadTools(input: string): ReadMatch | null {
     return null;
   }
 
-  // Compound queries (2+ tools) need synthesis to combine results.
-  // Single-tool queries may still need synthesis if the raw tool output
-  // isn't a direct answer (e.g., inspect_package returns raw package.json
-  // data — the user asked "what framework is this" and needs a one-word
-  // answer extracted).
+  // Compound queries need synthesis to combine results.
+  // Package inspection also needs synthesis because its structured metadata
+  // must be interpreted. A single git-status result is formatted
+  // deterministically below instead of spending a model call.
   needsSynthesis = calls.length >= 2 || wantsPackage;
 
   const summary = calls.length === 1
@@ -199,6 +201,102 @@ export function formatReadResultsForSynthesis(
     "Provide a concise, factual answer based on the tool results above.",
     "If the tools did not return the requested information, say so honestly.",
   ].join("\n");
+}
+
+
+/**
+ * Produce a precise user-facing answer for read results that do not need
+ * model synthesis. Returns null when no specialized deterministic formatter
+ * applies, allowing the controller to use its generic fallback.
+ */
+export function formatDeterministicReadAnswer(
+  results: ReadToolResult[],
+): string | null {
+  if (results.length !== 1) return null;
+
+  const entry = results[0];
+  if (entry.toolId !== "project.status" || !entry.result.success) return null;
+
+  const data = entry.result.data;
+  if (!data || typeof data !== "object") return null;
+
+  const record = data as Record<string, unknown>;
+
+  const branch =
+    typeof record.branch === "string" && record.branch.trim()
+      ? record.branch.trim()
+      : null;
+
+  const changed =
+    typeof record.changed === "number" && Number.isFinite(record.changed)
+      ? record.changed
+      : 0;
+
+  const untracked =
+    typeof record.untracked === "number" && Number.isFinite(record.untracked)
+      ? record.untracked
+      : 0;
+
+  const gitStatus =
+    record.gitStatus && typeof record.gitStatus === "object"
+      ? record.gitStatus as Record<string, unknown>
+      : null;
+
+  const files =
+    gitStatus && Array.isArray(gitStatus.files)
+      ? gitStatus.files.filter((value): value is string => typeof value === "string")
+      : [];
+
+  const trackedFiles: string[] = [];
+  const untrackedFiles: string[] = [];
+
+  for (const raw of files) {
+    const line = raw.trimEnd();
+
+    // Git porcelain uses two status columns followed by a space and path:
+    // " M file", "M  file", "?? file", etc.
+    const path = line.length >= 4 ? line.slice(3).trim() : line.trim();
+
+    if (!path) continue;
+
+    if (line.startsWith("??")) {
+      untrackedFiles.push(path);
+    } else {
+      trackedFiles.push(path);
+    }
+  }
+
+  const total =
+    typeof gitStatus?.changeCount === "number" &&
+    Number.isFinite(gitStatus.changeCount)
+      ? gitStatus.changeCount
+      : changed + untracked;
+
+  if (record.clean === true || total === 0) {
+    return branch
+      ? `The working tree on \`${branch}\` is clean.`
+      : "The working tree is clean.";
+  }
+
+  const intro = branch
+    ? `On \`${branch}\`, there are ${total} working-tree changes: ${changed} tracked and ${untracked} untracked.`
+    : `There are ${total} working-tree changes: ${changed} tracked and ${untracked} untracked.`;
+
+  const lines = [intro];
+
+  if (trackedFiles.length > 0) {
+    lines.push(
+      `Tracked: ${trackedFiles.map((file) => `\`${file}\``).join(", ")}`
+    );
+  }
+
+  if (untrackedFiles.length > 0) {
+    lines.push(
+      `Untracked: ${untrackedFiles.map((file) => `\`${file}\``).join(", ")}`
+    );
+  }
+
+  return lines.join("\n");
 }
 
 // ─── Full inspection (for /inspect) ────────────────────────────────
