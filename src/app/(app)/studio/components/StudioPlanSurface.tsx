@@ -267,17 +267,12 @@ export default function StudioPlanSurface({
           </div>
 
           {/* Changes summary */}
-          {changesSummary && (changesSummary.added > 0 || changesSummary.modified > 0 || changesSummary.deleted > 0) && (
-            <div className="mt-2 flex gap-3 border-t pt-2" style={{ borderColor: "var(--studio-border)" }}>
-              <span className="text-[11px]" style={{ color: "var(--litt-primary)" }}>
-                +{changesSummary.added} added
-              </span>
-              <span className="text-[11px]" style={{ color: "#e3b341" }}>
-                ~{changesSummary.modified} modified
-              </span>
-              <span className="text-[11px]" style={{ color: "var(--error)" }}>
-                -{changesSummary.deleted} deleted
-              </span>
+          {changesSummary && (changesSummary.added > 0 || changesSummary.modified > 0 || changesSummary.deleted > 0 || changesSummary.renamed > 0) && (
+            <div className="mt-2 flex flex-wrap gap-3 border-t pt-2" style={{ borderColor: "var(--studio-border)" }}>
+              {changesSummary.added > 0 && <span className="text-[11px]" style={{ color: "var(--litt-primary)" }}>+{changesSummary.added} created</span>}
+              {changesSummary.modified > 0 && <span className="text-[11px]" style={{ color: "#e3b341" }}>~{changesSummary.modified} modified</span>}
+              {changesSummary.deleted > 0 && <span className="text-[11px]" style={{ color: "var(--error)" }}>-{changesSummary.deleted} deleted</span>}
+              {changesSummary.renamed > 0 && <span className="text-[11px]" style={{ color: "#c4b5fd" }}>→{changesSummary.renamed} renamed</span>}
             </div>
           )}
         </PlanCard>

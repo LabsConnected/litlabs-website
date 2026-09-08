@@ -210,6 +210,22 @@ describe("SSE event pipeline — full LiTT task simulation", () => {
     expect(state.phase).toBe("done");
   });
 
+  it("classifies workspace mutations by created, modified, deleted, and renamed", () => {
+    feedSSEEventToExecutionStore({ type: "tool_execution", toolId: "files.create" });
+    feedSSEEventToExecutionStore({ type: "tool_execution", toolId: "files.create", success: true, summary: "Created hero.tsx" });
+    feedSSEEventToExecutionStore({ type: "tool_execution", toolId: "files.write" });
+    feedSSEEventToExecutionStore({ type: "tool_execution", toolId: "files.write", success: true, summary: "Updated styles.css" });
+    feedSSEEventToExecutionStore({ type: "tool_execution", toolId: "edit_file" });
+    feedSSEEventToExecutionStore({ type: "tool_execution", toolId: "edit_file", success: true, summary: "Edited page.tsx" });
+    feedSSEEventToExecutionStore({ type: "tool_execution", toolId: "files.delete" });
+    feedSSEEventToExecutionStore({ type: "tool_execution", toolId: "files.delete", success: true, summary: "Deleted old.css" });
+    feedSSEEventToExecutionStore({ type: "tool_execution", toolId: "files.rename" });
+    feedSSEEventToExecutionStore({ type: "tool_execution", toolId: "files.rename", success: true, summary: "Renamed app.tsx" });
+    feedSSEEventToExecutionStore({ type: "tool_execution", toolId: "files.read", success: true, summary: "Read package.json" });
+
+    expect(useExecutionStore.getState().changesSummary).toEqual({ added: 1, modified: 2, deleted: 1, renamed: 1 });
+  });
+
   it("simulates: model failure → fallback → recovery", () => {
     const feed = feedSSEEventToExecutionStore;
 

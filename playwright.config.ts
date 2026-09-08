@@ -2,23 +2,28 @@ import { defineConfig, devices } from "@playwright/test";
 import { existsSync, readFileSync } from "fs";
 import path from "path";
 
+const localServerURL = process.env.PLAYWRIGHT_DEV_SERVER === "true"
+  ? "http://localhost:3001"
+  : "http://127.0.0.1:3001";
+
 const baseURL =
   process.env.PLAYWRIGHT_BASE_URL ??
   process.env.SMOKE_TEST_URL ??
-  "http://127.0.0.1:3001";
+  localServerURL;
 
 const authDir = path.join(__dirname, "tests/playwright/.clerk");
+const userAAuthFile = path.join(authDir, "user-a.json");
+const localEnv = existsSync(".env.local") ? readFileSync(".env.local", "utf-8") : "";
+const hasLocalAuthState = existsSync(userAAuthFile);
 
 // Check if .env.local has real Clerk credentials for integration tests
 const hasRealClerk = (() => {
   if (process.env.PLAYWRIGHT_BASE_URL || process.env.SMOKE_TEST_URL) return true;
-  if (!existsSync(".env.local")) return false;
-  const content = readFileSync(".env.local", "utf-8");
   return (
-    content.includes("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=") &&
-    content.includes("CLERK_SECRET_KEY=") &&
-    !content.includes('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""') &&
-    !content.includes('CLERK_SECRET_KEY=""')
+    localEnv.includes("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=") &&
+    localEnv.includes("CLERK_SECRET_KEY=") &&
+    !localEnv.includes('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""') &&
+    !localEnv.includes('CLERK_SECRET_KEY=""')
   );
 })();
 
@@ -63,6 +68,30 @@ const authProjects = (hasRealClerk && hasTestUsers) ? [
   },
 ] : [];
 
+const localMobileAcceptanceProject =
+  !process.env.PLAYWRIGHT_BASE_URL &&
+  !process.env.SMOKE_TEST_URL &&
+  hasRealClerk &&
+  hasLocalAuthState
+    ? [{
+        name: "local-mobile-acceptance",
+        testMatch: /mobile-acceptance\.spec\.ts/,
+        use: {
+          ...devices["Pixel 7"],
+          storageState: userAAuthFile,
+        },
+      },
+      {
+        name: "local-authenticated-chromium",
+        testMatch: /studio\.spec\.ts/,
+        use: {
+          ...devices["Desktop Chrome"],
+          storageState: userAAuthFile,
+        },
+      },
+    ]
+    : [];
+
 export default defineConfig({
   testDir: "./tests/playwright",
 
@@ -93,9 +122,9 @@ export default defineConfig({
     ? {}
     : {
         webServer: {
-          command: "pnpm start",
-          url: "http://127.0.0.1:3001",
-          timeout: 60_000,
+          command: process.env.PLAYWRIGHT_DEV_SERVER === "true" ? "pnpm dev:webpack" : "pnpm start",
+          url: localServerURL,
+          timeout: process.env.PLAYWRIGHT_DEV_SERVER === "true" ? 120_000 : 60_000,
           reuseExistingServer: true,
           cwd: ".",
           env: (() => {
@@ -196,6 +225,7 @@ export default defineConfig({
     }] : []),
 
     // ── Authenticated projects — only when Clerk credentials are available ──
+    ...localMobileAcceptanceProject,
     ...authProjects,
   ],
 });

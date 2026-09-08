@@ -31,6 +31,31 @@ describe("LiTTMobileSheet (real component)", () => {
     expect(screen.getByTestId("litt-mobile-live-panel")).toHaveAttribute("data-active", "false");
   });
 
+  it("keeps the bounded sheet above the mobile nav with reachable chat controls", () => {
+    renderSheet({
+      chatContent: (
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <textarea aria-label="Message input" />
+          <button type="button">Send message</button>
+        </div>
+      ),
+    });
+
+    const sheet = screen.getByTestId("litt-mobile-sheet");
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    input.focus();
+
+    expect(sheet).toHaveStyle({
+      bottom: "calc(62px + env(safe-area-inset-bottom))",
+      height: "min(88dvh, calc(100dvh - 62px - env(safe-area-inset-bottom)))",
+      maxHeight: "calc(100dvh - 62px - env(safe-area-inset-bottom))",
+    });
+    expect(screen.getByTestId("litt-mobile-sheet-content")).toHaveClass("min-h-0", "flex-1", "overflow-hidden");
+    expect(screen.getByTestId("litt-mobile-chat-panel").className).toContain("min-w-0");
+    expect(document.activeElement).toBe(input);
+    expect(screen.getByRole("button", { name: "Send message" })).toBeTruthy();
+  });
+
   it("clicking Live calls onTabChange without managing its own state", () => {
     const { onTabChange } = renderSheet({ activeTab: "chat" });
     fireEvent.click(screen.getByTestId("litt-mobile-tab-live"));

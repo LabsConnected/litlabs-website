@@ -6,6 +6,7 @@ import {
   Camera,
   Mic,
   MicOff,
+  MousePointer2,
   Send,
   Square,
   Loader2,
@@ -62,6 +63,7 @@ export interface ComposerContextLine {
   repo?: string;
   branch?: string;
   permissionMode?: string;
+  selectedElement?: string;
 }
 
 interface CommandComposerProps {
@@ -76,6 +78,7 @@ interface CommandComposerProps {
   onToggleLive?: () => void;
   liveActive?: boolean;
   contextLine?: ComposerContextLine;
+  onClearSelectedElement?: () => void;
   /** Execution mode selector: plan (read-only), act (approval for mutations), auto (autonomous) */
   executionMode?: "plan" | "act" | "auto";
   onExecutionModeChange?: (mode: "plan" | "act" | "auto") => void;
@@ -96,6 +99,7 @@ export default function CommandComposer({
   onToggleLive,
   liveActive = false,
   contextLine,
+  onClearSelectedElement,
   executionMode = "act",
   onExecutionModeChange,
   littMode = "auto",
@@ -328,11 +332,11 @@ export default function CommandComposer({
       }}
     >
       {/* Context line: workspace · repository · branch */}
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[10px] font-medium" style={{ color: "var(--text-muted)" }} data-testid="studio-workspace-context">
-        {contextLine?.workspace && <span className="min-w-0 truncate">{contextLine.workspace}</span>}
+      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[10px] font-medium" style={{ color: "var(--text-muted)" }} data-testid="studio-workspace-context">
+        {contextLine?.workspace && <span className="min-w-0 max-w-full truncate">{contextLine.workspace}</span>}
         {(contextLine?.repo || contextLine?.branch) && (
-          <span className="flex min-w-0 items-center gap-1.5">
-            {contextLine.repo && <span className="truncate max-w-[200px]">{contextLine.repo}</span>}
+          <span className="flex min-w-0 max-w-full items-center gap-1.5">
+            {contextLine.repo && <span className="max-w-[min(200px,60vw)] truncate">{contextLine.repo}</span>}
             {contextLine.repo && contextLine.branch && (
               <span style={{ color: "var(--studio-border-strong)" }}>·</span>
             )}
@@ -340,6 +344,30 @@ export default function CommandComposer({
           </span>
         )}
       </div>
+
+      {contextLine?.selectedElement && (
+        <div
+          className="flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[10px]"
+          style={{ borderColor: "rgba(155,77,255,0.24)", backgroundColor: "rgba(155,77,255,0.07)" }}
+          data-testid="selected-preview-context"
+        >
+          <MousePointer2 size={11} className="shrink-0" style={{ color: "#c4b5fd" }} aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate" style={{ color: "var(--text-secondary)" }}>
+            Editing <strong style={{ color: "#c4b5fd" }}>{contextLine.selectedElement}</strong>
+          </span>
+          {onClearSelectedElement && (
+            <button
+              type="button"
+              onClick={onClearSelectedElement}
+              className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md hover:bg-white/8"
+              aria-label="Clear selected preview element"
+              title="Clear selection"
+            >
+              <X size={11} className="pointer-events-none" />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* LiTT mode quick-select — Image / Music / Video / Code / Website
           These don't navigate away from the conversation. They tell LiTT

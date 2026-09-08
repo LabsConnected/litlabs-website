@@ -223,13 +223,19 @@ export default function LiTTLiveActivity({
             )}
           </span>
         )}
-        {changesSummary && (changesSummary.modified + changesSummary.added + changesSummary.deleted) > 0 && (
+        {changesSummary && (changesSummary.modified + changesSummary.added + changesSummary.deleted + changesSummary.renamed) > 0 && (
           <span
             className="ml-auto flex items-center gap-1 text-[9px] font-bold"
             style={{ color: "var(--litt-primary)" }}
+            title={[
+              changesSummary.added > 0 ? `${changesSummary.added} created` : null,
+              changesSummary.modified > 0 ? `${changesSummary.modified} modified` : null,
+              changesSummary.deleted > 0 ? `${changesSummary.deleted} deleted` : null,
+              changesSummary.renamed > 0 ? `${changesSummary.renamed} renamed` : null,
+            ].filter(Boolean).join(" · ")}
           >
             <Edit3 size={9} className="pointer-events-none" />
-            {changesSummary.modified + changesSummary.added + changesSummary.deleted} change{(changesSummary.modified + changesSummary.added + changesSummary.deleted) !== 1 ? "s" : ""}
+            {changesSummary.modified + changesSummary.added + changesSummary.deleted + changesSummary.renamed} change{(changesSummary.modified + changesSummary.added + changesSummary.deleted + changesSummary.renamed) !== 1 ? "s" : ""}
           </span>
         )}
         {/* Stop control — visible while LiTT is running */}
