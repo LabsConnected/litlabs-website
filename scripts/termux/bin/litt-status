@@ -1,0 +1,89 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -u
+
+source "$HOME/.config/litt/termux.env"
+
+CALLER_REPO="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
+RUN_REPO="${CALLER_REPO:-$LITT_REPO}"
+
+echo
+echo "◬ LiTT STATUS"
+echo "============================================================"
+
+echo
+echo "PHONE / TERMUX"
+echo "Node:  $(node --version 2>/dev/null || echo missing)"
+echo "pnpm:  $(pnpm --version 2>/dev/null || echo missing)"
+echo "Shell: ${SHELL:-unknown}"
+
+echo
+echo "CURRENT WORKTREE"
+
+if git -C "$RUN_REPO" rev-parse --git-dir >/dev/null 2>&1; then
+  echo "Path:   $RUN_REPO"
+  echo "Branch: $(git -C "$RUN_REPO" branch --show-current)"
+  echo "HEAD:   $(git -C "$RUN_REPO" rev-parse --short=12 HEAD)"
+
+  if [ -z "$(git -C "$RUN_REPO" status --porcelain)" ]; then
+    echo "Git:    ✅ clean"
+  else
+    echo "Git:    ⚠️ dirty"
+    git -C "$RUN_REPO" status --short
+  fi
+
+  echo
+  git -C "$RUN_REPO" status -sb
+else
+  echo "❌ Not a Git worktree: $RUN_REPO"
+fi
+
+echo
+echo "CANONICAL MAIN"
+
+CANONICAL="$HOME/litt-canonical"
+
+if git -C "$CANONICAL" rev-parse --git-dir >/dev/null 2>&1; then
+  echo "Path:   $CANONICAL"
+  echo "Branch: $(git -C "$CANONICAL" branch --show-current)"
+  echo "HEAD:   $(git -C "$CANONICAL" rev-parse --short=12 HEAD)"
+else
+  echo "Not found"
+fi
+
+echo
+echo "OLLAMA"
+
+if curl --max-time 2 -fsS "$LITT_OLLAMA_LAN/api/tags" >/dev/null 2>&1; then
+  OLLAMA="$LITT_OLLAMA_LAN"
+  echo "Route:  ✅ LAN"
+elif curl --max-time 3 -fsS "$LITT_OLLAMA_TAILSCALE/api/tags" >/dev/null 2>&1; then
+  OLLAMA="$LITT_OLLAMA_TAILSCALE"
+  echo "Route:  ✅ Tailscale"
+else
+  echo "Route:  ❌ unreachable"
+  exit 0
+fi
+
+echo "Host:   $OLLAMA"
+
+echo
+echo "Available models:"
+curl --max-time 5 -fsS "$OLLAMA/api/tags" |
+  jq -r '.models[]?.name' |
+  sed 's/^/  • /'
+
+echo
+echo "Loaded models:"
+LOADED="$(
+  curl --max-time 5 -fsS "$OLLAMA/api/ps" |
+    jq -r '.models[]?.name'
+)"
+
+if [ -n "$LOADED" ]; then
+  printf '%s\n' "$LOADED" | sed 's/^/  • /'
+else
+  echo "  none"
+fi
+
+echo
+echo "============================================================"
