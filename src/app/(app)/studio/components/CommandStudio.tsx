@@ -2152,7 +2152,7 @@ function StudioWorkSurface({
   const isEmpty = messages.length === 0 && !loading;
   return (
     <div
-      className="relative flex h-full min-h-0 flex-col overflow-hidden"
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
       style={{
         background: "linear-gradient(180deg, var(--studio-surface) 0%, rgba(13,9,22,0.96) 100%)",
       }}

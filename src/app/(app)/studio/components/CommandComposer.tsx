@@ -332,11 +332,11 @@ export default function CommandComposer({
       }}
     >
       {/* Context line: workspace · repository · branch */}
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[10px] font-medium" style={{ color: "var(--text-muted)" }} data-testid="studio-workspace-context">
-        {contextLine?.workspace && <span className="min-w-0 truncate">{contextLine.workspace}</span>}
+      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[10px] font-medium" style={{ color: "var(--text-muted)" }} data-testid="studio-workspace-context">
+        {contextLine?.workspace && <span className="min-w-0 max-w-full truncate">{contextLine.workspace}</span>}
         {(contextLine?.repo || contextLine?.branch) && (
-          <span className="flex min-w-0 items-center gap-1.5">
-            {contextLine.repo && <span className="truncate max-w-[200px]">{contextLine.repo}</span>}
+          <span className="flex min-w-0 max-w-full items-center gap-1.5">
+            {contextLine.repo && <span className="max-w-[min(200px,60vw)] truncate">{contextLine.repo}</span>}
             {contextLine.repo && contextLine.branch && (
               <span style={{ color: "var(--studio-border-strong)" }}>·</span>
             )}

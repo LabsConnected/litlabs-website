@@ -636,16 +636,22 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.getByTestId("litt-mobile-trigger")).toBeTruthy();
     });
 
-    it("mobile trigger opens a real LiTT sheet with chat, composer, and workspace context", async () => {
+    it("mobile trigger opens Chat with reachable context, input, and send control", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
       const { user } = await renderCommandStudio();
       expect(screen.getByRole("button", { name: "Ask LiTT to build" })).toBeTruthy();
       await user.click(screen.getByTestId("litt-mobile-trigger"));
-      expect(screen.getByTestId("litt-mobile-sheet")).toBeTruthy();
-      expect(screen.getByTestId("studio-workspace-context")).toHaveTextContent(
-        "Private LiTT workspace — created when you send",
-      );
-      expect(screen.getByRole("button", { name: /send message/i })).toBeTruthy();
+      await user.click(screen.getByTestId("litt-mobile-tab-chat"));
+
+      const sheet = screen.getByTestId("litt-mobile-sheet");
+      const input = screen.getByRole("textbox", { name: /message input/i });
+      input.focus();
+
+      expect(sheet).toHaveStyle({ bottom: "calc(62px + env(safe-area-inset-bottom))" });
+      expect(screen.getByTestId("studio-workspace-context").textContent).toContain("Private LiTT workspace");
+      expect(document.activeElement).toBe(input);
+      expect(screen.getByRole("button", { name: /send message|cancel response/i })).toBeVisible();
+
       // Closing returns to workspace-only mobile state.
       await user.click(screen.getByTestId("litt-mobile-sheet-close"));
       expect(screen.queryByTestId("litt-mobile-sheet")).toBeNull();
