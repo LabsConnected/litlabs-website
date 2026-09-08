@@ -50,6 +50,10 @@ echo "===== WORKSPACE DEPS ====="
 pnpm build:workspace-deps
 
 echo
+echo "===== WORKSPACE DEPS ====="
+pnpm build:workspace-deps
+
+echo
 echo "===== TYPESCRIPT ====="
 (
   cd packages/litt-cli
