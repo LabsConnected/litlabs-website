@@ -110,7 +110,24 @@ async function killProcessTree(pid: number): Promise<number[]> {
       // process may have already exited
     }
   } else {
-    // Unix: kill children first, then parent
+    // Unix: detached spawn creates a dedicated process group whose
+    // group id is the child's PID. Signal the entire group atomically.
+    //
+    // This avoids a race in the old child-first approach:
+    // killing the child can cause the parent shell to exit before the
+    // parent PID is recorded, producing an empty killed[] even though
+    // cancellation actually succeeded.
+    try {
+      process.kill(-pid, "SIGTERM");
+      killed.push(pid);
+      return killed;
+    } catch {
+      // The child may not be a process-group leader (for example if
+      // detached spawning was unavailable). Fall through to the
+      // portable child/parent fallback below.
+    }
+
+    // Fallback: kill children first, then parent
     try {
       // Try pkill -P (kills children of pid)
       await new Promise<void>((resolve) => {
