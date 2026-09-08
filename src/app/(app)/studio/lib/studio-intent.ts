@@ -157,6 +157,11 @@ export function detectIntent(input: string): IntentResult | null {
   const text = input.trim();
   if (!text) return null;
 
+  const generateCode = INTENT_PATTERNS.find(({ intent }) => intent === "generate_code");
+  if (generateCode?.patterns.some((pattern) => pattern.test(text))) {
+    return buildIntentResult(generateCode.intent, generateCode.tool, text);
+  }
+
   for (const { intent, patterns, tool } of INTENT_PATTERNS) {
     for (const pattern of patterns) {
       if (pattern.test(text)) {

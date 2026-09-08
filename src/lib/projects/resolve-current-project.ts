@@ -43,11 +43,10 @@ export async function resolveCurrentProject({
   explicitProjectId,
   userId,
 }: ResolveOptions): Promise<CurrentProject | null> {
-  // 1. Try explicit project ID first
+  // 1. An explicit project ID is authoritative. Never silently replace an
+  // invalid/stale selection with an unrelated project from auto-resolution.
   if (explicitProjectId) {
-    const explicit = await resolveById(explicitProjectId, userId);
-    if (explicit) return explicit;
-    // Fall through to auto-resolution if explicit ID is invalid
+    return resolveById(explicitProjectId, userId);
   }
 
   // 2. Most recently updated studio_projects row

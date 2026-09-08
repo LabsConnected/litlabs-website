@@ -37,6 +37,18 @@ function createFakeExecutable(dir: string, name: string): string {
   return scriptPath;
 }
 
+function createFailingExecutable(dir: string, name: string, exitCode: number, stderr: string): string {
+  if (IS_WIN) {
+    const cmdPath = join(dir, `${name}.cmd`);
+    writeFileSync(cmdPath, `@echo off\r\necho ${stderr} 1>&2\r\nexit /b ${exitCode}\r\n`);
+    return cmdPath;
+  }
+  const scriptPath = join(dir, name);
+  writeFileSync(scriptPath, `#!/bin/sh\necho '${stderr}' >&2\nexit ${exitCode}\n`);
+  chmodSync(scriptPath, 0o755);
+  return scriptPath;
+}
+
 // Helper: override process.execPath to point to a clean temp directory
 // that does NOT contain pnpm/npm/corepack. This is needed because on the
 // test machine, dirname(process.execPath) may contain globally-installed
@@ -284,6 +296,63 @@ describe("PreviewManager — typed errors", () => {
     expect(status.error).toContain("pnpm");
 
     stopPreview("ws-pm-missing");
+    restore();
+  });
+});
+
+describe("PreviewManager — dependency install diagnostics", () => {
+  let tmpRoot: string;
+  let origEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), "preview-install-"));
+    origEnv = { ...process.env };
+    mockedGetWorkspace.mockReset();
+  });
+
+  afterEach(() => {
+    process.env = origEnv;
+    rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("surfaces dependency install exit 254 with safe diagnostics", async () => {
+    writeFileSync(join(tmpRoot, "package.json"), JSON.stringify({ scripts: { dev: "next dev" } }));
+    writeFileSync(join(tmpRoot, "next.config.js"), "module.exports = {}");
+    writeFileSync(join(tmpRoot, "pnpm-lock.yaml"), "");
+
+    mockedGetWorkspace.mockReturnValue({
+      workspaceId: "ws-install-254",
+      userId: "u1",
+      projectId: "p1",
+      root: tmpRoot,
+      branch: "main",
+      commitSha: "abc",
+      ready: true,
+    } as any);
+
+    const cleanNodeDir = join(tmpRoot, "clean-node");
+    mkdirSync(cleanNodeDir, { recursive: true });
+    const restore = overrideExecPath(cleanNodeDir);
+    const fakeBin = join(tmpRoot, "fakebin");
+    mkdirSync(fakeBin, { recursive: true });
+    createFailingExecutable(fakeBin, "pnpm", 254, "ERR_PNPM_UNEXPECTED_STORE");
+    process.env.PATH = fakeBin;
+    delete process.env.NODE_BIN_DIR;
+
+    try {
+      await startPreview({ workspaceId: "ws-install-254", userId: "u1" });
+      expect.fail("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(PreviewError);
+      const previewError = error as PreviewError;
+      expect(previewError.code).toBe("preview_dependency_install_failed");
+      expect(previewError.message).toContain("exit 254");
+      expect(previewError.message).toContain("ERR_PNPM_UNEXPECTED_STORE");
+      expect(previewError.diagnostic.cwd).toBe(tmpRoot);
+      expect(previewError.diagnostic.command).toContain("install");
+      expect(previewError.diagnostic.exitCode).toBe(254);
+    }
+
     restore();
   });
 });

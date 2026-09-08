@@ -2,12 +2,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/supabase", () => {
   const mockChain = (data: unknown[] | null, error: unknown = null) => {
+    let filtered = data ?? [];
     const chain = {
       select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
+      eq: vi.fn((column: string, value: unknown) => {
+        filtered = filtered.filter((row) => (row as Record<string, unknown>)[column] === value);
+        return chain;
+      }),
       order: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockResolvedValue({ data, error }),
-      maybeSingle: vi.fn().mockResolvedValue({ data: data?.[0] ?? null, error }),
+      limit: vi.fn().mockImplementation(async () => ({ data: filtered, error })),
+      maybeSingle: vi.fn().mockImplementation(async () => ({ data: filtered[0] ?? null, error })),
     };
     return chain;
   };
@@ -143,6 +147,32 @@ describe("resolveCurrentProject", () => {
     expect(result).not.toBeNull();
     expect(result!.projectId).toBe("studio-explicit");
     expect(result!.sourceType).toBe("blank");
+  });
+
+  it("does not replace an invalid explicit ID with an unrelated latest project", async () => {
+    mockSupabase.__setTableResult("studio_projects", [
+      {
+        id: "latest-project",
+        user_id: "user-1",
+        name: "Latest Project",
+        github_full_name: "owner/latest",
+        github_owner: "owner",
+        github_repo: "latest",
+        github_default_branch: "main",
+        github_branch: "main",
+        workspace_status: "ready",
+        source_type: "github",
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+    mockSupabase.__setTableResult("projects", []);
+
+    const result = await resolveCurrentProject({
+      explicitProjectId: "LabsConnected/litlabs-website",
+      userId: "user-1",
+    });
+
+    expect(result).toBeNull();
   });
 
   it("returns null when no project exists", async () => {
