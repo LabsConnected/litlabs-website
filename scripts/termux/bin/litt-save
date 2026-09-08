@@ -46,14 +46,6 @@ echo "===== DIFF CHECK ====="
 git diff --check
 
 echo
-echo "===== WORKSPACE DEPS ====="
-pnpm build:workspace-deps
-
-echo
-echo "===== WORKSPACE DEPS ====="
-pnpm build:workspace-deps
-
-echo
 echo "===== TYPE CHECK ====="
 pnpm type-check
 
