@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { AssetManifestSchema, PreviewCaptureSchema, VisualBuildRequestSchema, VisualPlanSchema, VisualReviewSchema } from "./types";
 import { applyRepairToSource, buildVisualPlan, determineBudget, evaluateCompletionGate, reviewCaptures, routeVisualSource } from "./qa";
