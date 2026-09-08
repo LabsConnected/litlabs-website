@@ -93,6 +93,15 @@ export interface PendingApproval {
   inputs?: Record<string, unknown>;
 }
 
+export type MutationKind = "created" | "modified" | "deleted" | "renamed";
+
+export interface MutationSummary {
+  added: number;
+  modified: number;
+  deleted: number;
+  renamed: number;
+}
+
 interface ExecutionStore {
   // ── State ──
   events: ExecutionEvent[];
@@ -103,8 +112,8 @@ interface ExecutionStore {
   checkpoint: { label: string; gitSha: string } | null;
   /** Tool calls in the current run */
   toolCalls: Array<{ toolId: string; success?: boolean; summary: string }>;
-  /** Changes summary */
-  changesSummary: { added: number; modified: number; deleted: number } | null;
+  /** Changes summary, classified by the actual mutation operation. */
+  changesSummary: MutationSummary | null;
 
   // ── Actions ──
   startRun: () => void;
@@ -147,7 +156,28 @@ function mapPhase(phase: string, step: number): ExecutionPhase {
   }
 }
 
-/** Generate a human-readable summary for a tool */
+/** Classify a successful file mutation for truthful completion feedback. */
+function mutationKindForTool(toolId: string): MutationKind | null {
+  switch (toolId) {
+    case "files.create":
+    case "create_file":
+      return "created";
+    case "files.delete":
+    case "delete_file":
+      return "deleted";
+    case "files.rename":
+    case "rename_file":
+      return "renamed";
+    case "edit_file":
+    case "files.write":
+    case "write_file":
+    case "workspace.write":
+      return "modified";
+    default:
+      return null;
+  }
+}
+
 function toolSummary(toolId: string, rawSummary?: string): string {
   if (rawSummary && rawSummary !== toolId) return rawSummary;
   // Friendly defaults
@@ -235,13 +265,19 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
         ];
       }
 
-      // Track changes for edit_file
+      // Track successful mutations by operation kind.
       let changesSummary = state.changesSummary;
-      if (event.type === "tool_result" && event.toolId === "edit_file" && event.success) {
+      const mutationKind = event.type === "tool_result" && event.toolId && event.success
+        ? mutationKindForTool(event.toolId)
+        : null;
+      if (mutationKind) {
+        const current = changesSummary ?? { added: 0, modified: 0, deleted: 0, renamed: 0 };
+        const key = mutationKind === "created"
+          ? "added"
+          : mutationKind;
         changesSummary = {
-          added: (changesSummary?.added ?? 0),
-          modified: (changesSummary?.modified ?? 0) + 1,
-          deleted: (changesSummary?.deleted ?? 0),
+          ...current,
+          [key]: current[key] + 1,
         };
       }
 

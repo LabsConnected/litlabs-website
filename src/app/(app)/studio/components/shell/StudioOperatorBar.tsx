@@ -66,8 +66,16 @@ export default function StudioOperatorBar({
   const PhaseIcon = meta.icon;
 
   const fileCount = changesSummary
-    ? changesSummary.added + changesSummary.modified + changesSummary.deleted
+    ? changesSummary.added + changesSummary.modified + changesSummary.deleted + changesSummary.renamed
     : 0;
+  const changeLabels = changesSummary
+    ? [
+        changesSummary.added > 0 ? `${changesSummary.added} created` : null,
+        changesSummary.modified > 0 ? `${changesSummary.modified} modified` : null,
+        changesSummary.deleted > 0 ? `${changesSummary.deleted} deleted` : null,
+        changesSummary.renamed > 0 ? `${changesSummary.renamed} renamed` : null,
+      ].filter(Boolean).join(" · ")
+    : "";
 
   return (
     <div
@@ -103,7 +111,7 @@ export default function StudioOperatorBar({
       {/* File changes (only when real data exists) */}
       {fileCount > 0 && (
         <span className="hidden sm:inline" style={{ color: "var(--text-muted)" }}>
-          · {fileCount} file{fileCount === 1 ? "" : "s"}
+          · Saved · {changeLabels || `${fileCount} file${fileCount === 1 ? "" : "s"}`}
         </span>
       )}
 

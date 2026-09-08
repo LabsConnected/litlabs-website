@@ -95,11 +95,13 @@ describe("CommandStudioHeader — truthful status", () => {
     mockProviderHealth = {};
   });
 
-  it("shows visible guidance for all execution modes", () => {
+  it("shows mode guidance and keeps branding and advanced tools behind one secondary control", () => {
+    const onOpenTools = vi.fn();
     render(
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
         onOpenActivityAction={vi.fn()}
+        onOpenToolsAction={onOpenTools}
         runtime={noProjectRuntime}
         runtimeLoading={false}
         capabilities={mockCapabilities}
@@ -110,6 +112,9 @@ describe("CommandStudioHeader — truthful status", () => {
     expect(guide.textContent).toContain("PLAN: inspect and explain; do not change files");
     expect(guide.textContent).toContain("ACT: make changes; approvals may be required");
     expect(guide.textContent).toContain("AUTO: LiTT chooses when to plan and when to act");
+    expect(screen.getByTestId("studio-brand")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /open advanced tools/i }));
+    expect(onOpenTools).toHaveBeenCalledTimes(1);
   });
 
   it("reports checking while runtime is loading", () => {

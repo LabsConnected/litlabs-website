@@ -80,6 +80,13 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const executionMode = typeof body.executionMode === "string" && ["plan", "act", "auto"].includes(body.executionMode)
     ? (body.executionMode as "plan" | "act" | "auto")
     : undefined;
+  const rawPreviewSelection = body.previewSelection;
+  const previewSelection = rawPreviewSelection && typeof rawPreviewSelection === "object"
+    ? rawPreviewSelection as { label?: unknown; selector?: unknown; tagName?: unknown }
+    : null;
+  const selectedPreviewLabel = typeof previewSelection?.label === "string" ? previewSelection.label.slice(0, 80) : null;
+  const selectedPreviewSelector = typeof previewSelection?.selector === "string" ? previewSelection.selector.slice(0, 240) : null;
+  const selectedPreviewTag = typeof previewSelection?.tagName === "string" ? previewSelection.tagName.slice(0, 32) : null;
 
   if (typeof message !== "string" || !message.trim()) {
     return NextResponse.json({ error: "message is required" }, { status: 400 });
@@ -264,7 +271,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   // 7.5. Resolve ambiguous references in the user message using conversation history.
   // Expands "it", "that", "same thing", "why", etc. into self-contained messages.
   const turnResolution = resolveTurn(message, history);
-  const resolvedMessage = turnResolution.resolved;
+  const resolvedMessage = selectedPreviewLabel
+    ? `${turnResolution.resolved}\n\n[Preview selection context]\nThe user selected the ${selectedPreviewLabel} element in the live preview${selectedPreviewTag ? ` (<${selectedPreviewTag}>)` : ""}. Use this element as the subject of the requested change. Preview selector: ${selectedPreviewSelector ?? "not available"}.`
+    : turnResolution.resolved;
 
   // 7.5.5. Harvest user preferences (non-blocking, best-effort).
   // Extracts name, city, timezone from natural conversation. Dedupe is handled

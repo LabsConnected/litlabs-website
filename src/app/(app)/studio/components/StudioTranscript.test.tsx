@@ -85,6 +85,33 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
     expect(screen.getByText("I'm ready to help.")).toBeTruthy();
   });
 
+  it("renders completion summary with explicit mutation categories and recovery feedback", () => {
+    render(
+      <StudioTranscript
+        messages={[{ role: "assistant", content: "Finished the build.", createdAt: Date.now() }]}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        completion={{
+          changes: { added: 1, modified: 2, deleted: 1, renamed: 1 },
+          previewUpdated: true,
+          repaired: true,
+        }}
+        onDismissCompletion={vi.fn()}
+        onUndoCompletion={vi.fn()}
+        onContinueCompletion={vi.fn()}
+      />,
+    );
+
+    const completion = screen.getByTestId("studio-completion");
+    expect(completion.textContent).toContain("1 created");
+    expect(completion.textContent).toContain("2 modified");
+    expect(completion.textContent).toContain("1 deleted");
+    expect(completion.textContent).toContain("1 renamed");
+    expect(completion.textContent).toContain("recovered automatically");
+    expect(completion.textContent).toContain("Preview updated");
+    expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
+  });
+
   it("renders nothing (empty) when messages array is empty", () => {
     const { container } = render(
       <StudioTranscript

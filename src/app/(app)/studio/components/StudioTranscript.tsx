@@ -13,6 +13,7 @@ import {
   type AgentId,
 } from "../stores/useStudioAgentStore";
 import type { StudioTool } from "./StudioSidebar";
+import type { MutationSummary } from "../stores/useExecutionStore";
 import {
   copyToClipboard,
   downloadTextFile,
@@ -247,12 +248,20 @@ export default function StudioTranscript({
   activeAgentId,
   onRouteToolAction,
   onRegenerateAction,
+  completion,
+  onDismissCompletion,
+  onUndoCompletion,
+  onContinueCompletion,
 }: {
   messages: ChatMessage[];
   busy: boolean;
   activeAgentId: AgentId;
   onRouteToolAction?: (tool: StudioTool, command?: string) => void;
   onRegenerateAction?: () => void;
+  completion?: { changes: MutationSummary; previewUpdated: boolean; repaired: boolean } | null;
+  onDismissCompletion?: () => void;
+  onUndoCompletion?: () => void;
+  onContinueCompletion?: () => void;
 }) {
   const { speakText } = useVoiceSession();
   const ptyUsable = useTerminalStore((s) => s.isUsable());
@@ -332,6 +341,9 @@ export default function StudioTranscript({
   }, []);
 
   const hasDownloadableMessages = messages.some((m) => m.content?.trim());
+  const completedMutationCount = completion
+    ? completion.changes.added + completion.changes.modified + completion.changes.deleted + completion.changes.renamed
+    : 0;
 
   return (
     <div
@@ -583,6 +595,40 @@ export default function StudioTranscript({
                   style={{ backgroundColor: agentColor, animationDelay: `${i * 150}ms` }}
                 />
               ))}
+            </div>
+          </div>
+        )}
+        {completion && !busy && (
+          <div
+            className="mx-auto w-full max-w-[88%] rounded-xl border px-3 py-2.5"
+            style={{ borderColor: "rgba(114,242,56,0.22)", backgroundColor: "rgba(114,242,56,0.05)" }}
+            data-testid="studio-completion"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="flex items-center gap-2 text-[11px] font-bold" style={{ color: "var(--litt-primary)" }}>
+              <IconCheck size={13} />
+              Done
+              {completion.repaired && <span className="font-normal" style={{ color: "#e3b341" }}>· recovered automatically</span>}
+            </div>
+            <div className="mt-1 text-[10px]" style={{ color: "var(--text-secondary)" }}>
+              {completedMutationCount > 0 ? `${completedMutationCount} file${completedMutationCount === 1 ? "" : "s"} changed` : "No files changed"}
+              {completion.previewUpdated ? " · Preview updated" : " · Ready for the next request"}
+            </div>
+            {completedMutationCount > 0 && (
+              <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[9px]" style={{ color: "var(--text-muted)" }}>
+                {completion.changes.added > 0 && <span>{completion.changes.added} created</span>}
+                {completion.changes.modified > 0 && <span>{completion.changes.modified} modified</span>}
+                {completion.changes.deleted > 0 && <span>{completion.changes.deleted} deleted</span>}
+                {completion.changes.renamed > 0 && <span>{completion.changes.renamed} renamed</span>}
+              </div>
+            )}
+            <div className="mt-2 flex items-center gap-2">
+              <button type="button" onClick={onDismissCompletion} className="rounded-md px-2 py-1 text-[10px] font-bold hover:bg-white/8" style={{ color: "var(--text-secondary)" }}>Keep</button>
+              {onUndoCompletion && completedMutationCount > 0 && (
+                <button type="button" onClick={onUndoCompletion} className="rounded-md px-2 py-1 text-[10px] font-bold hover:bg-white/8" style={{ color: "#fca5a5" }}>Undo</button>
+              )}
+              <button type="button" onClick={onContinueCompletion} className="rounded-md px-2 py-1 text-[10px] font-bold" style={{ backgroundColor: "rgba(155,77,255,0.14)", color: "#c4b5fd" }}>Continue</button>
             </div>
           </div>
         )}

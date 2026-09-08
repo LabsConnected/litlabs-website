@@ -318,7 +318,11 @@ async function renderCommandStudio() {
   const user = userEvent.setup();
   const view = render(<CommandStudio />);
 
-  await screen.findAllByTestId("assets-panel-mock");
+  await waitFor(() => {
+    if (!screen.queryByTestId("studio-command-composer") && !screen.queryByTestId("litt-mobile-trigger")) {
+      throw new Error("Studio surface has not mounted");
+    }
+  });
 
   return { user, ...view };
 }
@@ -560,7 +564,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
 
     it("Inspector header action opens the drawer on the Inspector tab", async () => {
       const { user } = await renderCommandStudio();
-      await user.click(screen.getByLabelText("Open workspace inspector"));
+      await user.click(screen.getByRole("button", { name: /open advanced tools/i }));
       expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
       expect(screen.getByTestId("context-inspector-panel")).toHaveAttribute("data-active", "true");
       expect(screen.getByTestId("context-files-panel")).toHaveAttribute("data-active", "false");
@@ -584,7 +588,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
 
     it("Files workspace-tab button is inactive while Inspector is showing", async () => {
       const { user } = await renderCommandStudio();
-      await user.click(screen.getByLabelText("Open workspace inspector"));
+      await user.click(screen.getByRole("button", { name: /open advanced tools/i }));
       const filesBtn = screen.getByTestId("workspace-tab-files");
       expect(filesBtn.className).not.toContain("glass-active");
       expect(filesBtn).toHaveAttribute("aria-pressed", "false");
@@ -592,7 +596,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
 
     it("clicking Files while Inspector is open switches to Files without closing the drawer", async () => {
       const { user } = await renderCommandStudio();
-      await user.click(screen.getByLabelText("Open workspace inspector"));
+      await user.click(screen.getByRole("button", { name: /open advanced tools/i }));
       expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
       await user.click(screen.getByTestId("workspace-tab-files"));
       expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
