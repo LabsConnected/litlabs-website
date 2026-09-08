@@ -40,6 +40,7 @@ import {
 } from "../composer-editor.js";
 import { COLORS } from "../colors.js";
 import { useCursorBlink } from "../use-cursor-blink.js";
+import { isTermux } from "../../lib/auth/browser-launcher.js";
 import { deriveFocusState } from "../focus-state.js";
 import { composerCopy, isBusyState, type RuntimeState } from "../runtime-state.js";
 
@@ -127,7 +128,15 @@ export function Composer({
     approvalActive: runtime === "waiting_for_approval",
     scrolled: !!scrolled,
   });
-  const cursor = useCursorBlink(550, 700, focus.blinkEnabled, focusEpoch ?? null);
+  // Termux text selection is cancelled by periodic Ink repaints.
+  // Keep the software caret solid on Android/Termux so long-press
+  // Copy/Share selection remains stable while the cockpit is idle.
+  const cursor = useCursorBlink(
+    550,
+    700,
+    focus.blinkEnabled && !isTermux(),
+    focusEpoch ?? null,
+  );
 
   const valueRef = useRef(value);
   const caretRef = useRef(caret);

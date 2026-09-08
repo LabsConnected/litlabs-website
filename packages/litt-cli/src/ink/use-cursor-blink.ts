@@ -46,18 +46,21 @@ export function useCursorBlink(
   // scrolled history) there is NO self-initiated repaint from the
   // composer: the caret is a focus signal, not a render churn source.
   useEffect(() => {
-    if (!enabledRef.current) {
+    if (!enabled) {
+      setSteady(false);
       setVisible(true);
       return;
     }
+
     const timer = setInterval(() => {
       // While steady (recent typing), keep the cursor solid.
       if (Date.now() < steadyUntilRef.current) return;
       setSteady(false);
       setVisible((v) => !v);
     }, intervalMs);
+
     return () => clearInterval(timer);
-  }, [intervalMs]);
+  }, [enabled, intervalMs]);
 
   // Event-based focus restoration: when the store bumps the focus epoch
   // (overlay closed, run settled, return-to-live), restart the caret in
