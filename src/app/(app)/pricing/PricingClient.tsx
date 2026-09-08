@@ -483,6 +483,9 @@ export default function PricingClient({ founderAvailable }: { founderAvailable: 
           <Link className={styles.secondaryCta} href="/marketplace">
             Explore Marketplace
           </Link>
+          <Link className={styles.secondaryCta} href="/">
+            Home
+          </Link>
         </div>
       </section>
     </main>
