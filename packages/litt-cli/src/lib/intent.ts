@@ -227,6 +227,11 @@ const READ_NOUNS = [
  * "say the word framework" stays CHAT (speech act).
  */
 const READ_PATTERNS: Array<{ test: (lower: string, core: string) => boolean }> = [
+  // Git status is a bounded read-only inspection, even when phrased
+  // imperatively with "check". Do not promote it to a mission merely
+  // because "check" is also a generic mission trigger.
+  { test: (_l, c) => /^check\s+(the\s+)?(current\s+)?git\s+status\b/.test(c) },
+  { test: (_l, c) => /^show\s+(me\s+)?(the\s+)?(current\s+)?git\s+status\b/.test(c) },
   // "what framework is this" / "what package manager does this use"
   { test: (_l, c) => /^what\s+(framework|stack|package manager|package-manager|scripts|dependencies|deps|packages|project name|project type|build tool|bundler|node version|typescript version)\b/.test(c) },
   // "what files changed" / "what changed"

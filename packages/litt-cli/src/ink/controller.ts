@@ -73,7 +73,14 @@ import {
   isLocalModelId,
   type LocalRoutePolicy,
 } from "../lib/local-model-resolution.js";
-import { matchReadTools, executeReadTools, formatReadResultsForSynthesis, buildFullInspectionMatch, formatInspectionForSynthesis } from "../lib/read-lane.js";
+import {
+  matchReadTools,
+  executeReadTools,
+  formatReadResultsForSynthesis,
+  formatDeterministicReadAnswer,
+  buildFullInspectionMatch,
+  formatInspectionForSynthesis,
+} from "../lib/read-lane.js";
 import { matchLocalToolMission, formatLocalToolSummary, type LocalToolResult } from "../lib/local-tool-mission.js";
 import { shouldSkipPlanning, classifyMissionComplexity } from "../lib/mission-complexity.js";
 import { PerfTrace } from "../lib/perf-trace.js";
@@ -2382,7 +2389,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
                 if (event.type === "delta") {
                   synthesized += event.text;
                   perf.mark("first_token");
-                  store.actions.appendAssistantDelta("", event.text);
+                  if (readAssistantMsgId) store.actions.appendAssistantDelta(readAssistantMsgId, event.text);
                 }
               },
             );
@@ -2393,8 +2400,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               servedModel: routed.label,
             });
           } else {
-            // No synthesis — format raw tool results as the answer.
-            const rawAnswer = readResults.map((r) => {
+            // No model synthesis — prefer a precise deterministic formatter.
+            // Generic structured output remains only as a defensive fallback
+            // for read tools without a specialized presentation.
+            const deterministicAnswer = formatDeterministicReadAnswer(readResults);
+            const fallbackAnswer = deterministicAnswer ?? readResults.map((r) => {
               const d = r.result.data;
               const lines = [`${r.label}:`];
               if (d && typeof d === "object") {
@@ -2409,7 +2419,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             perf.mark("finalize");
             store.actions.addChatMessage({
               role: "assistant",
-              content: rawAnswer,
+              content: fallbackAnswer,
               ts: Date.now(),
               status: "complete",
               servedModel: "read-tools",
@@ -2609,7 +2619,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
                 perf.mark("first_token");
                 // Live streaming preview — append to the pending
                 // assistant message. Finalized once on completion.
-                store.actions.appendAssistantDelta("", visible);
+                if (chatAssistantMsgId) store.actions.appendAssistantDelta(chatAssistantMsgId, visible);
               }
             },
             onToolStream: (chunk: StreamChunk) => {
@@ -2633,6 +2643,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               }
             },
           });
+          const chatTail = toolCallFilter.flush();
+          if (chatTail && chatAssistantMsgId) {
+            store.actions.appendAssistantDelta(chatAssistantMsgId, chatTail);
+          }
           if (model.activeModel) store.actions.setActiveModel(model.activeModel);
           // Re-affirm the served provider post-completion. The value was
           // already set pre-stream from model.providerId (execution truth,
@@ -3067,7 +3081,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               const visible = toolCallFilter.next(event.text);
               if (!visible) return;
               perf.mark("first_token");
-              store.actions.appendAssistantDelta("", visible);
+              if (missionAssistantMsgId) store.actions.appendAssistantDelta(missionAssistantMsgId, visible);
             }
           },
           onToolStream: (chunk: StreamChunk) => {
@@ -3242,6 +3256,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             }
           },
         });
+        const missionTail = toolCallFilter.flush();
+        if (missionTail && missionAssistantMsgId) {
+          store.actions.appendAssistantDelta(missionAssistantMsgId, missionTail);
+        }
 
         // When the agent loop finishes, mark the current step passed
         // (the model moved past it) and let the VerificationGate own

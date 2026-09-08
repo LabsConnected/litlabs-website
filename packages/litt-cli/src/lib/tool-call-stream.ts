@@ -115,7 +115,7 @@ export function createToolCallStreamFilter(): ToolCallStreamFilter {
         const candidates = [jsonIdx, protoIdx].filter((i) => i !== -1);
         if (candidates.length > 0) {
           start = Math.min(...candidates);
-          kind = candidates[0] === jsonIdx ? "json" : "line";
+          kind = start === jsonIdx ? "json" : "line";
         }
       }
 
