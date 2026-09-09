@@ -473,6 +473,7 @@ export function useCockpitStore() {
     return 33; // ~30fps — the sweet spot (not 200-500ms, which feels dead)
   })();
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const terminalIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Track the id of the currently-streaming assistant message so
   // appendAssistantDelta/finalizeAssistantMessage can auto-pass it
   // to the store without every caller needing to thread the id through.
@@ -908,7 +909,6 @@ export function useCockpitStore() {
   //      so it reads the CURRENT state, not the stale closure state. It
   //      only transitions to IDLE from a terminal state — a new mission that
   //      started during the delay window is left untouched.
-  const terminalIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleIdle = useCallback((delayMs: number) => {
     if (terminalIdleTimerRef.current) clearTimeout(terminalIdleTimerRef.current);
     const epochAtSchedule = missionEpochRef.current;
