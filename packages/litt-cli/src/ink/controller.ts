@@ -967,6 +967,62 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     currentRemoteModelRef.current?.cancel();
   }, []);
 
+  // ─── Watchdog — cancels ALL underlying execution, not just UI state ──
+  // The cockpit-store watchdog only resets UI state (isProcessing,
+  // holoState, etc.). That is insufficient: spawned processes, in-flight
+  // model streams, and tool executions continue running — consuming CPU,
+  // memory, API credits, and performing unwanted filesystem operations.
+  //
+  // This controller-level watchdog does the REAL cancellation:
+  //   1. session.cancel() — kills the entire process tree (ShellExecutor)
+  //   2. cancelRemoteModel() — aborts the in-flight RemoteModelProvider stream
+  //   3. Resets UI state via storeRef (defense-in-depth with the store watchdog)
+  //
+  // The timer starts when isProcessing becomes true and is cleared when
+  // it becomes false. Configurable via LITT_MAX_RUN_MS (default 10 min).
+  const watchdogTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isProcessing = store.state.isProcessing;
+  useEffect(() => {
+    if (isProcessing) {
+      if (watchdogTimerRef.current) clearTimeout(watchdogTimerRef.current);
+      const maxMs = parseInt(process.env.LITT_MAX_RUN_MS ?? "", 10) || 600_000;
+      watchdogTimerRef.current = setTimeout(() => {
+        watchdogTimerRef.current = null;
+        // ── Cancel ALL underlying execution ──
+        // 1. Kill spawned process tree (local tools, shell commands)
+        session.cancel().catch(() => {});
+        // 2. Abort in-flight remote model stream (API credits, network)
+        cancelRemoteModel();
+        // 3. Reset UI state (defense-in-depth with cockpit-store watchdog)
+        const s = storeRef.current;
+        s.actions.setIsProcessing(false);
+        s.actions.stopBusy();
+        s.actions.setHoloState("FAILED");
+        s.actions.clearMission();
+        s.actions.clearToolProgress();
+        s.actions.failToolProgressMission();
+        s.actions.addActivity({
+          id: `act_${Date.now()}_watchdog`,
+          ts: Date.now(),
+          type: "error",
+          tag: "WATCHDOG",
+          text: "Watchdog: run timed out — all underlying execution was cancelled (processes killed, model stream aborted) after exceeding the maximum run duration.",
+        });
+      }, maxMs);
+    } else {
+      if (watchdogTimerRef.current) {
+        clearTimeout(watchdogTimerRef.current);
+        watchdogTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (watchdogTimerRef.current) {
+        clearTimeout(watchdogTimerRef.current);
+        watchdogTimerRef.current = null;
+      }
+    };
+  }, [isProcessing, session, cancelRemoteModel]);
+
   // ─── @mention context logs ──────────────────────────────────────
   // Captured from the runtime event stream so @terminal:last and
   // @error:last resolve to real observed output. Bounded.

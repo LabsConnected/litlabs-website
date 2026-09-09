@@ -109,7 +109,10 @@ export function collectStartupStatus(cwd?: string): StartupStatus {
   const execution = resolveExecutionTarget();
   const localOnly = resolveLocalOnly();
   const prefs = loadModelPrefs(getDefaultPrefsPath());
-  const model = prefs.selectedModel ?? "qwen3:4b-instruct";
+  // Show the persisted preference, or "(none)" when no model is pinned.
+  // Never hardcode a default model name — the effective model is
+  // resolved at execution time by resolveLocalModel / ModelRuntime.
+  const model = prefs.selectedModel ?? "(none)";
   // Use the EFFECTIVE provider — the one that actually serves inference
   // for the current execution target + selected model. Not just which
   // API key exists.

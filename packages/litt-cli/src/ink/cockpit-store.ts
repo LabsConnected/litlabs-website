@@ -887,13 +887,12 @@ export function useCockpitStore() {
     }, delayMs);
   }, []);
 
-  // ─── Watchdog — agent cannot remain RUNNING forever ──────────────
-  // If isProcessing is true for longer than LITT_MAX_RUN_MS (default
-  // 10 minutes), the watchdog forces the shell back to a terminal state.
-  // This is the safety net for hung promises, lost finally blocks, or
-  // any path where the underlying operation ended but the UI state was
-  // never updated. The user sees "Watchdog: run timed out" and the
-  // composer unblocks — never a permanently locked shell.
+  // ─── Watchdog (UI-level) — agent cannot remain RUNNING forever ─────
+  // This is the UI-level safety net. It resets cockpit state so the
+  // shell never stays locked. The CONTROLLER-level watchdog (in
+  // controller.ts) does the actual cancellation: session.cancel() to
+  // kill spawned processes, and cancelRemoteModel() to abort in-flight
+  // model streams. Both fire on the same timer — defense-in-depth.
   const watchdogTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (isProcessing) {
