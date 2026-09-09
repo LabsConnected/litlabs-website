@@ -887,6 +887,49 @@ export function useCockpitStore() {
     }, delayMs);
   }, []);
 
+  // ─── Watchdog — agent cannot remain RUNNING forever ──────────────
+  // If isProcessing is true for longer than LITT_MAX_RUN_MS (default
+  // 10 minutes), the watchdog forces the shell back to a terminal state.
+  // This is the safety net for hung promises, lost finally blocks, or
+  // any path where the underlying operation ended but the UI state was
+  // never updated. The user sees "Watchdog: run timed out" and the
+  // composer unblocks — never a permanently locked shell.
+  const watchdogTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (isProcessing) {
+      // Start watchdog when processing begins
+      if (watchdogTimerRef.current) clearTimeout(watchdogTimerRef.current);
+      const maxMs = parseInt(process.env.LITT_MAX_RUN_MS ?? "", 10) || 600_000;
+      watchdogTimerRef.current = setTimeout(() => {
+        watchdogTimerRef.current = null;
+        // Force terminal state — the run is stuck
+        setIsProcessing(false);
+        stopBusy();
+        setHoloState("FAILED");
+        failToolProgressMission();
+        addActivity({
+          id: `act_${Date.now()}_watchdog`,
+          ts: Date.now(),
+          type: "error",
+          tag: "WATCHDOG",
+          text: "Watchdog: run timed out — the shell was force-recovered after exceeding the maximum run duration.",
+        });
+      }, maxMs);
+    } else {
+      // Clear watchdog when processing ends normally
+      if (watchdogTimerRef.current) {
+        clearTimeout(watchdogTimerRef.current);
+        watchdogTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (watchdogTimerRef.current) {
+        clearTimeout(watchdogTimerRef.current);
+        watchdogTimerRef.current = null;
+      }
+    };
+  }, [isProcessing]);
+
   /** Explicit focus restoration (e.g. typing returns from history). */
   const bumpFocus = useCallback(() => {
     const tracker = focusTrackerRef.current!;

@@ -22,7 +22,7 @@
  *   to the Composer's own useInput.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, useApp, useStdout } from "ink";
 import { useCockpitStore } from "./cockpit-store.js";
 import { useEventBridge } from "./event-bridge.js";
@@ -86,6 +86,13 @@ export function CockpitApp({
   const { exit } = useApp();
   const store = useCockpitStore();
   const { stdout } = useStdout();
+  // Store ref — same pattern as controller/event-bridge. `store` is a
+  // new object every render; callbacks that depend on it get a new
+  // identity every render, which re-triggers effects in consumers
+  // (OverlayKeyboardProvider, overlay components). The ref holds the
+  // latest store; callbacks read from it at event/call time.
+  const storeRef = useRef(store);
+  storeRef.current = store;
   useEventBridge(client, store, sessionBridge);
 
   // ─── Canonical ModelRuntime — ONE instance for the whole app ───
@@ -214,86 +221,87 @@ export function CockpitApp({
 
   // ─── App shortcuts (only when no overlay owns the keyboard) ─────
   const appShortcutHandler = useCallback<KeyboardHandler>((input, key) => {
+    const s = storeRef.current;
     if (isRawF2(input)) {
-      store.actions.setOverlay("model-center");
+      s.actions.setOverlay("model-center");
       return;
     }
     // Transcript scroll — PgUp/PgDn/Home/End. Works even while busy
     // (browsing history during a run). Never steals Up/Down (history).
-    if (key.pageUp) { store.actions.scrollPgUp(); return; }
-    if (key.pageDown) { store.actions.scrollPgDn(); return; }
-    if (key.home) { store.actions.scrollHome(); return; }
-    if (key.end) { store.actions.scrollEnd(); return; }
+    if (key.pageUp) { s.actions.scrollPgUp(); return; }
+    if (key.pageDown) { s.actions.scrollPgDn(); return; }
+    if (key.home) { s.actions.scrollHome(); return; }
+    if (key.end) { s.actions.scrollEnd(); return; }
     if (key.tab) {
       // Tab → Plan/Act toggle. Never mid-processing.
-      if (!store.state.isProcessing) controller.toggleMode();
+      if (!s.state.isProcessing) controller.toggleMode();
       return;
     }
     // Esc while working — cancel the active mission/chat (the composer
     // shows "Esc to stop"; this makes it true). Esc when idle is the
     // composer's own "clear draft" — the app handler ignores it here.
-    if (key.escape && (store.state.isProcessing
-      || store.state.holoState === "RUNNING" || store.state.holoState === "UNDERSTANDING"
-      || store.state.holoState === "PLANNING"
-      || store.state.holoState === "READING" || store.state.holoState === "EDITING"
-      || store.state.holoState === "TESTING" || store.state.holoState === "VERIFYING")) {
+    if (key.escape && (s.state.isProcessing
+      || s.state.holoState === "RUNNING" || s.state.holoState === "UNDERSTANDING"
+      || s.state.holoState === "PLANNING"
+      || s.state.holoState === "READING" || s.state.holoState === "EDITING"
+      || s.state.holoState === "TESTING" || s.state.holoState === "VERIFYING")) {
       session.cancel().catch(() => {});
       // Also cancel an in-flight REMOTE model stream — session.cancel()
       // only stops local tool execution; the server-side model call
       // would otherwise keep running (and being billed) unheard.
       controller.cancelRemoteModel();
-      store.actions.setIsProcessing(false);
-      store.actions.setHoloState("IDLE");
-      store.actions.clearMission();
-      store.actions.clearToolProgress();
-      store.actions.stopBusy();
+      s.actions.setIsProcessing(false);
+      s.actions.setHoloState("IDLE");
+      s.actions.clearMission();
+      s.actions.clearToolProgress();
+      s.actions.stopBusy();
       return;
     }
     if (isCtrl(input, key, "c")) {
-      if (store.state.holoState === "APPROVAL") {
+      if (s.state.holoState === "APPROVAL") {
         approvalBridge.cancel();
-        store.actions.clearApproval();
-        store.actions.setHoloState("IDLE");
-      } else if (store.state.isProcessing
-        || store.state.holoState === "RUNNING" || store.state.holoState === "UNDERSTANDING"
-        || store.state.holoState === "PLANNING"
-        || store.state.holoState === "READING" || store.state.holoState === "EDITING"
-        || store.state.holoState === "TESTING" || store.state.holoState === "VERIFYING") {
+        s.actions.clearApproval();
+        s.actions.setHoloState("IDLE");
+      } else if (s.state.isProcessing
+        || s.state.holoState === "RUNNING" || s.state.holoState === "UNDERSTANDING"
+        || s.state.holoState === "PLANNING"
+        || s.state.holoState === "READING" || s.state.holoState === "EDITING"
+        || s.state.holoState === "TESTING" || s.state.holoState === "VERIFYING") {
         session.cancel().catch(() => {});
         controller.cancelRemoteModel();
-        store.actions.setIsProcessing(false);
-        store.actions.setHoloState("IDLE");
-        store.actions.clearMission();
-        store.actions.clearToolProgress();
-        store.actions.stopBusy();
+        s.actions.setIsProcessing(false);
+        s.actions.setHoloState("IDLE");
+        s.actions.clearMission();
+        s.actions.clearToolProgress();
+        s.actions.stopBusy();
       } else {
         exit();
       }
     } else if (isCtrl(input, key, "k")) {
-      store.actions.setOverlay("command-palette");
-      store.actions.setOverlayQuery("");
+      s.actions.setOverlay("command-palette");
+      s.actions.setOverlayQuery("");
     } else if (isCtrl(input, key, "l")) {
       // Ctrl+L — clear the transcript (and any active mission view).
-      store.actions.setHoloState("IDLE");
-      store.actions.clearMission();
-      store.actions.clearChatTranscript();
-      store.actions.clearToolProgress();
-      store.actions.stopBusy();
+      s.actions.setHoloState("IDLE");
+      s.actions.clearMission();
+      s.actions.clearChatTranscript();
+      s.actions.clearToolProgress();
+      s.actions.stopBusy();
     } else if (isCtrl(input, key, "d")) {
       controller.openDiffViewer();
     } else if (isCtrl(input, key, "n")) {
       controller.newSession();
     } else if (isCtrl(input, key, "r")) {
-      store.actions.setOverlay("resume-picker");
+      s.actions.setOverlay("resume-picker");
     } else if (isCtrl(input, key, "o")) {
       // Ctrl+O — toggle execution details: expand/collapse the result
       // summaries of successful tool runs in the execution group.
       // (Workspace switching lives at /workspace and in the palette.)
-      store.actions.toggleToolDetails();
+      s.actions.toggleToolDetails();
     } else if (input === "?") {
-      if (!store.state.isProcessing) store.actions.setOverlay("help");
+      if (!s.state.isProcessing) s.actions.setOverlay("help");
     }
-  }, [controller, session, store, approvalBridge, exit]);
+  }, [controller, session, approvalBridge, exit]);
 
   const disabled = store.state.isProcessing
     || store.state.holoState === "RUNNING"
@@ -303,31 +311,35 @@ export function CockpitApp({
     || store.state.holoState === "VERIFYING" || store.state.holoState === "APPROVAL";
 
   const handleModelSelect = useCallback((selected: ModelChoice) => {
+    const s = storeRef.current;
     // Picking an explicit model switches routing to FIXED — in "auto" mode
     // cliModeToRouteOptions() ignores selectedModel entirely, so the pick
     // would never be honored ("models don't stick").
-    store.actions.updateSelectedModel(selected.id);
-    store.actions.updateRoutingMode("fixed");
-    store.actions.setOverlay("none");
-    store.actions.setOverlayQuery("");
-  }, [store]);
+    s.actions.updateSelectedModel(selected.id);
+    s.actions.updateRoutingMode("fixed");
+    s.actions.setOverlay("none");
+    s.actions.setOverlayQuery("");
+  }, []);
 
   const handleRoutingModeSelect = useCallback((routing: typeof store.state.routingMode) => {
-    store.actions.updateRoutingMode(routing);
-    store.actions.setOverlayQuery("");
-  }, [store]);
+    const s = storeRef.current;
+    s.actions.updateRoutingMode(routing);
+    s.actions.setOverlayQuery("");
+  }, []);
 
   const handlePaletteSelect = useCallback((action: typeof DEFAULT_ACTIONS[number]) => {
-    store.actions.setOverlay("none");
-    store.actions.setOverlayQuery("");
-    store.actions.setComposerValue("");
+    const s = storeRef.current;
+    s.actions.setOverlay("none");
+    s.actions.setOverlayQuery("");
+    s.actions.setComposerValue("");
     submit(action.id);
-  }, [store, submit]);
+  }, [submit]);
 
   const closeOverlay = useCallback(() => {
-    store.actions.setOverlay("none");
-    store.actions.setOverlayQuery("");
-  }, [store]);
+    const s = storeRef.current;
+    s.actions.setOverlay("none");
+    s.actions.setOverlayQuery("");
+  }, []);
 
   const overlayOpen = overlay !== "none";
 

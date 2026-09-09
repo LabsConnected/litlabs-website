@@ -32,7 +32,7 @@ import {
   localRoutePolicy,
   resolveLocalModel,
   localRoutedModel,
-  isLocalModelId,
+  resolveRequestedLocalModel,
 } from "../lib/local-model-resolution.js";
 import { resolveExecutionTarget, resolveLocalOnly } from "../lib/execution-target.js";
 import { ok, fail, warn, header, c, detectProject } from "../lib/utils.js";
@@ -142,8 +142,8 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     // When executionTarget=local (LITT_LOCAL_MODE=1, --local, or default),
     // the local daemon (Ollama/LM Studio) is the ONLY provider lane.
     // A persisted or env-selected remote model is never used in LOCAL mode.
-    const requestedLocalModel = process.env.LITT_MODEL?.trim()
-      || (isLocalModelId(selectedModel) ? selectedModel : null);
+    const requestedLocalModelInfo = resolveRequestedLocalModel(selectedModel);
+    const requestedLocalModel = requestedLocalModelInfo.model;
     const policy = localRoutePolicy({
       executionTarget,
       localOnly,
@@ -157,7 +157,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     if (policy.kind === "local-required") {
       // LOCAL mode: route through the local daemon.
       const lane = await probeLocalLane();
-      routed = modelRuntime.routeLocal(lane, requestedLocalModel);
+      routed = modelRuntime.routeLocal(lane, requestedLocalModel, requestedLocalModelInfo.source);
       routingMode = "fixed";
     } else {
       // REMOTE/BYOK mode: route through the cloud catalog.
