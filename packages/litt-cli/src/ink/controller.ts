@@ -71,6 +71,7 @@ import {
   localRoutePolicy,
   resolveLocalModel,
   isLocalModelId,
+  resolveRequestedLocalModel,
   type LocalRoutePolicy,
 } from "../lib/local-model-resolution.js";
 import {
@@ -169,17 +170,12 @@ function resolveModelProvider(
 /**
  * The model the operator named explicitly for this session.
  *
- * LITT_MODEL is the documented env override (the same one `litt ask`
- * reads), and an "ollama:" canonical id is an explicit local pick made
- * through the Model Center. An ordinary catalog selection is NOT an
- * explicit local request — that is the persisted-MiniMax case, which
- * LOCAL mode must be free to supersede.
+ * Delegates to the canonical resolveRequestedLocalModel() so the TUI,
+ * `litt ask`, and `litt doctor` all use identical precedence:
+ * LITT_MODEL env → persisted ollama: selection → null (preference order).
  */
 function requestedLocalModel(selectedModel: string | null): string | null {
-  const env = process.env.LITT_MODEL?.trim();
-  if (env) return env;
-  if (isLocalModelId(selectedModel)) return selectedModel;
-  return null;
+  return resolveRequestedLocalModel(selectedModel).model;
 }
 
 /**

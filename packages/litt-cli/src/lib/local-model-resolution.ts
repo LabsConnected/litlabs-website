@@ -45,6 +45,49 @@ export function isLocalModelId(modelId: string | null | undefined): boolean {
   return !!modelId && modelId.startsWith(OLLAMA_CANONICAL_PREFIX);
 }
 
+// ─── 0. Canonical requested-model resolution ────────────────────────
+
+/**
+ * The source of a requested local model — for display and routing traces.
+ */
+export type RequestedModelSource = "env" | "prefs" | "none";
+
+export interface RequestedModelInfo {
+  /** The model to request, or null when no explicit request was made. */
+  model: string | null;
+  /** Where the request came from: LITT_MODEL env, persisted prefs, or none. */
+  source: RequestedModelSource;
+}
+
+/**
+ * Resolve the model the operator named explicitly for LOCAL execution.
+ *
+ * This is the CANONICAL precedence — every surface (doctor, ask, TUI,
+ * local-lane probe) must call this so they all agree on which model to
+ * probe and execute.
+ *
+ * Precedence (identical everywhere):
+ *   1. LITT_MODEL env var — the documented override.
+ *   2. Persisted prefs selectedModel — but ONLY when it is a local
+ *      (ollama:) model id. A persisted REMOTE selection (e.g.
+ *      "minimax-m3-free") is never a local request.
+ *   3. null — no explicit request; the lane's own preference order
+ *      (selectLocalModel) picks from installed models.
+ *
+ * `prefsSelectedModel` is the value from ~/.litt/model-prefs.json
+ * (or the cockpit store's selectedModel state — same thing).
+ */
+export function resolveRequestedLocalModel(
+  prefsSelectedModel: string | null | undefined,
+): RequestedModelInfo {
+  const env = process.env.LITT_MODEL?.trim();
+  if (env) return { model: env, source: "env" };
+  if (prefsSelectedModel && isLocalModelId(prefsSelectedModel)) {
+    return { model: prefsSelectedModel, source: "prefs" };
+  }
+  return { model: null, source: "none" };
+}
+
 // ─── 1. Policy: must the local daemon serve this request? ───────────
 
 export interface LocalRoutePolicyInput {
@@ -148,6 +191,25 @@ export interface LocalModelResolution {
   endpoint: string;
   /** Why this tag was chosen — surfaced in the routing trace. */
   reason: string;
+  /**
+   * The model the operator asked for (env/prefs), stripped to a bare
+   * tag. null when no explicit request was made (preference order pick).
+   * Used to detect and surface fallback/route-change decisions.
+   */
+  configuredInput: string | null;
+  /**
+   * Where the configuredInput came from: "env" (LITT_MODEL), "prefs"
+   * (persisted selectedModel), or "none" (no explicit request).
+   */
+  configuredSource: RequestedModelSource;
+  /**
+   * True when the effective model differs from the configured input —
+   * i.e. a routing/preference-order decision changed what serves the
+   * request. False when the explicit request was honoured exactly, or
+   * when there was no explicit request (preference order is not a
+   * "fallback" — it's the default path).
+   */
+  isRouteChange: boolean;
 }
 
 export type LocalModelOutcome =
@@ -170,6 +232,11 @@ export function resolveLocalModel(
   lane: LocalLaneStatus,
   requested: string | null,
 ): LocalModelOutcome {
+  // Track the configured input and its source so callers (doctor, ask,
+  // TUI) can surface route-change decisions instead of silently serving
+  // a different model than the one the operator named.
+  const configuredInput = requested ? ollamaTagOf(requested) : null;
+
   if (!lane.available) {
     const detail = lane.reason ?? "the local model daemon is not available";
     return {
@@ -205,6 +272,9 @@ export function resolveLocalModel(
         reason: hit === tag
           ? `explicitly requested local model "${tag}"`
           : `explicitly requested "${tag}" → installed "${hit}"`,
+        configuredInput,
+        configuredSource: "env",
+        isRouteChange: hit !== tag,
       },
     };
   }
@@ -224,6 +294,9 @@ export function resolveLocalModel(
       provider: "ollama",
       endpoint: lane.endpoint,
       reason: `local lane preference order selected "${picked}"`,
+      configuredInput: null,
+      configuredSource: "none",
+      isRouteChange: false,
     },
   };
 }
