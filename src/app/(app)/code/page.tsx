@@ -497,7 +497,7 @@ export default function CodeScannerPage() {
           <Link
             href="/sign-in?redirect_url=/code"
             className="px-4 py-2 rounded-lg text-sm font-bold"
-            style={{ backgroundColor: "#6366f1", color: "#fff" }}
+            style={{ backgroundColor: "#a8ff2f", color: "#03050a" }}
           >
             Sign In
           </Link>

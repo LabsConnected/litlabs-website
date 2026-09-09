@@ -11,7 +11,6 @@ export default function SignUpPage() {
       <SignupTracker />
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="text-3xl mb-3">🌳</div>
           <h1
             className="text-xl font-black tracking-tight mb-1"
             style={{ color: "#e2e8f0" }}
@@ -35,8 +34,8 @@ export default function SignUpPage() {
                 rootBox: { width: "100%" },
                 cardBox: { width: "100%", maxWidth: "100%" },
                 formButtonPrimary: {
-                  backgroundColor: "#6366f1",
-                  color: "#fff",
+                  backgroundColor: "#a8ff2f",
+                  color: "#03050a",
                   border: "none",
                   fontSize: "13px",
                   fontWeight: "bold",
@@ -48,7 +47,7 @@ export default function SignUpPage() {
                   color: "#e2e8f0",
                   borderRadius: "8px",
                 },
-                footerActionLink: { color: "#818cf8" },
+                footerActionLink: { color: "#a8ff2f" },
                 headerTitle: { color: "#e2e8f0" },
                 headerSubtitle: { color: "#94a3b8" },
                 socialButtonsBlockButton: {
@@ -66,7 +65,7 @@ export default function SignUpPage() {
                 },
               },
               variables: {
-                colorPrimary: "#6366f1",
+                colorPrimary: "#a8ff2f",
                 colorBackground: "#1a1a24",
                 colorForeground: "#e2e8f0",
                 colorMutedForeground: "#94a3b8",

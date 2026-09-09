@@ -50,9 +50,6 @@ export default function GlobalError({
             }}
           >
             <div style={{ textAlign: "center", marginBottom: "1.5rem" }}>
-              <div style={{ fontSize: "2.5rem", marginBottom: "0.5rem" }}>
-                💥
-              </div>
               <h1
                 style={{
                   color: "#e2e8f0",
@@ -103,8 +100,8 @@ export default function GlobalError({
                   fontSize: "0.75rem",
                   fontWeight: "bold",
                   borderRadius: 8,
-                  backgroundColor: "#6366f1",
-                  color: "#fff",
+                  backgroundColor: "#a8ff2f",
+                  color: "#03050a",
                   border: "none",
                   cursor: "pointer",
                 }}
