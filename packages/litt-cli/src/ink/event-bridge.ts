@@ -115,9 +115,15 @@ function holoFromEvent(event: LifecycleEvent): HoloState | null {
     case "run.started": return "RUNNING";
     case "tool.started": return "RUNNING";
     case "tool.completed": return "RUNNING"; // still in run
-    case "tool.failed": return "FAILED";
-    case "tool.cancelled": return "CANCELLED";
-    case "tool.timeout": return "TIMEOUT";
+    // Per-tool failures/cancellations/timeouts do NOT set the global
+    // mission state. The agent loop continues after a recoverable tool
+    // failure — the model can retry, use a different tool, or report
+    // the failure. Only a TERMINAL run/mission event may mark the whole
+    // mission as FAILED/CANCELLED/TIMEOUT. The activity feed still
+    // records the per-tool failure with a FAIL tag (red row).
+    case "tool.failed": return null;
+    case "tool.cancelled": return null;
+    case "tool.timeout": return null;
     case "run.completed":
       return (event.data.status as string) === "success" ? "COMPLETE" :
              (event.data.status as string) === "cancelled" ? "CANCELLED" :
