@@ -30,6 +30,12 @@ export interface FailureReport {
   runId: string | null;
   /** When the failure occurred (epoch ms). */
   failedAt: number;
+  /** The step or command that failed (e.g. the test suite, a file edit). */
+  failedStep?: string | null;
+  /** The command that was running when the failure occurred, if known. */
+  commandExcerpt?: string | null;
+  /** A short excerpt of the actual output (stdout/stderr) that proves the failure. */
+  outputExcerpt?: string | null;
 }
 
 /**
@@ -41,8 +47,14 @@ export interface FailureReport {
  *   Task:
  *     <task>
  *
+ *   Failed step:
+ *     <step> (or "none")
+ *
  *   Reason:
  *     <reason>
+ *
+ *   Command/output excerpt:
+ *     <excerpt> (or "none")
  *
  *   Last successful step:
  *     <step>  (or "none")
@@ -57,15 +69,34 @@ export function formatFailureReport(report: FailureReport): string {
     `Task:`,
     `  ${report.task}`,
     "",
+    `Failed step:`,
+    `  ${report.failedStep ?? "none"}`,
+    "",
     `Reason:`,
     `  ${report.reason}`,
+  ];
+
+  // Command and output are distinct, complementary evidence — a failure
+  // can carry both (the command that ran AND the stdout/stderr that
+  // proves it failed), so both render under the shared heading.
+  const excerptParts = [report.commandExcerpt, report.outputExcerpt].filter(
+    (part): part is string => !!part,
+  );
+  lines.push("", `Command/output excerpt:`);
+  if (excerptParts.length > 0) {
+    for (const part of excerptParts) lines.push(`  ${part}`);
+  } else {
+    lines.push(`  none`);
+  }
+
+  lines.push(
     "",
     `Last successful step:`,
     `  ${report.lastSuccessfulStep ?? "none"}`,
     "",
     `Recommended next action:`,
     `  ${report.recommendedNextAction}`,
-  ];
+  );
 
   if (report.runId) {
     lines.push("", `Run ID: ${report.runId}`);
@@ -129,16 +160,25 @@ export function deriveNextAction(reason: string): string {
  * @param reason The error message from the runtime
  * @param lastSuccessfulStep The last step that succeeded (or null)
  * @param runId The run ID (or null)
+ * @param failedStep The step/command that failed (or null)
+ * @param commandExcerpt The command that produced the failure (or null)
+ * @param outputExcerpt A short output excerpt that proves the failure (or null)
  */
 export function buildFailureReport(
   task: string,
   reason: string,
   lastSuccessfulStep: string | null,
   runId: string | null,
+  failedStep: string | null = null,
+  commandExcerpt: string | null = null,
+  outputExcerpt: string | null = null,
 ): FailureReport {
   return {
     task,
+    failedStep,
     reason: reason || "Unknown error",
+    commandExcerpt,
+    outputExcerpt,
     lastSuccessfulStep,
     recommendedNextAction: deriveNextAction(reason),
     runId,

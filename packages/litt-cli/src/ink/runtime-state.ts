@@ -188,6 +188,13 @@ export function isTerminalState(state: RuntimeState): boolean {
   return TERMINAL_RUNTIME_STATES.has(state);
 }
 
+/** True when the run/mission ended in a failure state that should expose
+ *  the failure-details overlay (v View). Completed missions are terminal
+ *  but do not show the failure view. */
+export function isFailureState(state: RuntimeState): boolean {
+  return state === "failed" || state === "cancelled" || state === "timeout";
+}
+
 /** Status icon vocabulary — one glyph per state, everywhere. */
 export function runtimeGlyph(state: RuntimeState): string {
   switch (state) {

@@ -166,6 +166,9 @@ export interface MissionState {
   readOnly: boolean | null;
   /** Every tool id invoked during the mission (for honest summaries). */
   toolsUsed: string[];
+  /** The failure reason when the mission reaches FAILED/CANCELLED/TIMEOUT.
+   *  null for successful or still-running missions. */
+  failureReason?: string | null;
 }
 
 /**
@@ -308,7 +311,8 @@ export type Overlay =
   | "diff-viewer"
   | "workspace-picker"
   | "resume-picker"
-  | "ship";
+  | "ship"
+  | "failure-view";
 
 /**
  * Routing mode — how LiTT chooses models.
@@ -359,7 +363,15 @@ export function useCockpitStore() {
   // localOnly is fixed for the session — emergency/offline mode.
   // Changing it requires a restart with different env vars.
   const [localOnly] = useState<boolean>(() => resolveLocalOnly());
-  const [currentRunId, setCurrentRunId] = useState<string | null>(null);
+  const [currentRunId, setCurrentRunIdState] = useState<string | null>(null);
+  // Mission generation counter. scheduleIdle captures the value at scheduling
+  // and aborts if a newer logical mission has started since then.
+  // startMission increments it exactly once per new mission; setCurrentRunId
+  // does NOT touch it (backend runId assignment is not a new mission).
+  const missionEpochRef = useRef(0);
+  const setCurrentRunId = useCallback((runId: string | null) => {
+    setCurrentRunIdState(runId);
+  }, []);
   // Model prefs — loaded once from ~/.litt/model-prefs.json so the chosen
   // model + routing mode survive closing and reopening litt.
   const [modelPrefs] = useState(() => loadModelPrefs(getDefaultPrefsPath()));
@@ -492,6 +504,10 @@ export function useCockpitStore() {
       if (flushTimerRef.current !== null) {
         clearTimeout(flushTimerRef.current);
         flushTimerRef.current = null;
+      }
+      if (terminalIdleTimerRef.current !== null) {
+        clearTimeout(terminalIdleTimerRef.current);
+        terminalIdleTimerRef.current = null;
       }
     };
   }, []);
@@ -665,6 +681,10 @@ export function useCockpitStore() {
 
   /** Start a new mission */
   const startMission = useCallback((text: string, runId: string | null = null) => {
+    // New logical mission: advance the generation counter exactly once.
+    // setCurrentRunId does NOT advance this counter; a backend runId learned
+    // later belongs to the same logical mission.
+    missionEpochRef.current += 1;
     setMission(text);
     setMissionState({
       text,
@@ -682,6 +702,7 @@ export function useCockpitStore() {
       missionDeltaFiles: null,
       readOnly: null,
       toolsUsed: [],
+      failureReason: null,
     });
   }, []);
 
@@ -709,12 +730,19 @@ export function useCockpitStore() {
     });
   }, []);
 
-  /** Update the mission state (lifecycle phase) */
-  const updateMissionState = useCallback((state: HoloState) => {
+  /** Update the mission state (lifecycle phase). Optional reason is
+   *  persisted for terminal FAILED/CANCELLED/TIMEOUT states so the
+   *  failure view can show an honest, actionable report. */
+  const updateMissionState = useCallback((state: HoloState, reason?: string) => {
     setMissionState((prev) => {
       if (!prev) return prev;
       if (state === "COMPLETE" || state === "FAILED" || state === "CANCELLED" || state === "TIMEOUT") {
-        const completed = { ...prev, state, endedAt: Date.now() };
+        const completed = {
+          ...prev,
+          state,
+          endedAt: Date.now(),
+          ...(state !== "COMPLETE" ? { failureReason: reason ?? prev.failureReason ?? null } : {}),
+        };
         setLastCompletedMission(completed);
         return completed;
       }
@@ -872,17 +900,24 @@ export function useCockpitStore() {
   // back to IDLE, causing the composer to unblock mid-run and the status
   // bar to drop "Working".
   //
-  // scheduleIdle fixes this with TWO guards:
+  // scheduleIdle fixes this with THREE guards:
   //   1. Only ONE idle timer is pending at a time (previous is cleared).
-  //   2. The timer uses the functional updater `setHoloState((prev) => …)`
+  //   2. The timer captures the mission generation counter at scheduling and
+  //      aborts if a newer logical mission has started since then.
+  //   3. The timer uses the functional updater `setHoloState((prev) => …)`
   //      so it reads the CURRENT state, not the stale closure state. It
-  //      only transitions to IDLE from a terminal state — a new run that
+  //      only transitions to IDLE from a terminal state — a new mission that
   //      started during the delay window is left untouched.
   const terminalIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleIdle = useCallback((delayMs: number) => {
     if (terminalIdleTimerRef.current) clearTimeout(terminalIdleTimerRef.current);
+    const epochAtSchedule = missionEpochRef.current;
     terminalIdleTimerRef.current = setTimeout(() => {
       terminalIdleTimerRef.current = null;
+      if (missionEpochRef.current !== epochAtSchedule) {
+        // A newer logical mission superseded the terminal state; don't reset it.
+        return;
+      }
       setHoloState(idleTransitionFromTerminal);
     }, delayMs);
   }, []);

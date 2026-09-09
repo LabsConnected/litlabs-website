@@ -74,6 +74,7 @@ export interface LiTTShellProps {
   onOpenPalette: (query: string) => void;
   onClosePalette?: () => void;
   onOpenContext: (query: string) => void;
+  onOpenFailureView?: () => void;
   composerDisabled: boolean;
   /** True while the transcript is scrolled into history (no fake caret). */
   composerScrolled: boolean;
@@ -120,7 +121,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
     gitModified, gitUntracked, toolProgress, toolDetails = false,
     executionTarget, canonicalMission, workstream,
     composerValue, onComposerChange, onSubmit, onNavigateHistory,
-    onOpenPalette, onClosePalette, onOpenContext, composerDisabled,
+    onOpenPalette, onClosePalette, onOpenContext, onOpenFailureView, composerDisabled,
     composerScrolled, composerFocusEpoch, onComposerReturnToLive,
     transcriptAnchor, onTranscriptPageChange, onTranscriptAnchorChange,
     project, branch, localRuntime, remoteRuntime = "offline", brain, activeModel, activeProvider, mode,
@@ -338,6 +339,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
         onOpenPalette={onOpenPalette}
         onClosePalette={onClosePalette}
         onOpenContext={onOpenContext}
+        onOpenFailureView={onOpenFailureView}
         disabled={composerDisabled}
         busy={isProcessing}
         runtimeState={runtimeState}

@@ -42,6 +42,7 @@ import { DiffViewer } from "./overlays/diff-viewer.js";
 import { WorkspacePicker } from "./overlays/workspace-picker.js";
 import { ResumePicker } from "./overlays/resume-picker.js";
 import { ShipFlow } from "./overlays/ship-flow.js";
+import { FailureView } from "./overlays/failure-view.js";
 import { hasOpenRouterKey, hasAnyNativeProviderKey, providerLabel } from "../lib/model-provider.js";
 import {
   localRoutePolicy,
@@ -443,6 +444,14 @@ export function CockpitApp({
             />
           )}
           {overlay === "help" && <HelpOverlay onCancel={closeOverlay} />}
+          {overlay === "failure-view" && (
+            <FailureView
+              mission={store.state.missionState}
+              lastMission={store.state.lastCompletedMission}
+              activityLog={store.state.activityLog}
+              onClose={closeOverlay}
+            />
+          )}
         </>
       ) : (
         <>
@@ -490,6 +499,7 @@ export function CockpitApp({
             onOpenPalette={controller.openPalette}
             onClosePalette={closeOverlay}
             onOpenContext={controller.openContext}
+            onOpenFailureView={controller.openFailureView}
             composerDisabled={disabled}
             composerScrolled={store.state.transcriptAnchor !== null}
             composerFocusEpoch={store.state.focusEpoch}

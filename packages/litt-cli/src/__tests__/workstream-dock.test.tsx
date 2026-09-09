@@ -327,6 +327,56 @@ describe("WorkstreamNormalizer", () => {
       expect(groups[1].count).toBe(3);
       expect(groups[1].kind).toBe("edit");
     });
+
+    it("collapses 2+ generic inspect activities into one counted row", () => {
+      const activities = [
+        { id: "1", kind: "inspect" as const, label: "Inspecting", subject: "Inspecting", status: "complete" as const },
+        { id: "2", kind: "inspect" as const, label: "Inspecting", subject: "Inspecting", status: "complete" as const },
+      ];
+      const groups = groupConsecutive(activities);
+      expect(groups).toHaveLength(1);
+      expect(groups[0].count).toBe(2);
+      expect(groups[0].label).toContain("2 files");
+      // The generic label should not be repeated as its own subject line.
+      expect(groups[0].subjects).not.toContain("Inspecting");
+    });
+
+    it("collapses consecutive duplicate reason rows into one counted row", () => {
+      const activities = [
+        { id: "1", kind: "reason" as const, label: "Status", status: "complete" as const },
+        { id: "2", kind: "reason" as const, label: "Status", status: "complete" as const },
+      ];
+      const groups = groupConsecutive(activities);
+      expect(groups).toHaveLength(1);
+      expect(groups[0].count).toBe(2);
+      expect(groups[0].label).toContain("Status (2)");
+    });
+
+    it("does not mix failed and complete activities in one group", () => {
+      const activities = [
+        { id: "1", kind: "inspect" as const, label: "a.ts", subject: "a.ts", status: "complete" as const },
+        { id: "2", kind: "inspect" as const, label: "b.ts", subject: "b.ts", status: "failed" as const },
+        { id: "3", kind: "inspect" as const, label: "c.ts", subject: "c.ts", status: "complete" as const },
+      ];
+      const groups = groupConsecutive(activities);
+      expect(groups).toHaveLength(3);
+      expect(groups[0].status).toBe("complete");
+      expect(groups[1].status).toBe("failed");
+      expect(groups[2].status).toBe("complete");
+    });
+
+    it("keeps distinct file subjects visible when grouping", () => {
+      const activities = [
+        { id: "1", kind: "inspect" as const, label: "Inspecting", subject: "src/a.ts", status: "complete" as const },
+        { id: "2", kind: "inspect" as const, label: "Inspecting", subject: "src/b.ts", status: "complete" as const },
+        { id: "3", kind: "inspect" as const, label: "Inspecting", subject: "src/c.ts", status: "complete" as const },
+      ];
+      const groups = groupConsecutive(activities);
+      expect(groups).toHaveLength(1);
+      expect(groups[0].subjects).toContain("src/a.ts");
+      expect(groups[0].subjects).toContain("src/b.ts");
+      expect(groups[0].subjects).toContain("src/c.ts");
+    });
   });
 });
 
@@ -482,5 +532,87 @@ describe("Integration: store → normalizer → dock", () => {
     expect(store.snapshot().overallStatus).toBe("blocked");
     expect(store.snapshot().phase).toBe("blocked");
     expect(estimateWorkstreamDockRows(store.snapshot())).toBe(4);
+  });
+});
+
+// ─── Dedup semantics observed through the dock ─────────────────────
+
+describe("WorkstreamDock — semantic subject dedup", () => {
+  it("A: three generic Inspecting events become one useful summary", () => {
+    const store = new WorkstreamStore();
+    store.setObjective("Inspect project");
+    store.setWorkstreamPhase("inspecting");
+    store.begin("inspect", "INSPECTING", "Inspecting", "Inspecting");
+    store.begin("inspect", "INSPECTING", "Inspecting", "Inspecting");
+    store.begin("inspect", "INSPECTING", "Inspecting", "Inspecting");
+
+    const groups = groupConsecutive(store.snapshot().activities.slice(-5));
+    expect(groups.length).toBeGreaterThanOrEqual(1);
+    const inspectGroup = groups.find((g) => g.kind === "inspect");
+    expect(inspectGroup).toBeDefined();
+    expect(inspectGroup!.label).toContain("3 files");
+    expect(inspectGroup!.subjects).not.toContain("Inspecting");
+  });
+
+  it("B: single Typecheck / Typecheck renders Typecheck once", () => {
+    const store = new WorkstreamStore();
+    store.setObjective("Run checks");
+    store.setWorkstreamPhase("verifying");
+    store.begin("tool", "VERIFYING", "Typecheck", "Typecheck");
+
+    const groups = groupConsecutive(store.snapshot().activities.slice(-2));
+    const group = groups.find((g) => g.label === "Typecheck");
+    expect(group).toBeDefined();
+    // The subject equal to the label must be suppressed.
+    expect(group!.subjects).not.toContain("Typecheck");
+  });
+
+  it("C: repeated Status reasons merge without redundant subject lines", () => {
+    const store = new WorkstreamStore();
+    store.setObjective("Watch status");
+    store.addReason("Status");
+    store.addReason("Status");
+    store.addReason("Status");
+
+    const groups = groupConsecutive(store.snapshot().activities.slice(-5));
+    const statusGroup = groups.find((g) => g.kind === "reason" && g.label.includes("Status"));
+    expect(statusGroup).toBeDefined();
+    expect(statusGroup!.label).toMatch(/Status \(\d+\)/);
+    expect(statusGroup!.subjects).not.toContain("Status");
+  });
+
+  it("D: distinct file inspections keep filenames visible", () => {
+    const store = new WorkstreamStore();
+    store.setObjective("Inspect files");
+    store.setWorkstreamPhase("inspecting");
+    store.addInspect("src/a.ts");
+    store.addInspect("src/b.ts");
+    store.addInspect("src/c.ts");
+
+    const groups = groupConsecutive(store.snapshot().activities.slice(-5));
+    const inspectGroup = groups.find((g) => g.kind === "inspect");
+    expect(inspectGroup).toBeDefined();
+    expect(inspectGroup!.subjects).toContain("src/a.ts");
+    expect(inspectGroup!.subjects).toContain("src/b.ts");
+    expect(inspectGroup!.subjects).toContain("src/c.ts");
+  });
+
+  it("E: distinct failed and completed operations are not merged", () => {
+    const store = new WorkstreamStore();
+    store.setObjective("Mutate and validate");
+    store.setWorkstreamPhase("editing");
+    const id1 = store.begin("edit", "EDITING", "src/a.ts", "src/a.ts");
+    store.complete(id1, { added: 1, removed: 0 });
+    const id2 = store.begin("edit", "EDITING", "src/b.ts", "src/b.ts");
+    store.fail(id2, "Expected text not found");
+    const id3 = store.begin("edit", "EDITING", "src/c.ts", "src/c.ts");
+    store.complete(id3, { added: 1, removed: 0 });
+
+    const groups = groupConsecutive(store.snapshot().activities.slice(-5));
+    const editGroups = groups.filter((g) => g.kind === "edit");
+    expect(editGroups.length).toBe(3);
+    expect(editGroups[0].status).toBe("complete");
+    expect(editGroups[1].status).toBe("failed");
+    expect(editGroups[2].status).toBe("complete");
   });
 });
