@@ -384,18 +384,35 @@ export function useEventBridge(
           }
           break;
         }
-        case "mission.step_started":
-          ws.addReason(missionStepText(event.data));
+        case "mission.step_started": {
+          // Identity-based upsert: the same stepId may arrive multiple
+          // times (mission:step_started, mission:step_working,
+          // mission:step_verifying all map to this event type, and the
+          // dual sessionBridge + client subscription can redeliver).
+          // beginSource is a no-op if an activity with this sourceId
+          // already exists — one logical step = one workstream row.
+          const stepId = (event.data.stepId as string) ?? "";
+          const title = missionStepText(event.data);
+          ws.beginSource("reason", "WORKING", title, undefined, stepId || undefined);
           break;
-        case "mission.step_passed":
-          ws.addVerify(missionStepText(event.data), true);
+        }
+        case "mission.step_passed": {
+          // Complete the existing step activity (don't create a new
+          // "verify" row). This is the same logical operation — the
+          // step transitioned from running to passed.
+          const stepId = (event.data.stepId as string) ?? "";
+          const title = missionStepText(event.data);
+          ws.completeSource(stepId, { success: true, label: title });
           break;
-        case "mission.step_failed":
-          {
-            const id = ws.begin("failure", "FAILED", missionStepText(event.data));
-            ws.fail(id, "Step failed");
-          }
+        }
+        case "mission.step_failed": {
+          // Fail the existing step activity (don't create a new
+          // "failure" row). Same logical operation — the step failed.
+          const stepId = (event.data.stepId as string) ?? "";
+          const title = missionStepText(event.data);
+          ws.failSource(stepId, "Step failed", title);
           break;
+        }
         default:
           break;
       }

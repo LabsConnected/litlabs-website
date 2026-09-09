@@ -163,6 +163,13 @@ export interface WorkstreamActivity {
 
   /** Whether the activity's diff/details are expanded. */
   expanded?: boolean;
+
+  /** Stable identity propagated from the source event (stepId, toolCallId).
+   *  When present, upsert methods use this to deduplicate — the same logical
+   *  operation never produces two activities, even if its lifecycle emits
+   *  multiple events (step_started + step_working + step_passed) or the
+   *  event is delivered twice (dual subscription). */
+  sourceId?: string;
 }
 
 export interface WorkstreamSnapshot {
@@ -303,6 +310,7 @@ export class WorkstreamStore {
     phase: string | null,
     label: string,
     subject?: string,
+    sourceId?: string,
   ): string {
     const record: WorkstreamActivity = {
       id: nextId(),
@@ -312,6 +320,7 @@ export class WorkstreamStore {
       phase: phase ?? PHASE_LABELS[kind],
       label,
       ...(subject ? { subject } : {}),
+      ...(sourceId ? { sourceId } : {}),
     };
     this.push(record);
     this.currentPhase = record.phase;
@@ -325,6 +334,7 @@ export class WorkstreamStore {
     phase: string | null,
     label: string,
     subject?: string,
+    sourceId?: string,
   ): string {
     const record: WorkstreamActivity = {
       id: nextId(),
@@ -334,6 +344,7 @@ export class WorkstreamStore {
       phase: phase ?? PHASE_LABELS[kind],
       label,
       ...(subject ? { subject } : {}),
+      ...(sourceId ? { sourceId } : {}),
     };
     this.push(record);
     this.currentPhase = record.phase;
@@ -341,7 +352,68 @@ export class WorkstreamStore {
     return record.id;
   }
 
+  // ─── Identity-based upsert (sourceId deduplication) ─────────────
+  //
+  // When a source event carries a stable identity (stepId, toolCallId),
+  // the upsert methods use it to guarantee exactly-once rendering:
+  //
+  //   - beginSource: create a running activity, or return the existing
+  //     one if sourceId already matches (duplicate delivery is a no-op).
+  //   - completeSource / failSource: terminalize the activity identified
+  //     by sourceId, or create it as already-terminal if it doesn't exist
+  //     (handles out-of-order delivery where the terminal event arrives
+  //     before the start event).
+  //
+  // Two genuinely independent operations with different sourceIds (or no
+  // sourceId at all) always produce separate activities — the dedup is
+  // strictly identity-based, never label/text-based.
 
+  /** Begin a running activity, or no-op if sourceId already exists. */
+  beginSource(
+    kind: WorkstreamKind,
+    phase: string | null,
+    label: string,
+    subject?: string,
+    sourceId?: string,
+  ): string {
+    if (sourceId) {
+      const existing = this.activities.find((a) => a.sourceId === sourceId);
+      if (existing) return existing.id;
+    }
+    return this.begin(kind, phase, label, subject, sourceId);
+  }
+
+  /** Complete the activity identified by sourceId.
+   *  If the activity doesn't exist yet (out-of-order delivery), creates it
+   *  as already-complete so the step is still visible. */
+  completeSource(sourceId: string, opts?: {
+    added?: number; removed?: number; diff?: string[];
+    command?: string; elapsedMs?: number; success?: boolean;
+    passed?: number; failed?: number; skipped?: number; reason?: string;
+    label?: string;
+  }): void {
+    const existing = this.activities.find((a) => a.sourceId === sourceId);
+    if (existing) {
+      this.complete(existing.id, opts ?? {});
+      return;
+    }
+    // Out-of-order: create as already-complete
+    const id = this.begin("reason", "WORKING", opts?.label ?? sourceId, undefined, sourceId);
+    this.complete(id, opts ?? {});
+  }
+
+  /** Fail the activity identified by sourceId.
+   *  If the activity doesn't exist yet, creates it as already-failed. */
+  failSource(sourceId: string, reason?: string, label?: string): void {
+    const existing = this.activities.find((a) => a.sourceId === sourceId);
+    if (existing) {
+      this.fail(existing.id, reason);
+      return;
+    }
+    // Out-of-order: create as already-failed
+    const id = this.begin("reason", "WORKING", label ?? sourceId, undefined, sourceId);
+    this.fail(id, reason);
+  }
 
   /** A concise user-facing conclusion (NEVER chain-of-thought). */
   addReason(label: string, phase: string | null = "WORKING"): string {
