@@ -171,16 +171,16 @@ describe("estimateActivityFeedHeight", () => {
     expect(estimateActivityFeedHeight([])).toBe(0);
   });
 
-  it("returns border + header + 1 line per visible event", () => {
+  it("returns header + 1 line per visible event (no border)", () => {
     const events = activityEntries(3);
-    // non-compact: top/bottom border (2) + ACTIVITY header (1) + 3 rows = 6
-    expect(estimateActivityFeedHeight(events)).toBe(2 + 1 + 3);
+    // non-compact: no border (removed) + header (1) + 3 rows = 4
+    expect(estimateActivityFeedHeight(events)).toBe(0 + 1 + 3);
   });
 
   it("caps at 4 visible events", () => {
     const events = activityEntries(10);
-    // non-compact: 2 border + 1 header + max 4 rows = 7
-    expect(estimateActivityFeedHeight(events)).toBe(2 + 1 + 4);
+    // non-compact: 0 border + 1 header + max 4 rows = 5
+    expect(estimateActivityFeedHeight(events)).toBe(0 + 1 + 4);
   });
 });
 
@@ -215,8 +215,8 @@ describe("estimateExtraContentHeight", () => {
     const h = estimateExtraContentHeight(null, null, events, false, "IDLE", false, null, "local", COLS);
     expect(h).toBe(estimateActivityFeedHeight(events, 4, false, COLS) + 1);
     // The helper itself still works for /activity consumers.
-    // non-compact: top/bottom border (2) + ACTIVITY header (1) + 3 rows = 6
-    expect(estimateActivityFeedHeight(events)).toBe(2 + 1 + 3);
+    // non-compact: no border (removed for compact chrome) + header (1) + 3 rows = 4
+    expect(estimateActivityFeedHeight(events)).toBe(0 + 1 + 3);
   });
 
   it("sums activity feed + result block + summary when all present", () => {
@@ -263,12 +263,12 @@ describe("100×30 collision regression", () => {
     const mission = failedReadOnlyMission();
     const events = activityEntries(4);
     const extraHeight = estimateExtraContentHeight(null, mission, events, false, "IDLE", false, null, "local", WIDTH);
-    // extraHeight = feed(2 border + 1 header + 4 rows) + 1 marginTop + resultBlock(6) + 1 + summary(2) + 1 = 18
-    expect(extraHeight).toBe(18);
+    // extraHeight = feed(0 border + 1 header + 4 rows) + 1 marginTop + resultBlock(6) + 1 + summary(2) + 1 = 16
+    expect(extraHeight).toBe(16);
     // Reserve must be subtracted from the budget
     const reserve = extraHeight;
-    const budget = CONTENT_ROWS - reserve; // 23 - 18 = 5
-    expect(budget).toBe(5);
+    const budget = CONTENT_ROWS - reserve; // 23 - 16 = 7
+    expect(budget).toBe(7);
     const vp = computeViewport(messages, layout, budget, null, 0);
     // Messages must fit in the reduced budget
     const messageRows = layout.prefix[vp.end] - layout.prefix[vp.start];
