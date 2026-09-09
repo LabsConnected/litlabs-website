@@ -275,6 +275,32 @@ describe("Semantic Mission Planning", () => {
       assert.equal(classifyGoalDomain("Analyze performance"), "unknown");
       assert.equal(classifyGoalDomain("Something totally unclear"), "unknown");
     });
+
+    it("REGRESSION: a repo-edit goal that also says 'explain' stays repo, not info", () => {
+      // This is the LiTT agent-acceptance failure goal verbatim. It was
+      // misclassified as "info" (matched "explain" before anything else
+      // was checked), which produced a fallback plan whose final step is
+      // literally "Verify the summary" and had no check/repair/revalidate
+      // steps — the mission could then never reach a real edit/test/diff
+      // tool call and cycled inspect → "Verify the summary" → fail → retry.
+      const goal =
+        "Inspect this repository. Find one small, real, low-risk bug or " +
+        "improvement in the LiTT CLI. Explain what you found, make the fix, " +
+        "add or update the relevant test, run only the targeted validation " +
+        "needed, and show me the final git diff. Do not commit or push anything.";
+      assert.equal(classifyGoalDomain(goal), "repo");
+    });
+
+    it("does not let a generic repo-adjacent word override a real informational question", () => {
+      // "SQL" is a repoKeywords entry (it also appears in project work),
+      // but a plain definitional question about it must stay "info" — the
+      // strong-signal short-circuit must not be so broad it swallows
+      // ordinary informational goals.
+      assert.equal(
+        classifyGoalDomain("Summarize the differences between SQL and NoSQL"),
+        "info",
+      );
+    });
   });
 
   // ─── planMission — steps exist BEFORE tool execution ─────────────

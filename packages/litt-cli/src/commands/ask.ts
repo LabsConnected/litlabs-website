@@ -35,6 +35,14 @@ import {
   isLocalModelId,
 } from "../lib/local-model-resolution.js";
 import { resolveExecutionTarget, resolveLocalOnly } from "../lib/execution-target.js";
+import {
+  createMissionEvidenceTracker,
+  MissionVerificationGate,
+  TaskAwareVerificationGate,
+  requiresProjectHealth,
+  requiresMutationEvidence,
+  isMutatingToolCall,
+} from "../lib/mission-verification.js";
 import { ok, fail, warn, header, c, detectProject } from "../lib/utils.js";
 import { resolveActiveProject } from "../lib/active-project.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
@@ -168,15 +176,64 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     console.log(`${c.dim}Provider: ${providerLabel(model.providerId)} | Model: ${model.configuredModel}${c.reset}`);
     console.log(`${c.cyan}▶${c.reset} Asking: ${c.bold}${question}${c.reset}\n`);
 
+    // ─── VerificationGate — COMPLETE = the runtime proved it ───────
+    // Without this, runAgentLoop treats any non-tool-call model turn
+    // as "done" the moment ANY earlier tool call succeeded — a model
+    // that inspects a little, has every mutating attempt denied, then
+    // gives up with prose (or tells the user to do the work
+    // themselves) was reported as a successful, exit-0 completion.
+    // This wires the SAME canonical gates the TUI cockpit uses:
+    //   - MissionVerificationGate: read-only work is proven by real
+    //     evidence (fast, no unnecessary full build/test/typecheck);
+    //     a mutating mission is proven by the full VerificationGate.
+    //   - TaskAwareVerificationGate: the one additional guard "ask"
+    //     needs — when the REQUEST ITSELF asked for a code change
+    //     (requiresMutationEvidence) and nothing was ever mutated,
+    //     refuse completion outright, no matter how much read-only
+    //     evidence exists. A legitimate read-only request (e.g.
+    //     "explain this file") is unaffected — requiresMutationEvidence
+    //     is false for it, so evidence-only proof still applies.
+    const MUTATION_TOOLS = new Set(["project.edit_file", "project.write_file", "project.run"]);
+    const evidenceTracker = createMissionEvidenceTracker(MUTATION_TOOLS, { cwd: projectRoot });
+    const healthRequested = requiresProjectHealth(question);
+    const mutationRequired = requiresMutationEvidence(question);
+
+    // Tracks whether a mutating tool call actually SUCCEEDED — narrower
+    // than evidenceTracker.isReadOnly(), which flips false the moment a
+    // mutation is merely ATTEMPTED (even a denied `chmod`). Correlated
+    // by toolCallId so a mutating call's own result (not some unrelated
+    // call finishing around the same time) is what sets this.
+    const mutationAttempts = new Map<string, boolean>();
+    let hasSuccessfulMutation = false;
+
+    const verificationGate = new TaskAwareVerificationGate({
+      inner: new MissionVerificationGate({
+        fullGate: sess.getVerificationGate(),
+        isReadOnly: evidenceTracker.isReadOnly,
+        hasSuccessfulEvidence: evidenceTracker.hasSuccessfulEvidence,
+        hasSuccessfulEvidenceType: evidenceTracker.hasSuccessfulEvidenceType,
+        hasFailedEvidence: evidenceTracker.hasFailedEvidence,
+        evidenceSummary: evidenceTracker.summary,
+        failedSummary: evidenceTracker.failedSummary,
+        healthRequested: () => healthRequested,
+        hasFailedHealthCheck: evidenceTracker.hasFailedHealthCheck,
+        healthSummary: evidenceTracker.healthSummary,
+      }),
+      hasSuccessfulMutation: () => hasSuccessfulMutation,
+      mutationRequired: () => mutationRequired,
+      evidenceSummary: evidenceTracker.summary,
+    });
+
     const result = await runAgentLoop(question, {
       model,
       tools,
       shell,
       gateway,
+      verificationGate,
       cwd: projectRoot,
       userId: "cli-user",
       mode: "act",
-      maxRounds: 12,
+      maxRounds: 24,
       projectContext: {
         name: String(project.packageJson?.name ?? "unnamed"),
         root: project.rootDir,
@@ -203,25 +260,56 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
         // Lifecycle events — could render in cockpit
         if (event.subtype === "agent_tool_call") {
           const toolId = (event.data as { toolId?: string }).toolId ?? "unknown";
+          const inputs = (event.data as { inputs?: Record<string, unknown> }).inputs ?? null;
+          const toolCallId = (event as { toolCallId?: string }).toolCallId ?? "";
+          // Track mutation/evidence state synchronously — the
+          // verification gate reads it when the loop calls verify().
+          evidenceTracker.recordToolCall(toolId, inputs);
+          if (toolCallId) {
+            mutationAttempts.set(toolCallId, isMutatingToolCall(toolId, MUTATION_TOOLS, inputs, projectRoot));
+          }
           console.log(`\n${c.blue}○${c.reset} Tool call: ${c.bold}${toolId}${c.reset}`);
         } else if (event.subtype === "agent_tool_result") {
-          const success = (event.data as { success?: boolean }).success;
+          const success = (event.data as { success?: boolean }).success ?? true;
+          const toolId = (event.data as { toolId?: string }).toolId ?? "";
+          const message = (event.data as { message?: string }).message ?? "";
+          const toolCallId = (event as { toolCallId?: string }).toolCallId ?? "";
+          evidenceTracker.recordToolResult(toolId, success, message);
+          if (success && toolCallId && mutationAttempts.get(toolCallId)) {
+            hasSuccessfulMutation = true;
+          }
           const icon = success ? `${c.green}✓${c.reset}` : `${c.red}✗${c.reset}`;
           console.log(`${icon} Tool result`);
         }
       },
     });
 
-    console.log(`\n\n${c.green}■${c.reset} Agent completed (${result.rounds} rounds, ${result.toolCalls.length} tool calls, ${result.durationMs}ms)`);
+    // Honest completion reporting: "Agent completed" in green must
+    // never print for a termination other than the runtime-proven
+    // "complete" — that visual is exactly what made a false success
+    // (acceptance run "bqsci80gf") look identical to a real one.
+    const succeeded = result.termination === "complete";
+    console.log(
+      `\n\n${succeeded ? c.green : c.red}${succeeded ? "■" : "✗"}${c.reset} ` +
+      `Agent ${succeeded ? "completed" : "did NOT complete"} ` +
+      `(${result.rounds} rounds, ${result.toolCalls.length} tool calls, ${result.durationMs}ms)`,
+    );
     if (model.activeModel) {
       console.log(`${c.dim}Served by: ${providerLabel(model.providerId)} | Model: ${model.activeModel}${c.reset}`);
     }
 
     if (result.termination === "max_rounds") {
       warn("Stopped at max rounds — agent may not have finished.");
+    } else if (result.termination === "verification_failed") {
+      warn("Verification never passed before the round limit — the task is NOT complete.");
+      if (result.verification?.message) {
+        console.log(`${c.dim}${result.verification.message}${c.reset}`);
+      }
+    } else if (result.termination === "error") {
+      warn("The agent stopped with an error before completing the task.");
     }
 
-    return result.termination === "complete" ? 0 : 1;
+    return succeeded ? 0 : 1;
   } catch (err) {
     fail(`Agent error: ${err instanceof Error ? err.message : String(err)}`);
     return 1;

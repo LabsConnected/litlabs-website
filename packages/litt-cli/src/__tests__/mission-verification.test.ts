@@ -16,10 +16,12 @@ import {
 import type { VerificationGateLike, VerificationResult } from "@litt/agent-core";
 import {
   MissionVerificationGate,
+  TaskAwareVerificationGate,
   createMissionEvidenceTracker,
   isShipCommitAllowed,
   markInspectionStepsComplete,
   requiresProjectHealth,
+  requiresMutationEvidence,
   isHealthCheckTool,
   isMutatingToolCall,
 } from "../lib/mission-verification.js";
@@ -341,6 +343,153 @@ describe("MissionVerificationGate", () => {
   });
 });
 
+describe("TaskAwareVerificationGate", () => {
+  // Reproduces acceptance run "bqsci80gf": the request said "make the
+  // fix ... show me the final git diff", the mission collected some
+  // read-only evidence, every mutating attempt was denied, and the
+  // model gave up with prose. hasSuccessfulMutation() stays truthfully
+  // false (no mutation ever SUCCEEDED) — this is the ONE guard
+  // MissionVerificationGate's evidence-only branch cannot express on
+  // its own, and it must not be confused with isReadOnly(), which
+  // already flips false on a merely ATTEMPTED (denied) mutation — see
+  // the class doc for why that distinction is exactly the bug.
+
+  it("prose-only completion for a requested code fix is rejected, even with real prior evidence", async () => {
+    const inner = makeFullGate({ proven: true, message: "inner would have proven it" });
+    const gate = new TaskAwareVerificationGate({
+      inner,
+      hasSuccessfulMutation: () => false, // no project.edit_file/write_file ever succeeded
+      mutationRequired: () => true, // requiresMutationEvidence("...make the fix...") === true
+      evidenceSummary: () => "project.log: ok",
+    });
+
+    const result = await gate.verify();
+
+    expect(result.proven).toBe(false);
+    expect(result.status).toBe("failed");
+    expect(result.message).toContain("required an actual code change");
+    expect(result.message).toContain("no file was ever modified");
+    // The inner (canonical) gate must never even be consulted — a
+    // mutation-required task with no successful mutation cannot be
+    // proven by ANY amount of evidence, so there is nothing for it to
+    // legitimately say.
+    expect(inner.called()).toBe(0);
+  });
+
+  it("denied tool calls followed by 'run this manually' are rejected, not accepted", async () => {
+    // Simulates the exact tracker state from run bqsci80gf: real read
+    // evidence (project.log succeeded) PLUS a real denied mutation
+    // (chmod via project.run, denied by the approval gate — an ATTEMPT,
+    // never a success).
+    const tracker = createMissionEvidenceTracker(
+      new Set(["project.edit_file", "project.write_file", "project.run"]),
+    );
+    tracker.recordToolCall("project.log");
+    tracker.recordToolResult("project.log", true, "5 commits");
+    tracker.recordToolCall("project.run", { command: "chmod", args: ["+x", "-r", "-w", "/x"] });
+    tracker.recordToolResult("project.run", false, "Approval denied or not available");
+
+    // Note: tracker.isReadOnly() is ALREADY false here (chmod was
+    // attempted), which is exactly why MissionVerificationGate alone
+    // would delegate to the full gate — and a full gate run against an
+    // UNCHANGED repo can trivially "pass" typecheck/test/build. The
+    // mutation never actually succeeded, so hasSuccessfulMutation is
+    // computed independently (as ask.ts does, via toolCallId
+    // correlation), not derived from isReadOnly().
+    const inner = new MissionVerificationGate({
+      fullGate: makeFullGate({ proven: true }), // a real full gate would "pass" on an unchanged repo
+      isReadOnly: tracker.isReadOnly,
+      hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasFailedEvidence: tracker.hasFailedEvidence,
+      evidenceSummary: tracker.summary,
+      failedSummary: tracker.failedSummary,
+    });
+
+    const gate = new TaskAwareVerificationGate({
+      inner,
+      hasSuccessfulMutation: () => false, // chmod was denied, not successful
+      mutationRequired: () => true,
+      evidenceSummary: tracker.summary,
+    });
+
+    const result = await gate.verify();
+
+    // The guard must reject BEFORE ever reaching the inner gate — proof
+    // that this scenario does not slip through to the "mutating mission
+    // → full gate proves a no-op" trap.
+    expect(result.proven).toBe(false);
+  });
+
+  it("inspection + a real edit + successful verification is accepted", async () => {
+    const tracker = createMissionEvidenceTracker(
+      new Set(["project.edit_file", "project.write_file", "project.run"]),
+    );
+    tracker.recordToolCall("project.read_file", { path: "a.ts" });
+    tracker.recordToolResult("project.read_file", true, "read a.ts");
+    tracker.recordToolCall("project.edit_file", { path: "a.ts" });
+    tracker.recordToolResult("project.edit_file", true, "edited a.ts");
+    tracker.recordToolCall("project.typecheck");
+    tracker.recordToolResult("project.typecheck", true, "typecheck passed");
+
+    // A real edit flips isReadOnly() to false, so the inner gate
+    // delegates to the full VerificationGate (typecheck/test/build) —
+    // simulated here as a gate that proves once called.
+    const fullGate = makeFullGate({ proven: true, message: "typecheck/test passed" });
+    const inner = new MissionVerificationGate({
+      fullGate,
+      isReadOnly: tracker.isReadOnly,
+      hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasFailedEvidence: tracker.hasFailedEvidence,
+      evidenceSummary: tracker.summary,
+      failedSummary: tracker.failedSummary,
+    });
+    const gate = new TaskAwareVerificationGate({
+      inner,
+      hasSuccessfulMutation: () => true, // project.edit_file succeeded
+      mutationRequired: () => true,
+      evidenceSummary: tracker.summary,
+    });
+
+    const result = await gate.verify();
+
+    expect(tracker.isReadOnly()).toBe(false);
+    expect(fullGate.called()).toBe(1);
+    expect(result.proven).toBe(true);
+  });
+
+  it("a read-only/explanation task completes without ever requiring a mutation", async () => {
+    // requiresMutationEvidence("explain this file") === false, so the
+    // guard never fires and the inner evidence-only gate proves it
+    // exactly as MissionVerificationGate already does today.
+    const tracker = createMissionEvidenceTracker(
+      new Set(["project.edit_file", "project.write_file", "project.run"]),
+    );
+    tracker.recordToolCall("project.read_file", { path: "a.ts" });
+    tracker.recordToolResult("project.read_file", true, "read a.ts");
+
+    const fullGate = makeFullGate();
+    const inner = new MissionVerificationGate({
+      fullGate,
+      isReadOnly: tracker.isReadOnly,
+      hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasFailedEvidence: tracker.hasFailedEvidence,
+      evidenceSummary: tracker.summary,
+      failedSummary: tracker.failedSummary,
+    });
+    const gate = new TaskAwareVerificationGate({
+      inner,
+      hasSuccessfulMutation: () => false, // never attempted, never needed
+      mutationRequired: () => false, // "explain this file"
+      evidenceSummary: tracker.summary,
+    });
+
+    const result = await gate.verify();
+
+    expect(result.proven).toBe(true);
+    expect(fullGate.called()).toBe(0); // never escalated to the expensive gate
+  });
+});
+
 describe("isShipCommitAllowed (the /ship commit gate)", () => {
   const proven: VerificationResult = {
     proven: true,
@@ -468,6 +617,47 @@ describe("requiresProjectHealth", () => {
     expect(requiresProjectHealth("")).toBe(false);
     expect(requiresProjectHealth(null)).toBe(false);
     expect(requiresProjectHealth(undefined)).toBe(false);
+  });
+});
+
+describe("requiresMutationEvidence", () => {
+  it("a code-fix request DOES require mutation evidence", () => {
+    for (const request of [
+      "Inspect this repository. Find one small, real, low-risk bug or improvement " +
+        "in the LiTT CLI. Explain what you found, make the fix, add or update the " +
+        "relevant test, run only the targeted validation needed, and show me the " +
+        "final git diff. Do not commit or push anything.",
+      "fix the broken build",
+      "please repair this bug",
+      "resolve the issue in login.ts",
+      "implement a login page",
+      "refactor the retry logic",
+      "edit the file to handle nulls",
+      "make the change and show me the diff",
+      "add a test for the new branch",
+      "show me the final git diff",
+    ]) {
+      expect(requiresMutationEvidence(request)).toBe(true);
+    }
+  });
+
+  it("a read-only/explanation request does NOT require mutation evidence", () => {
+    for (const request of [
+      "explain this file",
+      "what does this function do?",
+      "inspect the repository and report the current state",
+      "what branch am I on?",
+      "tell me the project root, branch, HEAD and whether the tree is clean",
+      "summarize the recent commits",
+    ]) {
+      expect(requiresMutationEvidence(request)).toBe(false);
+    }
+  });
+
+  it("handles empty/missing request text", () => {
+    expect(requiresMutationEvidence("")).toBe(false);
+    expect(requiresMutationEvidence(null)).toBe(false);
+    expect(requiresMutationEvidence(undefined)).toBe(false);
   });
 });
 

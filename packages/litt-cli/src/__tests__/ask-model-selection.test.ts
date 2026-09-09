@@ -20,7 +20,13 @@ vi.mock("@litt/agent-core", async (original) => ({
 }));
 
 let fetchMock: ReturnType<typeof vi.fn>;
-const session = { installSigintHandler: () => {} } as unknown as RuntimeSession;
+const session = {
+  installSigintHandler: () => {},
+  // ask.ts wires a VerificationGate via sess.getVerificationGate(); this
+  // suite mocks runAgentLoop entirely (below), so the gate is
+  // constructed but never actually invoked — a minimal stub is enough.
+  getVerificationGate: () => ({ verify: async () => ({ proven: true, status: "proven", checks: [], totalDurationMs: 0, message: "stub", runId: "stub", ranChecks: [], skippedChecks: [] }) }),
+} as unknown as RuntimeSession;
 
 beforeEach(() => {
   for (const provider of PROVIDERS) {

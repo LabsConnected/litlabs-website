@@ -26,6 +26,7 @@ import {
   gitBranch,
   listFiles,
   readFile,
+  editFile,
   searchFiles,
   inspectPackageJson,
   runTypecheck,
@@ -106,6 +107,26 @@ const READ_FILE_DEF: ToolDefinition = {
   readOnly: true,
 };
 
+const EDIT_FILE_DEF: ToolDefinition = {
+  id: "project.edit_file",
+  name: "edit_file",
+  description:
+    "Edit a file by exact-match find/replace. \"search\" must match the file's " +
+    "CURRENT content exactly once — the edit is refused (no file is touched) if " +
+    "\"search\" is not found, or if it matches more than once. Read the file first " +
+    "with project.read_file and copy the exact existing text into \"search\".",
+  inputSchema: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: "File path relative to project root" },
+      search: { type: "string", description: "Exact existing text to find (must match exactly once)" },
+      replace: { type: "string", description: "Text to replace it with" },
+    },
+    required: ["path", "search", "replace"],
+  },
+  readOnly: false,
+};
+
 const SEARCH_DEF: ToolDefinition = {
   id: "project.search",
   name: "search",
@@ -173,6 +194,20 @@ const READ_ONLY_META: ToolMetadata = {
   projectScoped: false,
   mutating: false,
   readOnly: true,
+};
+
+/**
+ * Mutating file-edit tools route through ExecutionGateway.evaluatePolicy()
+ * exactly like every other mutating tool: metadata.mutating === true means
+ * PLAN mode denies it outright, ACT mode requires human approval, and AUTO
+ * mode requires a verified capability grant. Nothing gateway-side needed
+ * to change for project.edit_file — the existing generic policy already
+ * covers any non-shell tool with mutating: true.
+ */
+const MUTATING_FILE_META: ToolMetadata = {
+  projectScoped: false,
+  mutating: true,
+  readOnly: false,
 };
 
 const statusHandler: ToolHandler = async (ctx) => {
@@ -243,6 +278,21 @@ const readFileHandler: ToolHandler = async (ctx, args) => {
   return readFile(ctx.shell, filePath);
 };
 
+const editFileHandler: ToolHandler = async (ctx, args) => {
+  const filePath = typeof args.path === "string" ? args.path : "";
+  if (!filePath) {
+    return { status: "failed", success: false, message: "Missing required arg: path", data: {} };
+  }
+  const search = typeof args.search === "string" ? args.search : "";
+  if (!search) {
+    return { status: "failed", success: false, message: "Missing required arg: search", data: {} };
+  }
+  if (typeof args.replace !== "string") {
+    return { status: "failed", success: false, message: "Missing required arg: replace", data: {} };
+  }
+  return editFile(ctx.shell, filePath, search, args.replace);
+};
+
 const searchHandler: ToolHandler = async (ctx, args) => {
   const query = typeof args.query === "string" ? args.query : "";
   if (!query) {
@@ -285,6 +335,7 @@ const ENTRIES: Record<string, ToolEntry> = {
   "project.branch": { definition: BRANCH_DEF, handler: branchHandler, metadata: READ_ONLY_META },
   "project.list_files": { definition: LIST_FILES_DEF, handler: listFilesHandler, metadata: READ_ONLY_META },
   "project.read_file": { definition: READ_FILE_DEF, handler: readFileHandler, metadata: READ_ONLY_META },
+  "project.edit_file": { definition: EDIT_FILE_DEF, handler: editFileHandler, metadata: MUTATING_FILE_META },
   "project.search": { definition: SEARCH_DEF, handler: searchHandler, metadata: READ_ONLY_META },
   "project.inspect_package": { definition: INSPECT_PKG_DEF, handler: inspectPkgHandler, metadata: READ_ONLY_META },
   "project.check": { definition: CHECK_DEF, handler: checkHandler, metadata: READ_ONLY_META },

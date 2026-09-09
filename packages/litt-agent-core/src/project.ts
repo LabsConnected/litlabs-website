@@ -508,6 +508,156 @@ export async function readFile(
 }
 
 /**
+ * Edit a file via exact-match find/replace (with path safety).
+ *
+ * Deterministic, never a shell mutation: the caller supplies the EXACT
+ * text expected to already be in the file (`search`) and what it should
+ * become (`replace`). The edit is refused — the file is never touched —
+ * unless `search` occurs in the file's current content EXACTLY ONCE:
+ *   - zero occurrences means the caller's belief about the file's
+ *     content is stale or wrong; silently no-op-ing or guessing would
+ *     hide that.
+ *   - more than one occurrence means the location is ambiguous; picking
+ *     one silently could edit the wrong instance.
+ * Both are reported as clear, actionable failures instead of a mutation.
+ */
+export async function editFile(
+  shell: ShellExecutor,
+  filePath: string,
+  search: string,
+  replace: string,
+  maxBytes = 1_000_000,
+): Promise<ToolResult> {
+  // Path safety — same boundary as readFile: blocks absolute paths,
+  // ".." traversal, null bytes, and sensitive file patterns.
+  if (!isSafePath(filePath)) {
+    return {
+      status: "failed",
+      success: false,
+      message: `Blocked: ${filePath} matches a sensitive file pattern or is outside the workspace`,
+      data: {},
+    };
+  }
+
+  const workspaceRoot = path.resolve(shell.cwd);
+  const root = path.resolve(workspaceRoot, filePath);
+
+  // Defense in depth: confirm the resolved path still lands inside the
+  // workspace root, independent of the string-level checks above.
+  const relativeToRoot = path.relative(workspaceRoot, root);
+  if (relativeToRoot.startsWith("..") || path.isAbsolute(relativeToRoot)) {
+    return {
+      status: "failed",
+      success: false,
+      message: `Blocked: ${filePath} resolves outside the project workspace`,
+      data: {},
+    };
+  }
+
+  if (!search) {
+    return {
+      status: "failed",
+      success: false,
+      message: "Missing required arg: search (the exact existing text to replace)",
+      data: {},
+    };
+  }
+
+  if (!fs.existsSync(root)) {
+    return {
+      status: "failed",
+      success: false,
+      message: `File not found: ${filePath}`,
+      data: {},
+    };
+  }
+
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(root);
+  } catch (err) {
+    return {
+      status: "failed",
+      success: false,
+      message: `Failed to stat: ${err instanceof Error ? err.message : String(err)}`,
+      data: {},
+    };
+  }
+  if (!stat.isFile()) {
+    return { status: "failed", success: false, message: `Not a file: ${filePath}`, data: {} };
+  }
+  if (stat.size > maxBytes) {
+    return {
+      status: "failed",
+      success: false,
+      message: `File too large to edit: ${stat.size} bytes (max ${maxBytes})`,
+      data: { size: stat.size },
+    };
+  }
+
+  let before: string;
+  try {
+    before = fs.readFileSync(root, "utf8");
+  } catch (err) {
+    return {
+      status: "failed",
+      success: false,
+      message: `Failed to read: ${err instanceof Error ? err.message : String(err)}`,
+      data: {},
+    };
+  }
+
+  const occurrences = before.split(search).length - 1;
+  if (occurrences === 0) {
+    return {
+      status: "failed",
+      success: false,
+      message:
+        `Edit refused: the exact "search" text was not found in ${filePath}. ` +
+        `No mutation was made. Re-read the file with project.read_file and copy the exact existing text.`,
+      data: { path: filePath, occurrences: 0 },
+    };
+  }
+  if (occurrences > 1) {
+    return {
+      status: "failed",
+      success: false,
+      message:
+        `Edit refused: "search" text is ambiguous — it occurs ${occurrences} times in ${filePath}. ` +
+        `No mutation was made. Include more surrounding context so the match is unique.`,
+      data: { path: filePath, occurrences },
+    };
+  }
+
+  const after = before.replace(search, replace);
+
+  try {
+    fs.writeFileSync(root, after, "utf8");
+  } catch (err) {
+    return {
+      status: "failed",
+      success: false,
+      message: `Failed to write: ${err instanceof Error ? err.message : String(err)}`,
+      data: {},
+    };
+  }
+
+  return {
+    status: "success",
+    success: true,
+    message: `Edited ${filePath}: replaced 1 occurrence (${before.length} -> ${after.length} chars)`,
+    data: {
+      path: filePath,
+      occurrences: 1,
+      search,
+      replace,
+      sizeBefore: before.length,
+      sizeAfter: after.length,
+    },
+  };
+}
+
+/**
  * Search file contents using git grep.
  *
  * Exit-code semantics:

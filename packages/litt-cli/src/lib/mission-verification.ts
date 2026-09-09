@@ -84,6 +84,46 @@ export function requiresProjectHealth(requestText: string | null | undefined): b
 }
 
 /**
+ * Phrases that mean the user's request requires an actual code change —
+ * not just an answer. Mirrors HEALTH_REQUEST_PATTERNS: deliberately
+ * narrow, matched against the ORIGINAL request text (never the model's
+ * own turns, which cannot be trusted to self-report their own scope).
+ *
+ * This is the other half of the "task-aware, not every-request-must-
+ * edit-code" rule: HEALTH_REQUEST_PATTERNS stops a read-only question
+ * from being forced through an expensive full-project gate; this stops
+ * a request that explicitly asked for a code change from being accepted
+ * as COMPLETE off evidence alone when nothing was ever mutated.
+ */
+const MUTATION_REQUEST_PATTERNS: readonly RegExp[] = [
+  /\bfix\b/i,
+  /\brepair\b/i,
+  /\bresolve\s+(the|this|a|an)?\s*(bug|issue|error)\b/i,
+  /\bpatch\b/i,
+  /\bimplement\b/i,
+  /\brefactor\b/i,
+  /\b(edit|modify|change|update)\s+(the\s+|a\s+)?(code|file|files|source)\b/i,
+  /\bmake\s+(the\s+|a\s+)?(change|edit|modification|fix)\b/i,
+  /\b(add|update)\s+(a\s+|the\s+)?(relevant\s+)?tests?\b/i,
+  /\b(show|give)\s+(me\s+)?the\s+(final\s+)?(git\s+)?diff\b/i,
+];
+
+/**
+ * Does the user's request actually require a code change (an edit), as
+ * opposed to just an answer?
+ *
+ * When true and the mission never mutated the project, evidence alone
+ * (however much was successfully collected) must NOT be accepted as
+ * proof of completion — see TaskAwareVerificationGate. When false, a
+ * legitimate read-only request (e.g. "explain this file") is unaffected
+ * and is still provable by evidence alone.
+ */
+export function requiresMutationEvidence(requestText: string | null | undefined): boolean {
+  if (!requestText) return false;
+  return MUTATION_REQUEST_PATTERNS.some((re) => re.test(requestText));
+}
+
+/**
  * Is this tool call a project-health check rather than an objective?
  *
  * `project.run` is the generic escape hatch, so it is judged by the
@@ -393,6 +433,106 @@ export class MissionVerificationGate implements VerificationGateLike {
     } catch {
       // emitter must never crash the gate
     }
+  }
+}
+
+/**
+ * TaskAwareVerificationGate — the missing half of "COMPLETE = the
+ * runtime proved it" for a request that explicitly asked for a code
+ * change.
+ *
+ * Root cause this closes (acceptance run "bqsci80gf"): a request that
+ * said "make the fix... show me the final git diff" ran for a few
+ * rounds, collected some read-only evidence, had every mutating
+ * attempt denied by the approval gate, then gave up with prose telling
+ * the USER to run the fix manually — and reported exit code 0.
+ *
+ * This guard deliberately does NOT reuse MissionEvidenceTracker's
+ * isReadOnly() for its own decision: isReadOnly() flips to false the
+ * moment a mutating tool is ATTEMPTED — a denied `chmod` via
+ * `project.run` already counts, even though nothing was actually
+ * mutated. Reusing it here would let exactly the reproduced bug through
+ * again (an attempted-but-denied mutation would make isReadOnly() false,
+ * skip this guard, and fall through to MissionVerificationGate's
+ * "mutating mission → full gate" branch — which runs a real
+ * typecheck/test/build against an UNCHANGED repo and can trivially
+ * "prove" a no-op). The signal this guard needs is narrower and
+ * stronger: was there a mutation that actually SUCCEEDED.
+ *
+ * This wraps the canonical MissionVerificationGate — reused, not
+ * replaced — and adds exactly one additional guard in front of it:
+ * when the ORIGINAL request's own wording required a code change
+ * (requiresMutationEvidence) and no mutation ever SUCCEEDED, completion
+ * is refused outright, regardless of how much read-only evidence exists
+ * or how many mutations were merely attempted/denied/failed. A prose
+ * "done", an apology, a refusal, or an instruction telling the user to
+ * do the work themselves can never satisfy this — only a real,
+ * successful mutation can.
+ *
+ * Legitimate non-mutating requests are unaffected: requiresMutationEvidence
+ * is false for them, so this guard never fires and the inner gate's
+ * existing evidence-only proof applies exactly as before.
+ */
+export interface TaskAwareVerificationGateOptions {
+  /** The canonical gate this wraps — MissionVerificationGate in production. */
+  inner: VerificationGateLike;
+  /**
+   * True when at least one mutating tool call actually SUCCEEDED — not
+   * merely attempted. A denied (approval-blocked) or failed mutation
+   * attempt must NOT count; see the class doc for why.
+   */
+  hasSuccessfulMutation: () => boolean;
+  /** True when the ORIGINAL request's wording required a code change. */
+  mutationRequired: () => boolean;
+  /** Human summary of whatever evidence WAS collected, for an honest message. */
+  evidenceSummary: () => string;
+}
+
+export class TaskAwareVerificationGate implements VerificationGateLike {
+  private readonly _inner: VerificationGateLike;
+  private readonly _hasSuccessfulMutation: () => boolean;
+  private readonly _mutationRequired: () => boolean;
+  private readonly _evidenceSummary: () => string;
+
+  constructor(options: TaskAwareVerificationGateOptions) {
+    this._inner = options.inner;
+    this._hasSuccessfulMutation = options.hasSuccessfulMutation;
+    this._mutationRequired = options.mutationRequired;
+    this._evidenceSummary = options.evidenceSummary;
+  }
+
+  async verify(): Promise<VerificationResult> {
+    if (this._mutationRequired() && !this._hasSuccessfulMutation()) {
+      const runId = `verify_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const message =
+        "NOT VERIFIED — this request required an actual code change (a real edit), " +
+        "but no file was ever modified. A prose explanation, a denied or failed tool " +
+        "call, or an instruction telling the user to make the change themselves is " +
+        "not completed work. Collected evidence so far: " + this._evidenceSummary() + ". " +
+        "Use the project edit tool to make the change, then run the relevant " +
+        "test/typecheck, before saying you are done.";
+      const check: CheckResult = {
+        id: "evidence",
+        status: "failed",
+        success: false,
+        exitCode: 1,
+        message,
+        durationMs: 0,
+        runId,
+        toolCallId: "",
+      };
+      return {
+        proven: false,
+        status: "failed",
+        checks: [check],
+        totalDurationMs: 0,
+        message,
+        runId,
+        ranChecks: ["evidence"],
+        skippedChecks: [],
+      };
+    }
+    return this._inner.verify();
   }
 }
 
