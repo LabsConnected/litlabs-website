@@ -83,34 +83,30 @@ export function ApprovalUX({ prompt, onDecision, onCancelMission }: ApprovalUXPr
       flexDirection="column"
       borderStyle="round"
       borderColor={COLORS.gold}
-      paddingX={2}
-      paddingY={1}
+      paddingX={1}
+      paddingY={0}
     >
       <Box justifyContent="space-between">
-        <Text color={COLORS.gold} bold>⚠ APPROVAL REQUIRED</Text>
-        <Text color={COLORS.gold}>waiting {formatDuration(waitSeconds)}</Text>
-      </Box>
-      <Box marginTop={1}>
-        <Text dimColor>{`${prompt.toolId}  `}</Text>
-        <Text color={COLORS.textBright}>{`$ ${prompt.action}`}</Text>
+        <Text color={COLORS.gold} bold>⚠ APPROVAL</Text>
+        <Text color={COLORS.gold}>{formatDuration(waitSeconds)}</Text>
       </Box>
       <Box>
         <Text color={badgeCol} bold>[{badge}]</Text>
-        <Text dimColor> · scope: </Text>
-        <Text color={COLORS.secondary}>{prompt.scope}</Text>
+        <Text dimColor> </Text>
+        <Text color={COLORS.textBright}>{prompt.action}</Text>
         {queued > 0 && (
-          <Text color={COLORS.gold}>{` · ${queued} more queued`}</Text>
+          <Text color={COLORS.gold}>{` · ${queued} queued`}</Text>
         )}
       </Box>
-      <Box marginTop={1}>
+      <Box>
         <Text color={COLORS.success} bold>[a]</Text>
-        <Text> Approve once   </Text>
+        <Text> once  </Text>
         <Text color={COLORS.success} bold>[⇧a]</Text>
-        <Text> Approve similar   </Text>
+        <Text> similar  </Text>
         <Text color={COLORS.error} bold>[d]</Text>
-        <Text> Deny   </Text>
+        <Text> deny  </Text>
         <Text color={COLORS.gold} bold>[esc]</Text>
-        <Text> Cancel mission</Text>
+        <Text> cancel</Text>
       </Box>
     </Box>
   );

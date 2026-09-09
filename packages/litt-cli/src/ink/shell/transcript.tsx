@@ -312,7 +312,7 @@ export function estimateActivityFeedHeight(
   if (visible.length === 0) return 0;
   const compact = width < 60;
   const msgMax = Math.max(10, width - (compact ? 22 : 26));
-  const borderRows = compact ? 0 : 2;
+  const borderRows = 0; // border removed — compact chrome
   const headerRows = compact ? 0 : 1;
   let rows = borderRows + headerRows + visible.length;
   if (details) {

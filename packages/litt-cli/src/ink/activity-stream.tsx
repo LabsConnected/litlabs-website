@@ -44,13 +44,32 @@ export function isStreamEntry(entry: ActivityEntry): boolean {
   return entry.type === "tool.stdout" || entry.type === "tool.stderr" || entry.type === "agent.delta";
 }
 
-/** Collapse consecutive stream deltas and keep the newest `max` events. */
+/** Collapse consecutive stream deltas AND consecutive duplicate semantic
+ *  entries (same text + tag), then keep the newest `max` events.
+ *
+ *  This is the SECOND deduplication layer (the first is the store's
+ *  reconcileActivity by toolCallId/stepId). It catches duplicates the
+ *  reconciler misses — e.g. the same logical action replayed with a
+ *  different toolCallId on reconnect, or a mission step_started emitted
+ *  twice with the same text but different ids. Without this, the feed
+ *  shows "Inspecting / Inspecting" — the exact bug the user reported. */
 export function visibleEvents(entries: ActivityEntry[], max: number): ActivityEntry[] {
   const collapsed: ActivityEntry[] = [];
   // Look back far enough that collapsing doesn't drop real events.
   const raw = entries.slice(-Math.max(max * 3, max));
   for (const entry of raw) {
-    if (isStreamEntry(entry) && collapsed.length > 0 && isStreamEntry(collapsed[collapsed.length - 1])) {
+    const prev = collapsed.length > 0 ? collapsed[collapsed.length - 1] : null;
+    // Collapse consecutive stream deltas into the newest
+    if (isStreamEntry(entry) && prev && isStreamEntry(prev)) {
+      collapsed[collapsed.length - 1] = entry;
+      continue;
+    }
+    // Collapse consecutive duplicate semantic entries (same text + tag).
+    // This kills "Inspecting / Inspecting" without dropping distinct
+    // events that happen to share a tag (e.g. two different READ calls).
+    if (prev && !isStreamEntry(entry) && !isStreamEntry(prev)
+        && prev.text === entry.text
+        && (prev.tag ?? "") === (entry.tag ?? "")) {
       collapsed[collapsed.length - 1] = entry;
       continue;
     }
@@ -176,16 +195,16 @@ export function ActivityStream({
   const termWidth = widthProp ?? stdout?.columns ?? 80;
   const compact = compactProp ?? classifyWidth(termWidth) === "narrow";
 
-  // Account for border (2) + horizontal padding (2) when not compact.
-  const innerWidth = compact ? termWidth : Math.max(20, termWidth - 4);
+  // No border — just horizontal padding (2) when not compact.
+  const innerWidth = compact ? termWidth : Math.max(20, termWidth - 2);
   const prefixWidth = TIMESTAMP_WIDTH + GAP + TAG_WIDTH + 1 + 2 + 1; // time + gap + tag + space + indicator(2) + space
   const msgMax = Math.max(10, innerWidth - prefixWidth);
 
   const finalVisible = visibleEvents(entries, maxEntries);
 
   return (
-    <Box flexDirection="column" borderStyle={compact ? undefined : "single"} borderColor={COLORS.brand} paddingX={compact ? 0 : 1}>
-      {!compact && <Text bold color={COLORS.brand}>ACTIVITY</Text>}
+    <Box flexDirection="column" paddingX={compact ? 0 : 1}>
+      {!compact && <Text dimColor color={COLORS.secondary}>activity</Text>}
       {finalVisible.length === 0 ? (
         <Text dimColor> No activity yet — ask LiTT something.</Text>
       ) : (
