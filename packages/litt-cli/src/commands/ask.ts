@@ -25,7 +25,7 @@ import {
   type StreamChunk,
 } from "@litt/agent-core";
 import { createRuntimeSession } from "../lib/runtime-session.js";
-import { hasAnyProviderKey, resolveProviderAdapter, providerLabel } from "../lib/model-provider.js";
+import { hasAnyProviderKey, resolveProviderAdapter, providerLabel, resolveIdleStallMs } from "../lib/model-provider.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
 import { probeLocalLane } from "../lib/local-lane.js";
 import {
@@ -173,6 +173,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     const model = resolveProviderAdapter(routed, {
       tools: tools.list(),
       routingMode,
+      idleStallMs: resolveIdleStallMs(),
     });
 
     console.log(`${c.dim}Provider: ${providerLabel(model.providerId)} | Model: ${model.configuredModel}${c.reset}`);
@@ -187,7 +188,9 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       userId: "cli-user",
       mode: "act",
       maxRounds: 12,
-      totalTimeoutMs: 120000, // 2 min total — prevents infinite RUNNING hang
+      totalTimeoutMs: Number(process.env.LITT_ASK_TIMEOUT_MS) > 0
+        ? Number(process.env.LITT_ASK_TIMEOUT_MS)
+        : 120000, // 2 min default — override with LITT_ASK_TIMEOUT_MS for slow local models
       projectContext: {
         name: String(project.packageJson?.name ?? "unnamed"),
         root: project.rootDir,
@@ -244,6 +247,11 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     }
     if (result.termination === "failed") {
       warn("The requested task was not completed — a required mutation failed or was not performed.");
+    }
+    if (result.termination === "error" && result.content) {
+      // Surface the actual error/reason so the user can see why the agent
+      // stopped, instead of just "Agent stopped (error)" with no context.
+      console.log(`${c.dim}Reason: ${result.content}${c.reset}`);
     }
 
     return result.termination === "complete" ? 0 : 1;

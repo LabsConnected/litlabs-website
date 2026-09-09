@@ -240,6 +240,18 @@ export interface OpenRouterModelOptions {
 /** Default stall threshold — 90s without a single stream byte. */
 export const DEFAULT_IDLE_STALL_MS = 90_000;
 
+/**
+ * Resolve the idle-stall watchdog timeout.
+ *
+ * Local 3B models with large tool schemas can take >90s to produce the
+ * first token (TTFT). LITT_IDLE_STALL_MS lets the operator raise the
+ * threshold for slow local daemons without changing code.
+ */
+export function resolveIdleStallMs(): number {
+  const env = Number(process.env.LITT_IDLE_STALL_MS);
+  return env > 0 ? env : DEFAULT_IDLE_STALL_MS;
+}
+
 // ─── Max tokens policy ──────────────────────────────────────────────
 //
 // Configurable max response tokens. Previously hardcoded to 4096, which

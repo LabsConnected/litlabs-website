@@ -177,6 +177,12 @@ export interface AgentLoopOptions {
    * idle stall is handled by the provider adapter).
    */
   totalTimeoutMs?: number;
+  /**
+   * Platform override for the system prompt. When set, the model is told
+   * which platform it's on so it uses platform-appropriate commands (e.g.
+   * no `sed` on Windows). Default: auto-detected from process.platform.
+   */
+  platform?: string;
 }
 
 /**
@@ -716,7 +722,8 @@ export async function runAgentLoop(
 
   // Build the system prompt with tool definitions
   const toolDefs = options.tools.list();
-  const systemPrompt = options.systemPrompt ?? buildDefaultSystemPrompt(toolDefs, options.projectContext ?? null);
+  const platform = options.platform ?? (process.platform === "win32" ? "windows" : process.platform);
+  const systemPrompt = options.systemPrompt ?? buildDefaultSystemPrompt(toolDefs, options.projectContext ?? null, platform);
 
   // Build the conversation: system prompt, prior turns (context), then
   // the current prompt. See AgentLoopOptions.priorMessages.
@@ -1651,6 +1658,26 @@ export async function runAgentLoop(
       recordToolOutcome(call, entry!, execResults[i]);
     }
 
+    // ─── Mid-round timeout check ────────────────────────────────────
+    // Check the total timeout AFTER tool execution too, so a long-running
+    // tool call (e.g. project.check taking 20s) doesn't let the loop run
+    // far past the deadline. The round-boundary check at the top of the
+    // loop only fires at the START of the next round — if the current
+    // round's tool call pushed us past the deadline, we catch it here
+    // instead of waiting for another full round of model inference.
+    if (options.totalTimeoutMs && options.totalTimeoutMs > 0 && Date.now() - startTime > options.totalTimeoutMs) {
+      return {
+        content: `Agent timed out after ${options.totalTimeoutMs}ms total (mid-round). ` +
+          `The task was NOT completed. No success is being claimed.`,
+        toolCalls,
+        rounds,
+        durationMs: Date.now() - startTime,
+        usage: { total_tokens: totalTokens },
+        termination: "error",
+        escalations: escalationEvents.length ? escalationEvents : undefined,
+      };
+    }
+
     // Append the assistant's tool call(s) and ALL tool results to the
     // conversation. For parallel execution, all results are combined
     // into a single user message so the model sees all evidence at once.
@@ -1730,7 +1757,7 @@ export async function runAgentLoop(
  * Build the default system prompt that includes tool definitions
  * and optional project identity (so the model doesn't guess).
  */
-export function buildDefaultSystemPrompt(tools: ToolDefinition[], project?: ProjectContext | null): string {
+export function buildDefaultSystemPrompt(tools: ToolDefinition[], project?: ProjectContext | null, platform?: string): string {
   const toolList = tools.map((t) => {
     const params = Object.entries(t.inputSchema.properties ?? {})
       .map(([key, schema]) => {
@@ -1760,6 +1787,21 @@ CRITICAL OPERATOR RULES:
 - Never ask the user to run a command that an available project tool can run for you.
 - Do not claim project state, Git state, test state, build state, or file contents without tool evidence.
 - If a tool fails, report the actual failure instead of pretending the inspection succeeded.
+
+HOW TO MAKE EDITS (CRITICAL):
+- To edit a file, use project.run with a command that modifies the file.
+${platform === "windows" ? `- You are on WINDOWS. Do NOT use sed, grep, or other Unix-only commands. Use node -e, powershell -Command, or cmd /c for file edits.
+  Example: project.run with command "node" and args ["-e", "const fs=require('fs');const f='path/to/file';const c=fs.readFileSync(f,'utf8');fs.writeFileSync(f,'// comment\\n'+c)"]` : `- You are on ${platform ?? "linux"}. Use sed, node -e, or other available commands for file edits.`}
+- NEVER describe an edit in prose without actually running the command. A diff shown in prose is NOT a real edit.
+- After making an edit, use project.diff to show the REAL git diff of the change.
+- After making an edit, use project.check or project.build to verify the change did not break anything.
+- If you cannot make the edit (tool fails, command not available), state plainly that the edit failed. Do NOT claim success.
+
+HOW TO INSPECT:
+- To read a file, use project.read_file with the path.
+- To list files, use project.list_files with the path.
+- To check project status, use project.status.
+- To search code, use project.search with a query.
 ${projectSection}
 
 Available tools:
@@ -1770,6 +1812,9 @@ To call a tool, output a tool call block in this exact format:
 \`\`\`tool_call
 { "tool": "<tool_id>", "inputs": { "<param>": "<value>" } }
 \`\`\`
+
+You can also use the OpenAI/Anthropic native format:
+{ "name": "<tool_id>", "arguments": { "<param>": "<value>" } }
 
 After receiving the tool result, you can either call another tool or
 provide a final text answer. Be concise and actionable. If a tool fails,
