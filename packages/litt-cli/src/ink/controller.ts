@@ -3337,7 +3337,16 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
                   status: "failed",
                   checks: [],
                   totalDurationMs: 0,
-                  message: `Repository inspection did not complete (${result.termination}) — no successful tool evidence was collected.`,
+                  // evidenceTracker.hasSuccessfulEvidence() reflects tool
+                  // calls that actually ran — a mission can collect real
+                  // evidence (e.g. project.status) and still terminate
+                  // before the gate ran (max_rounds, a malformed final
+                  // attempt). Claiming "no successful tool evidence was
+                  // collected" in that case is false and discards work
+                  // the user did receive; say so accurately instead.
+                  message: evidenceTracker.hasSuccessfulEvidence()
+                    ? `Repository inspection did not complete (${result.termination}) — some tool evidence was collected, but the mission ended before it could be verified.`
+                    : `Repository inspection did not complete (${result.termination}) — no successful tool evidence was collected.`,
                   runId: "verify_not_run",
                   ranChecks: [],
                   skippedChecks: [],

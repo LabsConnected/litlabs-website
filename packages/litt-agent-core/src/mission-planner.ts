@@ -279,6 +279,34 @@ export function classifyGoalDomain(goal: string): FallbackDomain {
   ];
   if (systemKeywords.some((k) => g.includes(k))) return "system";
 
+  // ─── Strong, unambiguous repository-task signals ──────────────────
+  // Checked BEFORE the generic informational verbs below. Real repo-task
+  // goals routinely contain reporting verbs like "explain" alongside
+  // their real subject ("Explain what you found, make the fix, add or
+  // update the relevant test, ... show me the final git diff") — that
+  // verb describes HOW to report the result, not a pure research
+  // intent. Checking infoKeywords first misclassified exactly that goal
+  // as "info" (matched on "explain" before anything else was
+  // considered), which routed a real repository-edit mission into the
+  // read-only research fallback plan (whose final step is literally
+  // "Verify the summary") instead of the repo plan — the mission then
+  // had no check/repair/revalidate steps and could never reach an
+  // actual edit/test/diff.
+  //
+  // This list is deliberately SHORT and unambiguous — only phrases that
+  // are practically never used in a plain definitional question. It
+  // must NOT include generic words like "sql", "api", "server", "test",
+  // or "code": those also appear in ordinary informational questions
+  // ("what is SQL", "explain how an API works") which must stay "info".
+  // The full repoKeywords list below still classifies goals with no
+  // info verb at all as "repo" — this block only breaks the tie when
+  // an info verb AND a real repo subject are both present.
+  const strongRepoSignals = [
+    "repository", "codebase", "monorepo", "package.json", "pull request",
+    "git diff", "git status", "git log", "the cli", "litt cli",
+  ];
+  if (strongRepoSignals.some((k) => g.includes(k))) return "repo";
+
   const infoKeywords = [
     "explain", "what is", "what are", "what does", "what happened",
     "how does", "how do", "how to", "tell me", "summarize", "summary",

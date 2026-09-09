@@ -307,6 +307,24 @@ export interface ParsedToolCall {
 const TOOL_CALL_FENCE_RE = /```tool_call[ \t]*\r?\n?([\s\S]*?)```/i;
 /** A line that looks like a bare JSON tool object (single line). */
 const BARE_TOOL_JSON_RE = /^[ \t]*\{[^\n]*?"tool"[ \t]*:/m;
+
+/**
+ * True when the content shows clear signs of an ATTEMPTED tool call
+ * (a ```tool_call fence marker, opened or not, or a `"tool":` key) that
+ * nonetheless failed to parse via parseToolCalls(). Small/local models
+ * frequently produce near-miss JSON (a missing brace, a trailing comma,
+ * prose leaking inside the fence) — that is a malformed CALL, not a
+ * final answer, and must be handled differently: see the caller in
+ * runAgentLoop() for why conflating the two produces a failure loop.
+ */
+export function looksLikeToolCallAttempt(content: string): boolean {
+  return /```tool_call\b/i.test(content) || /"tool"\s*:\s*"/.test(content);
+}
+
+/** How many consecutive malformed tool-call attempts to tolerate before
+ *  failing closed with an honest terminal error instead of retrying
+ *  forever (or silently until the unrelated max_rounds limit). */
+const MAX_MALFORMED_TOOL_CALL_RETRIES = 3;
 function parseToolJson(raw: string): ParsedToolCall | null {
   try {
     const parsed = JSON.parse(raw.trim());
@@ -467,6 +485,107 @@ export function stripToolCallBlocks(content: string): string {
   return stripped.trim();
 }
 
+/**
+ * Truncate model content to end right after its FIRST tool-call span —
+ * a fenced ```tool_call block or a bare JSON tool object, whichever
+ * ends earliest in the text. Used only when the runtime is about to
+ * dispatch exactly that one call and inject the REAL result right
+ * after it.
+ *
+ * Root cause this guards against (observed live against litt-coder:3b):
+ * a weak model can narrate an entire FABRICATED multi-step transcript
+ * in a single turn — a real, valid tool_call, followed by its OWN
+ * invented "#### Tool Result" block, more invented reasoning, further
+ * invented tool calls, and even an invented final diff/summary —
+ * before the runtime ever gets a turn. The dispatch logic already
+ * correctly executes only the first REAL call and feeds back the REAL
+ * result, but if the model's fabricated continuation is persisted into
+ * conversation history verbatim, its own fake "evidence" sits in
+ * context and a weak model that already trusts its own narration over
+ * tool output keeps re-asserting the fabrication on later rounds
+ * instead of the real, contradicting result — never converging on an
+ * actual edit. Cutting the turn at its first real tool call preserves
+ * the model's genuine reasoning up to that point while discarding
+ * everything it invented about what happens after.
+ */
+export function truncateAfterFirstToolCall(content: string): string {
+  // Collect (start, end) for every valid call across all three parse
+  // strategies, then keep whichever STARTS earliest — not whichever
+  // ENDS earliest. A fenced ```tool_call block's inner JSON is also
+  // matched (correctly) by the bare-anywhere brace scanner below, and
+  // that inner span always ENDS before the fence's closing backticks
+  // do; picking by minimum end would truncate INSIDE the fence, leaving
+  // a dangling unclosed opener in the persisted content. Picking by
+  // minimum start always resolves to the fenced interpretation (its
+  // "```tool_call" opener starts before the "{" the brace scanner
+  // finds inside it), while still correctly ordering a genuine bare
+  // (unfenced) call that precedes a later fenced one.
+  const spans: { start: number; end: number }[] = [];
+
+  const fenceRe = /```tool_call[ \t]*\r?\n?([\s\S]*?)```/gi;
+  let fm: RegExpExecArray | null;
+  while ((fm = fenceRe.exec(content)) !== null) {
+    if (parseToolJson(fm[1])) spans.push({ start: fm.index, end: fm.index + fm[0].length });
+  }
+
+  const bareRe = /^[ \t]*\{[^\n]*?"tool"[ \t]*:/gm;
+  let bm: RegExpExecArray | null;
+  while ((bm = bareRe.exec(content)) !== null) {
+    const lineStart = content.lastIndexOf("\n", bm.index) + 1;
+    const lineEndIdx = content.indexOf("\n", lineStart);
+    const end = lineEndIdx === -1 ? content.length : lineEndIdx;
+    if (parseToolJson(content.slice(lineStart, end))) spans.push({ start: lineStart, end });
+  }
+
+  for (let idx = 0; idx < content.length; idx++) {
+    if (content[idx] !== "{") continue;
+    const span = balancedJsonSpan(content, idx);
+    if (!span || !/"tool"[ \t]*:/.test(span)) continue;
+    if (parseToolJson(span)) spans.push({ start: idx, end: idx + span.length });
+  }
+
+  if (spans.length === 0) return content;
+  spans.sort((a, b) => a.start - b.start);
+  return content.slice(0, spans[0].end);
+}
+
+/**
+ * Suggest the registered tool id closest to an unknown one the model
+ * tried to call — e.g. "project.edit" -> "project.edit_file".
+ *
+ * Root cause this exists for: a weak/local model can correctly infer
+ * WHAT it needs to do (edit a file) and still miss the exact registered
+ * id, especially when the real tool follows a "_file"/"_files" suffix
+ * convention the model doesn't reliably reproduce. The generic "Available
+ * tools: a, b, c, ..." message buries the one relevant answer in a list;
+ * this picks it out when there is exactly one unambiguous candidate.
+ *
+ * Deliberately conservative: returns a suggestion only when precisely
+ * ONE available id is a plausible match (a prefix relationship on the
+ * full id, or on the id's last dotted segment). Multiple candidates or
+ * none at all return null — the caller falls back to listing every
+ * available tool rather than guessing wrong.
+ */
+export function suggestToolName(
+  unknownId: string,
+  availableIds: readonly string[],
+): string | null {
+  const prefixMatches = availableIds.filter(
+    (id) => id !== unknownId && (id.startsWith(unknownId) || unknownId.startsWith(id)),
+  );
+  if (prefixMatches.length === 1) return prefixMatches[0];
+
+  const leafOf = (id: string): string => (id.includes(".") ? id.slice(id.lastIndexOf(".") + 1) : id);
+  const unknownLeaf = leafOf(unknownId);
+  const leafMatches = availableIds.filter((id) => {
+    const leaf = leafOf(id);
+    return leaf !== unknownLeaf && (leaf.startsWith(unknownLeaf) || unknownLeaf.startsWith(leaf));
+  });
+  if (leafMatches.length === 1) return leafMatches[0];
+
+  return null;
+}
+
 // ─── Mission Planning ──────────────────────────────────────────────
 
 // ─── Agent Loop ────────────────────────────────────────────────────
@@ -528,6 +647,9 @@ export async function runAgentLoop(
   const toolCalls: AgentToolCallRecord[] = [];
   let rounds = 0;
   let totalTokens = 0;
+  // Consecutive rounds where the model's output looked like a tool-call
+  // attempt but failed to parse. Reset whenever a real tool call parses.
+  let consecutiveMalformedToolCalls = 0;
   // Last verification result from the gate (if configured). Returned in
   // the result so callers can inspect why COMPLETE was not proven.
   let lastVerification: VerificationResult | undefined;
@@ -942,6 +1064,64 @@ export async function runAgentLoop(
     const toolCall = allToolCalls[0] ?? null;
 
     if (!toolCall) {
+      // ─── Malformed tool-call attempt (weak/local-model degradation) ──
+      // A model that TRIED to call a tool but emitted invalid JSON (a
+      // missing brace, a trailing comma, prose leaking into the fence —
+      // common with small local models such as litt-coder:3b) parses to
+      // the same `null` as a model that never attempted a tool call.
+      // Treating both cases identically was the root cause of the
+      // observed local-model failure loop: once one earlier round had
+      // produced real tool evidence, a later malformed attempt fell
+      // through to "the model claims it is done" below, which ran the
+      // full VerificationGate mid-task against an unfinished project —
+      // producing a failing repair prompt the model never asked for and
+      // could not act on. The model then garbled its next attempt too,
+      // repeating the cycle: real evidence, then verify → fail → retry,
+      // with the mission never reaching an actual edit/test/diff call.
+      //
+      // Detect the attempt — a ```tool_call fence marker or a `"tool":`
+      // key present in text that still failed to parse — and handle it
+      // as a malformed CALL, not a final answer: never run the gate,
+      // give the model a precise correction, and bound the retries so a
+      // model that cannot produce valid JSON fails with an honest
+      // terminal error instead of looping silently to max_rounds.
+      if (looksLikeToolCallAttempt(modelContent)) {
+        consecutiveMalformedToolCalls++;
+        if (missionId && escalation) {
+          escalation.recordFailure(missionId, "content", "malformed tool_call output (unparseable JSON)");
+        }
+
+        if (consecutiveMalformedToolCalls > MAX_MALFORMED_TOOL_CALL_RETRIES || round >= maxRounds - 1) {
+          const evidenceSummary = toolCalls.length > 0
+            ? `\n\nValid work completed before this failure:\n${toolCalls.map((tc) => `- ${tc.toolId}: ${tc.result.success ? "succeeded" : "failed"} — ${tc.result.message}`).join("\n")}`
+            : "";
+          termination = "error";
+          return {
+            content:
+              `LiTT could not parse the model's tool call after ${consecutiveMalformedToolCalls} malformed ` +
+              `attempt(s) in a row. The response looked like a tool call but was not valid JSON, so no tool ` +
+              `ran and no completion is being claimed.${evidenceSummary}`,
+            toolCalls,
+            rounds,
+            durationMs: Date.now() - startTime,
+            usage: { total_tokens: totalTokens },
+            termination,
+            escalations: escalationEvents.length ? escalationEvents : undefined,
+          };
+        }
+
+        messages.push({ role: "assistant", content: modelContent });
+        messages.push({
+          role: "user",
+          content:
+            "Your previous response looked like a tool call, but the JSON inside the ```tool_call fence " +
+            "was not valid and could not be parsed. Output EXACTLY one tool call and nothing else inside " +
+            "the fence, using double-quoted keys/strings and no trailing commas:\n\n" +
+            '```tool_call\n{ "tool": "<tool_id>", "inputs": { } }\n```',
+        });
+        continue;
+      }
+
       // Requests for repository/runtime evidence cannot honestly complete
       // before at least one project tool has SUCCEEDED. A recorded call
       // is not evidence — a failed/unavailable tool must never be masked
@@ -1164,6 +1344,11 @@ export async function runAgentLoop(
       continue;
     }
 
+    // A real tool call parsed successfully — clear the malformed-attempt
+    // streak so an isolated earlier glitch doesn't count against a model
+    // that has since recovered.
+    consecutiveMalformedToolCalls = 0;
+
     // ─── Multi-tool parallel execution ──────────────────────────────
     // When the model emits multiple tool calls in one turn AND all of
     // them are read-only (no mutations, no approvals needed), execute
@@ -1199,12 +1384,28 @@ export async function runAgentLoop(
       ? allEntries
       : allEntries.slice(0, 1);
 
+    // Sequential single-call dispatch is where a weak model's fabricated
+    // continuation (see truncateAfterFirstToolCall) actually gets fed
+    // back into history — the parallel multi-call path already requires
+    // every parsed call to be a known, read-only tool, which a
+    // fabricated trailing call (an unknown tool id, or a mutation)
+    // naturally disqualifies, falling back to sequential mode instead.
+    const persistedModelContent = callsToExecute.length === 1
+      ? truncateAfterFirstToolCall(modelContent)
+      : modelContent;
+
     // If the first tool is unknown, report and continue (backward compat).
     if (callsToExecute.length > 0 && callsToExecute[0].entry === null) {
-      messages.push({ role: "assistant", content: modelContent });
+      const unknownId = callsToExecute[0].call.toolId;
+      const availableIds = toolDefs.map((t) => t.id);
+      const suggestion = suggestToolName(unknownId, availableIds);
+      messages.push({ role: "assistant", content: persistedModelContent });
       messages.push({
         role: "user",
-        content: `Error: Unknown tool "${callsToExecute[0].call.toolId}". Available tools: ${toolDefs.map((t) => t.id).join(", ")}`,
+        content: suggestion
+          ? `Unknown tool "${unknownId}". Did you mean "${suggestion}"? Available matching tool: ${suggestion}. ` +
+            `Retry using the exact tool name.\n\nAll available tools: ${availableIds.join(", ")}`
+          : `Error: Unknown tool "${unknownId}". Available tools: ${availableIds.join(", ")}`,
       });
       continue;
     }
@@ -1227,7 +1428,7 @@ export async function runAgentLoop(
     // Append the assistant's tool call(s) and ALL tool results to the
     // conversation. For parallel execution, all results are combined
     // into a single user message so the model sees all evidence at once.
-    messages.push({ role: "assistant", content: modelContent });
+    messages.push({ role: "assistant", content: persistedModelContent });
     messages.push({
       role: "user",
       content: execResults

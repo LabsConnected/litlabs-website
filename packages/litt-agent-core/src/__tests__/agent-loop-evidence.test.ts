@@ -16,13 +16,19 @@
  *    and status."
  */
 
-import { describe, it } from "node:test";
+import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import {
   runAgentLoop,
   parseToolCall,
   stripToolCallBlocks,
+  looksLikeToolCallAttempt,
+  truncateAfterFirstToolCall,
+  suggestToolName,
   PROJECT_EVIDENCE_TOOL_ID,
 } from "../agent-loop.js";
 import {
@@ -457,5 +463,418 @@ describe("Agent loop max-rounds — truthful partial answer from tool evidence",
     // The content is the model's own answer, not a fabricated partial summary.
     assert.ok(!result.content.includes("inspected the project"));
     assert.ok(!result.content.includes("did not verify"));
+  });
+});
+
+// ─── Malformed tool-call handling (local/weak-model degradation) ───
+//
+// Root cause of the observed LiTT agent-acceptance failure loop
+// ("Inspecting" → "Verify the summary" → failure → retry, never
+// reaching edit/test/diff): a model turn with no PARSEABLE tool call
+// was always treated as "the model claims it is done" once any earlier
+// round had produced real tool evidence — even when the turn was
+// obviously an ATTEMPTED tool call that failed to parse (malformed
+// JSON, a common failure mode for small local models such as
+// litt-coder:3b). That ran the full VerificationGate mid-task, which
+// failed (nothing had been fixed yet), and fed back a repair prompt the
+// model never asked for and could not act on — producing exactly the
+// observed cycle without ever reaching a real edit call.
+
+describe("looksLikeToolCallAttempt — malformed-call detection", () => {
+  it("detects a fenced tool_call attempt even when unparseable", () => {
+    assert.equal(
+      looksLikeToolCallAttempt('```tool_call\n{ "tool": "project.edit_file", "inputs": {},}\n```'),
+      true,
+    );
+  });
+
+  it("detects an unclosed tool_call fence", () => {
+    assert.equal(looksLikeToolCallAttempt('```tool_call\n{ "tool": "project.status"'), true);
+  });
+
+  it("detects a bare unparseable tool JSON object", () => {
+    assert.equal(looksLikeToolCallAttempt('{ "tool": "project.status", broken'), true);
+  });
+
+  it("does not flag ordinary prose with no tool-call intent", () => {
+    assert.equal(looksLikeToolCallAttempt("The repository is on main and the tree is clean."), false);
+  });
+});
+
+describe("Agent loop — malformed tool-call output never runs the gate", () => {
+  it("retries a malformed tool_call instead of treating it as a final answer", async () => {
+    const shell = new NodeShellExecutor(process.cwd());
+    const store = new RuntimeStore(() => {});
+    const tools = createDefaultRegistry();
+
+    // Round 1: a real, successful tool call (real evidence exists).
+    // Round 2+: the model keeps attempting a tool call but the JSON is
+    // broken (trailing comma) — a realistic litt-coder:3b failure mode.
+    const model = makeMockModel([
+      '```tool_call\n{ "tool": "project.status", "inputs": {} }\n```',
+      '```tool_call\n{ "tool": "project.status", "inputs": {},}\n```',
+    ]);
+
+    let gateCalls = 0;
+    const gate: VerificationGateLike = {
+      async verify(): Promise<VerificationResult> {
+        gateCalls++;
+        return {
+          proven: true,
+          status: "proven",
+          checks: [],
+          totalDurationMs: 0,
+          message: "should never run",
+          runId: "verify_test",
+          ranChecks: [],
+          skippedChecks: [],
+        };
+      },
+    };
+
+    const result = await runAgentLoop(INSPECT_PROMPT, {
+      model, tools, shell, store, cwd: process.cwd(),
+      maxRounds: 6,
+      verificationGate: gate,
+    });
+
+    // The gate must NEVER run against a malformed, unfinished attempt —
+    // that mid-task misfire is what produced the observed failure loop.
+    assert.equal(gateCalls, 0, "the verification gate must not run on a malformed tool-call attempt");
+
+    // The loop must fail closed with an honest terminal error, not
+    // "complete" and not a silent generic max_rounds message.
+    assert.notEqual(result.termination, "complete");
+    assert.ok(result.content.toLowerCase().includes("malformed"), "the terminal error must name the real cause");
+
+    // Valid work already done (the successful round-1 evidence call)
+    // must be preserved, not discarded.
+    assert.ok(
+      result.toolCalls.some((tc) => tc.toolId === "project.status" && tc.result.success),
+      "earlier valid tool evidence must survive a later malformed attempt",
+    );
+  });
+
+  it("recovers once the model produces a valid tool call after a malformed attempt", async () => {
+    const shell = new NodeShellExecutor(process.cwd());
+    const store = new RuntimeStore(() => {});
+    const tools = createDefaultRegistry();
+
+    // Round 1: malformed attempt. Round 2: the model self-corrects and
+    // emits valid JSON. Round 3: final answer.
+    const model = makeMockModel([
+      '```tool_call\n{ "tool": "project.status", "inputs": {},}\n```',
+      '```tool_call\n{ "tool": "project.status", "inputs": {} }\n```',
+      "Repository inspected.",
+    ]);
+
+    const result = await runAgentLoop(INSPECT_PROMPT, {
+      model, tools, shell, store, cwd: process.cwd(),
+      maxRounds: 6,
+      verificationGate: makeProvingGate(),
+    });
+
+    assert.equal(result.termination, "complete");
+    assert.equal(
+      result.toolCalls.filter((tc) => tc.toolId === "project.status").length,
+      1,
+      "the malformed round-1 attempt must not itself count as an executed tool call",
+    );
+    assert.equal(result.toolCalls[0].result.success, true);
+  });
+});
+
+// ─── Fabricated-transcript contamination (weak-model degradation) ──
+//
+// Observed live against the real litt-coder:3b model (not mocked, via
+// `litt ask` over a real Ollama endpoint): given a valid, real tool_call,
+// the model narrated an entire FABRICATED continuation in the SAME
+// turn — its own invented "#### Tool Result" block (claiming success
+// and inventing file contents that do not exist in the repo), further
+// invented tool calls, and even an invented final diff. The dispatch
+// logic already executes only the real first call and injects the REAL
+// result — but the fabricated continuation was being persisted into
+// conversation history verbatim, sitting right next to the real result
+// on the next round. A weak model then kept re-asserting its own
+// fabricated version instead of the contradicting real one, repeating
+// across many rounds without ever reaching a real edit.
+
+describe("truncateAfterFirstToolCall — strips a model's fabricated continuation", () => {
+  it("keeps reasoning + the real tool call, drops everything invented after it", () => {
+    const content =
+      'Let\'s inspect the file.\n\n```tool_call\n{ "tool": "project.read_file", "inputs": { "path": "a.ts" } }\n```\n\n' +
+      '#### Tool Result\n\n```\n{ "path": "a.ts", "contents": "totally made up" }\n```\n\n' +
+      'Now let\'s fix it.\n\n```tool_call\n{ "tool": "project.edit_file", "inputs": { "path": "a.ts" } }\n```\n\n' +
+      '### Final Git Diff\n```diff\n+ fake change\n```';
+
+    const out = truncateAfterFirstToolCall(content);
+    assert.ok(out.includes("Let's inspect the file."));
+    assert.ok(out.includes('"tool": "project.read_file"'));
+    assert.ok(!out.includes("Tool Result"), "the model's own fabricated result must be dropped");
+    assert.ok(!out.includes("totally made up"), "fabricated file contents must be dropped");
+    assert.ok(!out.includes("project.edit_file"), "a fabricated second tool call must be dropped");
+    assert.ok(!out.includes("Final Git Diff"), "a fabricated final answer must be dropped");
+  });
+
+  it("is a no-op when there is no tool call at all", () => {
+    const content = "Just a plain final answer with no tool call.";
+    assert.equal(truncateAfterFirstToolCall(content), content);
+  });
+
+  it("is a no-op when the only tool call is the last thing in the content", () => {
+    const content = 'Checking status.\n\n```tool_call\n{ "tool": "project.status", "inputs": {} }\n```';
+    assert.equal(truncateAfterFirstToolCall(content), content);
+  });
+});
+
+describe("Agent loop — a fabricated continuation never contaminates history", () => {
+  /** Records every `messages` array the model was called with. */
+  function makeRecordingMockModel(responses: string[]): {
+    model: ModelProvider;
+    callsSeen: ChatMessage[][];
+  } {
+    let call = 0;
+    const callsSeen: ChatMessage[][] = [];
+    const model: ModelProvider = {
+      async stream(messages, emit) {
+        callsSeen.push(messages);
+        const response = responses[Math.min(call, responses.length - 1)] ?? "";
+        call++;
+        emit({ type: "meta", provider: "mock", model: "mock-model", profile: "fast" });
+        for (const word of response.split(" ")) emit({ type: "delta", text: word + " " });
+        emit({
+          type: "done",
+          model: "mock-model",
+          usage: { total_tokens: 1 },
+          timing: { ttftMs: 1, generationMs: 1, totalMs: 2 },
+        });
+        return {
+          content: response,
+          model: "mock-model",
+          provider: "mock",
+          usage: { total_tokens: 1 },
+          timing: { ttftMs: 1, generationMs: 1, totalMs: 2 },
+          profile: "fast" as ModelProfile,
+        };
+      },
+      async health() { return 100; },
+    };
+    return { model, callsSeen };
+  }
+
+  it("does not feed the model's own fabricated tool result back into its next-round context", async () => {
+    const shell = new NodeShellExecutor(process.cwd());
+    const store = new RuntimeStore(() => {});
+    // project.status is overridden to FAIL for real, so the model's
+    // fabricated round-1 claim of success is verifiably a fabrication.
+    // The fabricated continuation's SECOND tool call names a tool id
+    // that does not exist anywhere in the registry — "project.replace_text"
+    // — mirroring the real litt-coder:3b run this regression test is
+    // based on, where the model invented non-existent tool ids
+    // (project.replace_text, project.create_test) for its fabricated
+    // follow-up steps. This is what forces sequential (not parallel
+    // read-only) dispatch: an unknown second call fails the "every
+    // parsed call is a known read-only tool" check, so only the FIRST
+    // real call executes and truncateAfterFirstToolCall applies.
+    const tools = new ToolRegistry({
+      "project.status": {
+        definition: {
+          id: "project.status", name: "status", description: "Get project status",
+          inputSchema: { type: "object", properties: {} }, readOnly: true,
+        },
+        handler: async () => ({
+          status: "failed", success: false,
+          message: "git status failed: repository inspection tool unavailable", data: {},
+        }),
+        metadata: { projectScoped: false, mutating: false, readOnly: true },
+      },
+    });
+
+    const fabricatedRound1 =
+      'Checking status.\n\n```tool_call\n{ "tool": "project.status", "inputs": {} }\n```\n\n' +
+      '#### Tool Result\n\n```\n{ "branch": "main", "clean": true }\n```\n\n' +
+      "Repository verified clean on main. Applying the fix next.\n\n" +
+      '```tool_call\n{ "tool": "project.replace_text", "inputs": { "path": "b.ts", "search": "x", "replace": "y" } }\n```';
+
+    const { model, callsSeen } = makeRecordingMockModel([
+      fabricatedRound1,
+      "The inspection tool could not read the repository state, so repository status could not be verified.",
+    ]);
+
+    const result = await runAgentLoop(INSPECT_PROMPT, {
+      model, tools, shell, store, cwd: process.cwd(), maxRounds: 3,
+    });
+
+    assert.equal(callsSeen.length, 2, "the model must have been called for a second round");
+    const round2Messages = callsSeen[1];
+    const round2Text = round2Messages.map((m) => m.content).join("\n");
+
+    // The model's SELF-FABRICATED claims must not appear in the context
+    // it sees on the next round. (Not asserting on the word "branch"
+    // alone — INSPECT_PROMPT itself legitimately contains it.)
+    assert.ok(!round2Text.includes("clean\": true"), "fabricated fake status fields must not survive into round 2");
+    assert.ok(!round2Text.includes("verified clean on main"), "the model's fabricated narrative must not survive into round 2");
+    assert.ok(!round2Text.includes("project.replace_text"), "a fabricated SECOND tool call must not survive into round 2");
+
+    // The REAL, honest failure result must be what the model actually sees.
+    assert.ok(round2Text.includes("repository inspection tool unavailable"), "the real tool failure must be present");
+
+    // The loop must never claim complete off a fabricated success.
+    assert.notEqual(result.termination, "complete");
+    assert.ok(!result.content.includes("verified clean"), "a fabricated success must never reach the final answer");
+  });
+});
+
+// ─── project.edit vs project.edit_file (acceptance run "bqga7kzj8") ─
+//
+// Root cause: "project.edit_file" was referenced everywhere as a real
+// tool (mutation-tracking, scope mapping, UI labels) but was never
+// registered — a model that correctly decided to edit a file had
+// nothing real to call and fabricated "project.edit". Now that
+// "project.edit_file" is a real, registered tool, this proves:
+//   1. suggestToolName() picks it out unambiguously.
+//   2. the unknown-tool feedback names it explicitly.
+//   3. the NEXT round can actually invoke the real tool and mutate a
+//      real file through the full runAgentLoop path.
+
+describe("suggestToolName", () => {
+  const AVAILABLE = [
+    "project.status", "project.diff", "project.log", "project.branch",
+    "project.list_files", "project.read_file", "project.edit_file",
+    "project.search", "project.inspect_package", "project.check",
+    "project.test", "project.build", "project.run",
+  ];
+
+  it("picks the one unambiguous match: project.edit -> project.edit_file", () => {
+    assert.equal(suggestToolName("project.edit", AVAILABLE), "project.edit_file");
+  });
+
+  it("also resolves other _file/_files suffix guesses (read, list)", () => {
+    assert.equal(suggestToolName("project.read", AVAILABLE), "project.read_file");
+    assert.equal(suggestToolName("project.list", AVAILABLE), "project.list_files");
+  });
+
+  it("returns null when nothing plausible exists (e.g. project.write)", () => {
+    // project.write_file does not exist in the registry — the function
+    // must never invent a suggestion for a tool that isn't there.
+    assert.equal(suggestToolName("project.write", AVAILABLE), null);
+  });
+
+  it("returns null for a completely unrelated unknown id", () => {
+    assert.equal(suggestToolName("weather.today", AVAILABLE), null);
+  });
+
+  it("returns null when the id is already valid (no correction needed)", () => {
+    assert.equal(suggestToolName("project.status", AVAILABLE), null);
+  });
+});
+
+describe("Agent loop — unknown 'project.edit' truthfully suggests 'project.edit_file'", () => {
+  let workDir: string;
+  beforeEach(() => {
+    workDir = fs.mkdtempSync(path.join(os.tmpdir(), "litt-agent-loop-edit-test-"));
+  });
+  afterEach(() => {
+    fs.rmSync(workDir, { recursive: true, force: true });
+  });
+
+  it("names project.edit_file in the corrective feedback, and the next round can invoke it for real", async () => {
+    fs.writeFileSync(path.join(workDir, "a.ts"), "const x = 1;\n", "utf8");
+    const shell = new NodeShellExecutor(workDir);
+    const store = new RuntimeStore(() => {});
+    const tools = createDefaultRegistry();
+
+    // Records the exact `messages` array the model is called with each
+    // round, so round 2's prompt can be inspected directly for the
+    // corrective wording — not just the eventual dispatch outcome.
+    const responses = [
+      '```tool_call\n{ "tool": "project.edit", "inputs": { "path": "a.ts", "search": "const x = 1;", "replace": "const x = 2;" } }\n```',
+      '```tool_call\n{ "tool": "project.edit_file", "inputs": { "path": "a.ts", "search": "const x = 1;", "replace": "const x = 2;" } }\n```',
+      "Fixed and verified.",
+    ];
+    let call = 0;
+    const callsSeen: ChatMessage[][] = [];
+    const model: ModelProvider = {
+      async stream(messages, emit) {
+        callsSeen.push(messages);
+        const response = responses[Math.min(call, responses.length - 1)] ?? "";
+        call++;
+        emit({ type: "meta", provider: "mock", model: "mock-model", profile: "fast" });
+        for (const word of response.split(" ")) emit({ type: "delta", text: word + " " });
+        emit({ type: "done", model: "mock-model", usage: { total_tokens: 1 }, timing: { ttftMs: 1, generationMs: 1, totalMs: 2 } });
+        return { content: response, model: "mock-model", provider: "mock", usage: { total_tokens: 1 }, timing: { ttftMs: 1, generationMs: 1, totalMs: 2 }, profile: "fast" as ModelProfile };
+      },
+      async health() { return 100; },
+    };
+
+    const result = await runAgentLoop("Fix the bug in a.ts", {
+      model, tools, shell, store, cwd: workDir,
+      maxRounds: 6,
+      verificationGate: makeProvingGate(),
+    });
+
+    // Round 2's prompt — what the model actually saw after fabricating
+    // "project.edit" — must name the real tool explicitly, matching the
+    // acceptance criteria's exact wording.
+    assert.equal(callsSeen.length, 3, "expected 3 model calls: bad tool, real tool, final answer");
+    const round2Text = callsSeen[1].map((m) => m.content).join("\n");
+    assert.match(round2Text, /Unknown tool "project\.edit"/);
+    assert.match(round2Text, /Did you mean "project\.edit_file"/);
+    assert.match(round2Text, /Available matching tool: project\.edit_file/);
+    assert.match(round2Text, /Retry using the exact tool name/);
+
+    // Round 2 must have actually dispatched the REAL tool and mutated
+    // the real file — proof the correction was actionable, not just
+    // informative.
+    const editCall = result.toolCalls.find((tc) => tc.toolId === "project.edit_file");
+    assert.ok(editCall, "project.edit_file must have been dispatched in a later round");
+    assert.equal(editCall!.result.success, true);
+    assert.equal(
+      fs.readFileSync(path.join(workDir, "a.ts"), "utf8"),
+      "const x = 2;\n",
+      "the real file must have been mutated by the real tool",
+    );
+
+    // The fabricated "project.edit" must never be recorded as a real,
+    // successful tool call — it was never a real tool.
+    assert.ok(
+      !result.toolCalls.some((tc) => tc.toolId === "project.edit"),
+      "the unknown 'project.edit' must never be recorded as an executed tool call",
+    );
+
+    assert.equal(result.termination, "complete");
+  });
+
+  it("the corrective message itself names project.edit_file (unit-level, via suggestToolName)", () => {
+    // Direct proof of the exact wording contract requested: given the
+    // registry's real tool ids, the unknown "project.edit" resolves to
+    // exactly "project.edit_file" — the same function runAgentLoop uses
+    // to build: `Unknown tool "project.edit". Did you mean "project.edit_file"?
+    // Available matching tool: project.edit_file. Retry using the exact tool name.`
+    const availableIds = createDefaultRegistry().list().map((d) => d.id);
+    const suggestion = suggestToolName("project.edit", availableIds);
+    assert.equal(suggestion, "project.edit_file");
+  });
+});
+
+describe("Agent loop — existing valid tool calls are unaffected by the new tool", () => {
+  it("project.status still parses, dispatches, and completes exactly as before", async () => {
+    const shell = new NodeShellExecutor(process.cwd());
+    const store = new RuntimeStore(() => {});
+    const tools = createDefaultRegistry();
+    const model = makeMockModel([
+      '```tool_call\n{ "tool": "project.status", "inputs": {} }\n```',
+      "Repository inspected.",
+    ]);
+
+    const result = await runAgentLoop(INSPECT_PROMPT, {
+      model, tools, shell, store, cwd: process.cwd(),
+      verificationGate: makeProvingGate(),
+    });
+
+    assert.equal(result.toolCalls.length, 1);
+    assert.equal(result.toolCalls[0].toolId, "project.status");
+    assert.equal(result.toolCalls[0].result.success, true);
+    assert.equal(result.termination, "complete");
   });
 });
