@@ -17,7 +17,6 @@ export default function NotFound() {
     >
       <div className="max-w-md w-full rounded-xl p-8" style={{ border: "1px solid #2a2a3a", backgroundColor: "#1a1a24" }}>
         <div className="text-center mb-6">
-          <div className="text-4xl mb-2">👾</div>
           <h1 className="text-3xl font-bold tracking-tight mb-2" style={{ color: "#e2e8f0" }}>
             404
           </h1>
@@ -34,7 +33,7 @@ export default function NotFound() {
           <Link
             href="/"
             className="px-4 py-2 text-xs font-bold rounded-lg hover:opacity-90 transition-opacity"
-            style={{ backgroundColor: "#6366f1", color: "#fff", textDecoration: "none" }}
+            style={{ backgroundColor: "#a8ff2f", color: "#03050a", textDecoration: "none" }}
           >
             ← Back to Home
           </Link>

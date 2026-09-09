@@ -26,7 +26,6 @@ export default function Error({
         style={{ border: "1px solid #2a2a3a", backgroundColor: "#1a1a24" }}
       >
         <div className="text-center mb-6">
-          <div className="text-4xl mb-2">💥</div>
           <h1
             className="text-lg font-bold tracking-tight"
             style={{ color: "#e2e8f0" }}
@@ -49,7 +48,7 @@ export default function Error({
           <button
             onClick={reset}
             className="px-4 py-2 text-xs font-bold rounded-lg hover:opacity-90 transition-opacity cursor-pointer"
-            style={{ backgroundColor: "#6366f1", color: "#fff" }}
+            style={{ backgroundColor: "#a8ff2f", color: "#03050a" }}
           >
             Try Again
           </button>
