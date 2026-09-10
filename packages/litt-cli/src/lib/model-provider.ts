@@ -949,12 +949,21 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       throw new Error(`${options.providerId} model id is required for OpenAICompatibleModelProvider`);
     }
     this._profile = options.profile ?? "smart";
-    this._maxTokens = resolveMaxTokens(options.maxTokens);
+    const resolvedMaxTokens = resolveMaxTokens(options.maxTokens);
+
+    // Preserve output headroom for small Ollama runtime contexts.
+    this._maxTokens = options.providerId === "ollama"
+      ? Math.min(resolvedMaxTokens, 1024)
+      : resolvedMaxTokens;
+
     this._idleStallMs = options.idleStallMs ?? DEFAULT_IDLE_STALL_MS;
     this._routingMode = options.routingMode ?? "auto";
     // Build sanitized OpenAI-safe tool schemas. toOpenAiToolSchemas throws
     // (here, in the constructor — BEFORE any API request) on collision or
     // invalid names so we never send an OpenAI-rejected tool set.
+    // Keep native function tools for Ollama. The compact LiTT prompt
+    // removes textual schema bloat, while native schemas remain the
+    // authoritative interface for real tool_calls.
     if (options.tools && options.tools.length > 0) {
       const { schemas, map } = toOpenAiToolSchemas(options.tools);
       this._tools = schemas;
