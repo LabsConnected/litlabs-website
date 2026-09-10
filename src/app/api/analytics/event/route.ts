@@ -60,7 +60,11 @@ export async function POST(req: NextRequest) {
         Number.isFinite(e.ts) &&
         rows.length < 50
       ) {
-        const { event, ts, path, referrer, ...rest } = e as Record<string, unknown>;
+        const { event, ts, path, referrer, ...rest } = e as {
+          event: string;
+          ts: number;
+          [key: string]: unknown;
+        };
         const properties = Object.keys(rest).length > 0 ? rest : undefined;
         const row: AnalyticsEventRow = { event, ts };
         if (typeof path === "string") row.path = path;
