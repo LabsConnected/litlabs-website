@@ -16,7 +16,6 @@ import {
   checkProductionHealth,
   checkProductionSHA,
   RAILWAY_SERVICE_NAME,
-  PRODUCTION_DOMAIN,
 } from "../lib/production-checks.js";
 import { redact } from "../lib/secret-redaction.js";
 

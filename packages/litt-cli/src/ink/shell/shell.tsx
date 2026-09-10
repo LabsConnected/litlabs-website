@@ -37,7 +37,7 @@ import { ApprovalUX } from "../approval-ux.js";
 import type { ToolProgressSnapshot } from "../tool-progress-store.js";
 import type { WorkstreamSnapshot } from "../workstream-store.js";
 import type { ExecutionTarget } from "../../lib/execution-target.js";
-import { WorkstreamDock, estimateWorkstreamDockRows } from "../workstream-dock.js";
+import { WorkstreamDock } from "../workstream-dock.js";
 
 /** Rows consumed by fixed chrome below the content region:
  *  composer margin(1) + composer(1) + status margin(1) + divider(1) + 2 status lines. */

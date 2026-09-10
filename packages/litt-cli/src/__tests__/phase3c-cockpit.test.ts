@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { RuntimeClient, type LifecycleEvent } from "../lib/runtime-client.js";
+import { RuntimeClient } from "../lib/runtime-client.js";
 import { Cockpit } from "../lib/cockpit.js";
 import { SignalHandler } from "../lib/signal-handler.js";
 import { ApprovalBridge } from "../ink/approval-bridge.js";

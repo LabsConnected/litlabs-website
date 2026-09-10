@@ -25,10 +25,6 @@ import { isBackspace, isEnter, isEscape, isPrintable, type KeyInfo } from "../in
 
 // ─── Simulated Composer (same as composer-backspace-stale-ref.test.ts) ───
 
-interface ComposerState {
-  value: string;
-  caret: number;
-}
 
 function createSimulatedComposer() {
   const valueRef = { current: "" };

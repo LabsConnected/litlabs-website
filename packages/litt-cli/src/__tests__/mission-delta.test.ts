@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { porcelainPaths, parsePorcelainPath, computeMissionDelta, isGeneratedArtifact } from "../lib/mission-delta.js";
+import { porcelainPaths, computeMissionDelta, isGeneratedArtifact } from "../lib/mission-delta.js";
 
 describe("porcelainPaths", () => {
   it("parses modified/untracked lines", () => {

@@ -11,7 +11,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   WorkstreamStore,
-  MAX_ACTIVITIES,
   PHASE_DISPLAY,
   type WorkstreamPhase,
 } from "../ink/workstream-store.js";

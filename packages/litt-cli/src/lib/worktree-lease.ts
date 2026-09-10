@@ -23,7 +23,7 @@
  * Pure functions — no React, no Ink. Testable in node with temp dirs.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
 /** A worktree write lease. */

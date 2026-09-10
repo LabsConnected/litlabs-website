@@ -6,7 +6,7 @@
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   extractMentions, resolveMention, buildPromptWithContext,
 } from "../lib/context-resolver.js";

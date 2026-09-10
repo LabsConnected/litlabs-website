@@ -70,7 +70,6 @@ import { probeLocalLane, resetLocalLaneCache, type LocalLaneStatus } from "../li
 import {
   localRoutePolicy,
   resolveLocalModel,
-  isLocalModelId,
   resolveRequestedLocalModel,
   type LocalRoutePolicy,
 } from "../lib/local-model-resolution.js";
@@ -83,7 +82,7 @@ import {
   formatInspectionForSynthesis,
 } from "../lib/read-lane.js";
 import { matchLocalToolMission, formatLocalToolSummary, type LocalToolResult } from "../lib/local-tool-mission.js";
-import { shouldSkipPlanning, classifyMissionComplexity } from "../lib/mission-complexity.js";
+import { shouldSkipPlanning } from "../lib/mission-complexity.js";
 import { PerfTrace } from "../lib/perf-trace.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
 import { createToolCallStreamFilter } from "../lib/tool-call-stream.js";
@@ -100,13 +99,8 @@ import { getGitState } from "../lib/git-state.js";
 import {
   shipWorkflow as safeShipWorkflow,
   createOrSwitchBranch as safeCreateOrSwitchBranch,
-  stageFiles as safeStageFiles,
-  commitStaged as safeCommitStaged,
-  pushBranch as safePushBranch,
   createDraftPR as safeCreateDraftPR,
   isProtectedBranch,
-  generateBranchName,
-  isBlockedGitCommand,
 } from "../lib/git-workflow.js";
 import { saveSession, summarize, type SessionSnapshot } from "../lib/session-store.js";
 import type { WorkspaceEntry } from "../lib/workspace-store.js";
@@ -590,7 +584,7 @@ async function runLocalToolMission(
 
   // ─── Create a REAL Mission in the canonical RuntimeStore ──────────
   const agentStore = session.getStore();
-  const mission = await agentStore.createMission({
+  await agentStore.createMission({
     goal: input,
     mode: session.getMode(),
     projectRoot,
@@ -2886,7 +2880,6 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // Simple missions (single-action, bounded scope) skip the
         // ~2.1s planning round and go directly to execution with a
         // default single step. Complex missions use the full planner.
-        const complexity = classifyMissionComplexity(input);
         let plan: { source: string; fallbackDomain?: string };
         let plannedSteps: Array<{ id: string; title: string; allowedActionScope: string[] }>;
 

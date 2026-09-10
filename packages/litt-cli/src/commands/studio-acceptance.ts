@@ -14,7 +14,7 @@
  * Then present the owner acceptance checklist.
  */
 
-import { ok, fail, warn, header, c } from "../lib/utils.js";
+import { header, c } from "../lib/utils.js";
 import {
   checkProductionHealth,
   checkProductionSHA,

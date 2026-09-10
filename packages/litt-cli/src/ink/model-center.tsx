@@ -25,7 +25,7 @@
  * shared canonical ModelRuntime instance passed in from CockpitApp.
  */
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Box, Text } from "ink";
 import { useOverlayKeyboard } from "./overlay-manager.js";
 import { isEnter, isEscape, isTab, isUpArrow, isDownArrow } from "./keyboard-utils.js";
@@ -212,7 +212,7 @@ export function ModelCenter({
         }
       }
     }
-  }, [tab, routingIdx, modelIdx, selectableModels, onSelectRoutingMode, onSelectModel, onCancel]));
+  }, [KEY_DEBUG, tab, onCancel, routingIdx, onSelectRoutingMode, selectableModels, modelIdx, onSelectModel]));
 
   // Group models by their native provider (model provider, not transport)
   const modelsByProvider = new Map<ProviderId, ModelDefinition[]>();

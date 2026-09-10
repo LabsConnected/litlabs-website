@@ -18,20 +18,16 @@
  * Resumable: if paused for owner action, run again to resume.
  */
 
-import { ok, fail, warn, header, c, exec } from "../lib/utils.js";
+import { fail, header, c, exec } from "../lib/utils.js";
 import {
   getProductionRepoRoot,
   runAllChecks,
-  summarizeChecks,
   checkWebhookSecret,
   checkStripeSecretKey,
-  type CheckResult,
 } from "../lib/production-checks.js";
-import { redact } from "../lib/secret-redaction.js";
 import {
   createRun,
   loadRun,
-  saveRun,
   startStep,
   completeStep,
   blockStep,
@@ -39,7 +35,6 @@ import {
   resumeRun,
   finishRun,
   findIncompleteRun,
-  deleteRun,
   type FinishRun,
   type FinishPhase,
 } from "../lib/production-run-store.js";

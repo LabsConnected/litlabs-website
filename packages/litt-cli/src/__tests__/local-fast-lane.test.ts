@@ -56,7 +56,6 @@ import type { GitHeadState } from "../lib/git-state.js";
 import { PerfTrace } from "../lib/perf-trace.js";
 
 const mockedGetGitState = vi.mocked(getGitState);
-const mockedReadBranchFromGitDir = vi.mocked(readBranchFromGitDir);
 const mockedReadHeadStateFromGitDir = vi.mocked(readHeadStateFromGitDir);
 
 const baseCtx = { cwd: "/fake", projectName: "litt-final-integration", mode: "plan" as const };
@@ -1347,7 +1346,7 @@ describe("readBranchFromGitDir — real filesystem", () => {
 
     // Re-import won't work with vi.mock, so we read .git/HEAD directly
     // to verify the real function would return the same value.
-    const { readFileSync, existsSync } = require("node:fs");
+    const { existsSync } = require("node:fs");
     const { join } = require("node:path");
     const headPath = join(repoRoot, ".git", "HEAD");
     if (!existsSync(headPath)) {
@@ -1389,7 +1388,7 @@ describe("readBranchFromGitDir — real filesystem", () => {
     mockedReadHeadStateFromGitDir.mockRestore();
 
     // Directly test the real function
-    const { readFileSync, existsSync } = require("node:fs");
+    const { existsSync } = require("node:fs");
     const dotGit = join(tmpDir, ".git");
     expect(existsSync(dotGit)).toBe(false);
     // The real function would return null here

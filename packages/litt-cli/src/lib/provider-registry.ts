@@ -984,7 +984,7 @@ export class RoutingEngine {
       if (overrideChoice) {
         return {
           choice: overrideChoice,
-          telemetry: this.buildTelemetry(request, taskType, routingMode, estimatedContext, requiredCaps, candidates.map(m => m.id), [], overrideChoice, available),
+          telemetry: this.buildTelemetry(request, taskType, routingMode, estimatedContext, requiredCaps, candidates.map(m => m.id), [], overrideChoice),
         };
       }
     }
@@ -1048,7 +1048,7 @@ export class RoutingEngine {
 
     return {
       choice: selected,
-      telemetry: this.buildTelemetry(request, taskType, routingMode, estimatedContext, requiredCaps, candidates.map(m => m.id), rejected, selected, available),
+      telemetry: this.buildTelemetry(request, taskType, routingMode, estimatedContext, requiredCaps, candidates.map(m => m.id), rejected, selected),
     };
   }
 
@@ -1101,7 +1101,6 @@ export class RoutingEngine {
     candidateIds: string[],
     rejected: Array<{ modelId: string; reason: string }>,
     selected: ModelChoice,
-    availableModelIds: string[],
   ): RoutingTelemetry {
     const servedBy = this.registry.getModelServedBy(selected.id) ?? "unknown";
     const estimatedCost = estimateRunCost(selected.id, estimatedContext, 1000);

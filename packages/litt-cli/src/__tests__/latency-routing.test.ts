@@ -64,7 +64,6 @@ describe("profilePreference", () => {
 describe("latency telemetry", () => {
   beforeEach(() => {
     // Clear history by filling and draining
-    const hist = getLatencyHistory();
     // Record enough to push out old entries
     for (let i = 0; i < 100; i++) {
       recordLatency("clear", "CHAT_FAST", 0, true);

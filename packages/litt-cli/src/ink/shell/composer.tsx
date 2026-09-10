@@ -35,7 +35,7 @@ import { Box, Text, useInput } from "ink";
 import * as fs from "fs";
 import { normalizeKey, type KeyInfo } from "../input-keys.js";
 import {
-  applyKeyEvent, createComposerState, graphemeToCodeUnit, splitGraphemes,
+  applyKeyEvent, graphemeToCodeUnit, splitGraphemes,
   type ComposerState,
 } from "../composer-editor.js";
 import { COLORS } from "../colors.js";
@@ -300,7 +300,7 @@ export function Composer({
         return;
       }
     }
-  }, []));
+  }, [runtime]));
 
   const placeholder = "Ask LiTT anything...";
   // The software caret exists ONLY when the composer is genuinely the

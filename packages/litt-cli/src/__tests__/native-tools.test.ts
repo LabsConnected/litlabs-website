@@ -43,7 +43,7 @@ function sseBody(lines: string[]): BodyInit {
 }
 
 /** A fetch stub that records the request body and returns the SSE lines. */
-function recordingFetch(lines: string[], recorded: { body: any }): typeof fetch {
+function recordingFetch(lines: string[], recorded: { body: unknown }): typeof fetch {
   return (async (url: unknown, init?: RequestInit) => {
     recorded.body = JSON.parse(String(init?.body ?? "{}"));
     return new Response(sseBody(lines), { status: 200, headers: { "Content-Type": "text/event-stream" } });
@@ -52,7 +52,7 @@ function recordingFetch(lines: string[], recorded: { body: any }): typeof fetch 
 
 describe("OpenRouterModelProvider — native tool schemas are declared", () => {
   it("includes an OpenAI-compatible tools array in the request body when tools are provided", async () => {
-    const recorded: { body: any } = { body: null };
+    const recorded: { body: unknown } = { body: null };
     globalThis.fetch = recordingFetch(["data: [DONE]"], recorded);
 
     const provider = new OpenRouterModelProvider({
@@ -76,7 +76,7 @@ describe("OpenRouterModelProvider — native tool schemas are declared", () => {
   });
 
   it("omits the tools array when none are provided (backward compat)", async () => {
-    const recorded: { body: any } = { body: null };
+    const recorded: { body: unknown } = { body: null };
     globalThis.fetch = recordingFetch(["data: [DONE]"], recorded);
     const provider = new OpenRouterModelProvider({ apiKey: "sk-test", model: "openai/gpt-5.6-luna" });
     await provider.stream([{ role: "user", content: "hi" }], () => {});

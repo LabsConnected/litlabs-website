@@ -222,8 +222,7 @@ describe("provider routing: fallback behavior works only when intended", () => {
 
   it("no OpenAI key AND no OpenRouter key → resolver throws a clear error (no silent fallback)", () => {
     // No keys at all.
-    const runtime = new ModelRuntime();
-    // route() itself throws when no provider is configured — that's the
+        // route() itself throws when no provider is configured — that's the
     // registry's contract. We simulate a routed model that escaped routing
     // (e.g. a stale pin) and confirm the resolver also fails clearly.
     const routed: RoutedModel = {
@@ -430,8 +429,7 @@ describe("max_tokens policy: configurable limit + default", () => {
   it("OpenRouterModelProvider constructor uses resolveMaxTokens for its default", () => {
     delete process.env.LITT_MAX_TOKENS;
     process.env.OPENROUTER_API_KEY = "sk-or";
-    const p = new OpenRouterModelProvider({ model: "openrouter/auto" });
-    // Private field, but the diagnostic + ladder derive from it; verify
+        // Private field, but the diagnostic + ladder derive from it; verify
     // indirectly via the ladder the retry would build.
     expect(buildMaxTokensLadder(4096)[0]).toBe(4096);
     // Explicit override is honored.

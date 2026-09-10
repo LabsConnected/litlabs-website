@@ -15,7 +15,7 @@
 import { describe, it, expect } from "vitest";
 import { createRuntimeSession } from "../lib/runtime-session.js";
 import { SessionEventBridge } from "../ink/session-event-bridge.js";
-import { runAgentLoop, ToolRegistry, createShellExecutor, RuntimeStore } from "@litt/agent-core";
+import { runAgentLoop, RuntimeStore } from "@litt/agent-core";
 import type { RuntimeEvent } from "@litt/agent-core";
 
 /**

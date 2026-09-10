@@ -61,19 +61,20 @@ describe("P0: terminal → IDLE race", () => {
     function makeScheduleIdle() {
       let holoState: HoloState = "IDLE";
       let missionEpoch = 0;
-      let currentRunId: string | null = null;
       let timer: ReturnType<typeof setTimeout> | null = null;
 
       const setHoloState = (fn: (prev: HoloState) => HoloState) => {
         holoState = fn(holoState);
       };
 
-      const startMission = (runId: string | null = null) => {
+      const startMission = () => {
         missionEpoch += 1; // matches CockpitStore.startMission
       };
 
-      const setCurrentRunId = (runId: string | null) => {
-        currentRunId = runId; // matches CockpitStore.setCurrentRunId: no epoch change
+      // setCurrentRunId is a no-op in this mock: the real store's setCurrentRunId
+      // does not change the mission epoch, and the timer tests only care about epoch.
+      const setCurrentRunId = (_runId: string | null) => {
+        /* no-op */
       };
 
       const scheduleIdle = (delayMs: number) => {
@@ -129,7 +130,7 @@ describe("P0: terminal → IDLE race", () => {
     it("C: re-applying the same runId does not cause a false stale detection", () => {
       const store = makeScheduleIdle();
 
-      store.startMission("run_a");
+      store.startMission();
       store.setCurrentRunId("run_a");
       store.setHoloState(() => "COMPLETE");
       store.scheduleIdle(100);

@@ -7,11 +7,10 @@
  * Never prints secret values.
  */
 
-import { ok, fail, warn, header, c } from "../lib/utils.js";
+import { header, c } from "../lib/utils.js";
 import {
   runAllChecks,
   summarizeChecks,
-  type CheckGroup,
   type CheckResult,
 } from "../lib/production-checks.js";
 

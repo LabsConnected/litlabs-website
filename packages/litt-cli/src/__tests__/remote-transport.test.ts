@@ -30,12 +30,12 @@ import {
   isRemoteAvailable,
   exchangeClerkToken,
   clearTerminalTokenCache,
-  type RemoteDispatchOptions,
 } from "../lib/remote.js";
 import { resolveDispatch } from "../lib/dispatch.js";
 import { DEFAULT_TERMINAL_URL } from "../lib/auth/auth-config.js";
 import { getAuthSession, resetAuthSession } from "../lib/auth/auth-session.js";
 import { createCredentialStore } from "../lib/auth/credential-store.js";
+import type { RemoteUnavailableError } from "../lib/remote-unavailable.js";
 
 // ─── Mock fetch ───────────────────────────────────────────────────
 
@@ -658,7 +658,7 @@ describe("CLI workspace error propagation", () => {
       },
     }, 400));
 
-    const { isRemoteUnavailable, RemoteUnavailableError } = await import("../lib/remote-unavailable.js");
+    const { isRemoteUnavailable } = await import("../lib/remote-unavailable.js");
     try {
       await dispatchRemote("status", [], {
         clerkToken: CLERK_TOKEN,
@@ -685,7 +685,7 @@ describe("CLI workspace error propagation", () => {
       },
     }, 400));
 
-    const { isRemoteUnavailable, RemoteUnavailableError } = await import("../lib/remote-unavailable.js");
+    const { isRemoteUnavailable } = await import("../lib/remote-unavailable.js");
     try {
       await dispatchRemote("status", [], {
         clerkToken: CLERK_TOKEN,
@@ -708,7 +708,7 @@ describe("CLI workspace error propagation", () => {
       },
     }, 403));
 
-    const { RemoteUnavailableError, isRemoteUnavailable } = await import("../lib/remote-unavailable.js");
+    const { isRemoteUnavailable } = await import("../lib/remote-unavailable.js");
     try {
       await dispatchRemote("status", [], {
         clerkToken: CLERK_TOKEN,
@@ -738,7 +738,7 @@ describe("CLI workspace error propagation", () => {
       error: "Invalid token",
     }, 401));
 
-    const { RemoteUnavailableError, isRemoteUnavailable } = await import("../lib/remote-unavailable.js");
+    const { isRemoteUnavailable } = await import("../lib/remote-unavailable.js");
     try {
       await dispatchRemote("status", [], {
         clerkToken: CLERK_TOKEN,
@@ -774,7 +774,7 @@ describe("CLI workspace error propagation", () => {
     it(`${code} (HTTP ${status}) → its own reason, never auth_revoked`, async () => {
       fetchSpy.mockResolvedValueOnce(mockFetchResponse({ error: { code, message } }, status));
 
-      const { RemoteUnavailableError, isRemoteUnavailable } = await import("../lib/remote-unavailable.js");
+      const { isRemoteUnavailable } = await import("../lib/remote-unavailable.js");
       try {
         await dispatchRemote("status", [], {
           clerkToken: CLERK_TOKEN,
@@ -804,7 +804,7 @@ describe("CLI workspace error propagation", () => {
   it("402 with no code is still read as insufficient_credits", async () => {
     fetchSpy.mockResolvedValueOnce(mockFetchResponse({ error: "Payment required" }, 402));
 
-    const { RemoteUnavailableError, isRemoteUnavailable } = await import("../lib/remote-unavailable.js");
+    const { isRemoteUnavailable } = await import("../lib/remote-unavailable.js");
     try {
       await dispatchRemote("status", [], { clerkToken: CLERK_TOKEN, terminalUrl: EXCHANGE_URL });
       expect.fail("Should have thrown");
@@ -817,7 +817,7 @@ describe("CLI workspace error propagation", () => {
   it("the billing gate's own auth codes DO still mean auth_revoked", async () => {
     for (const code of ["unauthenticated", "user_not_found"] as const) {
       fetchSpy.mockResolvedValueOnce(mockFetchResponse({ error: { code, message: "x" } }, 401));
-      const { RemoteUnavailableError, isRemoteUnavailable } = await import("../lib/remote-unavailable.js");
+      const { isRemoteUnavailable } = await import("../lib/remote-unavailable.js");
       try {
         await dispatchRemote("status", [], { clerkToken: CLERK_TOKEN, terminalUrl: EXCHANGE_URL });
         expect.fail("Should have thrown");

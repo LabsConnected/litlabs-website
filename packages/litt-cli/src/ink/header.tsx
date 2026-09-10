@@ -70,7 +70,6 @@ export function Header({
   executionTarget,
   localRuntime,
   remoteRuntime,
-  authEmail,
   signedIn,
 }: HeaderProps): React.ReactElement {
   const { stdout } = useStdout();

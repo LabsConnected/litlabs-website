@@ -35,7 +35,6 @@ export function toolSummary(
   toolId: string,
   success: boolean,
   message: string,
-  durationMs?: number,
 ): string {
   if (!success) {
     // Failure — first line of the error, truncated

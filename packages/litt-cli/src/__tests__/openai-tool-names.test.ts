@@ -43,7 +43,7 @@ function sseBody(lines: string[]): BodyInit {
   });
 }
 
-function recordingFetch(lines: string[], recorded: { body: any }): typeof fetch {
+function recordingFetch(lines: string[], recorded: { body: unknown }): typeof fetch {
   return (async (url: unknown, init?: RequestInit) => {
     recorded.body = JSON.parse(String(init?.body ?? "{}"));
     return new Response(sseBody(lines), {
@@ -264,7 +264,7 @@ describe("OpenAICompatibleModelProvider — full boundary round-trip", () => {
   };
 
   it("outgoing request declares sanitized function names", async () => {
-    const recorded: { body: any } = { body: null };
+    const recorded: { body: unknown } = { body: null };
     globalThis.fetch = recordingFetch(["data: [DONE]"], recorded);
 
     const provider = new OpenAICompatibleModelProvider({

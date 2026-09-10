@@ -11,8 +11,6 @@
 
 import {
   routeModel as modelsRouteModel,
-  brainLabel as modelsBrainLabel,
-  routingModeLabel as modelsRoutingModeLabel,
   type ModelRegistry,
   type ModelDefinition,
   type RoutingInput,

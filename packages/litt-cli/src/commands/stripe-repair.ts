@@ -12,12 +12,11 @@
  * Never prints secret values.
  */
 
-import { ok, fail, warn, header, c, exec } from "../lib/utils.js";
+import { ok, fail, header, c, exec } from "../lib/utils.js";
 import {
   checkWebhookEndpoint,
   EXPECTED_WEBHOOK_EVENTS,
   WEBHOOK_URL,
-  RAILWAY_SERVICE_NAME,
 } from "../lib/production-checks.js";
 import { redact } from "../lib/secret-redaction.js";
 

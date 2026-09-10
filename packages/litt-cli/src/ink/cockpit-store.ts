@@ -440,10 +440,7 @@ export function useCockpitStore() {
   // verify/failure/retry/success). NO chain-of-thought is ever stored.
   const [workstreamStore] = useState(() => new WorkstreamStore());
   const [workstream, setWorkstream] = useState<WorkstreamSnapshot>(() => workstreamStore.snapshot());
-  const commitWorkstream = useCallback(() => {
-    setWorkstream(workstreamStore.snapshot());
-  }, [workstreamStore]);
-  /** Push an activity via a mutation callback on the WorkstreamStore. */
+    /** Push an activity via a mutation callback on the WorkstreamStore. */
   const workstreamPush = useCallback((mutate: (s: WorkstreamStore) => void) => {
     mutate(workstreamStore);
     setWorkstream(workstreamStore.snapshot());

@@ -28,11 +28,9 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text, useStdout } from "ink";
 import { COLORS } from "./colors.js";
-import { classifyWidth } from "./ui-primitives.js";
 import { LiTTMark, type MarkState } from "./litt-mark.js";
 import {
   type WorkstreamSnapshot,
-  type WorkstreamActivity,
   type WorkstreamPhase,
   type WorkstreamOverallStatus,
   type VerificationState,
@@ -360,7 +358,6 @@ export function WorkstreamDock({
 }: WorkstreamDockProps): React.ReactElement {
   const { stdout } = useStdout();
   const w = width ?? stdout?.columns ?? 80;
-  const widthClass = classifyWidth(w);
 
   // Terminal states get special cards
   if (snapshot.overallStatus === "complete") {
@@ -385,7 +382,6 @@ export function WorkstreamDock({
   const currentIdx = visibleGroups.findIndex((g) => g.status === "running");
 
   // Narrow width: condense
-  const showObjective = widthClass !== "narrow" || !!snapshot.objective;
   const showNext = !!snapshot.nextAction;
   const showVerification = snapshot.verification !== null;
 

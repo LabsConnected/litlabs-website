@@ -705,7 +705,7 @@ describe("RoutingEngine", () => {
     const engine = new RoutingEngine(registry, { routingMode: "budget", selectedModel: null, capabilityOverrides: {}, lastUsedModel: null, showFallbackNotifications: true }, MODEL_CATALOG);
     // Pass explicit available list including local model (which might be down in real health check)
     const allIds = MODEL_CATALOG.map(m => m.id);
-    const { choice, telemetry } = engine.route("fix this bug", allIds, null, "budget");
+    const { choice } = engine.route("fix this bug", allIds, null, "budget");
     // Should pick the cheapest model with coding capability
     const codingModels = MODEL_CATALOG.filter(m => m.strengths.includes("coding"));
     const cheapest = [...codingModels].sort((a, b) =>
