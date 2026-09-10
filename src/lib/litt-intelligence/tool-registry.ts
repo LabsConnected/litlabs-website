@@ -1335,10 +1335,7 @@ export function registerInternalTools(): void {
         version: "1.0.0",
         inputSchema: {
           type: "object",
-          properties: {
-            productionUrl: { type: "string" },
-            config: { type: "object" },
-          },
+          properties: {},
           required: [],
         },
         outputSchema: { type: "object" },

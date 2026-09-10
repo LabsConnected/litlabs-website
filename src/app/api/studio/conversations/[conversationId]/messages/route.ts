@@ -14,7 +14,7 @@ import { buildStudioContext } from "@/lib/studio/project-resolver";
 import { resolveCurrentProject } from "@/lib/projects/resolve-current-project";
 import { recallMemories, persistMemory, formatMemoryContext, harvestUserPreferences } from "@/lib/studio/memory-service";
 import { studioLog } from "@/lib/studio/logger";
-import type { AgentSlug } from "@/lib/studio/types";
+import type { AgentSlug, MessageStatus } from "@/lib/studio/types";
 import { parseAgentSelection } from "@/lib/agent-selection";
 import { resolveRuntimeAgent, type RuntimeAgent } from "@/lib/agent-runtime";
 import { reserveCredits, settleRun, estimateCredits } from "@/lib/agent-billing";
@@ -682,7 +682,15 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             }));
           }
 
-          await updateMessageStatus(assistantMessage.id, userId, "completed", assistantText);
+          const finalMessageStatus: MessageStatus = launchFlowResult?.cancelled
+            ? "cancelled"
+            : launchFlowResult?.pendingApproval
+              ? "awaiting_approval"
+              : launchFlowResult?.success
+                ? "completed"
+                : "failed";
+
+          await updateMessageStatus(assistantMessage.id, userId, finalMessageStatus, assistantText);
           if (agentRunId) {
             const actualCredits = runtimeAgent
               ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
@@ -691,7 +699,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               inputTokens: Math.ceil(finalPrompt.length / 4),
               outputTokens: Math.ceil(assistantText.length / 4),
               actualCredits,
-              status: "completed",
+              status: finalMessageStatus === "completed" ? "completed" : "failed",
             }, reservedCredits, reservationId).catch(() => {
               // Best-effort settlement — must not leak unhandled rejection
             });
@@ -737,7 +745,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             assistantMessage: {
               ...assistantMessage,
               content: assistantText,
-              status: "completed",
+              status: finalMessageStatus,
             },
             revision: newRevision,
             provider: "openrouter-v2",

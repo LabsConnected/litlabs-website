@@ -72,6 +72,7 @@ const SENSITIVE_ACTIONS: ReadonlySet<string> = new Set([
   "git.rebase",
   "files.delete",
   "deploy.production",
+  "deploy.execute",
 ]);
 
 export class PermissionEngine {

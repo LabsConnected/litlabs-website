@@ -530,18 +530,24 @@ export async function POST(req: NextRequest) {
 
               // For one_time plans (Founder), do NOT debit LiTTBits —
               // Founder has 0 LiTTBits. For subscription plans, debit
-              // the refunded amount from purchased balance.
-              if (plan.billingType === "subscription") {
-                try {
-                  await sb.rpc("debit_credits", {
-                    p_user_id: refundUser.id,
-                    p_amount: charge.amount_refunded / 100,
-                    p_category: "refund",
-                    p_description: `Refund for charge ${charge.id}`,
-                    p_idempotency_key: `refund_${charge.id}`,
-                  });
-                } catch {
-                  // Ledger not available — skip
+              // a prorated amount of the monthly credit grant based on the
+              // fraction of the charge that was refunded.
+              if (plan.billingType === "subscription" && plan.monthlyCredits > 0 && charge.amount > 0) {
+                const debitBits = Math.round(
+                  (charge.amount_refunded / charge.amount) * plan.monthlyCredits,
+                );
+                if (debitBits > 0) {
+                  try {
+                    await sb.rpc("debit_credits", {
+                      p_user_id: refundUser.id,
+                      p_amount: debitBits,
+                      p_category: "refund",
+                      p_description: `Refund for charge ${charge.id}`,
+                      p_idempotency_key: `refund_${charge.id}`,
+                    });
+                  } catch {
+                    // Ledger not available — skip
+                  }
                 }
               }
             }
@@ -558,18 +564,29 @@ export async function POST(req: NextRequest) {
             .eq("clerk_id", refundClerkId)
             .single();
           if (refundUser) {
-            // Debit the refunded amount from purchased balance via ledger
-            try {
-              await sb.rpc("debit_credits", {
-                p_user_id: refundUser.id,
-                // Stripe amount is in cents; convert to LiTTBits (1:1 with USD cents in this system).
-                p_amount: charge.amount_refunded / 100,
-                p_category: "refund",
-                p_description: `Refund for charge ${charge.id}`,
-                p_idempotency_key: `refund_${charge.id}`,
-              });
-            } catch {
-              // Ledger not available — skip
+            // The original credit pack's LiTTBit grant is stored on the
+            // PaymentIntent/Charge metadata. Debit the same fraction of
+            // that grant as the refunded amount / original charge amount.
+            const coinAmount = refundMeta.coin_amount
+              ? parseInt(refundMeta.coin_amount, 10)
+              : NaN;
+            if (coinAmount > 0 && charge.amount > 0) {
+              const debitBits = Math.round(
+                (charge.amount_refunded / charge.amount) * coinAmount,
+              );
+              if (debitBits > 0) {
+                try {
+                  await sb.rpc("debit_credits", {
+                    p_user_id: refundUser.id,
+                    p_amount: debitBits,
+                    p_category: "refund",
+                    p_description: `Refund for charge ${charge.id}`,
+                    p_idempotency_key: `refund_${charge.id}`,
+                  });
+                } catch {
+                  // Ledger not available — skip
+                }
+              }
             }
           }
         }

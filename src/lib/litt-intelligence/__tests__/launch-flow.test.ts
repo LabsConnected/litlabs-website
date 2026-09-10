@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { runLaunchFlow, type LaunchFlowOptions } from "@/lib/litt-intelligence/launch-flow";
 import type { WorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import type { AgentLoopResult } from "@/lib/litt-intelligence/agent-loop-v2";
-import type { DeployResult, DeployEnvironmentConfig } from "@/lib/litt-intelligence/deploy";
+import type { DeployResult } from "@/lib/litt-intelligence/deploy";
 import type { BuildFixLoopResult } from "@/lib/litt-intelligence/build-fix-loop";
 
 // ─── Mocks ──────────────────────────────────────────────────────────
@@ -99,6 +99,10 @@ function makeOptions(overrides: Partial<LaunchFlowOptions> = {}): LaunchFlowOpti
     buildPreviewUrl: () => "https://preview.litlabs.net/preview/ws-test",
     runAgentLoop: vi.fn().mockResolvedValue(successAgentResult()),
     runDeployFlow: vi.fn().mockResolvedValue(successDeployResult()),
+    resolveDeployConfig: vi.fn().mockReturnValue({
+      ok: true,
+      config: { provider: "railway" as const, token: "test-token", projectId: "svc-123", productionUrl: "https://example.litlabs.net" },
+    }),
     ...overrides,
   };
 }
@@ -211,19 +215,49 @@ describe("Launch Flow: bounded repair retry exhaustion", () => {
   });
 });
 
+// ─── Tests: preview timeout and stale state ─────────────────────────
+
+describe("Launch Flow: preview timeout", () => {
+  it("fails when preview never becomes ready within the configured timeout", async () => {
+    const getPreviewStatus = vi.fn().mockResolvedValue({
+      status: "starting", port: 4101, framework: "nextjs", command: "pnpm dev", startedAt: Date.now(),
+      lastHealthCheck: Date.now(), error: null, errorCode: null, logs: [],
+    });
+
+    const transport = createMockTransport({ getPreviewStatus });
+    const options = makeOptions({ transport, maxPreviewWaitMs: 50, previewPollIntervalMs: 20 });
+
+    const result = await runLaunchFlow(options);
+
+    expect(result.success).toBe(false);
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("timeout");
+    expect(getPreviewStatus).toHaveBeenCalled();
+  });
+
+  it("does not report a stale preview as ready when status reports ready but contains an error", async () => {
+    const getPreviewStatus = vi.fn().mockResolvedValue({
+      status: "ready", port: 4101, framework: "nextjs", command: "pnpm dev", startedAt: Date.now(),
+      lastHealthCheck: Date.now(), error: "stale process", errorCode: "preview_dev_server_failed", logs: [],
+    });
+
+    const transport = createMockTransport({ getPreviewStatus });
+    const options = makeOptions({ transport });
+
+    const result = await runLaunchFlow(options);
+
+    expect(result.success).toBe(false);
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("stale process");
+  });
+});
+
 // ─── Tests: deploy success ─────────────────────────────────────────
 
 describe("Launch Flow: deploy success", () => {
   it("deploys and verifies the production URL after a successful preview", async () => {
-    const deployConfig: DeployEnvironmentConfig = {
-      provider: "railway",
-      token: "test-token",
-      projectId: "svc-123",
-      productionUrl: "https://example.litlabs.net",
-    };
-
     const runDeployFlow = vi.fn().mockResolvedValue(successDeployResult({ productionUrl: "https://example.litlabs.net" }));
-    const options = makeOptions({ enableDeploy: true, deployConfig, runDeployFlow });
+    const options = makeOptions({ enableDeploy: true, runDeployFlow });
 
     const result = await runLaunchFlow(options);
 
@@ -231,7 +265,9 @@ describe("Launch Flow: deploy success", () => {
     expect(result.status).toBe("deployed");
     expect(result.productionUrl).toBe("https://example.litlabs.net");
     expect(result.finalText).toContain("Deployed and verified");
-    expect(runDeployFlow).toHaveBeenCalledWith(expect.objectContaining({ config: deployConfig }));
+    expect(runDeployFlow).toHaveBeenCalledWith(expect.objectContaining({
+      config: expect.objectContaining({ provider: "railway", projectId: "svc-123" }),
+    }));
   });
 });
 

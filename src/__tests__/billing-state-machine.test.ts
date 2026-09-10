@@ -136,12 +136,20 @@ function buildTrackingSupabase(existingEvent = false) {
       inserts.push({ table, row });
       return { error: null };
     }),
-    update: vi.fn((patch: any) => ({
-      eq: vi.fn(async (col: string, val: any) => {
-        updates.push({ table, patch, matches: [{ col, val }] });
-        return { error: null };
-      }),
-    })),
+    update: vi.fn((patch: any) => {
+      const matches: { col: string; val: any }[] = [];
+      const builder: any = {
+        eq: vi.fn((col: string, val: any) => {
+          matches.push({ col, val });
+          return builder;
+        }),
+        then: (resolve: (value: any) => void) => {
+          updates.push({ table, patch, matches: [...matches] });
+          resolve({ error: null });
+        },
+      };
+      return builder;
+    }),
   });
 
   const sb = {
@@ -732,6 +740,69 @@ describe("Webhook event processing — state mutations", () => {
     const res = await webhookPOST(req);
 
     expect(res.status).toBe(500);
+  });
+
+  it("charge.refunded (credit pack) → debits the prorated LiTTBit grant from purchased balance", async () => {
+    const { sb, rpcCalls } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+
+    mockConstructEvent.mockReturnValue(makeStripeEvent("charge.refunded", {
+      object: {
+        id: "ch_creditpack_refund",
+        amount: 1000,
+        amount_refunded: 1000,
+        currency: "usd",
+        payment_intent: "pi_creditpack_123",
+        metadata: {
+          product_type: "credit_pack",
+          clerk_id: "clerk_123",
+          coin_amount: "4000",
+        },
+      },
+    }));
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const req = makeWebhookRequest("body", "sig");
+    const res = await webhookPOST(req);
+
+    expect(res.status).toBe(200);
+    const debits = rpcCalls.filter((c) => c.fn === "debit_credits");
+    expect(debits.length).toBe(1);
+    expect(debits[0].params.p_amount).toBe(4000);
+    expect(debits[0].params.p_idempotency_key).toBe("refund_ch_creditpack_refund");
+  });
+
+  it("charge.refunded (subscription plan) → debits prorated monthly credits and revokes entitlement", async () => {
+    const { sb, rpcCalls, updates } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+
+    mockConstructEvent.mockReturnValue(makeStripeEvent("charge.refunded", {
+      object: {
+        id: "ch_creator_refund",
+        amount: 1500,
+        amount_refunded: 750,
+        currency: "usd",
+        payment_intent: "pi_creator_123",
+        metadata: {
+          product_type: "plan",
+          clerk_id: "clerk_123",
+          plan_id: "creator_beta",
+        },
+      },
+    }));
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const req = makeWebhookRequest("body", "sig");
+    const res = await webhookPOST(req);
+
+    expect(res.status).toBe(200);
+    expect(updates.find((u) => u.patch.status === "refunded")).toBeDefined();
+    const debits = rpcCalls.filter((c) => c.fn === "debit_credits");
+    expect(debits.length).toBe(1);
+    // Creator Beta: 6000 credits over $15 (1500c). Refunding 750c = 50% → 3000 credits.
+    expect(debits[0].params.p_amount).toBe(3000);
   });
 });
 

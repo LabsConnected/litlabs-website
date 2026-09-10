@@ -62,7 +62,7 @@ export interface DeployFlowOptions {
   fetchFn?: typeof fetch;
 }
 
-const RAILWAY_GRAPHQL_URL = "https://backboard.railway.app/graphql/v1";
+const RAILWAY_GRAPHQL_URL = "https://backboard.railway.com/graphql/v2";
 const VERCEL_API_URL = "https://api.vercel.com";
 const DEFAULT_POLL_INTERVAL_MS = 10_000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 36; // 6 minutes
@@ -76,8 +76,17 @@ export function resolveDeployConfig(
 ): { ok: true; config: DeployEnvironmentConfig } | { ok: false; error: string } {
   const railwayToken = env.RAILWAY_API_TOKEN;
   const railwayServiceId = env.RAILWAY_SERVICE_ID;
+  const railwayEnvironmentId = env.RAILWAY_ENVIRONMENT_ID;
 
   if (railwayToken && railwayServiceId) {
+    if (!railwayEnvironmentId) {
+      return {
+        ok: false,
+        error:
+          "Railway deployment is missing RAILWAY_ENVIRONMENT_ID. " +
+          "Set RAILWAY_API_TOKEN, RAILWAY_SERVICE_ID, and RAILWAY_ENVIRONMENT_ID.",
+      };
+    }
     return {
       ok: true,
       config: {
@@ -85,7 +94,7 @@ export function resolveDeployConfig(
         token: railwayToken,
         projectId: railwayServiceId,
         railwayProjectId: env.RAILWAY_PROJECT_ID,
-        environmentId: env.RAILWAY_ENVIRONMENT_ID,
+        environmentId: railwayEnvironmentId,
         productionUrl: env.DEPLOY_PRODUCTION_URL,
       },
     };
@@ -141,27 +150,17 @@ async function triggerRailwayDeployment(
   config: DeployEnvironmentConfig,
   fetchFn: typeof fetch,
 ): Promise<TriggerResult> {
+  if (!config.environmentId) {
+    throw new Error("Railway deployment requires environmentId in the deploy config");
+  }
+
   const body = {
     query: `
-      mutation DeployService($serviceId: String!, $environmentId: String, $projectId: String) {
-        deploymentCreate(
-          input: {
-            serviceId: $serviceId,
-            environmentId: $environmentId,
-            projectId: $projectId,
-            status: QUEUED
-          }
-        ) {
-          id
-          status
-        }
+      mutation DeployService($serviceId: String!, $environmentId: String!) {
+        serviceInstanceDeployV2(serviceId: $serviceId, environmentId: $environmentId)
       }
     `,
-    variables: {
-      serviceId: config.projectId,
-      environmentId: config.environmentId,
-      projectId: config.railwayProjectId,
-    },
+    variables: { serviceId: config.projectId, environmentId: config.environmentId },
   };
 
   const resp = await fetchFn(RAILWAY_GRAPHQL_URL, {
@@ -182,15 +181,15 @@ async function triggerRailwayDeployment(
     throw new Error(`Railway deploy trigger failed (${resp.status}): ${errors || "Unknown error"}`);
   }
 
-  const deployment = (data.data as Record<string, unknown> | undefined)?.deploymentCreate as
-    | { id?: string; status?: string }
+  const deploymentId = (data.data as Record<string, unknown> | undefined)?.serviceInstanceDeployV2 as
+    | string
     | undefined;
 
-  if (!deployment?.id) {
+  if (!deploymentId) {
     throw new Error("Railway deploy trigger did not return a deployment ID");
   }
 
-  return { id: deployment.id, status: deployment.status ?? "QUEUED" };
+  return { id: deploymentId, status: "QUEUED" };
 }
 
 /**
@@ -394,29 +393,32 @@ export async function verifyProductionUrl(
     candidates.push(`${url}/api/health`);
   }
 
+  let lastResult: VerifyProductionUrlResult | null = null;
   for (const candidate of candidates) {
     try {
       const { ok, status, text } = await tryFetch(candidate);
       if (!ok) {
-        return { success: false, detail: `GET ${candidate} returned HTTP ${status}`, url: candidate };
+        lastResult = { success: false, detail: `GET ${candidate} returned HTTP ${status}`, url: candidate };
+        continue;
       }
 
       if (options?.expectedCommitSha && !text.includes(options.expectedCommitSha)) {
-        return {
+        lastResult = {
           success: false,
           detail: `GET ${candidate} returned HTTP ${status} but the response did not contain the expected commit SHA`,
           url: candidate,
         };
+        continue;
       }
 
       return { success: true, detail: `GET ${candidate} returned HTTP ${status}`, url: candidate };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return { success: false, detail: `Could not reach ${candidate}: ${message}`, url: candidate };
+      lastResult = { success: false, detail: `Could not reach ${candidate}: ${message}`, url: candidate };
     }
   }
 
-  return { success: false, detail: `Could not verify production URL ${url}`, url };
+  return lastResult ?? { success: false, detail: `Could not verify production URL ${url}`, url };
 }
 
 /**
@@ -490,7 +492,8 @@ export async function runDeployFlow(options: DeployFlowOptions = {}): Promise<De
     const message = err instanceof Error ? err.message : String(err);
     // Never leak full tokens in error messages.
     const safe = message
-      .replace(new RegExp(config.token, "g"), redactToken(config.token))
+      .split(config.token)
+      .join(redactToken(config.token))
       .replace(/[a-f0-9]{32,}/gi, "<redacted-token-or-sha>");
     return {
       success: false,

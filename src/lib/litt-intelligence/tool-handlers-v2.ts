@@ -18,10 +18,16 @@ import type { WorkspaceTransport } from "./workspace-transport";
 
 // ─── Tool Handler Signature ───────────────────────────────────────
 
+export interface ToolHandlerResult {
+  success?: boolean;
+  error?: string | null;
+  [key: string]: unknown;
+}
+
 export type ToolHandler = (
   inputs: Record<string, unknown>,
   transport: WorkspaceTransport,
-) => Promise<unknown>;
+) => Promise<ToolHandlerResult>;
 
 // ─── File Tools ───────────────────────────────────────────────────
 
@@ -419,18 +425,14 @@ export const handlePreviewStop: ToolHandler = async (_inputs, transport) => {
 // ─── Deploy Tools ───────────────────────────────────────────────────
 
 import { resolveDeployConfig, runDeployFlow, verifyProductionUrl } from "./deploy";
-import type { DeployEnvironmentConfig } from "./deploy";
 
-export const handleDeployExecute: ToolHandler = async (inputs) => {
-  const config = inputs.config as DeployEnvironmentConfig | undefined;
-  const productionUrl = inputs.productionUrl as string | undefined;
-
+export const handleDeployExecute: ToolHandler = async () => {
   try {
-    const envConfig = config ? { ok: true as const, config } : resolveDeployConfig();
+    const envConfig = resolveDeployConfig();
     if (!envConfig.ok) {
       return { success: false, error: envConfig.error };
     }
-    const result = await runDeployFlow({ config: envConfig.config, productionUrl });
+    const result = await runDeployFlow({ config: envConfig.config });
     return {
       success: result.success,
       provider: result.provider,

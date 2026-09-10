@@ -19,7 +19,7 @@ import "server-only";
 import type { WorkspaceTransport } from "./workspace-transport";
 import { runAgentLoopV2, type AgentLoopResult, type AgentLoopConfig } from "./agent-loop-v2";
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
-import { runDeployFlow, verifyProductionUrl, type DeployFlowOptions, type DeployResult, type DeployEnvironmentConfig } from "./deploy";
+import { runDeployFlow, resolveDeployConfig, verifyProductionUrl, type DeployFlowOptions, type DeployResult, type DeployProvider } from "./deploy";
 import type { BuildFixLoopResult } from "./build-fix-loop";
 import { ProgressEmitter } from "./progress-events";
 import { buildPreviewProxyUrl } from "@/lib/terminal-internal-client";
@@ -36,7 +36,6 @@ export interface LaunchFlowOptions {
   executionMode?: AgentLoopConfig["executionMode"];
   enableBuildFix?: boolean;
   enableDeploy?: boolean;
-  deployConfig?: DeployEnvironmentConfig;
   deployEnvironment?: "production" | "preview";
   maxPreviewWaitMs?: number;
   previewPollIntervalMs?: number;
@@ -54,6 +53,8 @@ export interface LaunchFlowOptions {
   ) => Promise<AgentLoopResult>;
   /** Injected for tests. */
   runDeployFlow?: (options: DeployFlowOptions) => Promise<DeployResult>;
+  /** Injected for tests. */
+  resolveDeployConfig?: () => { ok: true; config: { provider: DeployProvider; token: string; projectId: string; productionUrl?: string } } | { ok: false; error: string };
   /** Injected for tests. */
   buildPreviewUrl?: (workspaceId: string) => string;
 }
@@ -126,10 +127,10 @@ async function startAndWaitForPreview(
     checkSignal(opts.signal);
 
     const status = await transport.getPreviewStatus();
-    progress.emit({ type: "preview_status", status: status.status, healthy: status.status === "ready" });
+    progress.emit({ type: "preview_status", status: status.status, healthy: status.status === "ready" && !status.error });
 
-    if (status.status === "ready") return "ready";
-    if (status.status === "failed") return "failed";
+    if (status.status === "ready" && !status.error) return "ready";
+    if (status.status === "failed" || status.error) return "failed";
 
     await sleep(opts.pollIntervalMs);
   }
@@ -357,16 +358,28 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
     checkSignal(signal);
     emitStep(progress, steps, "Deploying to production...");
     progress.emit({ type: "phase", phase: "deploy", step: agentResult.stepsUsed + 2 });
+
+    const envConfig = (options.resolveDeployConfig ?? resolveDeployConfig)();
+    if (!envConfig.ok) {
+      progress.emit({ type: "deploy_result", success: false, error: envConfig.error });
+      return baseResult({
+        status: "failed",
+        previewUrl,
+        finalText: `Deployment cannot run: ${envConfig.error}`,
+        error: envConfig.error,
+        repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
+        runtimeRepairAttempts,
+      });
+    }
+
     progress.emit({
       type: "deploy_start",
       environment: options.deployEnvironment ?? "production",
-      provider: options.deployConfig?.provider ?? "railway",
+      provider: envConfig.config.provider,
     });
 
     const deployFlowOptions: DeployFlowOptions = {
-      config: options.deployConfig,
-      productionUrl:
-        options.deployConfig?.productionUrl ?? process.env.DEPLOY_PRODUCTION_URL,
+      config: envConfig.config,
       signal,
     };
 

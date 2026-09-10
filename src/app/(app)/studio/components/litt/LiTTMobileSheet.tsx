@@ -79,7 +79,7 @@ export default function LiTTMobileSheet({
           <button
             type="button"
             onClick={() => onTabChange("chat")}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+            className="flex min-h-10 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
             style={{
               color: activeTab === "chat" ? "var(--litt-primary)" : "var(--text-muted)",
               backgroundColor: activeTab === "chat" ? "rgba(139,92,246,0.1)" : "transparent",
@@ -93,7 +93,7 @@ export default function LiTTMobileSheet({
           <button
             type="button"
             onClick={() => onTabChange("live")}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+            className="flex min-h-10 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
             style={{
               color: activeTab === "live" ? "var(--litt-primary)" : "var(--text-muted)",
               backgroundColor: activeTab === "live" ? "rgba(139,92,246,0.1)" : "transparent",
@@ -108,7 +108,7 @@ export default function LiTTMobileSheet({
           <button
             type="button"
             onClick={onClose}
-            className="grid h-6 w-6 place-items-center rounded-md transition hover:bg-white/10"
+            className="grid h-9 w-9 place-items-center rounded-md transition hover:bg-white/10"
             style={{ color: "var(--text-muted)" }}
             aria-label="Close LiTT"
             data-testid="litt-mobile-sheet-close"

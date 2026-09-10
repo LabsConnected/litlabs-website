@@ -1915,7 +1915,7 @@ function CommandStudioContent() {
           <button
             type="button"
             onClick={() => setMobileLittOpen(true)}
-            className="fixed z-[10015] flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-[11px] font-bold shadow-lg"
+            className="fixed z-[10015] flex min-h-10 items-center gap-1.5 rounded-full border px-3.5 py-2 text-[11px] font-bold shadow-lg"
             style={{
               right: 12,
               bottom: "calc(64px + env(safe-area-inset-bottom) + 12px)",
