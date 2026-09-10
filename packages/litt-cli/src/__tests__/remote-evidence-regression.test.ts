@@ -26,6 +26,7 @@
  *      on the model choosing project.status.
  */
 
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
   runAgentLoop,
@@ -118,7 +119,10 @@ function makeRemoteProvider(turns: RemoteTurn[]): { provider: RemoteModelProvide
 }
 
 const INSPECT_PROMPT = "What branch am I on and is the working tree clean?";
-const SHELL = new NodeShellExecutor(process.cwd());
+// Use a path derived from this file so concurrent tests cannot mutate the
+// working directory underneath us via process.chdir().
+const TEST_CWD = fileURLToPath(new URL("../../../..", import.meta.url));
+const SHELL = new NodeShellExecutor(TEST_CWD);
 
 /** A registry whose project.status always fails, with a real error. */
 function makeFailingStatusRegistry(message: string) {
@@ -168,7 +172,7 @@ describe("REMOTE transport — native tool calls reach the agent loop", () => {
       model: provider,
       tools: createDefaultRegistry(),
       shell: SHELL,
-      cwd: process.cwd(),
+      cwd: TEST_CWD,
       maxRounds: 10,
     });
 
@@ -217,7 +221,7 @@ describe("REMOTE project.status → repository_status → verified inspection", 
       model: provider,
       tools: createDefaultRegistry(),
       shell: SHELL,
-      cwd: process.cwd(),
+      cwd: TEST_CWD,
       maxRounds: 10,
       verificationGate: gate,
       // Exactly how the controller feeds the tracker.
@@ -254,7 +258,7 @@ describe("REMOTE repository evidence — fail closed", () => {
       model: provider,
       tools: makeFailingStatusRegistry("git status failed: not a git repository"),
       shell: SHELL,
-      cwd: process.cwd(),
+      cwd: TEST_CWD,
       maxRounds: 10,
       emitter: (event) => {
         const data = event.data as { toolId?: string; success?: boolean; message?: string };
@@ -315,7 +319,7 @@ describe("REMOTE inspection — deterministic evidence acquisition", () => {
       model: provider,
       tools: createDefaultRegistry(),
       shell: SHELL,
-      cwd: process.cwd(),
+      cwd: TEST_CWD,
       maxRounds: 10,
       verificationGate: gate,
       emitter: (event) => {
@@ -348,7 +352,7 @@ describe("REMOTE inspection — deterministic evidence acquisition", () => {
       model: provider,
       tools: createDefaultRegistry(),
       shell: SHELL,
-      cwd: process.cwd(),
+      cwd: TEST_CWD,
       maxRounds: 10,
     });
 
