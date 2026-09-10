@@ -186,7 +186,7 @@ function deriveHeader(mission: MissionState): { text: string; color: string } {
 }
 
 /** The honest result block. */
-export function MissionResultBlock({ mission, gitModified, gitUntracked }: MissionResultBlockProps): React.ReactElement {
+export function MissionResultBlock({ mission, gitModified: _gitModified, gitUntracked: _gitUntracked }: MissionResultBlockProps): React.ReactElement {
   const state = mission.state;
   const { text: header, color: headerColor } = deriveHeader(mission);
   const isComplete = header === "COMPLETE";

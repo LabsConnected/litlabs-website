@@ -14,7 +14,6 @@
  */
 
 import { exec, detectProject, resolveProjectCwd } from "./utils.js";
-import { redactEnvValue, redact } from "./secret-redaction.js";
 import {
   getRailwayEnvVars,
   hasNonEmpty,
@@ -23,7 +22,6 @@ import {
   type EnvVarMap,
   type ExecFn,
   RAILWAY_PRODUCTION_SERVICE,
-  RAILWAY_PRODUCTION_ENVIRONMENT,
   RAILWAY_PRODUCTION_PROJECT_ID,
 } from "./railway-env.js";
 

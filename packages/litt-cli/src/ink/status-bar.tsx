@@ -39,7 +39,7 @@ import {
   formatDuration, approvalWaitSeconds, busySecondsExcludingApproval,
   type RuntimeState,
 } from "./runtime-state.js";
-import { SectionDivider, classifyWidth, RepoStateBadge, ModeToggle } from "./ui-primitives.js";
+import { SectionDivider, RepoStateBadge, ModeToggle } from "./ui-primitives.js";
 
 export interface StatusBarProps {
   project: string;
@@ -73,7 +73,6 @@ export function StatusBar({
 }: StatusBarProps): React.ReactElement {
   const { stdout } = useStdout();
   const width = stdout?.columns ?? 80;
-  const w = classifyWidth(width);
 
   // ── ONE authoritative runtime state — never a self-derived status ──
   // Approval, working, and terminal states are decided by the shared
@@ -87,7 +86,6 @@ export function StatusBar({
     missionState,
     hasApproval,
   });
-  const working = isBusyState(runtime) && runtime !== "waiting_for_approval";
   const busy = isBusyState(runtime) || isTerminalState(runtime);
 
   const [, setTick] = React.useState(0);

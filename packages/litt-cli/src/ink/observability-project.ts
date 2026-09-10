@@ -68,9 +68,6 @@ export function isActivePhase(holoState: string, isProcessing: boolean): boolean
 
 // ─── 1. ThinkingBlock ───────────────────────────────────────────────
 
-const WORKING_HOLO_PHASES: ReadonlySet<string> = new Set([
-  "UNDERSTANDING", "PLANNING", "READING", "EDITING", "RUNNING", "TESTING", "VERIFYING",
-]);
 
 /** Map a ToolStatus onto a ThinkingStep status (the "what's happening now" view). */
 function toolStatusToThinking(status: ToolStatus): ThinkingStep["status"] {

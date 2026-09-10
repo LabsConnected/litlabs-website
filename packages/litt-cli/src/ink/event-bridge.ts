@@ -434,9 +434,11 @@ export function useEventBridge(
       const isVerifying = store.state.holoState === "VERIFYING";
       if (!(holo === "RUNNING" && isVerifying)) {
         store.actions.setHoloState(holo);
-        // Auto-return to IDLE after terminal states (except APPROVAL which stays)
+        // Auto-return to IDLE after terminal states (except APPROVAL which stays).
+        // Use scheduleIdle so a new run started during the delay window does
+        // not get clobbered by a stale terminal→IDLE timer (runtime-state P0).
         if (holo === "COMPLETE" || holo === "FAILED" || holo === "CANCELLED" || holo === "TIMEOUT") {
-          setTimeout(() => store.actions.setHoloState("IDLE"), 2000);
+          store.actions.scheduleIdle(2000);
         }
       }
     }

@@ -23,7 +23,6 @@
  * latency-aware routing only applies to AUTO/BUDGET/MAX modes.
  */
 
-import type { RoutingMode } from "../ink/cockpit-store.js";
 import type { RoutedModel } from "./model-runtime.js";
 import { classifyMissionComplexity } from "./mission-complexity.js";
 

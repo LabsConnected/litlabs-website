@@ -209,7 +209,7 @@ describe("run reconciliation — MISSION path cleanup", () => {
     const h = harness();
     h.actions.addChatMessage({ role: "user", content: "task", status: "complete" });
     h.actions.addChatMessage({ role: "assistant", content: "", status: "streaming" });
-    let settled = false;
+    const settled = false;
     let escaped: Error | null = null;
     try {
       try {

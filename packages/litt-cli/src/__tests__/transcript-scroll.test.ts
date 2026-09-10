@@ -155,7 +155,7 @@ describe("transcript scroll window", () => {
     const messages = transcript(4);
     const layout = layoutTranscript(messages, WIDTH);
     // Each message after the first costs +1 row (turn rhythm).
-    const raw = messages.map((m) => layout.heights[0]); // not exact — recompute:
+    const raw = messages.map(() => layout.heights[0]); // not exact — recompute:
     expect(layout.total).toBeGreaterThan(raw.length * layout.heights[0]);
     const vp = computeViewport(messages, layout, REGION, null, 0);
     const rows = layout.prefix[vp.end] - layout.prefix[vp.start];
@@ -303,7 +303,6 @@ describe("scroll stick bug — auto-return with observability blocks", () => {
 
     // Scrolled viewport (full budget, no extraHeight) — this is what
     // the shell computes for rendering.
-    const scrolledVp = computeViewport(messages, layout, REGION, anchor, 2);
     // The scrolled viewport MIGHT be atBottom (larger budget) — that's OK.
     // The bug was that the auto-return used THIS atBottom.
 
@@ -445,7 +444,6 @@ describe("scroll stick bug — auto-return with observability blocks", () => {
 
   it("after Ctrl+End new updates follow normally (live mode)", () => {
     const messages = transcript(8);
-    const layout = layoutTranscript(messages, WIDTH);
 
     // After Ctrl+End, anchor = null (live).
     const anchor = endAnchor();

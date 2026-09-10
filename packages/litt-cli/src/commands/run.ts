@@ -22,7 +22,7 @@
 import { RuntimeSession } from "../lib/runtime-session.js";
 import { ok, fail, header, c, label, value } from "../lib/utils.js";
 import type { StreamChunk } from "@litt/agent-core";
-import { loadRun, formatRunListEntry } from "../lib/run-store.js";
+import { loadRun } from "../lib/run-store.js";
 import { formatFailureReport } from "../lib/failure-report.js";
 
 export async function runCommand(args: string[], session?: RuntimeSession): Promise<number> {

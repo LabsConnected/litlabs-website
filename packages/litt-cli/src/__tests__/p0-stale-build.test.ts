@@ -21,7 +21,6 @@ import {
   readBuildMeta,
   writeBuildMeta,
   checkStaleBuild,
-  type BuildMeta,
 } from "../lib/build-metadata.js";
 
 const tmpDir = path.join(os.tmpdir(), `litt-p0-build-${Date.now()}`);

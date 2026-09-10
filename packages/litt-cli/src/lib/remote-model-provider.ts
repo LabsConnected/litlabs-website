@@ -163,7 +163,6 @@ export class RemoteModelProvider implements ModelProvider {
     const isPinned = this._routingMode === "fixed";
     let resolvedModel = this._model;
     let resolvedProvider = this.providerId;
-    let actualServedModel: string | undefined;
     const nativeToolCalls: Array<{ name: string; args: string }> = [];
 
     const handleEvent = (event: RemoteModelStreamEvent): void => {
@@ -184,7 +183,6 @@ export class RemoteModelProvider implements ModelProvider {
           if (event.argsChunk) nativeToolCalls[event.index].args += event.argsChunk;
           break;
         case "done":
-          actualServedModel = event.actualServedModel;
           if (isPinned) {
             // PINNED: preserve the configured model as the contract.
             // The actual served model is recorded for audit only.

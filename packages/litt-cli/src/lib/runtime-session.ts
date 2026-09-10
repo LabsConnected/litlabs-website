@@ -36,7 +36,6 @@ import {
   type ShellExecutor,
   type ToolResult,
   type StreamChunk,
-  type CommandExecutorResult,
   type ExecutionRequest,
   type RiskAssessment,
   type VerificationResult,

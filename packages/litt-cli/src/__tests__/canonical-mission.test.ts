@@ -19,18 +19,13 @@ import {
   RuntimeStore,
   runAgentLoop,
   planMission,
-  resolveStepForTool,
   attachToolToStep,
   updateToolResultOnStep,
   progressMissionStepAfterTool,
-  toolToEvidenceType,
-  isStepEvidenceSatisfied,
   createShellExecutor,
   createDefaultRegistry,
-  ExecutionGateway,
   VerificationGate,
   type RuntimeEvent,
-  type ToolResult,
   type ChatMessage,
   type ModelProvider,
   type ModelStreamEvent,
@@ -335,7 +330,7 @@ describe("LIVE ACCEPTANCE: Full mission lifecycle", () => {
           }],
         };
       },
-    } as any;
+    } as unknown;
 
     const repairEvents: string[] = [];
     const result = await runAgentLoop("Test and verify", {

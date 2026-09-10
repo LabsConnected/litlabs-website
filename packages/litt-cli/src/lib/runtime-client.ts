@@ -427,7 +427,6 @@ export class RuntimeClient {
 
       case "command_end": {
         const success = data.success as boolean;
-        const exitCode = data.exitCode as number | null;
         const cancelled = data.cancelled as boolean;
         const timedOut = data.timedOut as boolean;
 

@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { RuntimeClient, type ConnectionState } from "../lib/runtime-client.js";
+import { RuntimeClient } from "../lib/runtime-client.js";
 import type { RuntimeState } from "@litt/agent-core";
 
 // ─── Mocks ────────────────────────────────────────────────────────

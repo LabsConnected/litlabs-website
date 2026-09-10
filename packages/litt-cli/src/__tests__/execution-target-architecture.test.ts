@@ -11,8 +11,8 @@
  *   - dispatch.ts parses --local and --remote flags
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { resolveRuntimeMode, resolveExecutionTarget, resolveLocalOnly, executionTargetLabel, type ExecutionTarget } from "../lib/execution-target.js";
+import { describe, it, expect, afterEach } from "vitest";
+import { resolveRuntimeMode, resolveExecutionTarget, resolveLocalOnly, executionTargetLabel } from "../lib/execution-target.js";
 import { resolveDispatch } from "../lib/dispatch.js";
 
 describe("execution-target: resolveRuntimeMode", () => {

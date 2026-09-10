@@ -14,7 +14,7 @@
 
 import React from "react";
 import { Box, Text } from "ink";
-import { COLORS, activityColor } from "./colors.js";
+import { COLORS } from "./colors.js";
 import type { ActivityEntry } from "./cockpit-store.js";
 import type { LayoutBand } from "./use-terminal-size.js";
 

@@ -628,7 +628,7 @@ describe("ClerkCliAuth", () => {
     });
 
     // Mock token + userinfo endpoints — but pass through localhost (callback server)
-    (fetchSpy.mockImplementation as any)(async (input: Parameters<typeof fetch>[0]) => {
+    (fetchSpy.mockImplementation as unknown)(async (input: Parameters<typeof fetch>[0]) => {
       const url = typeof input === "string" ? input : input.toString();
       // Pass through requests to the local callback server
       if (url.includes("127.0.0.1")) {
@@ -687,7 +687,7 @@ describe("ClerkCliAuth", () => {
       timeoutMs: 30_000, // long timeout — we'll trigger the mismatch manually
     });
 
-    (fetchSpy.mockImplementation as any)(async (input: Parameters<typeof fetch>[0]) => {
+    (fetchSpy.mockImplementation as unknown)(async (input: Parameters<typeof fetch>[0]) => {
       const url = typeof input === "string" ? input : input.toString();
       // Pass through requests to the local callback server
       if (url.includes("127.0.0.1")) {
@@ -730,7 +730,7 @@ describe("ClerkCliAuth", () => {
   });
 
   it("getAccessToken returns stored token when valid", async () => {
-    const auth = createTestAuth();
+    createTestAuth();
     // Manually store tokens
     const tokens = {
       accessToken: "stored-access",

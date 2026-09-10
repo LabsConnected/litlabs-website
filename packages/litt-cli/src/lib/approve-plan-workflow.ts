@@ -15,10 +15,10 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { getGitState } from "./git-state.js";
-import { checkCanonicalMain, guardBranchSwitch } from "./canonical-main.js";
+import { checkCanonicalMain } from "./canonical-main.js";
 import { acquireLease, releaseLease, checkLease, type LeaseCheck } from "./worktree-lease.js";
 
 /** The result of creating an isolated worktree for ACT. */

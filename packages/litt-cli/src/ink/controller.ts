@@ -70,7 +70,6 @@ import { probeLocalLane, resetLocalLaneCache, type LocalLaneStatus } from "../li
 import {
   localRoutePolicy,
   resolveLocalModel,
-  isLocalModelId,
   resolveRequestedLocalModel,
   type LocalRoutePolicy,
 } from "../lib/local-model-resolution.js";
@@ -83,7 +82,7 @@ import {
   formatInspectionForSynthesis,
 } from "../lib/read-lane.js";
 import { matchLocalToolMission, formatLocalToolSummary, type LocalToolResult } from "../lib/local-tool-mission.js";
-import { shouldSkipPlanning, classifyMissionComplexity } from "../lib/mission-complexity.js";
+import { shouldSkipPlanning } from "../lib/mission-complexity.js";
 import { PerfTrace } from "../lib/perf-trace.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
 import { createToolCallStreamFilter } from "../lib/tool-call-stream.js";
@@ -100,13 +99,8 @@ import { getGitState } from "../lib/git-state.js";
 import {
   shipWorkflow as safeShipWorkflow,
   createOrSwitchBranch as safeCreateOrSwitchBranch,
-  stageFiles as safeStageFiles,
-  commitStaged as safeCommitStaged,
-  pushBranch as safePushBranch,
   createDraftPR as safeCreateDraftPR,
   isProtectedBranch,
-  generateBranchName,
-  isBlockedGitCommand,
 } from "../lib/git-workflow.js";
 import { saveSession, summarize, type SessionSnapshot } from "../lib/session-store.js";
 import type { WorkspaceEntry } from "../lib/workspace-store.js";
@@ -590,7 +584,7 @@ async function runLocalToolMission(
 
   // ─── Create a REAL Mission in the canonical RuntimeStore ──────────
   const agentStore = session.getStore();
-  const mission = await agentStore.createMission({
+  await agentStore.createMission({
     goal: input,
     mode: session.getMode(),
     projectRoot,
@@ -734,6 +728,10 @@ async function runLocalToolMission(
     if (buildResult) store.actions.setMissionBuild(buildResult.success);
 
     // ─── Terminal mission state ─────────────────────────────────────
+    const firstFailure = allOk ? null : results.find((r) => !r.success);
+    const localFailureReason = firstFailure
+      ? `${firstFailure.label}: failed — ${firstFailure.message.slice(0, 200)}`
+      : "Some tools failed";
     if (allOk) {
       await agentStore.completeMission("Local-tool mission complete — all tools passed");
       store.actions.setHoloState("COMPLETE");
@@ -751,7 +749,7 @@ async function runLocalToolMission(
     } else {
       await agentStore.failMission("Local-tool mission failed — some tools failed");
       store.actions.setHoloState("FAILED");
-      store.actions.updateMissionState("FAILED");
+      store.actions.updateMissionState("FAILED", localFailureReason);
       store.actions.setMissionRuntimeProven(false);
       store.actions.failToolProgressMission();
       store.actions.addActivity({
@@ -778,7 +776,7 @@ async function runLocalToolMission(
     });
     await agentStore.failMission(`Local-tool mission error: ${errText}`);
     store.actions.setHoloState("FAILED");
-    store.actions.updateMissionState("FAILED");
+    store.actions.updateMissionState("FAILED", errText);
     store.actions.setMissionRuntimeProven(false);
     store.actions.failToolProgressMission();
     store.actions.addActivity({
@@ -1095,6 +1093,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   const openPalette = useCallback((query: string) => {
     store.actions.setOverlay("command-palette");
     store.actions.setOverlayQuery(query);
+  }, [store]);
+
+  const openFailureView = useCallback(() => {
+    const mission = store.state.missionState ?? store.state.lastCompletedMission;
+    const terminal = mission?.state;
+    if (terminal === "FAILED" || terminal === "CANCELLED" || terminal === "TIMEOUT") {
+      store.actions.setOverlay("failure-view");
+    }
   }, [store]);
 
   const openContext = useCallback((query: string) => {
@@ -2874,7 +2880,6 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // Simple missions (single-action, bounded scope) skip the
         // ~2.1s planning round and go directly to execution with a
         // default single step. Complex missions use the full planner.
-        const complexity = classifyMissionComplexity(input);
         let plan: { source: string; fallbackDomain?: string };
         let plannedSteps: Array<{ id: string; title: string; allowedActionScope: string[] }>;
 
@@ -3446,13 +3451,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             text: `Mission verified · ${seconds}s${agentSeconds !== seconds ? ` (agent ${agentSeconds}s)` : ""}`,
             fullText: `Mission ${mission.id} completed with runtime verification.\n${verificationSummary}`,
           });
+          store.actions.scheduleIdle(2000);
         } else {
           await agentStore.failMission(
             `Verification not proven: ${verificationSummary.slice(0, 200)}`,
             verificationSummary,
           );
           store.actions.setHoloState("FAILED");
-          store.actions.updateMissionState("FAILED");
+          store.actions.updateMissionState("FAILED", verificationSummary);
           store.actions.setMissionRuntimeProven(false);
           store.actions.failToolProgressMission();
           settled = true;
@@ -3465,6 +3471,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             text: `Mission not verified · ${seconds}s${agentSeconds !== seconds ? ` (agent ${agentSeconds}s)` : ""}`,
             fullText: `Mission ${mission.id} could not be verified.\nAgent termination: ${result.termination}\n${verificationSummary}`,
           });
+          store.actions.scheduleIdle(2000);
         }
         persistSession();
       } catch (err) {
@@ -3490,10 +3497,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           });
         }
         store.actions.setHoloState("FAILED");
-        store.actions.updateMissionState("FAILED");
+        store.actions.updateMissionState("FAILED", errText);
         store.actions.failToolProgressMission();
         settled = true;
         store.actions.stopBusy();
+        store.actions.scheduleIdle(2000);
         // Fail the canonical mission if one was created
         const agentStore = session.getStore();
         const m = agentStore.getMission();
@@ -3509,8 +3517,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           store.actions.setIsProcessing(false);
           store.actions.stopBusy();
           store.actions.setHoloState("FAILED");
-          store.actions.updateMissionState("FAILED");
+          store.actions.updateMissionState("FAILED", "Mission ended without a terminal outcome");
           store.actions.failToolProgressMission();
+          store.actions.scheduleIdle(2000);
         }
       }
       perf.end("mission");
@@ -3575,6 +3584,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     handleApproval,
     toggleMode,
     openPalette,
+    openFailureView,
     openContext,
     attachToken,
     openDiffViewer,

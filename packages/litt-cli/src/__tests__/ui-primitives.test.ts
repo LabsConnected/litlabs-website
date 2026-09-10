@@ -10,7 +10,6 @@ import {
   classifyWidth,
   truncateMid,
   truncateTail,
-  type TerminalWidth,
 } from "../ink/ui-primitives.js";
 
 describe("ui-primitives: classifyWidth", () => {

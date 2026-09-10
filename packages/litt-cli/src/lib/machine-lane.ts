@@ -398,7 +398,6 @@ export function formatMachineResult(res: MachineCommandResult): string {
   const stderr = typeof res.result.data?.stderr === "string"
     ? (res.result.data.stderr as string).trim()
     : "";
-  const code = res.result.data?.exitCode;
   const tail = stderr ? `\n${stderr}` : "";
   return `${locus} · ${cmd} — ${res.result.message}${tail}`;
 }

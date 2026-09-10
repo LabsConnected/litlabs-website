@@ -30,8 +30,6 @@ import { ModelRuntime } from "../lib/model-runtime.js";
 import { probeLocalLane } from "../lib/local-lane.js";
 import {
   localRoutePolicy,
-  resolveLocalModel,
-  localRoutedModel,
   isLocalModelId,
 } from "../lib/local-model-resolution.js";
 import { resolveExecutionTarget, resolveLocalOnly } from "../lib/execution-target.js";

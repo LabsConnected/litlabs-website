@@ -149,7 +149,7 @@ export class ToolProgressStore {
         status: success ? "completed" : "failed",
         completedAt: now,
         durationMs: dur,
-        summary: toolSummary(entry.toolId, success, message, dur),
+        summary: toolSummary(entry.toolId, success, message),
         lastChunk: null,
       },
       ...this.entries.slice(idx + 1),

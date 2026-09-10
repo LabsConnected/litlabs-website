@@ -23,7 +23,7 @@ import { useOverlayKeyboard } from "./overlay-manager.js";
 import { isEnter, isEscape, isTab, isUpArrow, isDownArrow } from "./keyboard-utils.js";
 import { COLORS, costTier } from "./colors.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
-import type { ModelDefinition, ProviderId } from "@litt/models";
+import type { ModelDefinition } from "@litt/models";
 import type { RoutingMode, ModelChoice } from "../lib/model-routing.js";
 
 export interface ModelPickerProps {
@@ -134,7 +134,7 @@ export function ModelPicker({
         }
       }
     }
-  }, [tab, routingIdx, selectedIdx, loading, availableModels, onSelectModel, onSelectRoutingMode, onCancel]));
+  }, [KEY_DEBUG, tab, onCancel, onSelectRoutingMode, routingIdx, loading, availableModels, selectedIdx, onSelectModel]));
 
   // Build the active model display
   const activeLabel = activeModel ?? (selectedModelId

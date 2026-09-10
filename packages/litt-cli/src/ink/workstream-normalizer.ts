@@ -205,67 +205,163 @@ export interface ActivityGroup {
   ids: string[];
 }
 
+/** Labels that carry no specific information for a given kind. These are
+ *  filtered from subject lists so the dock doesn't render redundant lines
+ *  like "Inspecting / Inspecting" or "Status / Status". */
+function isGenericLabel(kind: WorkstreamKind, label: string): boolean {
+  switch (kind) {
+    case "inspect":
+      return label === "Inspecting";
+    case "edit":
+      return label === "Updating";
+    case "test":
+      return label === "Testing" || label === "Running tests";
+    case "command":
+      return label === "Running command";
+    case "tool":
+      return label === "tool" || label === "Tool";
+    default:
+      return false;
+  }
+}
+
+/** A subject is worth rendering only if it adds information beyond the
+ *  row's own label. This removes exact duplicates, generic placeholders,
+ *  and subjects already contained in the label (e.g. a test label that
+ *  already names the file). */
+export function subjectAddsInformation(subject: string, label: string, kind: WorkstreamKind): boolean {
+  if (!subject || subject === label) return false;
+  if (isGenericLabel(kind, subject)) return false;
+  if (label.includes(subject)) return false;
+  return true;
+}
+
+function usefulSubjects(subjects: (string | undefined)[], label: string, kind: WorkstreamKind): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of subjects) {
+    if (!s || !subjectAddsInformation(s, label, kind) || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+
+function kindGroupLabel(kind: WorkstreamKind): { base: string; noun: string } {
+  switch (kind) {
+    case "inspect":
+      return { base: "Inspecting", noun: "files" };
+    case "edit":
+      return { base: "Updating", noun: "files" };
+    case "test":
+      return { base: "Testing", noun: "tests" };
+    default:
+      return { base: "", noun: "items" };
+  }
+}
+
 /** Group consecutive same-kind activities (e.g. 4 read_file → "Inspecting 4 files").
- *  Only groups inspect/edit/test kinds; others stay individual. */
+ *  Rules:
+ *    - inspect/edit/test with 3+ activities group into one count label.
+ *    - inspect/edit/test with 2 activities group ONLY when both are generic
+ *      (no distinct subject), so "Inspecting / Inspecting" collapses to
+ *      "Inspecting 2 files" while "a.ts / b.ts" stays separate.
+ *    - Non-groupable kinds only collapse exact consecutive duplicates
+ *      (same kind, label, status, subject) into "Label (N)", so repeated
+ *      "Status" rows merge without hiding distinct commands/tools.
+ *    - Failed and complete activities are never mixed in one group. */
 export function groupConsecutive(
   activities: Array<{ id: string; kind: WorkstreamKind; label: string; subject?: string; status: "running" | "complete" | "failed" }>,
 ): ActivityGroup[] {
   const GROUPABLE: WorkstreamKind[] = ["inspect", "edit", "test"];
   const groups: ActivityGroup[] = [];
   let i = 0;
+
+  function pushGroup(group: ActivityGroup): void {
+    groups.push(group);
+  }
+
   while (i < activities.length) {
     const act = activities[i];
+
+    // Non-groupable kinds: collapse only consecutive EXACT duplicates.
     if (!GROUPABLE.includes(act.kind)) {
-      groups.push({
+      const batch = [act];
+      let j = i + 1;
+      while (
+        j < activities.length &&
+        activities[j].kind === act.kind &&
+        activities[j].label === act.label &&
+        activities[j].status === act.status &&
+        (activities[j].subject ?? "") === (act.subject ?? "")
+      ) {
+        batch.push(activities[j]);
+        j++;
+      }
+      const count = batch.length;
+      const baseLabel = act.label;
+      const label = count > 1 ? `${baseLabel} (${count})` : baseLabel;
+      const subjects = usefulSubjects(batch.map((b) => b.subject), label, act.kind);
+      pushGroup({
         kind: act.kind,
-        label: act.label,
-        count: 1,
-        subjects: act.subject ? [act.subject] : [],
+        label,
+        count,
+        subjects,
         status: act.status,
-        ids: [act.id],
+        ids: batch.map((b) => b.id),
       });
-      i++;
+      i = j;
       continue;
     }
-    // Collect consecutive same-kind activities
+
+    // Collect consecutive same-kind + same-status activities.
     const batch = [act];
     let j = i + 1;
-    while (j < activities.length && activities[j].kind === act.kind) {
+    while (
+      j < activities.length &&
+      activities[j].kind === act.kind &&
+      activities[j].status === act.status
+    ) {
       batch.push(activities[j]);
       j++;
     }
-    if (batch.length <= 2) {
-      // Not enough to group — emit individually
-      for (const b of batch) {
-        groups.push({
-          kind: b.kind,
-          label: b.label,
-          count: 1,
-          subjects: b.subject ? [b.subject] : [],
-          status: b.status,
-          ids: [b.id],
-        });
-      }
-    } else {
-      // Group them
-      const subjects = batch
-        .map((b) => b.subject)
-        .filter((s): s is string => typeof s === "string" && s.length > 0);
-      const kindLabel = act.kind === "inspect" ? "Inspecting"
-        : act.kind === "edit" ? "Updating"
-        : act.kind === "test" ? "Testing"
-        : act.label;
+
+    const { base, noun } = kindGroupLabel(act.kind);
+    const allGeneric = batch.every(
+      (b) =>
+        isGenericLabel(b.kind, b.label) &&
+        (!b.subject || b.subject === b.label || isGenericLabel(b.kind, b.subject)),
+    );
+
+    // Group if 3+ activities, or 2+ when neither carries a distinct subject.
+    if (batch.length >= 3 || (batch.length >= 2 && allGeneric)) {
+      const label = `${base} ${batch.length} ${noun}`;
+      const subjects = usefulSubjects(batch.map((b) => b.subject), label, act.kind);
       const anyRunning = batch.some((b) => b.status === "running");
       const anyFailed = batch.some((b) => b.status === "failed");
-      groups.push({
+      pushGroup({
         kind: act.kind,
-        label: `${kindLabel} ${batch.length} ${act.kind === "inspect" ? "files" : act.kind === "edit" ? "files" : "tests"}`,
+        label,
         count: batch.length,
         subjects,
         status: anyFailed ? "failed" : anyRunning ? "running" : "complete",
         ids: batch.map((b) => b.id),
       });
+    } else {
+      // 1–2 activities with distinct subjects: emit individually.
+      for (const b of batch) {
+        const subjects = usefulSubjects([b.subject], b.label, b.kind);
+        pushGroup({
+          kind: b.kind,
+          label: b.label,
+          count: 1,
+          subjects,
+          status: b.status,
+          ids: [b.id],
+        });
+      }
     }
+
     i = j;
   }
   return groups;

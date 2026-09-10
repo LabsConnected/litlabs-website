@@ -214,7 +214,7 @@ export interface LiTTHoloPanelProps {
   missionStartedAt?: number | null;
 }
 
-export function LiTTHoloPanel({ state, activeModel, routingReason, missionStartedAt }: LiTTHoloPanelProps): React.ReactElement {
+export function LiTTHoloPanel({ state, activeModel, missionStartedAt }: LiTTHoloPanelProps): React.ReactElement {
   const color = stateColor(state);
   const face = FACES[state] ?? FACES.IDLE;
   const label = STATE_LABELS[state] ?? state;

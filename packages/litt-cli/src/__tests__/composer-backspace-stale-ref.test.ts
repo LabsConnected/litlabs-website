@@ -25,11 +25,6 @@ import { isBackspace, isEnter, isEscape, isPrintable, type KeyInfo } from "../in
 // Mirrors the exact logic in composer.tsx's useInput callback,
 // including the synchronous ref updates that fix the stale-ref bug.
 
-interface ComposerState {
-  value: string;
-  caret: number;
-}
-
 function createSimulatedComposer() {
   // Refs — these represent valueRef.current and caretRef.current.
   // The bug was that these were only updated in useEffect (deferred),
@@ -70,7 +65,6 @@ function createSimulatedComposer() {
     const pos = caretRef.current;
 
     if (isEnter(key, input)) {
-      const text = current.trim();
       // submit — no state change
       return;
     }

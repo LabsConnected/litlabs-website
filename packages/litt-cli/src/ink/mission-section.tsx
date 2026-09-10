@@ -36,7 +36,7 @@ function shortRunId(id: string | null): string {
   return id.length > 8 ? id.slice(0, 8) : id;
 }
 
-export function MissionSection({ holoState, mission, missionState, lastCompletedMission }: MissionSectionProps): React.ReactElement {
+export function MissionSection({ holoState, missionState, lastCompletedMission }: MissionSectionProps): React.ReactElement {
   const isWorking = holoState === "UNDERSTANDING" || holoState === "PLANNING" || holoState === "READING"
     || holoState === "EDITING" || holoState === "RUNNING" || holoState === "TESTING" || holoState === "VERIFYING";
   const isComplete = holoState === "COMPLETE";
@@ -47,7 +47,6 @@ export function MissionSection({ holoState, mission, missionState, lastCompleted
     const m = lastCompletedMission;
     const elapsedStr = formatElapsed(m.startedAt, m.endedAt);
     const filesChanged = m.filesTouched.length;
-    const commandsRun = m.commandsExecuted.length;
 
     return (
       <Box flexDirection="column" marginTop={0}>

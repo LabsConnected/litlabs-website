@@ -35,14 +35,14 @@ import { Box, Text, useInput } from "ink";
 import * as fs from "fs";
 import { normalizeKey, type KeyInfo } from "../input-keys.js";
 import {
-  applyKeyEvent, createComposerState, graphemeToCodeUnit, splitGraphemes,
+  applyKeyEvent, graphemeToCodeUnit, splitGraphemes,
   type ComposerState,
 } from "../composer-editor.js";
 import { COLORS } from "../colors.js";
 import { useCursorBlink } from "../use-cursor-blink.js";
 import { isTermux } from "../../lib/auth/browser-launcher.js";
 import { deriveFocusState } from "../focus-state.js";
-import { composerCopy, isBusyState, type RuntimeState } from "../runtime-state.js";
+import { composerCopy, isBusyState, isFailureState, type RuntimeState } from "../runtime-state.js";
 
 // ─── Debug instrumentation for first-input tracing ────────────────
 // Set LITT_INPUT_DEBUG=1 to trace the first several key events to a
@@ -79,6 +79,8 @@ export interface ComposerProps {
   onClosePalette?: () => void;
   /** Opens the context picker, seeded with the partial query. */
   onOpenContext: (query: string) => void;
+  /** Opens the failure details overlay when the mission has failed. */
+  onOpenFailureView?: () => void;
   disabled: boolean;
   /** True while a mission/chat is processing — composer shows a live indicator. */
   busy?: boolean;
@@ -100,7 +102,7 @@ export interface ComposerProps {
 
 export function Composer({
   value, onChange, onSubmit, onNavigateHistory,
-  onOpenContext, disabled, busy, runtimeState, scrolled, focusEpoch, onReturnToLive,
+  onOpenContext, onOpenFailureView, disabled, busy, runtimeState, scrolled, focusEpoch, onReturnToLive,
 }: ComposerProps): React.ReactElement {
   // The derived runtime state is the single copy authority. The raw
   // busy/disabled flags only apply when no runtime state was provided
@@ -180,6 +182,8 @@ export function Composer({
   useEffect(() => { onNavigateHistoryRef.current = onNavigateHistory; }, [onNavigateHistory]);
   const onOpenContextRef = useRef(onOpenContext);
   useEffect(() => { onOpenContextRef.current = onOpenContext; }, [onOpenContext]);
+  const onOpenFailureViewRef = useRef(onOpenFailureView);
+  useEffect(() => { onOpenFailureViewRef.current = onOpenFailureView; }, [onOpenFailureView]);
   const onReturnToLiveRef = useRef(onReturnToLive);
   useEffect(() => { onReturnToLiveRef.current = onReturnToLive; }, [onReturnToLive]);
   const pokeRef = useRef(cursor.poke);
@@ -238,6 +242,15 @@ export function Composer({
         return;
       }
       case "INSERT_TEXT": {
+        // Failure-view shortcut: pressing "v" on an empty draft while the
+        // mission is in a terminal failure state opens the failure details
+        // overlay. This makes the status bar's `v View` hint functional
+        // without swallowing "v" as typed input.
+        if (evt.text === "v" && valueRef.current === "" && isFailureState(runtime) && onOpenFailureViewRef.current) {
+          onOpenFailureViewRef.current();
+          return;
+        }
+
         // Typing while scrolled into history is an explicit "I'm back in
         // the composer" signal — return to live.
         if (scrolledRef.current) onReturnToLiveRef.current?.();
@@ -252,8 +265,9 @@ export function Composer({
         pokeRef.current();
 
         // Slash commands are plain composer input — typing "/" does NOT
-        // open the full command palette. Ctrl+K is the explicit palette
-        // entry point; pressing Enter submits a slash command normally.
+        // open the full command palette. Ctrl+K at the app level is the
+        // explicit palette entry point; pressing Enter submits a slash
+        // command normally.
         //
         // The @ context picker only opens on the FIRST "@" character typed
         // on an empty draft. Subsequent characters just extend the draft.
@@ -286,7 +300,7 @@ export function Composer({
         return;
       }
     }
-  }, []));
+  }, [runtime]));
 
   const placeholder = "Ask LiTT anything...";
   // The software caret exists ONLY when the composer is genuinely the

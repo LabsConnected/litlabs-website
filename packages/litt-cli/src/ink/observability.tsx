@@ -148,7 +148,6 @@ export function ToolResultBlock({
   const durationStr = durationMs != null
     ? `${durationMs < 1000 ? `${Math.round(durationMs)}ms` : `${(durationMs / 1000).toFixed(1)}s`}`
     : "";
-  const headerText = `${locus} · ${truncateMid(command, maxCmd)}`;
 
   if (w === "narrow") {
     // Borderless compact form for narrow terminals
