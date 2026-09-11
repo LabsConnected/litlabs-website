@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { mobileDiag } from "../lib/mobileDiagnostics";
 
 interface VisualViewportSnapshot {
   width: number;
@@ -12,9 +13,28 @@ interface VisualViewportSnapshot {
   bottomInset: number;
 }
 
+let loggedUnsupported = false;
+
 function getSnapshot(): VisualViewportSnapshot {
-  if (typeof window === "undefined" || !window.visualViewport) {
+  if (typeof window === "undefined") {
     return { width: 0, height: 0, offsetTop: 0, offsetLeft: 0, scale: 1, bottomInset: 0 };
+  }
+  if (!window.visualViewport) {
+    // Fall back to window.innerWidth/innerHeight instead of 0 — a mobile
+    // sheet sized off `vv.height` must never collapse to 0px just because
+    // this API isn't available (older WebViews / in-app browsers).
+    if (!loggedUnsupported) {
+      loggedUnsupported = true;
+      mobileDiag("viewport", "visual_viewport_unsupported");
+    }
+    return {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      offsetTop: 0,
+      offsetLeft: 0,
+      scale: 1,
+      bottomInset: 0,
+    };
   }
   const vv = window.visualViewport;
   const bottomInset = Math.max(

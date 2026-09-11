@@ -47,12 +47,18 @@ export function getTerminalServerUrl(): string {
 }
 
 /**
- * Resolve the voice-server base URL.
+ * Resolve the voice-server base URL, or "" if it isn't configured.
+ *
+ * Deliberately has NO hardcoded fallback: the voice-proxy that was
+ * previously guessed here (voice-proxy-production-3f9c.up.railway.app) lives
+ * in a separate Railway project from the website and cannot be assumed to
+ * share VOICE_AUTH_SECRET — connecting to it produces a WebSocket close code
+ * 4001 that looks like an auth failure. Callers must treat "" as "voice is
+ * not configured", not synthesize a guessed URL.
  *
  * Resolution order:
  *   1. VOICE_PUBLIC_URL              — canonical env var (preferred)
  *   2. NEXT_PUBLIC_VOICE_WS_URL      — browser-side WebSocket URL (ws:// → http://)
- *   3. Legacy hardcoded production URL
  */
 export function getVoiceServerUrl(): string {
   // 1. Canonical env var
@@ -68,6 +74,5 @@ export function getVoiceServerUrl(): string {
       .replace(/\/$/, "");
   }
 
-  // 3. Legacy hardcoded production URL
-  return "https://voice-proxy-production-3f9c.up.railway.app";
+  return "";
 }

@@ -15,6 +15,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { MessageSquare, Activity, X } from "lucide-react";
 import { useVisualViewport } from "../../hooks/useVisualViewport";
+import { mobileDiag } from "../../lib/mobileDiagnostics";
 import type { LiTTTab } from "../LiTTPanel";
 
 export interface LiTTMobileSheetProps {
@@ -57,7 +58,26 @@ export default function LiTTMobileSheet({
     200,
     Math.round(vv.height - MOBILE_BOTTOM_NAV_H - safeBottom),
   );
-  const sheetHeight = Math.min(Math.round(vv.height * 0.88), availableHeight);
+  const MIN_SHEET_HEIGHT = 150;
+  const rawSheetHeight = Math.min(Math.round(vv.height * 0.88), availableHeight);
+  // Never let the sheet render at (near-)0px — a bad viewport reading
+  // should degrade to "small but usable", not "invisible/unusable".
+  const sheetHeight = Math.max(MIN_SHEET_HEIGHT, rawSheetHeight);
+
+  const loggedDegenerateRef = useRef(false);
+  useEffect(() => {
+    const degenerate = rawSheetHeight < MIN_SHEET_HEIGHT;
+    if (degenerate && !loggedDegenerateRef.current) {
+      loggedDegenerateRef.current = true;
+      mobileDiag("viewport", "degenerate_sheet_height", {
+        vvHeight: Math.round(vv.height),
+        vvWidth: Math.round(vv.width),
+        rawSheetHeight,
+      });
+    } else if (!degenerate) {
+      loggedDegenerateRef.current = false;
+    }
+  }, [rawSheetHeight, vv.height, vv.width]);
 
   // When the keyboard opens, make sure the focused input (composer) is
   // scrolled into view inside the sheet's scrollable content area.
