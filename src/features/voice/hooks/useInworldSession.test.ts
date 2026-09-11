@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useInworldSession } from "./useInworldSession";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
+import { getVoiceConnection } from "@/lib/voice-client";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -351,6 +352,74 @@ describe("useInworldSession — TTS state machine", () => {
         await result.current.startMicrophone();
       }),
     ).rejects.toThrow(/not active/i);
+  });
+
+  it("connect() retries exactly once with a force-refreshed credential on a 4001 close", async () => {
+    vi.mocked(getVoiceConnection).mockClear();
+    const { result } = renderHook(() => useInworldSession({}));
+
+    const connectPromise = result.current.connect();
+    // Flush microtasks so the first getVoiceConnection() resolves and the
+    // first WebSocket is constructed.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const firstWs = MockWebSocket.instances[MockWebSocket.instances.length - 1]!;
+
+    // Proxy rejects the token pre-session with close code 4001.
+    act(() => firstWs.__fireClose(4001, "auth failed"));
+
+    // connect() should force-refresh the credential and open a second socket.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(MockWebSocket.instances.length).toBe(2);
+    const secondWs = MockWebSocket.instances[1]!;
+
+    act(() => secondWs.__fireOpen());
+    act(() => secondWs.__fireMessage({ type: "session.created" }));
+    act(() => secondWs.__fireMessage({ type: "session.updated" }));
+    await act(async () => {
+      await connectPromise;
+    });
+
+    expect(result.current.isConnected).toBe(true);
+    expect(useVoiceStore.getState().state).not.toBe("error");
+    expect(vi.mocked(getVoiceConnection).mock.calls).toEqual([[], [true]]);
+  });
+
+  it("connect() surfaces a real auth error when a second attempt also gets 4001", async () => {
+    const { result } = renderHook(() => useInworldSession({}));
+
+    const connectPromise = result.current.connect();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const firstWs = MockWebSocket.instances[MockWebSocket.instances.length - 1]!;
+    act(() => firstWs.__fireClose(4001, "auth failed"));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const secondWs = MockWebSocket.instances[MockWebSocket.instances.length - 1]!;
+    act(() => secondWs.__fireClose(4001, "auth failed again"));
+
+    let caught: unknown = null;
+    await act(async () => {
+      try {
+        await connectPromise;
+      } catch (e) {
+        caught = e;
+      }
+    });
+
+    expect(caught).toBeInstanceOf(Error);
+    expect(useVoiceStore.getState().state).toBe("error");
+    expect(result.current.isConnected).toBe(false);
   });
 
   it("transcript events update the store and call onTranscript", async () => {

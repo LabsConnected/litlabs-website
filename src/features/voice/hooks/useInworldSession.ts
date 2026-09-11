@@ -34,6 +34,15 @@ export interface TranscriptMetadata {
   sessionGeneration?: number;
 }
 
+/**
+ * Error thrown by a failed connection attempt, tagged with the WebSocket
+ * close code (when the failure was a close event) so connect() can tell a
+ * pre-session auth failure (4001) apart from other failure modes.
+ */
+interface VoiceConnectError extends Error {
+  wsCloseCode?: number;
+}
+
 interface UseInworldSessionReturn {
   /** Open the WebSocket transport (no microphone). Required for TTS. */
   connect: (agentId?: VoiceAgentId) => Promise<void>;
@@ -487,32 +496,27 @@ export function useInworldSession(
   }, []);
 
   // --- WebSocket connection ---
-  const connect = useCallback(
-    async (_agentId?: VoiceAgentId) => {
-      setErrorState(null);
-      setError(null);
-      setState("connecting");
-
+  // connectAttempt does a single connection attempt using the given voice
+  // connection info (token + endpoint). It does NOT retry — retry-on-4001
+  // logic lives in connect() below, which is the only exported entry point.
+  const connectAttempt = useCallback(
+    async (conn: Awaited<ReturnType<typeof getVoiceConnection>>) => {
       try {
-        // Get voice config (voices, etc.) but connect through our proxy
-        const conn = await getVoiceConnection();
-
-        // Client-side — mirrors getVoiceServerUrl() from src/lib/terminal-url.ts (server-only).
-        // The NEXT_PUBLIC_VOICE_WS_URL env var is the canonical source, but
-        // the Vercel CLI on Windows has trouble piping the value, so we
-        // hardcode the production proxy URL as a fallback. This is a PUBLIC
-        // URL (not secret) — it's the WebSocket endpoint of our voice-server
-        // deployed on Railway.
-        const proxyUrl = process.env.NEXT_PUBLIC_VOICE_WS_URL ||
-          "wss://voice-proxy-production-3f9c.up.railway.app/voice";
-        if (!proxyUrl) {
-          throw new Error("Voice proxy is not configured. Set NEXT_PUBLIC_VOICE_WS_URL.");
+        // /api/voice/token is the canonical source of truth for BOTH the
+        // auth token AND the WebSocket endpoint — conn.endpoint always wins.
+        // Do NOT fall back to a hardcoded/guessed proxy URL here: signing a
+        // token against one proxy while connecting to a different one is
+        // exactly the split-brain (VOICE_AUTH_SECRET mismatch) that produces
+        // close code 4001.
+        if (!conn.endpoint) {
+          throw new Error("Voice proxy endpoint is not configured (missing conn.endpoint).");
         }
 
-        // Convert ws:// to wss:// for production if needed
-        const wsUrl = proxyUrl.startsWith("ws://") && typeof window !== "undefined" && window.location.protocol === "https:"
-          ? proxyUrl.replace("ws://", "wss://")
-          : proxyUrl;
+        // Normalize ws/wss: upgrade ws:// to wss:// when the page itself is
+        // served over https (mixed-content would otherwise silently fail).
+        const wsUrl = conn.endpoint.startsWith("ws://") && typeof window !== "undefined" && window.location.protocol === "https:"
+          ? conn.endpoint.replace("ws://", "wss://")
+          : conn.endpoint;
 
         // Append the auth token as a query param so the proxy can validate it
         const urlWithToken = wsUrl + (wsUrl.includes("?") ? "&" : "?") + `token=${encodeURIComponent(conn.token)}`;
@@ -770,9 +774,13 @@ export function useInworldSession(
           ws.onclose = (event) => {
             clearTimeout(timeout);
             if (!connectionOpen) {
-              reject(new Error(`Voice connection closed (code ${event.code}).`));
+              const err: VoiceConnectError = new Error(`Voice connection closed (code ${event.code}).`);
+              err.wsCloseCode = event.code;
+              reject(err);
             } else if (!sessionReady) {
-              reject(new Error(`Voice connection closed before session was ready (code ${event.code}).`));
+              const err: VoiceConnectError = new Error(`Voice connection closed before session was ready (code ${event.code}).`);
+              err.wsCloseCode = event.code;
+              reject(err);
             } else {
               handleClose(event);
             }
@@ -805,6 +813,57 @@ export function useInworldSession(
         // The intercepting handler above was only needed during connect().
         ws.onmessage = handleMessage;
       } catch (err) {
+        // A failed attempt must not leave wsRef pointing at a dead/closed
+        // socket — the next connect() call (or the 4001 retry below) needs
+        // to see wsRef as empty, not a socket stuck in CLOSING/CLOSED.
+        if (wsRef.current && wsRef.current.readyState !== WebSocket.OPEN) {
+          wsRef.current = null;
+        }
+        throw err;
+      }
+    },
+    [onError, onTranscript, onResponseComplete, setError, setState, setInterimTranscript, setTranscript, stopMicCapture, stopPlayback, decodePcm16ToAudioBuffer, schedulePendingChunks],
+  );
+
+  // connect() is the public entry point: it resolves conn.endpoint via
+  // getVoiceConnection(), makes one connection attempt, and — if the proxy
+  // rejects the token pre-session (code 4001, e.g. a mismatched
+  // VOICE_AUTH_SECRET or an expired cached token) — force-refreshes the
+  // credential and retries EXACTLY once. A second 4001 is treated as a real
+  // auth/config problem and surfaced to the user; it never loops.
+  const connect = useCallback(
+    async (_agentId?: VoiceAgentId) => {
+      setErrorState(null);
+      setError(null);
+      setState("connecting");
+
+      const conn = await getVoiceConnection();
+
+      try {
+        await connectAttempt(conn);
+      } catch (err) {
+        const code = (err as VoiceConnectError).wsCloseCode;
+
+        if (code === 4001) {
+          setErrorState("Voice authentication failed (4001). Refreshing voice credentials…");
+          try {
+            const freshConn = await getVoiceConnection(true);
+            await connectAttempt(freshConn);
+            setErrorState(null);
+            setError(null);
+            return;
+          } catch (retryErr) {
+            const retryCode = (retryErr as VoiceConnectError).wsCloseCode;
+            const message = retryCode === 4001
+              ? "Voice authentication failed. Your voice credentials could not be verified — please check the voice service configuration or sign in again."
+              : retryErr instanceof Error ? retryErr.message : "Failed to connect";
+            setErrorState(message);
+            setError(message);
+            setState("error");
+            throw retryErr instanceof Error ? retryErr : new Error(message);
+          }
+        }
+
         const message = err instanceof Error ? err.message : "Failed to connect";
         setErrorState(message);
         setError(message);
@@ -812,7 +871,7 @@ export function useInworldSession(
         throw err;
       }
     },
-    [onError, onTranscript, onResponseComplete, setError, setState, setInterimTranscript, setTranscript, stopMicCapture, stopPlayback, decodePcm16ToAudioBuffer, schedulePendingChunks],
+    [connectAttempt, setError, setState],
   );
 
   const disconnect = useCallback(() => {
