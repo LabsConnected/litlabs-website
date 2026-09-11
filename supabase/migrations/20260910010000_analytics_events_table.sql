@@ -23,12 +23,16 @@ create index if not exists idx_analytics_events_created_at
 alter table public.analytics_events enable row level security;
 
 -- No anon/authenticated access. The ingestion route inserts via service_role.
+-- Policies are dropped first so this migration stays idempotent on re-run
+-- (CREATE POLICY has no IF NOT EXISTS form).
+drop policy if exists "Deny public read on analytics_events" on public.analytics_events;
 create policy "Deny public read on analytics_events"
   on public.analytics_events
   for select
   to anon, authenticated
   using (false);
 
+drop policy if exists "Deny public write on analytics_events" on public.analytics_events;
 create policy "Deny public write on analytics_events"
   on public.analytics_events
   for insert
