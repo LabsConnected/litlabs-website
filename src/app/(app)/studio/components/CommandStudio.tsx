@@ -1915,10 +1915,10 @@ function CommandStudioContent() {
           <button
             type="button"
             onClick={() => setMobileLittOpen(true)}
-            className="fixed z-[10015] flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-[11px] font-bold shadow-lg"
+            className="fixed z-[10015] flex min-h-10 items-center gap-1.5 rounded-full border px-3.5 py-2 text-[11px] font-bold shadow-lg"
             style={{
               right: 12,
-              bottom: "calc(64px + env(safe-area-inset-bottom) + 12px)",
+              bottom: "calc(var(--studio-mobile-bottom-h) + env(safe-area-inset-bottom) + 12px)",
               backgroundColor: "var(--studio-surface)",
               borderColor: "var(--studio-border-strong)",
               color: "var(--litt-primary)",
@@ -1953,7 +1953,7 @@ function CommandStudioContent() {
       {/* Canvas overlay — opens when a canvas action is executed from chat */}
       {canvasOpen && (
         <aside
-          className="fixed z-[10009] flex flex-col overflow-hidden border shadow-2xl md:bottom-0 md:right-0 md:top-[calc(var(--studio-header-h)+4px)] md:w-full md:max-w-[520px] md:border-l bottom-[calc(56px+env(safe-area-inset-bottom))] left-0 right-0 top-auto h-[55dvh] rounded-t-2xl border-t"
+          className="fixed z-[10009] flex flex-col overflow-hidden border shadow-2xl md:bottom-0 md:right-0 md:top-[calc(var(--studio-header-h)+4px)] md:w-full md:max-w-[520px] md:border-l bottom-[calc(var(--studio-mobile-bottom-h)+env(safe-area-inset-bottom))] left-0 right-0 top-auto h-[55dvh] rounded-t-2xl border-t"
           style={{
             backgroundColor: "rgba(8,9,13,0.97)",
             borderColor: "var(--studio-border-strong)",

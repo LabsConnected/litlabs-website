@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import LiTTMobileSheet from "./LiTTMobileSheet";
@@ -18,6 +18,37 @@ describe("LiTTMobileSheet (real component)", () => {
     render(<LiTTMobileSheet {...props} />);
     return { onTabChange, onClose };
   }
+
+  beforeEach(() => {
+    window.innerHeight = 844;
+    const listeners: { type: string; listener: EventListenerOrEventListenerObject }[] = [];
+    Object.defineProperty(window, "visualViewport", {
+      value: {
+        width: 390,
+        height: 844,
+        offsetTop: 0,
+        offsetLeft: 0,
+        scale: 1,
+        addEventListener: (type: string, listener: EventListenerOrEventListenerObject) => {
+          listeners.push({ type, listener });
+        },
+        removeEventListener: (type: string, listener: EventListenerOrEventListenerObject) => {
+          const idx = listeners.findIndex((l) => l.type === type && l.listener === listener);
+          if (idx >= 0) listeners.splice(idx, 1);
+        },
+        dispatchEvent: (event: Event) => {
+          listeners
+            .filter((l) => l.type === event.type)
+            .forEach((l) => {
+              if (typeof l.listener === "function") l.listener(event);
+              else l.listener.handleEvent?.(event);
+            });
+          return true;
+        },
+      },
+      configurable: true,
+    });
+  });
 
   it("renders exactly one chat slot and one live slot", () => {
     renderSheet();
@@ -45,15 +76,34 @@ describe("LiTTMobileSheet (real component)", () => {
     const input = screen.getByRole("textbox", { name: "Message input" });
     input.focus();
 
+    // Geometry is driven by the Visual Viewport API so the sheet stays
+    // above the 62px bottom nav and any on-screen keyboard.
+    const expectedHeight = Math.min(Math.round(844 * 0.88), 844 - 62); // 742
     expect(sheet).toHaveStyle({
-      bottom: "calc(62px + env(safe-area-inset-bottom))",
-      height: "min(88dvh, calc(100dvh - 62px - env(safe-area-inset-bottom)))",
-      maxHeight: "calc(100dvh - 62px - env(safe-area-inset-bottom))",
+      bottom: "62px",
+      height: `${expectedHeight}px`,
     });
+    expect(sheet.getAttribute("style")).toContain("max-height");
+    expect(sheet.getAttribute("style")).toContain("var(--studio-mobile-bottom-h)");
     expect(screen.getByTestId("litt-mobile-sheet-content")).toHaveClass("min-h-0", "flex-1", "overflow-hidden");
     expect(screen.getByTestId("litt-mobile-chat-panel").className).toContain("min-w-0");
     expect(document.activeElement).toBe(input);
     expect(screen.getByRole("button", { name: "Send message" })).toBeTruthy();
+  });
+
+  it("lifts the sheet above the keyboard when the visual viewport shrinks", () => {
+    const vv = window.visualViewport as { height: number; width: number; offsetTop: number };
+    vv.height = 500;
+    vv.width = 390;
+    vv.offsetTop = 0;
+    renderSheet();
+
+    const sheet = screen.getByTestId("litt-mobile-sheet");
+    const expectedHeight = Math.min(Math.round(500 * 0.88), 500 - 62); // 438
+    expect(sheet).toHaveStyle({
+      bottom: "406px", // 62 + (844 - 500)
+      height: `${expectedHeight}px`,
+    });
   });
 
   it("clicking Live calls onTabChange without managing its own state", () => {

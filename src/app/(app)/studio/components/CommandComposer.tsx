@@ -324,7 +324,7 @@ export default function CommandComposer({
   return (
     <div
       data-testid="studio-command-composer"
-      className="glass-shell relative flex w-full min-w-0 flex-col gap-1.5 border-t px-2.5 py-2 pb-[calc(.5rem+env(safe-area-inset-bottom))] sm:pb-2"
+      className="glass-shell relative flex w-full min-w-0 shrink-0 flex-col gap-1.5 border-t px-2.5 py-2 pb-[calc(.5rem+env(safe-area-inset-bottom))] sm:pb-2"
       style={{
         backgroundColor: "rgba(13,9,22,0.88)",
         borderColor: "rgba(155,77,255,0.12)",

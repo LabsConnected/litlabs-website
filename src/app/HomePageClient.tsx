@@ -36,6 +36,7 @@ const NAV_ITEMS = [
   { label: "Capabilities", href: "#what-we-do" },
   { label: "How it works", href: "#how-it-works" },
   { label: "Studio", href: "#operator" },
+  { label: "CLI", href: "/cli" },
   { label: "Creations", href: "#creations" },
   { label: "Community", href: "/discover" },
 ] as const;

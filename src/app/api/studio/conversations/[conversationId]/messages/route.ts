@@ -14,7 +14,7 @@ import { buildStudioContext } from "@/lib/studio/project-resolver";
 import { resolveCurrentProject } from "@/lib/projects/resolve-current-project";
 import { recallMemories, persistMemory, formatMemoryContext, harvestUserPreferences } from "@/lib/studio/memory-service";
 import { studioLog } from "@/lib/studio/logger";
-import type { AgentSlug } from "@/lib/studio/types";
+import type { AgentSlug, MessageStatus } from "@/lib/studio/types";
 import { parseAgentSelection } from "@/lib/agent-selection";
 import { resolveRuntimeAgent, type RuntimeAgent } from "@/lib/agent-runtime";
 import { reserveCredits, settleRun, estimateCredits } from "@/lib/agent-billing";
@@ -26,6 +26,7 @@ import {
 } from "@/lib/litt-runtime";
 import { runAgentLoop } from "@/lib/litt-intelligence/agent-loop";
 import { runAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
+import { runLaunchFlow, type LaunchFlowResult } from "@/lib/litt-intelligence/launch-flow";
 import { ProgressEmitter, type ProgressEvent } from "@/lib/litt-intelligence/progress-events";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { createPausedRun } from "@/lib/litt-intelligence/paused-run-store";
@@ -434,6 +435,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     && !!built.kernelResult.decision.routing.requiresExecution;
 
   let v2Result: Awaited<ReturnType<typeof runAgentLoopV2>> | null = null;
+  let launchFlowResult: LaunchFlowResult | null = null;
   let v1Result: Awaited<ReturnType<typeof runAgentLoop>> | null = null;
   let finalPrompt = prompt;
 
@@ -609,19 +611,48 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               controller.enqueue(event({ type: "status", summary: evt.summary }));
             } else if (evt.type === "repair_attempt") {
               controller.enqueue(event({ type: "repair_attempt", attempt: evt.attempt, maxAttempts: evt.maxAttempts }));
+            } else if (evt.type === "preview_start") {
+              controller.enqueue(event({ type: "preview_start" }));
+            } else if (evt.type === "preview_status") {
+              controller.enqueue(event({ type: "preview_status", status: evt.status, healthy: evt.healthy }));
+            } else if (evt.type === "preview_result") {
+              controller.enqueue(event({ type: "preview_result", success: evt.success, previewUrl: evt.previewUrl, error: evt.error }));
+            } else if (evt.type === "deploy_start") {
+              controller.enqueue(event({ type: "deploy_start", environment: evt.environment, provider: evt.provider }));
+            } else if (evt.type === "deploy_status") {
+              controller.enqueue(event({ type: "deploy_status", status: evt.status, deploymentId: evt.deploymentId }));
+            } else if (evt.type === "deploy_result") {
+              controller.enqueue(event({ type: "deploy_result", success: evt.success, productionUrl: evt.productionUrl, error: evt.error }));
+            } else if (evt.type === "deploy_verify") {
+              controller.enqueue(event({ type: "deploy_verify", url: evt.url, success: evt.success, detail: evt.detail }));
             }
           });
 
-          // Run the agent loop — events stream in real-time
-          v2Result = await runAgentLoopV2(resolvedMessage, v2Transport, v2Config, streamProgress);
+          // Run the full launch flow: plan → build → preview → deploy.
+          // This keeps V2 execution bounded, truthful, and auto-repairing.
+          launchFlowResult = await runLaunchFlow({
+            userMessage: resolvedMessage,
+            projectId: conversation.projectId ?? "",
+            userId,
+            transport: v2Transport,
+            systemPrompt: v2Config.systemPrompt,
+            model: v2Config.model,
+            executionMode: v2Config.executionMode,
+            enableBuildFix: true,
+            enableDeploy: built.kernelResult.decision.routing.mode === "ship",
+            evalMetadata: v2Config.evalMetadata,
+            progress: streamProgress,
+          });
+
+          v2Result = launchFlowResult.agentLoopResult ?? null;
 
           // Stream the final text
-          assistantText = v2Result.finalText;
+          assistantText = launchFlowResult.finalText;
           controller.enqueue(event({ type: "text", text: assistantText }));
 
           // If V2 paused for approval, persist the paused state and flag it
           let pausedRunId: string | undefined;
-          if (v2Result.pendingApproval) {
+          if (v2Result?.pendingApproval) {
             try {
               const pausedRun = await createPausedRun({
                 userId,
@@ -651,7 +682,15 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             }));
           }
 
-          await updateMessageStatus(assistantMessage.id, userId, "completed", assistantText);
+          const finalMessageStatus: MessageStatus = launchFlowResult?.cancelled
+            ? "cancelled"
+            : launchFlowResult?.pendingApproval
+              ? "awaiting_approval"
+              : launchFlowResult?.success
+                ? "completed"
+                : "failed";
+
+          await updateMessageStatus(assistantMessage.id, userId, finalMessageStatus, assistantText);
           if (agentRunId) {
             const actualCredits = runtimeAgent
               ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
@@ -660,7 +699,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               inputTokens: Math.ceil(finalPrompt.length / 4),
               outputTokens: Math.ceil(assistantText.length / 4),
               actualCredits,
-              status: "completed",
+              status: finalMessageStatus === "completed" ? "completed" : "failed",
             }, reservedCredits, reservationId).catch(() => {
               // Best-effort settlement — must not leak unhandled rejection
             });
@@ -681,6 +720,10 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             // Best-effort memory persistence — must not leak unhandled rejection
           });
 
+          const launchLatencyMs = launchFlowResult?.totalDurationMs ?? v2Result?.totalDurationMs ?? 0;
+          const launchSteps = v2Result?.stepsUsed ?? 0;
+          const launchToolCalls = v2Result?.toolCalls.length ?? 0;
+
           studioLog("message:sent", {
             conversationId: conversation.id,
             projectId: conversation.projectId,
@@ -688,12 +731,12 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             agentSlug,
             agentInstanceId: runtimeAgent?.agentInstanceId || null,
             provider: "openrouter-v2",
-            latencyMs: v2Result.totalDurationMs,
+            latencyMs: launchLatencyMs,
             revisionBefore: conversation.revision,
             revisionAfter: newRevision,
             v2: true,
-            stepsUsed: v2Result.stepsUsed,
-            toolCalls: v2Result.toolCalls.length,
+            stepsUsed: launchSteps,
+            toolCalls: launchToolCalls,
           });
 
           controller.enqueue(event({
@@ -702,13 +745,16 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             assistantMessage: {
               ...assistantMessage,
               content: assistantText,
-              status: "completed",
+              status: finalMessageStatus,
             },
             revision: newRevision,
             provider: "openrouter-v2",
-            latencyMs: v2Result.totalDurationMs,
+            latencyMs: launchLatencyMs,
             v2: true,
-            pendingApproval: v2Result.pendingApproval ?? undefined,
+            pendingApproval: v2Result?.pendingApproval ?? undefined,
+            launchStatus: launchFlowResult?.status ?? undefined,
+            previewUrl: launchFlowResult?.previewUrl ?? undefined,
+            productionUrl: launchFlowResult?.productionUrl ?? undefined,
           }));
         } else {
           // ── V1 fallback path: stream tool results, then run LLM ──

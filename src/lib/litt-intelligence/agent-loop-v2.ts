@@ -493,13 +493,21 @@ export async function runAgentLoopV2(
     cancelReason = `Max steps reached (${cfg.maxSteps})`;
   }
 
+  // Surface build-fix failures in the final text so callers cannot
+  // accidentally report success when validation did not pass.
+  const effectiveFinalText =
+    finalText ||
+    (buildFixResult && !buildFixResult.allPassed
+      ? `The build checks did not all pass after ${buildFixResult.repairAttempts} repair attempts.`
+      : "I've completed the requested work. Let me know if you need any adjustments.");
+
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
     ...(cancelled ? { reason: cancelReason ?? "Unknown" } : { totalSteps: stepsUsed, totalDurationMs: Date.now() - startTime }),
   } as ProgressEvent);
 
   return {
-    finalText: finalText || "I've completed the requested work. Let me know if you need any adjustments.",
+    finalText: effectiveFinalText,
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,
@@ -869,13 +877,19 @@ export async function resumeAgentLoopV2(
     cancelReason = `Max steps reached (${cfg.maxSteps})`;
   }
 
+  const effectiveFinalText =
+    finalText ||
+    (buildFixResult && !buildFixResult.allPassed
+      ? `The build checks did not all pass after ${buildFixResult.repairAttempts} repair attempts.`
+      : "I've completed the requested work. Let me know if you need any adjustments.");
+
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
     ...(cancelled ? { reason: cancelReason ?? "Unknown" } : { totalSteps: stepsUsed, totalDurationMs: Date.now() - startTime }),
   } as ProgressEvent);
 
   return {
-    finalText: finalText || "I've completed the requested work. Let me know if you need any adjustments.",
+    finalText: effectiveFinalText,
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,

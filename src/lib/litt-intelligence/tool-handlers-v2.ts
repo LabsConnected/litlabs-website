@@ -18,10 +18,16 @@ import type { WorkspaceTransport } from "./workspace-transport";
 
 // ─── Tool Handler Signature ───────────────────────────────────────
 
+export interface ToolHandlerResult {
+  success?: boolean;
+  error?: string | null;
+  [key: string]: unknown;
+}
+
 export type ToolHandler = (
   inputs: Record<string, unknown>,
   transport: WorkspaceTransport,
-) => Promise<unknown>;
+) => Promise<ToolHandlerResult>;
 
 // ─── File Tools ───────────────────────────────────────────────────
 
@@ -368,4 +374,84 @@ export const handleApplyPatch: ToolHandler = async (inputs, transport) => {
 export const handlePackageInfo: ToolHandler = async (_inputs, transport) => {
   const info = await transport.discoverPackageInfo();
   return { success: true, ...info };
+};
+
+// ─── Preview Tools ────────────────────────────────────────────────
+
+export const handlePreviewStart: ToolHandler = async (_inputs, transport) => {
+  try {
+    const result = await transport.startPreview();
+    return {
+      success: result.status !== "failed",
+      workspaceId: result.workspaceId,
+      status: result.status,
+      port: result.port,
+      framework: result.framework,
+      command: result.command,
+      error: result.error ?? null,
+    };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+};
+
+export const handlePreviewStatus: ToolHandler = async (_inputs, transport) => {
+  try {
+    const result = await transport.getPreviewStatus();
+    return {
+      success: result.status !== "failed",
+      status: result.status,
+      port: result.port,
+      framework: result.framework,
+      command: result.command,
+      error: result.error,
+      errorCode: result.errorCode,
+      logs: result.logs.slice(-50),
+    };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+};
+
+export const handlePreviewStop: ToolHandler = async (_inputs, transport) => {
+  try {
+    const result = await transport.stopPreview();
+    return { success: true, workspaceId: result.workspaceId, status: result.status };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+};
+
+// ─── Deploy Tools ───────────────────────────────────────────────────
+
+import { resolveDeployConfig, runDeployFlow, verifyProductionUrl } from "./deploy";
+
+export const handleDeployExecute: ToolHandler = async () => {
+  try {
+    const envConfig = resolveDeployConfig();
+    if (!envConfig.ok) {
+      return { success: false, error: envConfig.error };
+    }
+    const result = await runDeployFlow({ config: envConfig.config });
+    return {
+      success: result.success,
+      provider: result.provider,
+      deploymentId: result.deploymentId,
+      status: result.status,
+      productionUrl: result.productionUrl,
+      error: result.error,
+      verification: result.verification,
+    };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+};
+
+export const handleDeployVerify: ToolHandler = async (inputs) => {
+  const url = inputs.url as string;
+  if (!url || typeof url !== "string") {
+    return { success: false, error: "url is required" };
+  }
+  const result = await verifyProductionUrl(url);
+  return { success: result.success, detail: result.detail };
 };
