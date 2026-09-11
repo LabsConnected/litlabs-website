@@ -45,8 +45,9 @@ export async function GET(req: NextRequest) {
   const littVoice = process.env.INWORLD_LITT_VOICE;
   const sparkVoice = process.env.INWORLD_SPARK_VOICE;
   const authSecret = process.env.VOICE_AUTH_SECRET;
+  const voiceServerUrl = getVoiceServerUrl();
   const wsUrl = process.env.NEXT_PUBLIC_VOICE_WS_URL ||
-    `${getVoiceServerUrl().replace(/^https:/, "wss:")}/voice`;
+    (voiceServerUrl ? `${voiceServerUrl.replace(/^https:/, "wss:")}/voice` : "");
 
   // Check configuration (env vars exist)
   const configured = !!(apiKey && littVoice && authSecret && authSecret.length >= 32);

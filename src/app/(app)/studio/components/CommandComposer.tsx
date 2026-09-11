@@ -25,6 +25,7 @@ import {
   useVoiceSession,
   type VoiceState,
 } from "@/app/(app)/studio/context/VoiceSessionContext";
+import { mobileDiag } from "../lib/mobileDiagnostics";
 import {
   useStudioAgentStore,
   AGENT_META,
@@ -269,7 +270,12 @@ export default function CommandComposer({
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (busy || submittingRef.current) return; // prevent duplicate submits
+    if (busy || submittingRef.current) {
+      // A tap here reads as "nothing happened" on a phone — worth knowing
+      // whether the composer was genuinely busy or stuck busy.
+      mobileDiag("composer", "submit_blocked_busy", { busy, alreadySubmitting: submittingRef.current });
+      return; // prevent duplicate submits
+    }
     const readyUrls = getReadyUrls();
     if (!value.trim() && readyUrls.length === 0 && snapshots.length === 0) return;
     submittingRef.current = true;
