@@ -35,6 +35,8 @@ import StudioTranscript from "./StudioTranscript";
 import LiTTLiveActivity from "./LiTTLiveActivity";
 import LiTTPanel from "./LiTTPanel";
 import LiTTMobileSheet from "./litt/LiTTMobileSheet";
+import MobileDiagOverlay from "./MobileDiagOverlay";
+import { mobileDiag } from "../lib/mobileDiagnostics";
 import ContextDrawer, { type ContextDrawerTab } from "./context/ContextDrawer";
 import AssetsPanel from "./context/AssetsPanel";
 import { StudioContextProvider } from "../context/StudioContext";
@@ -780,8 +782,24 @@ function CommandStudioContent() {
   const handleComposerSend = useCallback(async (value: string, attachments?: string[]) => {
     // The canonical controller provisions a starter project and conversation
     // when needed. Do not block first-time users at the composer boundary.
+    if (isMobileLitt) {
+      mobileDiag("composer", "send_attempt", {
+        hasProject: !!capabilities.projectId,
+        attachmentCount: attachments?.length ?? 0,
+      });
+    }
     try {
       const result = await conversation.send(value, attachments);
+      if (isMobileLitt) {
+        // errorKind is already a small, non-content-bearing enum
+        // ("auth" | "network" | "conflict" | "provider" | "validation") —
+        // safe to log verbatim.
+        mobileDiag(
+          result?.errorKind === "auth" ? "auth" : "chat_api",
+          result?.accepted ? "send_accepted" : "send_rejected",
+          { errorKind: result?.errorKind ?? null, persisted: !!result?.persisted },
+        );
+      }
       if (result?.accepted) {
         const execution = useExecutionStore.getState();
         const changes = execution.changesSummary ?? { added: 0, modified: 0, deleted: 0, renamed: 0 };
@@ -805,9 +823,14 @@ function CommandStudioContent() {
       // surface the error so the user knows why their message didn't send.
       setComposerValue(value);
       console.error("[Studio] Composer send failed:", err);
+      if (isMobileLitt) {
+        mobileDiag("chat_api", "send_threw", {
+          errorName: err instanceof Error ? err.name : typeof err,
+        });
+      }
       return { accepted: false, persisted: false, errorKind: "network" as const };
     }
-  }, [conversation, capabilities.projectId, refreshCapabilities]);
+  }, [conversation, capabilities.projectId, refreshCapabilities, isMobileLitt]);
 
   const [projectCreateError, setProjectCreateError] = useState<string | null>(null);
 
@@ -834,6 +857,7 @@ function CommandStudioContent() {
         const msg = (err as { error?: string }).error || `Failed to create project (${res.status})`;
         setProjectCreateError(msg);
         console.error("[handleStartBlank] Failed to create project:", err);
+        if (isMobileLitt) mobileDiag("project", "create_failed", { status: res.status });
         return;
       }
       const { project } = await res.json();
@@ -861,10 +885,11 @@ function CommandStudioContent() {
       const msg = err instanceof Error ? err.message : "Network error while creating project.";
       setProjectCreateError(msg);
       console.error("[handleStartBlank] Error:", err);
+      if (isMobileLitt) mobileDiag("project", "create_threw", { errorName: err instanceof Error ? err.name : typeof err });
     } finally {
       setCreatingProject(false);
     }
-  }, [searchParams, pathname, router, refreshCapabilities, userId, getToken]);
+  }, [searchParams, pathname, router, refreshCapabilities, userId, getToken, isMobileLitt]);
 
   const handlePrepareWorkspace = useCallback(async () => {
     if (!runtimeState.projectId) return;
@@ -890,10 +915,11 @@ function CommandStudioContent() {
       await Promise.all([refreshCapabilities(), runtime?.refresh() ?? Promise.resolve()]);
     } catch (error) {
       setProjectCreateError(error instanceof Error ? error.message : "Workspace preparation failed.");
+      if (isMobileLitt) mobileDiag("project", "workspace_prepare_failed", { errorName: error instanceof Error ? error.name : typeof error });
     } finally {
       setCreatingProject(false);
     }
-  }, [getToken, refreshCapabilities, runtime, runtimeState.projectId]);
+  }, [getToken, refreshCapabilities, runtime, runtimeState.projectId, isMobileLitt]);
 
   const handleSelectProject = useCallback((projectId: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -1948,6 +1974,9 @@ function CommandStudioContent() {
             liveContent={littLiveContent}
           />
         )}
+        {/* TEMPORARY: real-phone diagnostic HUD — remove once mobile Studio
+            is confirmed working end-to-end on device. */}
+        {isMobileLitt && <MobileDiagOverlay />}
       </div>
 
       {/* Canvas overlay — opens when a canvas action is executed from chat */}

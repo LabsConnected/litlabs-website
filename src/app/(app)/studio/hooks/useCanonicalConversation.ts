@@ -26,6 +26,7 @@ import {
   serializeConversationToUrl,
 } from "../stores/useConversationStore";
 import { useExecutionStore, feedSSEEventToExecutionStore } from "../stores/useExecutionStore";
+import { mobileDiag } from "../lib/mobileDiagnostics";
 
 export type SendErrorKind = "auth" | "conflict" | "network" | "provider" | "validation";
 
@@ -726,8 +727,10 @@ export function useCanonicalConversation({
           setBusy(false);
           if (sendErrorRef.current?.includes("session expired")) {
             setRequiresReauth(true);
+            mobileDiag("auth", "conversation_create_reauth_required");
             return { accepted: false, persisted: false, errorKind: "auth" };
           }
+          mobileDiag("chat_api", "conversation_create_failed");
           return { accepted: false, persisted: false, errorKind: "network" };
         }
         conversationId = conv.id;
@@ -801,6 +804,7 @@ export function useCanonicalConversation({
               sFinal409.getMessages().filter((m) => !m.id.startsWith("optimistic_")),
             );
             setSendError("Conversation was updated by another session. Your message was not sent — please try again.");
+            mobileDiag("chat_api", "revision_conflict_unresolved");
             return { accepted: false, persisted: false, errorKind: "conflict" };
           }
         }
@@ -819,6 +823,7 @@ export function useCanonicalConversation({
             rollbackOptimistic(activeConversationId);
             setRequiresReauth(true);
             setSendError("Your Studio session expired. Refresh the page and sign in again.");
+            mobileDiag("auth", "message_send_401_403", { status: response.status });
             return { accepted: false, persisted: false, errorKind: "auth" };
           }
           if (response.status === 429) {
@@ -831,6 +836,7 @@ export function useCanonicalConversation({
               ? `You're sending messages too fast. Try again in ${Math.ceil(secs / 60)} minute${Math.ceil(secs / 60) > 1 ? "s" : ""}.`
               : `You're sending messages too fast. Try again in ${secs} second${secs > 1 ? "s" : ""}.`;
             setSendError(friendly);
+            mobileDiag("chat_api", "message_send_rate_limited", { status: 429 });
             return { accepted: false, persisted: false, errorKind: "network" };
           }
           // Non-auth HTTP failure — the user message was not persisted.
@@ -840,6 +846,7 @@ export function useCanonicalConversation({
             ? `${data.error}: ${data.detail}`
             : data.error || `Request failed (${response.status})`;
           setSendError(errorText);
+          mobileDiag("chat_api", "message_send_failed", { status: response.status });
           return { accepted: false, persisted: false, errorKind: "network" };
         }
 
@@ -941,6 +948,7 @@ export function useCanonicalConversation({
             content: "No response body from server.",
           });
           setSendError("No response body from server.");
+          mobileDiag("streaming", "no_response_body");
           return { accepted: false, persisted: false, errorKind: "network" };
         }
 
@@ -1118,6 +1126,7 @@ export function useCanonicalConversation({
           content: "The stream ended unexpectedly. Please try again.",
         });
         setSendError("The stream ended unexpectedly. Please try again.");
+        mobileDiag("streaming", "ended_without_done_event");
         // User message was persisted (200 received), stream just ended early.
         return { accepted: false, persisted: true, errorKind: "network" };
       } catch (error) {
@@ -1134,6 +1143,7 @@ export function useCanonicalConversation({
             s.getMessages().filter((m) => m.id !== optimisticAssistantId),
           );
           setSendError("The request timed out. Please try again.");
+          mobileDiag("streaming", "aborted_timeout");
           return { accepted: false, persisted: true, errorKind: "network" };
         }
         const rawMessage = error instanceof Error ? error.message : `${AGENT_META[activeAgentId].displayName} is reconnecting`;
@@ -1143,6 +1153,7 @@ export function useCanonicalConversation({
           content: reply,
         });
         setSendError(reply);
+        mobileDiag("streaming", "threw", { errorName: error instanceof Error ? error.name : typeof error });
         // Network error during streaming — user message was likely persisted.
         return { accepted: false, persisted: true, errorKind: "network" };
       } finally {
