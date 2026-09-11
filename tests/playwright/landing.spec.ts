@@ -78,7 +78,6 @@ test.describe("Landing page — LiTT operator homepage", () => {
     expect(body).toContain("Everything between idea and done.");
     expect(body).toContain("Not a chat. A working system.");
     expect(body).toContain("One operator. The whole project loop.");
-    expect(body).toContain("The difference is what survives the chat.");
   });
 
   test("primary nav anchors resolve to real sections (no dead anchors)", async ({ page }) => {
@@ -106,12 +105,12 @@ test.describe("Landing page — LiTT operator homepage", () => {
     }
   });
 
-  test("the operating loop is spelled out", async ({ page }) => {
+  test("the operator section shows LiTT with tool chips", async ({ page }) => {
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
     const operator = page.locator("#operator");
     await expect(operator).toBeVisible();
-    for (const step of ["Understand", "Plan", "Build", "Create", "Use tools", "Verify", "Ship"]) {
-      await expect(operator.getByText(step, { exact: true }).first()).toBeVisible();
+    for (const skill of ["Plan", "Code", "Files", "Terminal", "Git", "Test", "Deploy"]) {
+      await expect(operator.getByText(skill, { exact: true }).first()).toBeVisible();
     }
     await expect(operator).toContainText("Control plane + builder");
   });
@@ -391,6 +390,52 @@ test.describe("Landing page — LiTT operator homepage", () => {
       const response = await request.get(`${BASE_URL}${route}`);
       expect(response.status(), `Footer link ${route} should resolve`).toBeLessThan(400);
     }
+  });
+
+  test("real product proof section exists with placeholder", async ({ page }) => {
+    await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+    const proofSection = page.locator("#real-proof");
+    await expect(proofSection).toBeVisible();
+    await expect(proofSection).toContainText("See LiTT work on a real project");
+    // Placeholder is honest about what it is
+    await expect(proofSection).toContainText("Real recording coming soon");
+  });
+
+  test("onboarding steps section exists with 5 steps", async ({ page }) => {
+    await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+    const onboarding = page.locator("#get-started");
+    await expect(onboarding).toBeVisible();
+    await expect(onboarding).toContainText("Start building in minutes");
+    const steps = onboarding.locator("article");
+    await expect(steps).toHaveCount(5);
+  });
+
+  test("comparison table section exists", async ({ page }) => {
+    await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+    const comparison = page.locator("#why-litt");
+    await expect(comparison).toBeVisible();
+    await expect(comparison).toContainText("Not a chat.");
+    await expect(comparison).toContainText("A working system.");
+  });
+
+  test("FAQ section exists with common questions", async ({ page }) => {
+    await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+    const faq = page.locator("#faq");
+    await expect(faq).toBeVisible();
+    await expect(faq).toContainText("Is LiTT just another AI chatbot?");
+    await expect(faq).toContainText("Who owns the code and assets LiTT creates?");
+    // FAQ items are expandable
+    const faqButtons = faq.getByRole("button");
+    await expect(faqButtons.count()).resolves.toBeGreaterThan(0);
+  });
+
+  test("trust section has ownership and approval messaging", async ({ page }) => {
+    await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+    const body = (await page.locator("body").textContent()) || "";
+    expect(body).toContain("Your project stays yours");
+    expect(body).toContain("Sensitive actions require approval");
+    expect(body).toContain("No lock-in");
+    expect(body).toContain("Beta features labeled clearly");
   });
 
   test("no console errors on homepage", async ({ page }) => {
