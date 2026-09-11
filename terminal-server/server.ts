@@ -1166,10 +1166,16 @@ app.use("/preview/:workspaceId", async (req: AuthenticatedRequest, res: Response
     // Forward status, headers, and body
     res.status(proxyResp.status);
     proxyResp.headers.forEach((value, key) => {
-      // Skip transfer-encoding header as express handles it
-      if (key.toLowerCase() !== "transfer-encoding") {
-        res.setHeader(key, value);
+      const header = key.toLowerCase();
+
+      // Express manages transfer-encoding. Preview responses must also be
+      // frameable by Studio even when the project itself sends DENY/SAMEORIGIN.
+      // Studio's parent CSP still controls which preview hosts may be embedded.
+      if (header === "transfer-encoding" || header === "x-frame-options") {
+        return;
       }
+
+      res.setHeader(key, value);
     });
 
     const body = await proxyResp.arrayBuffer();
