@@ -191,6 +191,7 @@ export {
   parseToolCall,
   parseToolCalls,
   stripToolCallBlocks,
+  filterRedundantToolCalls,
   buildDefaultSystemPrompt,
   classifyAgentFailure,
   sanitizePriorMessages,

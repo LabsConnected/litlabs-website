@@ -10,7 +10,13 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { matchReadTools, executeReadTools, formatReadResultsForSynthesis } from "../lib/read-lane.js";
+import {
+  matchReadTools,
+  executeReadTools,
+  formatReadResultsForSynthesis,
+  readCompletionActivityType,
+  type ReadToolResult,
+} from "../lib/read-lane.js";
 import type { ToolResult } from "@litt/agent-core";
 
 const ok = (message: string, data: Record<string, unknown> = {}): ToolResult => ({
@@ -199,5 +205,37 @@ describe("formatReadResultsForSynthesis", () => {
     const prompt = formatReadResultsForSynthesis("framework and branch", results);
     expect(prompt).toContain("project.inspect_package");
     expect(prompt).toContain("project.branch");
+  });
+});
+
+// ─── READ completion activity type — the checkmark-vs-neutral bug ───
+// Regression for: READ completion was logged as `type: "info"`, which
+// the activity renderer treats as a neutral status line rather than the
+// completed/checkmark presentation CHAT/MISSION completions already get
+// via `type: "agent.complete"`. This proves the SEMANTIC classification
+// controller.ts now uses, not a rendered glyph character (the glyph
+// mapping for "agent.complete" is already covered by the existing
+// semanticOf/SEMANTIC_GLYPH tests in terminal-ux.test.ts).
+describe("readCompletionActivityType", () => {
+  const succeeded = (toolId: string): ReadToolResult => ({
+    toolId, label: toolId, ms: 1, result: ok("done", {}),
+  });
+  const failed = (toolId: string): ReadToolResult => ({
+    toolId, label: toolId, ms: 1,
+    result: { status: "failed", success: false, message: "boom", data: {} },
+  });
+
+  it("is 'agent.complete' (not 'info') when every read tool succeeds", () => {
+    expect(readCompletionActivityType([succeeded("project.status"), succeeded("project.log")]))
+      .toBe("agent.complete");
+  });
+
+  it("is 'agent.stopped' — not a false 'agent.complete' — when a read tool fails", () => {
+    expect(readCompletionActivityType([succeeded("project.status"), failed("project.log")]))
+      .toBe("agent.stopped");
+  });
+
+  it("is 'agent.stopped' when all read tools fail", () => {
+    expect(readCompletionActivityType([failed("project.status")])).toBe("agent.stopped");
   });
 });

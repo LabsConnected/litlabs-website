@@ -39,7 +39,12 @@
 
 export type Intent = "chat" | "command" | "read" | "mission";
 
-/** Words that imply action — used only AFTER speech/info acts are ruled out. */
+/**
+ * Words that imply action — used only AFTER speech/info acts are ruled
+ * out. Matched as whole WORDS (see `hasMissionSignal`), never as a bare
+ * substring — "change" must not match inside "changed"/"changes", or a
+ * read-only "what changed" question gets hijacked into a mission.
+ */
 const MISSION_TRIGGERS = [
   "fix", "build", "test", "run", "deploy", "ship",
   "implement", "create", "add", "remove", "delete", "edit", "change",
@@ -48,6 +53,38 @@ const MISSION_TRIGGERS = [
   "write", "generate", "scaffold", "init", "setup", "configure",
   "scan", "audit", "diagnose",
 ];
+
+/**
+ * Multi-token mission idioms a single trigger WORD can't safely express.
+ * "make these changes" mutates the project even though neither "make"
+ * (far too generic on its own — "make it clearer", "make sense of this"
+ * are ordinary chat) nor "changes" (plural, also the noun in read-only
+ * "summarize the changes") is a safe standalone trigger word. Checked
+ * at the same point as MISSION_TRIGGERS (see `hasMissionSignal`).
+ */
+const MISSION_PHRASES: RegExp[] = [
+  /\bmake\s+(?:\w+\s+){0,2}changes?\b/,
+];
+
+/** Escape a string for literal use inside a RegExp. */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** True if `phrase` (a word or short literal phrase) appears in `text` as a whole token/phrase — never as a bare substring of a longer word. */
+function hasWord(text: string, phrase: string): boolean {
+  return new RegExp(`\\b${escapeRegExp(phrase).replace(/\s+/g, "\\s+")}\\b`, "i").test(text);
+}
+
+/**
+ * True if `text` carries a mission SIGNAL: a trigger word matched as a
+ * whole word (not a substring — "changed" does not match "change"), or
+ * one of the multi-token MISSION_PHRASES idioms.
+ */
+function hasMissionSignal(text: string): boolean {
+  return MISSION_TRIGGERS.some((t) => hasWord(text, t))
+    || MISSION_PHRASES.some((r) => r.test(text));
+}
 
 /**
  * Response-only speech acts. The user wants the model to PRODUCE TEXT,
@@ -123,9 +160,17 @@ export function classifyIntent(input: string): Intent {
   // Slash commands are commands, not chat or mission
   if (lower.startsWith("/")) return "command";
 
-  // Short messages (under ~15 chars) are usually conversation,
-  // unless they carry a strong action verb.
-  if (lower.length < 15 && !MISSION_TRIGGERS.some((t) => lower.includes(t))) {
+  // Strip a leading politeness/modal wrapper ("can you ...", "please ...")
+  // so the FIRST real verb determines the act, not the wrapper. Computed
+  // up front so the short-message gate below can also consult READ
+  // intent, not just mission signals.
+  const core = stripLeadingWrapper(lower);
+
+  // Short messages (under ~15 chars) are usually conversation, unless
+  // they carry a strong action verb OR are themselves a bounded read
+  // query ("what changed?" is 13 chars but must still route to READ,
+  // not be swallowed here as chat).
+  if (lower.length < 15 && !hasMissionSignal(lower) && !isReadIntent(lower, core)) {
     return "chat";
   }
 
@@ -140,10 +185,6 @@ export function classifyIntent(input: string): Intent {
     return "chat";
   }
 
-  // Strip a leading politeness/modal wrapper ("can you ...", "please ...")
-  // so the FIRST real verb determines the act, not the wrapper.
-  const core = stripLeadingWrapper(lower);
-
   // Response-only speech acts: "say ...", "reply with ...", "repeat ...".
   // The user wants the model to produce text, not execute tools — even if
   // the content to repeat contains mission words like "test" or "build".
@@ -154,7 +195,17 @@ export function classifyIntent(input: string): Intent {
   // Informational requests: "explain ...", "what does ... do", etc.
   // These ask for an explanation, not execution.
   if (startsWithAct(core, INFO_PREFIXES)) {
-    return "chat";
+    // Narrow carve-out: "summarize the changes" / "summarize what
+    // changed" ask about THIS project's git state (tool-answerable),
+    // not general knowledge — the same CHAT-vs-READ distinction already
+    // applied to "what ..." queries below, reusing the same isReadIntent
+    // machinery rather than a one-off string check. Every OTHER info
+    // prefix (explain/define/describe/tell me about/...) stays CHAT
+    // regardless of payload — "summarize the test results" is still
+    // chat because it does not match any read pattern.
+    if (!(core.startsWith("summarize ") && isReadIntent(lower, core))) {
+      return "chat";
+    }
   }
 
   // ─── READ intent — bounded read-only project inspection ───
@@ -188,8 +239,10 @@ export function classifyIntent(input: string): Intent {
   // Mission triggers — words that imply action. Only reached AFTER speech
   // acts and info requests are ruled out, so a mission word appearing
   // inside quoted repeat-content can no longer hijack a conversational
-  // request.
-  if (MISSION_TRIGGERS.some((t) => lower.includes(t))) {
+  // request. Matched as whole words/phrases (see hasMissionSignal), so
+  // "changed"/"changes" never accidentally hijack a read-only request
+  // via the "change" trigger.
+  if (hasMissionSignal(lower)) {
     return "mission";
   }
 
@@ -236,14 +289,27 @@ const READ_PATTERNS: Array<{ test: (lower: string, core: string) => boolean }> =
   { test: (_l, c) => /^what\s+(framework|stack|package manager|package-manager|scripts|dependencies|deps|packages|project name|project type|build tool|bundler|node version|typescript version)\b/.test(c) },
   // "what files changed" / "what changed"
   { test: (_l, c) => /^what\s+(files changed|changed|changes|diff)\b/.test(c) },
-  // "show recent commits" / "show commits" / "show the diff" / "show changes"
-  { test: (_l, c) => /^show\s+(recent commits|commits|the diff|diff|changes|log|git log)\b/.test(c) },
+  // "show recent commits" / "show commits" / "show the diff" / "show
+  // changes" / "show me what changed" / "show me the changes"
+  { test: (_l, c) => /^show\s+(me\s+)?(what\s+changed|recent commits|commits|the diff|diff|changes|log|git log)\b/.test(c) },
+  // "summarize the changes" / "summarize what changed" — an INFO prefix
+  // ("summarize") whose subject is THIS project's git state, not general
+  // knowledge. See the "summarize " carve-out in classifyIntent.
+  { test: (_l, c) => /^summarize\s+(the\s+)?(changes|what changed|diff)\b/.test(c) },
   // "tell me the framework" / "tell me the branch" (NOT "tell me about X" — that's INFO)
   { test: (_l, c) => /^tell me\s+(the\s+)?(framework|stack|branch|current branch|package manager|scripts|dependencies|deps|project name|project type|diff|changes|commits|recent commits)\b/.test(c) },
   // "which package manager" / "which branch"
   { test: (_l, c) => /^which\s+(package manager|package-manager|branch|current branch|framework|stack)\b/.test(c) },
   // Compound: "tell me the framework and branch" / "what framework and branch"
   { test: (_l, c) => /\b(framework|stack)\b.*\b(branch|current branch)\b/.test(c) && /^(what|tell me|which|show)\b/.test(c) },
+  // Compound: "show me the last 3 git commits and summarize what
+  // changed" — a leading read verb ("show") plus BOTH a commit-history
+  // signal and a changed/changes signal, anywhere in the sentence. Not
+  // anchored immediately after the verb (unlike the patterns above)
+  // because "show me the last 3 git commits ..." has words in between —
+  // but still requires the leading verb so this stays a narrow git-log
+  // template, not a generic "changed" matcher.
+  { test: (_l, c) => /^show\b/.test(c) && /\bcommits?\b/.test(c) && /\b(changed|changes)\b/.test(c) },
 ];
 
 /**

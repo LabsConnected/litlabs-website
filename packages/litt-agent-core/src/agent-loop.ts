@@ -666,6 +666,40 @@ export function validateToolCallArgs(
   return null;
 }
 
+/**
+ * Remove tool calls that exactly repeat a call already recorded as
+ * SUCCESSFUL earlier in this loop (same toolId + same inputs).
+ *
+ * Local/weaker models sometimes deliver their real final answer as
+ * prose alongside a reflexive re-call of a tool they already have
+ * evidence from (e.g. "double-checking" project.log again after
+ * already summarizing its result). A round that contains a tool call
+ * is dispatched and looped — it never returns its content to the
+ * caller. Without this filter, that redundant re-call would swallow
+ * the prose the model just wrote: the tool re-runs, the real answer is
+ * fed back into the model's own context as history, and the user never
+ * sees it unless a LATER round happens to repeat it verbatim (which
+ * weak models rarely do — they consider the question already answered).
+ *
+ * Once {toolId, inputs} has already succeeded in this loop, a repeat
+ * carries no new evidence, so it is dropped here and the round is
+ * treated as a final answer (see stripToolCallBlocks) instead of a
+ * fresh tool dispatch.
+ */
+export function filterRedundantToolCalls(
+  calls: ParsedToolCall[],
+  priorCalls: AgentToolCallRecord[],
+): ParsedToolCall[] {
+  const succeededKeys = new Set(
+    priorCalls
+      .filter((tc) => tc.result.success)
+      .map((tc) => `${tc.toolId}::${JSON.stringify(tc.inputs)}`),
+  );
+  return calls.filter(
+    (c) => !succeededKeys.has(`${c.toolId}::${JSON.stringify(c.inputs)}`),
+  );
+}
+
 // ─── Mission Planning ──────────────────────────────────────────────
 
 // ─── Agent Loop ────────────────────────────────────────────────────
@@ -1248,7 +1282,26 @@ export async function runAgentLoop(
     // Check for tool calls in the response.
     // parseToolCalls extracts ALL tool calls (multi-tool support),
     // enabling parallel execution of independent read-only tools.
-    const allToolCalls = parseToolCalls(modelContent);
+    //
+    // filterRedundantToolCalls drops any call that exactly repeats a
+    // tool call that already SUCCEEDED earlier in this loop. Without
+    // this, a model that appends a reflexive re-call to its real final
+    // answer ("done — but let me just double-check...") would have that
+    // answer silently discarded: the round is dispatched as a tool call
+    // and never returns its content, so the prose only survives as
+    // internal model context, never reaching the caller/UI.
+    const rawToolCalls = parseToolCalls(modelContent);
+    let allToolCalls = filterRedundantToolCalls(rawToolCalls, toolCalls);
+    if (allToolCalls.length === 0 && rawToolCalls.length > 0 && !stripToolCallBlocks(modelContent).trim()) {
+      // Every call in this turn was a redundant repeat AND there is no
+      // prose to return as a final answer. Falling through to the
+      // "no tool call" branch here would terminate the loop as
+      // COMPLETE with EMPTY content — worse than the original
+      // behavior. Fall back to the unfiltered list so the redundant
+      // call is re-dispatched (still bounded by maxRounds) exactly as
+      // before the redundancy filter existed.
+      allToolCalls = rawToolCalls;
+    }
     const toolCall = allToolCalls[0] ?? null;
 
     if (!toolCall) {

@@ -179,6 +179,26 @@ export async function executeReadTools(
 }
 
 /**
+ * Activity-feed completion type for a finished READ pass.
+ *
+ * Mirrors the "agent.complete" / "agent.stopped" convention the CHAT and
+ * MISSION lanes already use for their own completion events (see
+ * controller.ts) — "agent.complete" is the existing semantic SUCCESS
+ * type the activity renderer maps to the completed/checkmark
+ * presentation; "agent.stopped" is its existing failure counterpart.
+ *
+ * Truthful: only reports the completed type when every read tool in
+ * this pass actually succeeded. A failed project.status/project.log
+ * must not be reported as a clean completion just because the READ
+ * pass itself finished running.
+ */
+export function readCompletionActivityType(
+  results: ReadToolResult[],
+): "agent.complete" | "agent.stopped" {
+  return results.every((r) => r.result.success) ? "agent.complete" : "agent.stopped";
+}
+
+/**
  * Format read tool results into a context prompt for optional synthesis.
  * The synthesis model gets the raw tool results and the original query,
  * and produces a concise natural-language answer.

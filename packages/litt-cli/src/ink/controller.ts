@@ -80,6 +80,7 @@ import {
   formatDeterministicReadAnswer,
   buildFullInspectionMatch,
   formatInspectionForSynthesis,
+  readCompletionActivityType,
 } from "../lib/read-lane.js";
 import { matchLocalToolMission, formatLocalToolSummary, type LocalToolResult } from "../lib/local-tool-mission.js";
 import { shouldSkipPlanning } from "../lib/mission-complexity.js";
@@ -2431,7 +2432,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           store.actions.addActivity({
             id: `act_${Date.now()}_done`,
             ts: Date.now(),
-            type: "info",
+            type: readCompletionActivityType(readResults),
             tag: "READ",
             text: `Read complete — ${readMatch.summary}`,
           });
