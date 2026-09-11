@@ -218,6 +218,17 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
       });
     }
 
+    if (agentResult.modelFailed) {
+      return baseResult({
+        success: false,
+        status: "failed",
+        finalText: `The model could not complete the request: ${agentResult.modelFailed}`,
+        error: agentResult.modelFailed,
+        repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
+        runtimeRepairAttempts,
+      });
+    }
+
     if (agentResult.buildFixResult && !agentResult.buildFixResult.allPassed) {
       return baseResult({
         success: false,
@@ -297,6 +308,15 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
             : "The launch was cancelled during repair.",
           cancelled: true,
           cancelReason: repairResult.cancelReason,
+          repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
+          runtimeRepairAttempts,
+        });
+      }
+
+      if (repairResult.modelFailed) {
+        return baseResult({
+          finalText: `The model could not complete the repair: ${repairResult.modelFailed}`,
+          error: repairResult.modelFailed,
           repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
           runtimeRepairAttempts,
         });

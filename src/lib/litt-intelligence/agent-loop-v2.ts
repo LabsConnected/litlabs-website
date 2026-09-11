@@ -68,6 +68,8 @@ export interface AgentLoopResult {
   cancelled: boolean;
   cancelReason?: string;
   events: ProgressEvent[];
+  /** Set when the loop ended because every model call failed (provider outage, billing, etc.) — sanitized, no secrets */
+  modelFailed?: string;
   /** Set when the loop paused because ACT mode requires approval for a mutation */
   pendingApproval?: PendingApproval;
 }
@@ -177,6 +179,7 @@ export async function runAgentLoopV2(
   let stepsUsed = 0;
   let cancelled = false;
   let cancelReason: string | undefined;
+  let modelFailed: string | undefined;
   let checkpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
   const toolCallLog: Array<{ toolId: string; success: boolean; summary: string }> = [];
 
@@ -226,6 +229,7 @@ export async function runAgentLoopV2(
         category: "all_fallbacks_exhausted",
         message: errMsg.slice(0, 200),
       });
+      modelFailed = errMsg.slice(0, 200);
       finalText = `I encountered an error while reasoning: ${errMsg}`;
       break;
     }
@@ -516,6 +520,7 @@ export async function runAgentLoopV2(
     cancelled,
     cancelReason,
     events,
+    modelFailed,
   };
 }
 
@@ -592,6 +597,7 @@ export async function resumeAgentLoopV2(
   let stepsUsed = resume.stepsUsedBeforePause;
   let cancelled = false;
   let cancelReason: string | undefined;
+  let modelFailed: string | undefined;
   let checkpoint = resume.existingCheckpoint;
   const toolCallLog: Array<{ toolId: string; success: boolean; summary: string }> = [];
   let mutationBatchPending = false;
@@ -709,7 +715,15 @@ export async function resumeAgentLoopV2(
         },
       );
     } catch (err) {
-      finalText = `I encountered an error while reasoning: ${err instanceof Error ? err.message : String(err)}`;
+      const errMsg = err instanceof Error ? err.message : String(err);
+      localProgress.emit({
+        type: "model_failed",
+        model: cfg.model ?? "default",
+        category: "all_fallbacks_exhausted",
+        message: errMsg.slice(0, 200),
+      });
+      modelFailed = errMsg.slice(0, 200);
+      finalText = `I encountered an error while reasoning: ${errMsg}`;
       break;
     }
 
@@ -898,6 +912,7 @@ export async function resumeAgentLoopV2(
     cancelled,
     cancelReason,
     events,
+    modelFailed,
   };
 }
 

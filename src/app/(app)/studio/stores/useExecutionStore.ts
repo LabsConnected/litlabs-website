@@ -44,7 +44,9 @@ export interface ExecutionEvent {
     | "status"
     | "model_routing"
     | "model_failed"
-    | "repair_attempt";
+    | "repair_attempt"
+    | "preview"
+    | "deploy";
   /** Human-readable summary (NOT chain-of-thought) */
   summary: string;
   /** Tool ID for tool events */
@@ -392,6 +394,14 @@ export function feedSSEEventToExecutionStore(
     message?: string;
     attempt?: number;
     maxAttempts?: number;
+    healthy?: boolean;
+    previewUrl?: string;
+    environment?: string;
+    url?: string;
+    /** deploy_verify detail is a string; error events carry an object detail */
+    detail?: string | { message?: string; partialText?: string };
+    error?: string;
+    productionUrl?: string;
   },
   store = useExecutionStore,
 ) {
@@ -526,6 +536,50 @@ export function feedSSEEventToExecutionStore(
       s.addEvent({
         type: "repair_attempt",
         summary: `Repair attempt ${evt.attempt}/${evt.maxAttempts}`,
+      });
+      break;
+
+    case "preview_start":
+      s.addEvent({
+        type: "preview",
+        summary: "Starting live preview...",
+      });
+      break;
+
+    case "preview_result":
+      s.addEvent({
+        type: "preview",
+        summary: evt.success
+          ? "Live preview ready"
+          : `Preview failed: ${evt.error ?? "unknown error"}`,
+        success: evt.success,
+      });
+      break;
+
+    case "deploy_start":
+      s.addEvent({
+        type: "deploy",
+        summary: `Deploying to ${evt.environment ?? "production"}...`,
+      });
+      break;
+
+    case "deploy_result":
+      s.addEvent({
+        type: "deploy",
+        summary: evt.success
+          ? `Deployment succeeded${evt.productionUrl ? `: ${evt.productionUrl}` : ""}`
+          : `Deployment failed: ${evt.error ?? "unknown error"}`,
+        success: evt.success,
+      });
+      break;
+
+    case "deploy_verify":
+      s.addEvent({
+        type: "deploy",
+        summary: evt.success
+          ? `Production URL verified: ${evt.url ?? "unknown"}`
+          : `Production URL verification failed: ${typeof evt.detail === "string" ? evt.detail : evt.url ?? "unknown"}`,
+        success: evt.success,
       });
       break;
   }

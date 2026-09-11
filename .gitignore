@@ -168,6 +168,10 @@ PR_BODY_*.txt
 artifacts/production-qa/**/dom/
 artifacts/production-qa/**/screenshots/
 
+# Final-acceptance evidence: keep verdicts and SSE event logs, drop raw captures.
+artifacts/final-acceptance/**/screenshots/
+artifacts/final-acceptance/**/video/
+
 # Local-only libraries and reference dirs (not part of this repo's source)
 litlabs/
 litlabs-website/
