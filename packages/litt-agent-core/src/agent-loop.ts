@@ -183,6 +183,17 @@ export interface AgentLoopOptions {
    * no `sed` on Windows). Default: auto-detected from process.platform.
    */
   platform?: string;
+  /**
+   * Compact prompt/history mode for constrained local models.
+   * Defaults on automatically for Ollama providers.
+   */
+  compact?: boolean;
+  /**
+   * Approximate INPUT budget (not output budget) used by compact mode.
+   * The Ollama default is intentionally conservative so a 4096-token
+   * runtime still has room to generate a tool call/final response.
+   */
+  contextBudget?: number;
 }
 
 /**
@@ -723,7 +734,15 @@ export async function runAgentLoop(
   // Build the system prompt with tool definitions
   const toolDefs = options.tools.list();
   const platform = options.platform ?? (process.platform === "win32" ? "windows" : process.platform);
-  const systemPrompt = options.systemPrompt ?? buildDefaultSystemPrompt(toolDefs, options.projectContext ?? null, platform);
+  const providerId = (options.model as { providerId?: string }).providerId;
+  const compact = options.compact ?? providerId === "ollama";
+  const contextBudget = options.contextBudget ?? (compact ? 2400 : 0);
+  const systemPrompt = options.systemPrompt ?? buildDefaultSystemPrompt(
+    toolDefs,
+    options.projectContext ?? null,
+    platform,
+    compact,
+  );
 
   // Build the conversation: system prompt, prior turns (context), then
   // the current prompt. See AgentLoopOptions.priorMessages.
@@ -1007,7 +1026,7 @@ export async function runAgentLoop(
     `Tool "${entry.definition.name}" returned:\n${JSON.stringify({
       status: result.status,
       message: result.message,
-      data: result.data,
+      data: compactToolResultData(result.data, compact),
     }, null, 2)}`;
 
   // ─── Deterministic repository-evidence acquisition ──────────────
@@ -1101,6 +1120,12 @@ export async function runAgentLoop(
     let modelContent = "";
     const modelEvents: ModelStreamEvent[] = [];
     let modelResult: ModelResult | null = null;
+
+    // Compact immediately before each inference. This catches both old
+    // conversation history and tool results accumulated during this run.
+    if (compact && contextBudget > 0) {
+      pruneMessages(messages, contextBudget, prompt);
+    }
 
     try {
       modelResult = await activeModel.stream(messages, (event) => {
@@ -1757,16 +1782,13 @@ export async function runAgentLoop(
  * Build the default system prompt that includes tool definitions
  * and optional project identity (so the model doesn't guess).
  */
-export function buildDefaultSystemPrompt(tools: ToolDefinition[], project?: ProjectContext | null, platform?: string): string {
-  const toolList = tools.map((t) => {
-    const params = Object.entries(t.inputSchema.properties ?? {})
-      .map(([key, schema]) => {
-        const s = schema as { type?: string; description?: string };
-        return `    "${key}": ${s.type ?? "any"}${s.description ? ` — ${s.description}` : ""}`;
-      })
-      .join("\n");
-    return `- ${t.id}: ${t.description}${params ? `\n  Parameters:\n${params}` : ""}`;
-  }).join("\n");
+export function buildDefaultSystemPrompt(
+  tools: ToolDefinition[],
+  project?: ProjectContext | null,
+  platform?: string,
+  compact = false,
+): string {
+  const toolList = buildToolList(tools, compact);
 
   const projectSection = project
     ? `\nProject context (canonical — do not guess or hallucinate):
@@ -1778,12 +1800,43 @@ export function buildDefaultSystemPrompt(tools: ToolDefinition[], project?: Proj
 All tool calls execute in this project. Do not assume a different project.`
     : "";
 
+  if (compact) {
+    const compactProject = project
+      ? `Project: ${project.name} @ ${project.root} (branch ${project.branch ?? "unknown"}).`
+      : "";
+
+    const editHint = platform === "windows"
+      ? "Windows: use node -e or powershell for edits; do not use sed."
+      : `Platform: ${platform ?? "linux"}. Use platform-appropriate commands.`;
+
+    return `You are LiTT, a coding agent. Be concise and evidence-driven.
+
+Rules:
+- Use project tools before claiming project, git, build, test, or file state.
+- Discover a path with project.list_files or project.search before project.read_file unless that exact path was already returned earlier in this run.
+- Never invent paths or claim an edit/test/build succeeded without tool evidence.
+- To edit, use project.run. ${editHint}
+- After edits, use project.diff and project.check or project.build.
+- If a tool fails, report the real failure.
+${compactProject ? `\n${compactProject}` : ""}
+
+Tools:
+${toolList}
+
+Call a tool with:
+\`\`\`tool_call
+{ "tool": "<tool_id>", "inputs": { ... } }
+\`\`\`
+Continue from the returned evidence.`;
+  }
+
   return `You are LiTT, the AI development agent for LiTTree Lab Studios.
 You help users build software by calling tools and providing insights.
 
 CRITICAL OPERATOR RULES:
 - Never return an empty response.
 - When the user asks you to inspect, verify, check, test, build, search, read, or examine the current project, you MUST gather evidence with the available project tools before giving the final answer.
+- Before project.read_file, discover/confirm the path with project.list_files or project.search unless that exact path was already returned earlier in this run. Never invent a path.
 - Never ask the user to run a command that an available project tool can run for you.
 - Do not claim project state, Git state, test state, build state, or file contents without tool evidence.
 - If a tool fails, report the actual failure instead of pretending the inspection succeeded.
@@ -1819,6 +1872,363 @@ You can also use the OpenAI/Anthropic native format:
 After receiving the tool result, you can either call another tool or
 provide a final text answer. Be concise and actionable. If a tool fails,
 explain what went wrong and suggest next steps.`;
+}
+
+function buildToolList(tools: ToolDefinition[], compact: boolean): string {
+  if (!compact) {
+    return tools.map((t) => {
+      const schema = t.inputSchema as {
+        properties?: Record<string, unknown>;
+      };
+
+      const params = Object.entries(schema.properties ?? {})
+        .map(([key, value]) => {
+          const s = value as {
+            type?: string;
+            description?: string;
+          };
+
+          return `    "${key}": ${s.type ?? "any"}${s.description ? ` — ${s.description}` : ""}`;
+        })
+        .join("\n");
+
+      return `- ${t.id}: ${t.description}${params ? `\n  Parameters:\n${params}` : ""}`;
+    }).join("\n");
+  }
+
+  return tools.map((t) => {
+    const schema = t.inputSchema as {
+      properties?: Record<string, unknown>;
+      required?: string[];
+    };
+
+    const required = new Set(schema.required ?? []);
+
+    const params = Object.entries(schema.properties ?? {})
+      .map(([key, value]) => {
+        const p = value as { type?: string };
+
+        return `${key}${required.has(key) ? "" : "?"}:${p.type ?? "any"}`;
+      })
+      .join(", ");
+
+    const description =
+      t.description.replace(/\s+/g, " ").trim();
+
+    const shortDescription =
+      description.length > 80
+        ? `${description.slice(0, 77)}...`
+        : description;
+
+    return `- ${t.id}(${params})${shortDescription ? ` — ${shortDescription}` : ""}`;
+  }).join("\n");
+}
+
+const COMPACT_MAX_STRING = 1800;
+const COMPACT_MAX_ARRAY = 20;
+const COMPACT_MAX_OBJECT_KEYS = 32;
+
+const APPROX_CHARS_PER_TOKEN = 3.25;
+const MESSAGE_OVERHEAD_CHARS = 32;
+
+const MAX_HISTORY_MESSAGE_CHARS = 1600;
+const RECENT_MESSAGES_TO_PROTECT = 4;
+
+function truncateMiddle(
+  value: string,
+  maxChars: number,
+): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+
+  const marker = "\n... [truncated] ...\n";
+  const remaining =
+    Math.max(0, maxChars - marker.length);
+
+  const head =
+    Math.ceil(remaining * 0.72);
+
+  const tail =
+    Math.max(0, remaining - head);
+
+  return `${value.slice(0, head)}${marker}${tail > 0 ? value.slice(-tail) : ""}`;
+}
+
+/**
+ * Compact large tool payloads before they become conversation history.
+ */
+export function compactToolResultData(
+  data: Record<string, unknown>,
+  enabled: boolean,
+): Record<string, unknown> {
+  if (!enabled) {
+    return data;
+  }
+
+  return compactValue(data) as Record<string, unknown>;
+}
+
+function compactValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    return truncateMiddle(
+      value,
+      COMPACT_MAX_STRING,
+    );
+  }
+
+  if (Array.isArray(value)) {
+    const items = value
+      .slice(0, COMPACT_MAX_ARRAY)
+      .map((item) => compactValue(item));
+
+    if (value.length > COMPACT_MAX_ARRAY) {
+      items.push(
+        `... [${value.length - COMPACT_MAX_ARRAY} more items truncated]`,
+      );
+    }
+
+    return items;
+  }
+
+  if (
+    value !== null &&
+    typeof value === "object"
+  ) {
+    const entries = Object.entries(value);
+
+    const out: Record<string, unknown> = {};
+
+    for (
+      const [key, nested]
+      of entries.slice(
+        0,
+        COMPACT_MAX_OBJECT_KEYS,
+      )
+    ) {
+      out[key] = compactValue(nested);
+    }
+
+    if (
+      entries.length >
+      COMPACT_MAX_OBJECT_KEYS
+    ) {
+      out.__truncated__ =
+        `${entries.length - COMPACT_MAX_OBJECT_KEYS} object keys omitted`;
+    }
+
+    return out;
+  }
+
+  return value;
+}
+
+export function estimateMessageTokens(
+  messages: ChatMessage[],
+): number {
+  const chars = messages.reduce(
+    (sum, message) =>
+      sum +
+      message.content.length +
+      MESSAGE_OVERHEAD_CHARS,
+    0,
+  );
+
+  return Math.ceil(
+    chars /
+    APPROX_CHARS_PER_TOKEN,
+  );
+}
+
+/**
+ * Prune in-place while preserving the current user request and
+ * recent evidence.
+ */
+export function pruneMessages(
+  messages: ChatMessage[],
+  contextBudgetTokens: number,
+  currentPrompt?: string,
+): void {
+  if (
+    contextBudgetTokens <= 0 ||
+    messages.length === 0
+  ) {
+    return;
+  }
+
+  const working =
+    messages.map(
+      (message) => ({ ...message }),
+    );
+
+  const systemMessage =
+    working[0]?.role === "system"
+      ? working[0]
+      : undefined;
+
+  let currentPromptMessage:
+    | ChatMessage
+    | undefined;
+
+  if (currentPrompt) {
+    for (
+      let i = working.length - 1;
+      i >= 0;
+      i--
+    ) {
+      if (
+        working[i].role === "user" &&
+        working[i].content === currentPrompt
+      ) {
+        currentPromptMessage = working[i];
+        break;
+      }
+    }
+  }
+
+  for (const message of working) {
+    if (
+      message === systemMessage ||
+      message === currentPromptMessage
+    ) {
+      continue;
+    }
+
+    if (
+      message.content.length >
+      MAX_HISTORY_MESSAGE_CHARS
+    ) {
+      message.content =
+        truncateMiddle(
+          message.content,
+          MAX_HISTORY_MESSAGE_CHARS,
+        );
+    }
+  }
+
+  const protectedNow = (
+    message: ChatMessage,
+    index: number,
+  ): boolean =>
+    message === systemMessage ||
+    message === currentPromptMessage ||
+    index >= Math.max(
+      1,
+      working.length -
+      RECENT_MESSAGES_TO_PROTECT,
+    );
+
+  while (
+    estimateMessageTokens(working) >
+      contextBudgetTokens &&
+    working.length > 2
+  ) {
+    let removeIndex = -1;
+
+    for (
+      let i = 1;
+      i < working.length;
+      i++
+    ) {
+      if (
+        !protectedNow(
+          working[i],
+          i,
+        )
+      ) {
+        removeIndex = i;
+        break;
+      }
+    }
+
+    if (removeIndex < 0) {
+      break;
+    }
+
+    let deleteCount = 1;
+
+    if (
+      removeIndex + 1 <
+        working.length &&
+      !protectedNow(
+        working[removeIndex + 1],
+        removeIndex + 1,
+      )
+    ) {
+      deleteCount = 2;
+    }
+
+    working.splice(
+      removeIndex,
+      deleteCount,
+    );
+  }
+
+  if (
+    estimateMessageTokens(working) >
+    contextBudgetTokens
+  ) {
+    for (const message of working) {
+      if (
+        message === systemMessage ||
+        message === currentPromptMessage
+      ) {
+        continue;
+      }
+
+      if (
+        message.content.length >
+        600
+      ) {
+        message.content =
+          truncateMiddle(
+            message.content,
+            600,
+          );
+      }
+    }
+  }
+
+  if (
+    currentPromptMessage &&
+    estimateMessageTokens(working) >
+      contextBudgetTokens &&
+    currentPromptMessage.content.length >
+      2400
+  ) {
+    currentPromptMessage.content =
+      truncateMiddle(
+        currentPromptMessage.content,
+        2400,
+      );
+  }
+
+  while (
+    estimateMessageTokens(working) >
+      contextBudgetTokens &&
+    working.length > 2
+  ) {
+    const index =
+      working.findIndex(
+        (message, i) =>
+          i > 0 &&
+          message !== systemMessage &&
+          message !==
+            currentPromptMessage,
+      );
+
+    if (index < 0) {
+      break;
+    }
+
+    working.splice(index, 1);
+  }
+
+  messages.splice(
+    0,
+    messages.length,
+    ...working,
+  );
 }
 
 // ─── Helper: extract args from tool call for CommandExecutor ───────
