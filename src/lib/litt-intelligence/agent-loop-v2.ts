@@ -211,6 +211,7 @@ export async function runAgentLoopV2(
           temperature: 0.15,
           maxTokens: 4096,
           evalMetadata: cfg.evalMetadata,
+          deadline: startTime + cfg.maxRuntimeMs,
         },
       );
       // Emit model routing event so LiTT Live shows which model was actually used
@@ -487,7 +488,7 @@ export async function runAgentLoopV2(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs),
     });
   }
 
@@ -712,6 +713,7 @@ export async function resumeAgentLoopV2(
           temperature: 0.15,
           maxTokens: 4096,
           evalMetadata: cfg.evalMetadata,
+          deadline: startTime + cfg.maxRuntimeMs,
         },
       );
     } catch (err) {
@@ -882,7 +884,7 @@ export async function resumeAgentLoopV2(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs),
     });
   }
 
@@ -927,6 +929,7 @@ function createAutonomousRepairCallback(
   transport: WorkspaceTransport,
   systemPrompt: string,
   toolDefs: ToolDefinition[],
+  deadline: number,
 ): (attempt: number, errors: string) => Promise<boolean> {
   return async (attempt: number, errors: string) => {
     // Feed the error output to the LLM and let it repair
@@ -943,6 +946,7 @@ function createAutonomousRepairCallback(
         const response = await callLLMWithTools(systemPrompt, repairMessages, toolDefs, {
           temperature: 0.1,
           maxTokens: 4096,
+          deadline,
         });
 
         if (response.toolCalls.length === 0) {
