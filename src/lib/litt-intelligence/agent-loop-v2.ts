@@ -40,7 +40,7 @@ export interface AgentLoopConfig {
 
 export const DEFAULT_LOOP_CONFIG: AgentLoopConfig = {
   maxSteps: 20,
-  maxRuntimeMs: 300_000, // 5 minutes
+  maxRuntimeMs: 600_000, // 10 minutes — enough for full build+preview+deploy
   maxOutputChars: 50_000,
   maxRetries: 2,
   executionMode: "act",
