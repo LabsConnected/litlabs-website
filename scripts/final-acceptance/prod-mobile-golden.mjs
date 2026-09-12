@@ -20,7 +20,9 @@
  *
  * Optional env:
  *   LITT_PROD_BASE_URL        (default https://www.litlabs.net)
- *   LITT_ACCEPTANCE_USER_ID   (default the known QA user)
+ *   LITT_ACCEPTANCE_USER_ID   (default the known QA user; REQUIRED in CI —
+ *                              see below, this script refuses to silently
+ *                              fall back when running under GitHub Actions)
  *   LITT_ACCEPTANCE_PROMPT    (default a small static landing page build)
  *   LITT_ACCEPTANCE_DEPLOY    "1" to request deploy in the prompt (default on)
  */
@@ -28,10 +30,18 @@
 import { chromium, devices } from "@playwright/test";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
 import path from "path";
+import { resolveAcceptanceUserId } from "./acceptance-user.mjs";
 
 // ─── Config ────────────────────────────────────────────────────
 const BASE = (process.env.LITT_PROD_BASE_URL || "https://www.litlabs.net").replace(/\/$/, "");
-const USER_ID = process.env.LITT_ACCEPTANCE_USER_ID || "user_3GsAlPRx3ihYhftgAQ8Owr1uxzF";
+
+// GITHUB_ACTIONS is set unconditionally by every Actions runner (unlike CI,
+// which is only present if a step opts in), so it's the reliable signal that
+// we're in the production CI run rather than a local/manual invocation.
+const USER_ID = resolveAcceptanceUserId({
+  isCI: process.env.GITHUB_ACTIONS === "true",
+  envUserId: process.env.LITT_ACCEPTANCE_USER_ID,
+});
 const DEPLOY_REQUESTED = (process.env.LITT_ACCEPTANCE_DEPLOY ?? "1") !== "0";
 const PROMPT =
   process.env.LITT_ACCEPTANCE_PROMPT ||

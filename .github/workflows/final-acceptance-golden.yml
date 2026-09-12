@@ -10,6 +10,12 @@ name: Final Acceptance — Production Mobile Golden
 # Playwright/production-build steps already use — never printed, never
 # written to the produced artifact (the script only ever uses it as a
 # Bearer header value to mint a short-lived sign-in token).
+#
+# LITT_ACCEPTANCE_USER_ID selects which Clerk user the golden run signs
+# in as. It must be wired here as a repository secret — the script
+# refuses to fall back to its hard-coded legacy QA user when running in
+# CI (see prod-mobile-golden.mjs), so an unset/removed secret fails this
+# step clearly instead of silently authenticating as a stale user.
 on:
   workflow_dispatch:
 
@@ -45,6 +51,7 @@ jobs:
         run: node scripts/final-acceptance/prod-mobile-golden.mjs
         env:
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          LITT_ACCEPTANCE_USER_ID: ${{ secrets.LITT_ACCEPTANCE_USER_ID }}
 
       - name: Upload acceptance artifacts (verdict, SSE log, screenshots, video)
         if: always()
