@@ -387,6 +387,7 @@ export async function callLLMWithTools(
 
   // All OpenRouter models failed — try Gemini direct API fallback
   const geminiKey = getGeminiKey();
+  console.log("[llm-tool-calling] OpenRouter failures:", failures.map((f) => `${f.model}(${f.status})`).join(", "), "— trying Gemini direct fallback, key present:", !!geminiKey);
   if (geminiKey && openRouterTools.length > 0) {
     try {
       const geminiResult = await callGeminiWithTools(
@@ -410,6 +411,7 @@ export async function callLLMWithTools(
       return geminiResult;
     } catch (geminiErr) {
       const msg = geminiErr instanceof Error ? geminiErr.message : String(geminiErr);
+      console.error("[llm-tool-calling] Gemini direct fallback failed:", msg);
       failures.push({ model: "gemini-2.5-flash (direct)", status: null, category: "gemini_direct_error", latencyMs: 0, message: msg });
     }
   }
