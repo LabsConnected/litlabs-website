@@ -156,6 +156,56 @@ describe("Launch Flow: failed build → repair → preview", () => {
   });
 });
 
+// ─── Tests: model failure ─────────────────────────────────────────
+
+describe("Launch Flow: model failure", () => {
+  it("fails fast and surfaces the model error instead of previewing/deploying an ungenerated project", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(successAgentResult({
+      modelFailed: "All tool-calling models failed. Attempts: gemini-2.5-flash(http_402)",
+      buildFixResult: undefined,
+      stepsUsed: 1,
+    }));
+    const runDeployFlow = vi.fn().mockResolvedValue(successDeployResult());
+    const options = makeOptions({ enableDeploy: true, runAgentLoop, runDeployFlow });
+
+    const result = await runLaunchFlow(options);
+
+    expect(result.success).toBe(false);
+    expect(result.status).toBe("failed");
+    expect(result.finalText).toContain("http_402");
+    expect(result.error).toContain("http_402");
+    expect(options.transport.startPreview).not.toHaveBeenCalled();
+    expect(runDeployFlow).not.toHaveBeenCalled();
+  });
+
+  it("fails when the runtime-repair loop's model fails, instead of masking it as a preview error", async () => {
+    let callCount = 0;
+    const runAgentLoop = vi.fn().mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) return successAgentResult();
+      return successAgentResult({
+        modelFailed: "All tool-calling models failed (http_402)",
+        buildFixResult: undefined,
+      });
+    });
+    const getPreviewStatus = vi.fn().mockResolvedValue({
+      status: "failed", port: null, framework: null, command: null, startedAt: null,
+      lastHealthCheck: null, error: "Cannot find module 'react'", errorCode: "preview_dev_server_failed", logs: [],
+    });
+
+    const transport = createMockTransport({ getPreviewStatus });
+    const options = makeOptions({ transport, runAgentLoop, maxRuntimeRepairAttempts: 2 });
+
+    const result = await runLaunchFlow(options);
+
+    expect(result.success).toBe(false);
+    expect(result.status).toBe("failed");
+    expect(result.finalText).toContain("could not complete the repair");
+    expect(result.finalText).toContain("http_402");
+    expect(runAgentLoop).toHaveBeenCalledTimes(2); // initial + first repair only
+  });
+});
+
 // ─── Tests: runtime failure → repair ──────────────────────────────
 
 describe("Launch Flow: runtime failure → repair", () => {

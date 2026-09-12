@@ -1,0 +1,127 @@
+[
+  {
+    "type": "checkpoint",
+    "label": "Pre-launch: Build a simple single-page landing site for a coffee roastery called Ember Roast",
+    "gitSha": "b150fa06fd940c0808bfa2f744d44d5bcd1b09ca"
+  },
+  {
+    "type": "status",
+    "summary": "Planning and generating the project..."
+  },
+  {
+    "type": "phase",
+    "phase": "call_llm",
+    "step": 1
+  },
+  {
+    "type": "phase",
+    "phase": "call_llm",
+    "step": 1
+  },
+  {
+    "type": "status",
+    "summary": "Step 1: reasoning with gemini-2.5-flash"
+  },
+  {
+    "type": "model_failed",
+    "model": "gemini-2.5-flash",
+    "category": "all_fallbacks_exhausted",
+    "message": "All tool-calling models failed. Attempts: gemini-2.5-flash(http_402, 5207ms); google/gemini-2.5-flash(http_402, 4699ms); openai/gpt-5.6-luna(http_402, 5307ms); anthropic/claude-sonnet-4.6(http_402, 83"
+  },
+  {
+    "type": "finished",
+    "totalSteps": 1,
+    "totalDurationMs": 31975
+  },
+  {
+    "type": "status",
+    "summary": "Starting live preview..."
+  },
+  {
+    "type": "phase",
+    "phase": "preview",
+    "step": 2
+  },
+  {
+    "type": "preview_start"
+  },
+  {
+    "type": "preview_status",
+    "status": "starting",
+    "healthy": false
+  },
+  {
+    "type": "preview_status",
+    "status": "ready",
+    "healthy": true
+  },
+  {
+    "type": "preview_result",
+    "success": true,
+    "previewUrl": "https://terminal.litlabs.net/preview/ws-62c61cc3-1c093682"
+  },
+  {
+    "type": "status",
+    "summary": "Deploying to production..."
+  },
+  {
+    "type": "phase",
+    "phase": "deploy",
+    "step": 3
+  },
+  {
+    "type": "deploy_result",
+    "success": false,
+    "error": "Deployment is not configured. Set RAILWAY_API_TOKEN + RAILWAY_SERVICE_ID or VERCEL_TOKEN + VERCEL_PROJECT_ID, plus DEPLOY_PRODUCTION_URL for verification."
+  },
+  {
+    "type": "text",
+    "text": "Deployment cannot run: Deployment is not configured. Set RAILWAY_API_TOKEN + RAILWAY_SERVICE_ID or VERCEL_TOKEN + VERCEL_PROJECT_ID, plus DEPLOY_PRODUCTION_URL for verification."
+  },
+  {
+    "type": "done",
+    "userMessage": {
+      "id": "0097943c-bf58-4fca-bb9f-fec83e1e0e5e",
+      "conversationId": "7083ce50-10a0-4bd7-9980-6e37c7d4d405",
+      "ownerId": "user_3GsAlPRx3ihYhftgAQ8Owr1uxzF",
+      "projectId": "62c61cc3-fd18-4842-98cf-55a4b6000c8e",
+      "role": "user",
+      "agentSlug": null,
+      "agentMode": null,
+      "agentInstanceId": null,
+      "content": "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section, then deploy it live.",
+      "status": "completed",
+      "parentMessageId": null,
+      "regenerationOfMessageId": null,
+      "clientRequestId": "req_1789169545814_u5x1stxr",
+      "createdAt": "2026-09-11T23:32:28.911609+00:00",
+      "updatedAt": "2026-09-11T23:32:28.911609+00:00"
+    },
+    "assistantMessage": {
+      "id": "08d33d62-a0cd-4bfb-857f-eab8d506f17e",
+      "conversationId": "7083ce50-10a0-4bd7-9980-6e37c7d4d405",
+      "ownerId": "user_3GsAlPRx3ihYhftgAQ8Owr1uxzF",
+      "projectId": "62c61cc3-fd18-4842-98cf-55a4b6000c8e",
+      "role": "assistant",
+      "agentSlug": "litt",
+      "agentMode": null,
+      "agentInstanceId": null,
+      "content": "Deployment cannot run: Deployment is not configured. Set RAILWAY_API_TOKEN + RAILWAY_SERVICE_ID or VERCEL_TOKEN + VERCEL_PROJECT_ID, plus DEPLOY_PRODUCTION_URL for verification.",
+      "status": "failed",
+      "parentMessageId": "0097943c-bf58-4fca-bb9f-fec83e1e0e5e",
+      "regenerationOfMessageId": null,
+      "clientRequestId": null,
+      "createdAt": "2026-09-11T23:32:30.30689+00:00",
+      "updatedAt": "2026-09-11T23:32:30.30689+00:00"
+    },
+    "revision": 2,
+    "provider": "openrouter-v2",
+    "latencyMs": 34328,
+    "v2": true,
+    "launchStatus": "failed",
+    "previewUrl": "https://terminal.litlabs.net/preview/ws-62c61cc3-1c093682"
+  },
+  {
+    "type": "DONE"
+  }
+]

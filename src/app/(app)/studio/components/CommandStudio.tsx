@@ -805,11 +805,15 @@ function CommandStudioContent() {
         const changes = execution.changesSummary ?? { added: 0, modified: 0, deleted: 0, renamed: 0 };
         const filesChanged = changes.added + changes.modified + changes.deleted + changes.renamed;
         const repaired = execution.events.some((event) => event.type === "repair_attempt");
-        if (filesChanged > 0 && capabilities.projectId) {
+        // The launch flow can start/refresh the workspace preview without any
+        // file writes (e.g. template preview, or model failure after preview
+        // start). Re-poll preview status in that case so the iframe appears.
+        const previewReady = execution.events.some((event) => event.type === "preview" && event.success);
+        if ((filesChanged > 0 || previewReady) && capabilities.projectId) {
           setWorkspaceRevision((revision) => revision + 1);
           window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId: capabilities.projectId, source: "assistant" } }));
         }
-        setCompletion({ changes, previewUpdated: Boolean(capabilities.projectId), repaired });
+        setCompletion({ changes, previewUpdated: previewReady, repaired });
         setAdvancedToolsOpen(false);
         setContextDrawerOpen(false);
         setLittActiveTab("chat");
