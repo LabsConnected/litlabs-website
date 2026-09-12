@@ -1,0 +1,85 @@
+[
+  {
+    "type": "checkpoint",
+    "label": "Pre-launch: Build a simple single-page landing site for a coffee roastery called Ember Roast",
+    "gitSha": "e05e0deb4bd8d4992c3874517d4af997539ad5a3"
+  },
+  {
+    "type": "status",
+    "summary": "Planning and generating the project..."
+  },
+  {
+    "type": "phase",
+    "phase": "call_llm",
+    "step": 1
+  },
+  {
+    "type": "phase",
+    "phase": "call_llm",
+    "step": 1
+  },
+  {
+    "type": "status",
+    "summary": "Step 1: reasoning with gemini-2.5-flash"
+  },
+  {
+    "type": "model_failed",
+    "model": "gemini-2.5-flash",
+    "category": "all_fallbacks_exhausted",
+    "message": "All tool-calling models failed. Attempts: gemini-2.5-flash(http_402, 4795ms); google/gemini-2.5-flash(http_402, 6103ms); openai/gpt-5.6-luna(http_402, 4264ms); anthropic/claude-sonnet-4.6(http_402, 77"
+  },
+  {
+    "type": "finished",
+    "totalSteps": 1,
+    "totalDurationMs": 31986
+  },
+  {
+    "type": "text",
+    "text": "The model could not complete the request: All tool-calling models failed. Attempts: gemini-2.5-flash(http_402, 4795ms); google/gemini-2.5-flash(http_402, 6103ms); openai/gpt-5.6-luna(http_402, 4264ms); anthropic/claude-sonnet-4.6(http_402, 77"
+  },
+  {
+    "type": "done",
+    "userMessage": {
+      "id": "344f097f-9bf9-4746-a173-4f9e6557d00f",
+      "conversationId": "282e1b78-7bfb-42f4-9321-d5e17715bfd3",
+      "ownerId": "user_3GsAlPRx3ihYhftgAQ8Owr1uxzF",
+      "projectId": "611965ec-e0ba-4dbd-beed-e799e38589ea",
+      "role": "user",
+      "agentSlug": null,
+      "agentMode": null,
+      "agentInstanceId": null,
+      "content": "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section, then deploy it live.",
+      "status": "completed",
+      "parentMessageId": null,
+      "regenerationOfMessageId": null,
+      "clientRequestId": "req_1789172150483_641hkjzp",
+      "createdAt": "2026-09-12T00:15:53.64769+00:00",
+      "updatedAt": "2026-09-12T00:15:53.64769+00:00"
+    },
+    "assistantMessage": {
+      "id": "56ac53aa-fda7-489d-a1e8-d4ed05733b7f",
+      "conversationId": "282e1b78-7bfb-42f4-9321-d5e17715bfd3",
+      "ownerId": "user_3GsAlPRx3ihYhftgAQ8Owr1uxzF",
+      "projectId": "611965ec-e0ba-4dbd-beed-e799e38589ea",
+      "role": "assistant",
+      "agentSlug": "litt",
+      "agentMode": null,
+      "agentInstanceId": null,
+      "content": "The model could not complete the request: All tool-calling models failed. Attempts: gemini-2.5-flash(http_402, 4795ms); google/gemini-2.5-flash(http_402, 6103ms); openai/gpt-5.6-luna(http_402, 4264ms); anthropic/claude-sonnet-4.6(http_402, 77",
+      "status": "failed",
+      "parentMessageId": "344f097f-9bf9-4746-a173-4f9e6557d00f",
+      "regenerationOfMessageId": null,
+      "clientRequestId": null,
+      "createdAt": "2026-09-12T00:16:08.424509+00:00",
+      "updatedAt": "2026-09-12T00:16:08.424509+00:00"
+    },
+    "revision": 2,
+    "provider": "openrouter-v2",
+    "latencyMs": 32618,
+    "v2": true,
+    "launchStatus": "failed"
+  },
+  {
+    "type": "DONE"
+  }
+]

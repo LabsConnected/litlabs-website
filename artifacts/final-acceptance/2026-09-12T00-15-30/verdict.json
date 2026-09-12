@@ -1,0 +1,2543 @@
+{
+  "base": "https://www.litlabs.net",
+  "userId": "user_3GsAlPRx3ihYhftgAQ8Owr1uxzF",
+  "startedAt": "2026-09-12T00:15:30.158Z",
+  "steps": {
+    "sign_in": {
+      "ok": true,
+      "detail": "GET /api/studio-projects → 200",
+      "at": "2026-09-12T00:15:37.075Z"
+    },
+    "project_created": {
+      "ok": true,
+      "detail": "HTTP 201 id=611965ec-e0ba-4dbd-beed-e799e38589ea",
+      "at": "2026-09-12T00:15:37.992Z"
+    },
+    "workspace_ready": {
+      "ok": true,
+      "detail": "projectId=611965ec-e0ba-4dbd-beed-e799e38589ea",
+      "at": "2026-09-12T00:15:38.777Z"
+    },
+    "studio_load": {
+      "ok": true,
+      "detail": "HTTP 200",
+      "at": "2026-09-12T00:15:39.099Z"
+    },
+    "studio_shell": {
+      "ok": true,
+      "detail": "shell=true trigger=true",
+      "at": "2026-09-12T00:15:45.183Z"
+    },
+    "mobile_sheet_open": {
+      "ok": true,
+      "detail": null,
+      "at": "2026-09-12T00:15:45.878Z"
+    },
+    "keyboard_geometry": {
+      "ok": true,
+      "detail": "{\"vh\":500,\"inputBottom\":371,\"sendVisible\":true}",
+      "at": "2026-09-12T00:15:48.011Z"
+    },
+    "message_sent": {
+      "ok": true,
+      "detail": "prompt=\"Build a simple single-page landing site for a coffee roastery called Ember Roast\"",
+      "at": "2026-09-12T00:15:50.550Z"
+    },
+    "canonical_api_called": {
+      "ok": true,
+      "detail": "POST /api/studio/conversations/282e1b78-7bfb-42f4-9321-d5e17715bfd3/messages → 200",
+      "at": "2026-09-12T00:16:07.590Z"
+    },
+    "stream_completed": {
+      "ok": true,
+      "detail": "2655 bytes SSE",
+      "at": "2026-09-12T00:16:39.688Z"
+    },
+    "files_written": {
+      "ok": false,
+      "detail": "0 write-ish tool events, 0 files-changed events",
+      "at": "2026-09-12T00:16:39.692Z"
+    },
+    "preview_event": {
+      "ok": false,
+      "detail": "no preview_result event",
+      "at": "2026-09-12T00:16:39.693Z"
+    },
+    "assistant_completed": {
+      "ok": true,
+      "detail": "The model could not complete the request: All tool-calling models failed. Attempts: gemini-2.5-flash(http_402, 4795ms); google/gemini-2.5-flash(http_402, 6103ms); openai/gpt-5.6-luna(http_402, 4264ms)",
+      "at": "2026-09-12T00:16:39.694Z"
+    },
+    "preview_iframe_present": {
+      "ok": false,
+      "detail": "no iframe src",
+      "at": "2026-09-12T00:22:40.541Z"
+    },
+    "no_frame_violations": {
+      "ok": true,
+      "detail": "clean",
+      "at": "2026-09-12T00:22:40.551Z"
+    },
+    "deploy_result": {
+      "ok": false,
+      "detail": "no deploy_result event in stream",
+      "at": "2026-09-12T00:22:40.552Z"
+    },
+    "post_build_keyboard_usable": {
+      "ok": true,
+      "detail": "input=true sheet=true",
+      "at": "2026-09-12T00:22:41.826Z"
+    }
+  },
+  "sseEvents": [
+    {
+      "type": "checkpoint",
+      "label": "Pre-launch: Build a simple single-page landing site for a coffee roastery called Ember Roast",
+      "gitSha": "e05e0deb4bd8d4992c3874517d4af997539ad5a3"
+    },
+    {
+      "type": "status",
+      "summary": "Planning and generating the project..."
+    },
+    {
+      "type": "phase",
+      "phase": "call_llm",
+      "step": 1
+    },
+    {
+      "type": "phase",
+      "phase": "call_llm",
+      "step": 1
+    },
+    {
+      "type": "status",
+      "summary": "Step 1: reasoning with gemini-2.5-flash"
+    },
+    {
+      "type": "model_failed",
+      "model": "gemini-2.5-flash",
+      "category": "all_fallbacks_exhausted",
+      "message": "All tool-calling models failed. Attempts: gemini-2.5-flash(http_402, 4795ms); google/gemini-2.5-flash(http_402, 6103ms); openai/gpt-5.6-luna(http_402, 4264ms); anthropic/claude-sonnet-4.6(http_402, 77"
+    },
+    {
+      "type": "finished",
+      "totalSteps": 1,
+      "totalDurationMs": 31986
+    },
+    {
+      "type": "text",
+      "text": "The model could not complete the request: All tool-calling models failed. Attempts: gemini-2.5-flash(http_402, 4795ms); google/gemini-2.5-flash(http_402, 6103ms); openai/gpt-5.6-luna(http_402, 4264ms)"
+    },
+    {
+      "type": "done",
+      "userMessage": {
+        "id": "344f097f-9bf9-4746-a173-4f9e6557d00f",
+        "conversationId": "282e1b78-7bfb-42f4-9321-d5e17715bfd3",
+        "ownerId": "user_3GsAlPRx3ihYhftgAQ8Owr1uxzF",
+        "projectId": "611965ec-e0ba-4dbd-beed-e799e38589ea",
+        "role": "user",
+        "agentSlug": null,
+        "agentMode": null,
+        "agentInstanceId": null,
+        "content": "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section, then deploy it live.",
+        "status": "completed",
+        "parentMessageId": null,
+        "regenerationOfMessageId": null,
+        "clientRequestId": "req_1789172150483_641hkjzp",
+        "createdAt": "2026-09-12T00:15:53.64769+00:00",
+        "updatedAt": "2026-09-12T00:15:53.64769+00:00"
+      },
+      "assistantMessage": {
+        "id": "56ac53aa-fda7-489d-a1e8-d4ed05733b7f",
+        "conversationId": "282e1b78-7bfb-42f4-9321-d5e17715bfd3",
+        "ownerId": "user_3GsAlPRx3ihYhftgAQ8Owr1uxzF",
+        "projectId": "611965ec-e0ba-4dbd-beed-e799e38589ea",
+        "role": "assistant",
+        "agentSlug": "litt",
+        "agentMode": null,
+        "agentInstanceId": null,
+        "content": "The model could not complete the request: All tool-calling models failed. Attempts: gemini-2.5-flash(http_402, 4795ms); google/gemini-2.5-flash(http_402, 6103ms); openai/gpt-5.6-luna(http_402, 4264ms); anthropic/claude-sonnet-4.6(http_402, 77",
+        "status": "failed",
+        "parentMessageId": "344f097f-9bf9-4746-a173-4f9e6557d00f",
+        "regenerationOfMessageId": null,
+        "clientRequestId": null,
+        "createdAt": "2026-09-12T00:16:08.424509+00:00",
+        "updatedAt": "2026-09-12T00:16:08.424509+00:00"
+      },
+      "revision": 2,
+      "provider": "openrouter-v2",
+      "latencyMs": 32618,
+      "v2": true,
+      "launchStatus": "failed"
+    },
+    {
+      "type": "DONE"
+    }
+  ],
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 502 ()"
+  ],
+  "pageErrors": [],
+  "filesChangedEvents": [],
+  "networkSummary": [
+    {
+      "status": 200,
+      "url": "/api/owner/test-mode"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities"
+    },
+    {
+      "status": 200,
+      "url": "/api/users/user_3GsAlPRx3ihYhftgAQ8Owr1uxzF/plan"
+    },
+    {
+      "status": 200,
+      "url": "/api/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities"
+    },
+    {
+      "status": 200,
+      "url": "/api/settings/profile"
+    },
+    {
+      "status": 200,
+      "url": "/api/account"
+    },
+    {
+      "status": 200,
+      "url": "/api/notifications/count"
+    },
+    {
+      "status": 200,
+      "url": "/api/affiliate/track-lead"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/assets?limit=50"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/wallet"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/62c61cc3-fd18-4842-98cf-55a4b6000c8e/preview"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/62c61cc3-fd18-4842-98cf-55a4b6000c8e/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio/conversations?projectId=62c61cc3-fd18-4842-98cf-55a4b6000c8e"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/62c61cc3-fd18-4842-98cf-55a4b6000c8e/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/assets?projectId=62c61cc3-fd18-4842-98cf-55a4b6000c8e&limit=50"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/62c61cc3-fd18-4842-98cf-55a4b6000c8e/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio/conversations/7083ce50-10a0-4bd7-9980-6e37c7d4d405/messages"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/62c61cc3-fd18-4842-98cf-55a4b6000c8e/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/62c61cc3-fd18-4842-98cf-55a4b6000c8e/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/62c61cc3-fd18-4842-98cf-55a4b6000c8e/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/62c61cc3-fd18-4842-98cf-55a4b6000c8e/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/62c61cc3-fd18-4842-98cf-55a4b6000c8e/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/62c61cc3-fd18-4842-98cf-55a4b6000c8e/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/62c61cc3-fd18-4842-98cf-55a4b6000c8e/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/settings/profile"
+    },
+    {
+      "status": 200,
+      "url": "/api/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/owner/test-mode"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/users/user_3GsAlPRx3ihYhftgAQ8Owr1uxzF/plan"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/settings/profile"
+    },
+    {
+      "status": 200,
+      "url": "/api/affiliate/track-lead"
+    },
+    {
+      "status": 200,
+      "url": "/api/notifications/count"
+    },
+    {
+      "status": 200,
+      "url": "/api/account"
+    },
+    {
+      "status": 200,
+      "url": "/api/assets?limit=50"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/preview"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/wallet"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio/conversations?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/assets?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea&limit=50"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/settings/profile"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 201,
+      "url": "/api/studio/conversations"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio/conversations/282e1b78-7bfb-42f4-9321-d5e17715bfd3/messages"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/wallet"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/notifications/count"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/token"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/token"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/wallet"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/notifications/count"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/wallet"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/wallet"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/notifications/count"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/wallet"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/notifications/count"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/wallet"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/wallet"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/notifications/count"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 502,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/wallet"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/notifications/count"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/wallet"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/wallet"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/notifications/count"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/wallet"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/notifications/count"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/wallet"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/wallet"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/notifications/count"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/project-runtime?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/voice/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/llm/health"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities/project-terminal"
+    },
+    {
+      "status": 200,
+      "url": "/api/wallet"
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/capabilities?projectId=611965ec-e0ba-4dbd-beed-e799e38589ea"
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    },
+    {
+      "status": 200,
+      "url": "/api/studio-projects/611965ec-e0ba-4dbd-beed-e799e38589ea/files?path=."
+    }
+  ],
+  "screenshots": [
+    "artifacts/final-acceptance/2026-09-12T00-15-30/screenshots/01-signed-in.png",
+    "artifacts/final-acceptance/2026-09-12T00-15-30/screenshots/02-studio-mobile.png",
+    "artifacts/final-acceptance/2026-09-12T00-15-30/screenshots/03-sheet-open.png",
+    "artifacts/final-acceptance/2026-09-12T00-15-30/screenshots/04-keyboard-open.png",
+    "artifacts/final-acceptance/2026-09-12T00-15-30/screenshots/05-prompt-typed.png",
+    "artifacts/final-acceptance/2026-09-12T00-15-30/screenshots/06-after-build.png",
+    "artifacts/final-acceptance/2026-09-12T00-15-30/screenshots/08-post-build-keyboard.png"
+  ],
+  "verdict": "FAIL: files_written, preview_event, preview_iframe_present, deploy_result",
+  "notes": [
+    "workspace/prepare → 200 {\"workspaceId\":\"ws-611965ec-064b55eb\",\"workspaceStatus\":\"ready\",\"workspaceRoot\":\"/data/littree-workspaces/user_3GsAlPRx3ihYhftgAQ8Owr1uxzF/ws-611965ec-064b55eb\",\"branch\":\"main\",\"commitSha\":\"e05e0deb4b",
+    "Deploy requested in prompt but no deploy_result event — routing likely stayed in non-ship mode."
+  ],
+  "finishedAt": "2026-09-12T00:22:49.521Z"
+}

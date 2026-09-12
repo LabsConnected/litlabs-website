@@ -1,0 +1,14 @@
+{
+  "base": "https://www.litlabs.net",
+  "userId": "user_3GsAlPRx3ihYhftgAQ8Owr1uxzF",
+  "startedAt": "2026-09-12T00:14:53.846Z",
+  "steps": {},
+  "sseEvents": [],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "filesChangedEvents": [],
+  "networkSummary": [],
+  "screenshots": [],
+  "verdict": "RUNNER_ERROR",
+  "notes": []
+}
