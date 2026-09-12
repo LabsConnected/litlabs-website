@@ -855,6 +855,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           }));
         }
       } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : "LLM provider unavailable";
+        console.error("[messages-route] Stream failed:", errorMsg, err instanceof Error ? err.stack : "");
         await updateMessageStatus(assistantMessage.id, userId, "failed");
         if (agentRunId) {
           settleRun(agentRunId, {
@@ -867,7 +869,6 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             // Best-effort settlement on failure — must not leak unhandled rejection
           });
         }
-        const errorMsg = err instanceof Error ? err.message : "LLM provider unavailable";
         studioLog("message:failed", {
           conversationId: conversation.id,
           userId,
