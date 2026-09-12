@@ -188,6 +188,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
         executionMode: options.executionMode ?? "act",
         enableBuildFix: options.enableBuildFix ?? true,
         evalMetadata: options.evalMetadata,
+        signal,
       },
       progress,
     );
@@ -286,6 +287,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           executionMode: options.executionMode ?? "act",
           enableBuildFix: true,
           maxSteps: options.runtimeRepairBudgetSteps ?? 8,
+          signal,
         },
         progress,
       );

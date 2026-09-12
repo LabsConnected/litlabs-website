@@ -135,14 +135,13 @@ const OPENROUTER_TIMEOUT_MS = 60_000;
 const GEMINI_TIMEOUT_MS = 120_000;
 
 /**
- * Race a `fetch` against a wall-clock timeout.
+ * Race a `fetch` against a wall-clock timeout and an external abort signal.
  *
- * Some serverless runtimes ignore or mishandle `AbortSignal.timeout(...)`,
- * leaving the HTTP request pending forever and the agent loop stalled. This
- * wrapper adds a plain `setTimeout` race as a backstop and aborts the request
- * for cleanup. No secrets, no request bodies, and no full prompts are logged.
+ * Deterministically settles in every path (timeout, abort, success, throw) and
+ * cleans up the internal controller, timer, and external listener. No secrets,
+ * request bodies, or full prompts are logged.
  *
- * @param label - Used in timeout errors so logs show which provider aborted.
+ * @param label - Used in timeout/upstream errors so logs show which provider aborted.
  * @param externalSignal - Optional upstream/client AbortSignal to propagate.
  */
 async function fetchWithTimeout(
@@ -153,27 +152,32 @@ async function fetchWithTimeout(
   externalSignal?: AbortSignal,
 ): Promise<Response> {
   if (externalSignal?.aborted) {
-    throw new Error(`${label} request aborted before it started`);
+    throw new UpstreamAbortError(label);
   }
 
   const controller = new AbortController();
   let onExternalAbort: (() => void) | undefined;
-  if (externalSignal) {
-    onExternalAbort = () => controller.abort();
-    externalSignal.addEventListener("abort", onExternalAbort, { once: true });
-  }
-
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const externalAbortPromise = new Promise<never>((_, reject) => {
+    onExternalAbort = () => {
+      controller.abort();
+      reject(new UpstreamAbortError(label));
+    };
+    externalSignal?.addEventListener("abort", onExternalAbort, { once: true });
+  });
+  externalAbortPromise.catch(() => {});
+
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
       controller.abort();
-      reject(new Error(`${label} request timed out after ${timeoutMs}ms`));
+      reject(new ProviderTimeoutError(label, timeoutMs));
     }, timeoutMs);
   });
   timeoutPromise.catch(() => {}); // avoid unhandled rejection when fetch wins
 
   try {
-    return await Promise.race([fetch(url, { ...init, signal: controller.signal }), timeoutPromise]);
+    return await Promise.race([fetch(url, { ...init, signal: controller.signal }), timeoutPromise, externalAbortPromise]);
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
     if (onExternalAbort) {
@@ -193,6 +197,44 @@ function getGeminiKey(): string {
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const GUARDRAIL_MS = 1_000;
 const BUDGET_EXHAUSTED = "Agent runtime budget exhausted";
+
+class ProviderTimeoutError extends Error {
+  constructor(
+    public readonly provider: string,
+    public readonly timeoutMs: number,
+  ) {
+    super(`${provider} request timed out after ${timeoutMs}ms`);
+  }
+}
+
+class UpstreamAbortError extends Error {
+  constructor(public readonly provider: string) {
+    super(`${provider} request aborted by upstream`);
+  }
+}
+
+/**
+ * Tracks the single agent runtime budget for all provider attempts in a call.
+ */
+class DeadlineBudget {
+  constructor(private readonly deadline: number) {}
+
+  remainingMs() {
+    return Math.max(0, this.deadline - Date.now());
+  }
+
+  canAttempt() {
+    return this.remainingMs() > GUARDRAIL_MS;
+  }
+
+  attemptTimeoutMs(defaultMs: number) {
+    return Math.max(1, Math.min(defaultMs, this.remainingMs() - GUARDRAIL_MS));
+  }
+
+  canAffordRetry(delayMs: number, nextAttemptMs: number) {
+    return Date.now() + delayMs + nextAttemptMs + GUARDRAIL_MS <= this.deadline;
+  }
+}
 
 /**
  * Convert LiTT tool definitions to Gemini FunctionDeclaration format.
@@ -260,34 +302,36 @@ async function callGeminiWithTools(
     body.tools = [{ functionDeclarations }];
   }
 
-  const deadline = options?.deadline ?? Number.MAX_SAFE_INTEGER;
-  const remainingMs = () => Math.max(0, deadline - Date.now());
+  const budget = new DeadlineBudget(options?.deadline ?? Number.MAX_SAFE_INTEGER);
 
-  if (remainingMs() <= GUARDRAIL_MS) {
+  if (!budget.canAttempt()) {
     throw new Error(BUDGET_EXHAUSTED);
   }
 
-  console.log(`[llm-tool-calling] callGeminiWithTools: entering Gemini direct fallback model=${model} tools=${tools.length} @ ${new Date().toISOString()}`);
+  console.log(`[llm-tool-calling] callGeminiWithTools: entering Gemini direct fallback model=${model} tools=${tools.length} budgetMs=${budget.remainingMs()} @ ${new Date().toISOString()}`);
   const totalT0 = Date.now();
 
   let lastErr: unknown = null;
   let result: GeminiGenerateContentResponse | undefined;
 
   for (let attempt = 0; attempt < 3; attempt++) {
-    if (remainingMs() <= GUARDRAIL_MS) {
+    if (!budget.canAttempt()) {
       throw new Error(BUDGET_EXHAUSTED);
     }
 
-    const attemptTimeoutMs = Math.max(1, Math.min(GEMINI_TIMEOUT_MS, remainingMs() - GUARDRAIL_MS));
+    const attemptTimeoutMs = budget.attemptTimeoutMs(GEMINI_TIMEOUT_MS);
     const attemptT0 = Date.now();
-    console.log(`[llm-tool-calling] callGeminiWithTools: attempt ${attempt + 1} start timeoutMs=${attemptTimeoutMs} budgetMs=${remainingMs()} @ ${new Date().toISOString()}`);
+    console.log(`[llm-tool-calling] callGeminiWithTools: attempt ${attempt + 1} start timeoutMs=${attemptTimeoutMs} budgetMs=${budget.remainingMs()} @ ${new Date().toISOString()}`);
 
     try {
       const res = await fetchWithTimeout(
-        `${GEMINI_API_BASE}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
+        `${GEMINI_API_BASE}/models/${encodeURIComponent(model)}:generateContent`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": key,
+          },
           body: JSON.stringify(body),
         },
         attemptTimeoutMs,
@@ -309,18 +353,29 @@ async function callGeminiWithTools(
       const latencyMs = Date.now() - attemptT0;
       const msg = err instanceof Error ? err.message : String(err);
       const isTimeout = msg.includes("timed out");
-      console.log(`[llm-tool-calling] callGeminiWithTools: attempt ${attempt + 1} failed attemptLatencyMs=${latencyMs} timeout=${isTimeout} msg=${msg.slice(0, 150)} @ ${new Date().toISOString()}`);
+      const isUpstreamAbort = msg.includes("aborted by upstream");
+      const category = isTimeout ? "provider_timeout" : isUpstreamAbort ? "upstream_abort" : "gemini_direct_error";
+      console.log(`[llm-tool-calling] callGeminiWithTools: attempt ${attempt + 1} failed category=${category} attemptLatencyMs=${latencyMs} msg=${msg.slice(0, 150)} @ ${new Date().toISOString()}`);
 
       if (msg.includes("429") || msg.includes("Too Many Requests")) {
         const delay = (attempt + 1) * 60_000;
-        const canRetry = Date.now() + delay + GEMINI_TIMEOUT_MS + GUARDRAIL_MS <= deadline;
-        if (!canRetry) {
+        if (!budget.canAffordRetry(delay, GEMINI_TIMEOUT_MS)) {
           throw new Error(BUDGET_EXHAUSTED);
         }
-        console.log(`[llm-tool-calling] callGeminiWithTools: 429 backoff attempt ${attempt + 1} delayMs=${delay} budgetMs=${remainingMs()} @ ${new Date().toISOString()}`);
+        console.log(`[llm-tool-calling] callGeminiWithTools: 429 backoff attempt ${attempt + 1} delayMs=${delay} budgetMs=${budget.remainingMs()} @ ${new Date().toISOString()}`);
         const sleepT0 = Date.now();
-        await new Promise((r) => setTimeout(r, delay));
-        console.log(`[llm-tool-calling] callGeminiWithTools: 429 backoff ended actualSleepMs=${Date.now() - sleepT0} @ ${new Date().toISOString()}`);
+        await new Promise<void>((resolve, reject) => {
+          const t = setTimeout(resolve, delay);
+          if (options?.signal) {
+            const onAbort = () => { clearTimeout(t); reject(new UpstreamAbortError("Gemini 429 backoff")); };
+            if (options.signal.aborted) {
+              onAbort();
+            } else {
+              options.signal.addEventListener("abort", onAbort, { once: true });
+            }
+          }
+        });
+        console.log(`[llm-tool-calling] callGeminiWithTools: 429 backoff ended actualSleepMs=${Date.now() - sleepT0} budgetMs=${budget.remainingMs()} @ ${new Date().toISOString()}`);
         continue;
       }
 
@@ -382,8 +437,12 @@ const TOOL_CALLING_FALLBACK_MODELS = [
  * Categorize an HTTP error for logging and fallback decisions.
  * Never includes request bodies or auth tokens — only status + category.
  */
-function categorizeError(status: number | null, _message: string): string {
-  if (status === null) return "network_error";
+function categorizeError(status: number | null, message: string): string {
+  if (status === null) {
+    if (message.includes("timed out after")) return "provider_timeout";
+    if (message.includes("aborted by upstream")) return "upstream_abort";
+    return "network_error";
+  }
   if (status === 401 || status === 403) return "auth_error";
   if (status === 404) return "model_not_found";
   if (status === 429) return "rate_limited";
@@ -432,12 +491,10 @@ export async function callLLMWithTools(
   // Absolute wall-clock deadline inherited from the agent loop so the entire
   // fallback chain (OpenRouter attempts + Gemini sleeps + generateContent)
   // cannot outlive the agent's maxRuntimeMs.
-  const deadline = options?.deadline ?? Number.MAX_SAFE_INTEGER;
-  const remainingMs = () => Math.max(0, deadline - Date.now());
-
+  const budget = new DeadlineBudget(options?.deadline ?? Number.MAX_SAFE_INTEGER);
   const failures: Array<{ model: string; status: number | null; category: string; latencyMs: number; message: string }> = [];
 
-  if (remainingMs() <= GUARDRAIL_MS) {
+  if (!budget.canAttempt()) {
     throw new Error(BUDGET_EXHAUSTED);
   }
 
@@ -458,11 +515,11 @@ export async function callLLMWithTools(
       body.tool_choice = options?.toolChoice ?? "auto";
     }
 
-    if (remainingMs() <= GUARDRAIL_MS) {
+    if (!budget.canAttempt()) {
       throw new Error(BUDGET_EXHAUSTED);
     }
-    const attemptTimeoutMs = Math.max(1, Math.min(OPENROUTER_TIMEOUT_MS, remainingMs() - GUARDRAIL_MS));
-    console.log(`[llm-tool-calling] callLLMWithTools: attempting OpenRouter model=${model} timeoutMs=${attemptTimeoutMs} budgetMs=${remainingMs()} @ ${new Date().toISOString()}`);
+    const attemptTimeoutMs = budget.attemptTimeoutMs(OPENROUTER_TIMEOUT_MS);
+    console.log(`[llm-tool-calling] callLLMWithTools: attempting OpenRouter model=${model} timeoutMs=${attemptTimeoutMs} budgetMs=${budget.remainingMs()} @ ${new Date().toISOString()}`);
     const t0 = Date.now();
     let res: Response;
     try {
@@ -477,10 +534,10 @@ export async function callLLMWithTools(
             "X-Title": "LiTT",
           },
           body: JSON.stringify(body),
-          signal: options?.signal,
         },
         attemptTimeoutMs,
         "OpenRouter",
+        options?.signal,
       );
       console.log(`[llm-tool-calling] callLLMWithTools: OpenRouter model=${model} response status=${res.status} latencyMs=${Date.now() - t0} @ ${new Date().toISOString()}`);
     } catch (err) {
@@ -579,7 +636,7 @@ export async function callLLMWithTools(
         messages,
         tools,
         toolIdMap,
-        { temperature: options?.temperature, maxTokens: options?.maxTokens, evalMetadata: options?.evalMetadata, deadline, signal: options?.signal },
+        { temperature: options?.temperature, maxTokens: options?.maxTokens, evalMetadata: options?.evalMetadata, deadline: options?.deadline, signal: options?.signal },
       );
       // Log that we fell back to Gemini direct
       logLLMCall({

@@ -36,6 +36,8 @@ export interface AgentLoopConfig {
   systemPrompt: string;
   enableBuildFix: boolean;
   evalMetadata?: LLMCallMetadata;
+  /** Upstream/client AbortSignal propagated to all provider calls. */
+  signal?: AbortSignal;
 }
 
 export const DEFAULT_LOOP_CONFIG: AgentLoopConfig = {
@@ -212,6 +214,7 @@ export async function runAgentLoopV2(
           maxTokens: 4096,
           evalMetadata: cfg.evalMetadata,
           deadline: startTime + cfg.maxRuntimeMs,
+          signal: cfg.signal,
         },
       );
       // Emit model routing event so LiTT Live shows which model was actually used
@@ -488,7 +491,7 @@ export async function runAgentLoopV2(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal),
     });
   }
 
@@ -714,6 +717,7 @@ export async function resumeAgentLoopV2(
           maxTokens: 4096,
           evalMetadata: cfg.evalMetadata,
           deadline: startTime + cfg.maxRuntimeMs,
+          signal: cfg.signal,
         },
       );
     } catch (err) {
@@ -884,7 +888,7 @@ export async function resumeAgentLoopV2(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal),
     });
   }
 
@@ -930,6 +934,7 @@ function createAutonomousRepairCallback(
   systemPrompt: string,
   toolDefs: ToolDefinition[],
   deadline: number,
+  signal?: AbortSignal,
 ): (attempt: number, errors: string) => Promise<boolean> {
   return async (attempt: number, errors: string) => {
     // Feed the error output to the LLM and let it repair
@@ -947,6 +952,7 @@ function createAutonomousRepairCallback(
           temperature: 0.1,
           maxTokens: 4096,
           deadline,
+          signal,
         });
 
         if (response.toolCalls.length === 0) {

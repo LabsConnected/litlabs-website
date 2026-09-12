@@ -434,4 +434,78 @@ describe("callLLMWithTools — model routing fallback", () => {
     expect(result.toolCalls).toHaveLength(1);
     expect(result.toolCalls[0].toolId).toBe("write_file");
   });
+
+  it("rejects immediately when the upstream/client signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      callLLMWithTools(
+        "You are LiTT.",
+        [{ role: "user", content: "Hello" }],
+        [],
+        { model: "gemini-2.5-flash", signal: controller.signal },
+      ),
+    ).rejects.toThrow(/Agent runtime budget exhausted|aborted by upstream/);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("aborts a pending OpenRouter request and stops the chain when the upstream signal aborts", async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      mockFetch.mockImplementation(() => new Promise(() => {})); // hangs
+
+      const promise = callLLMWithTools(
+        "You are LiTT.",
+        [{ role: "user", content: "Hello" }],
+        [],
+        { model: "gemini-2.5-flash", signal: controller.signal },
+      );
+
+      // Let the first OpenRouter attempt start, then abort mid-flight.
+      await vi.advanceTimersByTimeAsync(5_000);
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      await expect(promise).rejects.toThrow(/aborted by upstream/);
+      // Only the in-flight attempt should have started; the chain stops.
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries Gemini direct 429 when the backoff fits in the remaining budget", async () => {
+    vi.useFakeTimers();
+    try {
+      mockFetch
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeGeminiErrorResponse(429, "Too Many Requests"))
+        .mockResolvedValueOnce(makeGeminiSuccessResponse("Retry success."));
+      vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+
+      const promise = callLLMWithTools(
+        "You are LiTT.",
+        [{ role: "user", content: "Hello" }],
+        [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
+        { model: "gemini-2.5-flash", deadline: Date.now() + 300_000 },
+      );
+
+      // First run starts the first (and only) 60s backoff timer.
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(60_000 + 1);
+      const result = await promise;
+
+      expect(result.text).toBe("Retry success.");
+      // 5 OpenRouter + 2 Gemini attempts.
+      expect(mockFetch).toHaveBeenCalledTimes(7);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

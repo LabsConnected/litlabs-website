@@ -642,6 +642,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             enableDeploy: built.kernelResult.decision.routing.mode === "ship",
             evalMetadata: v2Config.evalMetadata,
             progress: streamProgress,
+            signal: req.signal,
           });
 
           v2Result = launchFlowResult.agentLoopResult ?? null;
