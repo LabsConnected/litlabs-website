@@ -158,8 +158,13 @@ async function callGeminiWithTools(
     evalMetadata?: LLMCallMetadata;
   },
 ): Promise<LLMToolCallResponse> {
+  console.log("[llm-tool-calling] callGeminiWithTools: starting");
   const genAI = getGenAI();
-  if (!genAI) throw new Error("GEMINI_API_KEY not set — cannot use Gemini direct fallback");
+  if (!genAI) {
+    console.log("[llm-tool-calling] callGeminiWithTools: no Gemini key");
+    throw new Error("GEMINI_API_KEY not set — cannot use Gemini direct fallback");
+  }
+  console.log("[llm-tool-calling] callGeminiWithTools: genAI created, tools count:", tools.length);
 
   const model = genAI.getGenerativeModel({
     model: "gemini-2.5-flash",
@@ -176,11 +181,13 @@ async function callGeminiWithTools(
     parts: [{ text: m.content }],
   }));
 
+  console.log("[llm-tool-calling] callGeminiWithTools: calling generateContent, messages:", contents.length);
   const t0 = Date.now();
   const result = await model.generateContent({
     contents,
     systemInstruction: systemPrompt,
   });
+  console.log("[llm-tool-calling] callGeminiWithTools: generateContent completed in", Date.now() - t0, "ms");
 
   const response = result.response;
   const functionCalls = response.functionCalls();
@@ -411,7 +418,7 @@ export async function callLLMWithTools(
       return geminiResult;
     } catch (geminiErr) {
       const msg = geminiErr instanceof Error ? geminiErr.message : String(geminiErr);
-      console.error("[llm-tool-calling] Gemini direct fallback failed:", msg);
+      console.log("[llm-tool-calling] Gemini direct fallback FAILED:", msg);
       failures.push({ model: "gemini-2.5-flash (direct)", status: null, category: "gemini_direct_error", latencyMs: 0, message: msg });
     }
   }

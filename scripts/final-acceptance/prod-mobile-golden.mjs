@@ -172,6 +172,51 @@ async function main() {
     }
   });
 
+  // Inject a fetch interceptor to capture SSE events in real-time.
+  // Playwright's resp.body() waits for the entire stream to close, which
+  // may take minutes for long agent loops. This interceptor captures
+  // events as they arrive and stores them in window.__littSSEEvents.
+  await page.addInitScript(() => {
+    window.__littSSEEvents = [];
+    window.__littSSEComplete = false;
+    const origFetch = window.fetch;
+    window.fetch = async function (...args) {
+      const resp = await origFetch.apply(this, args);
+      const url = typeof args[0] === "string" ? args[0] : args[0]?.url ?? "";
+      if (/\/api\/studio\/conversations\/[^/]+\/messages/.test(url)) {
+        const contentType = resp.headers.get("content-type") ?? "";
+        if (contentType.includes("text/event-stream") && resp.body) {
+          const reader = resp.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          (async () => {
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) { window.__littSSEComplete = true; break; }
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split("\n");
+                buffer = lines.pop() ?? "";
+                let currentEvent = null;
+                for (const line of lines) {
+                  if (line.startsWith("data: ")) {
+                    try {
+                      const evt = JSON.parse(line.slice(6));
+                      window.__littSSEEvents.push(evt);
+                    } catch {}
+                  }
+                }
+              }
+            } catch {
+              window.__littSSEComplete = true;
+            }
+          })();
+        }
+      }
+      return resp;
+    };
+  });
+
   try {
     // ── Step 1: sign in via magic link ──
     await page.goto(signInUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
@@ -264,8 +309,19 @@ async function main() {
     step("canonical_api_called", messagesApiSeen.status === 200, `POST ${messagesApiSeen.url.replace(BASE, "")} → ${messagesApiSeen.status}`);
 
     // Poll until the SSE body is fully captured (response completes)
+    // OR until the injected interceptor captures a "done" event.
     while (!messagesApiResponseBody && Date.now() < deadline) {
       await page.waitForTimeout(2000);
+      // Check if the injected interceptor has captured a done event
+      const sseComplete = await page.evaluate(() => window.__littSSEComplete);
+      const sseEvents = await page.evaluate(() => window.__littSSEEvents || []);
+      const hasDone = sseEvents.some((e) => e.type === "done" || e.type === "error");
+      if (sseComplete || hasDone) {
+        // Use the injected events as the response body
+        if (!messagesApiResponseBody && sseEvents.length > 0) {
+          messagesApiResponseBody = sseEvents.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+        }
+      }
       // Surface live progress in the meantime
       const sheetText = await page.getByTestId("litt-mobile-sheet").innerText().catch(() => "");
       if (sheetText) process.stdout.write(".");
