@@ -48,7 +48,16 @@ export interface LLMToolCallResponse {
   toolCalls: ToolCallRequest[];
   finishReason: string;
   model: string;
+  /** Raw Gemini parts preserved for subsequent conversation rounds (thought signatures, ids). */
+  rawParts?: GeminiPart[];
 }
+
+/** Normalized conversation message. `parts` is Gemini-specific provider metadata. */
+export type LLMMessage = {
+  role: "user" | "assistant";
+  content: string;
+  parts?: GeminiPart[];
+};
 
 // ─── OpenRouter tool format ───────────────────────────────────────
 
@@ -70,6 +79,8 @@ interface OpenRouterMessage {
     function: { name: string; arguments: string };
   }>;
   tool_call_id?: string;
+  /** Gemini-specific raw model parts preserved for subsequent turns. */
+  parts?: GeminiPart[];
 }
 
 export function toOpenRouterTools(tools: ToolDefinition[]): OpenRouterTool[] {
@@ -114,9 +125,10 @@ type GeminiFunctionDeclaration = {
   };
 };
 
-type GeminiPart = {
+export type GeminiPart = {
   text?: string;
-  functionCall?: { name: string; args: Record<string, unknown> };
+  functionCall?: { id?: string; name: string; args: Record<string, unknown> };
+  thoughtSignature?: string;
 };
 
 type GeminiCandidate = {
@@ -264,7 +276,7 @@ function toGeminiFunctionDeclarations(tools: ToolDefinition[]): GeminiFunctionDe
  */
 async function callGeminiWithTools(
   systemPrompt: string,
-  messages: Array<{ role: "user" | "assistant"; content: string }>,
+  messages: LLMMessage[],
   tools: ToolDefinition[],
   toolIdMap: Map<string, string>,
   options?: {
@@ -285,7 +297,7 @@ async function callGeminiWithTools(
   const model = "gemini-2.5-flash";
   const contents = messages.map((m) => ({
     role: m.role === "assistant" ? "model" : "user",
-    parts: [{ text: m.content }],
+    parts: m.parts ?? [{ text: m.content }],
   }));
 
   const body: Record<string, unknown> = {
@@ -387,20 +399,21 @@ async function callGeminiWithTools(
     throw lastErr ?? new Error("Gemini direct fallback returned no result");
   }
 
-  const parts = result.candidates?.[0]?.content?.parts ?? [];
+  const parts: GeminiPart[] = result.candidates?.[0]?.content?.parts ?? [];
   const text = parts
     .filter((p) => typeof p.text === "string")
     .map((p) => p.text as string)
     .join("");
-  const functionCalls = parts
-    .map((p) => p.functionCall)
-    .filter((fc): fc is { name: string; args: Record<string, unknown> } => !!fc);
+  const functionCallParts = parts.filter((p) => !!p.functionCall);
 
-  const toolCalls: ToolCallRequest[] = functionCalls.map((fc) => ({
-    toolCallId: `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    toolId: toolIdMap.get(fc.name) ?? toToolDefinitionId(fc.name),
-    inputs: fc.args ?? {},
-  }));
+  const toolCalls: ToolCallRequest[] = functionCallParts.map((p) => {
+    const fc = p.functionCall!;
+    return {
+      toolCallId: fc.id ?? `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      toolId: toolIdMap.get(fc.name) ?? toToolDefinitionId(fc.name),
+      inputs: fc.args ?? {},
+    };
+  });
 
   logLLMCall({
     prompt: messages.map((m) => `${m.role}: ${m.content}`).join("\n"),
@@ -418,6 +431,7 @@ async function callGeminiWithTools(
     toolCalls,
     finishReason: toolCalls.length > 0 ? "tool_calls" : "stop",
     model,
+    rawParts: parts,
   };
 }
 
@@ -464,7 +478,7 @@ function categorizeError(status: number | null, message: string): string {
  */
 export async function callLLMWithTools(
   systemPrompt: string,
-  messages: Array<{ role: "user" | "assistant"; content: string }>,
+  messages: LLMMessage[],
   tools: ToolDefinition[],
   options?: {
     model?: string;
@@ -684,18 +698,12 @@ export function buildToolResultMessage(
 export function buildAssistantToolCallMessage(
   toolCalls: ToolCallRequest[],
   text: string,
-): OpenRouterMessage {
+  rawParts?: GeminiPart[],
+): LLMMessage {
   return {
     role: "assistant",
     content: text,
-    tool_calls: toolCalls.map((tc) => ({
-      id: tc.toolCallId,
-      type: "function" as const,
-      function: {
-        name: tc.toolId.replace(/\./g, "_"),
-        arguments: JSON.stringify(tc.inputs),
-      },
-    })),
+    parts: rawParts,
   };
 }
 

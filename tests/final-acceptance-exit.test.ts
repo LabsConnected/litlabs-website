@@ -18,15 +18,19 @@ describe("golden verdict exit code", () => {
     expect(exitCodeForVerdict(null as unknown as { verdict: string })).toBe(1);
   });
 
-  it("treats any PASS prefix as success", () => {
+  it("treats only exact PASS or PASS:<decorated> as success", () => {
+    expect(exitCodeForVerdict({ verdict: "PASS" })).toBe(0);
     expect(exitCodeForVerdict({ verdict: "PASS: all checks" })).toBe(0);
     expect(exitCodeForVerdict({ verdict: "PASS: files_written, preview_event" })).toBe(0);
+    expect(exitCodeForVerdict({ verdict: "PASS extra" })).toBe(1);
+    expect(exitCodeForVerdict({ verdict: "PASSED" })).toBe(1);
   });
 
   it("returns 1 for malformed or unknown verdict values", () => {
     expect(exitCodeForVerdict({ verdict: "" })).toBe(1);
-    expect(exitCodeForVerdict({ verdict: "PASSED" })).toBe(1);
     expect(exitCodeForVerdict({ verdict: "UNKNOWN" })).toBe(1);
     expect(exitCodeForVerdict({ verdict: 42 as unknown as string })).toBe(1);
+    expect(exitCodeForVerdict({ verdict: "FAIL" })).toBe(1);
+    expect(exitCodeForVerdict({ verdict: "PASSBROKEN" })).toBe(1);
   });
 });

@@ -18,7 +18,7 @@ import "server-only";
 import type { WorkspaceTransport } from "./workspace-transport";
 import { ProgressEmitter, type ProgressEvent } from "./progress-events";
 import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from "./permission-engine";
-import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, type ToolDefinition, type ToolCallResult } from "./llm-tool-calling";
+import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, type ToolDefinition, type ToolCallResult, type LLMMessage } from "./llm-tool-calling";
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { toolRegistry } from "./tool-registry";
@@ -57,7 +57,7 @@ export interface PendingApproval {
   inputs: Record<string, unknown>;
   reason: string;
   /** The conversation messages at the point of pause — resume from here after approval */
-  pausedMessages: Array<{ role: "user" | "assistant"; content: string }>;
+  pausedMessages: LLMMessage[];
 }
 
 export interface AgentLoopResult {
@@ -173,7 +173,7 @@ export async function runAgentLoopV2(
   const toolDefs = availableTools.map(toToolDefinition);
 
   // Conversation messages for the LLM
-  const llmMessages: Array<{ role: "user" | "assistant"; content: string }> = [
+  const llmMessages: LLMMessage[] = [
     { role: "user", content: userMessage },
   ];
 
@@ -260,10 +260,7 @@ export async function runAgentLoopV2(
     }
 
     // Add assistant message with tool calls to conversation
-    llmMessages.push({
-      role: "assistant",
-      content: buildAssistantToolCallMessage(llmResponse.toolCalls, llmResponse.text).content,
-    });
+    llmMessages.push(buildAssistantToolCallMessage(llmResponse.toolCalls, llmResponse.text, llmResponse.rawParts));
 
     // Process each tool call
     let batchHasMutation = false;
@@ -532,7 +529,7 @@ export async function runAgentLoopV2(
 
 export interface ResumeInput {
   /** The paused conversation messages at the point of approval pause */
-  pausedMessages: Array<{ role: "user" | "assistant"; content: string }>;
+  pausedMessages: LLMMessage[];
   /** The tool that was pending approval */
   toolId: string;
   toolCallId: string;
@@ -593,7 +590,7 @@ export async function resumeAgentLoopV2(
   const toolDefs = availableTools.map(toToolDefinition);
 
   // Resume from paused messages — these are server-verified, not client-supplied
-  const llmMessages: Array<{ role: "user" | "assistant"; content: string }> = [
+  const llmMessages: LLMMessage[] = [
     ...resume.pausedMessages,
   ];
 
@@ -738,10 +735,7 @@ export async function resumeAgentLoopV2(
       break;
     }
 
-    llmMessages.push({
-      role: "assistant",
-      content: buildAssistantToolCallMessage(llmResponse.toolCalls, llmResponse.text).content,
-    });
+    llmMessages.push(buildAssistantToolCallMessage(llmResponse.toolCalls, llmResponse.text, llmResponse.rawParts));
 
     let batchHasMutation = false;
 
@@ -938,7 +932,7 @@ function createAutonomousRepairCallback(
 ): (attempt: number, errors: string) => Promise<boolean> {
   return async (attempt: number, errors: string) => {
     // Feed the error output to the LLM and let it repair
-    const repairMessages: Array<{ role: "user" | "assistant"; content: string }> = [
+    const repairMessages: LLMMessage[] = [
       {
         role: "user",
         content: `The build/check failed with the following output. Please inspect the relevant code, fix the issue, and verify your fix.\n\n--- Error output ---\n${errors}\n--- End error output ---\n\nRepair attempt ${attempt}/3. Use the available tools to read the failing files, identify the issue, and write the fix.`,
@@ -960,10 +954,7 @@ function createAutonomousRepairCallback(
           return true;
         }
 
-        repairMessages.push({
-          role: "assistant",
-          content: buildAssistantToolCallMessage(response.toolCalls, response.text).content,
-        });
+        repairMessages.push(buildAssistantToolCallMessage(response.toolCalls, response.text, response.rawParts));
 
         // Execute each tool call
         for (const toolCall of response.toolCalls) {

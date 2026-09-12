@@ -25,7 +25,7 @@ vi.mock("@/lib/siteConfig", () => ({
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-import { callLLMWithTools } from "./llm-tool-calling";
+import { callLLMWithTools, buildAssistantToolCallMessage, type GeminiPart } from "./llm-tool-calling";
 
 function makeSuccessResponse(model: string, text: string, toolCalls: unknown[] = []) {
   return {
@@ -73,6 +73,15 @@ function makeGeminiErrorResponse(status: number, message: string) {
     status,
     json: async () => ({}),
     text: async () => message,
+  };
+}
+
+function makeGeminiRawResponse(parts: GeminiPart[]) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({ candidates: [{ content: { parts } }] }),
+    text: async () => "",
   };
 }
 
@@ -287,6 +296,8 @@ describe("callLLMWithTools — model routing fallback", () => {
       await expect(promise).rejects.toThrow(/All tool-calling models failed/);
       // Primary + 4 OpenRouter fallbacks each hit the 60s backstop.
       expect(mockFetch).toHaveBeenCalledTimes(5);
+      // All per-attempt timeout timers are cleared after the chain settles.
+      expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
     }
@@ -471,6 +482,8 @@ describe("callLLMWithTools — model routing fallback", () => {
       await expect(promise).rejects.toThrow(/aborted by upstream/);
       // Only the in-flight attempt should have started; the chain stops.
       expect(mockFetch).toHaveBeenCalledTimes(1);
+      // No orphan timeout or retry/backoff remains after the upstream abort.
+      expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
     }
@@ -504,8 +517,340 @@ describe("callLLMWithTools — model routing fallback", () => {
       expect(result.text).toBe("Retry success.");
       // 5 OpenRouter + 2 Gemini attempts.
       expect(mockFetch).toHaveBeenCalledTimes(7);
+      // Backoff and retry completed; no residual timers.
+      expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("classifies a Gemini 429 and the subsequent upstream abort of the backoff", async () => {
+    vi.useFakeTimers();
+    try {
+      mockFetch
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeGeminiErrorResponse(429, "Too Many Requests"))
+        .mockResolvedValueOnce(makeGeminiSuccessResponse("Should not run.", []));
+      vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+
+      const controller = new AbortController();
+      const promise = callLLMWithTools(
+        "You are LiTT.",
+        [{ role: "user", content: "Hello" }],
+        [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
+        { model: "gemini-2.5-flash", deadline: Date.now() + 300_000, signal: controller.signal },
+      );
+
+      await vi.advanceTimersByTimeAsync(0);
+      // 429 triggers a 60s backoff.
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      await expect(promise).rejects.toThrow(/aborted by upstream/);
+      // 5 OpenRouter + 1 Gemini (429), and no retry attempt.
+      expect(mockFetch).toHaveBeenCalledTimes(6);
+      // The 429 backoff timer is cleared when the upstream signal aborts.
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves Gemini parts across all candidates text, functionCalls, ids and thoughtSignatures", async () => {
+    const parts: GeminiPart[] = [
+      { text: "I will " },
+      { functionCall: { id: "call_abc_1", name: "write_file", args: { path: "test.txt" } }, thoughtSignature: "sig_1" },
+      { text: "and then " },
+      { functionCall: { name: "list_files", args: { directory: "/" } } },
+      { text: "done." },
+    ];
+
+    mockFetch
+      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+      .mockResolvedValueOnce(makeGeminiRawResponse(parts));
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+
+    const result = await callLLMWithTools(
+      "You are LiTT.",
+      [{ role: "user", content: "Hello" }],
+      [
+        { id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: { path: { type: "string" } }, required: [] } },
+        { id: "list_files", description: "List files", inputSchema: { type: "object", properties: { directory: { type: "string" } }, required: [] } },
+      ],
+      { model: "gemini-2.5-flash" },
+    );
+
+    expect(result.text).toBe("I will and then done.");
+    expect(result.toolCalls).toHaveLength(2);
+    expect(result.toolCalls[0].toolCallId).toBe("call_abc_1");
+    expect(result.toolCalls[0].toolId).toBe("write_file");
+    expect(result.toolCalls[1].toolId).toBe("list_files");
+    expect(result.rawParts).toEqual(parts);
+  });
+
+  it("does not start another provider after an upstream abort has already settled the chain", async () => {
+    const controller = new AbortController();
+    mockFetch.mockImplementation(() => new Promise(() => {})); // hangs forever
+
+    const promise = callLLMWithTools(
+      "You are LiTT.",
+      [{ role: "user", content: "Hello" }],
+      [],
+      { model: "gemini-2.5-flash", signal: controller.signal },
+    );
+
+    controller.abort();
+    await expect(promise).rejects.toThrow(/aborted by upstream/);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("fetchWithTimeout abort/timeouts through callLLMWithTools", () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("OpenRouter: pending request is aborted by upstream and classifies as upstream_abort", async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      mockFetch.mockImplementation(() => new Promise(() => {}));
+
+      const promise = callLLMWithTools(
+        "You are LiTT.",
+        [{ role: "user", content: "Hello" }],
+        [],
+        { model: "gemini-2.5-flash", signal: controller.signal },
+      );
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      const init = mockFetch.mock.calls[0][1] as { signal: AbortSignal } | undefined;
+      expect(init).toBeDefined();
+      expect(init!.signal.aborted).toBe(false);
+
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(init!.signal.aborted).toBe(true);
+      await expect(promise).rejects.toThrow(/OpenRouter request aborted by upstream/);
+      // No fallback attempts after the upstream abort.
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      // Timeout listener/timer is cleaned up; no pending work remains.
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("Gemini: per-attempt timeout fires and aborts the internal fetch signal", async () => {
+    vi.useFakeTimers();
+    try {
+      mockFetch
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockImplementation(() => new Promise(() => {})); // Gemini hangs
+      vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+
+      const promise = callLLMWithTools(
+        "You are LiTT.",
+        [{ role: "user", content: "Hello" }],
+        [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
+        { model: "gemini-2.5-flash" },
+      );
+
+      await vi.advanceTimersByTimeAsync(0);
+      const geminiInit = mockFetch.mock.calls[5][1] as { signal: AbortSignal } | undefined;
+      expect(geminiInit).toBeDefined();
+      expect(geminiInit!.signal.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(120_000 + 1);
+
+      expect(geminiInit!.signal.aborted).toBe(true);
+      await expect(promise).rejects.toThrow(/Gemini direct request timed out/);
+      expect(mockFetch).toHaveBeenCalledTimes(6);
+      // The per-attempt timeout is cleared and no orphan timer is left.
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("Gemini: upstream abort during a pending request classifies as upstream_abort", async () => {
+    vi.useFakeTimers();
+    try {
+      mockFetch
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockImplementation(() => new Promise(() => {}));
+      vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+
+      const controller = new AbortController();
+      const promise = callLLMWithTools(
+        "You are LiTT.",
+        [{ role: "user", content: "Hello" }],
+        [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
+        { model: "gemini-2.5-flash", signal: controller.signal },
+      );
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await expect(promise).rejects.toThrow(/Gemini direct request aborted by upstream/);
+      // Only the one Gemini attempt started and was aborted; no retries or fallbacks.
+      expect(mockFetch).toHaveBeenCalledTimes(6);
+      // No orphan timeout or listener remains after the upstream abort.
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("Gemini 429: no backoff timer starts when the retry cannot fit the deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      mockFetch
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeGeminiErrorResponse(429, "Too Many Requests"));
+      vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+
+      const promise = callLLMWithTools(
+        "You are LiTT.",
+        [{ role: "user", content: "Hello" }],
+        [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
+        { model: "gemini-2.5-flash", deadline: Date.now() + 70_000 },
+      );
+
+      await expect(promise).rejects.toThrow(/Agent runtime budget exhausted/);
+      expect(mockFetch).toHaveBeenCalledTimes(6);
+      // No 60s/120s backoff timer should be pending.
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("Gemini 429: upstream abort during backoff clears the timer and does not retry", async () => {
+    vi.useFakeTimers();
+    try {
+      mockFetch
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+        .mockResolvedValueOnce(makeGeminiErrorResponse(429, "Too Many Requests"))
+        .mockResolvedValueOnce(makeGeminiSuccessResponse("Should not run.", []));
+      vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+
+      const controller = new AbortController();
+      const promise = callLLMWithTools(
+        "You are LiTT.",
+        [{ role: "user", content: "Hello" }],
+        [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
+        { model: "gemini-2.5-flash", deadline: Date.now() + 300_000, signal: controller.signal },
+      );
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      await expect(promise).rejects.toThrow(/aborted by upstream/);
+      expect(mockFetch).toHaveBeenCalledTimes(6);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("Gemini conversation history round-trip", () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("preserves thoughtSignature from one Gemini turn to the next request's contents.parts", async () => {
+    const firstParts: GeminiPart[] = [
+      { text: "I will create the file." },
+      { functionCall: { id: "call_abc", name: "write_file", args: { path: "test.txt" } }, thoughtSignature: "sig_model_1" },
+    ];
+
+    // First call: OpenRouter all fail, Gemini returns parts with a thoughtSignature.
+    mockFetch
+      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+      .mockResolvedValueOnce(makeGeminiRawResponse(firstParts));
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+
+    const firstResult = await callLLMWithTools(
+      "You are LiTT.",
+      [{ role: "user", content: "Hello" }],
+      [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: { path: { type: "string" } }, required: [] } }],
+      { model: "gemini-2.5-flash" },
+    );
+
+    expect(firstResult.rawParts).toEqual(firstParts);
+
+    // Build the next conversation turn including the provider-specific raw parts.
+    const assistantMessage = buildAssistantToolCallMessage(firstResult.toolCalls, firstResult.text, firstResult.rawParts);
+    const nextMessages = [
+      { role: "user" as const, content: "Now commit that file" },
+      { role: "assistant" as const, content: assistantMessage.content, parts: assistantMessage.parts },
+    ];
+
+    // Second call: the Gemini request must contain the assistant's raw parts, including thoughtSignature.
+    const secondParts: GeminiPart[] = [{ text: "Done." }];
+    mockFetch
+      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
+      .mockResolvedValueOnce(makeGeminiRawResponse(secondParts));
+
+    await callLLMWithTools(
+      "You are LiTT.",
+      nextMessages,
+      [],
+      { model: "gemini-2.5-flash" },
+    );
+
+    const geminiCalls = mockFetch.mock.calls.filter(([url]) => String(url).includes("generativelanguage"));
+    const secondGeminiCall = geminiCalls[1];
+    const body = JSON.parse((secondGeminiCall[1] as { body: string }).body);
+    const assistantContent = body.contents.find((c: { role: string }) => c.role === "model");
+    expect(assistantContent.parts).toEqual(firstParts);
   });
 });
