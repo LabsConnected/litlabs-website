@@ -31,6 +31,7 @@ import { chromium, devices } from "@playwright/test";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
 import path from "path";
 import { resolveAcceptanceUserId } from "./acceptance-user.mjs";
+import { exitCodeForVerdict } from "./verdict-exit.mjs";
 
 // ─── Config ────────────────────────────────────────────────────
 const BASE = (process.env.LITT_PROD_BASE_URL || "https://www.litlabs.net").replace(/\/$/, "");
@@ -450,6 +451,9 @@ async function main() {
 
   await context.close();
   await browser.close();
+
+  // Fail the GitHub Actions step after artifacts are written and browser cleanup completes.
+  process.exitCode = exitCodeForVerdict(verdict);
 }
 
 main().catch((err) => {

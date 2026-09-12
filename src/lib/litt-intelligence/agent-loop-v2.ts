@@ -18,7 +18,7 @@ import "server-only";
 import type { WorkspaceTransport } from "./workspace-transport";
 import { ProgressEmitter, type ProgressEvent } from "./progress-events";
 import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from "./permission-engine";
-import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, type ToolDefinition, type ToolCallResult } from "./llm-tool-calling";
+import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, type ToolDefinition, type ToolCallResult, type LLMMessage } from "./llm-tool-calling";
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { toolRegistry } from "./tool-registry";
@@ -36,6 +36,8 @@ export interface AgentLoopConfig {
   systemPrompt: string;
   enableBuildFix: boolean;
   evalMetadata?: LLMCallMetadata;
+  /** Upstream/client AbortSignal propagated to all provider calls. */
+  signal?: AbortSignal;
 }
 
 export const DEFAULT_LOOP_CONFIG: AgentLoopConfig = {
@@ -55,7 +57,7 @@ export interface PendingApproval {
   inputs: Record<string, unknown>;
   reason: string;
   /** The conversation messages at the point of pause — resume from here after approval */
-  pausedMessages: Array<{ role: "user" | "assistant"; content: string }>;
+  pausedMessages: LLMMessage[];
 }
 
 export interface AgentLoopResult {
@@ -171,7 +173,7 @@ export async function runAgentLoopV2(
   const toolDefs = availableTools.map(toToolDefinition);
 
   // Conversation messages for the LLM
-  const llmMessages: Array<{ role: "user" | "assistant"; content: string }> = [
+  const llmMessages: LLMMessage[] = [
     { role: "user", content: userMessage },
   ];
 
@@ -212,6 +214,7 @@ export async function runAgentLoopV2(
           maxTokens: 4096,
           evalMetadata: cfg.evalMetadata,
           deadlineMs: startTime + cfg.maxRuntimeMs,
+          signal: cfg.signal,
         },
       );
       // Emit model routing event so LiTT Live shows which model was actually used
@@ -257,10 +260,7 @@ export async function runAgentLoopV2(
     }
 
     // Add assistant message with tool calls to conversation
-    llmMessages.push({
-      role: "assistant",
-      content: buildAssistantToolCallMessage(llmResponse.toolCalls, llmResponse.text).content,
-    });
+    llmMessages.push(buildAssistantToolCallMessage(llmResponse.toolCalls, llmResponse.text, llmResponse.rawParts));
 
     // Process each tool call
     let batchHasMutation = false;
@@ -276,10 +276,7 @@ export async function runAgentLoopV2(
           success: false,
           error: `Unknown tool: ${toolCall.toolId}`,
         };
-        llmMessages.push({
-          role: "assistant",
-          content: buildToolResultMessage(result).content,
-        });
+        llmMessages.push(buildToolResultMessage(result));
         continue;
       }
 
@@ -293,10 +290,7 @@ export async function runAgentLoopV2(
           success: false,
           error: validationError,
         };
-        llmMessages.push({
-          role: "assistant",
-          content: buildToolResultMessage(result).content,
-        });
+        llmMessages.push(buildToolResultMessage(result));
         continue;
       }
 
@@ -312,10 +306,7 @@ export async function runAgentLoopV2(
           success: false,
           error: permResult.reason ?? "Permission denied",
         };
-        llmMessages.push({
-          role: "assistant",
-          content: buildToolResultMessage(result).content,
-        });
+        llmMessages.push(buildToolResultMessage(result));
         localProgress.emit({
           type: "approval_required",
           toolId: toolCall.toolId,
@@ -361,10 +352,7 @@ export async function runAgentLoopV2(
           success: false,
           error: "Approval required — this operation is not in the AUTO-approve safe set",
         };
-        llmMessages.push({
-          role: "assistant",
-          content: buildToolResultMessage(result).content,
-        });
+        llmMessages.push(buildToolResultMessage(result));
         continue;
       }
 
@@ -461,10 +449,7 @@ export async function runAgentLoopV2(
       });
 
       // Add result to conversation
-      llmMessages.push({
-        role: "assistant",
-        content: buildToolResultMessage(result).content,
-      });
+      llmMessages.push(buildToolResultMessage(result));
 
       // Check output size limit
       const totalOutput = llmMessages.map((m) => m.content).join("").length;
@@ -488,7 +473,7 @@ export async function runAgentLoopV2(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal),
     });
   }
 
@@ -529,7 +514,7 @@ export async function runAgentLoopV2(
 
 export interface ResumeInput {
   /** The paused conversation messages at the point of approval pause */
-  pausedMessages: Array<{ role: "user" | "assistant"; content: string }>;
+  pausedMessages: LLMMessage[];
   /** The tool that was pending approval */
   toolId: string;
   toolCallId: string;
@@ -590,7 +575,7 @@ export async function resumeAgentLoopV2(
   const toolDefs = availableTools.map(toToolDefinition);
 
   // Resume from paused messages — these are server-verified, not client-supplied
-  const llmMessages: Array<{ role: "user" | "assistant"; content: string }> = [
+  const llmMessages: LLMMessage[] = [
     ...resume.pausedMessages,
   ];
 
@@ -653,10 +638,7 @@ export async function resumeAgentLoopV2(
       durationMs: Date.now() - startTime,
     });
 
-    llmMessages.push({
-      role: "assistant",
-      content: buildToolResultMessage(result).content,
-    });
+    llmMessages.push(buildToolResultMessage(result));
 
     const toolDef = availableTools.find((t) => t.id === resume.toolId);
     if (toolDef && !toolDef.readOnly) {
@@ -684,10 +666,7 @@ export async function resumeAgentLoopV2(
       durationMs: 0,
     });
 
-    llmMessages.push({
-      role: "assistant",
-      content: buildToolResultMessage(result).content,
-    });
+    llmMessages.push(buildToolResultMessage(result));
   }
 
   // Continue the loop
@@ -714,6 +693,7 @@ export async function resumeAgentLoopV2(
           maxTokens: 4096,
           evalMetadata: cfg.evalMetadata,
           deadlineMs: startTime + cfg.maxRuntimeMs,
+          signal: cfg.signal,
         },
       );
     } catch (err) {
@@ -734,10 +714,7 @@ export async function resumeAgentLoopV2(
       break;
     }
 
-    llmMessages.push({
-      role: "assistant",
-      content: buildAssistantToolCallMessage(llmResponse.toolCalls, llmResponse.text).content,
-    });
+    llmMessages.push(buildAssistantToolCallMessage(llmResponse.toolCalls, llmResponse.text, llmResponse.rawParts));
 
     let batchHasMutation = false;
 
@@ -752,7 +729,7 @@ export async function resumeAgentLoopV2(
           success: false,
           error: `Unknown tool: ${toolCall.toolId}`,
         };
-        llmMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+        llmMessages.push(buildToolResultMessage(result));
         continue;
       }
 
@@ -765,7 +742,7 @@ export async function resumeAgentLoopV2(
           success: false,
           error: validationError,
         };
-        llmMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+        llmMessages.push(buildToolResultMessage(result));
         continue;
       }
 
@@ -780,7 +757,7 @@ export async function resumeAgentLoopV2(
           success: false,
           error: permResult.reason ?? "Permission denied",
         };
-        llmMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+        llmMessages.push(buildToolResultMessage(result));
         localProgress.emit({ type: "approval_required", toolId: toolCall.toolId, reason: permResult.reason ?? "Permission denied" });
         continue;
       }
@@ -813,7 +790,7 @@ export async function resumeAgentLoopV2(
           success: false,
           error: "Approval required — this operation is not in the AUTO-approve safe set",
         };
-        llmMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+        llmMessages.push(buildToolResultMessage(result));
         continue;
       }
 
@@ -865,7 +842,7 @@ export async function resumeAgentLoopV2(
 
       localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: result.success, summary, durationMs: 0 });
 
-      llmMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+      llmMessages.push(buildToolResultMessage(result));
 
       const totalOutput = llmMessages.map((m) => m.content).join("").length;
       if (totalOutput > cfg.maxOutputChars) {
@@ -884,7 +861,7 @@ export async function resumeAgentLoopV2(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal),
     });
   }
 
@@ -930,10 +907,11 @@ export function createAutonomousRepairCallback(
   systemPrompt: string,
   toolDefs: ToolDefinition[],
   deadlineMs?: number,
+  signal?: AbortSignal,
 ): (attempt: number, errors: string) => Promise<boolean> {
   return async (attempt: number, errors: string) => {
     // Feed the error output to the LLM and let it repair
-    const repairMessages: Array<{ role: "user" | "assistant"; content: string }> = [
+    const repairMessages: LLMMessage[] = [
       {
         role: "user",
         content: `The build/check failed with the following output. Please inspect the relevant code, fix the issue, and verify your fix.\n\n--- Error output ---\n${errors}\n--- End error output ---\n\nRepair attempt ${attempt}/3. Use the available tools to read the failing files, identify the issue, and write the fix.`,
@@ -947,6 +925,7 @@ export function createAutonomousRepairCallback(
           temperature: 0.1,
           maxTokens: 4096,
           deadlineMs,
+          signal,
         });
 
         if (response.toolCalls.length === 0) {
@@ -954,10 +933,7 @@ export function createAutonomousRepairCallback(
           return true;
         }
 
-        repairMessages.push({
-          role: "assistant",
-          content: buildAssistantToolCallMessage(response.toolCalls, response.text).content,
-        });
+        repairMessages.push(buildAssistantToolCallMessage(response.toolCalls, response.text, response.rawParts));
 
         // Execute each tool call
         for (const toolCall of response.toolCalls) {
@@ -974,7 +950,7 @@ export function createAutonomousRepairCallback(
               ? { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: execResult.result, success: true }
               : { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: null, success: false, error: execResult.error };
 
-            repairMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+            repairMessages.push(buildToolResultMessage(result));
           } catch (err) {
             const result: ToolCallResult = {
               toolCallId: toolCall.toolCallId,
@@ -983,7 +959,7 @@ export function createAutonomousRepairCallback(
               success: false,
               error: err instanceof Error ? err.message : String(err),
             };
-            repairMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+            repairMessages.push(buildToolResultMessage(result));
           }
         }
       }

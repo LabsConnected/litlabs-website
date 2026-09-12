@@ -17,7 +17,7 @@
 import "server-only";
 
 import type { WorkspaceTransport } from "./workspace-transport";
-import { runAgentLoopV2, type AgentLoopResult, type AgentLoopConfig } from "./agent-loop-v2";
+import { runAgentLoopV2, type AgentLoopResult, type AgentLoopConfig, DEFAULT_LOOP_CONFIG } from "./agent-loop-v2";
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runDeployFlow, resolveDeployConfig, verifyProductionUrl, type DeployFlowOptions, type DeployResult, type DeployProvider } from "./deploy";
 import type { BuildFixLoopResult } from "./build-fix-loop";
@@ -188,6 +188,8 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
         executionMode: options.executionMode ?? "act",
         enableBuildFix: options.enableBuildFix ?? true,
         evalMetadata: options.evalMetadata,
+        maxRuntimeMs: DEFAULT_LOOP_CONFIG.maxRuntimeMs,
+        signal,
       },
       progress,
     );
@@ -286,6 +288,9 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           executionMode: options.executionMode ?? "act",
           enableBuildFix: true,
           maxSteps: options.runtimeRepairBudgetSteps ?? 8,
+          // Repair must not restart the global agent runtime budget.
+          maxRuntimeMs: Math.max(0, startTime + DEFAULT_LOOP_CONFIG.maxRuntimeMs - Date.now()),
+          signal,
         },
         progress,
       );

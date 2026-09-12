@@ -14,6 +14,7 @@
 import "server-only";
 
 import { supabaseAdmin } from "@/lib/supabase";
+import type { LLMMessage } from "./llm-tool-calling";
 
 const APPROVAL_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const TABLE = "agent_paused_runs";
@@ -28,7 +29,7 @@ export interface PausedRunRecord {
   toolCallId: string;
   inputs: Record<string, unknown>;
   reason: string;
-  pausedMessages: Array<{ role: "user" | "assistant"; content: string }>;
+  pausedMessages: LLMMessage[];
   executionMode: "plan" | "act" | "auto";
   systemPrompt: string;
   checkpointId: string | null;
@@ -48,7 +49,7 @@ interface PausedRunRow {
   tool_call_id: string;
   inputs: Record<string, unknown>;
   reason: string;
-  paused_messages: Array<{ role: "user" | "assistant"; content: string }>;
+  paused_messages: LLMMessage[];
   execution_mode: string;
   system_prompt: string;
   checkpoint_id: string | null;
@@ -89,7 +90,7 @@ export async function createPausedRun(input: {
   toolCallId: string;
   inputs: Record<string, unknown>;
   reason: string;
-  pausedMessages: Array<{ role: "user" | "assistant"; content: string }>;
+  pausedMessages: LLMMessage[];
   executionMode: "plan" | "act" | "auto";
   systemPrompt: string;
   checkpointId: string | null;

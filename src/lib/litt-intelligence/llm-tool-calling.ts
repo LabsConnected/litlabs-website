@@ -17,7 +17,7 @@
 
 import "server-only";
 
-import { GoogleGenerativeAI, SchemaType, type FunctionDeclaration } from "@google/generative-ai";
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { SITE_URL } from "@/lib/siteConfig";
 import { logLLMCall, type LLMCallMetadata } from "@/lib/evals/braintrust";
 
@@ -48,7 +48,25 @@ export interface LLMToolCallResponse {
   toolCalls: ToolCallRequest[];
   finishReason: string;
   model: string;
+  /** Raw Gemini parts preserved for subsequent conversation rounds (thought signatures, ids). */
+  rawParts?: GeminiPart[];
 }
+
+/** Normalized conversation message. Supports both OpenRouter and Gemini serialization. */
+export type LLMMessage = {
+  role: "user" | "assistant" | "tool";
+  content: string;
+  /** Gemini-specific raw model parts preserved for subsequent turns. */
+  parts?: GeminiPart[];
+  /** OpenRouter assistant tool_calls for multi-turn tool use. */
+  tool_calls?: Array<{
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+  }>;
+  /** OpenRouter tool result correlation id. */
+  tool_call_id?: string;
+};
 
 // ─── OpenRouter tool format ───────────────────────────────────────
 
@@ -70,6 +88,13 @@ interface OpenRouterMessage {
     function: { name: string; arguments: string };
   }>;
   tool_call_id?: string;
+}
+
+function toOpenRouterMessage(m: LLMMessage): OpenRouterMessage {
+  const om: OpenRouterMessage = { role: m.role, content: m.content };
+  if (m.tool_calls) om.tool_calls = m.tool_calls;
+  if (m.tool_call_id) om.tool_call_id = m.tool_call_id;
+  return om;
 }
 
 export function toOpenRouterTools(tools: ToolDefinition[]): OpenRouterTool[] {
@@ -102,9 +127,126 @@ export function toToolDefinitionId(openRouterName: string): string {
   return openRouterName.replace(/_/g, ".");
 }
 
+// ─── Gemini API types (local so we can use raw fetch and still have safety) ───
+
+type GeminiFunctionDeclaration = {
+  name: string;
+  description: string;
+  parameters: {
+    type: typeof SchemaType.OBJECT;
+    properties: Record<string, unknown>;
+    required: string[];
+  };
+};
+
+export type GeminiPart = {
+  text?: string;
+  functionCall?: { id?: string; name: string; args: Record<string, unknown> };
+  functionResponse?: { name: string; response: unknown };
+  thoughtSignature?: string;
+};
+
+type GeminiCandidate = {
+  content?: { parts?: GeminiPart[] };
+  finishReason?: string;
+};
+
+type GeminiGenerateContentResponse = {
+  candidates?: GeminiCandidate[];
+};
+
 // ─── Call LLM with tools ──────────────────────────────────────────
 
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+
+/**
+ * Race an in-flight provider promise against a wall-clock timeout and an
+ * external abort signal. Deterministically settles in every path (timeout,
+ * abort, success, throw) and cleans up the timer and external listener.
+ *
+ * @param label - Used in timeout/upstream errors so logs show which provider aborted.
+ * @param externalSignal - Optional upstream/client AbortSignal to propagate.
+ */
+async function raceProviderAttempt<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+  externalSignal?: AbortSignal,
+): Promise<T> {
+  if (externalSignal?.aborted) {
+    throw new UpstreamAbortError(label);
+  }
+
+  let onExternalAbort: (() => void) | undefined;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const externalAbortPromise = new Promise<never>((_, reject) => {
+    onExternalAbort = () => reject(new UpstreamAbortError(label));
+    externalSignal?.addEventListener("abort", onExternalAbort, { once: true });
+  });
+  externalAbortPromise.catch(() => {});
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new ProviderTimeoutError(label, timeoutMs)), timeoutMs);
+  });
+  timeoutPromise.catch(() => {}); // avoid unhandled rejection when the attempt wins
+
+  try {
+    return await Promise.race([promise, timeoutPromise, externalAbortPromise]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+    if (onExternalAbort) {
+      externalSignal?.removeEventListener("abort", onExternalAbort);
+    }
+  }
+}
+
+/**
+ * Race a `fetch` against a wall-clock timeout and an external abort signal.
+ * The underlying HTTP request is actually cancelled via AbortController, not
+ * just raced, and the controller/timer/listener are cleaned up in every path.
+ */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = OPENROUTER_TIMEOUT_MS,
+  label = "Provider",
+  externalSignal?: AbortSignal,
+): Promise<Response> {
+  if (externalSignal?.aborted) {
+    throw new UpstreamAbortError(label);
+  }
+
+  const controller = new AbortController();
+  let onExternalAbort: (() => void) | undefined;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const externalAbortPromise = new Promise<never>((_, reject) => {
+    onExternalAbort = () => {
+      controller.abort();
+      reject(new UpstreamAbortError(label));
+    };
+    externalSignal?.addEventListener("abort", onExternalAbort, { once: true });
+  });
+  externalAbortPromise.catch(() => {});
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      reject(new ProviderTimeoutError(label, timeoutMs));
+    }, timeoutMs);
+  });
+  timeoutPromise.catch(() => {}); // avoid unhandled rejection when fetch wins
+
+  try {
+    return await Promise.race([fetch(url, { ...init, signal: controller.signal }), timeoutPromise, externalAbortPromise]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+    if (onExternalAbort) {
+      externalSignal?.removeEventListener("abort", onExternalAbort);
+    }
+  }
+}
 
 // ─── Deadline / timeout constants ────────────────────────────────
 /** Cleanup margin reserved after every provider attempt for stream finalization,
@@ -180,13 +322,29 @@ function getGeminiKey(): string {
   return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
 }
 
-// Lazy singleton for the Gemini direct client
+const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
+
 let _genAI: GoogleGenerativeAI | null = null;
 function getGenAI(): GoogleGenerativeAI | null {
   const key = getGeminiKey();
   if (!key) return null;
   if (!_genAI) _genAI = new GoogleGenerativeAI(key);
   return _genAI;
+}
+
+class ProviderTimeoutError extends Error {
+  constructor(
+    public readonly provider: string,
+    public readonly timeoutMs: number,
+  ) {
+    super(`${provider} request timed out after ${timeoutMs}ms`);
+  }
+}
+
+class UpstreamAbortError extends Error {
+  constructor(public readonly provider: string) {
+    super(`${provider} request aborted by upstream`);
+  }
 }
 
 // ─── Test seam: Gemini model factory override ──────────────────
@@ -196,7 +354,13 @@ export type GeminiModelLike = {
   generateContent(
     request: Record<string, unknown>,
     requestOptions?: { timeout?: number; signal?: AbortSignal },
-  ): Promise<{ response: { functionCalls(): Array<{ name: string; args?: Record<string, unknown> }>; text(): string } }>;
+  ): Promise<{
+    response: {
+      functionCalls(): Array<{ id?: string; name: string; args?: Record<string, unknown> }>;
+      text(): string;
+      candidates?: GeminiCandidate[];
+    };
+  }>;
 };
 
 let _geminiModelFactoryOverride: ((
@@ -221,7 +385,14 @@ function createGeminiModel(config: Record<string, unknown>): GeminiModelLike {
  * Convert LiTT tool definitions to Gemini FunctionDeclaration format.
  * Gemini expects parameters as a JSON schema with type, properties, required.
  */
-function toGeminiFunctionDeclarations(tools: ToolDefinition[]): FunctionDeclaration[] {
+function toGeminiContent(m: LLMMessage): { role: "user" | "model"; parts: GeminiPart[] } {
+  return {
+    role: m.role === "assistant" ? "model" : "user",
+    parts: m.parts ?? [{ text: m.content }],
+  };
+}
+
+function toGeminiFunctionDeclarations(tools: ToolDefinition[]): GeminiFunctionDeclaration[] {
   return tools.map((tool) => {
     const schema = tool.inputSchema as Record<string, unknown>;
     return {
@@ -232,52 +403,104 @@ function toGeminiFunctionDeclarations(tools: ToolDefinition[]): FunctionDeclarat
         properties: (schema?.properties ?? {}) as Record<string, unknown>,
         required: ((schema?.required ?? []) as string[]),
       },
-    } as FunctionDeclaration;
+    } as GeminiFunctionDeclaration;
   });
 }
 
 /**
+ * Normalize a seam/SDK generateContent result into the raw-response shape so
+ * the shared parts/tool-call parsing path is identical for both transports.
+ */
+function normalizeGeminiModelResult(sdkResult: {
+  response: {
+    functionCalls(): Array<{ id?: string; name: string; args?: Record<string, unknown> }>;
+    text(): string;
+    candidates?: GeminiCandidate[];
+  };
+}): GeminiGenerateContentResponse {
+  const res = sdkResult.response;
+  if (res.candidates) return { candidates: res.candidates };
+  const parts: GeminiPart[] = [];
+  let fcs: Array<{ id?: string; name: string; args?: Record<string, unknown> }> = [];
+  try {
+    fcs = res.functionCalls() ?? [];
+  } catch {
+    // No function calls in this response.
+  }
+  for (const fc of fcs) {
+    parts.push({ functionCall: { id: fc.id, name: fc.name, args: fc.args ?? {} } });
+  }
+  let text = "";
+  try {
+    text = res.text();
+  } catch {
+    // No text in this response.
+  }
+  if (text) parts.push({ text });
+  return { candidates: [{ content: { parts } }] };
+}
+
+/**
  * Gemini direct API fallback for tool-calling.
- * Used when all OpenRouter models fail (e.g. 402 billing, 429 rate limit).
- * The Gemini API supports native function calling.
+ * Uses raw fetch with a hard wall-clock timeout and AbortController so the
+ * underlying HTTP request is actually cancelled, not just raced. The whole
+ * attempt chain is bounded by the caller's overall deadline so it cannot
+ * outlive the agent runtime.
  */
 async function callGeminiWithTools(
   systemPrompt: string,
-  messages: Array<{ role: "user" | "assistant"; content: string }>,
+  messages: LLMMessage[],
   tools: ToolDefinition[],
   toolIdMap: Map<string, string>,
   options?: {
     temperature?: number;
     maxTokens?: number;
     evalMetadata?: LLMCallMetadata;
+    /** Absolute timestamp after which this fallback call must not run. */
     deadlineMs?: number;
+    /** Optional upstream/client abort signal to propagate. */
+    signal?: AbortSignal;
   },
 ): Promise<LLMToolCallResponse> {
-  console.log("[llm-tool-calling] callGeminiWithTools: starting");
+  const key = getGeminiKey();
+  if (!key) {
+    throw new Error("GEMINI_API_KEY not set — cannot use Gemini direct fallback");
+  }
 
-  // Use the test seam if set, otherwise create from the real SDK
-  const model = createGeminiModel({
-    model: "gemini-2.5-flash",
-    tools: [{ functionDeclarations: toGeminiFunctionDeclarations(tools) }],
+  const model = "gemini-2.5-flash";
+  const contents = messages.map(toGeminiContent);
+  const functionDeclarations = toGeminiFunctionDeclarations(tools);
+
+  const body: Record<string, unknown> = {
+    contents,
+    systemInstruction: { role: "user", parts: [{ text: systemPrompt }] },
     generationConfig: {
       temperature: options?.temperature ?? 0.15,
       maxOutputTokens: options?.maxTokens ?? 4096,
     },
-  });
+  };
+  if (functionDeclarations.length > 0) {
+    body.tools = [{ functionDeclarations }];
+  }
 
-  console.log("[llm-tool-calling] callGeminiWithTools: model created, tools count:", tools.length);
+  // Test seam: when a model factory override is injected, calls route through
+  // it instead of the raw HTTP request so tests can exercise the real
+  // timeout/retry/budget behavior without a network.
+  const seamModel = _geminiModelFactoryOverride
+    ? createGeminiModel({
+        model,
+        tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : undefined,
+        generationConfig: body.generationConfig,
+      })
+    : null;
 
-  // Convert messages to Gemini contents format
-  const contents = messages.map((m) => ({
-    role: m.role === "assistant" ? "model" : "user",
-    parts: [{ text: m.content }],
-  }));
-
-  console.log("[llm-tool-calling] callGeminiWithTools: calling generateContent, messages:", contents.length);
-  const t0 = Date.now();
+  console.log(`[llm-tool-calling] callGeminiWithTools: entering Gemini direct fallback model=${model} tools=${tools.length} seam=${!!seamModel} @ ${new Date().toISOString()}`);
+  const totalT0 = Date.now();
   const MAX_GEMINI_ATTEMPTS = 3;
-  let result;
+
   let lastErr: unknown = null;
+  let result: GeminiGenerateContentResponse | undefined;
+
   for (let attempt = 0; attempt < MAX_GEMINI_ATTEMPTS; attempt++) {
     // Compute bounded per-attempt timeout from the absolute deadline
     const attemptTimeoutMs = computeAttemptTimeout(options?.deadlineMs, GEMINI_TIMEOUT_MS);
@@ -290,27 +513,70 @@ async function callGeminiWithTools(
     // Track whether this attempt was deadline-constrained (shorter than the max)
     const wasDeadlineConstrained = options?.deadlineMs !== undefined && attemptTimeoutMs < GEMINI_TIMEOUT_MS;
 
+    const attemptT0 = Date.now();
+    console.log(`[llm-tool-calling] callGeminiWithTools: attempt ${attempt + 1} start timeoutMs=${attemptTimeoutMs} @ ${new Date().toISOString()}`);
+
     try {
-      // The @google/generative-ai SDK v0.24.x supports requestOptions.timeout (ms)
-      // which internally creates an AbortController and aborts the fetch on timeout.
-      result = await model.generateContent(
-        {
-          contents,
-          systemInstruction: systemPrompt,
-        },
-        { timeout: attemptTimeoutMs },
-      );
+      if (seamModel) {
+        // The seam mirrors the SDK contract: requestOptions.timeout bounds the
+        // attempt and requestOptions.signal propagates the upstream abort. The
+        // outer race keeps settlement deterministic even if the promise hangs.
+        const sdkResult = await raceProviderAttempt(
+          seamModel.generateContent(
+            { contents, systemInstruction: systemPrompt },
+            { timeout: attemptTimeoutMs, signal: options?.signal },
+          ),
+          attemptTimeoutMs,
+          "Gemini direct",
+          options?.signal,
+        );
+        result = normalizeGeminiModelResult(sdkResult);
+      } else {
+        const res = await fetchWithTimeout(
+          `${GEMINI_API_BASE}/models/${encodeURIComponent(model)}:generateContent`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-goog-api-key": key,
+            },
+            body: JSON.stringify(body),
+          },
+          attemptTimeoutMs,
+          "Gemini direct",
+          options?.signal,
+        );
+
+        if (!res.ok) {
+          const errText = await res.text().catch(() => "");
+          throw new Error(`Gemini direct request failed with status ${res.status}: ${errText.slice(0, 200)}`);
+        }
+
+        result = (await res.json()) as GeminiGenerateContentResponse;
+      }
+      console.log(`[llm-tool-calling] callGeminiWithTools: attempt ${attempt + 1} success attemptLatencyMs=${Date.now() - attemptT0} totalElapsedMs=${Date.now() - totalT0} @ ${new Date().toISOString()}`);
       lastErr = null;
       break;
     } catch (err) {
       lastErr = err;
+      const latencyMs = Date.now() - attemptT0;
       const msg = err instanceof Error ? err.message : String(err);
-      console.log(`[llm-tool-calling] callGeminiWithTools: attempt ${attempt + 1} failed: ${msg.slice(0, 150)}`);
+      const isUpstreamAbort = err instanceof UpstreamAbortError || (options?.signal?.aborted ?? false);
+      const isTimeout =
+        err instanceof ProviderTimeoutError ||
+        msg.includes("timed out") ||
+        (err instanceof Error && (err.name === "AbortError" || msg.includes("AbortError") || msg.includes("aborted")));
+      const category = isUpstreamAbort ? "upstream_abort" : isTimeout ? "provider_timeout" : "gemini_direct_error";
+      console.log(`[llm-tool-calling] callGeminiWithTools: attempt ${attempt + 1} failed category=${category} attemptLatencyMs=${latencyMs} msg=${msg.slice(0, 150)} @ ${new Date().toISOString()}`);
+
+      // Upstream/client abort — stop immediately, no retries.
+      if (isUpstreamAbort) {
+        throw err instanceof UpstreamAbortError ? err : new UpstreamAbortError("Gemini direct");
+      }
 
       // If the attempt was deadline-constrained and timed out, surface the
-      // canonical budget-exhaustion error instead of a generic SDK timeout.
-      const isAbortError = err instanceof Error && (err.name === "AbortError" || msg.includes("AbortError") || msg.includes("aborted"));
-      if (isAbortError && wasDeadlineConstrained) {
+      // canonical budget-exhaustion error instead of a generic timeout.
+      if (isTimeout && wasDeadlineConstrained) {
         const remainingMs = options?.deadlineMs ? options.deadlineMs - Date.now() : 0;
         console.log(`[llm-tool-calling] callGeminiWithTools: deadline-constrained timeout on attempt ${attempt + 1}`);
         throw new AgentBudgetExhaustedError(remainingMs, `Gemini attempt ${attempt + 1} timed out against agent budget (timeout=${attemptTimeoutMs}ms)`);
@@ -333,33 +599,54 @@ async function callGeminiWithTools(
           console.log(`[llm-tool-calling] callGeminiWithTools: skipping retry, delay=${delay / 1000}s + attempt cannot fit in remaining ${Math.floor(remainingMs / 1000)}s`);
           throw new AgentBudgetExhaustedError(remainingMs, `429 retry delay=${delay / 1000}s + next attempt cannot fit in remaining budget`);
         }
-        console.log(`[llm-tool-calling] callGeminiWithTools: retrying in ${delay / 1000}s (next attempt budget: ${retryBudgetMs}ms)`);
-        await new Promise((r) => setTimeout(r, delay));
+        console.log(`[llm-tool-calling] callGeminiWithTools: 429 backoff attempt ${attempt + 1} delayMs=${delay} nextAttemptBudgetMs=${retryBudgetMs} @ ${new Date().toISOString()}`);
+        const sleepT0 = Date.now();
+        await new Promise<void>((resolve, reject) => {
+          const t = setTimeout(resolve, delay);
+          if (options?.signal) {
+            const onAbort = () => { clearTimeout(t); reject(new UpstreamAbortError("Gemini 429 backoff")); };
+            if (options.signal.aborted) {
+              onAbort();
+            } else {
+              options.signal.addEventListener("abort", onAbort, { once: true });
+            }
+          }
+        });
+        console.log(`[llm-tool-calling] callGeminiWithTools: 429 backoff ended actualSleepMs=${Date.now() - sleepT0} @ ${new Date().toISOString()}`);
         continue;
       }
+
       throw err;
     }
   }
-  if (lastErr || !result) throw lastErr ?? new Error("Gemini generateContent returned no result");
-  console.log("[llm-tool-calling] callGeminiWithTools: generateContent completed in", Date.now() - t0, "ms");
 
-  const response = result.response;
-  const functionCalls = response.functionCalls();
-  const text = response.text();
+  if (lastErr || !result) {
+    throw lastErr ?? new Error("Gemini direct fallback returned no result");
+  }
 
-  const toolCalls: ToolCallRequest[] = (functionCalls ?? []).map((fc) => ({
-    toolCallId: `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    toolId: toolIdMap.get(fc.name) ?? toToolDefinitionId(fc.name),
-    inputs: (fc.args ?? {}) as Record<string, unknown>,
-  }));
+  const parts: GeminiPart[] = result.candidates?.[0]?.content?.parts ?? [];
+  const text = parts
+    .filter((p) => typeof p.text === "string")
+    .map((p) => p.text as string)
+    .join("");
+  const functionCallParts = parts.filter((p) => !!p.functionCall);
+
+  const toolCalls: ToolCallRequest[] = functionCallParts.map((p) => {
+    const fc = p.functionCall!;
+    return {
+      toolCallId: fc.id ?? `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      toolId: toolIdMap.get(fc.name) ?? toToolDefinitionId(fc.name),
+      inputs: fc.args ?? {},
+    };
+  });
 
   logLLMCall({
     prompt: messages.map((m) => `${m.role}: ${m.content}`).join("\n"),
     systemPrompt,
     output: text,
     provider: "gemini-direct",
-    model: "gemini-2.5-flash",
-    latencyMs: Date.now() - t0,
+    model,
+    latencyMs: Date.now() - totalT0,
     failover: [],
     metadata: options?.evalMetadata ?? {},
   });
@@ -368,7 +655,8 @@ async function callGeminiWithTools(
     text,
     toolCalls,
     finishReason: toolCalls.length > 0 ? "tool_calls" : "stop",
-    model: "gemini-2.5-flash",
+    model,
+    rawParts: parts,
   };
 }
 
@@ -388,8 +676,12 @@ const TOOL_CALLING_FALLBACK_MODELS = [
  * Categorize an HTTP error for logging and fallback decisions.
  * Never includes request bodies or auth tokens — only status + category.
  */
-function categorizeError(status: number | null, _message: string): string {
-  if (status === null) return "network_error";
+function categorizeError(status: number | null, message: string): string {
+  if (status === null) {
+    if (message.includes("timed out after")) return "provider_timeout";
+    if (message.includes("aborted by upstream")) return "upstream_abort";
+    return "network_error";
+  }
   if (status === 401 || status === 403) return "auth_error";
   if (status === 404) return "model_not_found";
   if (status === 429) return "rate_limited";
@@ -411,7 +703,7 @@ function categorizeError(status: number | null, _message: string): string {
  */
 export async function callLLMWithTools(
   systemPrompt: string,
-  messages: Array<{ role: "user" | "assistant"; content: string }>,
+  messages: LLMMessage[],
   tools: ToolDefinition[],
   options?: {
     model?: string;
@@ -419,7 +711,10 @@ export async function callLLMWithTools(
     maxTokens?: number;
     toolChoice?: "auto" | "required" | "none";
     evalMetadata?: LLMCallMetadata;
+    /** Absolute timestamp after which this call must not run (agent runtime budget). */
     deadlineMs?: number;
+    /** Optional upstream/client abort signal to propagate to all provider calls. */
+    signal?: AbortSignal;
   },
 ): Promise<LLMToolCallResponse> {
   const key = getOpenRouterKey();
@@ -432,6 +727,9 @@ export async function callLLMWithTools(
   // Build the attempt chain: primary model first, then fallbacks (deduped)
   const attemptChain = [primaryModel, ...TOOL_CALLING_FALLBACK_MODELS.filter((m) => m !== primaryModel)];
 
+  // Absolute wall-clock deadline inherited from the agent loop so the entire
+  // fallback chain (OpenRouter attempts + Gemini sleeps + generateContent)
+  // cannot outlive the agent's maxRuntimeMs.
   const failures: Array<{ model: string; status: number | null; category: string; latencyMs: number; message: string }> = [];
 
   for (const model of attemptChain) {
@@ -440,7 +738,7 @@ export async function callLLMWithTools(
       stream: false,
       messages: [
         { role: "system", content: systemPrompt } as OpenRouterMessage,
-        ...messages.map((m) => ({ role: m.role, content: m.content }) as OpenRouterMessage),
+        ...messages.map(toOpenRouterMessage),
       ],
       temperature: options?.temperature ?? 0.15,
     };
@@ -451,30 +749,38 @@ export async function callLLMWithTools(
       body.tool_choice = options?.toolChoice ?? "auto";
     }
 
-    const t0 = Date.now();
     // Compute bounded per-attempt timeout from the absolute deadline
     const attemptTimeoutMs = computeAttemptTimeout(options?.deadlineMs, OPENROUTER_TIMEOUT_MS);
     if (attemptTimeoutMs === null) {
       const remainingMs = options?.deadlineMs ? options.deadlineMs - Date.now() : 0;
       throw new AgentBudgetExhaustedError(remainingMs, `OpenRouter attempt for ${model} cannot fit in remaining budget`);
     }
+    console.log(`[llm-tool-calling] callLLMWithTools: attempting OpenRouter model=${model} timeoutMs=${attemptTimeoutMs} @ ${new Date().toISOString()}`);
+    const t0 = Date.now();
 
     let res: Response;
     try {
-      res = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${key}`,
-          "HTTP-Referer": SITE_URL,
-          "X-Title": "LiTT",
+      res = await fetchWithTimeout(
+        `${OPENROUTER_BASE}/chat/completions`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${key}`,
+            "HTTP-Referer": SITE_URL,
+            "X-Title": "LiTT",
+          },
+          body: JSON.stringify(body),
         },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(attemptTimeoutMs),
-      });
+        attemptTimeoutMs,
+        "OpenRouter",
+        options?.signal,
+      );
+      console.log(`[llm-tool-calling] callLLMWithTools: OpenRouter model=${model} response status=${res.status} latencyMs=${Date.now() - t0} @ ${new Date().toISOString()}`);
     } catch (err) {
       const latencyMs = Date.now() - t0;
       const msg = err instanceof Error ? err.message : String(err);
+      console.log(`[llm-tool-calling] callLLMWithTools: OpenRouter model=${model} threw after ${latencyMs}ms: ${msg} @ ${new Date().toISOString()}`);
       const category = categorizeError(null, msg);
       failures.push({ model, status: null, category, latencyMs, message: msg });
       // Network/timeout errors are retryable — try next model
@@ -485,6 +791,7 @@ export async function callLLMWithTools(
       const txt = await res.text().catch(() => "");
       const latencyMs = Date.now() - t0;
       const category = categorizeError(res.status, txt);
+      console.log(`[llm-tool-calling] callLLMWithTools: OpenRouter model=${model} not ok status=${res.status} category=${category} latencyMs=${latencyMs} @ ${new Date().toISOString()}`);
       failures.push({ model, status: res.status, category, latencyMs, message: txt.slice(0, 200) });
 
       // Log the failed attempt
@@ -508,6 +815,7 @@ export async function callLLMWithTools(
     const choice = data.choices?.[0];
     if (!choice) {
       // Empty response — try next model
+      console.log(`[llm-tool-calling] callLLMWithTools: OpenRouter model=${model} empty response @ ${new Date().toISOString()}`);
       failures.push({ model, status: res.status, category: "empty_response", latencyMs: Date.now() - t0, message: "No choices in response" });
       continue;
     }
@@ -540,6 +848,7 @@ export async function callLLMWithTools(
       model: data.model ?? model,
     };
 
+    console.log(`[llm-tool-calling] callLLMWithTools: OpenRouter model=${result.model} success latencyMs=${Date.now() - t0} toolCalls=${toolCalls.length} @ ${new Date().toISOString()}`);
     logLLMCall({
       prompt: messages.map((m) => `${m.role}: ${m.content}`).join("\n"),
       systemPrompt,
@@ -564,7 +873,7 @@ export async function callLLMWithTools(
         messages,
         tools,
         toolIdMap,
-        { temperature: options?.temperature, maxTokens: options?.maxTokens, evalMetadata: options?.evalMetadata, deadlineMs: options?.deadlineMs },
+        { temperature: options?.temperature, maxTokens: options?.maxTokens, evalMetadata: options?.evalMetadata, deadlineMs: options?.deadlineMs, signal: options?.signal },
       );
       // Log that we fell back to Gemini direct
       logLLMCall({
@@ -602,25 +911,33 @@ export async function callLLMWithTools(
 
 export function buildToolResultMessage(
   result: ToolCallResult,
-): OpenRouterMessage {
+): LLMMessage {
   const content = result.success
     ? JSON.stringify(result.result).slice(0, 10_000)
     : `Error: ${result.error ?? "Unknown error"}`;
 
+  const underscoredName = result.toolId.replace(/\./g, "_");
+  const geminiResponse = result.success
+    ? (result.result ?? null)
+    : { error: result.error ?? "Unknown error" };
+
   return {
     role: "tool",
-    tool_call_id: result.toolCallId,
     content,
+    tool_call_id: result.toolCallId,
+    parts: [{ functionResponse: { name: underscoredName, response: geminiResponse } }],
   };
 }
 
 export function buildAssistantToolCallMessage(
   toolCalls: ToolCallRequest[],
   text: string,
-): OpenRouterMessage {
+  rawParts?: GeminiPart[],
+): LLMMessage {
   return {
     role: "assistant",
     content: text,
+    parts: rawParts,
     tool_calls: toolCalls.map((tc) => ({
       id: tc.toolCallId,
       type: "function" as const,
