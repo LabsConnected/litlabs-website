@@ -7,6 +7,14 @@
 
 export const LEGACY_QA_USER_ID = "user_3GsAlPRx3ihYhftgAQ8Owr1uxzF";
 
+// Clerk user ids always take this shape. Enforcing it here means a
+// misconfigured secret (e.g. an API/secret key pasted in by mistake) fails
+// fast with an actionable message, instead of a bare 404 from Clerk *and*
+// instead of that misconfigured value ever reaching resolveAcceptanceUserId's
+// caller, which persists its return value into the run's verdict.json
+// artifact.
+const CLERK_USER_ID_SHAPE = /^user_[A-Za-z0-9]+$/;
+
 /**
  * @param {{ isCI: boolean, envUserId: string | undefined }} opts
  * @returns {string}
@@ -20,5 +28,17 @@ export function resolveAcceptanceUserId({ isCI, envUserId }) {
         "QA user, which no longer resolves in Clerk (sign_in_tokens 404)."
     );
   }
-  return envUserId || LEGACY_QA_USER_ID;
+
+  const userId = envUserId || LEGACY_QA_USER_ID;
+
+  if (!CLERK_USER_ID_SHAPE.test(userId)) {
+    throw new Error(
+      "LITT_ACCEPTANCE_USER_ID does not look like a Clerk user id (expected the " +
+        `"user_..." shape, got a value of length ${userId.length}). Refusing to send ` +
+        "it to Clerk or record it — check that the secret holds a Clerk USER ID, not " +
+        "an API/secret key or anything else."
+    );
+  }
+
+  return userId;
 }

@@ -42,12 +42,44 @@ describe("resolveAcceptanceUserId CI guard", () => {
   });
 
   it("uses the configured secret when present in CI", () => {
-    expect(resolveAcceptanceUserId({ isCI: true, envUserId: "user_configured_qa" })).toBe(
-      "user_configured_qa",
+    expect(resolveAcceptanceUserId({ isCI: true, envUserId: "user_configuredQa123" })).toBe(
+      "user_configuredQa123",
     );
   });
 
   it("still falls back to the legacy QA user for local/manual runs (isCI: false)", () => {
     expect(resolveAcceptanceUserId({ isCI: false, envUserId: undefined })).toBe(LEGACY_QA_USER_ID);
+  });
+
+  it("rejects a value that doesn't look like a Clerk user id (e.g. a secret/API key pasted by mistake), in CI or locally", () => {
+    // Regression: LITT_ACCEPTANCE_USER_ID was twice mistakenly set to a
+    // Clerk secret key instead of a user id. That value was previously sent
+    // straight to Clerk (404) and persisted into verdict.json, leaking a
+    // live secret into the run's uploaded artifact. (Fixture below is
+    // deliberately NOT shaped like any real provider's key prefix, so it
+    // doesn't trip secret-scanning push protection on this test file.)
+    const wrongShapedSecret = "not-a-clerk-user-id-0000000000000000000000";
+    expect(() => resolveAcceptanceUserId({ isCI: true, envUserId: wrongShapedSecret })).toThrow(
+      /does not look like a Clerk user id/,
+    );
+    expect(() => resolveAcceptanceUserId({ isCI: false, envUserId: "not-a-user-id" })).toThrow(
+      /does not look like a Clerk user id/,
+    );
+  });
+
+  it("never includes the rejected value's content in the thrown error message", () => {
+    const wrongShapedSecret = "not-a-clerk-user-id-shouldNeverAppearInErrorText";
+    try {
+      resolveAcceptanceUserId({ isCI: true, envUserId: wrongShapedSecret });
+      throw new Error("expected resolveAcceptanceUserId to throw");
+    } catch (err) {
+      expect(String(err)).not.toContain(wrongShapedSecret);
+    }
+  });
+
+  it("accepts a well-formed Clerk user id", () => {
+    expect(resolveAcceptanceUserId({ isCI: true, envUserId: "user_2AbCdEfGhIjKlMnOpQr" })).toBe(
+      "user_2AbCdEfGhIjKlMnOpQr",
+    );
   });
 });
