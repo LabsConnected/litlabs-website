@@ -25,7 +25,7 @@ vi.mock("@/lib/siteConfig", () => ({
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-import { callLLMWithTools, buildAssistantToolCallMessage, type GeminiPart } from "./llm-tool-calling";
+import { callLLMWithTools, buildAssistantToolCallMessage, buildToolResultMessage, type GeminiPart } from "./llm-tool-calling";
 
 function makeSuccessResponse(model: string, text: string, toolCalls: unknown[] = []) {
   return {
@@ -852,5 +852,62 @@ describe("Gemini conversation history round-trip", () => {
     const body = JSON.parse((secondGeminiCall[1] as { body: string }).body);
     const assistantContent = body.contents.find((c: { role: string }) => c.role === "model");
     expect(assistantContent.parts).toEqual(firstParts);
+  });
+});
+
+describe("OpenRouter conversation history round-trip", () => {
+  it("preserves assistant tool_calls and tool result tool_call_id in the next OpenRouter request", async () => {
+    const toolCallId = "call_openrouter_1";
+    const toolInputs = { path: "test.txt", content: "hello" };
+    mockFetch.mockResolvedValueOnce(makeSuccessResponse("openai/gpt-4o", "I will write the file.", [
+      { id: toolCallId, type: "function", function: { name: "write_file", arguments: JSON.stringify(toolInputs) } },
+    ]));
+    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+
+    const firstResult = await callLLMWithTools(
+      "You are LiTT.",
+      [{ role: "user", content: "Write a file" }],
+      [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: [] } }],
+      { model: "openai/gpt-4o" },
+    );
+
+    expect(firstResult.toolCalls).toEqual([
+      { toolCallId, toolId: "write_file", inputs: toolInputs },
+    ]);
+
+    const assistantMessage = buildAssistantToolCallMessage(firstResult.toolCalls, firstResult.text, firstResult.rawParts);
+    const toolResult = buildToolResultMessage({ toolCallId, toolId: "write_file", result: { ok: true }, success: true });
+    const nextMessages = [
+      { role: "user" as const, content: "Now continue" },
+      assistantMessage,
+      toolResult,
+    ];
+
+    mockFetch.mockResolvedValueOnce(makeSuccessResponse("openai/gpt-4o", "Done."));
+    await callLLMWithTools("You are LiTT.", nextMessages, [], { model: "openai/gpt-4o" });
+
+    const openRouterCalls = mockFetch.mock.calls.filter(([url]) => String(url).includes("openrouter"));
+    const secondOpenRouterCall = openRouterCalls[1];
+    const body = JSON.parse((secondOpenRouterCall[1] as { body: string }).body);
+    const assistantMsg = body.messages.find((m: { role: string }) => m.role === "assistant");
+    const toolMsg = body.messages.find((m: { role: string }) => m.role === "tool");
+
+    expect(assistantMsg.tool_calls).toEqual([
+      { id: toolCallId, type: "function", function: { name: "write_file", arguments: JSON.stringify(toolInputs) } },
+    ]);
+    expect(toolMsg.tool_call_id).toBe(toolCallId);
+    expect(toolMsg.content).toBe(JSON.stringify({ ok: true }));
+  });
+});
+
+describe("buildToolResultMessage", () => {
+  it("produces an OpenRouter tool message and a Gemini functionResponse part", () => {
+    const result = buildToolResultMessage({ toolCallId: "call_1", toolId: "project.scan", result: { found: 1 }, success: true });
+    expect(result.role).toBe("tool");
+    expect(result.tool_call_id).toBe("call_1");
+    expect(result.content).toBe(JSON.stringify({ found: 1 }));
+    expect(result.parts).toEqual([
+      { functionResponse: { name: "project_scan", response: { found: 1 } } },
+    ]);
   });
 });

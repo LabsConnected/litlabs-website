@@ -52,11 +52,20 @@ export interface LLMToolCallResponse {
   rawParts?: GeminiPart[];
 }
 
-/** Normalized conversation message. `parts` is Gemini-specific provider metadata. */
+/** Normalized conversation message. Supports both OpenRouter and Gemini serialization. */
 export type LLMMessage = {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "tool";
   content: string;
+  /** Gemini-specific raw model parts preserved for subsequent turns. */
   parts?: GeminiPart[];
+  /** OpenRouter assistant tool_calls for multi-turn tool use. */
+  tool_calls?: Array<{
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+  }>;
+  /** OpenRouter tool result correlation id. */
+  tool_call_id?: string;
 };
 
 // ─── OpenRouter tool format ───────────────────────────────────────
@@ -128,6 +137,7 @@ type GeminiFunctionDeclaration = {
 export type GeminiPart = {
   text?: string;
   functionCall?: { id?: string; name: string; args: Record<string, unknown> };
+  functionResponse?: { name: string; response: unknown };
   thoughtSignature?: string;
 };
 
@@ -518,7 +528,12 @@ export async function callLLMWithTools(
       stream: false,
       messages: [
         { role: "system", content: systemPrompt } as OpenRouterMessage,
-        ...messages.map((m) => ({ role: m.role, content: m.content }) as OpenRouterMessage),
+        ...messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+          ...(m.tool_calls ? { tool_calls: m.tool_calls } : {}),
+          ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
+        }) as OpenRouterMessage),
       ],
       temperature: options?.temperature ?? 0.15,
     };
@@ -683,15 +698,21 @@ export async function callLLMWithTools(
 
 export function buildToolResultMessage(
   result: ToolCallResult,
-): OpenRouterMessage {
+): LLMMessage {
   const content = result.success
     ? JSON.stringify(result.result).slice(0, 10_000)
     : `Error: ${result.error ?? "Unknown error"}`;
 
+  const underscoredName = result.toolId.replace(/\./g, "_");
+  const geminiResponse = result.success
+    ? (result.result ?? null)
+    : { error: result.error ?? "Unknown error" };
+
   return {
     role: "tool",
-    tool_call_id: result.toolCallId,
     content,
+    tool_call_id: result.toolCallId,
+    parts: [{ functionResponse: { name: underscoredName, response: geminiResponse } }],
   };
 }
 
@@ -704,6 +725,14 @@ export function buildAssistantToolCallMessage(
     role: "assistant",
     content: text,
     parts: rawParts,
+    tool_calls: toolCalls.map((tc) => ({
+      id: tc.toolCallId,
+      type: "function" as const,
+      function: {
+        name: tc.toolId.replace(/\./g, "_"),
+        arguments: JSON.stringify(tc.inputs),
+      },
+    })),
   };
 }
 

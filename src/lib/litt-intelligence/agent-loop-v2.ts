@@ -276,10 +276,7 @@ export async function runAgentLoopV2(
           success: false,
           error: `Unknown tool: ${toolCall.toolId}`,
         };
-        llmMessages.push({
-          role: "assistant",
-          content: buildToolResultMessage(result).content,
-        });
+        llmMessages.push(buildToolResultMessage(result));
         continue;
       }
 
@@ -293,10 +290,7 @@ export async function runAgentLoopV2(
           success: false,
           error: validationError,
         };
-        llmMessages.push({
-          role: "assistant",
-          content: buildToolResultMessage(result).content,
-        });
+        llmMessages.push(buildToolResultMessage(result));
         continue;
       }
 
@@ -312,10 +306,7 @@ export async function runAgentLoopV2(
           success: false,
           error: permResult.reason ?? "Permission denied",
         };
-        llmMessages.push({
-          role: "assistant",
-          content: buildToolResultMessage(result).content,
-        });
+        llmMessages.push(buildToolResultMessage(result));
         localProgress.emit({
           type: "approval_required",
           toolId: toolCall.toolId,
@@ -361,10 +352,7 @@ export async function runAgentLoopV2(
           success: false,
           error: "Approval required — this operation is not in the AUTO-approve safe set",
         };
-        llmMessages.push({
-          role: "assistant",
-          content: buildToolResultMessage(result).content,
-        });
+        llmMessages.push(buildToolResultMessage(result));
         continue;
       }
 
@@ -461,10 +449,7 @@ export async function runAgentLoopV2(
       });
 
       // Add result to conversation
-      llmMessages.push({
-        role: "assistant",
-        content: buildToolResultMessage(result).content,
-      });
+      llmMessages.push(buildToolResultMessage(result));
 
       // Check output size limit
       const totalOutput = llmMessages.map((m) => m.content).join("").length;
@@ -653,10 +638,7 @@ export async function resumeAgentLoopV2(
       durationMs: Date.now() - startTime,
     });
 
-    llmMessages.push({
-      role: "assistant",
-      content: buildToolResultMessage(result).content,
-    });
+    llmMessages.push(buildToolResultMessage(result));
 
     const toolDef = availableTools.find((t) => t.id === resume.toolId);
     if (toolDef && !toolDef.readOnly) {
@@ -684,10 +666,7 @@ export async function resumeAgentLoopV2(
       durationMs: 0,
     });
 
-    llmMessages.push({
-      role: "assistant",
-      content: buildToolResultMessage(result).content,
-    });
+    llmMessages.push(buildToolResultMessage(result));
   }
 
   // Continue the loop
@@ -750,7 +729,7 @@ export async function resumeAgentLoopV2(
           success: false,
           error: `Unknown tool: ${toolCall.toolId}`,
         };
-        llmMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+        llmMessages.push(buildToolResultMessage(result));
         continue;
       }
 
@@ -763,7 +742,7 @@ export async function resumeAgentLoopV2(
           success: false,
           error: validationError,
         };
-        llmMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+        llmMessages.push(buildToolResultMessage(result));
         continue;
       }
 
@@ -778,7 +757,7 @@ export async function resumeAgentLoopV2(
           success: false,
           error: permResult.reason ?? "Permission denied",
         };
-        llmMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+        llmMessages.push(buildToolResultMessage(result));
         localProgress.emit({ type: "approval_required", toolId: toolCall.toolId, reason: permResult.reason ?? "Permission denied" });
         continue;
       }
@@ -811,7 +790,7 @@ export async function resumeAgentLoopV2(
           success: false,
           error: "Approval required — this operation is not in the AUTO-approve safe set",
         };
-        llmMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+        llmMessages.push(buildToolResultMessage(result));
         continue;
       }
 
@@ -863,7 +842,7 @@ export async function resumeAgentLoopV2(
 
       localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: result.success, summary, durationMs: 0 });
 
-      llmMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+      llmMessages.push(buildToolResultMessage(result));
 
       const totalOutput = llmMessages.map((m) => m.content).join("").length;
       if (totalOutput > cfg.maxOutputChars) {
@@ -971,7 +950,7 @@ function createAutonomousRepairCallback(
               ? { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: execResult.result, success: true }
               : { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: null, success: false, error: execResult.error };
 
-            repairMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+            repairMessages.push(buildToolResultMessage(result));
           } catch (err) {
             const result: ToolCallResult = {
               toolCallId: toolCall.toolCallId,
@@ -980,7 +959,7 @@ function createAutonomousRepairCallback(
               success: false,
               error: err instanceof Error ? err.message : String(err),
             };
-            repairMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+            repairMessages.push(buildToolResultMessage(result));
           }
         }
       }
