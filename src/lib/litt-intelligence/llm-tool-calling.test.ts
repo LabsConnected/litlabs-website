@@ -291,9 +291,12 @@ describe("callLLMWithTools — model routing fallback", () => {
         [],
         { model: "gemini-2.5-flash" },
       );
+      // Attach the rejection handler before advancing timers so the rejection
+      // is never reported as unhandled while fake timers flush.
+      const assertion = expect(promise).rejects.toThrow(/All tool-calling models failed/);
 
       await vi.runAllTimersAsync();
-      await expect(promise).rejects.toThrow(/All tool-calling models failed/);
+      await assertion;
       // Primary + 4 OpenRouter fallbacks each hit the 60s backstop.
       expect(mockFetch).toHaveBeenCalledTimes(5);
       // All per-attempt timeout timers are cleared after the chain settles.
@@ -324,9 +327,10 @@ describe("callLLMWithTools — model routing fallback", () => {
         [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
         { model: "gemini-2.5-flash" },
       );
+      const assertion = expect(promise).rejects.toThrow(/Gemini direct request timed out/);
 
       await vi.runAllTimersAsync();
-      await expect(promise).rejects.toThrow(/Gemini direct request timed out/);
+      await assertion;
       // 5 OpenRouter attempts + 1 Gemini attempt (non-429 hangs do not retry).
       expect(mockFetch).toHaveBeenCalledTimes(6);
     } finally {
@@ -363,9 +367,10 @@ describe("callLLMWithTools — model routing fallback", () => {
         [],
         { model: "gemini-2.5-flash", deadline: Date.now() + budgetMs },
       );
+      const assertion = expect(promise).rejects.toThrow(/Agent runtime budget exhausted/);
 
       await vi.runAllTimersAsync();
-      await expect(promise).rejects.toThrow(/Agent runtime budget exhausted/);
+      await assertion;
       // It should not have attempted all 5 OpenRouter models; the budget killed
       // it before the chain completed.
       expect(mockFetch.mock.calls.length).toBeLessThan(5);
@@ -388,9 +393,10 @@ describe("callLLMWithTools — model routing fallback", () => {
         [],
         { model: "gemini-2.5-flash", deadline: Date.now() + budgetMs },
       );
+      const assertion = expect(promise).rejects.toThrow(/Agent runtime budget exhausted/);
 
       await vi.runAllTimersAsync();
-      await expect(promise).rejects.toThrow(/Agent runtime budget exhausted/);
+      await assertion;
       // Only the first OpenRouter attempt should run; the budget is exhausted
       // before it can try all 5 OpenRouter fallbacks or Gemini.
       expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -473,13 +479,14 @@ describe("callLLMWithTools — model routing fallback", () => {
         [],
         { model: "gemini-2.5-flash", signal: controller.signal },
       );
+      const assertion = expect(promise).rejects.toThrow(/aborted by upstream/);
 
       // Let the first OpenRouter attempt start, then abort mid-flight.
       await vi.advanceTimersByTimeAsync(5_000);
       controller.abort();
       await vi.advanceTimersByTimeAsync(60_000);
 
-      await expect(promise).rejects.toThrow(/aborted by upstream/);
+      await assertion;
       // Only the in-flight attempt should have started; the chain stops.
       expect(mockFetch).toHaveBeenCalledTimes(1);
       // No orphan timeout or retry/backoff remains after the upstream abort.
@@ -544,13 +551,14 @@ describe("callLLMWithTools — model routing fallback", () => {
         [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
         { model: "gemini-2.5-flash", deadline: Date.now() + 300_000, signal: controller.signal },
       );
+      const assertion = expect(promise).rejects.toThrow(/aborted by upstream/);
 
       await vi.advanceTimersByTimeAsync(0);
       // 429 triggers a 60s backoff.
       controller.abort();
       await vi.advanceTimersByTimeAsync(60_000);
 
-      await expect(promise).rejects.toThrow(/aborted by upstream/);
+      await assertion;
       // 5 OpenRouter + 1 Gemini (429), and no retry attempt.
       expect(mockFetch).toHaveBeenCalledTimes(6);
       // The 429 backoff timer is cleared when the upstream signal aborts.
@@ -635,6 +643,7 @@ describe("fetchWithTimeout abort/timeouts through callLLMWithTools", () => {
         [],
         { model: "gemini-2.5-flash", signal: controller.signal },
       );
+      const assertion = expect(promise).rejects.toThrow(/OpenRouter request aborted by upstream/);
 
       await vi.advanceTimersByTimeAsync(5_000);
       const init = mockFetch.mock.calls[0][1] as { signal: AbortSignal } | undefined;
@@ -645,7 +654,7 @@ describe("fetchWithTimeout abort/timeouts through callLLMWithTools", () => {
       await vi.advanceTimersByTimeAsync(5_000);
 
       expect(init!.signal.aborted).toBe(true);
-      await expect(promise).rejects.toThrow(/OpenRouter request aborted by upstream/);
+      await assertion;
       // No fallback attempts after the upstream abort.
       expect(mockFetch).toHaveBeenCalledTimes(1);
       // Timeout listener/timer is cleaned up; no pending work remains.
@@ -673,6 +682,7 @@ describe("fetchWithTimeout abort/timeouts through callLLMWithTools", () => {
         [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
         { model: "gemini-2.5-flash" },
       );
+      const assertion = expect(promise).rejects.toThrow(/Gemini direct request timed out/);
 
       await vi.advanceTimersByTimeAsync(0);
       const geminiInit = mockFetch.mock.calls[5][1] as { signal: AbortSignal } | undefined;
@@ -682,7 +692,7 @@ describe("fetchWithTimeout abort/timeouts through callLLMWithTools", () => {
       await vi.advanceTimersByTimeAsync(120_000 + 1);
 
       expect(geminiInit!.signal.aborted).toBe(true);
-      await expect(promise).rejects.toThrow(/Gemini direct request timed out/);
+      await assertion;
       expect(mockFetch).toHaveBeenCalledTimes(6);
       // The per-attempt timeout is cleared and no orphan timer is left.
       expect(vi.getTimerCount()).toBe(0);
@@ -710,12 +720,13 @@ describe("fetchWithTimeout abort/timeouts through callLLMWithTools", () => {
         [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
         { model: "gemini-2.5-flash", signal: controller.signal },
       );
+      const assertion = expect(promise).rejects.toThrow(/Gemini direct request aborted by upstream/);
 
       await vi.advanceTimersByTimeAsync(5_000);
       controller.abort();
       await vi.advanceTimersByTimeAsync(5_000);
 
-      await expect(promise).rejects.toThrow(/Gemini direct request aborted by upstream/);
+      await assertion;
       // Only the one Gemini attempt started and was aborted; no retries or fallbacks.
       expect(mockFetch).toHaveBeenCalledTimes(6);
       // No orphan timeout or listener remains after the upstream abort.
@@ -773,13 +784,14 @@ describe("fetchWithTimeout abort/timeouts through callLLMWithTools", () => {
         [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
         { model: "gemini-2.5-flash", deadline: Date.now() + 300_000, signal: controller.signal },
       );
+      const assertion = expect(promise).rejects.toThrow(/aborted by upstream/);
 
       await vi.advanceTimersByTimeAsync(0);
       expect(vi.getTimerCount()).toBeGreaterThan(0);
       controller.abort();
       await vi.advanceTimersByTimeAsync(60_000);
 
-      await expect(promise).rejects.toThrow(/aborted by upstream/);
+      await assertion;
       expect(mockFetch).toHaveBeenCalledTimes(6);
       expect(vi.getTimerCount()).toBe(0);
     } finally {
@@ -803,6 +815,9 @@ describe("Gemini conversation history round-trip", () => {
       { text: "I will create the file." },
       { functionCall: { id: "call_abc", name: "write_file", args: { path: "test.txt" } }, thoughtSignature: "sig_model_1" },
     ];
+    const tools = [
+      { id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: { path: { type: "string" } }, required: [] } },
+    ];
 
     // First call: OpenRouter all fail, Gemini returns parts with a thoughtSignature.
     mockFetch
@@ -817,7 +832,7 @@ describe("Gemini conversation history round-trip", () => {
     const firstResult = await callLLMWithTools(
       "You are LiTT.",
       [{ role: "user", content: "Hello" }],
-      [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: { path: { type: "string" } }, required: [] } }],
+      tools,
       { model: "gemini-2.5-flash" },
     );
 
@@ -845,7 +860,7 @@ describe("Gemini conversation history round-trip", () => {
     await callLLMWithTools(
       "You are LiTT.",
       nextMessages,
-      [],
+      tools,
       { model: "gemini-2.5-flash" },
     );
 
@@ -873,6 +888,15 @@ describe("Gemini conversation history round-trip", () => {
 });
 
 describe("OpenRouter conversation history round-trip", () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("preserves assistant tool_calls and tool result tool_call_id in the next OpenRouter request", async () => {
     const toolCallId = "call_test_123";
     const toolInputs = { path: "test.txt", content: "hello" };
