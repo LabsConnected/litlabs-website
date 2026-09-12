@@ -183,10 +183,31 @@ async function callGeminiWithTools(
 
   console.log("[llm-tool-calling] callGeminiWithTools: calling generateContent, messages:", contents.length);
   const t0 = Date.now();
-  const result = await model.generateContent({
-    contents,
-    systemInstruction: systemPrompt,
-  });
+  let result;
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      result = await model.generateContent({
+        contents,
+        systemInstruction: systemPrompt,
+      });
+      lastErr = null;
+      break;
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`[llm-tool-calling] callGeminiWithTools: attempt ${attempt + 1} failed: ${msg.slice(0, 150)}`);
+      // Retry on 429 rate limit with exponential backoff
+      if (msg.includes("429") || msg.includes("Too Many Requests")) {
+        const delay = (attempt + 1) * 60_000; // 60s, 120s
+        console.log(`[llm-tool-calling] callGeminiWithTools: retrying in ${delay / 1000}s`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+  if (lastErr || !result) throw lastErr ?? new Error("Gemini generateContent returned no result");
   console.log("[llm-tool-calling] callGeminiWithTools: generateContent completed in", Date.now() - t0, "ms");
 
   const response = result.response;
