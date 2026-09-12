@@ -17,6 +17,7 @@
 
 import "server-only";
 
+import { GoogleGenerativeAI, SchemaType, type FunctionDeclaration } from "@google/generative-ai";
 import { SITE_URL } from "@/lib/siteConfig";
 import { logLLMCall, type LLMCallMetadata } from "@/lib/evals/braintrust";
 
@@ -107,6 +108,107 @@ const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 
 function getOpenRouterKey(): string {
   return process.env.OPENROUTER_API_KEY ?? "";
+}
+
+function getGeminiKey(): string {
+  return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
+}
+
+// Lazy singleton for the Gemini direct client
+let _genAI: GoogleGenerativeAI | null = null;
+function getGenAI(): GoogleGenerativeAI | null {
+  const key = getGeminiKey();
+  if (!key) return null;
+  if (!_genAI) _genAI = new GoogleGenerativeAI(key);
+  return _genAI;
+}
+
+/**
+ * Convert LiTT tool definitions to Gemini FunctionDeclaration format.
+ * Gemini expects parameters as a JSON schema with type, properties, required.
+ */
+function toGeminiFunctionDeclarations(tools: ToolDefinition[]): FunctionDeclaration[] {
+  return tools.map((tool) => {
+    const schema = tool.inputSchema as Record<string, unknown>;
+    return {
+      name: tool.id.replace(/\./g, "_"),
+      description: tool.description,
+      parameters: {
+        type: SchemaType.OBJECT,
+        properties: (schema?.properties ?? {}) as Record<string, unknown>,
+        required: ((schema?.required ?? []) as string[]),
+      },
+    } as FunctionDeclaration;
+  });
+}
+
+/**
+ * Gemini direct API fallback for tool-calling.
+ * Used when all OpenRouter models fail (e.g. 402 billing, 429 rate limit).
+ * The Gemini API supports native function calling.
+ */
+async function callGeminiWithTools(
+  systemPrompt: string,
+  messages: Array<{ role: "user" | "assistant"; content: string }>,
+  tools: ToolDefinition[],
+  toolIdMap: Map<string, string>,
+  options?: {
+    temperature?: number;
+    maxTokens?: number;
+    evalMetadata?: LLMCallMetadata;
+  },
+): Promise<LLMToolCallResponse> {
+  const genAI = getGenAI();
+  if (!genAI) throw new Error("GEMINI_API_KEY not set — cannot use Gemini direct fallback");
+
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.5-flash",
+    tools: [{ functionDeclarations: toGeminiFunctionDeclarations(tools) }],
+    generationConfig: {
+      temperature: options?.temperature ?? 0.15,
+      maxOutputTokens: options?.maxTokens ?? 4096,
+    },
+  });
+
+  // Convert messages to Gemini contents format
+  const contents = messages.map((m) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.content }],
+  }));
+
+  const t0 = Date.now();
+  const result = await model.generateContent({
+    contents,
+    systemInstruction: systemPrompt,
+  });
+
+  const response = result.response;
+  const functionCalls = response.functionCalls();
+  const text = response.text();
+
+  const toolCalls: ToolCallRequest[] = (functionCalls ?? []).map((fc) => ({
+    toolCallId: `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    toolId: toolIdMap.get(fc.name) ?? toToolDefinitionId(fc.name),
+    inputs: (fc.args ?? {}) as Record<string, unknown>,
+  }));
+
+  logLLMCall({
+    prompt: messages.map((m) => `${m.role}: ${m.content}`).join("\n"),
+    systemPrompt,
+    output: text,
+    provider: "gemini-direct",
+    model: "gemini-2.5-flash",
+    latencyMs: Date.now() - t0,
+    failover: [],
+    metadata: options?.evalMetadata ?? {},
+  });
+
+  return {
+    text,
+    toolCalls,
+    finishReason: toolCalls.length > 0 ? "tool_calls" : "stop",
+    model: "gemini-2.5-flash",
+  };
 }
 
 /**
@@ -281,6 +383,35 @@ export async function callLLMWithTools(
     });
 
     return result;
+  }
+
+  // All OpenRouter models failed — try Gemini direct API fallback
+  const geminiKey = getGeminiKey();
+  if (geminiKey && openRouterTools.length > 0) {
+    try {
+      const geminiResult = await callGeminiWithTools(
+        systemPrompt,
+        messages,
+        tools,
+        toolIdMap,
+        { temperature: options?.temperature, maxTokens: options?.maxTokens, evalMetadata: options?.evalMetadata },
+      );
+      // Log that we fell back to Gemini direct
+      logLLMCall({
+        prompt: messages.map((m) => `${m.role}: ${m.content}`).join("\n"),
+        systemPrompt,
+        output: geminiResult.text,
+        provider: "gemini-direct",
+        model: "gemini-2.5-flash",
+        latencyMs: 0,
+        failover: failures.map((f) => f.model),
+        metadata: { ...options?.evalMetadata ?? {}, failureCategory: "openrouter_all_failed_gemini_fallback" } as LLMCallMetadata,
+      });
+      return geminiResult;
+    } catch (geminiErr) {
+      const msg = geminiErr instanceof Error ? geminiErr.message : String(geminiErr);
+      failures.push({ model: "gemini-2.5-flash (direct)", status: null, category: "gemini_direct_error", latencyMs: 0, message: msg });
+    }
   }
 
   // All models failed — throw with structured failure info (no secrets)
