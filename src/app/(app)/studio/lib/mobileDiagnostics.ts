@@ -80,6 +80,19 @@ export function getMobileDiagLog(): MobileDiagEntry[] {
   return [...ring];
 }
 
+/**
+ * Whether the on-screen diagnostic HUD (MobileDiagOverlay) should render.
+ * Opt-in only, via `?mobileDiag=1` — the HUD must never appear for
+ * ordinary users just because they're on a mobile viewport. A query
+ * param (not a NODE_ENV check) is deliberate: this tool exists to debug
+ * real-phone behavior against PRODUCTION, where console access isn't
+ * available, so it has to still be reachable in production — just not
+ * by default.
+ */
+export function isMobileDiagEnabled(searchParams: Pick<URLSearchParams, "get">): boolean {
+  return searchParams.get("mobileDiag") === "1";
+}
+
 export function subscribeMobileDiag(fn: () => void): () => void {
   listeners.add(fn);
   return () => listeners.delete(fn);

@@ -36,7 +36,7 @@ import LiTTLiveActivity from "./LiTTLiveActivity";
 import LiTTPanel from "./LiTTPanel";
 import LiTTMobileSheet from "./litt/LiTTMobileSheet";
 import MobileDiagOverlay from "./MobileDiagOverlay";
-import { mobileDiag } from "../lib/mobileDiagnostics";
+import { mobileDiag, isMobileDiagEnabled } from "../lib/mobileDiagnostics";
 import ContextDrawer, { type ContextDrawerTab } from "./context/ContextDrawer";
 import AssetsPanel from "./context/AssetsPanel";
 import { StudioContextProvider } from "../context/StudioContext";
@@ -1978,9 +1978,9 @@ function CommandStudioContent() {
             liveContent={littLiveContent}
           />
         )}
-        {/* TEMPORARY: real-phone diagnostic HUD — remove once mobile Studio
-            is confirmed working end-to-end on device. */}
-        {isMobileLitt && <MobileDiagOverlay />}
+        {/* TEMPORARY: real-phone diagnostic HUD — opt-in only (?mobileDiag=1),
+            remove once mobile Studio is confirmed working end-to-end on device. */}
+        {isMobileLitt && isMobileDiagEnabled(searchParams) && <MobileDiagOverlay />}
       </div>
 
       {/* Canvas overlay — opens when a canvas action is executed from chat */}
