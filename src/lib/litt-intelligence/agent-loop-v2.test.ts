@@ -7,7 +7,7 @@ vi.mock("./llm-tool-calling", async (importOriginal) => ({
 }));
 
 import { runAgentLoopV2, resumeAgentLoopV2, type ResumeInput } from "./agent-loop-v2";
-import { callLLMWithTools } from "./llm-tool-calling";
+import { callLLMWithTools, AgentBudgetExhaustedError } from "./llm-tool-calling";
 
 const fakeTransport = {
   workspaceId: "ws-test",
@@ -74,11 +74,11 @@ describe("runAgentLoopV2 — deadline and abort propagation", () => {
 
     const after = Date.now();
     const call = vi.mocked(callLLMWithTools).mock.calls[0];
-    const options = call[3] as { deadline: number; signal: AbortSignal } | undefined;
+    const options = call[3] as { deadlineMs: number; signal: AbortSignal } | undefined;
 
     expect(options).toBeDefined();
-    expect(options!.deadline).toBeGreaterThanOrEqual(before + 120_000);
-    expect(options!.deadline).toBeLessThanOrEqual(after + 120_000);
+    expect(options!.deadlineMs).toBeGreaterThanOrEqual(before + 120_000);
+    expect(options!.deadlineMs).toBeLessThanOrEqual(after + 120_000);
     expect(options!.signal).toBe(controller.signal);
   });
 
@@ -108,11 +108,11 @@ describe("runAgentLoopV2 — deadline and abort propagation", () => {
 
     const after = Date.now();
     const call = vi.mocked(callLLMWithTools).mock.calls[0];
-    const options = call[3] as { deadline: number; signal: AbortSignal } | undefined;
+    const options = call[3] as { deadlineMs: number; signal: AbortSignal } | undefined;
 
     expect(options).toBeDefined();
-    expect(options!.deadline).toBeGreaterThanOrEqual(before + 90_000);
-    expect(options!.deadline).toBeLessThanOrEqual(after + 90_000);
+    expect(options!.deadlineMs).toBeGreaterThanOrEqual(before + 90_000);
+    expect(options!.deadlineMs).toBeLessThanOrEqual(after + 90_000);
     expect(options!.signal).toBe(controller.signal);
   });
 });
@@ -120,7 +120,7 @@ describe("runAgentLoopV2 — deadline and abort propagation", () => {
 describe("runAgentLoopV2 — deterministic failure reasons", () => {
   it("emits model_failed with the canonical budget-exhaustion message", async () => {
     vi.mocked(callLLMWithTools).mockRejectedValueOnce(
-      new Error("Agent runtime budget exhausted"),
+      new AgentBudgetExhaustedError(0, "test"),
     );
 
     const result = await runAgentLoopV2(
@@ -134,7 +134,7 @@ describe("runAgentLoopV2 — deterministic failure reasons", () => {
       },
     );
 
-    expect(result.modelFailed).toContain("Agent runtime budget exhausted");
+    expect(result.modelFailed).toContain("Agent budget exhausted");
     expect(result.cancelled).toBe(false);
     expect(result.events.some((e) => e.type === "model_failed")).toBe(true);
     expect(result.events.some((e) => e.type === "finished")).toBe(true);

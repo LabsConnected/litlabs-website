@@ -17,7 +17,7 @@
 
 import "server-only";
 
-import { SchemaType } from "@google/generative-ai";
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { SITE_URL } from "@/lib/siteConfig";
 import { logLLMCall, type LLMCallMetadata } from "@/lib/evals/braintrust";
 
@@ -158,18 +158,53 @@ type GeminiGenerateContentResponse = {
 // ─── Call LLM with tools ──────────────────────────────────────────
 
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
-const OPENROUTER_TIMEOUT_MS = 60_000;
-const GEMINI_TIMEOUT_MS = 120_000;
 
 /**
- * Race a `fetch` against a wall-clock timeout and an external abort signal.
- *
- * Deterministically settles in every path (timeout, abort, success, throw) and
- * cleans up the internal controller, timer, and external listener. No secrets,
- * request bodies, or full prompts are logged.
+ * Race an in-flight provider promise against a wall-clock timeout and an
+ * external abort signal. Deterministically settles in every path (timeout,
+ * abort, success, throw) and cleans up the timer and external listener.
  *
  * @param label - Used in timeout/upstream errors so logs show which provider aborted.
  * @param externalSignal - Optional upstream/client AbortSignal to propagate.
+ */
+async function raceProviderAttempt<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+  externalSignal?: AbortSignal,
+): Promise<T> {
+  if (externalSignal?.aborted) {
+    throw new UpstreamAbortError(label);
+  }
+
+  let onExternalAbort: (() => void) | undefined;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const externalAbortPromise = new Promise<never>((_, reject) => {
+    onExternalAbort = () => reject(new UpstreamAbortError(label));
+    externalSignal?.addEventListener("abort", onExternalAbort, { once: true });
+  });
+  externalAbortPromise.catch(() => {});
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new ProviderTimeoutError(label, timeoutMs)), timeoutMs);
+  });
+  timeoutPromise.catch(() => {}); // avoid unhandled rejection when the attempt wins
+
+  try {
+    return await Promise.race([promise, timeoutPromise, externalAbortPromise]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+    if (onExternalAbort) {
+      externalSignal?.removeEventListener("abort", onExternalAbort);
+    }
+  }
+}
+
+/**
+ * Race a `fetch` against a wall-clock timeout and an external abort signal.
+ * The underlying HTTP request is actually cancelled via AbortController, not
+ * just raced, and the controller/timer/listener are cleaned up in every path.
  */
 async function fetchWithTimeout(
   url: string,
@@ -213,6 +248,72 @@ async function fetchWithTimeout(
   }
 }
 
+// ─── Deadline / timeout constants ────────────────────────────────
+/** Cleanup margin reserved after every provider attempt for stream finalization,
+ *  tool-event emission, and controller cleanup. */
+const CLEANUP_MARGIN_MS = 1_000;
+/** Hard cap on a single Gemini generateContent attempt. */
+const GEMINI_TIMEOUT_MS = 30_000;
+/** Hard cap on a single OpenRouter chat/completions attempt. */
+const OPENROUTER_TIMEOUT_MS = 30_000;
+
+/**
+ * Canonical budget-exhaustion error.
+ * Thrown when the agent's remaining deadline cannot accommodate another
+ * provider attempt (including retry delay + next attempt + cleanup).
+ * This is distinct from a provider 429 or timeout — the agent itself
+ * has run out of time.
+ */
+export class AgentBudgetExhaustedError extends Error {
+  constructor(
+    public readonly remainingMs: number,
+    public readonly reason: string,
+  ) {
+    super(
+      `Agent budget exhausted: ${reason} (remaining ${Math.floor(remainingMs / 1000)}s)`,
+    );
+    this.name = "AgentBudgetExhaustedError";
+  }
+}
+
+/**
+ * Compute the bounded per-attempt timeout for a provider call.
+ * Returns null if the remaining budget cannot accommodate the attempt.
+ *
+ * Formula: generateTimeoutMs = Math.min(MAX_TIMEOUT, remainingMs - CLEANUP_MARGIN_MS)
+ * If generateTimeoutMs <= 0, the budget is exhausted.
+ */
+function computeAttemptTimeout(
+  deadlineMs: number | undefined,
+  maxTimeoutMs: number,
+): number | null {
+  if (!deadlineMs) return maxTimeoutMs; // no deadline → use max
+  const remainingMs = deadlineMs - Date.now();
+  const timeoutMs = Math.min(maxTimeoutMs, remainingMs - CLEANUP_MARGIN_MS);
+  return timeoutMs > 0 ? timeoutMs : null;
+}
+
+/**
+ * Compute whether a 429 retry fits within the remaining budget.
+ * Returns the next-attempt timeout if it fits, or null if it does not.
+ *
+ * Formula: nextAttemptBudget = Math.min(MAX_TIMEOUT, remaining - delay - CLEANUP_MARGIN)
+ * If nextAttemptBudget <= 0, the retry does not fit.
+ */
+function computeRetryBudget(
+  deadlineMs: number | undefined,
+  delayMs: number,
+  maxTimeoutMs: number,
+): number | null {
+  if (!deadlineMs) return maxTimeoutMs; // no deadline → allow
+  const remainingMs = deadlineMs - Date.now();
+  const nextAttemptBudget = Math.min(
+    maxTimeoutMs,
+    remainingMs - delayMs - CLEANUP_MARGIN_MS,
+  );
+  return nextAttemptBudget > 0 ? nextAttemptBudget : null;
+}
+
 function getOpenRouterKey(): string {
   return process.env.OPENROUTER_API_KEY ?? "";
 }
@@ -222,8 +323,14 @@ function getGeminiKey(): string {
 }
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
-const GUARDRAIL_MS = 1_000;
-const BUDGET_EXHAUSTED = "Agent runtime budget exhausted";
+
+let _genAI: GoogleGenerativeAI | null = null;
+function getGenAI(): GoogleGenerativeAI | null {
+  const key = getGeminiKey();
+  if (!key) return null;
+  if (!_genAI) _genAI = new GoogleGenerativeAI(key);
+  return _genAI;
+}
 
 class ProviderTimeoutError extends Error {
   constructor(
@@ -240,27 +347,38 @@ class UpstreamAbortError extends Error {
   }
 }
 
-/**
- * Tracks the single agent runtime budget for all provider attempts in a call.
- */
-class DeadlineBudget {
-  constructor(private readonly deadline: number) {}
+// ─── Test seam: Gemini model factory override ──────────────────
+// Tests can inject a mock model factory to exercise real Gemini
+// timeout/retry behavior without hitting the network.
+export type GeminiModelLike = {
+  generateContent(
+    request: Record<string, unknown>,
+    requestOptions?: { timeout?: number; signal?: AbortSignal },
+  ): Promise<{
+    response: {
+      functionCalls(): Array<{ id?: string; name: string; args?: Record<string, unknown> }>;
+      text(): string;
+      candidates?: GeminiCandidate[];
+    };
+  }>;
+};
 
-  remainingMs() {
-    return Math.max(0, this.deadline - Date.now());
-  }
+let _geminiModelFactoryOverride: ((
+  config: Record<string, unknown>,
+) => GeminiModelLike) | null = null;
 
-  canAttempt() {
-    return this.remainingMs() > GUARDRAIL_MS;
-  }
+/** @internal Test-only seam to override the Gemini model factory. */
+export function _setGeminiModelFactory(
+  factory: ((config: Record<string, unknown>) => GeminiModelLike) | null,
+): void {
+  _geminiModelFactoryOverride = factory;
+}
 
-  attemptTimeoutMs(defaultMs: number) {
-    return Math.max(1, Math.min(defaultMs, this.remainingMs() - GUARDRAIL_MS));
-  }
-
-  canAffordRetry(delayMs: number, nextAttemptMs: number) {
-    return Date.now() + delayMs + nextAttemptMs + GUARDRAIL_MS <= this.deadline;
-  }
+function createGeminiModel(config: Record<string, unknown>): GeminiModelLike {
+  if (_geminiModelFactoryOverride) return _geminiModelFactoryOverride(config);
+  const genAI = getGenAI();
+  if (!genAI) throw new Error("GEMINI_API_KEY not set — cannot use Gemini direct fallback");
+  return genAI.getGenerativeModel(config as unknown as Parameters<typeof genAI.getGenerativeModel>[0]) as unknown as GeminiModelLike;
 }
 
 /**
@@ -290,6 +408,39 @@ function toGeminiFunctionDeclarations(tools: ToolDefinition[]): GeminiFunctionDe
 }
 
 /**
+ * Normalize a seam/SDK generateContent result into the raw-response shape so
+ * the shared parts/tool-call parsing path is identical for both transports.
+ */
+function normalizeGeminiModelResult(sdkResult: {
+  response: {
+    functionCalls(): Array<{ id?: string; name: string; args?: Record<string, unknown> }>;
+    text(): string;
+    candidates?: GeminiCandidate[];
+  };
+}): GeminiGenerateContentResponse {
+  const res = sdkResult.response;
+  if (res.candidates) return { candidates: res.candidates };
+  const parts: GeminiPart[] = [];
+  let fcs: Array<{ id?: string; name: string; args?: Record<string, unknown> }> = [];
+  try {
+    fcs = res.functionCalls() ?? [];
+  } catch {
+    // No function calls in this response.
+  }
+  for (const fc of fcs) {
+    parts.push({ functionCall: { id: fc.id, name: fc.name, args: fc.args ?? {} } });
+  }
+  let text = "";
+  try {
+    text = res.text();
+  } catch {
+    // No text in this response.
+  }
+  if (text) parts.push({ text });
+  return { candidates: [{ content: { parts } }] };
+}
+
+/**
  * Gemini direct API fallback for tool-calling.
  * Uses raw fetch with a hard wall-clock timeout and AbortController so the
  * underlying HTTP request is actually cancelled, not just raced. The whole
@@ -306,7 +457,7 @@ async function callGeminiWithTools(
     maxTokens?: number;
     evalMetadata?: LLMCallMetadata;
     /** Absolute timestamp after which this fallback call must not run. */
-    deadline?: number;
+    deadlineMs?: number;
     /** Optional upstream/client abort signal to propagate. */
     signal?: AbortSignal;
   },
@@ -318,6 +469,7 @@ async function callGeminiWithTools(
 
   const model = "gemini-2.5-flash";
   const contents = messages.map(toGeminiContent);
+  const functionDeclarations = toGeminiFunctionDeclarations(tools);
 
   const body: Record<string, unknown> = {
     contents,
@@ -327,55 +479,81 @@ async function callGeminiWithTools(
       maxOutputTokens: options?.maxTokens ?? 4096,
     },
   };
-
-  const functionDeclarations = toGeminiFunctionDeclarations(tools);
   if (functionDeclarations.length > 0) {
     body.tools = [{ functionDeclarations }];
   }
 
-  const budget = new DeadlineBudget(options?.deadline ?? Number.MAX_SAFE_INTEGER);
+  // Test seam: when a model factory override is injected, calls route through
+  // it instead of the raw HTTP request so tests can exercise the real
+  // timeout/retry/budget behavior without a network.
+  const seamModel = _geminiModelFactoryOverride
+    ? createGeminiModel({
+        model,
+        tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : undefined,
+        generationConfig: body.generationConfig,
+      })
+    : null;
 
-  if (!budget.canAttempt()) {
-    throw new Error(BUDGET_EXHAUSTED);
-  }
-
-  console.log(`[llm-tool-calling] callGeminiWithTools: entering Gemini direct fallback model=${model} tools=${tools.length} budgetMs=${budget.remainingMs()} @ ${new Date().toISOString()}`);
+  console.log(`[llm-tool-calling] callGeminiWithTools: entering Gemini direct fallback model=${model} tools=${tools.length} seam=${!!seamModel} @ ${new Date().toISOString()}`);
   const totalT0 = Date.now();
+  const MAX_GEMINI_ATTEMPTS = 3;
 
   let lastErr: unknown = null;
   let result: GeminiGenerateContentResponse | undefined;
 
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (!budget.canAttempt()) {
-      throw new Error(BUDGET_EXHAUSTED);
+  for (let attempt = 0; attempt < MAX_GEMINI_ATTEMPTS; attempt++) {
+    // Compute bounded per-attempt timeout from the absolute deadline
+    const attemptTimeoutMs = computeAttemptTimeout(options?.deadlineMs, GEMINI_TIMEOUT_MS);
+    if (attemptTimeoutMs === null) {
+      const remainingMs = options?.deadlineMs ? options.deadlineMs - Date.now() : 0;
+      console.log(`[llm-tool-calling] callGeminiWithTools: budget exhausted before attempt ${attempt + 1}`);
+      throw new AgentBudgetExhaustedError(remainingMs, `Gemini attempt ${attempt + 1} cannot fit in remaining budget`);
     }
 
-    const attemptTimeoutMs = budget.attemptTimeoutMs(GEMINI_TIMEOUT_MS);
+    // Track whether this attempt was deadline-constrained (shorter than the max)
+    const wasDeadlineConstrained = options?.deadlineMs !== undefined && attemptTimeoutMs < GEMINI_TIMEOUT_MS;
+
     const attemptT0 = Date.now();
-    console.log(`[llm-tool-calling] callGeminiWithTools: attempt ${attempt + 1} start timeoutMs=${attemptTimeoutMs} budgetMs=${budget.remainingMs()} @ ${new Date().toISOString()}`);
+    console.log(`[llm-tool-calling] callGeminiWithTools: attempt ${attempt + 1} start timeoutMs=${attemptTimeoutMs} @ ${new Date().toISOString()}`);
 
     try {
-      const res = await fetchWithTimeout(
-        `${GEMINI_API_BASE}/models/${encodeURIComponent(model)}:generateContent`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": key,
+      if (seamModel) {
+        // The seam mirrors the SDK contract: requestOptions.timeout bounds the
+        // attempt and requestOptions.signal propagates the upstream abort. The
+        // outer race keeps settlement deterministic even if the promise hangs.
+        const sdkResult = await raceProviderAttempt(
+          seamModel.generateContent(
+            { contents, systemInstruction: systemPrompt },
+            { timeout: attemptTimeoutMs, signal: options?.signal },
+          ),
+          attemptTimeoutMs,
+          "Gemini direct",
+          options?.signal,
+        );
+        result = normalizeGeminiModelResult(sdkResult);
+      } else {
+        const res = await fetchWithTimeout(
+          `${GEMINI_API_BASE}/models/${encodeURIComponent(model)}:generateContent`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-goog-api-key": key,
+            },
+            body: JSON.stringify(body),
           },
-          body: JSON.stringify(body),
-        },
-        attemptTimeoutMs,
-        "Gemini direct",
-        options?.signal,
-      );
+          attemptTimeoutMs,
+          "Gemini direct",
+          options?.signal,
+        );
 
-      if (!res.ok) {
-        const errText = await res.text().catch(() => "");
-        throw new Error(`Gemini direct request failed with status ${res.status}: ${errText.slice(0, 200)}`);
+        if (!res.ok) {
+          const errText = await res.text().catch(() => "");
+          throw new Error(`Gemini direct request failed with status ${res.status}: ${errText.slice(0, 200)}`);
+        }
+
+        result = (await res.json()) as GeminiGenerateContentResponse;
       }
-
-      result = (await res.json()) as GeminiGenerateContentResponse;
       console.log(`[llm-tool-calling] callGeminiWithTools: attempt ${attempt + 1} success attemptLatencyMs=${Date.now() - attemptT0} totalElapsedMs=${Date.now() - totalT0} @ ${new Date().toISOString()}`);
       lastErr = null;
       break;
@@ -383,17 +561,45 @@ async function callGeminiWithTools(
       lastErr = err;
       const latencyMs = Date.now() - attemptT0;
       const msg = err instanceof Error ? err.message : String(err);
-      const isTimeout = msg.includes("timed out");
-      const isUpstreamAbort = msg.includes("aborted by upstream");
-      const category = isTimeout ? "provider_timeout" : isUpstreamAbort ? "upstream_abort" : "gemini_direct_error";
+      const isUpstreamAbort = err instanceof UpstreamAbortError || (options?.signal?.aborted ?? false);
+      const isTimeout =
+        err instanceof ProviderTimeoutError ||
+        msg.includes("timed out") ||
+        (err instanceof Error && (err.name === "AbortError" || msg.includes("AbortError") || msg.includes("aborted")));
+      const category = isUpstreamAbort ? "upstream_abort" : isTimeout ? "provider_timeout" : "gemini_direct_error";
       console.log(`[llm-tool-calling] callGeminiWithTools: attempt ${attempt + 1} failed category=${category} attemptLatencyMs=${latencyMs} msg=${msg.slice(0, 150)} @ ${new Date().toISOString()}`);
 
+      // Upstream/client abort — stop immediately, no retries.
+      if (isUpstreamAbort) {
+        throw err instanceof UpstreamAbortError ? err : new UpstreamAbortError("Gemini direct");
+      }
+
+      // If the attempt was deadline-constrained and timed out, surface the
+      // canonical budget-exhaustion error instead of a generic timeout.
+      if (isTimeout && wasDeadlineConstrained) {
+        const remainingMs = options?.deadlineMs ? options.deadlineMs - Date.now() : 0;
+        console.log(`[llm-tool-calling] callGeminiWithTools: deadline-constrained timeout on attempt ${attempt + 1}`);
+        throw new AgentBudgetExhaustedError(remainingMs, `Gemini attempt ${attempt + 1} timed out against agent budget (timeout=${attemptTimeoutMs}ms)`);
+      }
+
+      // Retry on 429 rate limit with exponential backoff — but only if
+      // another attempt actually exists. On the final attempt, throw
+      // immediately instead of sleeping for a retry that will never happen.
       if (msg.includes("429") || msg.includes("Too Many Requests")) {
-        const delay = (attempt + 1) * 60_000;
-        if (!budget.canAffordRetry(delay, GEMINI_TIMEOUT_MS)) {
-          throw new Error(BUDGET_EXHAUSTED);
+        const hasAnotherAttempt = attempt + 1 < MAX_GEMINI_ATTEMPTS;
+        if (!hasAnotherAttempt) {
+          console.log(`[llm-tool-calling] callGeminiWithTools: 429 on final attempt ${attempt + 1}, no retries left`);
+          throw err;
         }
-        console.log(`[llm-tool-calling] callGeminiWithTools: 429 backoff attempt ${attempt + 1} delayMs=${delay} budgetMs=${budget.remainingMs()} @ ${new Date().toISOString()}`);
+        const delay = (attempt + 1) * 60_000; // 60s, 120s
+        // Check if the retry delay + next attempt + cleanup fits within remaining budget
+        const retryBudgetMs = computeRetryBudget(options?.deadlineMs, delay, GEMINI_TIMEOUT_MS);
+        if (retryBudgetMs === null) {
+          const remainingMs = options?.deadlineMs ? options.deadlineMs - Date.now() : 0;
+          console.log(`[llm-tool-calling] callGeminiWithTools: skipping retry, delay=${delay / 1000}s + attempt cannot fit in remaining ${Math.floor(remainingMs / 1000)}s`);
+          throw new AgentBudgetExhaustedError(remainingMs, `429 retry delay=${delay / 1000}s + next attempt cannot fit in remaining budget`);
+        }
+        console.log(`[llm-tool-calling] callGeminiWithTools: 429 backoff attempt ${attempt + 1} delayMs=${delay} nextAttemptBudgetMs=${retryBudgetMs} @ ${new Date().toISOString()}`);
         const sleepT0 = Date.now();
         await new Promise<void>((resolve, reject) => {
           const t = setTimeout(resolve, delay);
@@ -406,7 +612,7 @@ async function callGeminiWithTools(
             }
           }
         });
-        console.log(`[llm-tool-calling] callGeminiWithTools: 429 backoff ended actualSleepMs=${Date.now() - sleepT0} budgetMs=${budget.remainingMs()} @ ${new Date().toISOString()}`);
+        console.log(`[llm-tool-calling] callGeminiWithTools: 429 backoff ended actualSleepMs=${Date.now() - sleepT0} @ ${new Date().toISOString()}`);
         continue;
       }
 
@@ -506,7 +712,7 @@ export async function callLLMWithTools(
     toolChoice?: "auto" | "required" | "none";
     evalMetadata?: LLMCallMetadata;
     /** Absolute timestamp after which this call must not run (agent runtime budget). */
-    deadline?: number;
+    deadlineMs?: number;
     /** Optional upstream/client abort signal to propagate to all provider calls. */
     signal?: AbortSignal;
   },
@@ -524,12 +730,7 @@ export async function callLLMWithTools(
   // Absolute wall-clock deadline inherited from the agent loop so the entire
   // fallback chain (OpenRouter attempts + Gemini sleeps + generateContent)
   // cannot outlive the agent's maxRuntimeMs.
-  const budget = new DeadlineBudget(options?.deadline ?? Number.MAX_SAFE_INTEGER);
   const failures: Array<{ model: string; status: number | null; category: string; latencyMs: number; message: string }> = [];
-
-  if (!budget.canAttempt()) {
-    throw new Error(BUDGET_EXHAUSTED);
-  }
 
   for (const model of attemptChain) {
     const body: Record<string, unknown> = {
@@ -548,12 +749,15 @@ export async function callLLMWithTools(
       body.tool_choice = options?.toolChoice ?? "auto";
     }
 
-    if (!budget.canAttempt()) {
-      throw new Error(BUDGET_EXHAUSTED);
+    // Compute bounded per-attempt timeout from the absolute deadline
+    const attemptTimeoutMs = computeAttemptTimeout(options?.deadlineMs, OPENROUTER_TIMEOUT_MS);
+    if (attemptTimeoutMs === null) {
+      const remainingMs = options?.deadlineMs ? options.deadlineMs - Date.now() : 0;
+      throw new AgentBudgetExhaustedError(remainingMs, `OpenRouter attempt for ${model} cannot fit in remaining budget`);
     }
-    const attemptTimeoutMs = budget.attemptTimeoutMs(OPENROUTER_TIMEOUT_MS);
-    console.log(`[llm-tool-calling] callLLMWithTools: attempting OpenRouter model=${model} timeoutMs=${attemptTimeoutMs} budgetMs=${budget.remainingMs()} @ ${new Date().toISOString()}`);
+    console.log(`[llm-tool-calling] callLLMWithTools: attempting OpenRouter model=${model} timeoutMs=${attemptTimeoutMs} @ ${new Date().toISOString()}`);
     const t0 = Date.now();
+
     let res: Response;
     try {
       res = await fetchWithTimeout(
@@ -669,7 +873,7 @@ export async function callLLMWithTools(
         messages,
         tools,
         toolIdMap,
-        { temperature: options?.temperature, maxTokens: options?.maxTokens, evalMetadata: options?.evalMetadata, deadline: options?.deadline, signal: options?.signal },
+        { temperature: options?.temperature, maxTokens: options?.maxTokens, evalMetadata: options?.evalMetadata, deadlineMs: options?.deadlineMs, signal: options?.signal },
       );
       // Log that we fell back to Gemini direct
       logLLMCall({
@@ -684,6 +888,11 @@ export async function callLLMWithTools(
       });
       return geminiResult;
     } catch (geminiErr) {
+      // Preserve AgentBudgetExhaustedError — do not hide agent-budget
+      // exhaustion as a generic provider failure.
+      if (geminiErr instanceof AgentBudgetExhaustedError) {
+        throw geminiErr;
+      }
       const msg = geminiErr instanceof Error ? geminiErr.message : String(geminiErr);
       console.log("[llm-tool-calling] Gemini direct fallback FAILED:", msg);
       failures.push({ model: "gemini-2.5-flash (direct)", status: null, category: "gemini_direct_error", latencyMs: 0, message: msg });

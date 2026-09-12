@@ -25,7 +25,7 @@ vi.mock("@/lib/siteConfig", () => ({
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-import { callLLMWithTools, buildAssistantToolCallMessage, buildToolResultMessage, type GeminiPart } from "./llm-tool-calling";
+import { callLLMWithTools, buildAssistantToolCallMessage, buildToolResultMessage, AgentBudgetExhaustedError, type GeminiPart } from "./llm-tool-calling";
 
 function makeSuccessResponse(model: string, text: string, toolCalls: unknown[] = []) {
   return {
@@ -345,29 +345,29 @@ describe("callLLMWithTools — model routing fallback", () => {
       "You are LiTT.",
       [{ role: "user", content: "Hello" }],
       [],
-      { model: "gemini-2.5-flash", deadline: Date.now() - 1 },
+      { model: "gemini-2.5-flash", deadlineMs: Date.now() - 1 },
     );
 
-    await expect(promise).rejects.toThrow(/Agent runtime budget exhausted/);
+    await expect(promise).rejects.toThrow(AgentBudgetExhaustedError);
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("cumulative OpenRouter fallback chain respects the single shared deadline", async () => {
-    // All OpenRouter attempts hang. With a 200s budget, the first few attempts
-    // use the full 60s timeout, but the chain must stop when the shared budget
+    // All OpenRouter attempts hang. With a 100s budget, the first few attempts
+    // use the full 30s timeout, but the chain must stop when the shared budget
     // would not allow another useful attempt.
     mockFetch.mockImplementation(() => new Promise(() => {}));
 
     vi.useFakeTimers();
     try {
-      const budgetMs = 200_000;
+      const budgetMs = 100_000;
       const promise = callLLMWithTools(
         "You are LiTT.",
         [{ role: "user", content: "Hello" }],
         [],
-        { model: "gemini-2.5-flash", deadline: Date.now() + budgetMs },
+        { model: "gemini-2.5-flash", deadlineMs: Date.now() + budgetMs },
       );
-      const assertion = expect(promise).rejects.toThrow(/Agent runtime budget exhausted/);
+      const assertion = expect(promise).rejects.toThrow(AgentBudgetExhaustedError);
 
       await vi.runAllTimersAsync();
       await assertion;
@@ -391,9 +391,9 @@ describe("callLLMWithTools — model routing fallback", () => {
         "You are LiTT.",
         [{ role: "user", content: "Hello" }],
         [],
-        { model: "gemini-2.5-flash", deadline: Date.now() + budgetMs },
+        { model: "gemini-2.5-flash", deadlineMs: Date.now() + budgetMs },
       );
-      const assertion = expect(promise).rejects.toThrow(/Agent runtime budget exhausted/);
+      const assertion = expect(promise).rejects.toThrow(AgentBudgetExhaustedError);
 
       await vi.runAllTimersAsync();
       await assertion;
@@ -422,10 +422,10 @@ describe("callLLMWithTools — model routing fallback", () => {
       "You are LiTT.",
       [{ role: "user", content: "Hello" }],
       [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
-      { model: "gemini-2.5-flash", deadline: Date.now() + 70_000 },
+      { model: "gemini-2.5-flash", deadlineMs: Date.now() + 60_000 },
     );
 
-    await expect(promise).rejects.toThrow(/Agent runtime budget exhausted/);
+    await expect(promise).rejects.toThrow(AgentBudgetExhaustedError);
     // 5 OpenRouter attempts + 1 Gemini attempt.
     expect(mockFetch).toHaveBeenCalledTimes(6);
   });
@@ -463,7 +463,7 @@ describe("callLLMWithTools — model routing fallback", () => {
         [],
         { model: "gemini-2.5-flash", signal: controller.signal },
       ),
-    ).rejects.toThrow(/Agent runtime budget exhausted|aborted by upstream/);
+    ).rejects.toThrow(/budget exhausted|aborted by upstream/i);
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -513,7 +513,7 @@ describe("callLLMWithTools — model routing fallback", () => {
         "You are LiTT.",
         [{ role: "user", content: "Hello" }],
         [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
-        { model: "gemini-2.5-flash", deadline: Date.now() + 300_000 },
+        { model: "gemini-2.5-flash", deadlineMs: Date.now() + 300_000 },
       );
 
       // First run starts the first (and only) 60s backoff timer.
@@ -549,7 +549,7 @@ describe("callLLMWithTools — model routing fallback", () => {
         "You are LiTT.",
         [{ role: "user", content: "Hello" }],
         [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
-        { model: "gemini-2.5-flash", deadline: Date.now() + 300_000, signal: controller.signal },
+        { model: "gemini-2.5-flash", deadlineMs: Date.now() + 300_000, signal: controller.signal },
       );
       const assertion = expect(promise).rejects.toThrow(/aborted by upstream/);
 
@@ -752,10 +752,10 @@ describe("fetchWithTimeout abort/timeouts through callLLMWithTools", () => {
         "You are LiTT.",
         [{ role: "user", content: "Hello" }],
         [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
-        { model: "gemini-2.5-flash", deadline: Date.now() + 70_000 },
+        { model: "gemini-2.5-flash", deadlineMs: Date.now() + 60_000 },
       );
 
-      await expect(promise).rejects.toThrow(/Agent runtime budget exhausted/);
+      await expect(promise).rejects.toThrow(AgentBudgetExhaustedError);
       expect(mockFetch).toHaveBeenCalledTimes(6);
       // No 60s/120s backoff timer should be pending.
       expect(vi.getTimerCount()).toBe(0);
@@ -782,7 +782,7 @@ describe("fetchWithTimeout abort/timeouts through callLLMWithTools", () => {
         "You are LiTT.",
         [{ role: "user", content: "Hello" }],
         [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
-        { model: "gemini-2.5-flash", deadline: Date.now() + 300_000, signal: controller.signal },
+        { model: "gemini-2.5-flash", deadlineMs: Date.now() + 300_000, signal: controller.signal },
       );
       const assertion = expect(promise).rejects.toThrow(/aborted by upstream/);
 
