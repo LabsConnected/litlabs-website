@@ -1,0 +1,55 @@
+name: Final Acceptance — Production Mobile Golden
+
+# Manual trigger only. Runs scripts/final-acceptance/prod-mobile-golden.mjs
+# (a real, Clerk-authenticated Playwright session against production —
+# see that script's own header comment) on a normal Linux runner, since
+# Playwright's browser binaries have no Android/Termux build and cannot
+# be launched from an on-device CLI environment.
+#
+# CLERK_SECRET_KEY is the same repository secret build.yml's own
+# Playwright/production-build steps already use — never printed, never
+# written to the produced artifact (the script only ever uses it as a
+# Bearer header value to mint a short-lived sign-in token).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  golden:
+    name: Golden mobile build/action journey
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI: true
+
+      - name: Install Playwright chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run production golden acceptance
+        run: node scripts/final-acceptance/prod-mobile-golden.mjs
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+
+      - name: Upload acceptance artifacts (verdict, SSE log, screenshots, video)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-acceptance-golden-${{ github.run_id }}
+          path: artifacts/final-acceptance/**
+          retention-days: 14
