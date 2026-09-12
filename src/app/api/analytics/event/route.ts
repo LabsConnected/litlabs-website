@@ -29,6 +29,11 @@ const ALLOWED_EVENT_NAMES = new Set([
   "checkout_completed",
   "plan_activated",
   "returning_user",
+  "hero_cta_click",
+  "watch_litt_click",
+  "pricing_link_click",
+  "github_connect_started",
+  "first_mission_submitted",
 ]);
 
 interface AnalyticsEventRow {

@@ -17,6 +17,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { track } from "@/lib/analytics";
 
 const MISSION_STEPS = [
   { label: "Brief understood", state: "done" },
@@ -65,14 +66,22 @@ export function LandingHeroV3() {
           </h1>
 
           <p className="litt-hero-reveal litt-hero-step-3 mt-7 max-w-2xl text-lg leading-8 text-white/58 sm:text-xl sm:leading-9">
-            LiTT plans, codes, creates, tests, remembers, uses tools, changes real projects, verifies the result, and helps ship.
+            LiTT plans, builds, edits real projects, uses tools, verifies the work, and helps you ship—all from one workspace.
           </p>
 
           <div className="litt-hero-reveal litt-hero-step-4 mt-9 flex flex-col gap-3 sm:flex-row">
-            <Link href={primaryHref} className="litt-primary-button">
+            <Link
+              href={primaryHref}
+              className="litt-primary-button"
+              onClick={() => track("hero_cta_click", { destination: primaryHref })}
+            >
               <Zap size={17} fill="currentColor" /> {primaryLabel} <ArrowRight size={16} />
             </Link>
-            <a href="#how-it-works" className="litt-secondary-button">
+            <a
+              href="#how-it-works"
+              className="litt-secondary-button"
+              onClick={() => track("watch_litt_click", { source: "hero" })}
+            >
               <span className="grid h-7 w-7 place-items-center rounded-full bg-white/8">
                 <Play size={11} fill="currentColor" />
               </span>
