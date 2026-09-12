@@ -825,9 +825,11 @@ describe("Gemini conversation history round-trip", () => {
 
     // Build the next conversation turn including the provider-specific raw parts.
     const assistantMessage = buildAssistantToolCallMessage(firstResult.toolCalls, firstResult.text, firstResult.rawParts);
+    const toolResult = buildToolResultMessage({ toolCallId: firstResult.toolCalls[0].toolCallId, toolId: firstResult.toolCalls[0].toolId, result: { ok: true }, success: true });
     const nextMessages = [
       { role: "user" as const, content: "Now commit that file" },
       { role: "assistant" as const, content: assistantMessage.content, parts: assistantMessage.parts },
+      toolResult,
     ];
 
     // Second call: the Gemini request must contain the assistant's raw parts, including thoughtSignature.
@@ -850,14 +852,29 @@ describe("Gemini conversation history round-trip", () => {
     const geminiCalls = mockFetch.mock.calls.filter(([url]) => String(url).includes("generativelanguage"));
     const secondGeminiCall = geminiCalls[1];
     const body = JSON.parse((secondGeminiCall[1] as { body: string }).body);
-    const assistantContent = body.contents.find((c: { role: string }) => c.role === "model");
-    expect(assistantContent.parts).toEqual(firstParts);
+    type GeminiContent = { role: string; parts?: GeminiPart[] };
+    const assistantContent = (body.contents as GeminiContent[]).find((c) => c.role === "model");
+    const toolResultContent = (body.contents as GeminiContent[]).find((c) => c.role === "user" && c.parts?.some((p: GeminiPart) => p.functionResponse));
+
+    // Assistant/model turn preserves the original raw parts and thoughtSignature.
+    expect(assistantContent?.parts).toEqual(firstParts);
+
+    // Tool result turn serializes as a Gemini functionResponse part.
+    expect(toolResultContent?.parts).toEqual([
+      { functionResponse: { name: "write_file", response: { ok: true } } },
+    ]);
+
+    // Gemini wire payload must NOT contain OpenRouter-only metadata.
+    for (const c of body.contents) {
+      expect(c.tool_calls).toBeUndefined();
+      expect(c.tool_call_id).toBeUndefined();
+    }
   });
 });
 
 describe("OpenRouter conversation history round-trip", () => {
   it("preserves assistant tool_calls and tool result tool_call_id in the next OpenRouter request", async () => {
-    const toolCallId = "call_openrouter_1";
+    const toolCallId = "call_test_123";
     const toolInputs = { path: "test.txt", content: "hello" };
     mockFetch.mockResolvedValueOnce(makeSuccessResponse("openai/gpt-4o", "I will write the file.", [
       { id: toolCallId, type: "function", function: { name: "write_file", arguments: JSON.stringify(toolInputs) } },
@@ -897,6 +914,10 @@ describe("OpenRouter conversation history round-trip", () => {
     ]);
     expect(toolMsg.tool_call_id).toBe(toolCallId);
     expect(toolMsg.content).toBe(JSON.stringify({ ok: true }));
+    // OpenRouter wire messages must NOT contain Gemini-only parts.
+    for (const m of body.messages) {
+      expect(m.parts).toBeUndefined();
+    }
   });
 });
 

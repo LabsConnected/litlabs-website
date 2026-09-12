@@ -88,8 +88,13 @@ interface OpenRouterMessage {
     function: { name: string; arguments: string };
   }>;
   tool_call_id?: string;
-  /** Gemini-specific raw model parts preserved for subsequent turns. */
-  parts?: GeminiPart[];
+}
+
+function toOpenRouterMessage(m: LLMMessage): OpenRouterMessage {
+  const om: OpenRouterMessage = { role: m.role, content: m.content };
+  if (m.tool_calls) om.tool_calls = m.tool_calls;
+  if (m.tool_call_id) om.tool_call_id = m.tool_call_id;
+  return om;
 }
 
 export function toOpenRouterTools(tools: ToolDefinition[]): OpenRouterTool[] {
@@ -262,6 +267,13 @@ class DeadlineBudget {
  * Convert LiTT tool definitions to Gemini FunctionDeclaration format.
  * Gemini expects parameters as a JSON schema with type, properties, required.
  */
+function toGeminiContent(m: LLMMessage): { role: "user" | "model"; parts: GeminiPart[] } {
+  return {
+    role: m.role === "assistant" ? "model" : "user",
+    parts: m.parts ?? [{ text: m.content }],
+  };
+}
+
 function toGeminiFunctionDeclarations(tools: ToolDefinition[]): GeminiFunctionDeclaration[] {
   return tools.map((tool) => {
     const schema = tool.inputSchema as Record<string, unknown>;
@@ -305,10 +317,7 @@ async function callGeminiWithTools(
   }
 
   const model = "gemini-2.5-flash";
-  const contents = messages.map((m) => ({
-    role: m.role === "assistant" ? "model" : "user",
-    parts: m.parts ?? [{ text: m.content }],
-  }));
+  const contents = messages.map(toGeminiContent);
 
   const body: Record<string, unknown> = {
     contents,
@@ -528,12 +537,7 @@ export async function callLLMWithTools(
       stream: false,
       messages: [
         { role: "system", content: systemPrompt } as OpenRouterMessage,
-        ...messages.map((m) => ({
-          role: m.role,
-          content: m.content,
-          ...(m.tool_calls ? { tool_calls: m.tool_calls } : {}),
-          ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
-        }) as OpenRouterMessage),
+        ...messages.map(toOpenRouterMessage),
       ],
       temperature: options?.temperature ?? 0.15,
     };
