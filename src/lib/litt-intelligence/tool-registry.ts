@@ -71,7 +71,7 @@ const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
   // Deploy tools act on the configured deploy provider, not a workspace.
   "deploy.execute": async () => (await import("./tool-handlers-v2")).handleDeployExecute as ToolHandler,
   "deploy.verify": async () => (await import("./tool-handlers-v2")).handleDeployVerify as ToolHandler,
-  "project.deploy": async () => (await import("./tool-handlers-v2")).handleProjectDeploy as ToolHandler,
+  "project.deploy": workspaceTool((m) => m.handleProjectDeploy),
   // Browser Agent Mode handlers (lazy-loaded, session-scoped)
   "browser.navigate": async () => {
     const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.navigate"];
