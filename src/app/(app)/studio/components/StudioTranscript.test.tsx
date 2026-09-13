@@ -325,3 +325,88 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
     expect(pulses.length).toBe(0);
   });
 });
+
+/* ── False-completion regression (Ember Roast V1 Acceptance) ─────── */
+
+/**
+ * Production evidence: LiTT replied conversationally to a build request and
+ * the transcript displayed "Work log · 1 of 1 steps complete" with no tool
+ * call, no file mutation, no build and no deployment.
+ *
+ * Root cause: the work log counted `message.actions?.length ?? 1`, so any
+ * assistant message with text rendered as one completed step.
+ */
+describe("StudioTranscript — truthful work log", () => {
+  const assistant = (over: Partial<ChatMessage> = {}): ChatMessage => ({
+    role: "assistant",
+    content: "I'm ready to build the Ember Roast site.",
+    status: "completed",
+    createdAt: Date.now(),
+    ...over,
+  });
+
+  function renderWith(messages: ChatMessage[]) {
+    return render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteToolAction={vi.fn()}
+      />,
+    );
+  }
+
+  it("renders NO work log for a conversational reply with no execution evidence", () => {
+    renderWith([assistant()]);
+    expect(screen.queryByTestId("studio-work-log")).toBeNull();
+  });
+
+  it("never claims '1 of 1 steps complete' without execution evidence", () => {
+    const { container } = renderWith([assistant()]);
+    expect(container.textContent).not.toMatch(/1 of 1 steps complete/);
+  });
+
+  it("does not count proposed canvas actions as completed steps", () => {
+    // `actions` are PROPOSALS the user can click — not work that happened.
+    renderWith([assistant({
+      actions: [
+        { type: "create_file", path: "index.html" },
+        { type: "create_file", path: "styles.css" },
+      ] as unknown as ChatMessage["actions"],
+    })]);
+    expect(screen.queryByTestId("studio-work-log")).toBeNull();
+  });
+
+  it("reports work not started when a build was requested but nothing ran", () => {
+    renderWith([assistant({
+      execution: { mode: "build", toolCalls: [] },
+    } as Partial<ChatMessage>)]);
+    const log = screen.getByTestId("studio-work-log");
+    expect(log.textContent).toMatch(/no action taken/i);
+    expect(log.textContent).not.toMatch(/complete/i);
+  });
+
+  it("reports real step counts from successful tool results", () => {
+    renderWith([assistant({
+      execution: {
+        mode: "build",
+        toolCalls: [
+          { toolId: "read_file", success: true, mutating: false },
+          { toolId: "edit_file", success: true, mutating: true },
+        ],
+      },
+    } as Partial<ChatMessage>)]);
+    expect(screen.getByTestId("studio-work-log").textContent).toContain("2 of 2 steps complete");
+  });
+
+  it("reports a deploy request with no deployment as partial, not complete", () => {
+    renderWith([assistant({
+      execution: {
+        mode: "ship",
+        toolCalls: [{ toolId: "edit_file", success: true, mutating: true }],
+      },
+    } as Partial<ChatMessage>)]);
+    const log = screen.getByTestId("studio-work-log");
+    expect(log.textContent).toMatch(/deployment missing/i);
+  });
+});

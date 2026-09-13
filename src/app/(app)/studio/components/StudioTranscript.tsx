@@ -15,12 +15,58 @@ import {
 import type { StudioTool } from "./StudioSidebar";
 import type { MutationSummary } from "../stores/useExecutionStore";
 import {
+  requirementForMode,
+  evaluateCompletion,
+  workLogLabel,
+} from "@/lib/studio/completion-evidence";
+import {
   copyToClipboard,
   downloadTextFile,
   conversationToPlainText,
   conversationToMarkdown,
   markdownToPlainText,
 } from "@/lib/studio/message-copy";
+
+/**
+ * Derive the work-log line from execution evidence only.
+ *
+ * Returns null when no work log should be shown. A conversational reply
+ * carries no evidence and therefore no work log — it must never render as
+ * completed work. `message.actions` are PROPOSED canvas actions the user can
+ * click, so they are deliberately not counted as completed steps.
+ */
+function deriveWorkLog(
+  message: ChatMessage,
+  isFailed: boolean,
+): { label: string; color: string } | null {
+  const execution = message.execution;
+
+  // A failed message reports failure regardless of evidence detail.
+  if (isFailed) {
+    const attempted = execution?.toolCalls.length ?? 0;
+    return {
+      label: attempted > 0 ? `0 of ${attempted} steps complete — failed` : "Failed — no work completed",
+      color: "#ef4444",
+    };
+  }
+
+  // No evidence attached → no work was executed → no work log.
+  if (!execution) return null;
+
+  const verdict = evaluateCompletion(requirementForMode(execution.mode), {
+    toolCalls: execution.toolCalls,
+    deployment: execution.deployment ?? null,
+  });
+  const label = workLogLabel(verdict);
+  if (!label) return null;
+
+  const color = verdict.state === "complete"
+    ? "var(--litt-primary)"
+    : verdict.state === "failed"
+      ? "#ef4444"
+      : "#e3b341";
+  return { label, color };
+}
 
 /* ── Inline SVG icons for hover actions (lucide-react is pinned to ^1.24) ── */
 function IconReply({ size = 12 }: { size?: number }) {
@@ -366,6 +412,7 @@ export default function StudioTranscript({
           const key = message.id || `msg_${index}`;
           const isCopied = copiedId === message.id;
           const isPinned = pinnedIds.has(message.id ?? "");
+          const workLog = deriveWorkLog(message, isFailed);
           return (
             <div
               key={key}
@@ -510,20 +557,24 @@ export default function StudioTranscript({
                     }}
                   />
                 )}
-                {/* Work log progress indicator — shows step completion for assistant messages */}
-                {!isUser && !isStreaming && hasContent && (
+                {/*
+                  Work log — derived ONLY from execution evidence. A message
+                  with no execution evidence renders no work log at all: a
+                  conversational reply is not completed work, and `actions`
+                  are proposals the user can click, not work that happened.
+                */}
+                {!isUser && !isStreaming && hasContent && workLog && (
                   <div
+                    data-testid="studio-work-log"
                     className="mt-1 flex items-center gap-1.5 px-1 text-[9px] font-bold"
                     style={{ color: "var(--text-muted)" }}
                   >
                     <span
                       className="inline-block h-1.5 w-1.5 rounded-full"
-                      style={{ backgroundColor: isFailed ? "#ef4444" : "var(--litt-primary)" }}
+                      style={{ backgroundColor: workLog.color }}
                       aria-hidden
                     />
-                    <span>
-                      Work log · {isFailed ? "0" : (message.actions?.length ?? 1)} of {message.actions?.length ?? 1} steps {isFailed ? "failed" : "complete"}
-                    </span>
+                    <span>Work log · {workLog.label}</span>
                   </div>
                 )}
                 {/* Pinned indicator badge */}

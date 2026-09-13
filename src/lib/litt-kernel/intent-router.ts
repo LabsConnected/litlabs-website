@@ -56,6 +56,10 @@ const MODE_PATTERNS: ModePattern[] = [
     mode: "build",
     patterns: [
       /\b(implement|build|write|create|edit|update|fix|refactor|add|remove|delete|change)\b.*\b(file|component|function|code|api|route|page|endpoint|class|module|test|config|readme|package)\b/i,
+      // Site/app artifacts. Without these, "build me a website" fell through
+      // to `think` mode with requiresExecution:false, so the request reached
+      // only the read-only loop — it could be discussed but never built.
+      /\b(build|create|make|generate|scaffold|set up)\b.*\b(website|web ?site|web ?app|site|landing site|landing page|homepage|web page|webpage|blog|portfolio|store|shop|dashboard|app)\b/i,
       /\b(add|implement|support)\b.*\b(dark mode|feature|endpoint|route|page)\b/i,
       /\b(fix|debug|resolve|patch)\b.*\b(bug|error|issue|crash|fail)\b/i,
       /\b(edit|update|change|modify|rename|delete)\b.*\b(file|readme|config|code|component)\b/i,
