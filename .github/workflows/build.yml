@@ -210,18 +210,27 @@ jobs:
       - name: Secret scan (blocking)
         run: |
           # Scan for accidentally committed secrets.
-          # Patterns: Groq (gsk_), OpenAI (sk-), Clerk (sk_live_), Stripe (sk_live_/sk_test_),
-          # Supabase service keys (eyJ...sbp), generic high-entropy JWTs.
+          # Covers: Groq (gsk_), OpenAI (sk-proj-), Clerk (sk_live_clerk_),
+          # Stripe (sk_live_/sk_test_), Supabase service keys (eyJ...sbp),
+          # n8n API keys (n8n_api_), and Cloudflare Access service tokens
+          # (<32hex>.access client id + 64-hex client secret).
+          #
+          # NOTE: quantifiers must use ERE form {40,} - NOT \{40,\}. With
+          # `git grep -E`, escaped braces match a literal "{40,}" sequence, so
+          # the pattern can never match a real key and the scan silently passes.
           # Test placeholders (pk_test_* in layout.tsx, test files) are allowed.
           EXIT=0
           for pattern in \
-            "gsk_[A-Za-z0-9]\{40,\}" \
-            "sk-proj-[A-Za-z0-9]\{40,\}" \
-            "sk_live_clerk_[A-Za-z0-9]\{30,\}" \
-            "sk_live_[A-Za-z0-9]\{40,\}" \
-            "sk_test_[A-Za-z0-9]\{40,\}" \
+            "gsk_[A-Za-z0-9]{40,}" \
+            "sk-proj-[A-Za-z0-9]{40,}" \
+            "sk_live_clerk_[A-Za-z0-9]{30,}" \
+            "sk_live_[A-Za-z0-9]{40,}" \
+            "sk_test_[A-Za-z0-9]{40,}" \
+            "n8n_api_[A-Za-z0-9]{32,}" \
+            "[0-9a-f]{32}\.access" \
+            "(CF_CLIENT_SECRET|CF_ACCESS_CLIENT_SECRET)[[:space:]]*[=:][[:space:]]*[\'\"][0-9a-f]{64}" \
             "eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.sbp_[A-Za-z0-9]"; do
-            HITS=$(git grep -nE "$pattern" -- ':!*.test.ts' ':!*.test.tsx' ':!tests/*' ':!**/__tests__/*' ':!docs/*' ':!*.md' 2>/dev/null || true)
+            HITS=$(git grep -nE "$pattern" -- ':!*.test.ts' ':!*.test.tsx' ':!tests/*' ':!**/__tests__/*' ':!docs/*' ':!*.md' ':!.github/workflows/build.yml' 2>/dev/null || true)
             if [ -n "$HITS" ]; then
               echo "❌ Potential secret found matching $pattern:"
               echo "$HITS"
@@ -230,7 +239,7 @@ jobs:
           done
           if [ "$EXIT" = "1" ]; then
             echo ""
-            echo "Secret scan FAILED — rotate the exposed key and remove it from source."
+            echo "Secret scan FAILED — rotate the exposed credential and remove it from source."
             exit 1
           fi
           echo "✅ Secret scan passed — no secrets found in source."
