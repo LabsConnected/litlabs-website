@@ -456,7 +456,7 @@ async function main() {
         let runError = approvalBody?.runError ?? null;
         const runStatus = approvalBody?.runStatus ?? approvalBody?.status ?? "processing";
         if (!runResult && runStatus === "processing" && convId) {
-          const pollDeadline = Date.now() + 8 * 60 * 1000; // 8 min budget
+          const pollDeadline = Date.now() + 15 * 60 * 1000; // 15 min budget (deploy + model continuation can take 10+ min)
           while (Date.now() < pollDeadline) {
             await page.waitForTimeout(3000);
             const statusResp = await page.request.get(

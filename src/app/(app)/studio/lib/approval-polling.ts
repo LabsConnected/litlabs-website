@@ -12,7 +12,7 @@ const POLL_INTERVAL_MS = 3000;
  * Maximum time to poll before giving up (ms).
  * 10 minutes — matches the server-side stale-run timeout.
  */
-const POLL_TIMEOUT_MS = 10 * 60 * 1000;
+const POLL_TIMEOUT_MS = 15 * 60 * 1000;
 
 export interface ApprovalRunResult {
   finalText: string;
