@@ -223,6 +223,40 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
 
     const guardPhase1 = (r: AgentLoopResult): LaunchFlowResult | null => {
       if (r.pendingApproval) {
+        // If the agent already wrote files before hitting the approval gate,
+        // start the preview so the user can see the result while deciding
+        // whether to approve the deploy. The preview is not a sensitive
+        // action — it's just a local dev server. Without this, a website
+        // build that pauses for deploy approval shows no preview at all,
+        // even though the files exist and are ready to serve.
+        if (hasAppliedMutation(r)) {
+          try {
+            checkSignal(signal);
+            emitStep(progress, steps, "Starting live preview...");
+            progress.emit({ type: "phase", phase: "preview", step: r.stepsUsed + 1 });
+            progress.emit({ type: "preview_start" });
+            void startAndWaitForPreview(
+              transport,
+              {
+                maxWaitMs: options.maxPreviewWaitMs ?? 120_000,
+                pollIntervalMs: 1_000,
+                signal,
+              },
+              progress,
+            ).then((previewStatus) => {
+              if (previewStatus === "ready") {
+                const previewUrl = (options.buildPreviewUrl ?? buildPreviewProxyUrl)(transport.workspaceId);
+                progress.emit({ type: "preview_result", success: true, previewUrl });
+              } else {
+                progress.emit({ type: "preview_result", success: false, error: `Preview did not become ready (status: ${previewStatus})` });
+              }
+            }).catch(() => {
+              progress.emit({ type: "preview_result", success: false, error: "Preview startup failed" });
+            });
+          } catch {
+            // Preview start is best-effort — don't block the approval flow
+          }
+        }
         return baseResult({
           success: false,
           status: "failed",
