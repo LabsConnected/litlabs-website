@@ -95,7 +95,7 @@ const COST_CATALOG: ModelCostEntry[] = [
   // ── Groq ────────────────────────────────────────────────────────
   {
     provider: "groq",
-    model: "llama-3.3-70b-versatile",
+    model: "openai/gpt-oss-120b",
     promptCostPer1M: 0.59,
     completionCostPer1M: 0.79,
     billingClass: "standard",
@@ -113,7 +113,7 @@ const COST_CATALOG: ModelCostEntry[] = [
   },
   {
     provider: "openrouter-qwen",
-    model: "qwen/qwen-2.5-coder-32b-instruct:free",
+    model: "nvidia/nemotron-3-super-120b-a12b:free",
     promptCostPer1M: 0,
     completionCostPer1M: 0,
     billingClass: "code",
@@ -121,7 +121,7 @@ const COST_CATALOG: ModelCostEntry[] = [
   },
   {
     provider: "openrouter-deepseek",
-    model: "deepseek/deepseek-chat:free",
+    model: "nvidia/nemotron-3-ultra-550b-a55b:free",
     promptCostPer1M: 0,
     completionCostPer1M: 0,
     billingClass: "reasoning",
@@ -129,7 +129,7 @@ const COST_CATALOG: ModelCostEntry[] = [
   },
   {
     provider: "openrouter-llama",
-    model: "meta-llama/llama-3.3-70b-instruct:free",
+    model: "google/gemma-4-31b-it:free",
     promptCostPer1M: 0,
     completionCostPer1M: 0,
     billingClass: "standard",
@@ -137,7 +137,7 @@ const COST_CATALOG: ModelCostEntry[] = [
   },
   {
     provider: "openrouter-mistral",
-    model: "mistralai/mistral-small-3.2-24b-instruct:free",
+    model: "nex-agi/nex-n2.5-pro:free",
     promptCostPer1M: 0,
     completionCostPer1M: 0,
     billingClass: "standard",
@@ -145,7 +145,7 @@ const COST_CATALOG: ModelCostEntry[] = [
   },
   {
     provider: "openrouter-trinity",
-    model: "microsoft/trinity-large-preview:free",
+    model: "nvidia/nemotron-3.5-lightning:free",
     promptCostPer1M: 0,
     completionCostPer1M: 0,
     billingClass: "reasoning",
@@ -153,7 +153,7 @@ const COST_CATALOG: ModelCostEntry[] = [
   },
   {
     provider: "openrouter-vision",
-    model: "google/gemini-2.5-flash:free",
+    model: "google/gemma-4-31b-it:free",
     promptCostPer1M: 0,
     completionCostPer1M: 0,
     billingClass: "standard",

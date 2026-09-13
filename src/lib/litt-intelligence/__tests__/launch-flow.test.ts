@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { runLaunchFlow, type LaunchFlowOptions } from "@/lib/litt-intelligence/launch-flow";
+import { registerInternalTools, toolRegistry } from "@/lib/litt-intelligence/tool-registry";
 import type { WorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import type { AgentLoopResult } from "@/lib/litt-intelligence/agent-loop-v2";
 import type { DeployResult } from "@/lib/litt-intelligence/deploy";
@@ -106,6 +107,63 @@ function makeOptions(overrides: Partial<LaunchFlowOptions> = {}): LaunchFlowOpti
     ...overrides,
   };
 }
+
+// ─── Tests: no-mutation reprompt ─────────────────────────────────
+
+describe("Launch Flow: no-mutation reprompt", () => {
+  beforeEach(() => {
+    toolRegistry.clear();
+    registerInternalTools();
+  });
+
+  it("reprompts once when an execution request applies zero mutations", async () => {
+    const runAgentLoop = vi.fn()
+      .mockResolvedValueOnce(successAgentResult({
+        toolCalls: [{ toolId: "files.list", success: true, summary: "listed" }],
+      }))
+      .mockResolvedValueOnce(successAgentResult({
+        toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html" }],
+      }));
+    const options = makeOptions({ requiresExecution: true, runAgentLoop });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    expect(String(runAgentLoop.mock.calls[1][0])).toContain("did not write any project files");
+    expect(result.success).toBe(true);
+    expect(result.status).toBe("preview_ready");
+  });
+
+  it("does not reprompt for non-execution requests (requiresExecution unset)", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(successAgentResult({ toolCalls: [] }));
+    const options = makeOptions({ runAgentLoop });
+
+    await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+  });
+
+  it("reprompts at most once even if the second pass also writes nothing", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(successAgentResult({ toolCalls: [] }));
+    const options = makeOptions({ requiresExecution: true, runAgentLoop });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe("preview_ready");
+  });
+
+  it("does not reprompt when the first pass already applied a mutation", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(successAgentResult({
+      toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html" }],
+    }));
+    const options = makeOptions({ requiresExecution: true, runAgentLoop });
+
+    await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+  });
+});
 
 // ─── Tests: prompt → preview ──────────────────────────────────────
 

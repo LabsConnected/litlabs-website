@@ -653,6 +653,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             executionMode: v2Config.executionMode,
             enableBuildFix: true,
             enableDeploy: built.kernelResult.decision.routing.mode === "ship",
+            requiresExecution: built.kernelResult.decision.routing.requiresExecution,
             evalMetadata: v2Config.evalMetadata,
             progress: streamProgress,
             signal: req.signal,
