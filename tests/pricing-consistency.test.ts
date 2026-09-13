@@ -10,16 +10,19 @@ describe("Pricing contract — single source of truth", () => {
       );
     });
 
-    it("publishes exactly 4 customer plans: starter, creator_beta, pro_builder_beta, founder", () => {
+    it("publishes exactly 3 purchasable plans: starter, creator_beta, pro_builder_beta", () => {
+      // founder is retired from sale, so it is no longer published even though
+      // it remains defined in PLANS for existing Founding Members.
       expect(PLAN_LIST.map((plan) => plan.id).sort()).toEqual(
-        ["starter", "creator_beta", "pro_builder_beta", "founder"].sort(),
+        ["starter", "creator_beta", "pro_builder_beta"].sort(),
       );
     });
 
-    it("PLAN_LIST excludes internal owner plan (only 4 customer plans)", () => {
-      expect(PLAN_LIST.length).toBe(4);
+    it("PLAN_LIST excludes the internal owner plan and the retired founder plan", () => {
+      expect(PLAN_LIST.length).toBe(3);
       expect(PLAN_LIST.every((p) => PLANS[p.id] === p)).toBe(true);
       expect(PLAN_LIST.find((p) => p.id === "owner")).toBeUndefined();
+      expect(PLAN_LIST.find((p) => p.id === "founder")).toBeUndefined();
     });
 
     it("every plan has a unique id", () => {
@@ -62,8 +65,11 @@ describe("Pricing contract — single source of truth", () => {
       expect(PLANS.pro_builder_beta.monthlyCredits).toBe(20000);
     });
 
-    it("Founder is enabled with $149 one-time price", () => {
-      expect(PLANS.founder.enabled).toBe(true);
+    it("Founder is retired but keeps its historical shape", () => {
+      // Retired from sale. The price and name are retained because existing
+      // Founding Members and historical Stripe records refer to them.
+      expect(PLANS.founder.enabled).toBe(false);
+      expect(PLANS.founder.stripePriceIdEnv).toBeUndefined();
       expect(PLANS.founder.billingType).toBe("one_time");
       expect(PLANS.founder.monthlyPriceCents).toBe(14900);
       expect(PLANS.founder.name).toBe("Founding Member");
@@ -125,17 +131,17 @@ describe("Pricing contract — single source of truth", () => {
   });
 
   describe("Checkout safety — disabled plans cannot be purchased", () => {
-    it("Founder is enabled and can be purchased", () => {
-      const founder = PLANS.founder;
-      expect(founder.enabled).toBe(true);
-      // The billing checkout route checks plan.enabled and returns 400
-      // This test verifies the contract is enforced at the catalog level
+    it("Founder cannot be purchased", () => {
+      // Two independent blocks, so neither alone is load-bearing:
+      //   enabled: false        -> the checkout route's !plan.enabled guard
+      //   no stripePriceIdEnv   -> getStripePriceId() cannot resolve a price
+      expect(PLANS.founder.enabled).toBe(false);
+      expect(PLANS.founder.stripePriceIdEnv).toBeUndefined();
     });
 
-    it("Only enabled plans can be purchased", () => {
+    it("Only creator_beta and pro_builder_beta are purchasable", () => {
       const enabledPlans = PLAN_LIST.filter((p) => p.enabled && p.billingType !== "free");
-      // Only creator_beta and pro_builder_beta should be purchasable
-      expect(enabledPlans.map((p) => p.id).sort()).toEqual(["creator_beta", "founder", "pro_builder_beta"]);
+      expect(enabledPlans.map((p) => p.id).sort()).toEqual(["creator_beta", "pro_builder_beta"]);
     });
   });
 });

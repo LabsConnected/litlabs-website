@@ -93,9 +93,15 @@ export const FEATURE_FLAGS: Record<FeatureFlag, FeatureFlagDefinition> = {
   },
   founderCheckout: {
     flag: "founderCheckout",
-    description: "Founding Member checkout — disabled until approved $149 Stripe Price ID is configured",
+    description:
+      "Founding Member ($149 one-time) checkout. RETIRED — the tier is no " +
+      "longer sold, and the pricing card has been removed rather than shown " +
+      "as unavailable. Previously this flag was decorative: nothing read it, " +
+      "so with STRIPE_PRICE_FOUNDER set the charge path was live. The " +
+      "checkout route now enforces it. Existing Founding Members keep their " +
+      "entitlements via PLANS.founder / FOUNDER_ENTITLEMENTS.",
     enabled: false,
-    hideFromNav: false, // Visible as "Coming soon" on pricing page
+    hideFromNav: true,
   },
   marketplaceAgentInstall: {
     flag: "marketplaceAgentInstall",
