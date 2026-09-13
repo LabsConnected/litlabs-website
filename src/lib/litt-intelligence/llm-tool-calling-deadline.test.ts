@@ -220,6 +220,58 @@ describe("callLLMWithTools — deadline/budget contract (real Gemini behavior)",
     expect(generateContentMock).toHaveBeenCalledTimes(2);
   });
 
+  // ─── B2. Abort listener cleanup on normal backoff completion ─
+
+  it("B2. Gemini 429 backoff removes its abort listener after normal sleep (no leak)", async () => {
+    mockFetch.mockResolvedValue(makeOpenRouterFailure(402, "Billing required"));
+
+    const { model, generateContentMock } = makeMockModel(["429", "success"]);
+    _setGeminiModelFactory(() => model);
+
+    // Count listeners registered/removed on the upstream signal across the
+    // whole call — every layer (fetchWithTimeout, raceProviderAttempt, and
+    // the 429 backoff sleep) must leave zero net listeners behind.
+    const controller = new AbortController();
+    let added = 0;
+    let removed = 0;
+    const signal = controller.signal;
+    const origAdd = signal.addEventListener.bind(signal);
+    const origRemove = signal.removeEventListener.bind(signal);
+    vi.spyOn(signal, "addEventListener").mockImplementation(
+      (...args: Parameters<AbortSignal["addEventListener"]>) => {
+        added++;
+        return origAdd(...args);
+      },
+    );
+    vi.spyOn(signal, "removeEventListener").mockImplementation(
+      (...args: Parameters<AbortSignal["removeEventListener"]>) => {
+        removed++;
+        return origRemove(...args);
+      },
+    );
+
+    const deadline = Date.now() + 120_000;
+    const promise = callLLMWithTools(
+      "You are LiTT.",
+      [{ role: "user", content: "Hello" }],
+      [TEST_TOOL],
+      { model: "test-model", deadlineMs: deadline, signal },
+    );
+
+    await flushMicrotasks();
+    await tick(60_100);
+
+    const result = await promise;
+    expect(result.text).toBe("Gemini success");
+    expect(generateContentMock).toHaveBeenCalledTimes(2);
+
+    // Listeners were registered (the backoff sleep + attempt races), and
+    // every one was removed — including the sleep's listener after the
+    // normal (non-aborted) completion path.
+    expect(added).toBeGreaterThan(0);
+    expect(removed).toBe(added);
+  });
+
   // ─── C. 429 retry rejected ───────────────────────────────────
 
   it("C. Gemini 429 → retry rejected when budget cannot fit delay + attempt + cleanup", async () => {

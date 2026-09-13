@@ -602,13 +602,20 @@ async function callGeminiWithTools(
         console.log(`[llm-tool-calling] callGeminiWithTools: 429 backoff attempt ${attempt + 1} delayMs=${delay} nextAttemptBudgetMs=${retryBudgetMs} @ ${new Date().toISOString()}`);
         const sleepT0 = Date.now();
         await new Promise<void>((resolve, reject) => {
-          const t = setTimeout(resolve, delay);
-          if (options?.signal) {
-            const onAbort = () => { clearTimeout(t); reject(new UpstreamAbortError("Gemini 429 backoff")); };
-            if (options.signal.aborted) {
+          const signal = options?.signal;
+          const onAbort = () => {
+            clearTimeout(t);
+            reject(new UpstreamAbortError("Gemini 429 backoff"));
+          };
+          const t = setTimeout(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+          }, delay);
+          if (signal) {
+            if (signal.aborted) {
               onAbort();
             } else {
-              options.signal.addEventListener("abort", onAbort, { once: true });
+              signal.addEventListener("abort", onAbort, { once: true });
             }
           }
         });
