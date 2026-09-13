@@ -146,6 +146,13 @@ async function main() {
     window.addEventListener("studio:files-changed", (e) => {
       window.__littFilesChanged.push({ at: Date.now(), detail: e?.detail ?? null });
     });
+    // Run the golden journey in AUTO execution mode — the same mode a user
+    // can select in the Studio header. AUTO auto-approves the workspace-safe
+    // tool set (files.write, mkdir, rename, patch, commit) so the autonomous
+    // build chain streams to completion on a single SSE session. The ACT
+    // approval gate and the sensitive-action gate (deploy.execute, push,
+    // delete) are intentionally NOT bypassed — they are proven separately.
+    try { localStorage.setItem("litt:executionMode", "auto"); } catch {}
   });
 
   const page = await context.newPage();
@@ -335,7 +342,11 @@ async function main() {
     writeFileSync(path.join(ARTIFACT_DIR, "sse-events.json"), JSON.stringify(events, null, 2));
 
     const toolEvents = events.filter((e) => e.type === "tool_execution");
-    const writeEvents = toolEvents.filter((e) => /write|create|edit|file/i.test(`${e.toolId} ${e.summary}`));
+    // Count only successful real file mutations — a read-only tool (files.list,
+    // files.read, project.scan) must never satisfy this step.
+    const writeEvents = toolEvents.filter((e) =>
+      e.success === true &&
+      /^(files\.write|files\.mkdir|files\.rename|files\.delete|apply_patch)$/.test(String(e.toolId)));
     step("files_written", writeEvents.length > 0 || (await page.evaluate(() => (window.__littFilesChanged || []).length)) > 0,
       `${writeEvents.length} write-ish tool events, ${await page.evaluate(() => (window.__littFilesChanged || []).length)} files-changed events`);
     verdict.filesChangedEvents = await page.evaluate(() => window.__littFilesChanged || []);

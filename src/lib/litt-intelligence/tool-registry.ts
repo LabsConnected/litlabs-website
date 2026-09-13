@@ -10,40 +10,65 @@
  */
 
 import type { LiTTToolDefinition, ApprovalPolicy } from "./types";
+import type { WorkspaceTransport } from "./workspace-transport";
 // Shared realtime capability from @litt/agent-core — the ONE implementation.
 // The web registry delegates to it so CLI and Studio have the same capability.
 import { webSearch as coreWebSearch, safeFetch as coreSafeFetch, weatherForecast as coreWeatherForecast, SafeFetchError } from "@litt/agent-core";
 
 type ToolHandler = (inputs: Record<string, unknown>, transport?: unknown) => Promise<unknown>;
 
+type V2Module = typeof import("./tool-handlers-v2");
+type V2Handler = (inputs: Record<string, unknown>, transport: WorkspaceTransport) => Promise<unknown>;
+
+/**
+ * Workspace-scoped tools MUST execute through the WorkspaceTransport
+ * (authenticated, workspace-rooted terminal-server endpoints). They must
+ * never fall back to the web service's own filesystem — process.cwd() on
+ * this service is the LiTT app deployment, not user project storage.
+ * Missing transport → fail closed.
+ */
+function workspaceTool(load: (mod: V2Module) => V2Handler): () => Promise<ToolHandler> {
+  return async () => {
+    const handler = load(await import("./tool-handlers-v2"));
+    return (inputs, transport) => {
+      if (!transport) {
+        throw new Error("This tool requires an active project workspace");
+      }
+      return handler(inputs, transport as WorkspaceTransport);
+    };
+  };
+}
+
 const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
-  // V1 handlers (legacy — still used by agent-loop.ts pre-LLM phase)
-  "project.scan": async () => (await import("./tool-handlers")).handleProjectScan,
-  "files.list": async () => (await import("./tool-handlers")).handleFilesList,
-  "files.read": async () => (await import("./tool-handlers")).handleFilesRead,
-  "files.write": async () => (await import("./tool-handlers")).handleFilesWrite,
-  "git.status": async () => (await import("./tool-handlers")).handleGitStatus,
-  "terminal.execute": async () => (await import("./tool-handlers")).handleTerminalExecute,
-  "project.health": async () => (await import("./tool-handlers")).handleProjectHealth,
+  // Workspace-scoped tools — workspace-transport handlers only.
+  "project.scan": workspaceTool((m) => m.handleProjectScan),
+  "files.list": workspaceTool((m) => m.handleFilesList),
+  "files.read": workspaceTool((m) => m.handleFilesRead),
+  "files.write": workspaceTool((m) => m.handleFilesWrite),
+  "git.status": workspaceTool((m) => m.handleGitStatus),
+  "terminal.execute": workspaceTool((m) => m.handleTerminalExecute),
+  "project.health": workspaceTool((m) => m.handleProjectHealth),
+  // App-level capability — server-side HTTP, not workspace-scoped.
   "image.generate": async () => (await import("./tool-handlers")).handleImageGenerate,
   // V2 workspace-aware handlers (used by agent-loop-v2.ts)
-  // V2 handlers accept an optional transport param; the agent loop binds it at call time.
-  "files.delete": async () => (await import("./tool-handlers-v2")).handleFilesDelete as ToolHandler,
-  "files.mkdir": async () => (await import("./tool-handlers-v2")).handleFilesMkdir as ToolHandler,
-  "files.rename": async () => (await import("./tool-handlers-v2")).handleFilesRename as ToolHandler,
-  "search_code": async () => (await import("./tool-handlers-v2")).handleSearchCode as ToolHandler,
-  "git.diff": async () => (await import("./tool-handlers-v2")).handleGitDiff as ToolHandler,
-  "git.log": async () => (await import("./tool-handlers-v2")).handleGitLog as ToolHandler,
-  "git.commit": async () => (await import("./tool-handlers-v2")).handleGitCommit as ToolHandler,
-  "apply_patch": async () => (await import("./tool-handlers-v2")).handleApplyPatch as ToolHandler,
-  "build.run": async () => (await import("./tool-handlers-v2")).handleBuildRun as ToolHandler,
-  "test.run": async () => (await import("./tool-handlers-v2")).handleTestRun as ToolHandler,
-  "typecheck.run": async () => (await import("./tool-handlers-v2")).handleTypecheckRun as ToolHandler,
-  "lint.run": async () => (await import("./tool-handlers-v2")).handleLintRun as ToolHandler,
-  "package.info": async () => (await import("./tool-handlers-v2")).handlePackageInfo as ToolHandler,
-  "preview.start": async () => (await import("./tool-handlers-v2")).handlePreviewStart as ToolHandler,
-  "preview.status": async () => (await import("./tool-handlers-v2")).handlePreviewStatus as ToolHandler,
-  "preview.stop": async () => (await import("./tool-handlers-v2")).handlePreviewStop as ToolHandler,
+  // All require a WorkspaceTransport — missing transport fails closed.
+  "files.delete": workspaceTool((m) => m.handleFilesDelete),
+  "files.mkdir": workspaceTool((m) => m.handleFilesMkdir),
+  "files.rename": workspaceTool((m) => m.handleFilesRename),
+  "search_code": workspaceTool((m) => m.handleSearchCode),
+  "git.diff": workspaceTool((m) => m.handleGitDiff),
+  "git.log": workspaceTool((m) => m.handleGitLog),
+  "git.commit": workspaceTool((m) => m.handleGitCommit),
+  "apply_patch": workspaceTool((m) => m.handleApplyPatch),
+  "build.run": workspaceTool((m) => m.handleBuildRun),
+  "test.run": workspaceTool((m) => m.handleTestRun),
+  "typecheck.run": workspaceTool((m) => m.handleTypecheckRun),
+  "lint.run": workspaceTool((m) => m.handleLintRun),
+  "package.info": workspaceTool((m) => m.handlePackageInfo),
+  "preview.start": workspaceTool((m) => m.handlePreviewStart),
+  "preview.status": workspaceTool((m) => m.handlePreviewStatus),
+  "preview.stop": workspaceTool((m) => m.handlePreviewStop),
+  // Deploy tools act on the configured deploy provider, not a workspace.
   "deploy.execute": async () => (await import("./tool-handlers-v2")).handleDeployExecute as ToolHandler,
   "deploy.verify": async () => (await import("./tool-handlers-v2")).handleDeployVerify as ToolHandler,
   // Browser Agent Mode handlers (lazy-loaded, session-scoped)

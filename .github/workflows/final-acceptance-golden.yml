@@ -52,6 +52,12 @@ jobs:
         env:
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           LITT_ACCEPTANCE_USER_ID: ${{ secrets.LITT_ACCEPTANCE_USER_ID }}
+          # No production deploy target is configured for user workspaces
+          # (no RAILWAY_API_TOKEN/DEPLOY_PRODUCTION_URL on the web service),
+          # so the golden does not request "deploy it live" — the deploy path
+          # reports a truthful "not configured" error, which is proven by the
+          # deploy_result step only when a real target exists.
+          LITT_ACCEPTANCE_DEPLOY: "0"
 
       - name: Upload acceptance artifacts (verdict, SSE log, screenshots, video)
         if: always()

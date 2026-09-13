@@ -439,14 +439,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   let v1Result: Awaited<ReturnType<typeof runAgentLoop>> | null = null;
   let finalPrompt = prompt;
 
-  // Prepare V2 transport and config BEFORE the stream starts.
-  // The actual loop runs INSIDE the stream so events can be streamed in real-time.
+  // Prepare the workspace transport BEFORE the stream starts, for both
+  // the V2 loop and the V1 pre-LLM auto-inspection. Workspace-scoped tools
+  // require this transport — without it they fail closed rather than
+  // touching the web service's own filesystem.
+  // The actual V2 loop runs INSIDE the stream so events stream in real-time.
   let v2Transport: Awaited<ReturnType<typeof createWorkspaceTransport>> | null = null;
   let v2Config: Partial<AgentLoopConfig> | null = null;
 
-  if (useV2) {
+  if (conversation.projectId && canonicalCtx.workspaceExecutionAvailable) {
     try {
-      v2Transport = await createWorkspaceTransport(conversation.projectId!, userId);
+      v2Transport = await createWorkspaceTransport(conversation.projectId, userId);
     } catch (transportErr) {
       // Transport creation failed — fall back to V1 with visible logging
       // so operators can detect workspace issues (not silently swallowed).
@@ -456,28 +459,32 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         userId,
         errorClass: transportErr instanceof Error ? transportErr.message : "unknown",
       });
-      v1Result = await runAgentLoop(resolvedMessage, conversation.projectId ?? "", prompt);
-      finalPrompt = v1Result.enrichedPrompt;
     }
+  }
 
-    if (v2Transport) {
-      v2Config = {
-        systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
-        executionMode: canonicalCtx.executionMode,
-        enableBuildFix: true,
-        model: typeof body.model === "string" ? body.model : undefined,
-        evalMetadata: {
-          agentSlug,
-          agentMode: "v2-execution",
-          conversationId: conversation.id,
-          userId,
-          projectId: conversation.projectId ?? undefined,
-        },
-      };
-    }
+  if (useV2 && v2Transport) {
+    v2Config = {
+      systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
+      executionMode: canonicalCtx.executionMode,
+      enableBuildFix: true,
+      model: typeof body.model === "string" ? body.model : undefined,
+      evalMetadata: {
+        agentSlug,
+        agentMode: "v2-execution",
+        conversationId: conversation.id,
+        userId,
+        projectId: conversation.projectId ?? undefined,
+      },
+    };
   } else {
-    // V1 fallback — no executable workspace, read-only inspection only
-    v1Result = await runAgentLoop(resolvedMessage, conversation.projectId ?? "", prompt);
+    // V1 fallback — read-only inspection only. Pass the transport (when a
+    // workspace exists) so auto-inspection reads the user's real workspace.
+    v1Result = await runAgentLoop(
+      resolvedMessage,
+      conversation.projectId ?? "",
+      prompt,
+      v2Transport ?? undefined,
+    );
     finalPrompt = v1Result.enrichedPrompt;
   }
 
