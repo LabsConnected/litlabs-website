@@ -146,7 +146,23 @@ export const handleSearchCode: ToolHandler = async (inputs, transport) => {
 export const handleGitStatus: ToolHandler = async (_inputs, transport) => {
   try {
     const status = await transport.gitStatus();
-    return { success: true, ...status };
+    // Compat fields consumed by the V1 auto-inspection formatter
+    // (agent-loop.ts formatToolResultsBlock / summarizeResult).
+    const changeCount = status.staged.length + status.modified.length + status.untracked.length;
+    let recentCommits = "";
+    try {
+      const { commits } = await transport.gitLog({ maxCount: 10 });
+      recentCommits = commits
+        .map((c) => `${c.sha.slice(0, 7)} ${c.message}`)
+        .join("\n");
+    } catch { /* git log unavailable — leave empty */ }
+    return {
+      success: true,
+      ...status,
+      hasChanges: !status.clean,
+      status: status.clean ? "Clean working tree" : `${changeCount} uncommitted change(s)`,
+      recentCommits,
+    };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : "Git status failed" };
   }

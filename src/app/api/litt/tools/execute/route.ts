@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { toolRegistry } from "@/lib/litt-intelligence/tool-registry";
 import { requiresApproval } from "@/lib/litt-intelligence/types";
+import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 
 /**
  * POST /api/litt/tools/execute
@@ -55,9 +56,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Tool "${body.toolId}" is disabled` }, { status: 403 });
   }
 
-  // Check if approval is required
-  const needsApproval = requiresApproval(tool.permissionLevel);
-  if (needsApproval && !body.hasApproval) {
+  // Check if approval is required. A client-supplied hasApproval flag is
+  // NEVER honored as proof of approval — approval-gated tools always
+  // record a pending execution and return 202 from this endpoint. Real
+  // approvals resume through the conversation approvals flow, which binds
+  // the decision to an authenticated pause record.
+  const needsApproval =
+    requiresApproval(tool.permissionLevel) ||
+    (tool.approvalPolicy.requireExplicitForMutations && !tool.readOnly);
+  if (needsApproval) {
     // Record the approval request
     if (supabaseAdmin) {
       const { data: user } = await supabaseAdmin
@@ -88,12 +95,24 @@ export async function POST(request: NextRequest) {
     }, { status: 202 });
   }
 
-  // Execute the tool
+  // Build a workspace transport when a projectId is supplied so
+  // workspace-scoped tools execute against the caller's own verified
+  // project workspace. Without it those tools fail closed.
+  let transport: Awaited<ReturnType<typeof createWorkspaceTransport>> | null = null;
+  if (body.projectId) {
+    transport = await createWorkspaceTransport(body.projectId, userId).catch(() => null);
+  }
+
+  // Execute the tool. The authenticated userId is injected into inputs —
+  // client-supplied identity fields are never trusted. hasApproval stays
+  // false: approval-gated tools already returned 202 above, and the
+  // registry's own approval policy enforces the rest.
   const result = await toolRegistry.execute(
     body.toolId,
-    body.inputs ?? {},
+    { ...(body.inputs ?? {}), userId },
     {
-      hasApproval: body.hasApproval,
+      hasApproval: false,
+      transport: transport ?? undefined,
     },
   );
 
