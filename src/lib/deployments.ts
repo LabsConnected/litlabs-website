@@ -218,6 +218,7 @@ export async function getDeployments(
     until?: Date;
     status?: DeployStatus;
     environment?: DeployEnvironment;
+    projectId?: string;
     limit?: number;
   } = {},
 ): Promise<DeployRecord[]> {
@@ -237,6 +238,9 @@ export async function getDeployments(
   }
   if (options.environment) {
     query = query.eq("environment", options.environment);
+  }
+  if (options.projectId) {
+    query = query.eq("metadata->>project_id", options.projectId);
   }
   if (options.limit) {
     query = query.limit(options.limit);
