@@ -164,7 +164,7 @@ function AuthInner({ linkColor }: NavAuthProps) {
 
   if (!isSignedIn) {
     return (
-      <SignInButton mode="redirect" forceRedirectUrl="/dashboard">
+      <SignInButton mode="redirect" forceRedirectUrl="/studio">
         <button
           className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-[12px] font-bold cursor-pointer transition-all hover:scale-[1.03] active:scale-[0.98]"
           style={{
