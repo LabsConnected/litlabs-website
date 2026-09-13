@@ -1,8 +1,19 @@
 import { createServer } from "http";
 import { createHmac } from "crypto";
 import { WebSocketServer, WebSocket } from "ws";
+import { resolveBindHost } from "./network-bind.mjs";
 
 const PORT = process.env.PORT ?? process.env.VOICE_PROXY_PORT ?? "4002";
+
+// Bind-address policy: Railway -> 0.0.0.0, --tailscale -> tailnet IP,
+// --lan -> 0.0.0.0 (explicit), else 127.0.0.1. See ./network-bind.mjs.
+let BIND;
+try {
+  BIND = resolveBindHost();
+} catch (err) {
+  console.error(err.message);
+  process.exit(1);
+}
 const PATH = "/voice";
 const INWORLD_ENDPOINT =
   "wss://api.inworld.ai/api/v1/realtime/session";
@@ -318,8 +329,8 @@ wss.on("connection", (browserWs, req) => {
   });
 });
 
-server.listen(Number(PORT), "0.0.0.0", () => {
-  console.log(`[voice-proxy] Listening on ws://0.0.0.0:${PORT}${PATH}`);
+server.listen(Number(PORT), BIND.host, () => {
+  console.log(`[voice-proxy] Listening on ws://${BIND.host}:${PORT}${PATH} (bind: ${BIND.reason})`);
   console.log(`[voice-proxy] Proxying to ${INWORLD_ENDPOINT}`);
 });
 

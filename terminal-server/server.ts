@@ -58,9 +58,22 @@ import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manage
 import { requireInternalServiceAuth, type AuthenticatedRequest } from "./internal-auth";
 import { mintTerminalToken, verifyTerminalToken, bearerToken } from "./auth";
 import { verifyClerkToken } from "./clerk-verify";
+import { resolveBindHost } from "./network-bind";
 import type { RemoteCommandRequest } from "@litt/agent-core";
 
 const PORT = Number(process.env.PORT || process.env.TERMINAL_SERVER_PORT || 4001);
+
+// Bind-address policy: Railway → 0.0.0.0, --tailscale → tailnet IP,
+// --lan → 0.0.0.0 (explicit), else 127.0.0.1. See ./network-bind.ts.
+// A missing Tailscale interface aborts startup here — intentional; never
+// silently fall back to a wider bind.
+let BIND: ReturnType<typeof resolveBindHost>;
+try {
+  BIND = resolveBindHost();
+} catch (err) {
+  console.error((err as Error).message);
+  process.exit(1);
+}
 const ALLOWED_ORIGINS = [
   ...(process.env.TERMINAL_ALLOWED_ORIGIN || "")
     .split(",")
@@ -1755,8 +1768,8 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`🔥 LiTTree Terminal Server running on http://0.0.0.0:${PORT}`);
+server.listen(PORT, BIND.host, () => {
+  console.log(`🔥 LiTTree Terminal Server running on http://${BIND.host}:${PORT} (bind: ${BIND.reason})`);
   console.log(`   Allowed origins: ${ALLOWED_ORIGINS.join(", ")}`);
   console.log(`   Workspace root: ${WORKSPACE_ROOT}`);
   console.log(`   Docker mode: ${USE_DOCKER}`);
