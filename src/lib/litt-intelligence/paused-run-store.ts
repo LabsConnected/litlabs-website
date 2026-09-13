@@ -271,7 +271,7 @@ export async function markRunProcessing(
     })
     .eq("id", pausedRunId)
     .eq("user_id", userId)
-    .eq("run_status", null) // Only if not yet started
+    .is("run_status", null) // Only if not yet started (NULL check requires .is, not .eq)
     .select("id")
     .maybeSingle();
 
