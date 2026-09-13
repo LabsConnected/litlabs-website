@@ -21,7 +21,7 @@ vi.mock("@/lib/github-app", () => ({
   getInstallationToken: vi.fn(),
 }));
 
-import { ensureWorkspaceAlive, normalizeFileError } from "@/lib/studio/workspace-recovery";
+import { ensureWorkspaceAlive, normalizeFileError, provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
 import { getProject, updateProjectWorkspace, claimProvisioningLock, ensureCanonicalStudioProject } from "@/lib/projects/project-repository";
 import { getWorkspaceInternal, prepareWorkspaceInternal } from "@/lib/terminal-internal-client";
 import type { CanonicalProject } from "@/lib/projects/types";
@@ -42,7 +42,10 @@ const fakeWorkspace = (overrides: Partial<WorkspaceGetResponse> = {}): Workspace
 
 describe("workspace-recovery", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    // resetAllMocks clears both call history AND mock implementations
+    // (clearAllMocks only clears call history, leaving stale
+    // mockResolvedValue/mockRejectedValue from previous tests).
+    vi.resetAllMocks();
   });
 
   describe("ensureWorkspaceAlive", () => {
@@ -125,6 +128,90 @@ describe("workspace-recovery", () => {
     it("handles non-JSON text", () => {
       const result = normalizeFileError("Permission denied");
       expect(result).toBe("Permission denied");
+    });
+  });
+
+  describe("provisionWorkspaceForProject", () => {
+    it("returns existing workspaceId when workspace is ready and alive", async () => {
+      vi.mocked(getProject).mockResolvedValue(fakeProject({ workspaceId: "ws-existing", workspaceStatus: "ready" }));
+      vi.mocked(getWorkspaceInternal).mockResolvedValue(fakeWorkspace({ workspaceId: "ws-existing", root: "/data/ws-existing", ready: true } as unknown as WorkspaceGetResponse));
+
+      const result = await provisionWorkspaceForProject("proj-1", "user-1");
+
+      expect(result).toBe("ws-existing");
+      // Should NOT have claimed a lock or prepared a new workspace
+      expect(claimProvisioningLock).not.toHaveBeenCalled();
+      expect(prepareWorkspaceInternal).not.toHaveBeenCalled();
+    });
+
+    it("re-provisions when DB says ready but terminal server lost the workspace", async () => {
+      // First getProject: ready but stale
+      vi.mocked(getProject)
+        .mockResolvedValueOnce(fakeProject({ workspaceId: "ws-stale", workspaceStatus: "ready" }));
+      // getWorkspaceInternal returns null (lost)
+      vi.mocked(getWorkspaceInternal).mockResolvedValue(null);
+      // After reset, ensureCanonicalStudioProject returns not_prepared
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(null);
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-new", root: "/data/ws-new" }) as unknown as WorkspacePrepareResponse,
+      );
+
+      const result = await provisionWorkspaceForProject("proj-1", "user-1");
+
+      expect(result).toBe("ws-new");
+      expect(prepareWorkspaceInternal).toHaveBeenCalled();
+    });
+
+    it("provisions a blank project workspace from scratch", async () => {
+      vi.mocked(getProject).mockResolvedValue(fakeProject({ sourceType: "blank", templateId: "blank-static", workspaceId: null, workspaceStatus: "not_prepared" }));
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(null);
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-blank", root: "/data/ws-blank" }) as unknown as WorkspacePrepareResponse,
+      );
+
+      const result = await provisionWorkspaceForProject("proj-blank", "user-1");
+
+      expect(result).toBe("ws-blank");
+      expect(prepareWorkspaceInternal).toHaveBeenCalledWith(expect.objectContaining({
+        sourceType: "blank",
+        templateId: "blank-static",
+      }));
+    });
+
+    it("throws when project has no valid source", async () => {
+      // sourceType "template" matches neither the blank nor github branch,
+      // so the code falls through to the "no valid source" error.
+      vi.mocked(getProject).mockResolvedValue(fakeProject({ sourceType: "template" as unknown as "blank", workspaceId: null, workspaceStatus: "not_prepared" }));
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(null);
+
+      await expect(provisionWorkspaceForProject("proj-bad", "user-1")).rejects.toThrow("no valid source");
+    });
+
+    it("marks workspace as failed on provisioning error", async () => {
+      vi.mocked(getProject).mockResolvedValue(fakeProject({ sourceType: "blank", workspaceId: null, workspaceStatus: "not_prepared" }));
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(null);
+      vi.mocked(prepareWorkspaceInternal).mockRejectedValue(new Error("Disk full"));
+
+      await expect(provisionWorkspaceForProject("proj-fail", "user-1")).rejects.toThrow("Disk full");
+      // Should have marked the workspace as failed with the error message
+      expect(updateProjectWorkspace).toHaveBeenCalledWith("proj-fail", "user-1", expect.objectContaining({
+        workspaceStatus: "failed",
+        workspaceError: "Disk full",
+      }));
+    });
+
+    it("throws when project is not found", async () => {
+      vi.mocked(getProject).mockResolvedValue(null);
+
+      await expect(provisionWorkspaceForProject("proj-missing", "user-1")).rejects.toThrow("Project not found");
     });
   });
 });

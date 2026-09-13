@@ -151,7 +151,17 @@ export async function startPreviewInternal(
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => "Unknown error");
-    throw new Error(`Preview start failed (${resp.status}): ${text}`);
+    // Try to extract errorCode from the terminal-server's error response
+    let errorCode: string | null = null;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed?.errorCode) errorCode = String(parsed.errorCode);
+    } catch {
+      // Not JSON — fall through
+    }
+    const err = new Error(`Preview start failed (${resp.status}): ${text}`);
+    if (errorCode) (err as { code?: string }).code = errorCode;
+    throw err;
   }
 
   return (await resp.json()) as PreviewStartResponse;
