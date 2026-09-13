@@ -199,7 +199,7 @@ function providerDefs(): ProviderDef[] {
       credentialState: () =>
         envPresent("GEMINI_API_KEY", "GOOGLE_API_KEY") ? "available" : "missing",
       models: () => [
-        process.env.GEMINI_PRIMARY_MODEL || "gemini-2.5-flash",
+        process.env.GEMINI_PRIMARY_MODEL || "gemini-3.6-flash",
         process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash-lite",
       ],
     },
@@ -220,7 +220,7 @@ function providerDefs(): ProviderDef[] {
       timeoutMs: DEFAULT_ATTEMPT_TIMEOUT_MS,
       credentialState: () => (envPresent("GROQ_API_KEY") ? "available" : "missing"),
       models: () => [
-        process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+        process.env.GROQ_MODEL || "openai/gpt-oss-120b",
         "llama-3.1-8b-instant",
       ],
     },
