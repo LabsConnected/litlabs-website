@@ -47,7 +47,7 @@ const DEPLOY_REQUESTED = (process.env.LITT_ACCEPTANCE_DEPLOY ?? "1") !== "0";
 const PROMPT =
   process.env.LITT_ACCEPTANCE_PROMPT ||
   (DEPLOY_REQUESTED
-    ? "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section, then deploy it live."
+    ? "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section, then publish it live to a public URL."
     : "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section.");
 
 const STAMP = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
@@ -56,8 +56,6 @@ const SHOT_DIR = path.join(ARTIFACT_DIR, "screenshots");
 mkdirSync(SHOT_DIR, { recursive: true });
 
 const KEYBOARD_VIEWPORT = { width: 412, height: 500 };
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ─── Env loading (never printed) ───────────────────────────────
 function loadSecret() {
@@ -447,51 +445,25 @@ async function main() {
         const approvalBody = approval ? await approval.json().catch(() => null) : null;
         writeFileSync(path.join(ARTIFACT_DIR, "deploy-approval-response.json"), JSON.stringify(approvalBody, null, 2));
 
-        // Cloudflare may return 524 if the deploy takes longer than ~100s.
-        // In that case, the approval was still accepted server-side — poll
-        // the conversation messages for the deploy result.
-        let resumedCalls = approvalBody?.result?.toolCalls ?? [];
-        if (approval?.status() !== 200 && convId) {
-          // Poll conversation messages for up to 4 minutes looking for
-          // a deploy_result or deploy_verify event.
-          for (let poll = 0; poll < 48; poll++) {
-            await sleep(5_000);
-            try {
-              const msgsResp = await page.request.get(
-                `${BASE}/api/studio/conversations/${convId}/messages`,
-                { timeout: 15_000 },
-              );
-              if (msgsResp.ok()) {
-                const msgsBody = await msgsResp.json().catch(() => null);
-                const msgs = msgsBody?.messages ?? [];
-                // Look for an assistant message containing deploy evidence
-                const deployMsg = msgs.find((m) =>
-                  m.role === "assistant" && /deploy|production.*url|live.*url/i.test(m.content ?? ""),
-                );
-                if (deployMsg) {
-                  // Check if the message mentions success and a URL
-                  const content = String(deployMsg.content ?? "");
-                  const urlMatch = content.match(/https?:\/\/[^\s"'\\]+\/sites\/[^\s"'\\]+/);
-                  if (urlMatch && /success|ready|deployed|live/i.test(content)) {
-                    productionUrl = productionUrl ?? urlMatch[0];
-                    deployResult = deployResult ?? {
-                      success: true,
-                      productionUrl,
-                      error: null,
-                    };
-                    break;
-                  }
-                }
-              }
-            } catch {
-              // Continue polling
-            }
+        let approved = approval?.status() === 200 && approvalBody?.resolved === true;
+        let approveDetail = `HTTP ${approval?.status() ?? "no-request"} resolved=${approvalBody?.resolved}`;
+        if (!approved && convId) {
+          // An edge timeout (e.g. 524) severs the response but the server-side
+          // resolution is atomic and already recorded — confirm via the paused
+          // run's durable status rather than trusting only the lost body.
+          const statusResp = await page.request.get(
+            `${BASE}/api/studio/conversations/${convId}/approvals/${deployApproval.pausedRunId}`,
+            { timeout: 30_000 },
+          ).catch(() => null);
+          const statusBody = statusResp ? await statusResp.json().catch(() => null) : null;
+          if (statusBody?.status === "approved") {
+            approved = true;
+            approveDetail += `; resolution confirmed via status endpoint (edge severed the POST body)`;
           }
         }
+        step("deploy_approved", approved === true, approveDetail);
 
-        step("deploy_approved", (approval?.status() === 200 && approvalBody?.resolved === true) || (!!deployResult),
-          `HTTP ${approval?.status() ?? "no-request"} resolved=${approvalBody?.resolved}${deployResult ? " (recovered via poll)" : ""}`);
-
+        const resumedCalls = approvalBody?.result?.toolCalls ?? [];
         const deployCall = resumedCalls.find((c) => c.toolId === "project.deploy");
         if (deployCall) {
           // summarizeToolResult JSON-encodes object results; publicUrl may be
@@ -511,6 +483,38 @@ async function main() {
         }
         if (approvalBody?.result?.pendingApproval) {
           verdict.notes.push(`resumed run paused again on ${approvalBody.result.pendingApproval.toolId}; a second-stage pause is not resumable via this endpoint`);
+        }
+
+        // If the resume response was severed (no toolCalls to read) or carried
+        // no URL, fall back to the durable deployment record — the source of
+        // truth for what project.deploy actually did. Poll briefly: a lost
+        // response can still precede the record's ready transition.
+        if ((!deployResult || !productionUrl) && projectId) {
+          const deadline = Date.now() + 120_000;
+          let latest = null;
+          while (Date.now() < deadline) {
+            const depResp = await page.request.get(
+              `${BASE}/api/studio-projects/${projectId}/deployments`,
+              { timeout: 30_000 },
+            ).catch(() => null);
+            const depBody = depResp ? await depResp.json().catch(() => null) : null;
+            latest = depBody?.deployment ?? null;
+            if (latest?.status === "ready" || latest?.status === "failed") break;
+            await new Promise((r) => setTimeout(r, 5_000));
+          }
+          if (latest?.status === "ready" && latest.publicUrl) {
+            productionUrl = productionUrl ?? latest.publicUrl;
+            deployResult = deployResult ?? {
+              success: latest.urlVerified === true,
+              productionUrl,
+            };
+            verdict.notes.push(`deploy outcome recovered from deployment record ${latest.id} (resume response severed)`);
+          } else if (latest?.status === "failed") {
+            deployResult = deployResult ?? {
+              success: false,
+              error: latest.errorMessage ?? "deployment failed",
+            };
+          }
         }
       }
 

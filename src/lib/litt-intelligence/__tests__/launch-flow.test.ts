@@ -165,6 +165,45 @@ describe("Launch Flow: no-mutation reprompt", () => {
   });
 });
 
+// ─── Tests: approval pause still runs preview ────────────────────────
+
+describe("Launch Flow: approval pause runs preview", () => {
+  it("starts the preview before returning a phase-1 pendingApproval", async () => {
+    const progressEvents: Array<{ type: string }> = [];
+    const progress = { emit: (e: { type: string }) => progressEvents.push(e) };
+    const runAgentLoop = vi.fn().mockResolvedValue(successAgentResult({
+      toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
+      pendingApproval: {
+        toolId: "project.deploy",
+        toolCallId: "tc-1",
+        inputs: {},
+        reason: "Sensitive action — requires explicit approval",
+        pausedMessages: [],
+      },
+    }));
+    const transport = createMockTransport();
+    const options = makeOptions({
+      requiresExecution: true,
+      runAgentLoop,
+      transport,
+      progress: progress as never,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    // Preview must have been attempted even though the loop paused.
+    expect(progressEvents.some((e) => e.type === "preview_start")).toBe(true);
+    expect(progressEvents.some((e) => e.type === "preview_result" )).toBe(true);
+    expect(transport.startPreview).toHaveBeenCalled();
+    // The pause is preserved and returned with the live preview URL.
+    expect(result.pendingApproval?.toolId).toBe("project.deploy");
+    expect(result.previewUrl).toBe("https://preview.litlabs.net/preview/ws-test");
+    expect(result.status).toBe("preview_ready");
+    // The reprompt must not fire while a run is paused for approval.
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+  });
+});
+
 // ─── Tests: prompt → preview ──────────────────────────────────────
 
 describe("Launch Flow: prompt → preview", () => {

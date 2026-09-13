@@ -61,9 +61,19 @@ export default function StudioOperatorBar({
   const pendingApproval = useExecutionStore((s) => s.pendingApproval);
   const checkpoint = useExecutionStore((s) => s.checkpoint);
   const changesSummary = useExecutionStore((s) => s.changesSummary);
+  const previewPreparing = useExecutionStore((s) => s.previewPreparing);
 
   const meta = PHASE_META[phase] ?? PHASE_META.idle;
   const PhaseIcon = meta.icon;
+
+  // While the preview is being prepared (workspace provisioning + dev server
+  // start + health check), show a truthful "Preparing preview" state — but
+  // only when no agent run is in progress (agent runs take precedence and
+  // already set a non-idle phase).
+  const showPreviewPreparing = previewPreparing && phase === "idle" && !isRunning;
+  const displayLabel = showPreviewPreparing ? "Preparing preview" : meta.label;
+  const displayColor = showPreviewPreparing ? "#e3b341" : meta.color;
+  const DisplayIcon = showPreviewPreparing ? Activity : PhaseIcon;
 
   const fileCount = changesSummary
     ? changesSummary.added + changesSummary.modified + changesSummary.deleted + changesSummary.renamed
@@ -92,20 +102,20 @@ export default function StudioOperatorBar({
     >
       {/* Phase indicator */}
       <div className="flex items-center gap-1.5">
-        <PhaseIcon
+        <DisplayIcon
           size={12}
           strokeWidth={2}
-          className="pointer-events-none"
-          style={{ color: meta.color }}
+          className={`pointer-events-none ${showPreviewPreparing ? "animate-pulse" : ""}`}
+          style={{ color: displayColor }}
         />
         <span
           className="font-bold"
-          style={{ color: meta.color }}
+          style={{ color: displayColor }}
         >
           Operator
         </span>
         <span style={{ color: "var(--text-muted)" }}>·</span>
-        <span style={{ color: meta.color }}>{meta.label}</span>
+        <span style={{ color: displayColor }}>{displayLabel}</span>
       </div>
 
       {/* File changes (only when real data exists) */}

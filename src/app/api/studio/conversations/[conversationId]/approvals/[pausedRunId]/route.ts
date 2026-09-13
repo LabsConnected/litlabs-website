@@ -118,10 +118,15 @@ export async function POST(
   }
 
   // 6. Resume the V2 agent loop with frozen inputs
+  // The resumed loop runs inside this request — bound its runtime well under
+  // the ~100s edge proxy ceiling so the response (which carries the executed
+  // tool's outcome in result.toolCalls) always reaches the client.
   const resumeConfig: Partial<AgentLoopConfig> = {
     systemPrompt: resolved.systemPrompt,
     executionMode: resolved.executionMode,
     enableBuildFix: true,
+    maxRuntimeMs: 75_000,
+    signal: req.signal,
   };
 
   try {

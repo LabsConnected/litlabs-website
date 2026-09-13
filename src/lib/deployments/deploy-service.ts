@@ -226,8 +226,11 @@ function failure(
 /**
  * Deploy the user's project and return a verified public URL.
  *
- * Ordering is deliberate: the public URL is fetched BEFORE the deployment is
- * marked ready, so "ready" always means the site actually served.
+ * Ordering is deliberate: the row is marked ready BEFORE the public URL is
+ * fetched because the serving route only answers `ready` deployments — the
+ * fetch is what proves the URL actually serves. Success is still claimed
+ * only after that fetch returns 2xx; a failed fetch reverts the row to
+ * `failed` so it stops serving and is never reported as live.
  */
 export async function deployUserProject(
   request: DeployRequest,
@@ -328,6 +331,11 @@ export async function deployUserProject(
       totalBytes: validation.totalBytes,
     });
 
+    // The serving route only answers `ready` rows — publish before the
+    // live-URL check or the fetch can never observe the site. A failed
+    // fetch below reverts the row to `failed`.
+    await store.update(record.id, { status: "ready" });
+
     // ── Verify the live URL before claiming success ──
     let response: Response;
     try {
@@ -365,7 +373,7 @@ export async function deployUserProject(
       };
     }
 
-    await store.update(record.id, { status: "ready", urlVerified: true });
+    await store.update(record.id, { urlVerified: true });
 
     return {
       ok: true,

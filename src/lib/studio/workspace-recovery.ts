@@ -163,6 +163,132 @@ export async function reprepareWorkspace(
 }
 
 /**
+ * Provision a workspace for a project from scratch (or re-provision if lost).
+ *
+ * This is the single shared entry point for workspace provisioning used by:
+ * - /api/studio-projects/[projectId]/workspace/prepare (explicit prepare)
+ * - /api/studio-projects/[projectId]/preview POST (auto-provision before starting dev server)
+ *
+ * It is idempotent: if the workspace is already ready AND alive on the terminal
+ * server, it returns immediately. If the workspace is missing or stale, it
+ * claims the provisioning lock and provisions a fresh one.
+ *
+ * Returns the (possibly new) workspaceId. Throws on provisioning failure.
+ */
+export async function provisionWorkspaceForProject(
+  projectId: string,
+  userId: string,
+): Promise<string> {
+  const project = await getProject(projectId, userId);
+  if (!project) throw new Error("Project not found");
+  if (project.userId !== userId) throw new Error("Forbidden");
+
+  // If the workspace is already ready in DB, verify it still exists on the
+  // terminal server. Railway restarts/crashes can lose in-memory workspaces.
+  if (project.workspaceId && project.workspaceStatus === "ready") {
+    const ws = await getWorkspaceInternal(project.workspaceId, userId).catch(() => null);
+    if (ws && ws.ready) {
+      return project.workspaceId;
+    }
+    // Workspace lost on terminal-server — reset stale DB record so we can re-provision
+    await updateProjectWorkspace(projectId, userId, {
+      workspaceId: null,
+      workspaceStatus: "not_prepared",
+      workspaceRoot: null,
+      workspaceError: null,
+    });
+  }
+
+  // Recover stale provisioning locks before attempting a fresh claim.
+  await recoverStaleProvisioning(projectId, userId);
+
+  // Ensure the project exists as a canonical studio_projects row.
+  let canonical: CanonicalProject;
+  try {
+    canonical = await ensureCanonicalStudioProject(projectId, userId);
+  } catch {
+    throw new Error("Could not establish canonical project record for provisioning");
+  }
+
+  // If another request is already provisioning, don't duplicate — wait for it.
+  if (canonical.workspaceStatus === "provisioning") {
+    const refreshed = await getProject(projectId, userId);
+    if (refreshed?.workspaceId && refreshed.workspaceStatus === "ready") {
+      return refreshed.workspaceId;
+    }
+    throw new Error("Workspace provisioning is already in progress");
+  }
+
+  // Atomically claim the provisioning lock.
+  const claimed = await claimProvisioningLock(projectId, userId);
+  if (!claimed) {
+    const refreshed = await getProject(projectId, userId);
+    if (refreshed?.workspaceId && refreshed.workspaceStatus === "ready") {
+      return refreshed.workspaceId;
+    }
+    throw new Error("Workspace provisioning is already in progress");
+  }
+
+  // We own the lock — provision the workspace.
+  try {
+    let result;
+    if (project.sourceType === "blank") {
+      result = await prepareWorkspaceInternal({
+        sourceType: "blank",
+        userId,
+        projectId,
+        templateId: project.templateId ?? "blank-static",
+      });
+    } else if (
+      project.sourceType === "github" &&
+      project.githubInstallationId &&
+      project.githubOwner &&
+      project.githubRepo
+    ) {
+      const githubToken = await getInstallationTokenForClone({
+        installationId: project.githubInstallationId,
+        owner: project.githubOwner,
+        repo: project.githubRepo,
+      });
+      result = await prepareWorkspaceInternal({
+        sourceType: "github",
+        userId,
+        projectId,
+        installationId: project.githubInstallationId,
+        owner: project.githubOwner,
+        repo: project.githubRepo,
+        branch: project.githubBranch ?? "main",
+        commitSha: project.latestCommitSha,
+        githubToken,
+      });
+    } else {
+      await updateProjectWorkspace(projectId, userId, {
+        workspaceStatus: "failed",
+        workspaceError: "Project has no valid source for workspace provisioning",
+      });
+      throw new Error("Project has no valid source for workspace provisioning");
+    }
+
+    await updateProjectWorkspace(projectId, userId, {
+      workspaceId: result.workspaceId,
+      workspaceStatus: "ready",
+      workspaceRoot: result.root,
+      workspacePreparedAt: new Date().toISOString(),
+      workspaceError: null,
+    });
+
+    return result.workspaceId;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Workspace provisioning failed";
+    await updateProjectWorkspace(projectId, userId, {
+      workspaceStatus: "failed",
+      workspaceError: message,
+    });
+    throw err;
+  }
+}
+
+/**
  * Normalize raw terminal-server error text into a clean user-facing message.
  * Prevents nested JSON like {"error":"Workspace not found"} from reaching the UI.
  */

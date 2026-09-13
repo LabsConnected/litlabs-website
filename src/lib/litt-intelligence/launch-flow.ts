@@ -314,27 +314,38 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
 
     let agentResult = await runPhase1(options.userMessage);
     lastAgentLoopResult = agentResult;
-    let guarded = guardPhase1(agentResult);
-    if (guarded) return guarded;
 
-    // An execution request that ended with zero workspace mutations almost
-    // always means a weak model closed its turn after announcing writes it
-    // never made. Issue exactly one bounded reprompt, then continue — the
-    // second result flows through the same guards.
-    if (options.requiresExecution && !hasAppliedMutation(agentResult)) {
-      emitStep(
-        progress,
-        steps,
-        "No project files were changed — re-prompting the agent to apply the request...",
-      );
-      agentResult = await runPhase1(
-        `Your previous reply announced changes but did not write any project files. ` +
-        `Apply the original request now: ${options.userMessage}\n\n` +
-        `Write or modify the project files with the file tools (files.write / apply_patch), then stop.`,
-      );
-      lastAgentLoopResult = agentResult;
-      guarded = guardPhase1(agentResult);
+    // A pause for a sensitive action (e.g. project.deploy) is not a failure:
+    // the build output already exists in the workspace, so still bring the
+    // preview up while the approval is pending — the user can review the
+    // site before deciding. The pause result is returned after Phase 2.
+    let pausedApproval = agentResult.pendingApproval;
+    if (!pausedApproval) {
+      const guarded = guardPhase1(agentResult);
       if (guarded) return guarded;
+
+      // An execution request that ended with zero workspace mutations almost
+      // always means a weak model closed its turn after announcing writes it
+      // never made. Issue exactly one bounded reprompt, then continue — the
+      // second result flows through the same guards.
+      if (options.requiresExecution && !hasAppliedMutation(agentResult)) {
+        emitStep(
+          progress,
+          steps,
+          "No project files were changed — re-prompting the agent to apply the request...",
+        );
+        agentResult = await runPhase1(
+          `Your previous reply announced changes but did not write any project files. ` +
+          `Apply the original request now: ${options.userMessage}\n\n` +
+          `Write or modify the project files with the file tools (files.write / apply_patch), then stop.`,
+        );
+        lastAgentLoopResult = agentResult;
+        pausedApproval = agentResult.pendingApproval;
+        if (!pausedApproval) {
+          const guarded = guardPhase1(agentResult);
+          if (guarded) return guarded;
+        }
+      }
     }
 
     // Phase 2: start and verify the live preview
@@ -453,6 +464,18 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
       const status = await transport.getPreviewStatus().catch(() => ({ status: "failed" as const, error: "unknown" }));
       const error = (status as { error?: string | null }).error ?? `Preview did not become ready (status: ${previewStatus})`;
       progress.emit({ type: "preview_result", success: false, error });
+      // A pending approval outranks a preview failure — the build completed
+      // and the user still needs to approve the sensitive action.
+      if (pausedApproval) {
+        return baseResult({
+          finalText:
+            `I need your approval to continue: ${pausedApproval.reason} ` +
+            `(Preview could not be started: ${error})`,
+          pendingApproval: pausedApproval,
+          repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
+          runtimeRepairAttempts,
+        });
+      }
       return baseResult({
         finalText: `The preview could not be started after ${runtimeRepairAttempts} repair attempts. ${error}`,
         error,
@@ -462,6 +485,19 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
 
     const previewUrl = (options.buildPreviewUrl ?? buildPreviewProxyUrl)(transport.workspaceId);
     progress.emit({ type: "preview_result", success: true, previewUrl });
+
+    // Phase 1 paused for approval — preview is live; return the pause now.
+    if (pausedApproval) {
+      return baseResult({
+        status: "preview_ready",
+        previewUrl,
+        finalText: `I need your approval to continue: ${pausedApproval.reason}`,
+        pendingApproval: pausedApproval,
+        buildFixResult: agentResult.buildFixResult,
+        repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
+        runtimeRepairAttempts,
+      });
+    }
 
     if (!options.enableDeploy) {
       return baseResult({

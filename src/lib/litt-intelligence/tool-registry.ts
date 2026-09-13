@@ -1407,7 +1407,14 @@ export function registerInternalTools(): void {
         idempotent: false,
         readOnly: false,
         permissionLevel: 'production',
-        enabled: true,
+        // Only offer when an infra deploy provider is actually configured.
+        // Without RAILWAY_API_TOKEN/VERCEL_TOKEN the handler can never
+        // succeed, and the model may pick it over project.deploy — pausing
+        // the run for approval of a tool guaranteed to fail.
+        enabled: Boolean(
+          (process.env.RAILWAY_API_TOKEN && process.env.RAILWAY_SERVICE_ID && process.env.RAILWAY_ENVIRONMENT_ID)
+          || (process.env.VERCEL_TOKEN && process.env.VERCEL_PROJECT_ID),
+        ),
       },
       handler: lazyHandlers["deploy.execute"],
     },

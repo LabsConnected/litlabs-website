@@ -3,8 +3,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, Eye, Loader2, Monitor, MousePointer2, RefreshCw, RotateCcw, Smartphone, Tablet, Copy, Check, Square, X } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { useExecutionStore } from "../stores/useExecutionStore";
 
-type PreviewState = "loading" | "not_prepared" | "starting" | "ready" | "stale" | "offline" | "failed" | "restarting";
+/**
+ * Preview states — the five canonical states the UI explicitly supports.
+ * These are NEVER collapsed into a generic "Preview unavailable":
+ *   not_started  — workspace/runtime never provisioned (auto-starts)
+ *   starting      — workspace provisioning + dev server starting + health check
+ *   ready         — dev server healthy, preview URL available
+ *   unreachable   — runtime status check failed (terminal server down/network)
+ *   failed        — startup or health check failed (reason exposed)
+ *
+ * Internal transitional states (loading, stale, restarting) are kept for
+ * UX but map onto the canonical five for display.
+ */
+type PreviewState = "loading" | "not_started" | "starting" | "ready" | "stale" | "unreachable" | "failed" | "restarting";
 type DeviceMode = "desktop" | "tablet" | "mobile";
 
 export interface PreviewSelection {
@@ -26,15 +39,16 @@ const STATUS_DOT_COLOR: Record<PreviewState, string> = {
   restarting: "#e3b341",
   ready: "#48EE38",
   stale: "#e3b341",
-  offline: "#6b7280",
+  unreachable: "#6b7280",
   failed: "#EF4444",
-  not_prepared: "#6b7280",
+  not_started: "#6b7280",
 };
 
 interface PreviewPayload {
   runtimeStatus?: unknown;
   previewUrl?: unknown;
   runtimeError?: unknown;
+  runtimeErrorCode?: unknown;
   framework?: unknown;
   developmentCommand?: unknown;
   packageManager?: unknown;
@@ -81,18 +95,26 @@ function selectorForPreviewElement(element: HTMLElement): string {
   return parts.join(" > ") || element.tagName.toLowerCase();
 }
 
-function statusFromPayload(payload: PreviewPayload, workspaceStatus: string | null): { state: PreviewState; url: string | null; error: string | null } {
+function statusFromPayload(payload: PreviewPayload, workspaceStatus: string | null): { state: PreviewState; url: string | null; error: string | null; errorCode: string | null } {
   const runtimeStatus = typeof payload.runtimeStatus === "string" ? payload.runtimeStatus : "stopped";
   const url = typeof payload.previewUrl === "string" && payload.previewUrl ? payload.previewUrl : null;
   const error = typeof payload.runtimeError === "string" && payload.runtimeError ? payload.runtimeError : null;
-  if (runtimeStatus === "ready" && url) return { state: "ready", url, error: null };
-  if (runtimeStatus === "starting") return { state: "starting", url, error };
-  if (runtimeStatus === "restarting") return { state: "restarting", url, error };
-  if (runtimeStatus === "failed") return { state: "failed", url, error: error ?? "Preview dev server crashed or failed to start" };
-  if (["preparing", "provisioning"].includes(workspaceStatus ?? "")) return { state: "starting", url, error };
-  if (workspaceStatus === "failed" || workspaceStatus === "error") return { state: "failed", url, error: error ?? "Workspace preparation failed" };
-  if (workspaceStatus !== "ready") return { state: "not_prepared", url, error };
-  return { state: "offline", url, error };
+  const errorCode = typeof payload.runtimeErrorCode === "string" && payload.runtimeErrorCode ? payload.runtimeErrorCode : null;
+  if (runtimeStatus === "ready" && url) return { state: "ready", url, error: null, errorCode: null };
+  if (runtimeStatus === "starting") return { state: "starting", url, error, errorCode };
+  if (runtimeStatus === "restarting") return { state: "restarting", url, error, errorCode };
+  if (runtimeStatus === "failed") return { state: "failed", url, error: error ?? "Preview dev server crashed or failed to start", errorCode };
+  if (runtimeStatus === "unreachable") return { state: "unreachable", url, error: error ?? "Preview runtime is unreachable", errorCode };
+  if (runtimeStatus === "not_started") return { state: "not_started", url, error, errorCode };
+  if (["preparing", "provisioning"].includes(workspaceStatus ?? "")) return { state: "starting", url, error, errorCode };
+  if (workspaceStatus === "failed" || workspaceStatus === "error") return { state: "failed", url, error: error ?? "Workspace preparation failed", errorCode };
+  if (runtimeStatus === "stopped") {
+    // Workspace exists but dev server isn't running — treat as not_started so
+    // the auto-start flow kicks in (it's idempotent for an existing workspace).
+    return { state: "not_started", url, error, errorCode };
+  }
+  if (workspaceStatus !== "ready") return { state: "not_started", url, error, errorCode };
+  return { state: "unreachable", url, error, errorCode };
 }
 
 export default function StudioPreviewPanel({
@@ -113,9 +135,10 @@ export default function StudioPreviewPanel({
   onSelectionChange?: (selection: PreviewSelection | null) => void;
 }) {
   const { getToken } = useClerkAuth();
-  const [state, setState] = useState<PreviewState>(projectId ? "loading" : "not_prepared");
+  const [state, setState] = useState<PreviewState>(projectId ? "loading" : "not_started");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [frameKey, setFrameKey] = useState(0);
   const [deviceMode, setDeviceMode] = useState<DeviceMode>("desktop");
   const [maximized, setMaximized] = useState(false);
@@ -133,6 +156,14 @@ export default function StudioPreviewPanel({
   const selectedElementRef = useRef<PreviewSelection | null>(null);
   const selectedNodeRef = useRef<HTMLElement | null>(null);
   const selectedNodeStyleRef = useRef<{ outline: string; outlineOffset: string; boxShadow: string } | null>(null);
+  // Single-flight guard: ensures only one preview start is in flight at a
+  // time. Mobile rerenders and rapid prop changes cannot launch duplicate
+  // runtimes. The guard persists across renders (useRef) and is checked at
+  // the start of preparePreview and auto-start.
+  const startInFlightRef = useRef(false);
+  // Track which projectId we've auto-started for so we don't re-trigger on
+  // every render of the same project (e.g. after it reaches "ready").
+  const autoStartedForRef = useRef<string | null>(null);
 
   const clearSelection = useCallback((notify = true) => {
     if (!selectedNodeRef.current && !selectedElementRef.current) return;
@@ -211,7 +242,7 @@ export default function StudioPreviewPanel({
 
   const loadStatus = useCallback(async (stale = false) => {
     if (!projectId) {
-      setState("not_prepared");
+      setState("not_started");
       setPreviewUrl(null);
       setError(null);
       clearSelection(false);
@@ -240,16 +271,20 @@ export default function StudioPreviewPanel({
       });
       setPreviewUrl(next.url);
       setError(next.error);
+      setErrorCode(next.errorCode);
       setFramework(typeof payload.framework === "string" ? payload.framework : null);
       setDevCommand(typeof payload.developmentCommand === "string" ? payload.developmentCommand : null);
       setLogs(Array.isArray(payload.logs) ? payload.logs as string[] : []);
     } catch (loadError) {
-      setState("offline");
-      setError(loadError instanceof Error ? loadError.message : "Preview status is unavailable");
+      setState("unreachable");
+      setError(loadError instanceof Error ? loadError.message : "Preview runtime is unreachable");
     }
   }, [authHeaders, clearSelection, projectId, workspaceStatus]);
 
   useEffect(() => {
+    // Reset auto-start tracking when the project changes so a new project
+    // gets a fresh auto-start.
+    autoStartedForRef.current = null;
     void loadStatus();
   }, [loadStatus]);
 
@@ -295,11 +330,18 @@ export default function StudioPreviewPanel({
     return () => window.removeEventListener("keydown", handler);
   }, [loadStatus, state]);
 
-  const preparePreview = async () => {
+  const setPreviewPreparing = useExecutionStore((s) => s.setPreviewPreparing);
+
+  const preparePreview = useCallback(async () => {
     if (!projectId) return;
+    // Single-flight guard: only one preview start in flight at a time.
+    // Mobile rerenders and rapid prop changes cannot launch duplicate runtimes.
+    if (startInFlightRef.current) return;
+    startInFlightRef.current = true;
     setState("starting");
     setError(null);
     setIframeFailed(false);
+    setPreviewPreparing(true);
     try {
       const response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/preview`, {
         method: "POST",
@@ -312,12 +354,34 @@ export default function StudioPreviewPanel({
       setState(next.state);
       setPreviewUrl(next.url);
       setError(next.error);
+      setErrorCode(next.errorCode);
       if (next.state === "ready") setFrameKey((value) => value + 1);
     } catch (prepareError) {
       setState("failed");
       setError(prepareError instanceof Error ? prepareError.message : "Preview preparation failed");
+      setErrorCode(null);
+    } finally {
+      startInFlightRef.current = false;
+      setPreviewPreparing(false);
     }
-  };
+  }, [authHeaders, projectId, setPreviewPreparing, workspaceStatus]);
+
+  // Auto-start: when the preview is not_started (workspace/runtime never
+  // provisioned or dev server not running), automatically start it. The
+  // normal user path must NOT require pressing "Prepare preview".
+  //
+  // Single-flight is enforced by startInFlightRef (checked in preparePreview)
+  // and autoStartedForRef (prevents re-triggering for the same project after
+  // the first attempt, regardless of outcome). A ready preview does not
+  // restart — auto-start only fires for the not_started state.
+  useEffect(() => {
+    if (state !== "not_started") return;
+    if (!projectId) return;
+    if (autoStartedForRef.current === projectId) return;
+    if (startInFlightRef.current) return;
+    autoStartedForRef.current = projectId;
+    void preparePreview();
+  }, [state, projectId, preparePreview]);
 
   const handleCopyUrl = useCallback(async () => {
     if (!previewUrl) return;
@@ -344,7 +408,7 @@ export default function StudioPreviewPanel({
         const payload = await response.json().catch(() => null) as PreviewPayload | null;
         throw new Error(typeof payload?.runtimeError === "string" ? payload.runtimeError : `Preview stop failed (${response.status})`);
       }
-      setState("not_prepared");
+      setState("not_started");
       setPreviewUrl(null);
       setError(null);
       setLogs([]);
@@ -361,8 +425,9 @@ export default function StudioPreviewPanel({
   }, [loadStatus]);
 
   const displayUrl = previewUrl ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}studioRefresh=${frameKey}` : null;
-  const label = state === "loading" ? "Checking preview status…" : state === "starting" ? "Starting dev server…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (iframeFailed ? "Preview failed to load" : "Preview ready") : state === "stale" ? "Preview may be stale" : state === "not_prepared" ? "Preview not started" : state === "failed" ? "Preview crashed" : "Preview unavailable";
-  const detail = state === "not_prepared" ? "The workspace needs preparation before a preview can start. Click below to prepare it." : state === "offline" ? "The project preview endpoint is not currently available. Try refreshing or preparing the preview." : state === "starting" ? "Waiting for the dev server to respond…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed. Refreshing the project preview status." : state === "failed" ? (error ?? "The dev server crashed. Try restarting it.") : error ?? "The preview surface reports only real project runtime state.";
+  const isAuthConfigError = errorCode === "preview_clerk_config_error" || errorCode === "preview_auth_config_error";
+  const label = state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (iframeFailed ? "Preview failed to load" : "Preview ready") : state === "stale" ? "Preview may be stale" : state === "not_started" ? "Preview not started" : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : "Preview failed to start") : "Preview runtime unreachable";
+  const detail = state === "not_started" ? "Preparing your preview automatically…" : state === "unreachable" ? (error ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed. Refreshing the project preview status." : state === "failed" ? (isAuthConfigError ? (error ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — update the Clerk keys in the terminal-server Railway env or workspace .env.local.") : error ?? "The dev server failed to start. Try restarting it.") : error ?? "The preview surface reports only real project runtime state.";
   const dotColor = STATUS_DOT_COLOR[state];
   const isLive = state === "ready" || state === "stale";
 
@@ -574,7 +639,9 @@ export default function StudioPreviewPanel({
             </div>
             <div className="text-[11px] font-bold" style={{ color: "var(--text-primary)" }}>{label}</div>
             <div className="max-w-[220px] text-[10px] leading-4" style={{ color: "var(--text-muted)" }}>{detail}</div>
-            {["not_prepared", "offline", "failed"].includes(state) && (
+            {/* Retry button for unreachable/failed states. not_started is
+                handled by auto-start — no manual button needed. */}
+            {["unreachable", "failed"].includes(state) && (
               <button
                 type="button"
                 onClick={() => void preparePreview()}
@@ -584,7 +651,7 @@ export default function StudioPreviewPanel({
                 data-testid="preview-prepare"
               >
                 <RotateCcw size={11} className="pointer-events-none" />
-                {state === "failed" ? "Restart preview" : "Prepare preview"}
+                {state === "failed" ? "Restart preview" : "Retry"}
               </button>
             )}
           </div>

@@ -116,6 +116,13 @@ interface ExecutionStore {
   toolCalls: Array<{ toolId: string; success?: boolean; summary: string }>;
   /** Changes summary, classified by the actual mutation operation. */
   changesSummary: MutationSummary | null;
+  /**
+   * True while the Studio preview is being prepared (workspace provisioning +
+   * dev server start + health check). Drives the operator bar so it doesn't
+   * misleadingly show "Idle" during preview preparation. Only set when no
+   * agent run is in progress (agent runs take precedence).
+   */
+  previewPreparing: boolean;
 
   // ── Actions ──
   startRun: () => void;
@@ -128,6 +135,7 @@ interface ExecutionStore {
   collapseEvent: (id: string) => void;
   collapseLowLevel: () => void;
   clearEvents: () => void;
+  setPreviewPreparing: (preparing: boolean) => void;
   reset: () => void;
 }
 
@@ -220,6 +228,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   checkpoint: null,
   toolCalls: [],
   changesSummary: null,
+  previewPreparing: false,
 
   startRun: () => {
     seqCounter = 0;
@@ -349,6 +358,12 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
 
   clearEvents: () => set({ events: [], toolCalls: [], changesSummary: null }),
 
+  setPreviewPreparing: (preparing) => {
+    // Only update if it actually changes to avoid needless re-renders.
+    if (get().previewPreparing === preparing) return;
+    set({ previewPreparing: preparing });
+  },
+
   reset: () => {
     seqCounter = 0;
     set({
@@ -360,6 +375,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       checkpoint: null,
       toolCalls: [],
       changesSummary: null,
+      previewPreparing: false,
     });
   },
 }));

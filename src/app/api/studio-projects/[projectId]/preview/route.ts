@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getProject, updateProjectRuntime } from "@/lib/projects/project-repository";
-import { ensureWorkspaceAlive } from "@/lib/studio/workspace-recovery";
+import { ensureWorkspaceAlive, provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
 import {
   startPreviewInternal,
   getPreviewStatusInternal,
@@ -29,8 +29,11 @@ export async function GET(
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
   if (!project.workspaceId) {
+    // No workspace was ever provisioned for this project. This is the
+    // "not_started" state — distinct from "stopped" (workspace exists but
+    // dev server isn't running) and "unreachable" (runtime check failed).
     return NextResponse.json({
-      runtimeStatus: "stopped",
+      runtimeStatus: "not_started",
       previewUrl: null,
       runtimeError: null,
       framework: project.framework,
@@ -44,6 +47,8 @@ export async function GET(
     const runtimeStatus = await getPreviewStatusInternal(project.workspaceId, userId);
 
     if (!runtimeStatus) {
+      // Workspace exists in DB but the terminal server returned no status.
+      // This is "stopped" — the dev server isn't running, not an error.
       return NextResponse.json({
         runtimeStatus: "stopped",
         previewUrl: null,
@@ -73,16 +78,21 @@ export async function GET(
       runtimeStatus: runtimeStatus.status,
       previewUrl,
       runtimeError: runtimeStatus.error,
+      runtimeErrorCode: runtimeStatus.errorCode,
       framework: runtimeStatus.framework ?? project.framework,
       developmentCommand: runtimeStatus.command ?? project.developmentCommand,
       packageManager: project.packageManager,
       logs: runtimeStatus.logs,
     });
   } catch (err) {
+    // The runtime status check itself threw — the terminal server is
+    // unreachable or returned an unexpected error. This is "unreachable",
+    // NOT "stopped" (which means the dev server simply isn't running).
     return NextResponse.json({
-      runtimeStatus: "stopped",
+      runtimeStatus: "unreachable",
       previewUrl: null,
-      runtimeError: err instanceof Error ? err.message : "Preview runtime unavailable",
+      runtimeError: err instanceof Error ? err.message : "Preview runtime unreachable",
+      runtimeErrorCode: null,
       framework: project.framework,
       developmentCommand: project.developmentCommand,
       packageManager: project.packageManager,
@@ -107,17 +117,29 @@ export async function POST(
   const project = await getProject(projectId, userId);
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
-  if (!project.workspaceId || !project.workspaceRoot) {
-    return NextResponse.json({ error: "Workspace not provisioned" }, { status: 409 });
-  }
-
+  // Auto-provision the workspace if it was never prepared. This is the fix
+  // for the "Prepare preview" → 409 "Workspace not provisioned" loop: the
+  // preview start endpoint now provisions the workspace itself so the user
+  // never has to know what a "workspace" or "repository binding" is.
   let workspaceId = project.workspaceId;
   try {
-    const recovered = await ensureWorkspaceAlive(projectId, userId, workspaceId);
-    workspaceId = recovered.workspaceId;
+    if (!workspaceId || !project.workspaceRoot) {
+      workspaceId = await provisionWorkspaceForProject(projectId, userId);
+    } else {
+      const recovered = await ensureWorkspaceAlive(projectId, userId, workspaceId);
+      workspaceId = recovered.workspaceId;
+    }
   } catch (err) {
+    const message = err instanceof Error ? err.message : "Workspace provisioning failed";
+    await updateProjectRuntime(projectId, userId, {
+      runtimeStatus: "failed",
+      previewUrl: null,
+      runtimeError: message,
+    });
     return NextResponse.json({
-      error: err instanceof Error ? err.message : "Workspace recovery failed",
+      error: message,
+      runtimeStatus: "failed",
+      runtimeError: message,
     }, { status: 500 });
   }
 
@@ -153,6 +175,7 @@ export async function POST(
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Preview start failed";
+    const errorCode = (err as { code?: string }).code ?? null;
     await updateProjectRuntime(projectId, userId, {
       runtimeStatus: "failed",
       previewUrl: null,
@@ -162,6 +185,8 @@ export async function POST(
     return NextResponse.json({
       error: message,
       runtimeStatus: "failed",
+      runtimeError: message,
+      runtimeErrorCode: errorCode,
     }, { status: 500 });
   }
 }
