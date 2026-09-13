@@ -224,7 +224,11 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
       return baseResult({
         success: false,
         status: "failed",
-        finalText: `The model could not complete the request: ${agentResult.modelFailed}`,
+        // Prefer the sanitized purpose-written failure message when the loop
+        // produced one; otherwise surface the (sanitized) failure detail.
+        finalText:
+          agentResult.modelFailureText ??
+          `The model could not complete the request: ${agentResult.modelFailed}`,
         error: agentResult.modelFailed,
         repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
         runtimeRepairAttempts,
@@ -320,7 +324,9 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
 
       if (repairResult.modelFailed) {
         return baseResult({
-          finalText: `The model could not complete the repair: ${repairResult.modelFailed}`,
+          finalText:
+            repairResult.modelFailureText ??
+            `The model could not complete the repair: ${repairResult.modelFailed}`,
           error: repairResult.modelFailed,
           repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
           runtimeRepairAttempts,
