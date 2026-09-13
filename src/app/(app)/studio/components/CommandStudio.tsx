@@ -809,7 +809,13 @@ function CommandStudioContent() {
         // file writes (e.g. template preview, or model failure after preview
         // start). Re-poll preview status in that case so the iframe appears.
         const previewReady = execution.events.some((event) => event.type === "preview" && event.success);
-        if ((filesChanged > 0 || previewReady) && capabilities.projectId) {
+        // Also refresh if any tool execution events fired (the agent may have
+        // written files but the changesSummary wasn't populated — the SSE
+        // stream may have ended before the done event carried the summary).
+        const hadToolExecution = execution.events.some(
+          (event) => event.type === "tool_start" || event.type === "tool_result",
+        );
+        if ((filesChanged > 0 || previewReady || hadToolExecution) && capabilities.projectId) {
           setWorkspaceRevision((revision) => revision + 1);
           window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId: capabilities.projectId, source: "assistant" } }));
         }
@@ -1945,7 +1951,7 @@ function CommandStudioContent() {
           <button
             type="button"
             onClick={() => setMobileLittOpen(true)}
-            className="fixed z-[10015] flex min-h-10 items-center gap-1.5 rounded-full border px-3.5 py-2 text-[11px] font-bold shadow-lg"
+            className="fixed z-[10015] grid h-11 w-11 place-items-center rounded-full border shadow-lg transition active:scale-95"
             style={{
               right: 12,
               bottom: "calc(var(--studio-mobile-bottom-h) + env(safe-area-inset-bottom) + 12px)",
@@ -1955,10 +1961,11 @@ function CommandStudioContent() {
               backdropFilter: "blur(12px)",
             }}
             aria-label="Ask LiTT to build"
+            title="Ask LiTT to build"
             data-testid="litt-mobile-trigger"
           >
             <span
-              className="flex h-4 w-4 items-center justify-center rounded-md text-[9px] font-black"
+              className="flex h-6 w-6 items-center justify-center rounded-md text-[11px] font-black"
               style={{
                 background: "linear-gradient(135deg, rgba(139,92,246,0.3), rgba(99,102,241,0.15))",
               }}
@@ -1966,7 +1973,6 @@ function CommandStudioContent() {
             >
               L
             </span>
-            Ask LiTT to build
           </button>
         )}
         {isMobileLitt && mobileLittOpen && (

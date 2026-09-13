@@ -753,13 +753,16 @@ export function useCanonicalConversation({
         const s = getStore();
         const expectedRevision = s.revision;
         const isAutoBest = selectedModel.id === "auto" || selectedModel.category === "auto";
-        // Abort after 120s — the route now streams (maxDuration=120), so
-        // reasoning/thinking models get room to think before emitting text
-        // instead of being killed at 55s ("cut out").
+        // Abort after 10 minutes — the V2 agent loop can run for up to 10
+        // minutes (DEFAULT_LOOP_CONFIG.maxRuntimeMs = 600_000ms) doing
+        // multi-step builds with provider fallback. A 120s timeout kills
+        // legitimate build flows before the agent can write files and start
+        // the preview. The server-side heartbeat (SSE comment lines every
+        // 15s) keeps the connection alive through proxy idle timeouts.
         const controller = new AbortController();
         requestController = controller;
         requestAbortRef.current = controller;
-        const timeoutId = setTimeout(() => controller.abort(), 120_000);
+        const timeoutId = setTimeout(() => controller.abort(), 600_000);
         requestTimeoutId = timeoutId;
         const makeRequest = async (revision: number) => fetch(`/api/studio/conversations/${activeConversationId}/messages`, {
           method: "POST",

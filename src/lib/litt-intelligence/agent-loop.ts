@@ -17,6 +17,8 @@
 
 import "server-only";
 
+import type { WorkspaceTransport } from "./workspace-transport";
+
 let _toolRegistry: typeof import("./tool-registry").toolRegistry | null = null;
 async function getToolRegistry() {
   if (!_toolRegistry) {
@@ -208,11 +210,13 @@ function detectEngineeringIntent(message: string): EngineeringIntent {
 async function executeReadOnlyTool(
   toolId: string,
   inputs: Record<string, unknown>,
+  transport?: WorkspaceTransport,
 ): Promise<{ success: boolean; result: unknown; summary: string }> {
   const toolRegistry = await getToolRegistry();
   const result = await toolRegistry.execute(toolId, inputs, {
     hasApproval: true, // read-only tools auto-approve
     availableCapabilities: [],
+    transport,
   });
 
   if (!result.ok) {
@@ -367,6 +371,7 @@ export async function runAgentLoop(
   message: string,
   projectId: string,
   originalPrompt: string,
+  transport?: WorkspaceTransport,
 ): Promise<AgentLoopResult> {
   const intent = detectEngineeringIntent(message);
 
@@ -391,38 +396,38 @@ export async function runAgentLoop(
 
   // 1. Project scan — gives stack, architecture, dependencies, tests, risks
   if (intent.shouldScan) {
-    const exec = await executeReadOnlyTool("project.scan", { projectId });
+    const exec = await executeReadOnlyTool("project.scan", { projectId }, transport);
     executions.push({ toolId: "project.scan", ...exec });
   }
 
   // 2. Git status — branch, changes, recent commits
   if (intent.shouldGitStatus) {
-    const exec = await executeReadOnlyTool("git.status", { projectId });
+    const exec = await executeReadOnlyTool("git.status", { projectId }, transport);
     executions.push({ toolId: "git.status", ...exec });
   }
 
   // 3. Read package.json — always useful for engineering questions
   if (intent.shouldReadPackageJson) {
-    const exec = await executeReadOnlyTool("files.read", { projectId, path: "package.json" });
+    const exec = await executeReadOnlyTool("files.read", { projectId, path: "package.json" }, transport);
     executions.push({ toolId: "files.read", ...exec });
   }
 
   // 4. List root files — gives an overview of the project structure
   if (intent.shouldListFiles) {
-    const exec = await executeReadOnlyTool("files.list", { projectId, path: "." });
+    const exec = await executeReadOnlyTool("files.list", { projectId, path: "." }, transport);
     executions.push({ toolId: "files.list", ...exec });
   }
 
   // 5. Read specifically mentioned files
   for (const filePath of intent.filesToRead) {
     if (filePath === "package.json") continue; // already read above
-    const exec = await executeReadOnlyTool("files.read", { projectId, path: filePath });
+    const exec = await executeReadOnlyTool("files.read", { projectId, path: filePath }, transport);
     executions.push({ toolId: "files.read", ...exec });
   }
 
   // 6. Health check — TypeScript, lint, tests (only if explicitly requested)
   if (intent.shouldHealthCheck) {
-    const exec = await executeReadOnlyTool("project.health", { projectId });
+    const exec = await executeReadOnlyTool("project.health", { projectId }, transport);
     executions.push({ toolId: "project.health", ...exec });
   }
 

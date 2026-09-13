@@ -439,14 +439,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   let v1Result: Awaited<ReturnType<typeof runAgentLoop>> | null = null;
   let finalPrompt = prompt;
 
-  // Prepare V2 transport and config BEFORE the stream starts.
-  // The actual loop runs INSIDE the stream so events can be streamed in real-time.
+  // Prepare the workspace transport BEFORE the stream starts, for both
+  // the V2 loop and the V1 pre-LLM auto-inspection. Workspace-scoped tools
+  // require this transport — without it they fail closed rather than
+  // touching the web service's own filesystem.
+  // The actual V2 loop runs INSIDE the stream so events stream in real-time.
   let v2Transport: Awaited<ReturnType<typeof createWorkspaceTransport>> | null = null;
   let v2Config: Partial<AgentLoopConfig> | null = null;
 
-  if (useV2) {
+  if (conversation.projectId && canonicalCtx.workspaceExecutionAvailable) {
     try {
-      v2Transport = await createWorkspaceTransport(conversation.projectId!, userId);
+      v2Transport = await createWorkspaceTransport(conversation.projectId, userId);
     } catch (transportErr) {
       // Transport creation failed — fall back to V1 with visible logging
       // so operators can detect workspace issues (not silently swallowed).
@@ -456,28 +459,32 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         userId,
         errorClass: transportErr instanceof Error ? transportErr.message : "unknown",
       });
-      v1Result = await runAgentLoop(resolvedMessage, conversation.projectId ?? "", prompt);
-      finalPrompt = v1Result.enrichedPrompt;
     }
+  }
 
-    if (v2Transport) {
-      v2Config = {
-        systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
-        executionMode: canonicalCtx.executionMode,
-        enableBuildFix: true,
-        model: typeof body.model === "string" ? body.model : undefined,
-        evalMetadata: {
-          agentSlug,
-          agentMode: "v2-execution",
-          conversationId: conversation.id,
-          userId,
-          projectId: conversation.projectId ?? undefined,
-        },
-      };
-    }
+  if (useV2 && v2Transport) {
+    v2Config = {
+      systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
+      executionMode: canonicalCtx.executionMode,
+      enableBuildFix: true,
+      model: typeof body.model === "string" ? body.model : undefined,
+      evalMetadata: {
+        agentSlug,
+        agentMode: "v2-execution",
+        conversationId: conversation.id,
+        userId,
+        projectId: conversation.projectId ?? undefined,
+      },
+    };
   } else {
-    // V1 fallback — no executable workspace, read-only inspection only
-    v1Result = await runAgentLoop(resolvedMessage, conversation.projectId ?? "", prompt);
+    // V1 fallback — read-only inspection only. Pass the transport (when a
+    // workspace exists) so auto-inspection reads the user's real workspace.
+    v1Result = await runAgentLoop(
+      resolvedMessage,
+      conversation.projectId ?? "",
+      prompt,
+      v2Transport ?? undefined,
+    );
     finalPrompt = v1Result.enrichedPrompt;
   }
 
@@ -549,8 +556,50 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const encoder = new TextEncoder();
   const event = (payload: Record<string, unknown>) =>
     encoder.encode(`data: ${JSON.stringify(payload)}\n\n`);
+
+  // ── Stream lifecycle abort controller ──
+  // Combines req.signal (client disconnect) with stream cancellation
+  // (proxy idle timeout) so the agent loop is aborted in both cases.
+  const streamAbort = new AbortController();
+  const onReqAbort = () => {
+    if (!streamAbort.signal.aborted) {
+      console.error("[messages-route] req.signal aborted (client disconnect)");
+      streamAbort.abort(new Error("Client disconnected"));
+    }
+  };
+  if (req.signal) {
+    if (req.signal.aborted) {
+      streamAbort.abort(new Error("Client already disconnected"));
+    } else {
+      req.signal.addEventListener("abort", onReqAbort, { once: true });
+    }
+  }
+
+  // Correlation ID for structured diagnostics — shared across start/cancel
+  const rid = `${conversation.id.slice(0, 8)}-${Date.now().toString(36)}`;
   const stream = new ReadableStream({
     async start(controller) {
+      console.error(`[messages-route:${rid}] stream opened`);
+
+      // Safe enqueue — catches errors when controller is already closed/errored
+      const safeEnqueue = (chunk: Uint8Array): boolean => {
+        try {
+          controller.enqueue(chunk);
+          return true;
+        } catch (e) {
+          console.error(`[messages-route:${rid}] controller.enqueue failed:`, e instanceof Error ? e.message : String(e));
+          return false;
+        }
+      };
+      const safeEvent = (payload: Record<string, unknown>): boolean =>
+        safeEnqueue(event(payload));
+
+      // Heartbeat — emits SSE comments every 15s to prevent proxy idle timeouts
+      // (Cloudflare/Railway close connections after ~100s of inactivity)
+      const heartbeatTimer = setInterval(() => {
+        safeEnqueue(encoder.encode(": keepalive\n\n"));
+      }, 15_000);
+
       let assistantText = "";
       let reasoningText = "";
       // Actual provider that produced the last model response — surfaced
@@ -566,71 +615,71 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           const streamProgress = new ProgressEmitter((evt: ProgressEvent) => {
             // Stream each event to the client immediately
             if (evt.type === "tool_start") {
-              controller.enqueue(event({ type: "tool_execution", toolId: evt.toolId, summary: evt.summary }));
+              safeEvent({ type: "tool_execution", toolId: evt.toolId, summary: evt.summary });
             } else if (evt.type === "tool_result") {
-              controller.enqueue(event({
+              safeEvent({
                 type: "tool_execution",
                 toolId: evt.toolId,
                 success: evt.success,
                 summary: evt.summary,
                 durationMs: evt.durationMs,
-              }));
+              });
             } else if (evt.type === "approval_required") {
-              controller.enqueue(event({
+              safeEvent({
                 type: "approval_required",
                 toolId: evt.toolId,
                 reason: evt.reason,
-              }));
+              });
             } else if (evt.type === "checkpoint") {
-              controller.enqueue(event({ type: "checkpoint", label: evt.label, gitSha: evt.gitSha }));
+              safeEvent({ type: "checkpoint", label: evt.label, gitSha: evt.gitSha });
             } else if (evt.type === "build_start") {
-              controller.enqueue(event({ type: "build_start", check: evt.check }));
+              safeEvent({ type: "build_start", check: evt.check });
             } else if (evt.type === "build_result") {
-              controller.enqueue(event({ type: "build_result", check: evt.check, passed: evt.passed, errorCount: evt.errorCount }));
+              safeEvent({ type: "build_result", check: evt.check, passed: evt.passed, errorCount: evt.errorCount });
             } else if (evt.type === "phase") {
-              controller.enqueue(event({ type: "phase", phase: evt.phase, step: evt.step }));
+              safeEvent({ type: "phase", phase: evt.phase, step: evt.step });
             } else if (evt.type === "finished") {
-              controller.enqueue(event({ type: "finished", totalSteps: evt.totalSteps, totalDurationMs: evt.totalDurationMs }));
+              safeEvent({ type: "finished", totalSteps: evt.totalSteps, totalDurationMs: evt.totalDurationMs });
             } else if (evt.type === "cancelled") {
-              controller.enqueue(event({ type: "cancelled", reason: evt.reason }));
+              safeEvent({ type: "cancelled", reason: evt.reason });
             } else if (evt.type === "model_routing") {
               routedProvider = evt.provider;
               routedModel = evt.model;
-              controller.enqueue(event({
+              safeEvent({
                 type: "model_routing",
                 model: evt.model,
                 provider: evt.provider,
                 fallbackFrom: evt.fallbackFrom,
                 category: evt.category,
                 latencyMs: evt.latencyMs,
-              }));
+              });
             } else if (evt.type === "model_failed") {
-              controller.enqueue(event({
+              safeEvent({
                 type: "model_failed",
                 model: evt.model,
                 category: evt.category,
                 message: evt.message,
-              }));
+              });
             } else if (evt.type === "reasoning") {
-              controller.enqueue(event({ type: "reasoning", summary: evt.summary }));
+              safeEvent({ type: "reasoning", summary: evt.summary });
             } else if (evt.type === "status") {
-              controller.enqueue(event({ type: "status", summary: evt.summary }));
+              safeEvent({ type: "status", summary: evt.summary });
             } else if (evt.type === "repair_attempt") {
-              controller.enqueue(event({ type: "repair_attempt", attempt: evt.attempt, maxAttempts: evt.maxAttempts }));
+              safeEvent({ type: "repair_attempt", attempt: evt.attempt, maxAttempts: evt.maxAttempts });
             } else if (evt.type === "preview_start") {
-              controller.enqueue(event({ type: "preview_start" }));
+              safeEvent({ type: "preview_start" });
             } else if (evt.type === "preview_status") {
-              controller.enqueue(event({ type: "preview_status", status: evt.status, healthy: evt.healthy }));
+              safeEvent({ type: "preview_status", status: evt.status, healthy: evt.healthy });
             } else if (evt.type === "preview_result") {
-              controller.enqueue(event({ type: "preview_result", success: evt.success, previewUrl: evt.previewUrl, error: evt.error }));
+              safeEvent({ type: "preview_result", success: evt.success, previewUrl: evt.previewUrl, error: evt.error });
             } else if (evt.type === "deploy_start") {
-              controller.enqueue(event({ type: "deploy_start", environment: evt.environment, provider: evt.provider }));
+              safeEvent({ type: "deploy_start", environment: evt.environment, provider: evt.provider });
             } else if (evt.type === "deploy_status") {
-              controller.enqueue(event({ type: "deploy_status", status: evt.status, deploymentId: evt.deploymentId }));
+              safeEvent({ type: "deploy_status", status: evt.status, deploymentId: evt.deploymentId });
             } else if (evt.type === "deploy_result") {
-              controller.enqueue(event({ type: "deploy_result", success: evt.success, productionUrl: evt.productionUrl, error: evt.error }));
+              safeEvent({ type: "deploy_result", success: evt.success, productionUrl: evt.productionUrl, error: evt.error });
             } else if (evt.type === "deploy_verify") {
-              controller.enqueue(event({ type: "deploy_verify", url: evt.url, success: evt.success, detail: evt.detail }));
+              safeEvent({ type: "deploy_verify", url: evt.url, success: evt.success, detail: evt.detail });
             }
           });
 
@@ -646,16 +695,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             executionMode: v2Config.executionMode,
             enableBuildFix: true,
             enableDeploy: built.kernelResult.decision.routing.mode === "ship",
+            requiresExecution: built.kernelResult.decision.routing.requiresExecution,
             evalMetadata: v2Config.evalMetadata,
             progress: streamProgress,
-            signal: req.signal,
+            signal: streamAbort.signal,
           });
 
           v2Result = launchFlowResult.agentLoopResult ?? null;
 
           // Stream the final text
           assistantText = launchFlowResult.finalText;
-          controller.enqueue(event({ type: "text", text: assistantText }));
+          safeEvent({ type: "text", text: assistantText });
 
           // If V2 paused for approval, persist the paused state and flag it
           let pausedRunId: string | undefined;
@@ -680,13 +730,13 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               // If persistence fails, still send the approval event without a resume ID
             }
 
-            controller.enqueue(event({
+            safeEvent({
               type: "pending_approval",
               toolId: v2Result.pendingApproval.toolId,
               reason: v2Result.pendingApproval.reason,
               inputs: v2Result.pendingApproval.inputs,
               pausedRunId,
-            }));
+            });
           }
 
           const finalMessageStatus: MessageStatus = launchFlowResult?.cancelled
@@ -747,7 +797,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             toolCalls: launchToolCalls,
           });
 
-          controller.enqueue(event({
+          safeEvent({
             type: "done",
             userMessage,
             assistantMessage: {
@@ -764,17 +814,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             launchStatus: launchFlowResult?.status ?? undefined,
             previewUrl: launchFlowResult?.previewUrl ?? undefined,
             productionUrl: launchFlowResult?.productionUrl ?? undefined,
-          }));
+          });
         } else {
           // ── V1 fallback path: stream tool results, then run LLM ──
           if (v1Result?.ranTools) {
             for (const exec of v1Result.toolExecutions) {
-              controller.enqueue(event({
+              safeEvent({
                 type: "tool_execution",
                 toolId: exec.toolId,
                 success: exec.success,
                 summary: exec.summary,
-              }));
+              });
             }
           }
 
@@ -782,7 +832,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             finalPrompt,
             (chunk) => {
               assistantText += chunk;
-              controller.enqueue(event({ type: "text", text: chunk }));
+              safeEvent({ type: "text", text: chunk });
             },
             {
               task: "chat",
@@ -801,7 +851,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             undefined,
             (reasoning) => {
               reasoningText += reasoning;
-              controller.enqueue(event({ type: "reasoning", text: reasoning }));
+              safeEvent({ type: "reasoning", text: reasoning });
             },
           );
 
@@ -848,7 +898,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             v2: false,
           });
 
-          controller.enqueue(event({
+          safeEvent({
             type: "done",
             userMessage,
             assistantMessage: {
@@ -861,11 +911,11 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             provider: r.provider,
             model: r.model,
             latencyMs: r.latencyMs,
-          }));
+          });
         }
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : "LLM provider unavailable";
-        console.error("[messages-route] Stream failed:", errorMsg, err instanceof Error ? err.stack : "");
+        console.error(`[messages-route:${rid}] Stream failed:`, errorMsg, err instanceof Error ? err.stack : "");
         await updateMessageStatus(assistantMessage.id, userId, "failed");
         if (agentRunId) {
           settleRun(agentRunId, {
@@ -884,14 +934,30 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           agentSlug,
           errorClass: errorMsg,
         });
-        controller.enqueue(event({
+        safeEvent({
           type: "error",
           message: errorMsg,
           partialText: assistantText || undefined,
-        }));
+        });
       } finally {
-        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-        controller.close();
+        clearInterval(heartbeatTimer);
+        console.error(`[messages-route:${rid}] finally: emitting [DONE]`);
+        safeEnqueue(encoder.encode("data: [DONE]\n\n"));
+        try {
+          controller.close();
+          console.error(`[messages-route:${rid}] controller.close() succeeded`);
+        } catch (e) {
+          console.error(`[messages-route:${rid}] controller.close() failed:`, e instanceof Error ? e.message : String(e));
+        }
+        if (req.signal) {
+          req.signal.removeEventListener("abort", onReqAbort);
+        }
+      }
+    },
+    cancel(reason) {
+      console.error(`[messages-route:${rid}] stream cancelled by downstream:`, reason);
+      if (!streamAbort.signal.aborted) {
+        streamAbort.abort(new Error(`Stream cancelled: ${reason ?? "unknown"}`));
       }
     },
   });
