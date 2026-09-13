@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getPausedRun, resolvePausedRun } from "@/lib/litt-intelligence/paused-run-store";
+import {
+  getPausedRun,
+  resolvePausedRun,
+  markRunProcessing,
+  markRunCompleted,
+  markRunFailed,
+  type RunResult,
+} from "@/lib/litt-intelligence/paused-run-store";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { resumeAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
@@ -15,19 +22,20 @@ import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
  * On APPROVE:
  *   - Revalidate user ownership and workspace
  *   - Re-run permission validation
- *   - Execute the EXACT previously requested tool (frozen inputs)
- *   - Resume the V2 agent loop
- *   - Return the resumed result
+ *   - Persist the approval decision (single-use, atomic)
+ *   - Start the resumed execution DETACHED from this HTTP request
+ *   - Return 202 Accepted with { resolved: true, status: "processing" }
  *
- * On REJECT:
- *   - Inject rejection as tool result
- *   - Resume V2 so LiTT can choose a safer alternative
+ * The client polls GET /approvals/[pausedRunId] for run_status until
+ * "completed" or "failed".
  *
  * Security:
- *   - Never accepts replacement tool arguments
- *   - Never trusts client-supplied paused state
- *   - Approvals are single-use and expiring (5 min TTL)
- *   - Re-verifies workspace ownership on resume
+ * - Never accepts replacement tool arguments
+ * - Never trusts client-supplied paused state
+ * - Approvals are single-use and expiring (5 min TTL)
+ * - Re-verifies workspace ownership on resume
+ * - Idempotent: repeated approval requests return 202 without
+ *   launching duplicate executions
  */
 
 export async function POST(
@@ -62,6 +70,19 @@ export async function POST(
   }
 
   if (pausedRun.status !== "pending") {
+    // Already resolved — check if the execution is still running
+    // This is the idempotent path: a repeated approval request returns 202
+    // with the current run status instead of launching a duplicate.
+    if (pausedRun.status === "approved" || pausedRun.status === "rejected") {
+      return NextResponse.json({
+        resolved: true,
+        decision: pausedRun.status,
+        status: pausedRun.runStatus ?? "processing",
+        pausedRunId,
+        runStatus: pausedRun.runStatus,
+        runError: pausedRun.runError,
+      }, { status: 202 });
+    }
     return NextResponse.json(
       { error: `Approval already ${pausedRun.status}` },
       { status: 409 },
@@ -82,94 +103,142 @@ export async function POST(
     );
   }
 
-  // 4. Re-validate workspace ownership and readiness
+  // 4. For REJECTED: no resumed execution needed — return immediately
+  if (body.decision === "rejected") {
+    return NextResponse.json({
+      resolved: true,
+      decision: "rejected",
+      status: "completed",
+      pausedRunId,
+    });
+  }
+
+  // 5. For APPROVED: validate workspace, then start detached execution
   let transport;
   try {
     transport = await createWorkspaceTransport(resolved.projectId, userId);
   } catch {
+    await markRunFailed(pausedRunId, userId, "Workspace is no longer available");
     return NextResponse.json(
       {
         error:
           "Workspace is no longer available or you no longer have access. The approval has been recorded but the operation cannot proceed.",
         resolved: true,
+        status: "failed",
+        pausedRunId,
       },
       { status: 409 },
     );
   }
 
-  // 5. Verify workspace hasn't changed in a way that invalidates the approval
+  // 6. Verify workspace hasn't changed in a way that invalidates the approval
   try {
     const verified = await verifyProjectWorkspace(resolved.projectId, userId);
     if (verified.workspaceId !== resolved.workspaceId) {
+      await markRunFailed(pausedRunId, userId, "Workspace changed since approval");
       return NextResponse.json(
         {
           error:
             "Workspace has changed since the approval was requested. Please retry the operation.",
           resolved: true,
+          status: "failed",
+          pausedRunId,
         },
         { status: 409 },
       );
     }
   } catch {
+    await markRunFailed(pausedRunId, userId, "Workspace verification failed on resume");
     return NextResponse.json(
-      { error: "Workspace verification failed on resume" },
+      { error: "Workspace verification failed on resume", resolved: true, status: "failed" },
       { status: 500 },
     );
   }
 
-  // 6. Resume the V2 agent loop with frozen inputs
-  // The resumed loop runs inside this request — bound its runtime well under
-  // the ~100s edge proxy ceiling so the response (which carries the executed
-  // tool's outcome in result.toolCalls) always reaches the client.
+  // 7. Mark the run as "processing" (atomic — prevents duplicate executions)
+  const started = await markRunProcessing(pausedRunId, userId);
+  if (!started) {
+    // Another request already started the execution — return current status
+    const current = await getPausedRun(pausedRunId, userId);
+    return NextResponse.json({
+      resolved: true,
+      decision: "approved",
+      status: current?.runStatus ?? "processing",
+      pausedRunId,
+      runStatus: current?.runStatus ?? "processing",
+    }, { status: 202 });
+  }
+
+  // 8. Start the resumed execution DETACHED from this HTTP request.
+  // Railway's long-running Node process keeps this promise alive after
+  // the response is sent. The result is persisted to the DB so the client
+  // can poll GET for completion.
   const resumeConfig: Partial<AgentLoopConfig> = {
     systemPrompt: resolved.systemPrompt,
     executionMode: resolved.executionMode,
     enableBuildFix: true,
-    maxRuntimeMs: 75_000,
-    signal: req.signal,
   };
 
-  try {
-    const result = await resumeAgentLoopV2(
-      {
-        pausedMessages: resolved.pausedMessages,
-        toolId: resolved.toolId,
-        toolCallId: resolved.toolCallId,
-        inputs: resolved.inputs, // Frozen from pause time — never from client
-        decision: body.decision as "approved" | "rejected",
-        rejectionReason: body.reason,
-        config: resumeConfig,
-        stepsUsedBeforePause: 0, // Will be adjusted by resume function
-        hadInterveningMutation: false,
-        existingCheckpoint: resolved.checkpointId
-          ? { checkpointId: resolved.checkpointId, label: "pre-approval", gitSha: "" }
-          : undefined,
-      },
-      transport,
-    );
-
-    return NextResponse.json({
-      resolved: true,
-      decision: body.decision,
-      result: {
+  // Fire-and-forget with proper error handling — NOT a floating promise.
+  // The .then/.catch chain persists the result/error to the DB.
+  void resumeAgentLoopV2(
+    {
+      pausedMessages: resolved.pausedMessages,
+      toolId: resolved.toolId,
+      toolCallId: resolved.toolCallId,
+      inputs: resolved.inputs, // Frozen from pause time — never from client
+      decision: body.decision as "approved" | "rejected",
+      rejectionReason: body.reason,
+      config: resumeConfig,
+      stepsUsedBeforePause: 0,
+      hadInterveningMutation: false,
+      existingCheckpoint: resolved.checkpointId
+        ? { checkpointId: resolved.checkpointId, label: "pre-approval", gitSha: "" }
+        : undefined,
+    },
+    transport,
+  )
+    .then((result) => {
+      const runResult: RunResult = {
         finalText: result.finalText,
         stepsUsed: result.stepsUsed,
         toolCalls: result.toolCalls,
         cancelled: result.cancelled,
         cancelReason: result.cancelReason,
-        pendingApproval: result.pendingApproval ?? undefined,
-        buildFixResult: result.buildFixResult,
-      },
+        pendingApproval: result.pendingApproval
+          ? {
+              toolId: result.pendingApproval.toolId,
+              pausedRunId: undefined, // Will be set by the next pause cycle
+              reason: result.pendingApproval.reason,
+            }
+          : undefined,
+      };
+      return markRunCompleted(pausedRunId, userId, runResult);
+    })
+    .catch((err) => {
+      const message = err instanceof Error ? err.message : "Resume failed";
+      return markRunFailed(pausedRunId, userId, message);
     });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Resume failed";
-    return NextResponse.json({ error: message, resolved: true }, { status: 500 });
-  }
+
+  // 9. Return 202 Accepted immediately — the execution continues in the background
+  return NextResponse.json({
+    resolved: true,
+    decision: "approved",
+    status: "processing",
+    pausedRunId,
+    runStatus: "processing",
+  }, { status: 202 });
 }
 
 /**
  * GET /api/studio/conversations/[conversationId]/approvals/[pausedRunId]
- * Get the status of a paused run.
+ * Get the status of a paused run, including async execution state.
+ *
+ * Returns:
+ *   - status: "pending" | "approved" | "rejected" | "expired"
+ *   - runStatus: null | "processing" | "completed" | "failed"
+ *   - runResult: the resumed execution result (when completed)
+ *   - runError: error message (when failed)
  */
 export async function GET(
   req: NextRequest,
@@ -194,5 +263,10 @@ export async function GET(
     status: pausedRun.status,
     expiresAt: pausedRun.expiresAt,
     createdAt: pausedRun.createdAt,
+    runStatus: pausedRun.runStatus,
+    runResult: pausedRun.runResult,
+    runError: pausedRun.runError,
+    runStartedAt: pausedRun.runStartedAt,
+    runCompletedAt: pausedRun.runCompletedAt,
   });
 }

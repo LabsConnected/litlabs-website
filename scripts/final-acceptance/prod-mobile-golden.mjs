@@ -436,34 +436,49 @@ async function main() {
 
       if (deployApproval?.pausedRunId) {
         const convId = (messagesApiSeen?.url ?? "").match(/conversations\/([^/]+)\/messages/)?.[1];
+        // Async approval contract: POST returns 202 immediately, then poll
+        // GET for the resumed execution result. This avoids the Cloudflare
+        // 524 timeout that occurred when the approval endpoint synchronously
+        // awaited the full resumed agent loop (deploy + model continuation).
         const approval = convId
           ? await page.request.post(
               `${BASE}/api/studio/conversations/${convId}/approvals/${deployApproval.pausedRunId}`,
-              { data: { decision: "approved" }, timeout: 5 * 60_000 },
+              { data: { decision: "approved" }, timeout: 30_000 },
             ).catch(() => null)
           : null;
         const approvalBody = approval ? await approval.json().catch(() => null) : null;
         writeFileSync(path.join(ARTIFACT_DIR, "deploy-approval-response.json"), JSON.stringify(approvalBody, null, 2));
+        step("deploy_approved", (approval?.status() === 202 || approval?.status() === 200) && approvalBody?.resolved === true,
+          `HTTP ${approval?.status() ?? "no-request"} resolved=${approvalBody?.resolved} status=${approvalBody?.status ?? "none"}`);
 
-        let approved = approval?.status() === 200 && approvalBody?.resolved === true;
-        let approveDetail = `HTTP ${approval?.status() ?? "no-request"} resolved=${approvalBody?.resolved}`;
-        if (!approved && convId) {
-          // An edge timeout (e.g. 524) severs the response but the server-side
-          // resolution is atomic and already recorded — confirm via the paused
-          // run's durable status rather than trusting only the lost body.
-          const statusResp = await page.request.get(
-            `${BASE}/api/studio/conversations/${convId}/approvals/${deployApproval.pausedRunId}`,
-            { timeout: 30_000 },
-          ).catch(() => null);
-          const statusBody = statusResp ? await statusResp.json().catch(() => null) : null;
-          if (statusBody?.status === "approved") {
-            approved = true;
-            approveDetail += `; resolution confirmed via status endpoint (edge severed the POST body)`;
+        // Poll GET for the resumed execution result
+        let runResult = approvalBody?.runResult ?? null;
+        let runError = approvalBody?.runError ?? null;
+        const runStatus = approvalBody?.runStatus ?? approvalBody?.status ?? "processing";
+        if (!runResult && runStatus === "processing" && convId) {
+          const pollDeadline = Date.now() + 8 * 60 * 1000; // 8 min budget
+          while (Date.now() < pollDeadline) {
+            await page.waitForTimeout(3000);
+            const statusResp = await page.request.get(
+              `${BASE}/api/studio/conversations/${convId}/approvals/${deployApproval.pausedRunId}`,
+              { timeout: 15_000 },
+            ).catch(() => null);
+            if (!statusResp || !statusResp.ok()) continue;
+            const statusBody = await statusResp.json().catch(() => null);
+            if (!statusBody) continue;
+            if (statusBody.runStatus === "completed" && statusBody.runResult) {
+              runResult = statusBody.runResult;
+              break;
+            }
+            if (statusBody.runStatus === "failed") {
+              runError = statusBody.runError ?? "Execution failed";
+              break;
+            }
+            // Still processing — keep polling
           }
         }
-        step("deploy_approved", approved === true, approveDetail);
 
-        const resumedCalls = approvalBody?.result?.toolCalls ?? [];
+        const resumedCalls = runResult?.toolCalls ?? [];
         const deployCall = resumedCalls.find((c) => c.toolId === "project.deploy");
         if (deployCall) {
           // summarizeToolResult JSON-encodes object results; publicUrl may be
@@ -481,40 +496,11 @@ async function main() {
             error: String(summary).slice(0, 200),
           };
         }
-        if (approvalBody?.result?.pendingApproval) {
-          verdict.notes.push(`resumed run paused again on ${approvalBody.result.pendingApproval.toolId}; a second-stage pause is not resumable via this endpoint`);
+        if (runResult?.pendingApproval) {
+          verdict.notes.push(`resumed run paused again on ${runResult.pendingApproval.toolId}; a second-stage pause is not resumable via this endpoint`);
         }
-
-        // If the resume response was severed (no toolCalls to read) or carried
-        // no URL, fall back to the durable deployment record — the source of
-        // truth for what project.deploy actually did. Poll briefly: a lost
-        // response can still precede the record's ready transition.
-        if ((!deployResult || !productionUrl) && projectId) {
-          const deadline = Date.now() + 120_000;
-          let latest = null;
-          while (Date.now() < deadline) {
-            const depResp = await page.request.get(
-              `${BASE}/api/studio-projects/${projectId}/deployments`,
-              { timeout: 30_000 },
-            ).catch(() => null);
-            const depBody = depResp ? await depResp.json().catch(() => null) : null;
-            latest = depBody?.deployment ?? null;
-            if (latest?.status === "ready" || latest?.status === "failed") break;
-            await new Promise((r) => setTimeout(r, 5_000));
-          }
-          if (latest?.status === "ready" && latest.publicUrl) {
-            productionUrl = productionUrl ?? latest.publicUrl;
-            deployResult = deployResult ?? {
-              success: latest.urlVerified === true,
-              productionUrl,
-            };
-            verdict.notes.push(`deploy outcome recovered from deployment record ${latest.id} (resume response severed)`);
-          } else if (latest?.status === "failed") {
-            deployResult = deployResult ?? {
-              success: false,
-              error: latest.errorMessage ?? "deployment failed",
-            };
-          }
+        if (runError && !deployResult) {
+          deployResult = { success: false, productionUrl: null, error: runError };
         }
       }
 

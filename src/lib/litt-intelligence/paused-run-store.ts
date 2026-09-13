@@ -9,6 +9,13 @@
  * - Tool arguments are frozen at pause time. The approve endpoint cannot
  *   replace them.
  * - On resume, user ownership and workspace state are re-verified.
+ *
+ * Async execution:
+ * - After approval, the resumed agent loop runs detached from the HTTP
+ *   request. Its state is persisted in run_status / run_result / run_error
+ *   so the client can poll the GET endpoint for completion.
+ * - Stale runs (processing > RUN_STALE_TIMEOUT_MS) are marked failed on
+ *   read to recover from process restarts.
  */
 
 import "server-only";
@@ -18,6 +25,25 @@ import type { LLMMessage } from "./llm-tool-calling";
 
 const APPROVAL_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const TABLE = "agent_paused_runs";
+
+/** A run that has been "processing" longer than this is considered stale
+ *  (the process likely restarted). The GET endpoint marks it as failed. */
+export const RUN_STALE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+export type RunStatus = "processing" | "completed" | "failed" | null;
+
+export interface RunResult {
+  finalText: string;
+  stepsUsed: number;
+  toolCalls: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }>;
+  cancelled: boolean;
+  cancelReason?: string;
+  pendingApproval?: {
+    toolId: string;
+    pausedRunId?: string;
+    reason: string;
+  };
+}
 
 export interface PausedRunRecord {
   id: string;
@@ -37,6 +63,12 @@ export interface PausedRunRecord {
   createdAt: string;
   expiresAt: string;
   resolvedAt: string | null;
+  // Async execution tracking (null when not yet started)
+  runStatus: RunStatus;
+  runResult: RunResult | null;
+  runError: string | null;
+  runStartedAt: string | null;
+  runCompletedAt: string | null;
 }
 
 interface PausedRunRow {
@@ -57,6 +89,11 @@ interface PausedRunRow {
   created_at: string;
   expires_at: string;
   resolved_at: string | null;
+  run_status: string | null;
+  run_result: RunResult | null;
+  run_error: string | null;
+  run_started_at: string | null;
+  run_completed_at: string | null;
 }
 
 function rowToRecord(row: PausedRunRow): PausedRunRecord {
@@ -78,6 +115,11 @@ function rowToRecord(row: PausedRunRow): PausedRunRecord {
     createdAt: row.created_at,
     expiresAt: row.expires_at,
     resolvedAt: row.resolved_at,
+    runStatus: (row.run_status as RunStatus) ?? null,
+    runResult: row.run_result ?? null,
+    runError: row.run_error ?? null,
+    runStartedAt: row.run_started_at ?? null,
+    runCompletedAt: row.run_completed_at ?? null,
   };
 }
 
@@ -144,7 +186,23 @@ export async function getPausedRun(
     .maybeSingle();
 
   if (error || !data) return null;
-  return rowToRecord(data as PausedRunRow);
+
+  const record = rowToRecord(data as PausedRunRow);
+
+  // Stale-run recovery: if the run has been "processing" for too long,
+  // mark it as failed. This handles process restarts where the detached
+  // execution was killed mid-flight.
+  if (record.runStatus === "processing" && record.runStartedAt) {
+    const startedAt = new Date(record.runStartedAt).getTime();
+    if (Date.now() - startedAt > RUN_STALE_TIMEOUT_MS) {
+      await markRunFailed(pausedRunId, userId, "Execution timed out (process may have restarted)");
+      record.runStatus = "failed";
+      record.runError = "Execution timed out (process may have restarted)";
+      record.runCompletedAt = new Date().toISOString();
+    }
+  }
+
+  return record;
 }
 
 export async function resolvePausedRun(
@@ -191,6 +249,78 @@ export async function resolvePausedRun(
   }
 
   return record;
+}
+
+/**
+ * Mark a run as "processing" — the resumed execution has started.
+ * Only transitions from null (not yet started) to "processing".
+ * This is idempotent: if already processing, it's a no-op.
+ */
+export async function markRunProcessing(
+  pausedRunId: string,
+  userId: string,
+): Promise<boolean> {
+  if (!supabaseAdmin) return false;
+
+  const now = new Date().toISOString();
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .update({
+      run_status: "processing",
+      run_started_at: now,
+    })
+    .eq("id", pausedRunId)
+    .eq("user_id", userId)
+    .eq("run_status", null) // Only if not yet started
+    .select("id")
+    .maybeSingle();
+
+  if (error) return false;
+  return !!data;
+}
+
+/**
+ * Mark a run as "completed" — the resumed execution finished successfully.
+ */
+export async function markRunCompleted(
+  pausedRunId: string,
+  userId: string,
+  result: RunResult,
+): Promise<void> {
+  if (!supabaseAdmin) return;
+
+  const now = new Date().toISOString();
+  await supabaseAdmin
+    .from(TABLE)
+    .update({
+      run_status: "completed",
+      run_result: result,
+      run_completed_at: now,
+    })
+    .eq("id", pausedRunId)
+    .eq("user_id", userId);
+}
+
+/**
+ * Mark a run as "failed" — the resumed execution threw or returned an error.
+ */
+export async function markRunFailed(
+  pausedRunId: string,
+  userId: string,
+  error: string,
+): Promise<void> {
+  if (!supabaseAdmin) return;
+
+  const now = new Date().toISOString();
+  await supabaseAdmin
+    .from(TABLE)
+    .update({
+      run_status: "failed",
+      run_error: error,
+      run_completed_at: now,
+    })
+    .eq("id", pausedRunId)
+    .eq("user_id", userId);
 }
 
 export async function expireStaleRuns(): Promise<number> {
