@@ -80,7 +80,7 @@ describe("LLM Client & Studio Models Test Suite", () => {
       const balanced = resolveLittAlias("litt-balanced");
       expect(balanced).not.toBeNull();
       expect(balanced?.apiProvider).toBe("gemini");
-      expect(balanced?.apiModel).toBe("gemini-2.5-flash");
+      expect(balanced?.apiModel).toBe("gemini-3.6-flash");
 
       const reasoning = resolveLittAlias("litt-reasoning");
       expect(reasoning).not.toBeNull();

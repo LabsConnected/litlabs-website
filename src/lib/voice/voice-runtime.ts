@@ -278,7 +278,7 @@ export async function runLiTTForVoice(args: {
     const t0 = Date.now();
     let roundText = "";
     let roundProvider = "auto";
-    let roundModel = "google/gemini-2.5-flash";
+    let roundModel = "gemini-3.6-flash";
     // Track repeated tool calls to detect infinite loops
     const toolCallCounts = new Map<string, number>();
 

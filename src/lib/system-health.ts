@@ -233,7 +233,7 @@ interface CachedProbe {
 let _geminiCache: CachedProbe | null = null;
 let _openrouterCache: CachedProbe | null = null;
 
-const GEMINI_MODEL = process.env.GEMINI_PRIMARY_MODEL || "gemini-2.5-flash";
+const GEMINI_MODEL = process.env.GEMINI_PRIMARY_MODEL || "gemini-3.6-flash";
 
 /**
  * Probe Gemini with a tiny 1-token generation request.
