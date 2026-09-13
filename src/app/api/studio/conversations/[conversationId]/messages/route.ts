@@ -553,6 +553,10 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     async start(controller) {
       let assistantText = "";
       let reasoningText = "";
+      // Actual provider that produced the last model response — surfaced
+      // through model_routing events from the provider-neutral router.
+      let routedProvider = "auto";
+      let routedModel: string | undefined;
       try {
         if (v2Transport && v2Config) {
           // ── V2 path: run agent loop INSIDE the stream with real-time events ──
@@ -590,6 +594,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             } else if (evt.type === "cancelled") {
               controller.enqueue(event({ type: "cancelled", reason: evt.reason }));
             } else if (evt.type === "model_routing") {
+              routedProvider = evt.provider;
+              routedModel = evt.model;
               controller.enqueue(event({
                 type: "model_routing",
                 model: evt.model,
@@ -731,7 +737,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             userId,
             agentSlug,
             agentInstanceId: runtimeAgent?.agentInstanceId || null,
-            provider: "openrouter-v2",
+            provider: routedProvider,
+            model: routedModel,
             latencyMs: launchLatencyMs,
             revisionBefore: conversation.revision,
             revisionAfter: newRevision,
@@ -749,7 +756,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               status: finalMessageStatus,
             },
             revision: newRevision,
-            provider: "openrouter-v2",
+            provider: routedProvider,
+            model: routedModel,
             latencyMs: launchLatencyMs,
             v2: true,
             pendingApproval: v2Result?.pendingApproval ?? undefined,

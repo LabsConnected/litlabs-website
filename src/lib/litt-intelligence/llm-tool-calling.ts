@@ -1,15 +1,24 @@
 /**
- * LLM Tool Calling — native structured tool/function calling.
+ * LLM Tool Calling — provider-neutral structured tool/function calling.
  *
  * Autonomous mutations require native structured tool calling.
  * Models without reliable tool calling are limited to conversation/PLAN
  * or routed to a capable provider.
  *
  * This module:
- *   1. Converts LiTT tool definitions to OpenAI-compatible function-calling format
- *   2. Calls OpenRouter with tools enabled (non-streaming for tool-call rounds)
- *   3. Parses tool_calls from the response
- *   4. Formats tool results for feeding back to the LLM
+ *   1. Converts LiTT tool definitions to the OpenAI-compatible
+ *      function-calling format shared by OpenRouter, Groq, Mistral,
+ *      Cloudflare Workers AI, Ollama (/v1), and OpenAI-compatible BYOK.
+ *   2. Routes each request through the Basic provider registry — an ordered
+ *      plan of eligible providers filtered by cost policy, capabilities,
+ *      credentials, and circuit-breaker health.
+ *   3. Parses tool_calls / functionCall parts from the response.
+ *   4. Formats tool results for feeding back to the LLM.
+ *
+ * The canonical transcript (LLMMessage) carries BOTH wire encodings
+ * (OpenAI-style tool_calls/tool_call_id AND Gemini parts), so a provider
+ * failover mid-conversation never loses completed tool calls — the next
+ * provider receives the full normalized history including tool results.
  *
  * No text-parsed fake tool calls. If the model doesn't return structured
  * tool_calls, there are no tool calls.
@@ -20,6 +29,22 @@ import "server-only";
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { SITE_URL } from "@/lib/siteConfig";
 import { logLLMCall, type LLMCallMetadata } from "@/lib/evals/braintrust";
+import {
+  planBasicRoutes,
+  recordProviderSuccess,
+  recordProviderFailure,
+  recordModelFailure,
+  isModelCoolingDown,
+  classifyHttpFailure,
+  classifyThrownFailure,
+  parseRetryAfterMs,
+  resolveBasicOllamaEndpoint,
+  ProviderAttemptError,
+  type FailureClass,
+  type PlannedProvider,
+  type ProviderFailure,
+  type RouteRequirements,
+} from "./provider-registry";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -48,27 +73,32 @@ export interface LLMToolCallResponse {
   toolCalls: ToolCallRequest[];
   finishReason: string;
   model: string;
+  /** Provider that produced this response (e.g. "gemini", "openrouter"). */
+  provider?: string;
   /** Raw Gemini parts preserved for subsequent conversation rounds (thought signatures, ids). */
   rawParts?: GeminiPart[];
 }
 
-/** Normalized conversation message. Supports both OpenRouter and Gemini serialization. */
+/** Normalized conversation message. Supports both OpenAI-compatible and Gemini serialization. */
 export type LLMMessage = {
   role: "user" | "assistant" | "tool";
   content: string;
   /** Gemini-specific raw model parts preserved for subsequent turns. */
   parts?: GeminiPart[];
-  /** OpenRouter assistant tool_calls for multi-turn tool use. */
+  /** OpenAI-compatible assistant tool_calls for multi-turn tool use. */
   tool_calls?: Array<{
     id: string;
     type: "function";
     function: { name: string; arguments: string };
   }>;
-  /** OpenRouter tool result correlation id. */
+  /** OpenAI-compatible tool result correlation id. */
   tool_call_id?: string;
 };
 
-// ─── OpenRouter tool format ───────────────────────────────────────
+// ─── OpenAI-compatible tool format ────────────────────────────────
+// Shared by OpenRouter, Groq, Mistral, Cloudflare Workers AI, Ollama /v1,
+// and OpenAI-compatible BYOK endpoints. The OpenRouter names are kept for
+// backwards compatibility with existing exports and tests.
 
 interface OpenRouterTool {
   type: "function";
@@ -109,8 +139,8 @@ export function toOpenRouterTools(tools: ToolDefinition[]): OpenRouterTool[] {
 }
 
 /**
- * Build a reverse map from OpenRouter function names back to original tool IDs.
- * OpenRouter names replace dots with underscores (project.scan → project_scan),
+ * Build a reverse map from OpenAI-compatible function names back to original tool IDs.
+ * Function names replace dots with underscores (project.scan → project_scan),
  * which is lossy for tools that use underscores natively (search_code → search_code).
  * This map lets us recover the original ID without guessing.
  */
@@ -155,9 +185,13 @@ type GeminiGenerateContentResponse = {
   candidates?: GeminiCandidate[];
 };
 
-// ─── Call LLM with tools ──────────────────────────────────────────
+// ─── Deadline / timeout plumbing ──────────────────────────────────
 
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+const GROQ_BASE = "https://api.groq.com/openai/v1";
+const MISTRAL_BASE = "https://api.mistral.com/v1";
+const OPENAI_BASE = "https://api.openai.com/v1";
+const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 /**
  * Race an in-flight provider promise against a wall-clock timeout and an
@@ -209,8 +243,8 @@ async function raceProviderAttempt<T>(
 async function fetchWithTimeout(
   url: string,
   init: RequestInit,
-  timeoutMs = OPENROUTER_TIMEOUT_MS,
-  label = "Provider",
+  timeoutMs: number,
+  label: string,
   externalSignal?: AbortSignal,
 ): Promise<Response> {
   if (externalSignal?.aborted) {
@@ -252,15 +286,13 @@ async function fetchWithTimeout(
 /** Cleanup margin reserved after every provider attempt for stream finalization,
  *  tool-event emission, and controller cleanup. */
 const CLEANUP_MARGIN_MS = 1_000;
-/** Hard cap on a single Gemini generateContent attempt. */
-const GEMINI_TIMEOUT_MS = 30_000;
-/** Hard cap on a single OpenRouter chat/completions attempt. */
-const OPENROUTER_TIMEOUT_MS = 30_000;
+/** Fallback per-attempt cap when a route does not declare one. */
+const DEFAULT_ATTEMPT_TIMEOUT_MS = 30_000;
 
 /**
  * Canonical budget-exhaustion error.
  * Thrown when the agent's remaining deadline cannot accommodate another
- * provider attempt (including retry delay + next attempt + cleanup).
+ * provider attempt (including cleanup margin).
  * This is distinct from a provider 429 or timeout — the agent itself
  * has run out of time.
  */
@@ -280,8 +312,8 @@ export class AgentBudgetExhaustedError extends Error {
  * Compute the bounded per-attempt timeout for a provider call.
  * Returns null if the remaining budget cannot accommodate the attempt.
  *
- * Formula: generateTimeoutMs = Math.min(MAX_TIMEOUT, remainingMs - CLEANUP_MARGIN_MS)
- * If generateTimeoutMs <= 0, the budget is exhausted.
+ * Formula: attemptTimeoutMs = Math.min(routeTimeoutMs, remainingMs - CLEANUP_MARGIN_MS)
+ * If attemptTimeoutMs <= 0, the budget is exhausted.
  */
 function computeAttemptTimeout(
   deadlineMs: number | undefined,
@@ -293,36 +325,9 @@ function computeAttemptTimeout(
   return timeoutMs > 0 ? timeoutMs : null;
 }
 
-/**
- * Compute whether a 429 retry fits within the remaining budget.
- * Returns the next-attempt timeout if it fits, or null if it does not.
- *
- * Formula: nextAttemptBudget = Math.min(MAX_TIMEOUT, remaining - delay - CLEANUP_MARGIN)
- * If nextAttemptBudget <= 0, the retry does not fit.
- */
-function computeRetryBudget(
-  deadlineMs: number | undefined,
-  delayMs: number,
-  maxTimeoutMs: number,
-): number | null {
-  if (!deadlineMs) return maxTimeoutMs; // no deadline → allow
-  const remainingMs = deadlineMs - Date.now();
-  const nextAttemptBudget = Math.min(
-    maxTimeoutMs,
-    remainingMs - delayMs - CLEANUP_MARGIN_MS,
-  );
-  return nextAttemptBudget > 0 ? nextAttemptBudget : null;
-}
-
-function getOpenRouterKey(): string {
-  return process.env.OPENROUTER_API_KEY ?? "";
-}
-
 function getGeminiKey(): string {
   return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
 }
-
-const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 let _genAI: GoogleGenerativeAI | null = null;
 function getGenAI(): GoogleGenerativeAI | null {
@@ -338,18 +343,20 @@ class ProviderTimeoutError extends Error {
     public readonly timeoutMs: number,
   ) {
     super(`${provider} request timed out after ${timeoutMs}ms`);
+    this.name = "ProviderTimeoutError";
   }
 }
 
 class UpstreamAbortError extends Error {
   constructor(public readonly provider: string) {
     super(`${provider} request aborted by upstream`);
+    this.name = "UpstreamAbortError";
   }
 }
 
 // ─── Test seam: Gemini model factory override ──────────────────
 // Tests can inject a mock model factory to exercise real Gemini
-// timeout/retry behavior without hitting the network.
+// timeout/failure behavior without hitting the network.
 export type GeminiModelLike = {
   generateContent(
     request: Record<string, unknown>,
@@ -377,7 +384,13 @@ export function _setGeminiModelFactory(
 function createGeminiModel(config: Record<string, unknown>): GeminiModelLike {
   if (_geminiModelFactoryOverride) return _geminiModelFactoryOverride(config);
   const genAI = getGenAI();
-  if (!genAI) throw new Error("GEMINI_API_KEY not set — cannot use Gemini direct fallback");
+  if (!genAI) {
+    throw new ProviderAttemptError("gemini", "unknown", {
+      class: "auth_invalid",
+      scope: "provider",
+      message: "GEMINI_API_KEY not set — cannot use Gemini route",
+    });
+  }
   return genAI.getGenerativeModel(config as unknown as Parameters<typeof genAI.getGenerativeModel>[0]) as unknown as GeminiModelLike;
 }
 
@@ -440,197 +453,44 @@ function normalizeGeminiModelResult(sdkResult: {
   return { candidates: [{ content: { parts } }] };
 }
 
+// ─── Structured diagnostics ───────────────────────────────────────
+
 /**
- * Gemini direct API fallback for tool-calling.
- * Uses raw fetch with a hard wall-clock timeout and AbortController so the
- * underlying HTTP request is actually cancelled, not just raced. The whole
- * attempt chain is bounded by the caller's overall deadline so it cannot
- * outlive the agent runtime.
+ * Emit a structured provider-routing diagnostic line. Fields are safe by
+ * construction — provider/model/class/status/timings only, never headers,
+ * request bodies, or secrets.
  */
-async function callGeminiWithTools(
-  systemPrompt: string,
-  messages: LLMMessage[],
-  tools: ToolDefinition[],
+function logRoute(event: string, fields: Record<string, unknown>): void {
+  const parts = Object.entries(fields)
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(" ");
+  console.log(`[provider-router] ${event} ${parts} @ ${new Date().toISOString()}`);
+}
+
+// ─── Adapters ─────────────────────────────────────────────────────
+
+interface AttemptRequest {
+  systemPrompt: string;
+  messages: LLMMessage[];
+  tools: ToolDefinition[];
+  toolIdMap: Map<string, string>;
+  temperature?: number;
+  maxTokens?: number;
+  toolChoice?: "auto" | "required" | "none";
+}
+
+interface AttemptContext {
+  timeoutMs: number;
+  signal?: AbortSignal;
+  secrets: { userApiKey?: string; byokBaseUrl?: string };
+}
+
+function toGeminiResponse(
+  result: GeminiGenerateContentResponse,
+  model: string,
   toolIdMap: Map<string, string>,
-  options?: {
-    temperature?: number;
-    maxTokens?: number;
-    evalMetadata?: LLMCallMetadata;
-    /** Absolute timestamp after which this fallback call must not run. */
-    deadlineMs?: number;
-    /** Optional upstream/client abort signal to propagate. */
-    signal?: AbortSignal;
-  },
-): Promise<LLMToolCallResponse> {
-  const key = getGeminiKey();
-  if (!key) {
-    throw new Error("GEMINI_API_KEY not set — cannot use Gemini direct fallback");
-  }
-
-  const model = "gemini-2.5-flash";
-  const contents = messages.map(toGeminiContent);
-  const functionDeclarations = toGeminiFunctionDeclarations(tools);
-
-  const body: Record<string, unknown> = {
-    contents,
-    systemInstruction: { role: "user", parts: [{ text: systemPrompt }] },
-    generationConfig: {
-      temperature: options?.temperature ?? 0.15,
-      maxOutputTokens: options?.maxTokens ?? 4096,
-    },
-  };
-  if (functionDeclarations.length > 0) {
-    body.tools = [{ functionDeclarations }];
-  }
-
-  // Test seam: when a model factory override is injected, calls route through
-  // it instead of the raw HTTP request so tests can exercise the real
-  // timeout/retry/budget behavior without a network.
-  const seamModel = _geminiModelFactoryOverride
-    ? createGeminiModel({
-        model,
-        tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : undefined,
-        generationConfig: body.generationConfig,
-      })
-    : null;
-
-  console.log(`[llm-tool-calling] callGeminiWithTools: entering Gemini direct fallback model=${model} tools=${tools.length} seam=${!!seamModel} @ ${new Date().toISOString()}`);
-  const totalT0 = Date.now();
-  const MAX_GEMINI_ATTEMPTS = 3;
-
-  let lastErr: unknown = null;
-  let result: GeminiGenerateContentResponse | undefined;
-
-  for (let attempt = 0; attempt < MAX_GEMINI_ATTEMPTS; attempt++) {
-    // Compute bounded per-attempt timeout from the absolute deadline
-    const attemptTimeoutMs = computeAttemptTimeout(options?.deadlineMs, GEMINI_TIMEOUT_MS);
-    if (attemptTimeoutMs === null) {
-      const remainingMs = options?.deadlineMs ? options.deadlineMs - Date.now() : 0;
-      console.log(`[llm-tool-calling] callGeminiWithTools: budget exhausted before attempt ${attempt + 1}`);
-      throw new AgentBudgetExhaustedError(remainingMs, `Gemini attempt ${attempt + 1} cannot fit in remaining budget`);
-    }
-
-    // Track whether this attempt was deadline-constrained (shorter than the max)
-    const wasDeadlineConstrained = options?.deadlineMs !== undefined && attemptTimeoutMs < GEMINI_TIMEOUT_MS;
-
-    const attemptT0 = Date.now();
-    console.log(`[llm-tool-calling] callGeminiWithTools: attempt ${attempt + 1} start timeoutMs=${attemptTimeoutMs} @ ${new Date().toISOString()}`);
-
-    try {
-      if (seamModel) {
-        // The seam mirrors the SDK contract: requestOptions.timeout bounds the
-        // attempt and requestOptions.signal propagates the upstream abort. The
-        // outer race keeps settlement deterministic even if the promise hangs.
-        const sdkResult = await raceProviderAttempt(
-          seamModel.generateContent(
-            { contents, systemInstruction: systemPrompt },
-            { timeout: attemptTimeoutMs, signal: options?.signal },
-          ),
-          attemptTimeoutMs,
-          "Gemini direct",
-          options?.signal,
-        );
-        result = normalizeGeminiModelResult(sdkResult);
-      } else {
-        const res = await fetchWithTimeout(
-          `${GEMINI_API_BASE}/models/${encodeURIComponent(model)}:generateContent`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-goog-api-key": key,
-            },
-            body: JSON.stringify(body),
-          },
-          attemptTimeoutMs,
-          "Gemini direct",
-          options?.signal,
-        );
-
-        if (!res.ok) {
-          const errText = await res.text().catch(() => "");
-          throw new Error(`Gemini direct request failed with status ${res.status}: ${errText.slice(0, 200)}`);
-        }
-
-        result = (await res.json()) as GeminiGenerateContentResponse;
-      }
-      console.log(`[llm-tool-calling] callGeminiWithTools: attempt ${attempt + 1} success attemptLatencyMs=${Date.now() - attemptT0} totalElapsedMs=${Date.now() - totalT0} @ ${new Date().toISOString()}`);
-      lastErr = null;
-      break;
-    } catch (err) {
-      lastErr = err;
-      const latencyMs = Date.now() - attemptT0;
-      const msg = err instanceof Error ? err.message : String(err);
-      const isUpstreamAbort = err instanceof UpstreamAbortError || (options?.signal?.aborted ?? false);
-      const isTimeout =
-        err instanceof ProviderTimeoutError ||
-        msg.includes("timed out") ||
-        (err instanceof Error && (err.name === "AbortError" || msg.includes("AbortError") || msg.includes("aborted")));
-      const category = isUpstreamAbort ? "upstream_abort" : isTimeout ? "provider_timeout" : "gemini_direct_error";
-      console.log(`[llm-tool-calling] callGeminiWithTools: attempt ${attempt + 1} failed category=${category} attemptLatencyMs=${latencyMs} msg=${msg.slice(0, 150)} @ ${new Date().toISOString()}`);
-
-      // Upstream/client abort — stop immediately, no retries.
-      if (isUpstreamAbort) {
-        throw err instanceof UpstreamAbortError ? err : new UpstreamAbortError("Gemini direct");
-      }
-
-      // If the attempt was deadline-constrained and timed out, surface the
-      // canonical budget-exhaustion error instead of a generic timeout.
-      if (isTimeout && wasDeadlineConstrained) {
-        const remainingMs = options?.deadlineMs ? options.deadlineMs - Date.now() : 0;
-        console.log(`[llm-tool-calling] callGeminiWithTools: deadline-constrained timeout on attempt ${attempt + 1}`);
-        throw new AgentBudgetExhaustedError(remainingMs, `Gemini attempt ${attempt + 1} timed out against agent budget (timeout=${attemptTimeoutMs}ms)`);
-      }
-
-      // Retry on 429 rate limit with exponential backoff — but only if
-      // another attempt actually exists. On the final attempt, throw
-      // immediately instead of sleeping for a retry that will never happen.
-      if (msg.includes("429") || msg.includes("Too Many Requests")) {
-        const hasAnotherAttempt = attempt + 1 < MAX_GEMINI_ATTEMPTS;
-        if (!hasAnotherAttempt) {
-          console.log(`[llm-tool-calling] callGeminiWithTools: 429 on final attempt ${attempt + 1}, no retries left`);
-          throw err;
-        }
-        const delay = (attempt + 1) * 60_000; // 60s, 120s
-        // Check if the retry delay + next attempt + cleanup fits within remaining budget
-        const retryBudgetMs = computeRetryBudget(options?.deadlineMs, delay, GEMINI_TIMEOUT_MS);
-        if (retryBudgetMs === null) {
-          const remainingMs = options?.deadlineMs ? options.deadlineMs - Date.now() : 0;
-          console.log(`[llm-tool-calling] callGeminiWithTools: skipping retry, delay=${delay / 1000}s + attempt cannot fit in remaining ${Math.floor(remainingMs / 1000)}s`);
-          throw new AgentBudgetExhaustedError(remainingMs, `429 retry delay=${delay / 1000}s + next attempt cannot fit in remaining budget`);
-        }
-        console.log(`[llm-tool-calling] callGeminiWithTools: 429 backoff attempt ${attempt + 1} delayMs=${delay} nextAttemptBudgetMs=${retryBudgetMs} @ ${new Date().toISOString()}`);
-        const sleepT0 = Date.now();
-        await new Promise<void>((resolve, reject) => {
-          const signal = options?.signal;
-          const onAbort = () => {
-            clearTimeout(t);
-            reject(new UpstreamAbortError("Gemini 429 backoff"));
-          };
-          const t = setTimeout(() => {
-            signal?.removeEventListener("abort", onAbort);
-            resolve();
-          }, delay);
-          if (signal) {
-            if (signal.aborted) {
-              onAbort();
-            } else {
-              signal.addEventListener("abort", onAbort, { once: true });
-            }
-          }
-        });
-        console.log(`[llm-tool-calling] callGeminiWithTools: 429 backoff ended actualSleepMs=${Date.now() - sleepT0} @ ${new Date().toISOString()}`);
-        continue;
-      }
-
-      throw err;
-    }
-  }
-
-  if (lastErr || !result) {
-    throw lastErr ?? new Error("Gemini direct fallback returned no result");
-  }
-
+): LLMToolCallResponse {
   const parts: GeminiPart[] = result.candidates?.[0]?.content?.parts ?? [];
   const text = parts
     .filter((p) => typeof p.text === "string")
@@ -647,66 +507,467 @@ async function callGeminiWithTools(
     };
   });
 
-  logLLMCall({
-    prompt: messages.map((m) => `${m.role}: ${m.content}`).join("\n"),
-    systemPrompt,
-    output: text,
-    provider: "gemini-direct",
-    model,
-    latencyMs: Date.now() - totalT0,
-    failover: [],
-    metadata: options?.evalMetadata ?? {},
-  });
-
   return {
     text,
     toolCalls,
     finishReason: toolCalls.length > 0 ? "tool_calls" : "stop",
     model,
+    provider: "gemini",
     rawParts: parts,
   };
 }
 
-/**
- * Fallback model chain for tool-calling rounds.
- * When the primary model fails, we try these in order.
- * All models must support OpenRouter's native tool-calling API.
- */
-const TOOL_CALLING_FALLBACK_MODELS = [
-  "google/gemini-2.5-flash",
-  "openai/gpt-5.6-luna",
-  "anthropic/claude-sonnet-4.6",
-  "meta-llama/llama-3.3-70b-instruct",
-];
-
-/**
- * Categorize an HTTP error for logging and fallback decisions.
- * Never includes request bodies or auth tokens — only status + category.
- */
-function categorizeError(status: number | null, message: string): string {
-  if (status === null) {
-    if (message.includes("timed out after")) return "provider_timeout";
-    if (message.includes("aborted by upstream")) return "upstream_abort";
-    return "network_error";
+/** Single Gemini generateContent attempt — bounded by ctx.timeoutMs and the
+ *  upstream signal. No internal retries: 429s and timeouts route around the
+ *  provider via the circuit breaker instead of sleeping inside the request. */
+async function attemptGemini(
+  model: string,
+  req: AttemptRequest,
+  ctx: AttemptContext,
+): Promise<LLMToolCallResponse> {
+  const key = getGeminiKey();
+  if (!key && !_geminiModelFactoryOverride) {
+    throw new ProviderAttemptError("gemini", model, {
+      class: "auth_invalid",
+      scope: "provider",
+      message: "GEMINI_API_KEY not set",
+    });
   }
-  if (status === 401 || status === 403) return "auth_error";
-  if (status === 404) return "model_not_found";
-  if (status === 429) return "rate_limited";
-  if (status >= 500) return "provider_error";
-  if (status === 400) return "bad_request";
-  return `http_${status}`;
+
+  const contents = req.messages.map(toGeminiContent);
+  const functionDeclarations = toGeminiFunctionDeclarations(req.tools);
+
+  const body: Record<string, unknown> = {
+    contents,
+    systemInstruction: { role: "user", parts: [{ text: req.systemPrompt }] },
+    generationConfig: {
+      temperature: req.temperature ?? 0.15,
+      maxOutputTokens: req.maxTokens ?? 4096,
+    },
+  };
+  if (functionDeclarations.length > 0) {
+    body.tools = [{ functionDeclarations }];
+  }
+
+  // Test seam: when a model factory override is injected, calls route through
+  // it instead of the raw HTTP request so tests can exercise the real
+  // timeout/budget behavior without a network.
+  const seamModel = _geminiModelFactoryOverride
+    ? createGeminiModel({
+        model,
+        tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : undefined,
+        generationConfig: body.generationConfig,
+      })
+    : null;
+
+  let result: GeminiGenerateContentResponse;
+  try {
+    if (seamModel) {
+      const sdkResult = await raceProviderAttempt(
+        seamModel.generateContent(
+          { contents, systemInstruction: req.systemPrompt },
+          { timeout: ctx.timeoutMs, signal: ctx.signal },
+        ),
+        ctx.timeoutMs,
+        "Gemini direct",
+        ctx.signal,
+      );
+      result = normalizeGeminiModelResult(sdkResult);
+    } else {
+      const res = await fetchWithTimeout(
+        `${GEMINI_API_BASE}/models/${encodeURIComponent(model)}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": key,
+          },
+          body: JSON.stringify(body),
+        },
+        ctx.timeoutMs,
+        "Gemini direct",
+        ctx.signal,
+      );
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        throw new ProviderAttemptError(
+          "gemini",
+          model,
+          classifyHttpFailure(res.status, errText, parseRetryAfterMs(res.headers, errText)),
+        );
+      }
+
+      result = (await res.json()) as GeminiGenerateContentResponse;
+    }
+  } catch (err) {
+    if (
+      err instanceof ProviderAttemptError ||
+      err instanceof UpstreamAbortError ||
+      err instanceof AgentBudgetExhaustedError
+    ) {
+      throw err;
+    }
+    throw new ProviderAttemptError("gemini", model, classifyThrownFailure(err));
+  }
+
+  if (!result.candidates?.length) {
+    throw new ProviderAttemptError("gemini", model, {
+      class: "bad_response",
+      scope: "provider",
+      message: "Gemini response contained no candidates",
+    });
+  }
+
+  return toGeminiResponse(result, model, req.toolIdMap);
+}
+
+/** Provider-specific connection details for the shared OpenAI-compatible adapter. */
+function compatEndpointFor(
+  route: PlannedProvider,
+  secrets: AttemptContext["secrets"],
+): { baseUrl: string; headers: Record<string, string> } {
+  switch (route.provider) {
+    case "openrouter": {
+      const key = process.env.OPENROUTER_API_KEY ?? "";
+      if (!key) {
+        throw new ProviderAttemptError("openrouter", route.models[0] ?? "unknown", {
+          class: "auth_invalid",
+          scope: "provider",
+          message: "OPENROUTER_API_KEY not set",
+        });
+      }
+      return {
+        baseUrl: OPENROUTER_BASE,
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "HTTP-Referer": SITE_URL,
+          "X-Title": "LiTT",
+        },
+      };
+    }
+    case "groq": {
+      const key = process.env.GROQ_API_KEY ?? "";
+      if (!key) {
+        throw new ProviderAttemptError("groq", route.models[0] ?? "unknown", {
+          class: "auth_invalid",
+          scope: "provider",
+          message: "GROQ_API_KEY not set",
+        });
+      }
+      return { baseUrl: GROQ_BASE, headers: { Authorization: `Bearer ${key}` } };
+    }
+    case "mistral": {
+      const key = process.env.MISTRAL_API_KEY ?? "";
+      if (!key) {
+        throw new ProviderAttemptError("mistral", route.models[0] ?? "unknown", {
+          class: "auth_invalid",
+          scope: "provider",
+          message: "MISTRAL_API_KEY not set",
+        });
+      }
+      return { baseUrl: MISTRAL_BASE, headers: { Authorization: `Bearer ${key}` } };
+    }
+    case "cloudflare": {
+      const accountId = process.env.CLOUDFLARE_ACCOUNT_ID ?? "";
+      const token = process.env.CLOUDFLARE_AI_API_TOKEN ?? "";
+      if (!accountId || !token) {
+        throw new ProviderAttemptError("cloudflare", route.models[0] ?? "unknown", {
+          class: "auth_invalid",
+          scope: "provider",
+          message: "Cloudflare Workers AI credentials not set",
+        });
+      }
+      return {
+        baseUrl: `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/v1`,
+        headers: { Authorization: `Bearer ${token}` },
+      };
+    }
+    case "byok": {
+      const key = secrets.userApiKey ?? "";
+      if (!key) {
+        throw new ProviderAttemptError("byok", route.models[0] ?? "unknown", {
+          class: "auth_invalid",
+          scope: "provider",
+          message: "BYOK requested without a user-supplied key",
+        });
+      }
+      // User-specified openai-compatible endpoint or api.openai.com.
+      const baseUrl = secrets.byokBaseUrl?.replace(/\/+$/, "") || OPENAI_BASE;
+      return { baseUrl, headers: { Authorization: `Bearer ${key}` } };
+    }
+    default:
+      throw new ProviderAttemptError(route.provider, route.models[0] ?? "unknown", {
+        class: "bad_response",
+        scope: "provider",
+        message: `No OpenAI-compatible endpoint configured for provider ${route.provider}`,
+      });
+  }
+}
+
+function parseOpenAiCompatibleResponse(
+  data: Record<string, unknown>,
+  model: string,
+  route: PlannedProvider,
+  toolIdMap: Map<string, string>,
+): LLMToolCallResponse {
+  const choice = (data.choices as Array<Record<string, unknown>> | undefined)?.[0];
+  if (!choice) {
+    throw new ProviderAttemptError(route.provider, model, {
+      class: "bad_response",
+      scope: "provider",
+      message: "No choices in response",
+    });
+  }
+
+  const message = choice.message as Record<string, unknown> | undefined;
+  const text: string = (message?.content as string) ?? "";
+  const rawToolCalls = (message?.tool_calls as Array<{
+    id: string;
+    function: { name: string; arguments: string };
+  }>) ?? [];
+  const finishReason: string = (choice.finish_reason as string) ?? "stop";
+
+  const toolCalls: ToolCallRequest[] = rawToolCalls.map((raw) => {
+    let inputs: Record<string, unknown> = {};
+    try {
+      inputs = JSON.parse(raw.function.arguments);
+    } catch {
+      inputs = {};
+    }
+    return {
+      toolCallId: raw.id,
+      toolId: toolIdMap.get(raw.function.name) ?? toToolDefinitionId(raw.function.name),
+      inputs,
+    };
+  });
+
+  return {
+    text,
+    toolCalls,
+    finishReason,
+    model: (data.model as string) ?? model,
+    provider: route.provider,
+  };
+}
+
+/** Shared OpenAI-compatible chat/completions attempt for OpenRouter, Groq,
+ *  Mistral, Cloudflare Workers AI, Ollama (/v1), and BYOK endpoints. */
+async function attemptOpenAiCompatible(
+  route: PlannedProvider,
+  model: string,
+  req: AttemptRequest,
+  ctx: AttemptContext,
+  endpoint: { baseUrl: string; headers: Record<string, string> },
+): Promise<LLMToolCallResponse> {
+  const openAiTools = toOpenRouterTools(req.tools);
+  const body: Record<string, unknown> = {
+    model,
+    stream: false,
+    messages: [
+      { role: "system", content: req.systemPrompt } as OpenRouterMessage,
+      ...req.messages.map(toOpenRouterMessage),
+    ],
+    temperature: req.temperature ?? 0.15,
+  };
+
+  if (req.maxTokens) body.max_tokens = req.maxTokens;
+  if (openAiTools.length > 0) {
+    body.tools = openAiTools;
+    body.tool_choice = req.toolChoice ?? "auto";
+  }
+
+  const res = await fetchWithTimeout(
+    `${endpoint.baseUrl}/chat/completions`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...endpoint.headers,
+      },
+      body: JSON.stringify(body),
+    },
+    ctx.timeoutMs,
+    route.provider,
+    ctx.signal,
+  );
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new ProviderAttemptError(
+      route.provider,
+      model,
+      classifyHttpFailure(res.status, txt, parseRetryAfterMs(res.headers, txt)),
+    );
+  }
+
+  const data = (await res.json()) as Record<string, unknown>;
+  return parseOpenAiCompatibleResponse(data, model, route, req.toolIdMap);
+}
+
+// ─── Ollama ───────────────────────────────────────────────────────
+
+/** Local model families with reliable structured tool calling. */
+const OLLAMA_TOOL_CAPABLE =
+  /llama-?3\.[123]|llama3\.[123]|qwen|mistral|nemo|command-r|granite|phi-?4|functionary|deepseek|devstral|gpt-oss/i;
+
+const OLLAMA_PROBE_TTL_MS = 5 * 60_000;
+const OLLAMA_PROBE_TIMEOUT_MS = 1_500;
+let _ollamaProbeCache: { at: number; models: string[] } | null = null;
+
+/** Test seam: inject a probe result instead of calling /api/tags. */
+let _ollamaProbeOverride: (() => Promise<string[]>) | null = null;
+
+/** @internal Test-only seam to override the Ollama model probe. */
+export function _setOllamaProbeForTests(probe: (() => Promise<string[]>) | null): void {
+  _ollamaProbeOverride = probe;
+}
+
+async function probeOllamaModels(endpoint: string, ctx: AttemptContext): Promise<string[]> {
+  if (_ollamaProbeOverride) return _ollamaProbeOverride();
+  if (_ollamaProbeCache && Date.now() - _ollamaProbeCache.at < OLLAMA_PROBE_TTL_MS) {
+    return _ollamaProbeCache.models;
+  }
+  const res = await fetchWithTimeout(
+    `${endpoint}/api/tags`,
+    { method: "GET" },
+    Math.min(ctx.timeoutMs, OLLAMA_PROBE_TIMEOUT_MS),
+    "Ollama probe",
+    ctx.signal,
+  );
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new ProviderAttemptError(
+      "ollama",
+      "auto",
+      classifyHttpFailure(res.status, txt, parseRetryAfterMs(res.headers, txt)),
+    );
+  }
+  const data = (await res.json()) as { models?: Array<{ name?: string }> };
+  const models = (data.models ?? [])
+    .map((m) => m.name)
+    .filter((n): n is string => !!n);
+  _ollamaProbeCache = { at: Date.now(), models };
+  return models;
+}
+
+/** Pick a local model. When the request requires tools, only tool-capable
+ *  families are eligible — a model that cannot emit tool calls is never
+ *  selected just because it is free. */
+function pickOllamaModel(available: string[], toolsRequired: boolean): string | null {
+  const override = process.env.OLLAMA_MODEL;
+  if (override) return override;
+  if (available.length === 0) return null;
+  if (!toolsRequired) return available[0];
+  return available.find((m) => OLLAMA_TOOL_CAPABLE.test(m)) ?? null;
+}
+
+async function attemptOllama(
+  _model: string,
+  req: AttemptRequest,
+  ctx: AttemptContext,
+): Promise<LLMToolCallResponse> {
+  const endpoint = resolveBasicOllamaEndpoint();
+
+  let available: string[];
+  try {
+    available = await probeOllamaModels(endpoint, ctx);
+  } catch (err) {
+    if (err instanceof ProviderAttemptError || err instanceof UpstreamAbortError) throw err;
+    throw new ProviderAttemptError("ollama", "auto", classifyThrownFailure(err));
+  }
+
+  const model = pickOllamaModel(available, req.tools.length > 0);
+  if (!model) {
+    throw new ProviderAttemptError("ollama", "auto", {
+      class: "model_unavailable",
+      scope: "provider",
+      message: req.tools.length > 0
+        ? "No tool-capable local model loaded in Ollama"
+        : "No local models loaded in Ollama",
+    });
+  }
+
+  const route: PlannedProvider = {
+    provider: "ollama",
+    adapter: "ollama",
+    costClass: "LOCAL",
+    capabilities: { tools: true, vision: false, structuredOutput: false, coding: true },
+    models: [model],
+    timeoutMs: ctx.timeoutMs,
+    health: "healthy",
+    credentialState: "not_required",
+  };
+  return attemptOpenAiCompatible(route, model, req, ctx, {
+    baseUrl: `${endpoint}/v1`,
+    headers: {},
+  });
+}
+
+// ─── All-routes failure ───────────────────────────────────────────
+
+export interface RouteAttemptFailure {
+  provider: string;
+  model: string;
+  class: FailureClass;
+  httpStatus?: number;
+  latencyMs: number;
+  message: string;
 }
 
 /**
- * Call OpenRouter with native tool calling support.
- * Non-streaming — used for tool-call rounds in the agent loop.
+ * Every eligible provider route failed (or none were eligible). Carries the
+ * structured per-attempt failure list for diagnostics and a truthful,
+ * secret-free message for the user.
+ */
+export class AllRoutesFailedError extends Error {
+  readonly userMessage =
+    "LiTT couldn't complete this request because all currently available AI routes " +
+    "were unavailable or reached their limits. Your project and completed work are " +
+    "preserved — try again shortly, connect a local model, or use a personal provider key.";
+
+  constructor(
+    public readonly failures: RouteAttemptFailure[],
+    public readonly excluded: Array<{ provider: string; reason: string }>,
+  ) {
+    super(buildAllFailedMessage(failures, excluded));
+    this.name = "AllRoutesFailedError";
+  }
+}
+
+function buildAllFailedMessage(
+  failures: RouteAttemptFailure[],
+  excluded: Array<{ provider: string; reason: string }>,
+): string {
+  const attempted = failures
+    .map((f) => `${f.provider}/${f.model}(${f.class}${f.httpStatus ? ` http_${f.httpStatus}` : ""}, ${f.latencyMs}ms)`)
+    .join("; ");
+  const skipped = excluded.map((e) => `${e.provider}(${e.reason})`).join(", ");
+  if (failures.length === 0) {
+    return `All tool-calling models failed. No eligible provider routes were available` +
+      (skipped ? ` — excluded: ${skipped}` : "") + `.`;
+  }
+  return (
+    `All tool-calling models failed. Attempts: ${attempted}.` +
+    (skipped ? ` Excluded: ${skipped}.` : "")
+  );
+}
+
+// ─── Call LLM with tools ──────────────────────────────────────────
+
+/**
+ * Route a tool-calling request through the Basic provider plan.
  *
- * If the model returns tool_calls, they are parsed and returned.
- * If the model returns text only (no tool_calls), toolCalls is empty.
- * We NEVER parse text to extract fake tool calls.
+ * Providers are selected by the registry (cost policy → capabilities →
+ * credentials → health). Each provider attempt shares the caller's absolute
+ * deadline: attemptTimeout = min(routeTimeout, remainingBudget - margin).
+ * A provider-scope failure (401/402/provider-403/408/timeout/429/5xx/network)
+ * stops the whole provider for this call; a model-scope failure (400/404/
+ * model-403) advances to the next candidate model inside the same provider.
  *
- * Fallback: if the primary model fails, we try a chain of fallback models.
- * Each attempt is logged with provider, model, latency, and failure category.
+ * Failover is transparent to the agent: the normalized LLMMessage transcript
+ * carries every completed tool call and result, so the replacement provider
+ * continues exactly where the failed one stopped — no tool is re-executed.
  */
 export async function callLLMWithTools(
   systemPrompt: string,
@@ -722,196 +983,218 @@ export async function callLLMWithTools(
     deadlineMs?: number;
     /** Optional upstream/client abort signal to propagate to all provider calls. */
     signal?: AbortSignal;
+    /** BYOK: user-supplied API key — opts this request into USER_FUNDED routes. */
+    userApiKey?: string;
+    /** BYOK: which provider the key belongs to (openai-compatible only for tools). */
+    byokProvider?: "openai" | "openai-compatible";
+    /** BYOK: model override on the user's account. */
+    byokModel?: string;
+    /** BYOK: base URL for an openai-compatible user endpoint. */
+    byokBaseUrl?: string;
   },
 ): Promise<LLMToolCallResponse> {
-  const key = getOpenRouterKey();
-  if (!key) throw new Error("OPENROUTER_API_KEY not set — cannot make tool-calling LLM calls");
+  const requirements: RouteRequirements = {
+    tools: tools.length > 0,
+    coding: tools.length > 0,
+  };
 
-  const primaryModel = options?.model ?? "google/gemini-2.5-flash";
-  const openRouterTools = toOpenRouterTools(tools);
+  const plan = planBasicRoutes(requirements, {
+    model: options?.model,
+    userApiKey: options?.userApiKey,
+    byokProvider: options?.byokProvider,
+    byokModel: options?.byokModel,
+    byokBaseUrl: options?.byokBaseUrl,
+  });
+
+  if (plan.droppedModelHint) {
+    logRoute("model_hint_dropped", {
+      model: plan.droppedModelHint,
+      reason: "not_eligible_under_basic_cost_policy",
+    });
+  }
+
+  const failures: RouteAttemptFailure[] = [];
   const toolIdMap = buildToolIdReverseMap(tools);
+  const req: AttemptRequest = {
+    systemPrompt,
+    messages,
+    tools,
+    toolIdMap,
+    temperature: options?.temperature,
+    maxTokens: options?.maxTokens,
+    toolChoice: options?.toolChoice,
+  };
+  const ctx: AttemptContext = {
+    timeoutMs: 0, // per-attempt value set below
+    signal: options?.signal,
+    secrets: { userApiKey: options?.userApiKey, byokBaseUrl: options?.byokBaseUrl },
+  };
 
-  // Build the attempt chain: primary model first, then fallbacks (deduped)
-  const attemptChain = [primaryModel, ...TOOL_CALLING_FALLBACK_MODELS.filter((m) => m !== primaryModel)];
+  if (plan.providers.length === 0) {
+    logRoute("no_eligible_routes", {
+      excluded: plan.excluded.map((e) => `${e.provider}:${e.reason}`).join(","),
+      remainingBudgetMs: options?.deadlineMs ? Math.max(0, options.deadlineMs - Date.now()) : undefined,
+    });
+    throw new AllRoutesFailedError(failures, plan.excluded);
+  }
 
-  // Absolute wall-clock deadline inherited from the agent loop so the entire
-  // fallback chain (OpenRouter attempts + Gemini sleeps + generateContent)
-  // cannot outlive the agent's maxRuntimeMs.
-  const failures: Array<{ model: string; status: number | null; category: string; latencyMs: number; message: string }> = [];
+  const promptLog = messages.map((m) => `${m.role}: ${m.content}`).join("\n");
 
-  for (const model of attemptChain) {
-    const body: Record<string, unknown> = {
-      model,
-      stream: false,
-      messages: [
-        { role: "system", content: systemPrompt } as OpenRouterMessage,
-        ...messages.map(toOpenRouterMessage),
-      ],
-      temperature: options?.temperature ?? 0.15,
-    };
+  for (let r = 0; r < plan.providers.length; r++) {
+    const route = plan.providers[r];
+    const nextProvider = plan.providers[r + 1]?.provider;
 
-    if (options?.maxTokens) body.max_tokens = options.maxTokens;
-    if (openRouterTools.length > 0) {
-      body.tools = openRouterTools;
-      body.tool_choice = options?.toolChoice ?? "auto";
-    }
+    for (const model of route.models) {
+      if (isModelCoolingDown(route.provider, model)) {
+        logRoute("model_skipped", { provider: route.provider, model, reason: "model_cooldown" });
+        continue;
+      }
 
-    // Compute bounded per-attempt timeout from the absolute deadline
-    const attemptTimeoutMs = computeAttemptTimeout(options?.deadlineMs, OPENROUTER_TIMEOUT_MS);
-    if (attemptTimeoutMs === null) {
-      const remainingMs = options?.deadlineMs ? options.deadlineMs - Date.now() : 0;
-      throw new AgentBudgetExhaustedError(remainingMs, `OpenRouter attempt for ${model} cannot fit in remaining budget`);
-    }
-    console.log(`[llm-tool-calling] callLLMWithTools: attempting OpenRouter model=${model} timeoutMs=${attemptTimeoutMs} @ ${new Date().toISOString()}`);
-    const t0 = Date.now();
-
-    let res: Response;
-    try {
-      res = await fetchWithTimeout(
-        `${OPENROUTER_BASE}/chat/completions`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${key}`,
-            "HTTP-Referer": SITE_URL,
-            "X-Title": "LiTT",
-          },
-          body: JSON.stringify(body),
-        },
-        attemptTimeoutMs,
-        "OpenRouter",
-        options?.signal,
+      // Bounded per-attempt timeout from the shared absolute deadline.
+      const attemptTimeoutMs = computeAttemptTimeout(
+        options?.deadlineMs,
+        route.timeoutMs ?? DEFAULT_ATTEMPT_TIMEOUT_MS,
       );
-      console.log(`[llm-tool-calling] callLLMWithTools: OpenRouter model=${model} response status=${res.status} latencyMs=${Date.now() - t0} @ ${new Date().toISOString()}`);
-    } catch (err) {
-      const latencyMs = Date.now() - t0;
-      const msg = err instanceof Error ? err.message : String(err);
-      console.log(`[llm-tool-calling] callLLMWithTools: OpenRouter model=${model} threw after ${latencyMs}ms: ${msg} @ ${new Date().toISOString()}`);
-      const category = categorizeError(null, msg);
-      failures.push({ model, status: null, category, latencyMs, message: msg });
-      // Network/timeout errors are retryable — try next model
-      continue;
-    }
+      if (attemptTimeoutMs === null) {
+        const remainingMs = options?.deadlineMs ? options.deadlineMs - Date.now() : 0;
+        logRoute("budget_exhausted", {
+          provider: route.provider,
+          model,
+          remainingBudgetMs: Math.max(0, remainingMs),
+        });
+        throw new AgentBudgetExhaustedError(
+          remainingMs,
+          `${route.provider}/${model} attempt cannot fit in remaining budget`,
+        );
+      }
+      const wasDeadlineConstrained =
+        options?.deadlineMs !== undefined && attemptTimeoutMs < route.timeoutMs;
 
-    if (!res.ok) {
-      const txt = await res.text().catch(() => "");
-      const latencyMs = Date.now() - t0;
-      const category = categorizeError(res.status, txt);
-      console.log(`[llm-tool-calling] callLLMWithTools: OpenRouter model=${model} not ok status=${res.status} category=${category} latencyMs=${latencyMs} @ ${new Date().toISOString()}`);
-      failures.push({ model, status: res.status, category, latencyMs, message: txt.slice(0, 200) });
-
-      // Log the failed attempt
-      logLLMCall({
-        prompt: messages.map((m) => `${m.role}: ${m.content}`).join("\n"),
-        systemPrompt,
-        output: "",
-        provider: "openrouter",
+      ctx.timeoutMs = attemptTimeoutMs;
+      const t0 = Date.now();
+      logRoute("attempt_start", {
+        provider: route.provider,
         model,
-        latencyMs,
-        failover: failures.slice(0, -1).map((f) => f.model),
-        metadata: { ...options?.evalMetadata ?? {}, failureCategory: category } as LLMCallMetadata,
+        costClass: route.costClass,
+        timeoutMs: attemptTimeoutMs,
+        remainingBudgetMs: options?.deadlineMs
+          ? Math.max(0, options.deadlineMs - t0)
+          : undefined,
       });
 
-      // Non-retryable errors (400 bad request) — skip to next model
-      // Retryable errors (429, 5xx, network) — also skip to next model
-      continue;
-    }
-
-    const data = await res.json();
-    const choice = data.choices?.[0];
-    if (!choice) {
-      // Empty response — try next model
-      console.log(`[llm-tool-calling] callLLMWithTools: OpenRouter model=${model} empty response @ ${new Date().toISOString()}`);
-      failures.push({ model, status: res.status, category: "empty_response", latencyMs: Date.now() - t0, message: "No choices in response" });
-      continue;
-    }
-
-    const text: string = choice.message?.content ?? "";
-    const rawToolCalls = choice.message?.tool_calls ?? [];
-    const finishReason: string = choice.finish_reason ?? "stop";
-
-    const toolCalls: ToolCallRequest[] = rawToolCalls.map((raw: {
-      id: string;
-      function: { name: string; arguments: string };
-    }) => {
-      let inputs: Record<string, unknown> = {};
       try {
-        inputs = JSON.parse(raw.function.arguments);
-      } catch {
-        inputs = {};
+        const result =
+          route.adapter === "gemini"
+            ? await attemptGemini(model, req, ctx)
+            : route.adapter === "ollama"
+              ? await attemptOllama(model, req, ctx)
+              : await attemptOpenAiCompatible(
+                  route,
+                  model,
+                  req,
+                  ctx,
+                  compatEndpointFor(route, ctx.secrets),
+                );
+
+        recordProviderSuccess(route.provider);
+        const latencyMs = Date.now() - t0;
+        logRoute("attempt_success", {
+          provider: route.provider,
+          model: result.model,
+          latencyMs,
+          toolCalls: result.toolCalls.length,
+          remainingBudgetMs: options?.deadlineMs
+            ? Math.max(0, options.deadlineMs - Date.now())
+            : undefined,
+        });
+        logLLMCall({
+          prompt: promptLog,
+          systemPrompt,
+          output: result.text,
+          provider: route.provider,
+          model: result.model,
+          latencyMs,
+          failover: failures.map((f) => `${f.provider}/${f.model}`),
+          metadata: options?.evalMetadata ?? {},
+        });
+        return result;
+      } catch (err) {
+        const latencyMs = Date.now() - t0;
+
+        // Upstream/client abort — stop the whole chain immediately.
+        if (err instanceof UpstreamAbortError || options?.signal?.aborted) {
+          throw err instanceof UpstreamAbortError
+            ? err
+            : new UpstreamAbortError(route.provider);
+        }
+        // Agent budget is already exhausted — nothing else can run.
+        if (err instanceof AgentBudgetExhaustedError) throw err;
+
+        const failure: ProviderFailure =
+          err instanceof ProviderAttemptError ? err.failure : classifyThrownFailure(err);
+
+        // A timeout that was clipped by the shared deadline means no other
+        // legitimate attempt can fit — surface the truthful budget error.
+        if (failure.class === "timeout" && wasDeadlineConstrained) {
+          const remainingMs = options?.deadlineMs ? options.deadlineMs - Date.now() : 0;
+          throw new AgentBudgetExhaustedError(
+            remainingMs,
+            `${route.provider}/${model} timed out against agent budget (timeout=${attemptTimeoutMs}ms)`,
+          );
+        }
+
+        failures.push({
+          provider: route.provider,
+          model,
+          class: failure.class,
+          httpStatus: failure.httpStatus,
+          latencyMs,
+          message: failure.message,
+        });
+
+        logRoute("attempt_failure", {
+          provider: route.provider,
+          model,
+          class: failure.class,
+          httpStatus: failure.httpStatus,
+          scope: failure.scope,
+          latencyMs,
+          retryAfterMs: failure.retryAfterMs,
+          remainingBudgetMs: options?.deadlineMs
+            ? Math.max(0, options.deadlineMs - Date.now())
+            : undefined,
+        });
+        logLLMCall({
+          prompt: promptLog,
+          systemPrompt,
+          output: "",
+          provider: route.provider,
+          model,
+          latencyMs,
+          failover: failures.slice(0, -1).map((f) => `${f.provider}/${f.model}`),
+          metadata: { ...(options?.evalMetadata ?? {}), failureCategory: failure.class } as LLMCallMetadata,
+        });
+
+        if (failure.scope === "provider") {
+          recordProviderFailure(route.provider, failure);
+          logRoute("fallback", {
+            from: route.provider,
+            to: nextProvider ?? "none",
+            class: failure.class,
+            cooldownUntil: failure.class === "rate_limited" && failure.retryAfterMs
+              ? Date.now() + failure.retryAfterMs
+              : undefined,
+          });
+          break; // next provider — no more models behind the same account
+        }
+
+        // Model-scope failure — cool the model, try the provider's next model.
+        recordModelFailure(route.provider, model);
       }
-      return {
-        toolCallId: raw.id,
-        toolId: toolIdMap.get(raw.function.name) ?? toToolDefinitionId(raw.function.name),
-        inputs,
-      };
-    });
-
-    const result: LLMToolCallResponse = {
-      text,
-      toolCalls,
-      finishReason,
-      model: data.model ?? model,
-    };
-
-    console.log(`[llm-tool-calling] callLLMWithTools: OpenRouter model=${result.model} success latencyMs=${Date.now() - t0} toolCalls=${toolCalls.length} @ ${new Date().toISOString()}`);
-    logLLMCall({
-      prompt: messages.map((m) => `${m.role}: ${m.content}`).join("\n"),
-      systemPrompt,
-      output: text,
-      provider: "openrouter",
-      model: result.model,
-      latencyMs: Date.now() - t0,
-      failover: failures.map((f) => f.model),
-      metadata: options?.evalMetadata ?? {},
-    });
-
-    return result;
-  }
-
-  // All OpenRouter models failed — try Gemini direct API fallback
-  const geminiKey = getGeminiKey();
-  console.log("[llm-tool-calling] OpenRouter failures:", failures.map((f) => `${f.model}(${f.status})`).join(", "), "— trying Gemini direct fallback, key present:", !!geminiKey);
-  if (geminiKey && openRouterTools.length > 0) {
-    try {
-      const geminiResult = await callGeminiWithTools(
-        systemPrompt,
-        messages,
-        tools,
-        toolIdMap,
-        { temperature: options?.temperature, maxTokens: options?.maxTokens, evalMetadata: options?.evalMetadata, deadlineMs: options?.deadlineMs, signal: options?.signal },
-      );
-      // Log that we fell back to Gemini direct
-      logLLMCall({
-        prompt: messages.map((m) => `${m.role}: ${m.content}`).join("\n"),
-        systemPrompt,
-        output: geminiResult.text,
-        provider: "gemini-direct",
-        model: "gemini-2.5-flash",
-        latencyMs: 0,
-        failover: failures.map((f) => f.model),
-        metadata: { ...options?.evalMetadata ?? {}, failureCategory: "openrouter_all_failed_gemini_fallback" } as LLMCallMetadata,
-      });
-      return geminiResult;
-    } catch (geminiErr) {
-      // Preserve AgentBudgetExhaustedError — do not hide agent-budget
-      // exhaustion as a generic provider failure.
-      if (geminiErr instanceof AgentBudgetExhaustedError) {
-        throw geminiErr;
-      }
-      const msg = geminiErr instanceof Error ? geminiErr.message : String(geminiErr);
-      console.log("[llm-tool-calling] Gemini direct fallback FAILED:", msg);
-      failures.push({ model: "gemini-2.5-flash (direct)", status: null, category: "gemini_direct_error", latencyMs: 0, message: msg });
     }
   }
 
-  // All models failed — throw with structured failure info (no secrets)
-  const failureSummary = failures.map((f) => `${f.model}(${f.category}, ${f.latencyMs}ms)`).join("; ");
-  throw new Error(
-    `All tool-calling models failed. Attempts: ${failureSummary}. ` +
-    `Last error: ${failures[failures.length - 1]?.message ?? "unknown"}`,
-  );
+  throw new AllRoutesFailedError(failures, plan.excluded);
 }
 
 // ─── Format tool results for LLM ──────────────────────────────────

@@ -7,6 +7,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { llmHealth, DEFAULT_MODELS } from "@/lib/llm";
+import { providerDiagnostics } from "@/lib/litt-intelligence/provider-registry";
 import { auth } from "@/lib/auth";
 
 export const runtime = "nodejs";
@@ -44,6 +45,8 @@ export async function GET(req: NextRequest) {
       freeModels,
       hasGemini: health.gemini.available,
       hasOpenRouter: health.openrouter.available,
+      // Basic router circuit-breaker state — presence/state only, no secrets.
+      basicRoutes: providerDiagnostics(),
     });
   } catch (_error) {
     return NextResponse.json({ error: "Health check failed" }, { status: 500 });

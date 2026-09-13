@@ -168,6 +168,14 @@ export default function PrivacyPage() {
                 (Whisper).
               </li>
               <li>
+                <strong>Mistral:</strong> LLM routing for text and code tasks.
+              </li>
+              <li>
+                <strong>Local models (Ollama):</strong> Optional on-device or
+                self-hosted inference — requests stay on your infrastructure
+                when a local route is selected.
+              </li>
+              <li>
                 <strong>OpenAI:</strong> Premium LLM and media generation
                 (BYOK — Bring Your Own Key).
               </li>

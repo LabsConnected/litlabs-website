@@ -246,16 +246,25 @@ export async function runLiTTForVoice(args: {
   // 4. If no tools are needed (the LLM returns text immediately),
   //    skip the loop entirely and use the text directly.
   //
-  // Voice needs speed: if the OPENROUTER_API_KEY is not configured,
-  // fall back to the text-only executeRun path (no tool dispatch).
+  // Voice needs speed: if no Basic provider credential is configured at
+  // all, fall back to the text-only executeRun path (no tool dispatch).
+  // The router inside callLLMWithTools picks the healthiest eligible route.
 
-  const openRouterKey = process.env.OPENROUTER_API_KEY;
+  const anyProviderKey =
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.OPENROUTER_API_KEY ||
+    process.env.GROQ_API_KEY ||
+    process.env.MISTRAL_API_KEY ||
+    (process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_AI_API_TOKEN) ||
+    process.env.OLLAMA_BASE_URL ||
+    process.env.LITT_OLLAMA_URL;
   let finalText: string;
   let finalProvider: string;
   let finalModel: string;
   let finalLatencyMs: number;
 
-  if (openRouterKey && ctx.userId) {
+  if (anyProviderKey && ctx.userId) {
     // ── Native tool-calling path ──
     const toolDefs = getProjectToolDefinitions();
     const messages: Array<{ role: "user" | "assistant"; content: string }> = [
@@ -268,7 +277,7 @@ export async function runLiTTForVoice(args: {
 
     const t0 = Date.now();
     let roundText = "";
-    const roundProvider = "openrouter";
+    let roundProvider = "auto";
     let roundModel = "google/gemini-2.5-flash";
     // Track repeated tool calls to detect infinite loops
     const toolCallCounts = new Map<string, number>();
@@ -289,10 +298,14 @@ export async function runLiTTForVoice(args: {
             model: roundModel,
             maxTokens: 500,
             temperature: 0.2,
+            // Shared absolute deadline — provider failover can never blow
+            // past the Vapi response window.
+            deadlineMs: t0 + VOICE_TOTAL_TIMEOUT_MS,
           },
         );
 
         roundModel = llmResp.model;
+        roundProvider = llmResp.provider ?? roundProvider;
         roundText = llmResp.text;
 
         // No tool calls → we're done, return the text
@@ -347,7 +360,12 @@ export async function runLiTTForVoice(args: {
               voiceSystem,
               messages,
               [],
-              { model: roundModel, maxTokens: 300, temperature: 0.2 },
+              {
+                model: roundModel,
+                maxTokens: 300,
+                temperature: 0.2,
+                deadlineMs: t0 + VOICE_TOTAL_TIMEOUT_MS,
+              },
             );
             roundText = finalResp.text;
             break;
@@ -379,7 +397,12 @@ export async function runLiTTForVoice(args: {
             voiceSystem,
             messages,
             [],
-            { model: roundModel, maxTokens: 300, temperature: 0.2 },
+            {
+              model: roundModel,
+              maxTokens: 300,
+              temperature: 0.2,
+              deadlineMs: t0 + VOICE_TOTAL_TIMEOUT_MS,
+            },
           );
           roundText = finalResp.text;
         }
@@ -394,7 +417,7 @@ export async function runLiTTForVoice(args: {
     finalModel = roundModel;
     finalLatencyMs = Date.now() - t0;
   } else {
-    // ── Text-only fallback path (no OPENROUTER_API_KEY) ──
+    // ── Text-only fallback path (no provider credential configured) ──
     const voiceFull = [
       voiceSystem,
       "",

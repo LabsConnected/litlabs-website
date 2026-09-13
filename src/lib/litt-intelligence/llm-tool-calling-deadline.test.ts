@@ -1,13 +1,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /**
- * Regression tests for the deadline/budget contract in callLLMWithTools
- * and callGeminiWithTools.
+ * Deadline/budget contract tests for the provider-neutral router in
+ * callLLMWithTools.
  *
- * These tests exercise REAL Gemini timeout/retry behavior by injecting a
- * mock model factory through the _setGeminiModelFactory test seam.
- * Fake timers control the clock so we can verify retry delays, budget
- * exhaustion, and deadline-constrained timeouts deterministically.
+ * These tests exercise REAL timeout behavior by injecting a mock Gemini model
+ * through the _setGeminiModelFactory test seam. Fake timers control the clock
+ * so we can verify cooldowns, budget exhaustion, and deadline-constrained
+ * timeouts deterministically.
+ *
+ * Contract under test:
+ *   - one absolute deadline is shared by every provider attempt
+ *   - a provider timeout falls through to the next provider when the
+ *     deadline still has room — it does NOT kill the agent
+ *   - a deadline-constrained timeout surfaces as AgentBudgetExhaustedError
+ *   - 429 cools down the provider and routes around it — no blocking sleep
+ *   - an exhausted budget throws AgentBudgetExhaustedError, not a generic
+ *     provider failure
  */
 
 // Mock braintrust logging
@@ -27,19 +36,45 @@ vi.stubGlobal("fetch", mockFetch);
 import {
   callLLMWithTools,
   AgentBudgetExhaustedError,
+  AllRoutesFailedError,
   _setGeminiModelFactory,
   type GeminiModelLike,
 } from "./llm-tool-calling";
+import {
+  _resetProviderHealthForTests,
+  getProviderHealth,
+} from "./provider-registry";
 
 // ─── Test helpers ──────────────────────────────────────────────
 
-/** A minimal tool definition that triggers the Gemini fallback path
- *  (callLLMWithTools only tries Gemini when openRouterTools.length > 0). */
 const TEST_TOOL = {
   id: "test.tool",
   description: "A test tool",
   inputSchema: { type: "object", properties: {}, required: [] },
 };
+
+const PROVIDER_ENVS = [
+  "GEMINI_API_KEY",
+  "GOOGLE_API_KEY",
+  "OPENROUTER_API_KEY",
+  "GROQ_API_KEY",
+  "MISTRAL_API_KEY",
+  "CLOUDFLARE_ACCOUNT_ID",
+  "CLOUDFLARE_AI_API_TOKEN",
+  "OLLAMA_BASE_URL",
+  "OLLAMA_HOST",
+  "OLLAMA_HOST_PC",
+  "LITT_OLLAMA_URL",
+  "OLLAMA_MODEL",
+  "RAILWAY_ENVIRONMENT",
+  "RAILWAY_PROJECT_ID",
+  "VERCEL",
+];
+
+function clearProviderEnvs() {
+  for (const key of PROVIDER_ENVS) vi.stubEnv(key, "");
+  vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+}
 
 function makeGeminiSuccess(text: string, functionCalls: Array<{ name: string; args?: Record<string, unknown> }> = []) {
   return {
@@ -99,6 +134,7 @@ function makeOpenRouterFailure(status: number, message: string) {
   return {
     ok: false,
     status,
+    headers: new Headers(),
     json: async () => ({}),
     text: async () => message,
   };
@@ -108,6 +144,7 @@ function makeOpenRouterSuccess(model: string, text: string) {
   return {
     ok: true,
     status: 200,
+    headers: new Headers(),
     json: async () => ({
       model,
       choices: [{ message: { content: text, tool_calls: [] }, finish_reason: "stop" }],
@@ -116,19 +153,10 @@ function makeOpenRouterSuccess(model: string, text: string) {
   };
 }
 
-/**
- * Flush all pending microtasks and zero-length timers.
- * With fake timers, `await` alone doesn't resolve promises from
- * mock implementations. This helper ensures all pending microtasks
- * complete before we advance the clock.
- */
 async function flushMicrotasks(): Promise<void> {
   await vi.advanceTimersByTimeAsync(0);
 }
 
-/**
- * Advance fake timers and flush microtasks in one step.
- */
 async function tick(ms: number): Promise<void> {
   await vi.advanceTimersByTimeAsync(ms);
 }
@@ -138,13 +166,15 @@ async function tick(ms: number): Promise<void> {
 describe("callLLMWithTools — deadline/budget contract (real Gemini behavior)", () => {
   beforeEach(() => {
     mockFetch.mockReset();
-    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
-    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    _resetProviderHealthForTests();
+    vi.unstubAllEnvs();
+    clearProviderEnvs();
     _setGeminiModelFactory(null);
     vi.useFakeTimers();
   });
 
   afterEach(() => {
+    _resetProviderHealthForTests();
     vi.unstubAllEnvs();
     vi.useRealTimers();
     _setGeminiModelFactory(null);
@@ -152,10 +182,8 @@ describe("callLLMWithTools — deadline/budget contract (real Gemini behavior)",
 
   // ─── A. Gemini generateContent never settles ─────────────────
 
-  it("A. Gemini generateContent never settles → attempt times out within calculated budget", async () => {
-    // All OpenRouter models fail → forces Gemini fallback
-    mockFetch.mockResolvedValue(makeOpenRouterFailure(402, "Billing required"));
-
+  it("A. Gemini attempt never settles → deadline-constrained timeout → AgentBudgetExhaustedError", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
     const { model, generateContentMock } = makeMockModel(["hang"]);
     _setGeminiModelFactory(() => model);
 
@@ -166,270 +194,146 @@ describe("callLLMWithTools — deadline/budget contract (real Gemini behavior)",
       "You are LiTT.",
       [{ role: "user", content: "Hello" }],
       [TEST_TOOL],
-      { model: "test-model", deadlineMs: deadline },
+      { deadlineMs: deadline },
     );
-    // Prevent unhandled rejection warning — assertion is below
     promise.catch(() => {});
 
-    // Flush microtasks so OpenRouter failures complete and Gemini attempt starts
     await flushMicrotasks();
-
-    // Advance past the 4000ms attempt timeout
     await tick(4_100);
 
     await expect(promise).rejects.toThrow(AgentBudgetExhaustedError);
-
-    // Exactly 1 Gemini attempt occurred
     expect(generateContentMock).toHaveBeenCalledTimes(1);
 
-    // The attempt was called with a bounded timeout (4000ms, not 30000ms)
-    const callArgs = generateContentMock.mock.calls[0];
-    const requestOptions = callArgs[1];
-    expect(requestOptions.timeout).toBeLessThanOrEqual(4_000);
+    // The attempt was bounded by the deadline (4000ms, not the 30s route cap).
+    const requestOptions = generateContentMock.mock.calls[0][1];
+    expect(requestOptions!.timeout).toBeLessThanOrEqual(4_000);
   });
 
-  // ─── B. Gemini returns 429, retry succeeds ───────────────────
+  // ─── B. Gemini 429 → route around, no sleep ──────────────────
 
-  it("B. Gemini 429 → advance 60s → second call succeeds (exactly 2 attempts)", async () => {
-    mockFetch.mockResolvedValue(makeOpenRouterFailure(402, "Billing required"));
+  it("B. Gemini 429 cools down the provider and OpenRouter continues without any sleep", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    mockFetch.mockResolvedValue(makeOpenRouterSuccess("openrouter/free", "OR handled it."));
 
-    const { model, generateContentMock } = makeMockModel(["429", "success"]);
+    const { model, generateContentMock } = makeMockModel(["429"]);
     _setGeminiModelFactory(() => model);
-
-    // Deadline far enough for 60s delay + 30s attempt + 1s cleanup
-    const deadline = Date.now() + 120_000;
-
-    const promise = callLLMWithTools(
-      "You are LiTT.",
-      [{ role: "user", content: "Hello" }],
-      [TEST_TOOL],
-      { model: "test-model", deadlineMs: deadline },
-    );
-
-    // Flush microtasks: OpenRouter failures + first Gemini 429
-    await flushMicrotasks();
-
-    // Now the code is sleeping for 60s before retry
-    await tick(60_100);
-
-    // Second attempt should succeed
-    const result = await promise;
-    expect(result.text).toBe("Gemini success");
-
-    // Exactly 2 Gemini attempts
-    expect(generateContentMock).toHaveBeenCalledTimes(2);
-  });
-
-  // ─── B2. Abort listener cleanup on normal backoff completion ─
-
-  it("B2. Gemini 429 backoff removes its abort listener after normal sleep (no leak)", async () => {
-    mockFetch.mockResolvedValue(makeOpenRouterFailure(402, "Billing required"));
-
-    const { model, generateContentMock } = makeMockModel(["429", "success"]);
-    _setGeminiModelFactory(() => model);
-
-    // Count listeners registered/removed on the upstream signal across the
-    // whole call — every layer (fetchWithTimeout, raceProviderAttempt, and
-    // the 429 backoff sleep) must leave zero net listeners behind.
-    const controller = new AbortController();
-    let added = 0;
-    let removed = 0;
-    const signal = controller.signal;
-    const origAdd = signal.addEventListener.bind(signal);
-    const origRemove = signal.removeEventListener.bind(signal);
-    vi.spyOn(signal, "addEventListener").mockImplementation(
-      (...args: Parameters<AbortSignal["addEventListener"]>) => {
-        added++;
-        return origAdd(...args);
-      },
-    );
-    vi.spyOn(signal, "removeEventListener").mockImplementation(
-      (...args: Parameters<AbortSignal["removeEventListener"]>) => {
-        removed++;
-        return origRemove(...args);
-      },
-    );
 
     const deadline = Date.now() + 120_000;
     const promise = callLLMWithTools(
       "You are LiTT.",
       [{ role: "user", content: "Hello" }],
       [TEST_TOOL],
-      { model: "test-model", deadlineMs: deadline, signal },
+      { deadlineMs: deadline },
     );
 
-    await flushMicrotasks();
-    await tick(60_100);
-
     const result = await promise;
-    expect(result.text).toBe("Gemini success");
-    expect(generateContentMock).toHaveBeenCalledTimes(2);
+    expect(result.text).toBe("OR handled it.");
+    expect(result.provider).toBe("openrouter");
 
-    // Listeners were registered (the backoff sleep + attempt races), and
-    // every one was removed — including the sleep's listener after the
-    // normal (non-aborted) completion path.
-    expect(added).toBeGreaterThan(0);
-    expect(removed).toBe(added);
+    // Exactly ONE Gemini attempt — 429 never retries or sleeps in-request.
+    expect(generateContentMock).toHaveBeenCalledTimes(1);
+    expect(getProviderHealth("gemini").state).toBe("cooldown");
+    // No backoff/sleep timer is pending.
+    expect(vi.getTimerCount()).toBe(0);
   });
 
-  // ─── C. 429 retry rejected ───────────────────────────────────
+  // ─── C. 429 with every provider failing ──────────────────────
 
-  it("C. Gemini 429 → retry rejected when budget cannot fit delay + attempt + cleanup", async () => {
+  it("C. Gemini 429 + OpenRouter 402 → AllRoutesFailedError with both attempts recorded", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
     mockFetch.mockResolvedValue(makeOpenRouterFailure(402, "Billing required"));
 
     const { model, generateContentMock } = makeMockModel(["429"]);
     _setGeminiModelFactory(() => model);
 
-    // Deadline only 5s remaining — cannot fit 60s delay + 30s attempt + 1s cleanup
-    const deadline = Date.now() + 5_000;
-
     const promise = callLLMWithTools(
       "You are LiTT.",
       [{ role: "user", content: "Hello" }],
       [TEST_TOOL],
-      { model: "test-model", deadlineMs: deadline },
+      { deadlineMs: Date.now() + 60_000 },
     );
-    promise.catch(() => {});
 
-    // Flush microtasks: OpenRouter failures + first Gemini 429
-    await flushMicrotasks();
-
-    // Should reject with AgentBudgetExhaustedError — no sleep/retry
-    await expect(promise).rejects.toThrow(AgentBudgetExhaustedError);
-    await expect(promise).rejects.toThrow(/429 retry delay/);
-
-    // Exactly 1 Gemini attempt (no retry)
+    try {
+      await promise;
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(AllRoutesFailedError);
+      const e = err as AllRoutesFailedError;
+      expect(e.failures.map((f) => f.class)).toEqual(["rate_limited", "billing"]);
+    }
     expect(generateContentMock).toHaveBeenCalledTimes(1);
+    // One OpenRouter call only — account-level 402 stops the provider.
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
-  // ─── D. Multiple 429 retries ────────────────────────────────
+  // ─── D. Golden-run regression: Gemini timeout is NOT terminal ─
 
-  it("D. Gemini 429 repeatedly → retries stop before crossing absolute deadline", async () => {
-    mockFetch.mockResolvedValue(makeOpenRouterFailure(402, "Billing required"));
-
-    const { model, generateContentMock } = makeMockModel(["429", "429", "429"]);
-    _setGeminiModelFactory(() => model);
-
-    // Deadline 130s — fits first 60s retry but not second 120s retry
-    // First retry: delay=60s, budget=min(30000, 130000-60000-1000)=30000 → fits
-    // Second retry: delay=120s, budget=min(30000, ~70000-120000-1000) → negative → rejected
-    const deadline = Date.now() + 130_000;
-
-    const promise = callLLMWithTools(
-      "You are LiTT.",
-      [{ role: "user", content: "Hello" }],
-      [TEST_TOOL],
-      { model: "test-model", deadlineMs: deadline },
-    );
-    promise.catch(() => {});
-
-    // Flush: OpenRouter failures + first Gemini 429
-    await flushMicrotasks();
-
-    // Sleep 60s for first retry, then second 429
-    await tick(60_100);
-
-    // Should reject with AgentBudgetExhaustedError — second retry (120s) cannot fit
-    await expect(promise).rejects.toThrow(AgentBudgetExhaustedError);
-
-    // Exactly 2 Gemini attempts (first + one retry), not 3
-    expect(generateContentMock).toHaveBeenCalledTimes(2);
-  });
-
-  // ─── E. Deadline-constrained Gemini timeout ────────────────
-
-  it("E. Deadline-constrained timeout → AgentBudgetExhaustedError, not generic SDK timeout", async () => {
-    mockFetch.mockResolvedValue(makeOpenRouterFailure(402, "Billing required"));
+  it("D. Gemini timeout falls through to OpenRouter when the deadline still has room", async () => {
+    // This is the golden-run-34720866763 fix: a Gemini request timeout must
+    // not end the agent when another compatible route remains.
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    mockFetch.mockResolvedValue(makeOpenRouterSuccess("openrouter/free", "Recovered by OR."));
 
     const { model, generateContentMock } = makeMockModel(["hang"]);
     _setGeminiModelFactory(() => model);
 
-    // Give less than GEMINI_TIMEOUT_MS (30s) remaining
-    // remainingMs=10000, timeoutMs=min(30000, 10000-1000)=9000
+    // 120s deadline → Gemini attempt gets the full 30s route timeout
+    // (not deadline-constrained), then OR continues with budget to spare.
+    const promise = callLLMWithTools(
+      "You are LiTT.",
+      [{ role: "user", content: "Hello" }],
+      [TEST_TOOL],
+      { deadlineMs: Date.now() + 120_000 },
+    );
+
+    await flushMicrotasks();
+    await tick(30_100);
+
+    const result = await promise;
+    expect(result.provider).toBe("openrouter");
+    expect(result.text).toBe("Recovered by OR.");
+    expect(generateContentMock).toHaveBeenCalledTimes(1);
+    expect(getProviderHealth("gemini").state).toBe("degraded");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  // ─── E. Deadline-constrained Gemini timeout ────────────────
+
+  it("E. Deadline-constrained timeout → AgentBudgetExhaustedError, not a generic timeout", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    const { model, generateContentMock } = makeMockModel(["hang"]);
+    _setGeminiModelFactory(() => model);
+
+    // remainingMs=10000 → timeoutMs=min(30000, 10000-1000)=9000
     const deadline = Date.now() + 10_000;
 
     const promise = callLLMWithTools(
       "You are LiTT.",
       [{ role: "user", content: "Hello" }],
       [TEST_TOOL],
-      { model: "test-model", deadlineMs: deadline },
+      { deadlineMs: deadline },
     );
     promise.catch(() => {});
 
-    // Flush microtasks so Gemini attempt starts
     await flushMicrotasks();
-
-    // Advance past the 9000ms deadline-constrained timeout
     await tick(9_100);
 
-    // Should throw AgentBudgetExhaustedError, not a generic AbortError
     await expect(promise).rejects.toThrow(AgentBudgetExhaustedError);
     await expect(promise).rejects.toThrow(/timed out against agent budget/);
 
     expect(generateContentMock).toHaveBeenCalledTimes(1);
-
-    // Verify the timeout was deadline-constrained (9000ms, not 30000ms)
-    const callArgs = generateContentMock.mock.calls[0];
-    const requestOptions = callArgs[1];
-    expect(requestOptions.timeout).toBe(9_000);
-  });
-
-  // ─── D2. Final 429 does not sleep ───────────────────────────
-
-  it("D2. Final 429 does not sleep — exactly 3 attempts, rejects immediately after 3rd 429", async () => {
-    mockFetch.mockResolvedValue(makeOpenRouterFailure(402, "Billing required"));
-
-    const { model, generateContentMock } = makeMockModel(["429", "429", "429"]);
-    _setGeminiModelFactory(() => model);
-
-    // Deadline large enough that a hypothetical 180s sleep would fit
-    // (300s remaining > 180s delay + 30s attempt + 1s cleanup)
-    const deadline = Date.now() + 300_000;
-
-    const promise = callLLMWithTools(
-      "You are LiTT.",
-      [{ role: "user", content: "Hello" }],
-      [TEST_TOOL],
-      { model: "test-model", deadlineMs: deadline },
-    );
-    promise.catch(() => {});
-
-    // Flush: OpenRouter failures + first Gemini 429
-    await flushMicrotasks();
-
-    // Sleep 60s for first retry → second 429
-    await tick(60_100);
-
-    // Flush: second 429 completes
-    await flushMicrotasks();
-
-    // Sleep 120s for second retry → third 429
-    await tick(120_100);
-
-    // The third 429 should reject immediately — no 180s sleep
-    // Capture the time before we await the rejection
-    const timeBeforeReject = Date.now();
-
-    await expect(promise).rejects.toThrow(/429/);
-
-    // Verify exactly 3 generateContent calls (not 4+)
-    expect(generateContentMock).toHaveBeenCalledTimes(3);
-
-    // Verify no additional 180s timer was scheduled after the 3rd 429.
-    // If a 180s sleep had been scheduled, advancing time would trigger it,
-    // but the promise already rejected. We verify by checking that the
-    // time did not advance by 180s — the rejection was immediate.
-    const elapsed = Date.now() - timeBeforeReject;
-    expect(elapsed).toBeLessThan(60_000); // should be ~0, definitely not 180s
+    const requestOptions = generateContentMock.mock.calls[0][1];
+    expect(requestOptions!.timeout).toBe(9_000);
   });
 
   // ─── F. Build repair propagation ────────────────────────────
 
   it("F. Build-repair callback receives the same absolute deadlineMs", async () => {
-    // Import createAutonomousRepairCallback (now exported)
     const { createAutonomousRepairCallback } = await import("./agent-loop-v2");
 
-    // Mock the transport minimally
     const mockTransport = {
       readFile: vi.fn().mockResolvedValue("file content"),
       writeFile: vi.fn().mockResolvedValue(undefined),
@@ -438,7 +342,8 @@ describe("callLLMWithTools — deadline/budget contract (real Gemini behavior)",
       runCommand: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
     };
 
-    // Mock fetch to return success for the repair callLLMWithTools
+    // Only OpenRouter is configured → the repair call succeeds via OR.
+    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
     mockFetch.mockResolvedValue(makeOpenRouterSuccess("test-model", "Repair done"));
 
     const deadline = Date.now() + 300_000;
@@ -449,16 +354,9 @@ describe("callLLMWithTools — deadline/budget contract (real Gemini behavior)",
       deadline,
     );
 
-    // Execute the repair callback — it calls callLLMWithTools internally
-    // with the deadlineMs we passed
     const result = await repairCallback(1, "Build error: syntax error");
 
-    // The repair callback should have called callLLMWithTools (via fetch)
     expect(mockFetch).toHaveBeenCalled();
-
-    // Verify the fetch was called (meaning callLLMWithTools was invoked)
-    // The deadline propagation is verified by the fact that the callback
-    // accepts and uses the deadlineMs parameter.
     expect(result).toBe(true);
   });
 
@@ -467,7 +365,7 @@ describe("callLLMWithTools — deadline/budget contract (real Gemini behavior)",
   it("G. resumeAgentLoopV2 passes deadlineMs === startTime + cfg.maxRuntimeMs", async () => {
     // Verify via source inspection that resumeAgentLoopV2 passes the deadline.
     // A full integration test would require mocking the entire workspace/transport
-    // stack, which is covered by v2-integration.test.ts. Here we verify the
+    // stack, which is covered by the agent-loop tests. Here we verify the
     // contract is present in the source.
     const fs = await import("fs");
     const source = fs.readFileSync(
@@ -475,30 +373,28 @@ describe("callLLMWithTools — deadline/budget contract (real Gemini behavior)",
       "utf-8",
     );
 
-    // Check that resumeAgentLoopV2 passes deadlineMs: startTime + cfg.maxRuntimeMs
     const resumeMatch = source.match(
       /resumeAgentLoopV2[\s\S]*?deadlineMs:\s*startTime\s*\+\s*cfg\.maxRuntimeMs/,
     );
     expect(resumeMatch).not.toBeNull();
     expect(resumeMatch![0]).toContain("deadlineMs: startTime + cfg.maxRuntimeMs");
 
-    // Also verify runAgentLoopV2 does the same
     const runMatch = source.match(
       /runAgentLoopV2[\s\S]*?deadlineMs:\s*startTime\s*\+\s*cfg\.maxRuntimeMs/,
     );
     expect(runMatch).not.toBeNull();
     expect(runMatch![0]).toContain("deadlineMs: startTime + cfg.maxRuntimeMs");
 
-    // Verify createAutonomousRepairCallback accepts and passes deadlineMs
     const repairMatch = source.match(
       /createAutonomousRepairCallback[\s\S]*?deadlineMs/,
     );
     expect(repairMatch).not.toBeNull();
   });
 
-  // ─── OpenRouter hanging request (kept from before) ──────────
+  // ─── OpenRouter hanging request ──────────────────────────────
 
-  it("OpenRouter hanging request remains bounded by deadline", async () => {
+  it("a hanging OpenRouter request stays bounded by the shared deadline", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
     // Simulate a fetch that never resolves but respects AbortSignal
     mockFetch.mockImplementationOnce((_url: string, opts: { signal?: AbortSignal }) => {
       return new Promise((_resolve, reject) => {
@@ -510,61 +406,48 @@ describe("callLLMWithTools — deadline/budget contract (real Gemini behavior)",
       });
     });
 
-    // Disable Gemini fallback to isolate OpenRouter behavior
-    vi.stubEnv("GEMINI_API_KEY", "");
-
-    // Deadline 3s → timeoutMs=min(30000, 3000-1000)=2000
+    // Deadline 3s → timeoutMs=min(30000, 3000-1000)=2000 → deadline-constrained
     const deadline = Date.now() + 3_000;
 
     const promise = callLLMWithTools(
       "You are LiTT.",
       [{ role: "user", content: "Hello" }],
       [TEST_TOOL],
-      { model: "google/gemini-2.5-flash", deadlineMs: deadline },
+      { deadlineMs: deadline },
     );
     promise.catch(() => {});
 
-    // Flush microtasks so the first fetch starts
     await flushMicrotasks();
-
-    // Advance past the 2000ms timeout
     await tick(2_100);
 
-    // The first model's fetch should have been aborted
-    // Subsequent models will fail (mock returns undefined after first call)
-    // The promise should reject
-    await expect(promise).rejects.toThrow();
-
+    await expect(promise).rejects.toThrow(AgentBudgetExhaustedError);
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    const fetchCall = mockFetch.mock.calls[0];
-    const options = fetchCall[1];
+    const options = mockFetch.mock.calls[0][1] as { signal?: AbortSignal };
     expect(options.signal).toBeDefined();
   });
 
   // ─── AgentBudgetExhaustedError preservation ─────────────────
 
-  it("AgentBudgetExhaustedError from Gemini is rethrown unchanged, not hidden as provider failure", async () => {
-    mockFetch.mockResolvedValue(makeOpenRouterFailure(402, "Billing required"));
+  it("a deadline-constrained timeout is reported as budget exhaustion, not provider failure", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
 
-    // Inject a model that throws 429, with a short deadline so retry is rejected
-    const { model } = makeMockModel(["429"]);
+    // Gemini hangs; the deadline leaves only ~4s — nothing else can run.
+    const { model } = makeMockModel(["hang"]);
     _setGeminiModelFactory(() => model);
-
-    // Deadline 5s — cannot fit 60s retry
-    const deadline = Date.now() + 5_000;
 
     const promise = callLLMWithTools(
       "You are LiTT.",
       [{ role: "user", content: "Hello" }],
       [TEST_TOOL],
-      { model: "test-model", deadlineMs: deadline },
+      { deadlineMs: Date.now() + 5_000 },
     );
     promise.catch(() => {});
 
-    // Flush microtasks: OpenRouter failures + Gemini 429
     await flushMicrotasks();
+    await tick(4_100);
 
-    // Should throw AgentBudgetExhaustedError, NOT "All tool-calling models failed"
+    // AgentBudgetExhaustedError, NOT "All tool-calling models failed"
     await expect(promise).rejects.toThrow(AgentBudgetExhaustedError);
     await expect(promise).rejects.not.toThrow(/All tool-calling models failed/);
   });
@@ -579,11 +462,8 @@ describe("callLLMWithTools — deadline/budget contract (real Gemini behavior)",
     expect(err.reason).toBe("test reason");
   });
 
-  it("OpenRouter budget exhausted before attempt throws AgentBudgetExhaustedError", async () => {
-    // Disable Gemini fallback
-    vi.stubEnv("GEMINI_API_KEY", "");
-
-    // Past deadline
+  it("throws AgentBudgetExhaustedError before any attempt when the deadline has passed", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
     const pastDeadline = Date.now() - 1000;
 
     await expect(
@@ -591,11 +471,10 @@ describe("callLLMWithTools — deadline/budget contract (real Gemini behavior)",
         "You are LiTT.",
         [{ role: "user", content: "Hello" }],
         [TEST_TOOL],
-        { model: "test-model", deadlineMs: pastDeadline },
+        { deadlineMs: pastDeadline },
       ),
     ).rejects.toThrow(AgentBudgetExhaustedError);
 
-    // No fetch should have been made
     expect(mockFetch).not.toHaveBeenCalled();
   });
 });

@@ -1,14 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /**
- * Regression tests for model routing fallback in callLLMWithTools.
+ * Tests for the provider-neutral Basic router in callLLMWithTools.
  *
- * Root cause being tested: callLLMWithTools previously had NO fallback.
- * If the primary model failed (e.g. GPT-4o BYOK), the entire agent loop died.
- * Tool execution also died because the LLM is needed to decide which tools to call.
+ * The router plans eligible routes from the provider registry (cost policy,
+ * capabilities, credentials, health) and fails over between independent
+ * providers — OpenRouter is one branch, not the backbone.
  *
- * Fix: callLLMWithTools now tries a chain of fallback models, logging each
- * attempt with provider, model, latency, and failure category.
+ * Failure contract under test:
+ *   - provider-scope failures (401/402/provider-403/timeout/429/5xx/network)
+ *     stop the WHOLE provider for this call — no more models behind the
+ *     same account
+ *   - model-scope failures (400/404/model-403) advance to the provider's
+ *     next candidate model
+ *   - every attempt shares the caller's absolute deadline
+ *   - all-route exhaustion throws AllRoutesFailedError (truthful, sanitized)
  */
 
 // Mock braintrust logging
@@ -21,11 +27,64 @@ vi.mock("@/lib/siteConfig", () => ({
   SITE_URL: "https://test.example.com",
 }));
 
-// Mock fetch to simulate provider failures (OpenRouter and Gemini direct)
+// Mock fetch to simulate provider responses
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-import { callLLMWithTools, buildAssistantToolCallMessage, buildToolResultMessage, AgentBudgetExhaustedError, type GeminiPart } from "./llm-tool-calling";
+import {
+  callLLMWithTools,
+  buildAssistantToolCallMessage,
+  buildToolResultMessage,
+  AgentBudgetExhaustedError,
+  AllRoutesFailedError,
+  _setOllamaProbeForTests,
+  type GeminiPart,
+} from "./llm-tool-calling";
+import {
+  _resetProviderHealthForTests,
+  getProviderHealth,
+} from "./provider-registry";
+
+// ─── Helpers ──────────────────────────────────────────────────────
+
+const PROVIDER_ENVS = [
+  "GEMINI_API_KEY",
+  "GOOGLE_API_KEY",
+  "OPENROUTER_API_KEY",
+  "GROQ_API_KEY",
+  "MISTRAL_API_KEY",
+  "CLOUDFLARE_ACCOUNT_ID",
+  "CLOUDFLARE_AI_API_TOKEN",
+  "OLLAMA_BASE_URL",
+  "OLLAMA_HOST",
+  "OLLAMA_HOST_PC",
+  "LITT_OLLAMA_URL",
+  "OLLAMA_MODEL",
+  "OPENROUTER_MODEL",
+  "GROQ_MODEL",
+  "MISTRAL_MODEL",
+  "CLOUDFLARE_AI_MODEL",
+  "RAILWAY_ENVIRONMENT",
+  "RAILWAY_PROJECT_ID",
+  "VERCEL",
+];
+
+function clearProviderEnvs() {
+  for (const key of PROVIDER_ENVS) vi.stubEnv(key, "");
+  // Ollama is opt-in per test — never probed by default.
+  vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+}
+
+/** All fetch calls whose URL contains the given fragment. */
+function callsTo(fragment: string) {
+  return mockFetch.mock.calls.filter(([url]) => String(url).includes(fragment));
+}
+
+function lastBodyFor(fragment: string): Record<string, unknown> {
+  const calls = callsTo(fragment);
+  const init = calls[calls.length - 1][1] as { body: string };
+  return JSON.parse(init.body);
+}
 
 function makeSuccessResponse(model: string, text: string, toolCalls: unknown[] = []) {
   return {
@@ -44,10 +103,11 @@ function makeSuccessResponse(model: string, text: string, toolCalls: unknown[] =
   };
 }
 
-function makeErrorResponse(status: number, message: string) {
+function makeErrorResponse(status: number, message: string, headers?: Record<string, string>) {
   return {
     ok: false,
     status,
+    headers: new Headers(headers),
     json: async () => ({}),
     text: async () => message,
   };
@@ -60,9 +120,7 @@ function makeGeminiSuccessResponse(text: string, functionCalls: { name: string; 
   return {
     ok: true,
     status: 200,
-    json: async () => ({
-      candidates: [{ content: { parts } }],
-    }),
+    json: async () => ({ candidates: [{ content: { parts } }] }),
     text: async () => "",
   };
 }
@@ -71,6 +129,7 @@ function makeGeminiErrorResponse(status: number, message: string) {
   return {
     ok: false,
     status,
+    headers: new Headers(),
     json: async () => ({}),
     text: async () => message,
   };
@@ -85,714 +144,287 @@ function makeGeminiRawResponse(parts: GeminiPart[]) {
   };
 }
 
-describe("callLLMWithTools — model routing fallback", () => {
-  beforeEach(() => {
-    mockFetch.mockReset();
-    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
-  });
+const WRITE_TOOL = {
+  id: "write_file",
+  description: "Write a file",
+  inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: [] },
+};
 
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
+beforeEach(() => {
+  mockFetch.mockReset();
+  _resetProviderHealthForTests();
+  _setOllamaProbeForTests(null);
+  vi.unstubAllEnvs();
+  clearProviderEnvs();
+});
 
-  it("succeeds on the primary model without fallback", async () => {
-    mockFetch.mockResolvedValueOnce(
-      makeSuccessResponse("google/gemini-2.5-flash", "I can help with that."),
-    );
+afterEach(() => {
+  _resetProviderHealthForTests();
+  _setOllamaProbeForTests(null);
+  vi.unstubAllEnvs();
+});
 
-    const result = await callLLMWithTools(
-      "You are LiTT.",
-      [{ role: "user", content: "Hello" }],
-      [],
-      { model: "google/gemini-2.5-flash" },
-    );
+// ─── Tests ────────────────────────────────────────────────────────
 
-    expect(result.text).toBe("I can help with that.");
-    expect(result.model).toBe("google/gemini-2.5-flash");
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-  });
-
-  it("falls back to a secondary model when primary fails with 404", async () => {
-    // Primary model fails
-    mockFetch.mockResolvedValueOnce(
-      makeErrorResponse(404, "Model not found"),
-    );
-    // Fallback succeeds (first fallback in chain: gemini-2.5-flash)
-    mockFetch.mockResolvedValueOnce(
-      makeSuccessResponse("google/gemini-2.5-flash", "Fallback response."),
-    );
-
-    const result = await callLLMWithTools(
-      "You are LiTT.",
-      [{ role: "user", content: "Hello" }],
-      [],
-      { model: "gpt-4o-nonexistent" },
-    );
-
-    expect(result.text).toBe("Fallback response.");
-    expect(result.model).toBe("google/gemini-2.5-flash");
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-  });
-
-  it("falls back when primary fails with 429 (rate limited)", async () => {
-    mockFetch.mockResolvedValueOnce(
-      makeErrorResponse(429, "Rate limited"),
-    );
-    mockFetch.mockResolvedValueOnce(
-      makeSuccessResponse("google/gemini-2.5-flash", "Rate limit fallback."),
-    );
-
-    const result = await callLLMWithTools(
-      "You are LiTT.",
-      [{ role: "user", content: "Hello" }],
-      [],
-      { model: "openai/gpt-4o" },
-    );
-
-    expect(result.text).toBe("Rate limit fallback.");
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-  });
-
-  it("falls back when primary fails with network error", async () => {
-    mockFetch.mockRejectedValueOnce(new Error("Network timeout"));
-    mockFetch.mockResolvedValueOnce(
-      makeSuccessResponse("google/gemini-2.5-flash", "Network error fallback."),
-    );
-
-    const result = await callLLMWithTools(
-      "You are LiTT.",
-      [{ role: "user", content: "Hello" }],
-      [],
-      { model: "openai/gpt-4o" },
-    );
-
-    expect(result.text).toBe("Network error fallback.");
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-  });
-
-  it("throws structured error when ALL fallbacks fail", async () => {
-    // All models fail
-    mockFetch.mockResolvedValue(makeErrorResponse(500, "Server error"));
-
-    await expect(
-      callLLMWithTools(
-        "You are LiTT.",
-        [{ role: "user", content: "Hello" }],
-        [],
-        { model: "openai/gpt-4o" },
-      ),
-    ).rejects.toThrow(/All tool-calling models failed/);
-  });
-
-  it("throws when OPENROUTER_API_KEY is not set", async () => {
-    vi.stubEnv("OPENROUTER_API_KEY", "");
-
-    await expect(
-      callLLMWithTools("You are LiTT.", [{ role: "user", content: "Hello" }], []),
-    ).rejects.toThrow("OPENROUTER_API_KEY not set");
-  });
-
-  it("throws when OPENROUTER_API_KEY is empty string", async () => {
-    vi.stubEnv("OPENROUTER_API_KEY", "");
-
-    await expect(
-      callLLMWithTools("test", [{ role: "user", content: "hi" }], []),
-    ).rejects.toThrow("OPENROUTER_API_KEY not set");
-  });
-
-  it("parses tool calls from successful response", async () => {
-    mockFetch.mockResolvedValueOnce(
-      makeSuccessResponse("google/gemini-2.5-flash", "Let me check.", [
-        {
-          id: "call_123",
-          function: {
-            name: "inspect_project_files",
-            arguments: JSON.stringify({ project_id: "test-uuid" }),
-          },
-        },
-      ]),
-    );
-
-    const result = await callLLMWithTools(
-      "You are LiTT.",
-      [{ role: "user", content: "Inspect the project" }],
-      [
-        {
-          id: "inspect_project_files",
-          description: "Inspect project files",
-          inputSchema: { type: "object", properties: {} },
-        },
-      ],
-    );
-
-    expect(result.toolCalls).toHaveLength(1);
-    expect(result.toolCalls[0].toolId).toBe("inspect_project_files");
-    expect(result.toolCalls[0].inputs.project_id).toBe("test-uuid");
-  });
-
-  it("does not retry non-retryable 400 errors — skips to next model", async () => {
-    // 400 is non-retryable but we still try the next model in the chain
-    mockFetch.mockResolvedValueOnce(
-      makeErrorResponse(400, "Bad request — invalid model"),
-    );
-    mockFetch.mockResolvedValueOnce(
-      makeSuccessResponse("google/gemini-2.5-flash", "Fallback after 400."),
-    );
-
-    const result = await callLLMWithTools(
-      "You are LiTT.",
-      [{ role: "user", content: "Hello" }],
-      [],
-      { model: "bad-model" },
-    );
-
-    expect(result.text).toBe("Fallback after 400.");
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-  });
-
-  it("falls back when the primary fetch never settles (timeout backstop)", async () => {
-    // A dangling or runaway HTTP request that ignores AbortSignal must not
-    // hang the agent loop; the wall-clock timeout backstop forces a fallback.
-    vi.useFakeTimers();
-    try {
-      mockFetch.mockImplementationOnce(() => new Promise(() => {})); // hangs
-      mockFetch.mockResolvedValueOnce(
-        makeSuccessResponse("google/gemini-2.5-flash", "Timeout fallback."),
-      );
-
-      const promise = callLLMWithTools(
-        "You are LiTT.",
-        [{ role: "user", content: "Hello" }],
-        [],
-        { model: "gemini-2.5-flash" },
-      );
-
-      // Advance past the 60s OpenRouter per-attempt timeout.
-      await vi.advanceTimersByTimeAsync(60_000 + 1);
-      const result = await promise;
-
-      expect(result.text).toBe("Timeout fallback.");
-      expect(mockFetch).toHaveBeenCalledTimes(2);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("throws deterministically when every OpenRouter attempt times out", async () => {
-    // If every model's HTTP request hangs, the agent loop must still reach a
-    // final model_failed/finished/done event instead of silently stalling.
-    vi.useFakeTimers();
-    try {
-      mockFetch.mockImplementation(() => new Promise(() => {})); // all calls hang
-
-      const promise = callLLMWithTools(
-        "You are LiTT.",
-        [{ role: "user", content: "Hello" }],
-        [],
-        { model: "gemini-2.5-flash" },
-      );
-      // Attach the rejection handler before advancing timers so the rejection
-      // is never reported as unhandled while fake timers flush.
-      const assertion = expect(promise).rejects.toThrow(/All tool-calling models failed/);
-
-      await vi.runAllTimersAsync();
-      await assertion;
-      // Primary + 4 OpenRouter fallbacks each hit the 60s backstop.
-      expect(mockFetch).toHaveBeenCalledTimes(5);
-      // All per-attempt timeout timers are cleared after the chain settles.
-      expect(vi.getTimerCount()).toBe(0);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("throws deterministically when the Gemini direct HTTP request hangs", async () => {
-    // All OpenRouter models fail, then the Gemini direct HTTP request never
-    // settles. The fetch must be aborted by the per-attempt timeout and the
-    // failure must surface, not leave an orphan SDK promise.
-    mockFetch
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockImplementation(() => new Promise(() => {})); // Gemini hangs
+describe("callLLMWithTools — provider selection", () => {
+  it("uses Gemini direct first when its credential is present", async () => {
     vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
-
-    vi.useFakeTimers();
-    try {
-      const promise = callLLMWithTools(
-        "You are LiTT.",
-        [{ role: "user", content: "Hello" }],
-        [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
-        { model: "gemini-2.5-flash" },
-      );
-      const assertion = expect(promise).rejects.toThrow(/Gemini direct request timed out/);
-
-      await vi.runAllTimersAsync();
-      await assertion;
-      // 5 OpenRouter attempts + 1 Gemini attempt (non-429 hangs do not retry).
-      expect(mockFetch).toHaveBeenCalledTimes(6);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("does not start any provider call when the shared deadline is already exhausted", async () => {
-    mockFetch.mockResolvedValue(makeSuccessResponse("google/gemini-2.5-flash", "Never used."));
-
-    const promise = callLLMWithTools(
-      "You are LiTT.",
-      [{ role: "user", content: "Hello" }],
-      [],
-      { model: "gemini-2.5-flash", deadlineMs: Date.now() - 1 },
-    );
-
-    await expect(promise).rejects.toThrow(AgentBudgetExhaustedError);
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-
-  it("cumulative OpenRouter fallback chain respects the single shared deadline", async () => {
-    // All OpenRouter attempts hang. With a 100s budget, the first few attempts
-    // use the full 30s timeout, but the chain must stop when the shared budget
-    // would not allow another useful attempt.
-    mockFetch.mockImplementation(() => new Promise(() => {}));
-
-    vi.useFakeTimers();
-    try {
-      const budgetMs = 100_000;
-      const promise = callLLMWithTools(
-        "You are LiTT.",
-        [{ role: "user", content: "Hello" }],
-        [],
-        { model: "gemini-2.5-flash", deadlineMs: Date.now() + budgetMs },
-      );
-      const assertion = expect(promise).rejects.toThrow(AgentBudgetExhaustedError);
-
-      await vi.runAllTimersAsync();
-      await assertion;
-      // It should not have attempted all 5 OpenRouter models; the budget killed
-      // it before the chain completed.
-      expect(mockFetch.mock.calls.length).toBeLessThan(5);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("terminates the entire fallback chain before the configured overall budget", async () => {
-    // If the caller passes a short hard deadline, the chain must stop early
-    // instead of blindly running through all OpenRouter fallbacks and Gemini.
-    mockFetch.mockImplementation(() => new Promise(() => {})); // hangs
-
-    vi.useFakeTimers();
-    try {
-      const budgetMs = 5_000;
-      const promise = callLLMWithTools(
-        "You are LiTT.",
-        [{ role: "user", content: "Hello" }],
-        [],
-        { model: "gemini-2.5-flash", deadlineMs: Date.now() + budgetMs },
-      );
-      const assertion = expect(promise).rejects.toThrow(AgentBudgetExhaustedError);
-
-      await vi.runAllTimersAsync();
-      await assertion;
-      // Only the first OpenRouter attempt should run; the budget is exhausted
-      // before it can try all 5 OpenRouter fallbacks or Gemini.
-      expect(mockFetch).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("rejects before a Gemini 429 retry would exceed the remaining agent budget", async () => {
-    // First Gemini attempt is rate-limited. The required 60s sleep + the next
-    // generateContent timeout must fit inside the caller's deadline or it
-    // fails deterministically without attempting the sleep.
-    mockFetch
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeGeminiErrorResponse(429, "Too Many Requests"));
-    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
-
-    const promise = callLLMWithTools(
-      "You are LiTT.",
-      [{ role: "user", content: "Hello" }],
-      [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
-      { model: "gemini-2.5-flash", deadlineMs: Date.now() + 60_000 },
-    );
-
-    await expect(promise).rejects.toThrow(AgentBudgetExhaustedError);
-    // 5 OpenRouter attempts + 1 Gemini attempt.
-    expect(mockFetch).toHaveBeenCalledTimes(6);
-  });
-
-  it("succeeds through the Gemini direct fallback after all OpenRouter models fail", async () => {
-    mockFetch
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeGeminiSuccessResponse("I'll create the file.", [{ name: "write_file", args: { path: "test.txt", content: "hello" } }]));
-    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    mockFetch.mockResolvedValueOnce(makeGeminiSuccessResponse("Hello from Gemini."));
 
     const result = await callLLMWithTools(
       "You are LiTT.",
       [{ role: "user", content: "Hello" }],
-      [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: [] } }],
-      { model: "gemini-2.5-flash" },
+      [],
     );
 
-    expect(result.text).toBe("I'll create the file.");
-    expect(result.toolCalls).toHaveLength(1);
-    expect(result.toolCalls[0].toolId).toBe("write_file");
+    expect(result.text).toBe("Hello from Gemini.");
+    expect(result.provider).toBe("gemini");
+    expect(callsTo("generativelanguage")).toHaveLength(1);
+    expect(callsTo("openrouter")).toHaveLength(0);
   });
 
-  it("rejects immediately when the upstream/client signal is already aborted", async () => {
-    const controller = new AbortController();
-    controller.abort();
-
-    await expect(
-      callLLMWithTools(
-        "You are LiTT.",
-        [{ role: "user", content: "Hello" }],
-        [],
-        { model: "gemini-2.5-flash", signal: controller.signal },
-      ),
-    ).rejects.toThrow(/budget exhausted|aborted by upstream/i);
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-
-  it("aborts a pending OpenRouter request and stops the chain when the upstream signal aborts", async () => {
-    vi.useFakeTimers();
-    try {
-      const controller = new AbortController();
-      mockFetch.mockImplementation(() => new Promise(() => {})); // hangs
-
-      const promise = callLLMWithTools(
-        "You are LiTT.",
-        [{ role: "user", content: "Hello" }],
-        [],
-        { model: "gemini-2.5-flash", signal: controller.signal },
-      );
-      const assertion = expect(promise).rejects.toThrow(/aborted by upstream/);
-
-      // Let the first OpenRouter attempt start, then abort mid-flight.
-      await vi.advanceTimersByTimeAsync(5_000);
-      controller.abort();
-      await vi.advanceTimersByTimeAsync(60_000);
-
-      await assertion;
-      // Only the in-flight attempt should have started; the chain stops.
-      expect(mockFetch).toHaveBeenCalledTimes(1);
-      // No orphan timeout or retry/backoff remains after the upstream abort.
-      expect(vi.getTimerCount()).toBe(0);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("retries Gemini direct 429 when the backoff fits in the remaining budget", async () => {
-    vi.useFakeTimers();
-    try {
-      mockFetch
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeGeminiErrorResponse(429, "Too Many Requests"))
-        .mockResolvedValueOnce(makeGeminiSuccessResponse("Retry success."));
-      vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
-
-      const promise = callLLMWithTools(
-        "You are LiTT.",
-        [{ role: "user", content: "Hello" }],
-        [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
-        { model: "gemini-2.5-flash", deadlineMs: Date.now() + 300_000 },
-      );
-
-      // First run starts the first (and only) 60s backoff timer.
-      await vi.advanceTimersByTimeAsync(0);
-      await vi.advanceTimersByTimeAsync(60_000 + 1);
-      const result = await promise;
-
-      expect(result.text).toBe("Retry success.");
-      // 5 OpenRouter + 2 Gemini attempts.
-      expect(mockFetch).toHaveBeenCalledTimes(7);
-      // Backoff and retry completed; no residual timers.
-      expect(vi.getTimerCount()).toBe(0);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("classifies a Gemini 429 and the subsequent upstream abort of the backoff", async () => {
-    vi.useFakeTimers();
-    try {
-      mockFetch
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeGeminiErrorResponse(429, "Too Many Requests"))
-        .mockResolvedValueOnce(makeGeminiSuccessResponse("Should not run.", []));
-      vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
-
-      const controller = new AbortController();
-      const promise = callLLMWithTools(
-        "You are LiTT.",
-        [{ role: "user", content: "Hello" }],
-        [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
-        { model: "gemini-2.5-flash", deadlineMs: Date.now() + 300_000, signal: controller.signal },
-      );
-      const assertion = expect(promise).rejects.toThrow(/aborted by upstream/);
-
-      await vi.advanceTimersByTimeAsync(0);
-      // 429 triggers a 60s backoff.
-      controller.abort();
-      await vi.advanceTimersByTimeAsync(60_000);
-
-      await assertion;
-      // 5 OpenRouter + 1 Gemini (429), and no retry attempt.
-      expect(mockFetch).toHaveBeenCalledTimes(6);
-      // The 429 backoff timer is cleared when the upstream signal aborts.
-      expect(vi.getTimerCount()).toBe(0);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("preserves Gemini parts across all candidates text, functionCalls, ids and thoughtSignatures", async () => {
-    const parts: GeminiPart[] = [
-      { text: "I will " },
-      { functionCall: { id: "call_abc_1", name: "write_file", args: { path: "test.txt" } }, thoughtSignature: "sig_1" },
-      { text: "and then " },
-      { functionCall: { name: "list_files", args: { directory: "/" } } },
-      { text: "done." },
-    ];
-
-    mockFetch
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeGeminiRawResponse(parts));
+  it("falls back from Gemini to OpenRouter free on a provider failure", async () => {
     vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    mockFetch
+      .mockResolvedValueOnce(makeGeminiErrorResponse(500, "Internal error"))
+      .mockResolvedValueOnce(makeSuccessResponse("openrouter/free", "OR free response."));
 
     const result = await callLLMWithTools(
       "You are LiTT.",
       [{ role: "user", content: "Hello" }],
-      [
-        { id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: { path: { type: "string" } }, required: [] } },
-        { id: "list_files", description: "List files", inputSchema: { type: "object", properties: { directory: { type: "string" } }, required: [] } },
-      ],
-      { model: "gemini-2.5-flash" },
+      [],
     );
 
-    expect(result.text).toBe("I will and then done.");
-    expect(result.toolCalls).toHaveLength(2);
-    expect(result.toolCalls[0].toolCallId).toBe("call_abc_1");
-    expect(result.toolCalls[0].toolId).toBe("write_file");
-    expect(result.toolCalls[1].toolId).toBe("list_files");
-    expect(result.rawParts).toEqual(parts);
+    expect(result.text).toBe("OR free response.");
+    expect(result.provider).toBe("openrouter");
+    // The Basic route uses only the free router/model list — never a paid slug.
+    expect(lastBodyFor("openrouter").model).toBe("openrouter/free");
   });
 
-  it("does not start another provider after an upstream abort has already settled the chain", async () => {
-    const controller = new AbortController();
-    mockFetch.mockImplementation(() => new Promise(() => {})); // hangs forever
+  it("skips providers with missing credentials entirely", async () => {
+    // Only Groq configured — Gemini/OR/Mistral must not be attempted at all.
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(makeSuccessResponse("llama-3.3-70b-versatile", "Groq says hi."));
 
-    const promise = callLLMWithTools(
+    const result = await callLLMWithTools(
       "You are LiTT.",
       [{ role: "user", content: "Hello" }],
       [],
-      { model: "gemini-2.5-flash", signal: controller.signal },
     );
 
-    controller.abort();
-    await expect(promise).rejects.toThrow(/aborted by upstream/);
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(result.provider).toBe("groq");
+    expect(callsTo("generativelanguage")).toHaveLength(0);
+    expect(callsTo("openrouter")).toHaveLength(0);
+    expect(callsTo("groq")).toHaveLength(1);
+  });
+
+  it("never calls OpenRouter at all when no OpenRouter key exists", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch.mockResolvedValueOnce(makeGeminiSuccessResponse("Gemini only."));
+
+    await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
+    expect(callsTo("openrouter")).toHaveLength(0);
   });
 });
 
-describe("fetchWithTimeout abort/timeouts through callLLMWithTools", () => {
-  beforeEach(() => {
-    mockFetch.mockReset();
-    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+describe("callLLMWithTools — failure classification and failover", () => {
+  it("402 on OpenRouter disables the provider — no second OR model is attempted", async () => {
+    // This is the golden-run-34720866763 regression: an account-level 402
+    // must NOT fan out across five more OpenRouter models.
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch
+      .mockResolvedValueOnce(makeErrorResponse(402, "Insufficient credits"))
+      .mockResolvedValueOnce(makeSuccessResponse("llama-3.3-70b-versatile", "Groq handled it."));
+
+    const result = await callLLMWithTools(
+      "You are LiTT.",
+      [{ role: "user", content: "Hello" }],
+      [],
+    );
+
+    expect(result.text).toBe("Groq handled it.");
+    expect(result.provider).toBe("groq");
+    // Exactly ONE OpenRouter call — provider stopped at account level.
+    expect(callsTo("openrouter")).toHaveLength(1);
+    expect(getProviderHealth("openrouter").state).toBe("disabled");
   });
 
-  afterEach(() => {
-    vi.unstubAllEnvs();
+  it("401 marks the credential invalid and moves to another provider", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "bad-gemini-key");
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch
+      .mockResolvedValueOnce(makeGeminiErrorResponse(401, "Invalid API key"))
+      .mockResolvedValueOnce(makeSuccessResponse("llama-3.3-70b-versatile", "Groq took over."));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
+
+    expect(result.provider).toBe("groq");
+    expect(callsTo("generativelanguage")).toHaveLength(1);
+    expect(getProviderHealth("gemini").state).toBe("disabled");
   });
 
-  it("OpenRouter: pending request is aborted by upstream and classifies as upstream_abort", async () => {
+  it("provider-level 403 disables the provider; model-level 403 tries the next model", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    vi.stubEnv("MISTRAL_API_KEY", "test-mistral-key");
+    mockFetch
+      .mockResolvedValueOnce(makeErrorResponse(403, "This model is not allowed"))
+      .mockResolvedValueOnce(makeSuccessResponse("meta-llama/llama-3.3-70b-instruct:free", "Second OR model."));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
+
+    // Model-scoped 403 → second OR model attempted and succeeded.
+    expect(result.provider).toBe("openrouter");
+    expect(callsTo("openrouter")).toHaveLength(2);
+    expect(getProviderHealth("openrouter").state).toBe("healthy");
+  });
+
+  it("429 applies a cooldown and routes around without sleeping", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    vi.stubEnv("MISTRAL_API_KEY", "test-mistral-key");
+    mockFetch
+      .mockResolvedValueOnce(makeErrorResponse(429, "Rate limited", { "retry-after": "30" }))
+      .mockResolvedValueOnce(makeSuccessResponse("mistral-small-latest", "Mistral handled it."));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
+
+    expect(result.provider).toBe("mistral");
+    const health = getProviderHealth("groq");
+    expect(health.state).toBe("cooldown");
+    expect(health.cooldownUntil).toBeGreaterThan(Date.now() + 25_000);
+    // Groq was not hammered again.
+    expect(callsTo("groq")).toHaveLength(1);
+  });
+
+  it("a cooled-down provider is skipped entirely on the next call", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    vi.stubEnv("MISTRAL_API_KEY", "test-mistral-key");
+    mockFetch
+      .mockResolvedValueOnce(makeErrorResponse(429, "Rate limited", { "retry-after": "30" }))
+      .mockResolvedValueOnce(makeSuccessResponse("mistral-small-latest", "one"))
+      .mockResolvedValueOnce(makeSuccessResponse("mistral-small-latest", "two"));
+
+    await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
+    const second = await callLLMWithTools("sys", [{ role: "user", content: "hi again" }], []);
+
+    expect(second.provider).toBe("mistral");
+    // Still only one Groq call ever — cooldown persisted across calls.
+    expect(callsTo("groq")).toHaveLength(1);
+  });
+
+  it("a hanging provider attempt times out and the next provider continues", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    mockFetch
+      .mockImplementationOnce(() => new Promise(() => {})) // Gemini hangs
+      .mockResolvedValueOnce(makeSuccessResponse("openrouter/free", "OR picked it up."));
+
+    vi.useFakeTimers();
+    try {
+      const promise = callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
+      await vi.advanceTimersByTimeAsync(30_000 + 1);
+      const result = await promise;
+
+      expect(result.provider).toBe("openrouter");
+      expect(callsTo("generativelanguage")).toHaveLength(1);
+      expect(getProviderHealth("gemini").state).toBe("degraded");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a thrown network error falls through to the next provider", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    mockFetch
+      .mockRejectedValueOnce(new Error("fetch failed: connection refused"))
+      .mockResolvedValueOnce(makeSuccessResponse("openrouter/free", "Network fallback."));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
+    expect(result.text).toBe("Network fallback.");
+  });
+
+  it("a provider-scope failure never retries more models behind the same provider", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    mockFetch.mockResolvedValue(makeErrorResponse(500, "Server error"));
+
+    await expect(callLLMWithTools("sys", [{ role: "user", content: "hi" }], []))
+      .rejects.toThrow(AllRoutesFailedError);
+    // One OR attempt only — a 500 is provider-scope.
+    expect(callsTo("openrouter")).toHaveLength(1);
+  });
+});
+
+describe("callLLMWithTools — deadline and abort", () => {
+  it("does not start any provider call when the shared deadline is already exhausted", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch.mockResolvedValue(makeGeminiSuccessResponse("Never used."));
+
+    await expect(
+      callLLMWithTools("sys", [{ role: "user", content: "hi" }], [], { deadlineMs: Date.now() - 1 }),
+    ).rejects.toThrow(AgentBudgetExhaustedError);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("the whole chain shares one absolute deadline — a short budget stops it early", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    mockFetch.mockImplementation(() => new Promise(() => {})); // every call hangs
+
+    vi.useFakeTimers();
+    try {
+      const promise = callLLMWithTools(
+        "sys",
+        [{ role: "user", content: "hi" }],
+        [],
+        { deadlineMs: Date.now() + 5_000 },
+      );
+      const assertion = expect(promise).rejects.toThrow(AgentBudgetExhaustedError);
+      await vi.runAllTimersAsync();
+      await assertion;
+      // Only the first attempt ran — the budget died before any fallback.
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects immediately when the upstream signal is already aborted", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      callLLMWithTools("sys", [{ role: "user", content: "hi" }], [], { signal: controller.signal }),
+    ).rejects.toThrow(/aborted by upstream/i);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("an upstream abort mid-request stops the entire chain", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
     vi.useFakeTimers();
     try {
       const controller = new AbortController();
       mockFetch.mockImplementation(() => new Promise(() => {}));
 
       const promise = callLLMWithTools(
-        "You are LiTT.",
-        [{ role: "user", content: "Hello" }],
+        "sys",
+        [{ role: "user", content: "hi" }],
         [],
-        { model: "gemini-2.5-flash", signal: controller.signal },
-      );
-      const assertion = expect(promise).rejects.toThrow(/OpenRouter request aborted by upstream/);
-
-      await vi.advanceTimersByTimeAsync(5_000);
-      const init = mockFetch.mock.calls[0][1] as { signal: AbortSignal } | undefined;
-      expect(init).toBeDefined();
-      expect(init!.signal.aborted).toBe(false);
-
-      controller.abort();
-      await vi.advanceTimersByTimeAsync(5_000);
-
-      expect(init!.signal.aborted).toBe(true);
-      await assertion;
-      // No fallback attempts after the upstream abort.
-      expect(mockFetch).toHaveBeenCalledTimes(1);
-      // Timeout listener/timer is cleaned up; no pending work remains.
-      expect(vi.getTimerCount()).toBe(0);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("Gemini: per-attempt timeout fires and aborts the internal fetch signal", async () => {
-    vi.useFakeTimers();
-    try {
-      mockFetch
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockImplementation(() => new Promise(() => {})); // Gemini hangs
-      vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
-
-      const promise = callLLMWithTools(
-        "You are LiTT.",
-        [{ role: "user", content: "Hello" }],
-        [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
-        { model: "gemini-2.5-flash" },
-      );
-      const assertion = expect(promise).rejects.toThrow(/Gemini direct request timed out/);
-
-      await vi.advanceTimersByTimeAsync(0);
-      const geminiInit = mockFetch.mock.calls[5][1] as { signal: AbortSignal } | undefined;
-      expect(geminiInit).toBeDefined();
-      expect(geminiInit!.signal.aborted).toBe(false);
-
-      await vi.advanceTimersByTimeAsync(120_000 + 1);
-
-      expect(geminiInit!.signal.aborted).toBe(true);
-      await assertion;
-      expect(mockFetch).toHaveBeenCalledTimes(6);
-      // The per-attempt timeout is cleared and no orphan timer is left.
-      expect(vi.getTimerCount()).toBe(0);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("Gemini: upstream abort during a pending request classifies as upstream_abort", async () => {
-    vi.useFakeTimers();
-    try {
-      mockFetch
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockImplementation(() => new Promise(() => {}));
-      vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
-
-      const controller = new AbortController();
-      const promise = callLLMWithTools(
-        "You are LiTT.",
-        [{ role: "user", content: "Hello" }],
-        [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
-        { model: "gemini-2.5-flash", signal: controller.signal },
-      );
-      const assertion = expect(promise).rejects.toThrow(/Gemini direct request aborted by upstream/);
-
-      await vi.advanceTimersByTimeAsync(5_000);
-      controller.abort();
-      await vi.advanceTimersByTimeAsync(5_000);
-
-      await assertion;
-      // Only the one Gemini attempt started and was aborted; no retries or fallbacks.
-      expect(mockFetch).toHaveBeenCalledTimes(6);
-      // No orphan timeout or listener remains after the upstream abort.
-      expect(vi.getTimerCount()).toBe(0);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("Gemini 429: no backoff timer starts when the retry cannot fit the deadline", async () => {
-    vi.useFakeTimers();
-    try {
-      mockFetch
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeGeminiErrorResponse(429, "Too Many Requests"));
-      vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
-
-      const promise = callLLMWithTools(
-        "You are LiTT.",
-        [{ role: "user", content: "Hello" }],
-        [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
-        { model: "gemini-2.5-flash", deadlineMs: Date.now() + 60_000 },
-      );
-
-      await expect(promise).rejects.toThrow(AgentBudgetExhaustedError);
-      expect(mockFetch).toHaveBeenCalledTimes(6);
-      // No 60s/120s backoff timer should be pending.
-      expect(vi.getTimerCount()).toBe(0);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("Gemini 429: upstream abort during backoff clears the timer and does not retry", async () => {
-    vi.useFakeTimers();
-    try {
-      mockFetch
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-        .mockResolvedValueOnce(makeGeminiErrorResponse(429, "Too Many Requests"))
-        .mockResolvedValueOnce(makeGeminiSuccessResponse("Should not run.", []));
-      vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
-
-      const controller = new AbortController();
-      const promise = callLLMWithTools(
-        "You are LiTT.",
-        [{ role: "user", content: "Hello" }],
-        [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: {}, required: [] } }],
-        { model: "gemini-2.5-flash", deadlineMs: Date.now() + 300_000, signal: controller.signal },
+        { signal: controller.signal },
       );
       const assertion = expect(promise).rejects.toThrow(/aborted by upstream/);
 
-      await vi.advanceTimersByTimeAsync(0);
-      expect(vi.getTimerCount()).toBeGreaterThan(0);
+      await vi.advanceTimersByTimeAsync(5_000);
       controller.abort();
-      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(5_000);
 
       await assertion;
-      expect(mockFetch).toHaveBeenCalledTimes(6);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
@@ -800,45 +432,240 @@ describe("fetchWithTimeout abort/timeouts through callLLMWithTools", () => {
   });
 });
 
+describe("callLLMWithTools — Ollama local route", () => {
+  it("completes via Ollama when every cloud provider is unavailable", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    _setOllamaProbeForTests(async () => ["llama3.1:8b", "phi3:mini"]);
+
+    mockFetch
+      .mockResolvedValueOnce(makeGeminiErrorResponse(500, "Gemini down"))
+      .mockResolvedValueOnce(makeErrorResponse(402, "OpenRouter out of credits"))
+      .mockResolvedValueOnce(makeSuccessResponse("llama3.1:8b", "Local model handled it."));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+
+    expect(result.provider).toBe("ollama");
+    expect(result.text).toBe("Local model handled it.");
+    // The Ollama call went to the OpenAI-compatible local endpoint with the
+    // tool-capable model picked from the probe.
+    const ollamaCalls = callsTo("localhost:11434/v1/chat/completions");
+    expect(ollamaCalls).toHaveLength(1);
+    expect(lastBodyFor("localhost:11434").model).toBe("llama3.1:8b");
+  });
+
+  it("skips Ollama when no tool-capable local model is loaded", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://localhost:11434");
+    _setOllamaProbeForTests(async () => ["gemma2:2b"]); // not tool-capable
+
+    mockFetch
+      .mockResolvedValueOnce(makeErrorResponse(402, "Groq credits"))
+      .mockResolvedValueOnce(makeSuccessResponse("x", "unreachable"));
+
+    await expect(
+      callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]),
+    ).rejects.toThrow(AllRoutesFailedError);
+    // Ollama never got a chat call — probe found no tool-capable model.
+    expect(callsTo("localhost:11434/v1")).toHaveLength(0);
+  });
+});
+
+describe("callLLMWithTools — BYOK", () => {
+  it("uses a user-supplied OpenAI key only when explicitly provided", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    mockFetch
+      .mockResolvedValueOnce(makeErrorResponse(402, "credits"))
+      .mockResolvedValueOnce(makeSuccessResponse("gpt-4o", "BYOK handled it."));
+
+    const result = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "hi" }],
+      [],
+      { userApiKey: "sk-user-provided-key", byokProvider: "openai" },
+    );
+
+    expect(result.provider).toBe("byok");
+    const byokCall = callsTo("api.openai.com")[0];
+    expect(byokCall).toBeDefined();
+    const headers = (byokCall[1] as { headers: Record<string, string> }).headers;
+    expect(headers.Authorization).toBe("Bearer sk-user-provided-key");
+  });
+
+  it("never touches a paid user route without a user key", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    mockFetch.mockResolvedValue(makeErrorResponse(402, "credits"));
+
+    await expect(callLLMWithTools("sys", [{ role: "user", content: "hi" }], []))
+      .rejects.toThrow(AllRoutesFailedError);
+    expect(callsTo("api.openai.com")).toHaveLength(0);
+  });
+});
+
+describe("callLLMWithTools — exhaustion and privacy", () => {
+  it("throws AllRoutesFailedError with structured per-attempt failures", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    mockFetch.mockResolvedValue(makeErrorResponse(500, "down"));
+
+    try {
+      await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(AllRoutesFailedError);
+      const e = err as AllRoutesFailedError;
+      expect(e.message).toMatch(/All tool-calling models failed/);
+      expect(e.failures.length).toBeGreaterThanOrEqual(2);
+      expect(e.failures.map((f) => f.provider)).toContain("gemini");
+      expect(e.failures.map((f) => f.provider)).toContain("openrouter");
+      expect(e.userMessage).toMatch(/AI routes/i);
+    }
+  });
+
+  it("throws AllRoutesFailedError without any fetch when no provider is eligible", async () => {
+    // No keys at all, ollama disabled.
+    try {
+      await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(AllRoutesFailedError);
+      const e = err as AllRoutesFailedError;
+      expect(e.failures).toHaveLength(0);
+      expect(e.excluded.length).toBeGreaterThan(0);
+    }
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("never leaks secret values into thrown errors", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "gemini-SECRET-9f8e7d");
+    vi.stubEnv("OPENROUTER_API_KEY", "or-SECRET-a1b2c3");
+    vi.stubEnv("GROQ_API_KEY", "groq-SECRET-z9y8");
+    mockFetch.mockResolvedValue(
+      makeErrorResponse(401, "invalid credential sk-leaked123 Bearer abc"),
+    );
+
+    try {
+      await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      const msg = (err as Error).message;
+      expect(msg).not.toContain("gemini-SECRET-9f8e7d");
+      expect(msg).not.toContain("or-SECRET-a1b2c3");
+      expect(msg).not.toContain("groq-SECRET-z9y8");
+      expect(msg).not.toContain("sk-leaked123");
+      expect(msg).not.toContain("Bearer abc");
+    }
+  });
+
+  it("parses tool calls from an OpenAI-compatible response", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(
+      makeSuccessResponse("llama-3.3-70b-versatile", "Let me write that.", [
+        {
+          id: "call_123",
+          type: "function",
+          function: {
+            name: "write_file",
+            arguments: JSON.stringify({ path: "test.txt", content: "hello" }),
+          },
+        },
+      ]),
+    );
+
+    const result = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "Write test.txt" }],
+      [WRITE_TOOL],
+    );
+
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].toolCallId).toBe("call_123");
+    expect(result.toolCalls[0].toolId).toBe("write_file");
+    expect(result.toolCalls[0].inputs).toEqual({ path: "test.txt", content: "hello" });
+  });
+});
+
+describe("cross-provider transcript round-trip", () => {
+  it("a tool call from Gemini and its result feed correctly into OpenRouter", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+
+    // Turn 1: Gemini emits a functionCall.
+    mockFetch.mockResolvedValueOnce(
+      makeGeminiSuccessResponse("I will write the file.", [
+        { name: "write_file", args: { path: "test.txt", content: "hi" } },
+      ]),
+    );
+    const first = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "write test.txt" }],
+      [WRITE_TOOL],
+    );
+    expect(first.provider).toBe("gemini");
+    expect(first.toolCalls[0].toolId).toBe("write_file");
+    const toolCallId = first.toolCalls[0].toolCallId;
+
+    // Agent executes the tool, records the result in the shared transcript.
+    const transcript = [
+      { role: "user" as const, content: "write test.txt" },
+      buildAssistantToolCallMessage(first.toolCalls, first.text, first.rawParts),
+      buildToolResultMessage({
+        toolCallId,
+        toolId: "write_file",
+        result: { path: "test.txt", written: true },
+        success: true,
+      }),
+    ];
+
+    // Turn 2: Gemini is now down (degraded/disabled) → OpenRouter continues
+    // with the SAME transcript including the completed tool result.
+    mockFetch
+      .mockResolvedValueOnce(makeGeminiErrorResponse(500, "Gemini exploded"))
+      .mockResolvedValueOnce(makeSuccessResponse("openrouter/free", "File written."));
+
+    const second = await callLLMWithTools("sys", transcript, [WRITE_TOOL]);
+    expect(second.provider).toBe("openrouter");
+
+    // The OpenRouter request must carry the assistant tool_calls and the
+    // tool result with the same correlation id.
+    const body = lastBodyFor("openrouter");
+    const messages = body.messages as Array<Record<string, unknown>>;
+    const assistantMsg = messages.find((m) => m.role === "assistant");
+    const toolMsg = messages.find((m) => m.role === "tool");
+    expect(assistantMsg!.tool_calls).toEqual([
+      {
+        id: toolCallId,
+        type: "function",
+        function: { name: "write_file", arguments: JSON.stringify({ path: "test.txt", content: "hi" }) },
+      },
+    ]);
+    expect(toolMsg!.tool_call_id).toBe(toolCallId);
+    expect(toolMsg!.content).toContain("test.txt");
+    // No Gemini-specific parts leak into the OpenRouter wire payload.
+    for (const m of messages) expect(m.parts).toBeUndefined();
+  });
+});
+
 describe("Gemini conversation history round-trip", () => {
-  beforeEach(() => {
-    mockFetch.mockReset();
-    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it("preserves thoughtSignature from one Gemini turn to the next request's contents.parts", async () => {
+  it("preserves thoughtSignature from one Gemini turn to the next", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
     const firstParts: GeminiPart[] = [
       { text: "I will create the file." },
       { functionCall: { id: "call_abc", name: "write_file", args: { path: "test.txt" } }, thoughtSignature: "sig_model_1" },
     ];
-    const tools = [
-      { id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: { path: { type: "string" } }, required: [] } },
-    ];
+    const tools = [WRITE_TOOL];
 
-    // First call: OpenRouter all fail, Gemini returns parts with a thoughtSignature.
-    mockFetch
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeGeminiRawResponse(firstParts));
-    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
-
+    mockFetch.mockResolvedValueOnce(makeGeminiRawResponse(firstParts));
     const firstResult = await callLLMWithTools(
       "You are LiTT.",
       [{ role: "user", content: "Hello" }],
       tools,
-      { model: "gemini-2.5-flash" },
     );
-
     expect(firstResult.rawParts).toEqual(firstParts);
 
-    // Build the next conversation turn including the provider-specific raw parts.
     const assistantMessage = buildAssistantToolCallMessage(firstResult.toolCalls, firstResult.text, firstResult.rawParts);
     const toolResult = buildToolResultMessage({ toolCallId: firstResult.toolCalls[0].toolCallId, toolId: firstResult.toolCalls[0].toolId, result: { ok: true }, success: true });
     const nextMessages = [
@@ -847,69 +674,39 @@ describe("Gemini conversation history round-trip", () => {
       toolResult,
     ];
 
-    // Second call: the Gemini request must contain the assistant's raw parts, including thoughtSignature.
     const secondParts: GeminiPart[] = [{ text: "Done." }];
-    mockFetch
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeErrorResponse(402, "Payment required"))
-      .mockResolvedValueOnce(makeGeminiRawResponse(secondParts));
+    mockFetch.mockResolvedValueOnce(makeGeminiRawResponse(secondParts));
+    await callLLMWithTools("You are LiTT.", nextMessages, tools);
 
-    await callLLMWithTools(
-      "You are LiTT.",
-      nextMessages,
-      tools,
-      { model: "gemini-2.5-flash" },
-    );
-
-    const geminiCalls = mockFetch.mock.calls.filter(([url]) => String(url).includes("generativelanguage"));
-    const secondGeminiCall = geminiCalls[1];
-    const body = JSON.parse((secondGeminiCall[1] as { body: string }).body);
+    const body = lastBodyFor("generativelanguage");
     type GeminiContent = { role: string; parts?: GeminiPart[] };
     const assistantContent = (body.contents as GeminiContent[]).find((c) => c.role === "model");
     const toolResultContent = (body.contents as GeminiContent[]).find((c) => c.role === "user" && c.parts?.some((p: GeminiPart) => p.functionResponse));
 
-    // Assistant/model turn preserves the original raw parts and thoughtSignature.
     expect(assistantContent?.parts).toEqual(firstParts);
-
-    // Tool result turn serializes as a Gemini functionResponse part.
     expect(toolResultContent?.parts).toEqual([
       { functionResponse: { name: "write_file", response: { ok: true } } },
     ]);
-
-    // Gemini wire payload must NOT contain OpenRouter-only metadata.
-    for (const c of body.contents) {
-      expect(c.tool_calls).toBeUndefined();
-      expect(c.tool_call_id).toBeUndefined();
+    for (const c of body.contents as GeminiContent[]) {
+      expect((c as Record<string, unknown>).tool_calls).toBeUndefined();
+      expect((c as Record<string, unknown>).tool_call_id).toBeUndefined();
     }
   });
 });
 
 describe("OpenRouter conversation history round-trip", () => {
-  beforeEach(() => {
-    mockFetch.mockReset();
+  it("preserves assistant tool_calls and tool result tool_call_id in the next request", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "test-key");
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it("preserves assistant tool_calls and tool result tool_call_id in the next OpenRouter request", async () => {
     const toolCallId = "call_test_123";
     const toolInputs = { path: "test.txt", content: "hello" };
-    mockFetch.mockResolvedValueOnce(makeSuccessResponse("openai/gpt-4o", "I will write the file.", [
+    mockFetch.mockResolvedValueOnce(makeSuccessResponse("openrouter/free", "I will write the file.", [
       { id: toolCallId, type: "function", function: { name: "write_file", arguments: JSON.stringify(toolInputs) } },
     ]));
-    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
 
     const firstResult = await callLLMWithTools(
       "You are LiTT.",
       [{ role: "user", content: "Write a file" }],
-      [{ id: "write_file", description: "Write a file", inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: [] } }],
-      { model: "openai/gpt-4o" },
+      [WRITE_TOOL],
     );
 
     expect(firstResult.toolCalls).toEqual([
@@ -924,29 +721,27 @@ describe("OpenRouter conversation history round-trip", () => {
       toolResult,
     ];
 
-    mockFetch.mockResolvedValueOnce(makeSuccessResponse("openai/gpt-4o", "Done."));
-    await callLLMWithTools("You are LiTT.", nextMessages, [], { model: "openai/gpt-4o" });
+    mockFetch.mockResolvedValueOnce(makeSuccessResponse("openrouter/free", "Done."));
+    await callLLMWithTools("You are LiTT.", nextMessages, []);
 
-    const openRouterCalls = mockFetch.mock.calls.filter(([url]) => String(url).includes("openrouter"));
-    const secondOpenRouterCall = openRouterCalls[1];
-    const body = JSON.parse((secondOpenRouterCall[1] as { body: string }).body);
-    const assistantMsg = body.messages.find((m: { role: string }) => m.role === "assistant");
-    const toolMsg = body.messages.find((m: { role: string }) => m.role === "tool");
+    const body = lastBodyFor("openrouter");
+    const messages = body.messages as Array<Record<string, unknown>>;
+    const assistantMsg = messages.find((m) => m.role === "assistant");
+    const toolMsg = messages.find((m) => m.role === "tool");
 
-    expect(assistantMsg.tool_calls).toEqual([
+    expect(assistantMsg!.tool_calls).toEqual([
       { id: toolCallId, type: "function", function: { name: "write_file", arguments: JSON.stringify(toolInputs) } },
     ]);
-    expect(toolMsg.tool_call_id).toBe(toolCallId);
-    expect(toolMsg.content).toBe(JSON.stringify({ ok: true }));
-    // OpenRouter wire messages must NOT contain Gemini-only parts.
-    for (const m of body.messages) {
+    expect(toolMsg!.tool_call_id).toBe(toolCallId);
+    expect(toolMsg!.content).toBe(JSON.stringify({ ok: true }));
+    for (const m of messages) {
       expect(m.parts).toBeUndefined();
     }
   });
 });
 
 describe("buildToolResultMessage", () => {
-  it("produces an OpenRouter tool message and a Gemini functionResponse part", () => {
+  it("produces an OpenAI-compatible tool message and a Gemini functionResponse part", () => {
     const result = buildToolResultMessage({ toolCallId: "call_1", toolId: "project.scan", result: { found: 1 }, success: true });
     expect(result.role).toBe("tool");
     expect(result.tool_call_id).toBe("call_1");

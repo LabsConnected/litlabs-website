@@ -18,7 +18,7 @@ import "server-only";
 import type { WorkspaceTransport } from "./workspace-transport";
 import { ProgressEmitter, type ProgressEvent } from "./progress-events";
 import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from "./permission-engine";
-import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, type ToolDefinition, type ToolCallResult, type LLMMessage } from "./llm-tool-calling";
+import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, AllRoutesFailedError, AgentBudgetExhaustedError, type ToolDefinition, type ToolCallResult, type LLMMessage } from "./llm-tool-calling";
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { toolRegistry } from "./tool-registry";
@@ -72,6 +72,10 @@ export interface AgentLoopResult {
   events: ProgressEvent[];
   /** Set when the loop ended because every model call failed (provider outage, billing, etc.) — sanitized, no secrets */
   modelFailed?: string;
+  /** User-facing message for a model failure — truthful and sanitized.
+   *  Only set when the loop produced a purpose-written failure message
+   *  (all routes exhausted / budget exhausted). */
+  modelFailureText?: string;
   /** Set when the loop paused because ACT mode requires approval for a mutation */
   pendingApproval?: PendingApproval;
 }
@@ -154,6 +158,11 @@ export async function runAgentLoopV2(
   const events: ProgressEvent[] = [];
   const toolCallRecords: ToolCallRecord[] = [];
   let hasInterveningMutation = false;
+  // Mutating tool calls that already executed successfully this run —
+  // keyed by toolId+inputs. A replacement provider that re-emits an
+  // identical mutation after failover replays the recorded result instead
+  // of executing it again.
+  const executedMutations = new Map<string, ToolCallResult>();
 
   // Collect progress events
   const localProgress = new ProgressEmitter((event) => {
@@ -182,6 +191,7 @@ export async function runAgentLoopV2(
   let cancelled = false;
   let cancelReason: string | undefined;
   let modelFailed: string | undefined;
+  let modelFailureText: string | undefined;
   let checkpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
   const toolCallLog: Array<{ toolId: string; success: boolean; summary: string }> = [];
 
@@ -217,11 +227,11 @@ export async function runAgentLoopV2(
           signal: cfg.signal,
         },
       );
-      // Emit model routing event so LiTT Live shows which model was actually used
+      // Emit model routing event so LiTT Live shows which provider/model was actually used
       localProgress.emit({
         type: "model_routing",
         model: llmResponse.model,
-        provider: "openrouter",
+        provider: llmResponse.provider ?? "unknown",
         fallbackFrom: cfg.model && llmResponse.model !== cfg.model ? cfg.model : undefined,
       });
     } catch (err) {
@@ -234,7 +244,16 @@ export async function runAgentLoopV2(
         message: errMsg.slice(0, 200),
       });
       modelFailed = errMsg.slice(0, 200);
-      finalText = `I encountered an error while reasoning: ${errMsg}`;
+      finalText =
+        err instanceof AllRoutesFailedError
+          ? err.userMessage
+          : err instanceof AgentBudgetExhaustedError
+            ? "I ran out of time before finishing this request. Your project and any completed work are preserved — try again."
+            : `I encountered an error while reasoning: ${errMsg}`;
+      modelFailureText =
+        err instanceof AllRoutesFailedError || err instanceof AgentBudgetExhaustedError
+          ? finalText
+          : undefined;
       break;
     }
 
@@ -292,6 +311,32 @@ export async function runAgentLoopV2(
         };
         llmMessages.push(buildToolResultMessage(result));
         continue;
+      }
+
+      // Duplicate-mutation protection: if this exact mutating call already
+      // executed successfully in this run (e.g. a replacement provider
+      // re-emitted it after failover), replay the recorded result instead
+      // of executing the mutation a second time.
+      const dedupeKey = `${toolCall.toolId}:${hashInputs(toolCall.inputs)}`;
+      if (!toolDef.readOnly) {
+        const prior = executedMutations.get(dedupeKey);
+        if (prior) {
+          llmMessages.push(buildToolResultMessage({
+            toolCallId: toolCall.toolCallId,
+            toolId: toolCall.toolId,
+            result: prior.result,
+            success: true,
+          }));
+          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed" });
+          localProgress.emit({
+            type: "tool_result",
+            toolId: toolCall.toolId,
+            success: true,
+            summary: "skipped — already executed",
+            durationMs: 0,
+          });
+          continue;
+        }
       }
 
       // Check permissions
@@ -434,6 +479,7 @@ export async function runAgentLoopV2(
       if (!toolDef.readOnly) {
         hasInterveningMutation = true;
         batchHasMutation = true;
+        if (result.success) executedMutations.set(dedupeKey, result);
       }
 
       // Log the call
@@ -507,6 +553,7 @@ export async function runAgentLoopV2(
     cancelReason,
     events,
     modelFailed,
+    modelFailureText,
   };
 }
 
@@ -558,6 +605,7 @@ export async function resumeAgentLoopV2(
   const events: ProgressEvent[] = [];
   const toolCallRecords: ToolCallRecord[] = [];
   let hasInterveningMutation = resume.hadInterveningMutation;
+  const executedMutations = new Map<string, ToolCallResult>();
 
   const localProgress = new ProgressEmitter((event) => {
     events.push(event);
@@ -584,6 +632,7 @@ export async function resumeAgentLoopV2(
   let cancelled = false;
   let cancelReason: string | undefined;
   let modelFailed: string | undefined;
+  let modelFailureText: string | undefined;
   let checkpoint = resume.existingCheckpoint;
   const toolCallLog: Array<{ toolId: string; success: boolean; summary: string }> = [];
   let mutationBatchPending = false;
@@ -705,7 +754,16 @@ export async function resumeAgentLoopV2(
         message: errMsg.slice(0, 200),
       });
       modelFailed = errMsg.slice(0, 200);
-      finalText = `I encountered an error while reasoning: ${errMsg}`;
+      finalText =
+        err instanceof AllRoutesFailedError
+          ? err.userMessage
+          : err instanceof AgentBudgetExhaustedError
+            ? "I ran out of time before finishing this request. Your project and any completed work are preserved — try again."
+            : `I encountered an error while reasoning: ${errMsg}`;
+      modelFailureText =
+        err instanceof AllRoutesFailedError || err instanceof AgentBudgetExhaustedError
+          ? finalText
+          : undefined;
       break;
     }
 
@@ -744,6 +802,22 @@ export async function resumeAgentLoopV2(
         };
         llmMessages.push(buildToolResultMessage(result));
         continue;
+      }
+
+      const dedupeKey = `${toolCall.toolId}:${hashInputs(toolCall.inputs)}`;
+      if (!toolDef.readOnly) {
+        const prior = executedMutations.get(dedupeKey);
+        if (prior) {
+          llmMessages.push(buildToolResultMessage({
+            toolCallId: toolCall.toolCallId,
+            toolId: toolCall.toolId,
+            result: prior.result,
+            success: true,
+          }));
+          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed" });
+          localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: true, summary: "skipped — already executed", durationMs: 0 });
+          continue;
+        }
       }
 
       const permInfo = toPermissionInfo(toolDef);
@@ -835,6 +909,7 @@ export async function resumeAgentLoopV2(
       if (!toolDef.readOnly) {
         hasInterveningMutation = true;
         batchHasMutation = true;
+        if (result.success) executedMutations.set(dedupeKey, result);
       }
 
       const summary = summarizeToolResult(toolCall.toolId, result.result);
@@ -892,6 +967,7 @@ export async function resumeAgentLoopV2(
     cancelReason,
     events,
     modelFailed,
+    modelFailureText,
   };
 }
 
