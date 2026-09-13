@@ -427,3 +427,278 @@ describe("PreviewManager — exit 127 mapping", () => {
     restore();
   });
 });
+
+// ─── Clerk configuration validation ─────────────────────────────────
+
+import {
+  validateClerkConfig,
+  fingerprintClerkEnv,
+} from "../preview/PreviewManager";
+
+describe("PreviewManager — Clerk config validation", () => {
+  let tmpRoot: string;
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), "preview-clerk-"));
+  });
+
+  afterEach(() => {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  function writeClerkPackageJson(root: string): void {
+    writeFileSync(
+      join(root, "package.json"),
+      JSON.stringify({ dependencies: { "@clerk/nextjs": "^6.0.0" } }),
+    );
+  }
+
+  function writeNonClerkPackageJson(root: string): void {
+    writeFileSync(
+      join(root, "package.json"),
+      JSON.stringify({ dependencies: { next: "^16.0.0" } }),
+    );
+  }
+
+  it("skips validation for non-Clerk projects", () => {
+    writeNonClerkPackageJson(tmpRoot);
+    const result = validateClerkConfig({}, tmpRoot);
+    expect(result.ok).toBe(true);
+    expect(result.usesClerk).toBe(false);
+  });
+
+  it("fails when CLERK_SECRET_KEY is missing for a Clerk project", () => {
+    writeClerkPackageJson(tmpRoot);
+    const result = validateClerkConfig(
+      { NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_live_abc123" },
+      tmpRoot,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.usesClerk).toBe(true);
+    expect(result.reason).toContain("CLERK_SECRET_KEY is missing");
+  });
+
+  it("fails when CLERK_SECRET_KEY has a publishable key prefix (pk_)", () => {
+    writeClerkPackageJson(tmpRoot);
+    const result = validateClerkConfig(
+      {
+        CLERK_SECRET_KEY: "pk_live_abc123",
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_live_abc123",
+      },
+      tmpRoot,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("publishable key");
+    expect(result.reason).toContain("pk_");
+  });
+
+  it("fails when CLERK_SECRET_KEY has an unexpected prefix", () => {
+    writeClerkPackageJson(tmpRoot);
+    const result = validateClerkConfig(
+      {
+        CLERK_SECRET_KEY: "garbage_value_here",
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_live_abc123",
+      },
+      tmpRoot,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("unexpected prefix");
+  });
+
+  it("fails when secret and publishable keys are identical", () => {
+    writeClerkPackageJson(tmpRoot);
+    const result = validateClerkConfig(
+      {
+        CLERK_SECRET_KEY: "sk_live_same123",
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "sk_live_same123",
+      },
+      tmpRoot,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("identical");
+  });
+
+  it("fails when NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is missing", () => {
+    writeClerkPackageJson(tmpRoot);
+    const result = validateClerkConfig(
+      { CLERK_SECRET_KEY: "sk_live_abc123" },
+      tmpRoot,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is missing");
+  });
+
+  it("fails on test/live environment mismatch", () => {
+    writeClerkPackageJson(tmpRoot);
+    const result = validateClerkConfig(
+      {
+        CLERK_SECRET_KEY: "sk_test_abc123",
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_live_abc123",
+      },
+      tmpRoot,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("mismatch");
+    expect(result.reason).toContain("test");
+    expect(result.reason).toContain("live");
+  });
+
+  it("passes when both keys are valid and from the same environment", () => {
+    writeClerkPackageJson(tmpRoot);
+    const result = validateClerkConfig(
+      {
+        CLERK_SECRET_KEY: "sk_live_abc123def456",
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_live_xyz789ghi012",
+      },
+      tmpRoot,
+    );
+    expect(result.ok).toBe(true);
+    expect(result.usesClerk).toBe(true);
+  });
+
+  it("accepts CLERK_PUBLISHABLE_KEY as fallback for NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", () => {
+    writeClerkPackageJson(tmpRoot);
+    const result = validateClerkConfig(
+      {
+        CLERK_SECRET_KEY: "sk_test_abc123",
+        CLERK_PUBLISHABLE_KEY: "pk_test_xyz789",
+      },
+      tmpRoot,
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("cleans whitespace, newlines, and quotes from key values", () => {
+    writeClerkPackageJson(tmpRoot);
+    const result = validateClerkConfig(
+      {
+        CLERK_SECRET_KEY: '  "sk_live_abc123"\n  ',
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "  pk_live_xyz789  ",
+      },
+      tmpRoot,
+    );
+    expect(result.ok).toBe(true);
+  });
+});
+
+// ─── Clerk env fingerprinting (never logs full key) ──────────────────
+
+describe("PreviewManager — Clerk env fingerprinting", () => {
+  it("never includes the full key value in the fingerprint", () => {
+    const secret = "sk_test_fake_clerk_secret_for_fingerprint_test_only";
+    const publishable = "pk_test_fake_clerk_publishable_for_fingerprint_test_only";
+    const fingerprint = fingerprintClerkEnv({
+      CLERK_SECRET_KEY: secret,
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: publishable,
+    });
+
+    const serialized = JSON.stringify(fingerprint);
+    // The full key value must NOT appear in the serialized fingerprint
+    expect(serialized).not.toContain(secret);
+    expect(serialized).not.toContain(publishable);
+    // But the prefix and fingerprint hash should be present
+    expect(serialized).toContain("sk_test_");
+    expect(serialized).toContain("pk_test_");
+    expect(fingerprint.CLERK_SECRET_KEY.present).toBe(true);
+    expect(fingerprint.CLERK_SECRET_KEY.length).toBe(secret.length);
+    expect(fingerprint.CLERK_SECRET_KEY.fingerprint).toBeTruthy();
+    expect(fingerprint.CLERK_SECRET_KEY.fingerprint).toHaveLength(12);
+  });
+
+  it("reports absent keys correctly", () => {
+    const fingerprint = fingerprintClerkEnv({});
+    expect(fingerprint.CLERK_SECRET_KEY.present).toBe(false);
+    expect(fingerprint.CLERK_SECRET_KEY.prefix).toBeNull();
+    expect(fingerprint.CLERK_SECRET_KEY.fingerprint).toBe("none");
+    expect(fingerprint.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY.present).toBe(false);
+  });
+});
+
+// ─── Auth config error detection in health probe ────────────────────
+
+describe("PreviewManager — auth config error in health probe", () => {
+  let tmpRoot: string;
+  let origEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), "preview-auth-err-"));
+    origEnv = { ...process.env };
+    mockedGetWorkspace.mockReset();
+  });
+
+  afterEach(() => {
+    process.env = origEnv;
+    rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("surfaces preview_auth_config_error when dev server returns Clerk 500", async () => {
+    // Create a Clerk-using project
+    writeFileSync(
+      join(tmpRoot, "package.json"),
+      JSON.stringify({ dependencies: { "@clerk/nextjs": "^6.0.0" } }),
+    );
+    writeFileSync(join(tmpRoot, "next.config.js"), "module.exports = {}");
+    writeFileSync(join(tmpRoot, "pnpm-lock.yaml"), "");
+
+    mockedGetWorkspace.mockReturnValue({
+      workspaceId: "ws-auth-err",
+      userId: "u1",
+      projectId: "p1",
+      root: tmpRoot,
+      branch: "main",
+      commitSha: "abc",
+      ready: true,
+    } as any);
+
+    // Set valid Clerk env so validation passes
+    process.env.CLERK_SECRET_KEY = "sk_live_abc123def456";
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = "pk_live_xyz789ghi012";
+
+    // Make pnpm resolvable
+    const cleanNodeDir = join(tmpRoot, "clean-node");
+    mkdirSync(cleanNodeDir, { recursive: true });
+    const restore = overrideExecPath(cleanNodeDir);
+    const fakeBin = join(tmpRoot, "fakebin");
+    mkdirSync(fakeBin, { recursive: true });
+    createFakeExecutable(fakeBin, "pnpm");
+    process.env.PATH = fakeBin;
+    delete process.env.NODE_BIN_DIR;
+
+    // Mock fetch to return a Clerk 500 after the server "boots"
+    const origFetch = globalThis.fetch;
+    let callCount = 0;
+    globalThis.fetch = vi.fn(async (url: any) => {
+      callCount++;
+      if (typeof url === "string" && url.includes("127.0.0.1")) {
+        return new Response(
+          "Clerk: Handshake token verification failed: The provided Clerk Secret Key is invalid. (reason=secret-key-invalid)",
+          { status: 500 },
+        );
+      }
+      return origFetch(url as any);
+    }) as any;
+
+    await startPreview({
+      workspaceId: "ws-auth-err",
+      userId: "u1",
+      command: "sleep 30",
+      framework: "node",
+      packageManager: "pnpm",
+    });
+
+    // Wait for the health probe to detect the auth error
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
+    const status = getPreviewStatus("ws-auth-err");
+    // Should be failed with auth config error, NOT a generic timeout
+    expect(status.status).toBe("failed");
+    if (status.errorCode === "preview_auth_config_error") {
+      expect(status.error).toContain("authentication configuration error");
+      expect(status.error).toContain("NOT a generic preview failure");
+    }
+
+    stopPreview("ws-auth-err");
+    globalThis.fetch = origFetch;
+    restore();
+  });
+});

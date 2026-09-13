@@ -20,6 +20,7 @@
  */
 
 import { execFile, spawn, type ChildProcess } from "child_process";
+import { createHash } from "crypto";
 import { existsSync, readFileSync, statSync } from "fs";
 import { delimiter as PATH_DELIMITER, dirname, join, resolve } from "path";
 import { promisify } from "util";
@@ -66,7 +67,9 @@ export type PreviewErrorCode =
   | "preview_spawn_error"
   | "preview_no_free_port"
   | "preview_no_dev_command"
-  | "preview_dependency_install_failed";
+  | "preview_dependency_install_failed"
+  | "preview_clerk_config_error"
+  | "preview_auth_config_error";
 
 export class PreviewError extends Error {
   readonly code: PreviewErrorCode;
@@ -268,6 +271,217 @@ function redactDiagnosticText(value: unknown): string {
     .slice(-4000);
 }
 
+// ─── Clerk configuration validation ────────────────────────────────
+//
+// The preview runtime inherits the terminal-server's process.env via
+// `...process.env`. If the terminal-server has a stale, rotated, or
+// malformed CLERK_SECRET_KEY, the preview's Clerk middleware crashes
+// with a 500 ("Handshake token verification failed: secret-key-invalid").
+//
+// Next.js does NOT override already-set process.env values with .env*
+// files, so the inherited (stale) key wins over any workspace .env.local.
+//
+// These validators run BEFORE spawning the dev server so we surface a
+// truthful, deterministic configuration error instead of a generic
+// 60-second "Dev server did not become healthy" timeout.
+
+interface ClerkValidationResult {
+  ok: boolean;
+  reason: string | null;
+  /** Whether the workspace project uses Clerk at all. */
+  usesClerk: boolean;
+}
+
+/**
+ * Detect whether the workspace project uses Clerk by checking package.json
+ * for @clerk/nextjs, @clerk/backend, or @clerk/clerk-sdk-node.
+ */
+function workspaceUsesClerk(root: string): boolean {
+  const pkgJsonPath = join(root, "package.json");
+  if (!existsSync(pkgJsonPath)) return false;
+  try {
+    const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf-8"));
+    const deps = { ...pkg?.dependencies, ...pkg?.devDependencies };
+    return Boolean(
+      deps["@clerk/nextjs"] ||
+      deps["@clerk/backend"] ||
+      deps["@clerk/clerk-sdk-node"] ||
+      deps["@clerk/remix"],
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Clean an env value: trim whitespace, newlines, and surrounding quotes
+ * that can sneak in from copy-paste or Railway variable editing.
+ */
+function cleanEnvValue(value: string | undefined): string {
+  if (!value) return "";
+  let v = value.trim();
+  // Strip surrounding quotes (single or double)
+  if (
+    (v.startsWith('"') && v.endsWith('"')) ||
+    (v.startsWith("'") && v.endsWith("'"))
+  ) {
+    v = v.slice(1, -1).trim();
+  }
+  return v;
+}
+
+/**
+ * Compute a short SHA-256 fingerprint of a secret for safe logging.
+ * Never log the full key value.
+ */
+function fingerprintSecret(value: string): string {
+  if (!value) return "none";
+  return createHash("sha256").update(value).digest("hex").slice(0, 12);
+}
+
+/**
+ * Validate the Clerk configuration that will reach the preview runtime.
+ *
+ * Checks:
+ *   1. If the workspace uses Clerk, CLERK_SECRET_KEY must be present.
+ *   2. CLERK_SECRET_KEY must start with sk_test_ or sk_live_ (not pk_).
+ *   3. CLERK_SECRET_KEY must not equal the publishable key.
+ *   4. NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY (or CLERK_PUBLISHABLE_KEY fallback)
+ *      must be present.
+ *   5. Values are cleaned of whitespace/newlines/quotes.
+ *
+ * Returns a validation result with `ok` and a human-readable `reason`.
+ * Also returns `usesClerk` so the caller can skip validation for non-Clerk
+ * projects.
+ */
+export function validateClerkConfig(
+  env: Record<string, string>,
+  root: string,
+): ClerkValidationResult {
+  const usesClerk = workspaceUsesClerk(root);
+  if (!usesClerk) {
+    return { ok: true, reason: null, usesClerk: false };
+  }
+
+  const secretKey = cleanEnvValue(env.CLERK_SECRET_KEY);
+  const publishableKey = cleanEnvValue(
+    env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? env.CLERK_PUBLISHABLE_KEY,
+  );
+
+  if (!secretKey) {
+    return {
+      ok: false,
+      reason:
+        "CLERK_SECRET_KEY is missing. The workspace uses @clerk/nextjs but " +
+        "no secret key was found in the preview runtime environment. " +
+        "Add it to the workspace .env.local or configure it in the preview env.",
+      usesClerk: true,
+    };
+  }
+
+  if (!secretKey.startsWith("sk_test_") && !secretKey.startsWith("sk_live_")) {
+    // Check if it's a publishable key accidentally in the secret slot
+    if (secretKey.startsWith("pk_test_") || secretKey.startsWith("pk_live_")) {
+      return {
+        ok: false,
+        reason:
+          "CLERK_SECRET_KEY contains a publishable key (pk_*) instead of a " +
+          "secret key (sk_*). Swap the values — the secret key must start " +
+          "with sk_test_ or sk_live_.",
+        usesClerk: true,
+      };
+    }
+    return {
+      ok: false,
+      reason:
+        `CLERK_SECRET_KEY has an unexpected prefix "${secretKey.slice(0, 8)}". ` +
+        "Clerk secret keys must start with sk_test_ or sk_live_.",
+      usesClerk: true,
+    };
+  }
+
+  if (publishableKey && secretKey === publishableKey) {
+    return {
+      ok: false,
+      reason:
+        "CLERK_SECRET_KEY and NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY are " +
+        "identical. The secret key and publishable key must be different " +
+        "values from the same Clerk instance.",
+      usesClerk: true,
+    };
+  }
+
+  if (!publishableKey) {
+    return {
+      ok: false,
+      reason:
+        "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is missing. The workspace uses " +
+        "@clerk/nextjs which requires NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY " +
+        "(or CLERK_PUBLISHABLE_KEY as fallback) in the preview environment.",
+      usesClerk: true,
+    };
+  }
+
+  if (
+    !publishableKey.startsWith("pk_test_") &&
+    !publishableKey.startsWith("pk_live_")
+  ) {
+    return {
+      ok: false,
+      reason:
+        `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY has an unexpected prefix ` +
+        `"${publishableKey.slice(0, 8)}". Clerk publishable keys must ` +
+        "start with pk_test_ or pk_live_.",
+      usesClerk: true,
+    };
+  }
+
+  // Check for test/live mismatch (test secret + live publishable or vice versa)
+  const secretIsLive = secretKey.startsWith("sk_live_");
+  const publishableIsLive = publishableKey.startsWith("pk_live_");
+  if (secretIsLive !== publishableIsLive) {
+    return {
+      ok: false,
+      reason:
+        `Clerk key environment mismatch: CLERK_SECRET_KEY is ` +
+        `${secretIsLive ? "live" : "test"} but ` +
+        `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is ` +
+        `${publishableIsLive ? "live" : "test"}. Both keys must be ` +
+        "from the same Clerk environment (both test or both live).",
+      usesClerk: true,
+    };
+  }
+
+  return { ok: true, reason: null, usesClerk: true };
+}
+
+/**
+ * Build a redacted fingerprint of the Clerk env for safe logging.
+ * Never includes the full key value — only prefix + length + hash.
+ */
+export function fingerprintClerkEnv(
+  env: Record<string, string>,
+): Record<string, unknown> {
+  const secret = cleanEnvValue(env.CLERK_SECRET_KEY);
+  const publishable = cleanEnvValue(
+    env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? env.CLERK_PUBLISHABLE_KEY,
+  );
+  return {
+    CLERK_SECRET_KEY: {
+      present: Boolean(secret),
+      prefix: secret ? secret.slice(0, 8) : null,
+      length: secret.length,
+      fingerprint: fingerprintSecret(secret),
+    },
+    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: {
+      present: Boolean(publishable),
+      prefix: publishable ? publishable.slice(0, 8) : null,
+      length: publishable.length,
+      fingerprint: fingerprintSecret(publishable),
+    },
+  };
+}
+
 async function installWorkspaceDependencies(
   root: string,
   packageManager: string,
@@ -402,7 +616,26 @@ function detectFramework(root: string): FrameworkInfo {
 
 // ─── Health probing ────────────────────────────────────────────────
 
-async function probeHealth(port: number, timeoutMs: number): Promise<boolean> {
+/**
+ * Result of a health probe. Distinguishes:
+ *   - healthy: server is running and responding
+ *   - auth_config_error: server booted but Clerk/auth config is broken (500)
+ *   - not_ready: server not responding yet
+ */
+interface HealthProbeResult {
+  healthy: boolean;
+  /** If the server returned a 500 with auth-related error text. */
+  authConfigError: boolean;
+  /** The HTTP status code if the server responded. */
+  status: number | null;
+  /** Snippet of the response body if status >= 400 (redacted). */
+  bodySnippet: string | null;
+}
+
+async function probeHealth(
+  port: number,
+  timeoutMs: number,
+): Promise<HealthProbeResult> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
@@ -411,13 +644,48 @@ async function probeHealth(port: number, timeoutMs: number): Promise<boolean> {
       });
       if (resp.ok || resp.status === 404) {
         // 404 is still a response — server is running, just no route at /
-        return true;
+        return { healthy: true, authConfigError: false, status: resp.status, bodySnippet: null };
+      }
+      // 5xx — server booted but something is broken. Capture the body
+      // to detect Clerk/auth config errors vs. generic server errors.
+      if (resp.status >= 500) {
+        const body = await resp.text().catch(() => "");
+        const bodySnippet = redactDiagnosticText(body.slice(0, 2000));
+        const isAuthError = detectAuthConfigError(body);
+        if (isAuthError) {
+          return {
+            healthy: false,
+            authConfigError: true,
+            status: resp.status,
+            bodySnippet,
+          };
+        }
       }
     } catch {
       // Not ready yet
     }
     await new Promise((resolve) => setTimeout(resolve, HEALTH_PROBE_INTERVAL_MS));
   }
+  return { healthy: false, authConfigError: false, status: null, bodySnippet: null };
+}
+
+/**
+ * Detect whether an error response body indicates an authentication
+ * configuration failure (Clerk, Auth.js, etc.) rather than a generic
+ * server crash. This lets the health check surface a truthful
+ * "auth config broken" error instead of a generic timeout.
+ */
+function detectAuthConfigError(body: string): boolean {
+  const lower = body.toLowerCase();
+  // Clerk-specific error patterns
+  if (lower.includes("clerk") && lower.includes("secret")) return true;
+  if (lower.includes("secret-key-invalid")) return true;
+  if (lower.includes("handshake token verification failed")) return true;
+  if (lower.includes("clerk_secret_key")) return true;
+  if (lower.includes("publishable key") && lower.includes("clerk")) return true;
+  // Generic auth config patterns
+  if (lower.includes("auth") && lower.includes("config")) return true;
+  if (lower.includes("missing") && lower.includes("secret") && lower.includes("key")) return true;
   return false;
 }
 
@@ -616,6 +884,70 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
     env.HOSTNAME = "0.0.0.0";
   }
 
+  // ─── Clerk env normalization ──────────────────────────────────────
+  // The terminal-server may have CLERK_PUBLISHABLE_KEY but not
+  // NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY (the var name @clerk/nextjs
+  // expects). Map it so the preview runtime gets the right var.
+  // Also clean whitespace/newlines/quotes that sneak in from Railway
+  // variable editing or copy-paste.
+  if (
+    !env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY &&
+    env.CLERK_PUBLISHABLE_KEY
+  ) {
+    env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = cleanEnvValue(env.CLERK_PUBLISHABLE_KEY);
+  }
+  if (env.CLERK_SECRET_KEY) {
+    env.CLERK_SECRET_KEY = cleanEnvValue(env.CLERK_SECRET_KEY);
+  }
+  if (env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
+    env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = cleanEnvValue(env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+  }
+
+  // ─── Clerk config validation ─────────────────────────────────────
+  // Validate BEFORE spawning so we surface a truthful configuration
+  // error instead of a 60-second timeout masking a Clerk 500.
+  const clerkValidation = validateClerkConfig(env, ws.root);
+  if (!clerkValidation.ok) {
+    const err = new PreviewError(
+      "preview_clerk_config_error",
+      clerkValidation.reason ?? "Clerk configuration is invalid",
+      {
+        cwd: ws.root,
+        suggestedRemediation:
+          "Check that CLERK_SECRET_KEY starts with sk_test_ or sk_live_, " +
+          "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY starts with pk_test_ or pk_live_, " +
+          "both are from the same Clerk environment, and neither has " +
+          "whitespace or quotes. If the secret was recently rotated, " +
+          "update it in the terminal-server Railway env or workspace .env.local.",
+      },
+    );
+    const failedPort = allocatePort();
+    const fingerprint = fingerprintClerkEnv(env);
+    const failedRuntime: PreviewRuntime = {
+      workspaceId,
+      userId,
+      projectId: ws.projectId,
+      process: null,
+      port: failedPort,
+      framework: detected.framework,
+      command: actualCommand,
+      status: "failed",
+      startedAt: Date.now(),
+      lastHealthCheck: null,
+      error: err.message,
+      errorCode: err.code,
+      logs: [
+        ...preservedLogs,
+        `[preview] Clerk configuration error: ${err.message}`,
+        `[preview] Clerk env fingerprint: ${JSON.stringify(fingerprint)}`,
+        `[preview] Suggested: ${err.diagnostic.suggestedRemediation}`,
+      ],
+    };
+    runtimes.set(workspaceId, failedRuntime);
+    releasePort(failedPort);
+    throw err;
+  }
+
   const runtime: PreviewRuntime = {
     workspaceId,
     userId,
@@ -644,6 +976,13 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
   pushLog(runtime, `[preview] Starting ${detected.framework} on port ${port}: ${actualCommand}`);
   pushLog(runtime, `[preview] PATH: ${childPath}`);
   pushLog(runtime, `[preview] Runtime Node: ${process.execPath}`);
+
+  // Log a redacted fingerprint of the Clerk env so we can diagnose
+  // which key the runtime received without ever logging the full value.
+  if (clerkValidation.usesClerk) {
+    const fingerprint = fingerprintClerkEnv(env);
+    pushLog(runtime, `[preview] Clerk env fingerprint: ${JSON.stringify(fingerprint)}`);
+  }
 
   const child = spawn(shell, shellArgs, {
     cwd: ws.root,
@@ -699,12 +1038,33 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
 
   // Health probe in background — don't block the response
   probeHealth(port, HEALTH_PROBE_TIMEOUT_MS)
-    .then((healthy) => {
+    .then((result) => {
       runtime.lastHealthCheck = Date.now();
-      if (healthy && runtime.status === "starting") {
+      if (result.healthy && runtime.status === "starting") {
         runtime.status = "ready";
         pushLog(runtime, `[preview] Health check passed — ready on port ${port}`);
-      } else if (!healthy && runtime.status === "starting") {
+      } else if (result.authConfigError && runtime.status === "starting") {
+        // Server booted but Clerk/auth config is broken — surface the
+        // real error, not a generic timeout.
+        runtime.status = "failed";
+        runtime.errorCode = "preview_auth_config_error";
+        runtime.error = [
+          `Dev server booted but returned a ${result.status} with an ` +
+            "authentication configuration error.",
+          result.bodySnippet
+            ? `Response body:\n${result.bodySnippet}`
+            : "",
+          "This is NOT a generic preview failure. The Clerk secret key " +
+            "or publishable key is invalid, stale, or mismatched. Check " +
+            "the Clerk env fingerprint in the preview logs and update " +
+            "the keys in the terminal-server Railway env or workspace " +
+            ".env.local.",
+        ].filter(Boolean).join("\n");
+        pushLog(runtime, `[preview] Auth config error (HTTP ${result.status})`);
+        if (result.bodySnippet) {
+          pushLog(runtime, `[preview] ${result.bodySnippet.slice(0, 500)}`);
+        }
+      } else if (!result.healthy && runtime.status === "starting") {
         runtime.status = "failed";
         runtime.errorCode = "preview_port_never_ready";
         runtime.error = `Dev server did not become healthy within ${HEALTH_PROBE_TIMEOUT_MS / 1000}s`;
@@ -848,6 +1208,20 @@ export async function verifyPreviewHealth(workspaceId: string): Promise<boolean>
     if (resp.ok || resp.status === 404) {
       rt.lastHealthCheck = Date.now();
       return true;
+    }
+    // Detect auth config errors on live health checks too
+    if (resp.status >= 500) {
+      const body = await resp.text().catch(() => "");
+      if (detectAuthConfigError(body)) {
+        rt.status = "failed";
+        rt.errorCode = "preview_auth_config_error";
+        rt.error =
+          `Health check detected an authentication configuration error ` +
+          `(HTTP ${resp.status}). The Clerk secret key or publishable ` +
+          "key is invalid, stale, or mismatched.";
+        pushLog(rt, `[preview] Auth config error detected during health check (HTTP ${resp.status})`);
+        return false;
+      }
     }
   } catch {
     // Process may have died
