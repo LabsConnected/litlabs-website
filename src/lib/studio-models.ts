@@ -39,7 +39,7 @@ export const LITT_MODEL_ALIASES: StudioModel[] = [
     recommended: true,
     description: "Best model for the task. Routes automatically.",
     apiProvider: "gemini",
-    apiModel: "gemini-2.5-flash",
+    apiModel: "gemini-3.6-flash",
     bitsLabel: "~1–5 BITS",
   },
   {
@@ -53,7 +53,7 @@ export const LITT_MODEL_ALIASES: StudioModel[] = [
     isLittAlias: true,
     description: "Quick answers and simple tasks.",
     apiProvider: "groq",
-    apiModel: "llama-3.3-70b-versatile",
+    apiModel: "openai/gpt-oss-120b",
     bitsLabel: "Low BITS",
   },
   {
@@ -67,7 +67,7 @@ export const LITT_MODEL_ALIASES: StudioModel[] = [
     isLittAlias: true,
     description: "Everyday work with good quality and speed.",
     apiProvider: "gemini",
-    apiModel: "gemini-2.5-flash",
+    apiModel: "gemini-3.6-flash",
     bitsLabel: "Standard BITS",
   },
   {
@@ -109,7 +109,7 @@ export const LITT_MODEL_ALIASES: StudioModel[] = [
     isLittAlias: true,
     description: "Web research, summarization, and information gathering.",
     apiProvider: "gemini",
-    apiModel: "gemini-2.5-flash",
+    apiModel: "gemini-3.6-flash",
     bitsLabel: "Standard BITS",
   },
 ];
@@ -133,14 +133,14 @@ export const CHAT_MODELS: StudioModel[] = [
   { id: "claude-sonnet", name: "Claude Sonnet (BYOK)", provider: "anthropic", cost: "paid", speed: "medium", icon: "🔑", category: "byok", apiModel: "claude-sonnet-4-5", description: "Provider bills you directly. No LiTT model markup.", bitsLabel: "No LiTTBits" },
 
   // ── Advanced Providers — raw provider models (collapsible) ───────
-  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "gemini", cost: "free", speed: "fast", icon: "⚡", category: "advanced", apiModel: "gemini-2.5-flash", bitsLabel: "Included" },
+  { id: "gemini-2.5-flash", name: "Gemini 3.6 Flash", provider: "gemini", cost: "free", speed: "fast", icon: "⚡", category: "advanced", apiModel: "gemini-3.6-flash", bitsLabel: "Included" },
   { id: "openrouter-free", name: "OpenRouter Free", provider: "openrouter", cost: "free", speed: "medium", icon: "🎁", category: "advanced", apiProvider: "openrouter-free", apiModel: "openrouter/free", bitsLabel: "Included" },
   { id: "deepseek-free", name: "DeepSeek Chat", provider: "openrouter", cost: "free", speed: "medium", icon: "🐍", category: "advanced", apiProvider: "openrouter-deepseek", apiModel: "deepseek/deepseek-chat:free", bitsLabel: "Included" },
   { id: "llama-free", name: "Llama 3.3 70B", provider: "openrouter", cost: "free", speed: "medium", icon: "🦙", category: "advanced", apiProvider: "openrouter-llama", apiModel: "meta-llama/llama-3.3-70b-instruct:free", bitsLabel: "Included" },
-  { id: "groq-llama-70b", name: "Groq Llama 70B", provider: "groq", cost: "free", speed: "fast", icon: "🚀", category: "advanced", apiProvider: "groq", apiModel: "llama-3.3-70b-versatile", bitsLabel: "Low BITS" },
+  { id: "groq-llama-70b", name: "Groq Llama 70B", provider: "groq", cost: "free", speed: "fast", icon: "🚀", category: "advanced", apiProvider: "groq", apiModel: "openai/gpt-oss-120b", bitsLabel: "Low BITS" },
   { id: "qwen-coder", name: "Qwen3 Coder", provider: "openrouter", cost: "free", speed: "fast", icon: "⌨️", category: "advanced", apiProvider: "openrouter-qwen", apiModel: "qwen/qwen-2.5-coder-32b-instruct:free", bitsLabel: "Low BITS" },
-  { id: "gemini-creative", name: "Gemini Creative", provider: "gemini", cost: "free", speed: "fast", icon: "🎨", category: "advanced", apiModel: "gemini-2.5-flash", bitsLabel: "Included" },
-  { id: "gemini-vision", name: "Gemini Vision", provider: "gemini", cost: "free", speed: "fast", icon: "👁️", category: "advanced", apiModel: "gemini-2.5-flash", bitsLabel: "Included" },
+  { id: "gemini-creative", name: "Gemini Creative", provider: "gemini", cost: "free", speed: "fast", icon: "🎨", category: "advanced", apiModel: "gemini-3.6-flash", bitsLabel: "Included" },
+  { id: "gemini-vision", name: "Gemini Vision", provider: "gemini", cost: "free", speed: "fast", icon: "👁️", category: "advanced", apiModel: "gemini-3.6-flash", bitsLabel: "Included" },
 ];
 
 export const CODE_MODELS: StudioModel[] = [

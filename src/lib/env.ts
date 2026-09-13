@@ -71,7 +71,7 @@ const optionalAISchema = z.object({
   CLOUDFLARE_AI_API_TOKEN: z.string().optional(),
   CLOUDFLARE_IMAGE_MODEL: z.string().optional(),
   SUPERMEMORY_API_KEY: z.string().optional(),
-  GEMINI_PRIMARY_MODEL: z.string().optional().default("gemini-2.5-flash"),
+  GEMINI_PRIMARY_MODEL: z.string().optional().default("gemini-3.6-flash"),
   GEMINI_FALLBACK_MODEL: z.string().optional().default("gemini-2.5-flash-lite"),
   OPENROUTER_MODEL: z.string().optional(),
   OLLAMA_BASE_URL: z.string().optional(),

@@ -269,7 +269,7 @@ export async function runLiTTForVoice(args: {
     const t0 = Date.now();
     let roundText = "";
     const roundProvider = "openrouter";
-    let roundModel = "google/gemini-2.5-flash";
+    let roundModel = "openrouter/free";
     // Track repeated tool calls to detect infinite loops
     const toolCallCounts = new Map<string, number>();
 

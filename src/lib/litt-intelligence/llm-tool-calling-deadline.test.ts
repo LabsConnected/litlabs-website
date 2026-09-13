@@ -28,6 +28,7 @@ import {
   callLLMWithTools,
   AgentBudgetExhaustedError,
   _setGeminiModelFactory,
+  _resetToolProviderHealth,
   type GeminiModelLike,
 } from "./llm-tool-calling";
 
@@ -138,8 +139,11 @@ async function tick(ms: number): Promise<void> {
 describe("callLLMWithTools — deadline/budget contract (real Gemini behavior)", () => {
   beforeEach(() => {
     mockFetch.mockReset();
+    _resetToolProviderHealth();
     vi.stubEnv("OPENROUTER_API_KEY", "test-key");
     vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("GROQ_API_KEY", "");
+    vi.stubEnv("LITT_GROQ_BASIC_ENABLED", "0");
     _setGeminiModelFactory(null);
     vi.useFakeTimers();
   });
@@ -512,6 +516,7 @@ describe("callLLMWithTools — deadline/budget contract (real Gemini behavior)",
 
     // Disable Gemini fallback to isolate OpenRouter behavior
     vi.stubEnv("GEMINI_API_KEY", "");
+    vi.stubEnv("GOOGLE_API_KEY", "");
 
     // Deadline 3s → timeoutMs=min(30000, 3000-1000)=2000
     const deadline = Date.now() + 3_000;
@@ -582,6 +587,7 @@ describe("callLLMWithTools — deadline/budget contract (real Gemini behavior)",
   it("OpenRouter budget exhausted before attempt throws AgentBudgetExhaustedError", async () => {
     // Disable Gemini fallback
     vi.stubEnv("GEMINI_API_KEY", "");
+    vi.stubEnv("GOOGLE_API_KEY", "");
 
     // Past deadline
     const pastDeadline = Date.now() - 1000;

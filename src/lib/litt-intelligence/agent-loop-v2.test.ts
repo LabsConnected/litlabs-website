@@ -52,6 +52,7 @@ describe("runAgentLoopV2 — deadline and abort propagation", () => {
       toolCalls: [],
       finishReason: "stop",
       model: "google/gemini-2.5-flash",
+      provider: "openrouter-free",
     });
   });
 
@@ -114,6 +115,129 @@ describe("runAgentLoopV2 — deadline and abort propagation", () => {
     expect(options!.deadlineMs).toBeGreaterThanOrEqual(before + 90_000);
     expect(options!.deadlineMs).toBeLessThanOrEqual(after + 90_000);
     expect(options!.signal).toBe(controller.signal);
+  });
+});
+
+describe("runAgentLoopV2 — duplicate mutation suppression across provider failover", () => {
+  it("executes a mutation exactly once when the next provider re-issues the same tool call", async () => {
+    // Scenario: provider A returns a mutating tool call → it executes and its
+    // result is recorded → the next model request is served by provider B →
+    // B re-issues the identical mutation → the recorded result is replayed
+    // and the mutation must NOT execute again.
+    const mkdir = vi.fn().mockResolvedValue({ created: true });
+    const transport = {
+      workspaceId: "ws-test",
+      userId: "u-test",
+      workspaceRoot: "/tmp/test",
+      projectId: "p-test",
+      mkdir,
+      createCheckpointBeforeMutation: vi.fn().mockResolvedValue(null),
+    } as unknown as WorkspaceTransport;
+
+    const inputs = { path: "new-dir" };
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "Creating the directory.",
+        toolCalls: [{ toolCallId: "call_a1", toolId: "files.mkdir", inputs }],
+        finishReason: "tool_calls",
+        model: "openrouter/free",
+        provider: "openrouter-free",
+      })
+      // Provider B (gemini-direct) continues the transcript and re-issues the
+      // identical mutation — it must be suppressed.
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ toolCallId: "call_b1", toolId: "files.mkdir", inputs }],
+        finishReason: "tool_calls",
+        model: "gemini-3.6-flash",
+        provider: "gemini-direct",
+      })
+      .mockResolvedValueOnce({
+        text: "Done.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "gemini-3.6-flash",
+        provider: "gemini-direct",
+      });
+
+    const result = await runAgentLoopV2(
+      "create a new directory",
+      transport,
+      {
+        model: "openrouter/free",
+        systemPrompt: "You are LiTT.",
+        executionMode: "auto",
+        enableBuildFix: false,
+        maxSteps: 6,
+        maxRuntimeMs: 60_000,
+      },
+    );
+
+    // The mutation ran exactly once despite being issued by two providers.
+    expect(mkdir).toHaveBeenCalledTimes(1);
+    expect(mkdir).toHaveBeenCalledWith("new-dir");
+
+    // The suppressed duplicate was reported truthfully as a replayed result.
+    expect(
+      result.events.some(
+        (e) => e.type === "tool_result" && e.summary === "Already completed; duplicate mutation suppressed",
+      ),
+    ).toBe(true);
+
+    expect(result.finalText).toBe("Done.");
+    expect(result.modelFailed).toBeUndefined();
+  });
+
+  it("does not suppress a mutation issued with different inputs", async () => {
+    const mkdir = vi.fn().mockResolvedValue({ created: true });
+    const transport = {
+      workspaceId: "ws-test",
+      userId: "u-test",
+      workspaceRoot: "/tmp/test",
+      projectId: "p-test",
+      mkdir,
+      createCheckpointBeforeMutation: vi.fn().mockResolvedValue(null),
+    } as unknown as WorkspaceTransport;
+
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "Creating the first directory.",
+        toolCalls: [{ toolCallId: "call_1", toolId: "files.mkdir", inputs: { path: "dir-a" } }],
+        finishReason: "tool_calls",
+        model: "openrouter/free",
+        provider: "openrouter-free",
+      })
+      .mockResolvedValueOnce({
+        text: "Creating the second directory.",
+        toolCalls: [{ toolCallId: "call_2", toolId: "files.mkdir", inputs: { path: "dir-b" } }],
+        finishReason: "tool_calls",
+        model: "openrouter/free",
+        provider: "openrouter-free",
+      })
+      .mockResolvedValueOnce({
+        text: "Done.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "openrouter/free",
+        provider: "openrouter-free",
+      });
+
+    const result = await runAgentLoopV2(
+      "create two directories",
+      transport,
+      {
+        model: "openrouter/free",
+        systemPrompt: "You are LiTT.",
+        executionMode: "auto",
+        enableBuildFix: false,
+        maxSteps: 6,
+        maxRuntimeMs: 60_000,
+      },
+    );
+
+    // Distinct inputs → both are legitimate mutations, both execute.
+    expect(mkdir).toHaveBeenCalledTimes(2);
+    expect(result.finalText).toBe("Done.");
   });
 });
 

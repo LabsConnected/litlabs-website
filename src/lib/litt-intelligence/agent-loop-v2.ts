@@ -153,6 +153,7 @@ export async function runAgentLoopV2(
   const startTime = Date.now();
   const events: ProgressEvent[] = [];
   const toolCallRecords: ToolCallRecord[] = [];
+  const completedMutationResults = new Map<string, ToolCallResult>();
   let hasInterveningMutation = false;
 
   // Collect progress events
@@ -221,7 +222,7 @@ export async function runAgentLoopV2(
       localProgress.emit({
         type: "model_routing",
         model: llmResponse.model,
-        provider: "openrouter",
+        provider: llmResponse.provider,
         fallbackFrom: cfg.model && llmResponse.model !== cfg.model ? cfg.model : undefined,
       });
     } catch (err) {
@@ -358,6 +359,24 @@ export async function runAgentLoopV2(
 
       // Loop detection
       const inputsHash = hashInputs(toolCall.inputs);
+      const mutationKey = `${toolCall.toolId}:${inputsHash}`;
+      if (!toolDef.readOnly) {
+        const completed = completedMutationResults.get(mutationKey);
+        if (completed?.success) {
+          llmMessages.push(buildToolResultMessage({
+            ...completed,
+            toolCallId: toolCall.toolCallId,
+          }));
+          localProgress.emit({
+            type: "tool_result",
+            toolId: toolCall.toolId,
+            success: true,
+            summary: "Already completed; duplicate mutation suppressed",
+            durationMs: 0,
+          });
+          continue;
+        }
+      }
       if (detectRepeatedCalls(toolCallRecords, toolCall.toolId, inputsHash, hasInterveningMutation)) {
         cancelled = true;
         cancelReason = `Repeated tool call detected: ${toolCall.toolId} called 3+ times with same inputs and no intervening mutation`;
@@ -429,6 +448,10 @@ export async function runAgentLoopV2(
         resultHash: hashResult(result.result),
         step: stepsUsed,
       });
+
+      if (!toolDef.readOnly && result.success) {
+        completedMutationResults.set(mutationKey, result);
+      }
 
       // Track mutations
       if (!toolDef.readOnly) {
@@ -557,6 +580,7 @@ export async function resumeAgentLoopV2(
   const startTime = Date.now();
   const events: ProgressEvent[] = [];
   const toolCallRecords: ToolCallRecord[] = [];
+  const completedMutationResults = new Map<string, ToolCallResult>();
   let hasInterveningMutation = resume.hadInterveningMutation;
 
   const localProgress = new ProgressEmitter((event) => {
@@ -644,6 +668,12 @@ export async function resumeAgentLoopV2(
     if (toolDef && !toolDef.readOnly) {
       hasInterveningMutation = true;
       mutationBatchPending = true;
+      if (result.success) {
+        completedMutationResults.set(
+          `${resume.toolId}:${hashInputs(resume.inputs)}`,
+          result,
+        );
+      }
     }
   } else {
     // Rejected — inject rejection as tool result
@@ -696,6 +726,12 @@ export async function resumeAgentLoopV2(
           signal: cfg.signal,
         },
       );
+      localProgress.emit({
+        type: "model_routing",
+        model: llmResponse.model,
+        provider: llmResponse.provider,
+        fallbackFrom: cfg.model && llmResponse.model !== cfg.model ? cfg.model : undefined,
+      });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       localProgress.emit({
@@ -796,6 +832,24 @@ export async function resumeAgentLoopV2(
 
       // Loop detection
       const inputsHash = hashInputs(toolCall.inputs);
+      const mutationKey = `${toolCall.toolId}:${inputsHash}`;
+      if (!toolDef.readOnly) {
+        const completed = completedMutationResults.get(mutationKey);
+        if (completed?.success) {
+          llmMessages.push(buildToolResultMessage({
+            ...completed,
+            toolCallId: toolCall.toolCallId,
+          }));
+          localProgress.emit({
+            type: "tool_result",
+            toolId: toolCall.toolId,
+            success: true,
+            summary: "Already completed; duplicate mutation suppressed",
+            durationMs: 0,
+          });
+          continue;
+        }
+      }
       if (detectRepeatedCalls(toolCallRecords, toolCall.toolId, inputsHash, hasInterveningMutation)) {
         cancelled = true;
         cancelReason = `Repeated tool call detected: ${toolCall.toolId} called 3+ times with same inputs and no intervening mutation`;
@@ -831,6 +885,10 @@ export async function resumeAgentLoopV2(
       }
 
       toolCallRecords.push({ toolId: toolCall.toolId, inputsHash, resultHash: hashResult(result.result), step: stepsUsed });
+
+      if (!toolDef.readOnly && result.success) {
+        completedMutationResults.set(mutationKey, result);
+      }
 
       if (!toolDef.readOnly) {
         hasInterveningMutation = true;

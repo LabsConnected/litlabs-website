@@ -48,6 +48,8 @@ export interface LLMToolCallResponse {
   toolCalls: ToolCallRequest[];
   finishReason: string;
   model: string;
+  /** The independent provider that actually served this response. */
+  provider: "openrouter-free" | "gemini-direct" | "groq";
   /** Raw Gemini parts preserved for subsequent conversation rounds (thought signatures, ids). */
   rawParts?: GeminiPart[];
 }
@@ -158,6 +160,7 @@ type GeminiGenerateContentResponse = {
 // ─── Call LLM with tools ──────────────────────────────────────────
 
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+const GROQ_BASE = "https://api.groq.com/openai/v1";
 
 /**
  * Race an in-flight provider promise against a wall-clock timeout and an
@@ -256,6 +259,78 @@ const CLEANUP_MARGIN_MS = 1_000;
 const GEMINI_TIMEOUT_MS = 30_000;
 /** Hard cap on a single OpenRouter chat/completions attempt. */
 const OPENROUTER_TIMEOUT_MS = 30_000;
+const GROQ_TIMEOUT_MS = 30_000;
+
+export type ToolProviderHealthState = "healthy" | "degraded" | "cooldown" | "disabled";
+type ToolProvider = LLMToolCallResponse["provider"];
+
+interface ToolProviderHealth {
+  state: ToolProviderHealthState;
+  untilMs?: number;
+  reason?: string;
+}
+
+const providerHealth = new Map<ToolProvider, ToolProviderHealth>();
+
+function providerCanRun(provider: ToolProvider): boolean {
+  const health = providerHealth.get(provider);
+  if (!health || health.state === "healthy") return true;
+  if (health.state === "disabled") return false;
+  if (health.untilMs && health.untilMs > Date.now()) return false;
+  providerHealth.delete(provider);
+  return true;
+}
+
+function markProviderHealthy(provider: ToolProvider): void {
+  providerHealth.set(provider, { state: "healthy" });
+}
+
+function retryAfterMs(value: string | null): number {
+  if (!value) return 30_000;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(1_000, seconds * 1_000);
+  const dateMs = Date.parse(value);
+  return Number.isFinite(dateMs) ? Math.max(1_000, dateMs - Date.now()) : 30_000;
+}
+
+function markProviderFailure(
+  provider: ToolProvider,
+  status: number | null,
+  category: string,
+  retryAfter: string | null = null,
+): void {
+  if (status === 401 || status === 402 || status === 403) {
+    providerHealth.set(provider, { state: "disabled", reason: category });
+    return;
+  }
+  if (status === 429) {
+    providerHealth.set(provider, {
+      state: "cooldown",
+      untilMs: Date.now() + retryAfterMs(retryAfter),
+      reason: category,
+    });
+    return;
+  }
+  providerHealth.set(provider, {
+    state: "degraded",
+    untilMs: Date.now() + 15_000,
+    reason: category,
+  });
+}
+
+/** Diagnostics/test seam. Values never include credentials or response bodies. */
+export function getToolProviderHealth(): Record<ToolProvider, ToolProviderHealthState> {
+  return {
+    "openrouter-free": providerHealth.get("openrouter-free")?.state ?? "healthy",
+    "gemini-direct": providerHealth.get("gemini-direct")?.state ?? "healthy",
+    groq: providerHealth.get("groq")?.state ?? "healthy",
+  };
+}
+
+/** @internal Test-only reset for module-level circuit state. */
+export function _resetToolProviderHealth(): void {
+  providerHealth.clear();
+}
 
 /**
  * Canonical budget-exhaustion error.
@@ -322,6 +397,16 @@ function getGeminiKey(): string {
   return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
 }
 
+function getGroqKey(): string {
+  return process.env.GROQ_API_KEY || "";
+}
+
+function isGroqBasicEnabled(): boolean {
+  // A Groq key may belong to a paid account. Basic only opts into this route
+  // when operations explicitly classifies the configured allocation as free.
+  return process.env.LITT_GROQ_BASIC_ENABLED === "1";
+}
+
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 let _genAI: GoogleGenerativeAI | null = null;
@@ -344,6 +429,18 @@ class ProviderTimeoutError extends Error {
 class UpstreamAbortError extends Error {
   constructor(public readonly provider: string) {
     super(`${provider} request aborted by upstream`);
+  }
+}
+
+class ProviderHttpError extends Error {
+  constructor(
+    public readonly provider: ToolProvider,
+    public readonly status: number,
+    public readonly retryAfter: string | null,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ProviderHttpError";
   }
 }
 
@@ -467,7 +564,7 @@ async function callGeminiWithTools(
     throw new Error("GEMINI_API_KEY not set — cannot use Gemini direct fallback");
   }
 
-  const model = "gemini-2.5-flash";
+  const model = process.env.GEMINI_TOOL_MODEL || "gemini-3.6-flash";
   const contents = messages.map(toGeminiContent);
   const functionDeclarations = toGeminiFunctionDeclarations(tools);
 
@@ -549,7 +646,12 @@ async function callGeminiWithTools(
 
         if (!res.ok) {
           const errText = await res.text().catch(() => "");
-          throw new Error(`Gemini direct request failed with status ${res.status}: ${errText.slice(0, 200)}`);
+          throw new ProviderHttpError(
+            "gemini-direct",
+            res.status,
+            res.headers?.get?.("retry-after") ?? null,
+            `Gemini direct request failed with status ${res.status}: ${errText.slice(0, 200)}`,
+          );
         }
 
         result = (await res.json()) as GeminiGenerateContentResponse;
@@ -586,6 +688,11 @@ async function callGeminiWithTools(
       // another attempt actually exists. On the final attempt, throw
       // immediately instead of sleeping for a retry that will never happen.
       if (msg.includes("429") || msg.includes("Too Many Requests")) {
+        // A configured independent provider is preferable to consuming most
+        // of the shared agent deadline in a provider-local sleep.
+        if (isGroqBasicEnabled() && getGroqKey() && providerCanRun("groq")) {
+          throw err;
+        }
         const hasAnotherAttempt = attempt + 1 < MAX_GEMINI_ATTEMPTS;
         if (!hasAnotherAttempt) {
           console.log(`[llm-tool-calling] callGeminiWithTools: 429 on final attempt ${attempt + 1}, no retries left`);
@@ -663,6 +770,7 @@ async function callGeminiWithTools(
     toolCalls,
     finishReason: toolCalls.length > 0 ? "tool_calls" : "stop",
     model,
+    provider: "gemini-direct",
     rawParts: parts,
   };
 }
@@ -672,12 +780,10 @@ async function callGeminiWithTools(
  * When the primary model fails, we try these in order.
  * All models must support OpenRouter's native tool-calling API.
  */
-const TOOL_CALLING_FALLBACK_MODELS = [
-  "google/gemini-2.5-flash",
-  "openai/gpt-5.6-luna",
-  "anthropic/claude-sonnet-4.6",
-  "meta-llama/llama-3.3-70b-instruct",
-];
+const BASIC_OPENROUTER_MODEL = "openrouter/free";
+// Groq's named replacement for the retired llama-3.3-70b-versatile; supports
+// tool calling on the free/developer tier.
+const GROQ_TOOL_MODEL = "openai/gpt-oss-120b";
 
 /**
  * Categorize an HTTP error for logging and fallback decisions.
@@ -690,6 +796,7 @@ function categorizeError(status: number | null, message: string): string {
     return "network_error";
   }
   if (status === 401 || status === 403) return "auth_error";
+  if (status === 402) return "billing_required";
   if (status === 404) return "model_not_found";
   if (status === 429) return "rate_limited";
   if (status >= 500) return "provider_error";
@@ -724,22 +831,46 @@ export async function callLLMWithTools(
     signal?: AbortSignal;
   },
 ): Promise<LLMToolCallResponse> {
-  const key = getOpenRouterKey();
-  if (!key) throw new Error("OPENROUTER_API_KEY not set — cannot make tool-calling LLM calls");
-
-  const primaryModel = options?.model ?? "google/gemini-2.5-flash";
+  if (options?.signal?.aborted) {
+    throw new UpstreamAbortError("tool provider router");
+  }
+  if (options?.deadlineMs && computeAttemptTimeout(options.deadlineMs, 1) === null) {
+    throw new AgentBudgetExhaustedError(
+      options.deadlineMs - Date.now(),
+      "No provider attempt can fit in remaining budget",
+    );
+  }
   const openRouterTools = toOpenRouterTools(tools);
   const toolIdMap = buildToolIdReverseMap(tools);
+  const failures: Array<{
+    provider: ToolProvider;
+    model: string;
+    status: number | null;
+    category: string;
+    latencyMs: number;
+    message: string;
+  }> = [];
 
-  // Build the attempt chain: primary model first, then fallbacks (deduped)
-  const attemptChain = [primaryModel, ...TOOL_CALLING_FALLBACK_MODELS.filter((m) => m !== primaryModel)];
+  const recordFailure = (
+    provider: ToolProvider,
+    model: string,
+    status: number | null,
+    category: string,
+    latencyMs: number,
+    message: string,
+    retryAfter: string | null = null,
+  ) => {
+    failures.push({ provider, model, status, category, latencyMs, message: message.slice(0, 200) });
+    markProviderFailure(provider, status, category, retryAfter);
+  };
 
-  // Absolute wall-clock deadline inherited from the agent loop so the entire
-  // fallback chain (OpenRouter attempts + Gemini sleeps + generateContent)
-  // cannot outlive the agent's maxRuntimeMs.
-  const failures: Array<{ model: string; status: number | null; category: string; latencyMs: number; message: string }> = [];
-
-  for (const model of attemptChain) {
+  const parseOpenAICompatible = async (
+    provider: "openrouter-free" | "groq",
+    model: string,
+    baseUrl: string,
+    key: string,
+    timeoutMs: number,
+  ): Promise<LLMToolCallResponse | null> => {
     const body: Record<string, unknown> = {
       model,
       stream: false,
@@ -756,75 +887,73 @@ export async function callLLMWithTools(
       body.tool_choice = options?.toolChoice ?? "auto";
     }
 
-    // Compute bounded per-attempt timeout from the absolute deadline
-    const attemptTimeoutMs = computeAttemptTimeout(options?.deadlineMs, OPENROUTER_TIMEOUT_MS);
+    const attemptTimeoutMs = computeAttemptTimeout(options?.deadlineMs, timeoutMs);
     if (attemptTimeoutMs === null) {
       const remainingMs = options?.deadlineMs ? options.deadlineMs - Date.now() : 0;
-      throw new AgentBudgetExhaustedError(remainingMs, `OpenRouter attempt for ${model} cannot fit in remaining budget`);
+      throw new AgentBudgetExhaustedError(remainingMs, `${provider} attempt for ${model} cannot fit in remaining budget`);
     }
-    console.log(`[llm-tool-calling] callLLMWithTools: attempting OpenRouter model=${model} timeoutMs=${attemptTimeoutMs} @ ${new Date().toISOString()}`);
+    console.log(`[llm-tool-calling] callLLMWithTools: attempting provider=${provider} model=${model} timeoutMs=${attemptTimeoutMs} @ ${new Date().toISOString()}`);
     const t0 = Date.now();
 
     let res: Response;
     try {
       res = await fetchWithTimeout(
-        `${OPENROUTER_BASE}/chat/completions`,
+        `${baseUrl}/chat/completions`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${key}`,
-            "HTTP-Referer": SITE_URL,
-            "X-Title": "LiTT",
+            ...(provider === "openrouter-free" ? { "HTTP-Referer": SITE_URL, "X-Title": "LiTT" } : {}),
           },
           body: JSON.stringify(body),
         },
         attemptTimeoutMs,
-        "OpenRouter",
+        provider,
         options?.signal,
       );
-      console.log(`[llm-tool-calling] callLLMWithTools: OpenRouter model=${model} response status=${res.status} latencyMs=${Date.now() - t0} @ ${new Date().toISOString()}`);
     } catch (err) {
       const latencyMs = Date.now() - t0;
       const msg = err instanceof Error ? err.message : String(err);
-      console.log(`[llm-tool-calling] callLLMWithTools: OpenRouter model=${model} threw after ${latencyMs}ms: ${msg} @ ${new Date().toISOString()}`);
       const category = categorizeError(null, msg);
-      failures.push({ model, status: null, category, latencyMs, message: msg });
-      // Network/timeout errors are retryable — try next model
-      continue;
+      if (category === "upstream_abort") throw err;
+      recordFailure(provider, model, null, category, latencyMs, msg);
+      return null;
     }
 
     if (!res.ok) {
       const txt = await res.text().catch(() => "");
       const latencyMs = Date.now() - t0;
       const category = categorizeError(res.status, txt);
-      console.log(`[llm-tool-calling] callLLMWithTools: OpenRouter model=${model} not ok status=${res.status} category=${category} latencyMs=${latencyMs} @ ${new Date().toISOString()}`);
-      failures.push({ model, status: res.status, category, latencyMs, message: txt.slice(0, 200) });
+      recordFailure(provider, model, res.status, category, latencyMs, txt, res.headers?.get?.("retry-after") ?? null);
 
-      // Log the failed attempt
       logLLMCall({
         prompt: messages.map((m) => `${m.role}: ${m.content}`).join("\n"),
         systemPrompt,
         output: "",
-        provider: "openrouter",
+        provider,
         model,
         latencyMs,
-        failover: failures.slice(0, -1).map((f) => f.model),
+        failover: failures.slice(0, -1).map((f) => `${f.provider}:${f.model}`),
         metadata: { ...options?.evalMetadata ?? {}, failureCategory: category } as LLMCallMetadata,
       });
-
-      // Non-retryable errors (400 bad request) — skip to next model
-      // Retryable errors (429, 5xx, network) — also skip to next model
-      continue;
+      return null;
     }
 
-    const data = await res.json();
-    const choice = data.choices?.[0];
+    let data: { model?: string; choices?: Array<{
+      message?: { content?: string; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> };
+      finish_reason?: string;
+    }> } | null;
+    try {
+      data = (await res.json()) as typeof data;
+    } catch {
+      recordFailure(provider, model, res.status, "malformed_response", Date.now() - t0, "Response body was not valid JSON");
+      return null;
+    }
+    const choice = data?.choices?.[0];
     if (!choice) {
-      // Empty response — try next model
-      console.log(`[llm-tool-calling] callLLMWithTools: OpenRouter model=${model} empty response @ ${new Date().toISOString()}`);
-      failures.push({ model, status: res.status, category: "empty_response", latencyMs: Date.now() - t0, message: "No choices in response" });
-      continue;
+      recordFailure(provider, model, res.status, "malformed_response", Date.now() - t0, "No choices in response");
+      return null;
     }
 
     const text: string = choice.message?.content ?? "";
@@ -852,28 +981,45 @@ export async function callLLMWithTools(
       text,
       toolCalls,
       finishReason,
-      model: data.model ?? model,
+      model: data?.model ?? model,
+      provider,
     };
 
-    console.log(`[llm-tool-calling] callLLMWithTools: OpenRouter model=${result.model} success latencyMs=${Date.now() - t0} toolCalls=${toolCalls.length} @ ${new Date().toISOString()}`);
+    markProviderHealthy(provider);
     logLLMCall({
       prompt: messages.map((m) => `${m.role}: ${m.content}`).join("\n"),
       systemPrompt,
       output: text,
-      provider: "openrouter",
+      provider,
       model: result.model,
       latencyMs: Date.now() - t0,
-      failover: failures.map((f) => f.model),
+      failover: failures.map((f) => `${f.provider}:${f.model}`),
       metadata: options?.evalMetadata ?? {},
     });
 
     return result;
+  };
+
+  // Basic is cost-class constrained. OpenRouter may only receive an explicit
+  // :free model or its free router; paid model IDs are never attempted here.
+  const requestedFreeModel = options?.model === BASIC_OPENROUTER_MODEL || options?.model?.endsWith(":free")
+    ? options.model
+    : BASIC_OPENROUTER_MODEL;
+  const openRouterKey = getOpenRouterKey();
+  if (openRouterKey && providerCanRun("openrouter-free")) {
+    const result = await parseOpenAICompatible(
+      "openrouter-free",
+      requestedFreeModel,
+      OPENROUTER_BASE,
+      openRouterKey,
+      OPENROUTER_TIMEOUT_MS,
+    );
+    if (result) return result;
   }
 
-  // All OpenRouter models failed — try Gemini direct API fallback
   const geminiKey = getGeminiKey();
-  console.log("[llm-tool-calling] OpenRouter failures:", failures.map((f) => `${f.model}(${f.status})`).join(", "), "— trying Gemini direct fallback, key present:", !!geminiKey);
-  if (geminiKey && openRouterTools.length > 0) {
+  if (geminiKey && providerCanRun("gemini-direct")) {
+    const geminiT0 = Date.now();
     try {
       const geminiResult = await callGeminiWithTools(
         systemPrompt,
@@ -888,11 +1034,12 @@ export async function callLLMWithTools(
         systemPrompt,
         output: geminiResult.text,
         provider: "gemini-direct",
-        model: "gemini-2.5-flash",
-        latencyMs: 0,
-        failover: failures.map((f) => f.model),
+        model: geminiResult.model,
+        latencyMs: Date.now() - geminiT0,
+        failover: failures.map((f) => `${f.provider}:${f.model}`),
         metadata: { ...options?.evalMetadata ?? {}, failureCategory: "openrouter_all_failed_gemini_fallback" } as LLMCallMetadata,
       });
+      markProviderHealthy("gemini-direct");
       return geminiResult;
     } catch (geminiErr) {
       // Preserve AgentBudgetExhaustedError — do not hide agent-budget
@@ -900,16 +1047,53 @@ export async function callLLMWithTools(
       if (geminiErr instanceof AgentBudgetExhaustedError) {
         throw geminiErr;
       }
+      if (geminiErr instanceof UpstreamAbortError || options?.signal?.aborted) {
+        throw geminiErr;
+      }
       const msg = geminiErr instanceof Error ? geminiErr.message : String(geminiErr);
-      console.log("[llm-tool-calling] Gemini direct fallback FAILED:", msg);
-      failures.push({ model: "gemini-2.5-flash (direct)", status: null, category: "gemini_direct_error", latencyMs: 0, message: msg });
+      // The raw-fetch path throws ProviderHttpError with the real status; the
+      // SDK/seam path surfaces status only inside the message text.
+      const status = geminiErr instanceof ProviderHttpError
+        ? geminiErr.status
+        : msg.includes("429") ? 429 : null;
+      const category = categorizeError(status, msg);
+      recordFailure(
+        "gemini-direct",
+        process.env.GEMINI_TOOL_MODEL || "gemini-3.6-flash",
+        status,
+        category,
+        Date.now() - geminiT0,
+        msg,
+        geminiErr instanceof ProviderHttpError ? geminiErr.retryAfter : null,
+      );
+    }
+  }
+
+  const groqKey = getGroqKey();
+  if (isGroqBasicEnabled() && groqKey && providerCanRun("groq")) {
+    const result = await parseOpenAICompatible(
+      "groq",
+      process.env.GROQ_TOOL_MODEL || GROQ_TOOL_MODEL,
+      GROQ_BASE,
+      groqKey,
+      GROQ_TIMEOUT_MS,
+    );
+    if (result) return result;
+  }
+
+  // If the shared agent deadline can no longer fit any attempt, surface the
+  // canonical budget error rather than a generic all-providers-failed error.
+  if (options?.deadlineMs) {
+    const remainingMs = options.deadlineMs - Date.now();
+    if (remainingMs <= CLEANUP_MARGIN_MS) {
+      throw new AgentBudgetExhaustedError(remainingMs, "Provider chain consumed the remaining agent budget");
     }
   }
 
   // All models failed — throw with structured failure info (no secrets)
-  const failureSummary = failures.map((f) => `${f.model}(${f.category}, ${f.latencyMs}ms)`).join("; ");
+  const failureSummary = failures.map((f) => `${f.provider}:${f.model}(${f.category}, ${f.latencyMs}ms)`).join("; ");
   throw new Error(
-    `All tool-calling models failed. Attempts: ${failureSummary}. ` +
+    `All Basic-eligible tool-calling providers failed. Attempts: ${failureSummary || "none configured"}. ` +
     `Last error: ${failures[failures.length - 1]?.message ?? "unknown"}`,
   );
 }
