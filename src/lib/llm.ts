@@ -55,12 +55,58 @@ export type LLMProvider =
 
 export type ModelCategory = "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok" | "litt-alias";
 
+/**
+ * Which account pays for each provider.
+ *
+ * "litt_paid" providers bill LiTT's OWN platform credential (OPENAI_API_KEY).
+ * Everything else is a free-tier managed route or a :free OpenRouter slug, so
+ * it costs LiTT nothing per call. BYOK is not represented here: a user key is
+ * passed per request and billed to that user by their provider.
+ *
+ * This mirrors the cost policy the v2 Basic router already enforces
+ * structurally in provider-registry.ts, where LITT_PAID routes are excluded
+ * outright and `openai/*` resolves to the byok route.
+ */
+export const PROVIDER_COST_CLASS: Record<LLMProvider, "included" | "litt_paid"> = {
+  gemini: "included",
+  groq: "included",
+  "groq-whisper": "included",
+  openai: "litt_paid",
+  "openrouter-free": "included",
+  "openrouter-qwen": "included",
+  "openrouter-deepseek": "included",
+  "openrouter-mistral": "included",
+  "openrouter-llama": "included",
+  "openrouter-trinity": "included",
+  "openrouter-vision": "included",
+};
+
+/** True when calling this provider spends LiTT's own money. */
+export function isLittPaidProvider(provider: LLMProvider): boolean {
+  return PROVIDER_COST_CLASS[provider] === "litt_paid";
+}
+
+/** Free-tier chain used when every candidate would spend LiTT's money. */
+const INCLUDED_FALLBACK_CHAIN: LLMProvider[] = ["gemini", "openrouter-free", "groq"];
+
 export interface LLMOptions {
   task?: LLMTask;
-  /** Force a specific provider (skips the chain). */
+  /** Force a specific provider (skips the chain).
+   *
+   *  SECURITY: this is frequently populated from request input (the Studio
+   *  model picker posts `provider`/`model` straight through). A forced
+   *  provider can therefore never promote a litt_paid route on its own —
+   *  see `allowLittPaidProviders`. */
   provider?: LLMProvider;
   /** User-facing model category for routing. */
   category?: ModelCategory;
+  /** Authorizes providers that spend LiTT's own money for this call.
+   *
+   *  Default-deny. Without it a forced `provider` cannot pin a litt_paid
+   *  route and litt_paid providers are filtered out of the default chain.
+   *  Derive this from the caller's plan/entitlements — NEVER from request
+   *  input, or the protection is void. */
+  allowLittPaidProviders?: boolean;
   /** Hint to prefer free tier even if a paid key is available. */
   preferFree?: boolean;
   maxTokens?: number;
@@ -158,7 +204,41 @@ function markModelUnavailable(provider: string): void {
 /* ------------------------------------------------------------------ */
 /*  Default chain per task                                             */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Cost-policy gate around the raw chain.
+ *
+ * A Free user must not be able to make LiTT pay. Two ways that was possible:
+ *
+ *   1. Forging a provider. `defaultChain` honours `opts.provider` by
+ *      returning [provider] and skipping the chain entirely, and the Studio
+ *      message route builds that value from `body.provider` with no plan
+ *      check — so POSTing { provider: "openai", category: "fast" } pinned the
+ *      run to LiTT's own OpenAI key.
+ *   2. The default chain itself. Whenever OPENAI_API_KEY is set, "openai" is
+ *      FIRST for auto / chat / code / creative / precise / json / litt-alias,
+ *      so ordinary Basic traffic on this v1 path led with a paid provider.
+ *
+ * Default-deny fixes both: litt_paid providers are dropped unless the caller
+ * explicitly passes `allowLittPaidProviders`, which must be derived from the
+ * user's plan and never from request input. If filtering empties the chain we
+ * fall back to the included free-tier chain rather than failing the request.
+ *
+ * The v2 agent path (planBasicRoutes) already enforces this structurally;
+ * this brings the v1 chat path in line with it.
+ */
 function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
+  const chain = rawDefaultChain(task, opts);
+  if (opts.allowLittPaidProviders) return chain;
+
+  const included = chain.filter((p) => !isLittPaidProvider(p));
+  if (included.length > 0) return included;
+
+  // Every candidate was litt_paid (e.g. a forged provider: "openai").
+  return INCLUDED_FALLBACK_CHAIN.filter((p) => !isLittPaidProvider(p));
+}
+
+function rawDefaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
   // "litt-alias" models (LiTT Balanced/Reasoning/Code) should use the full
   // fallback chain — the apiProvider is a *preference*, not a hard pin.
   // Without this, a single provider failure bricks the conversation.
