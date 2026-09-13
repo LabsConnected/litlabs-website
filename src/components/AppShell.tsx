@@ -22,8 +22,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   X,
-  Bell,
-  Search,
   Menu,
   Plus,
   ChevronUp,
@@ -196,7 +194,7 @@ function IdentityDock({ collapsed }: { collapsed: boolean }) {
             <IdentityMenuHeader name={displayName} email={email} role={role} roleColor={roleColor} T={T} />
             <IdentityMenuItems items={menuItems} T={T} onClick={() => setOpen(false)} />
             <IdentityMenuDivider T={T} />
-            <IdentityMenuSignOut T={T} onClick={() => { setOpen(false); void signOut(); }} />
+            <IdentityMenuSignOut onClick={() => { setOpen(false); void signOut(); }} />
           </div>
         )}
       </div>
@@ -253,7 +251,7 @@ function IdentityDock({ collapsed }: { collapsed: boolean }) {
           {/* Divider */}
           <IdentityMenuDivider T={T} />
           {/* Sign out */}
-          <IdentityMenuSignOut T={T} onClick={() => { setOpen(false); void signOut(); }} />
+          <IdentityMenuSignOut onClick={() => { setOpen(false); void signOut(); }} />
         </div>
       )}
     </div>
@@ -311,12 +309,7 @@ function IdentityMenuDivider({ T }: { T: ReturnType<typeof useTheme>["resolvedCo
   return <div className="my-1 h-px" style={{ background: `${T.borderColor}15` }} />;
 }
 
-function IdentityMenuSignOut({
-  T, onClick,
-}: {
-  T: ReturnType<typeof useTheme>["resolvedColors"];
-  onClick: () => void;
-}) {
+function IdentityMenuSignOut({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
@@ -488,6 +481,7 @@ function DesktopNavItem({
     <Link
       href={item.href ?? "#"}
       title={collapsed ? item.label : undefined}
+      aria-current={active ? "page" : undefined}
       className={`group relative flex items-center rounded-xl border transition-all duration-200 ${
         collapsed ? "mx-auto h-10 w-10 justify-center" : "h-10 gap-3 px-3"
       }`}
@@ -542,6 +536,7 @@ function MobileDrawer({
   const { resolvedColors: T } = useTheme();
   const { isSignedIn } = useClerkAuth();
   const { balance } = useWallet();
+  const littHealth = useLittHealth();
 
   const checkActive = useCallback(
     (href: string) => isAppNavActive(pathname, searchParams, href),
@@ -609,6 +604,7 @@ function MobileDrawer({
                       key={item.label}
                       href={item.href ?? "#"}
                       onClick={onClose}
+                      aria-current={active ? "page" : undefined}
                       className="flex h-11 items-center gap-3 rounded-xl border px-3 transition-all"
                       style={{
                         background: active
@@ -645,6 +641,7 @@ function MobileDrawer({
                     key={item.label}
                     href={item.href ?? "#"}
                     onClick={onClose}
+                    aria-current={active ? "page" : undefined}
                     className="flex h-11 items-center gap-3 rounded-xl border px-3 transition-all"
                     style={{
                       background: active
@@ -672,10 +669,23 @@ function MobileDrawer({
           <div className="mb-2 flex items-center justify-between rounded-lg border px-2.5 py-2" style={{ borderColor: `${T.borderColor}15`, background: `${T.boxBg}50` }}>
             <div className="flex items-center gap-2">
               <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+                {littHealth.pulse && (
+                  <span
+                    className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60"
+                    style={{ backgroundColor: littHealth.color }}
+                  />
+                )}
+                <span
+                  className="relative inline-flex h-2 w-2 rounded-full"
+                  style={{ backgroundColor: littHealth.color }}
+                />
               </span>
-              <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">LiTT Online</span>
+              <span
+                className="text-[10px] font-black uppercase tracking-wider"
+                style={{ color: littHealth.color }}
+              >
+                {littHealth.label}
+              </span>
             </div>
             {isSignedIn && (
               <span className="text-[11px] font-bold" style={{ color: T.textMuted }}>
@@ -718,6 +728,7 @@ function MobileBottomBar() {
             <Link
               key={item.label}
               href={item.href}
+              aria-current={active ? "page" : undefined}
               className="relative flex min-h-11 flex-col items-center justify-center gap-0.5 transition-all"
               style={{ color: active ? T.accentColor : T.textMuted }}
             >
@@ -759,6 +770,7 @@ function MobileBottomBar() {
             <Link
               key={item.label}
               href={item.href}
+              aria-current={active ? "page" : undefined}
               className="relative flex min-h-11 flex-col items-center justify-center gap-0.5 transition-all"
               style={{ color: active ? T.accentColor : T.textMuted }}
             >
@@ -806,7 +818,7 @@ function MobileTopBar({ onMenuClick }: { onMenuClick: () => void }) {
         style={{ color: T.textMuted }}
         aria-label="Settings"
       >
-        <Search size={20} />
+        <SettingsIcon size={20} />
       </Link>
     </header>
   );

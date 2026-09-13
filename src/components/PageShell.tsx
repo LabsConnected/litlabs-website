@@ -82,13 +82,13 @@ export default function PageShell({
                   LiTTree LabStudios
                 </Link>
                 <span className="text-[9px] opacity-30">/</span>
-                <Link
-                  href="/dashboard"
-                  className="text-[9px] font-bold uppercase tracking-wider opacity-60 transition-opacity hover:opacity-100"
+                <span
+                  aria-current="page"
+                  className="truncate text-[9px] font-bold uppercase tracking-wider opacity-70"
                   style={{ color: T.textColor }}
                 >
-                  Dashboard
-                </Link>
+                  {title ?? "Current page"}
+                </span>
               </div>
               {title && (
                 <h1
