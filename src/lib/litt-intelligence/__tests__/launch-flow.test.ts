@@ -499,8 +499,10 @@ describe("Launch Flow: budget limits", () => {
     const config = runAgentLoop.mock.calls[0][2] as Record<string, unknown>;
     expect(config.maxOutputChars).toBe(200_000);
     expect(config.maxSteps).toBe(40);
-    // Runtime budget must still be the real bound
-    expect(config.maxRuntimeMs).toBe(600_000);
+    // Runtime budget must still be the real bound (allow 1ms timing slack
+    // for the elapsed-time subtraction before the agent loop starts)
+    expect(config.maxRuntimeMs).toBeGreaterThanOrEqual(599_000);
+    expect(config.maxRuntimeMs).toBeLessThanOrEqual(600_000);
   });
 
   it("passes maxOutputChars to the repair agent loop too", async () => {
