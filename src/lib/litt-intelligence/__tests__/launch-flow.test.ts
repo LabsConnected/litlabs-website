@@ -119,10 +119,10 @@ describe("Launch Flow: no-mutation reprompt", () => {
   it("reprompts once when an execution request applies zero mutations", async () => {
     const runAgentLoop = vi.fn()
       .mockResolvedValueOnce(successAgentResult({
-        toolCalls: [{ toolId: "files.list", success: true, summary: "listed" }],
+        toolCalls: [{ toolId: "files.list", success: true, summary: "listed", mutating: false }],
       }))
       .mockResolvedValueOnce(successAgentResult({
-        toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html" }],
+        toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
       }));
     const options = makeOptions({ requiresExecution: true, runAgentLoop });
 
@@ -155,7 +155,7 @@ describe("Launch Flow: no-mutation reprompt", () => {
 
   it("does not reprompt when the first pass already applied a mutation", async () => {
     const runAgentLoop = vi.fn().mockResolvedValue(successAgentResult({
-      toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html" }],
+      toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
     }));
     const options = makeOptions({ requiresExecution: true, runAgentLoop });
 

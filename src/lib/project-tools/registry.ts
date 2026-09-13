@@ -42,6 +42,13 @@ import {
   type ToolResult,
   type CheckId,
 } from "@/lib/vapi-tools";
+import {
+  checkApplicability,
+  notApplicableReason,
+  repoOnlyToolApplicability,
+  capabilityNotice,
+  type WorkspaceShape,
+} from "@/lib/studio/workspace-capability";
 import { resolveRecipient } from "@/lib/vapi-recipient-policy";
 import { VAPI_TOOL_DEFINITIONS } from "@/lib/vapi-tool-definitions";
 import {
@@ -452,7 +459,29 @@ export const toolRunProjectChecks: ToolHandler = async (userId, args) => {
   const now = new Date().toISOString();
   const results: Record<string, unknown>[] = [];
 
+  // A static workspace with no repository has no toolchain and no git BY
+  // DESIGN. Running these checks there yields failures that describe the
+  // workspace type, not the project's health — so they are classified
+  // not_applicable and must never be reported as project failures.
+  const shape: WorkspaceShape = {
+    framework: project.framework,
+    packageManager: project.packageManager,
+    githubFullName: project.githubFullName,
+    sourceType: project.sourceType,
+  };
+
   for (const checkId of checks) {
+    if (checkApplicability(shape, checkId) === "not_applicable") {
+      results.push({
+        id: checkId,
+        label: labelFor(checkId),
+        status: "not_applicable",
+        output: null,
+        error: null,
+        reason: notApplicableReason(shape, checkId),
+      });
+      continue;
+    }
     const command = packageManagerCommand(project.packageManager, checkId);
     if (!command) {
       results.push({ id: checkId, label: labelFor(checkId), status: "not_configured", output: null, error: null });
@@ -486,9 +515,13 @@ export const toolRunProjectChecks: ToolHandler = async (userId, args) => {
 
   const passed = results.filter((r) => r.status === "passed").length;
   const failed = results.filter((r) => r.status === "failed").length;
-  return ok(projectId, `Ran ${results.length} check(s): ${passed} passed, ${failed} failed.`, {
+  const notApplicable = results.filter((r) => r.status === "not_applicable").length;
+  const notice = capabilityNotice(shape);
+  const naPart = notApplicable > 0 ? `, ${notApplicable} not applicable to this workspace type` : "";
+  return ok(projectId, `Ran ${results.length} check(s): ${passed} passed, ${failed} failed${naPart}.`, {
     checks: results,
-    summary: { total: results.length, passed, failed },
+    summary: { total: results.length, passed, failed, notApplicable },
+    ...(notice ? { workspaceNotice: notice } : {}),
     timestamp: now,
   });
 };
@@ -1302,6 +1335,33 @@ export async function executeProjectTool(
   if (!entry) {
     return fail(`Unknown tool "${toolName}". Valid: ${Object.keys(PROJECT_TOOLS).join(", ")}.`);
   }
+
+  // Repo-only tools on a workspace with no repository are NOT APPLICABLE.
+  // Letting them run produces "git is not installed"-style errors that the
+  // model then reports as project failures, and it proposes installing git
+  // for a workspace that intentionally has none.
+  const projectId = str(args.project_id);
+  if (entry.metadata.projectScoped && projectId) {
+    const project = await getProject(projectId, userId);
+    if (project) {
+      const shape: WorkspaceShape = {
+        framework: project.framework,
+        packageManager: project.packageManager,
+        githubFullName: project.githubFullName,
+        sourceType: project.sourceType,
+      };
+      if (repoOnlyToolApplicability(shape, toolName) === "not_applicable") {
+        const reason = notApplicableReason(shape, toolName);
+        return ok(projectId, reason, {
+          status: "not_applicable",
+          tool: toolName,
+          reason,
+          workspaceNotice: capabilityNotice(shape),
+        });
+      }
+    }
+  }
+
   return entry.handler(userId, args);
 }
 

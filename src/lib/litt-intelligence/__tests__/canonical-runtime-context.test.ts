@@ -23,6 +23,8 @@ describe("buildRuntimeContextBlock", () => {
       model: null,
       provider: null,
       sourceType: "github",
+      deploymentStatus: "not_started",
+      deploymentUrl: null,
     };
 
     const block = buildRuntimeContextBlock(ctx);
@@ -57,6 +59,8 @@ describe("buildRuntimeContextBlock", () => {
       model: null,
       provider: null,
       sourceType: "github",
+      deploymentStatus: "not_started",
+      deploymentUrl: null,
     };
 
     const block = buildRuntimeContextBlock(ctx);
@@ -85,6 +89,8 @@ describe("buildRuntimeContextBlock", () => {
       model: null,
       provider: null,
       sourceType: null,
+      deploymentStatus: "not_started",
+      deploymentUrl: null,
     };
 
     const block = buildRuntimeContextBlock(ctx);
@@ -115,6 +121,8 @@ describe("buildRuntimeContextBlock", () => {
       model: null,
       provider: null,
       sourceType: "github",
+      deploymentStatus: "not_started",
+      deploymentUrl: null,
     };
 
     const block = buildRuntimeContextBlock(ctx);
@@ -142,6 +150,8 @@ describe("buildRuntimeContextBlock", () => {
       model: null,
       provider: null,
       sourceType: "github",
+      deploymentStatus: "not_started",
+      deploymentUrl: null,
     };
 
     const block = buildRuntimeContextBlock(ctx);
