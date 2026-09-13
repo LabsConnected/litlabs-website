@@ -64,7 +64,6 @@ const MODE_PATTERNS: ModePattern[] = [
       /\b(fix|debug|resolve|patch)\b.*\b(bug|error|issue|crash|fail)\b/i,
       /\b(edit|update|change|modify|rename|delete)\b.*\b(file|readme|config|code|component)\b/i,
       /\b(run|execute)\b.*\b(tests?|builds?|lint|commands?|scripts?)\b/i,
-      /\b(landing\s*(page|site))\b/i,
     ],
     requiresProject: true,
     requiresExecution: true,
