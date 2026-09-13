@@ -43,6 +43,11 @@ import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import dotenv from "dotenv";
 import path from "node:path";
+// dist/worker is emitted as native ESM (its own package.json sets
+// "type":"module" — see terminal-server/package.json's build:worker
+// script), so this relative import needs the explicit .js extension for
+// Node's ESM resolver to find the compiled sibling file at runtime.
+import { resolveBindHost } from "./network-bind.js";
 
 // Load .env.local then .env (shared with the terminal server)
 const cwd = process.cwd();
@@ -276,6 +281,16 @@ if (isMainWorkerProcess) {
   // Default to 8082 (not 8081 — the LiveKit framework's internal broker uses 8081).
   const HEALTH_PORT = Number(process.env.LITT_AGENT_WORKER_PORT || process.env.PORT || 8082);
 
+  // Same bind policy as server.ts: Railway → 0.0.0.0, --tailscale/--lan →
+  // explicit, else 127.0.0.1. A missing Tailscale interface aborts here.
+  let bind: ReturnType<typeof resolveBindHost>;
+  try {
+    bind = resolveBindHost();
+  } catch (err) {
+    console.error((err as Error).message);
+    process.exit(1);
+  }
+
   const healthServer = createServer((_req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(
@@ -290,8 +305,8 @@ if (isMainWorkerProcess) {
     );
   });
 
-  healthServer.listen(HEALTH_PORT, "0.0.0.0", () => {
-    console.log(`[litt-agent] liveness endpoint listening on 0.0.0.0:${HEALTH_PORT}/`);
+  healthServer.listen(HEALTH_PORT, bind.host, () => {
+    console.log(`[litt-agent] liveness endpoint listening on ${bind.host}:${HEALTH_PORT}/ (bind: ${bind.reason})`);
   });
 
   // Run via the LiveKit agents CLI (spawns/coordinates worker processes).

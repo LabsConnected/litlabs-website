@@ -5,7 +5,7 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev
 
-COPY server.mjs ./
+COPY server.mjs network-bind.mjs ./
 
 # Railway assigns $PORT dynamically — server.mjs reads process.env.PORT
 # with fallback to 4002 for local dev. EXPOSE is informational only.

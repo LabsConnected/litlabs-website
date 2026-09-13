@@ -25,8 +25,22 @@ import { existsSync, readFileSync, statSync } from "fs";
 import { delimiter as PATH_DELIMITER, dirname, join, resolve } from "path";
 import { promisify } from "util";
 import { getWorkspace, type WorkspaceDescriptor } from "../workspace/WorkspaceManager";
+import { resolveBindHost } from "../network-bind";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Preview children mirror the parent terminal-server's own resolved bind
+ * host (Railway → 0.0.0.0, --tailscale/--lan → explicit, else 127.0.0.1) —
+ * see ../network-bind.ts. Called at each use site (not cached at module
+ * load) so a --tailscale failure surfaces as a normal preview-start error
+ * through this file's existing error handling, rather than crashing the
+ * whole process during module import — server.ts's own startup guard is
+ * what aborts the process for that case; this is a defensive second layer.
+ */
+function previewBindHost(): string {
+  return resolveBindHost().host;
+}
 
 export type PreviewStatus = "stopped" | "starting" | "ready" | "failed" | "restarting";
 
@@ -591,7 +605,11 @@ function detectFramework(root: string): FrameworkInfo {
     // `--turbopack` is added explicitly to match the default Next.js 16 dev
     // experience; older Next.js versions ignore unknown flags gracefully.
     const nextBin = `${packageManager} exec next`;
-    return { framework: "nextjs", command: `${nextBin} dev --port $PORT --hostname 0.0.0.0`, packageManager };
+    return {
+      framework: "nextjs",
+      command: `${nextBin} dev --port $PORT --hostname ${previewBindHost()}`,
+      packageManager,
+    };
   }
 
   if (hasViteConfig || (hasPkgJson && devScript?.includes("vite"))) {
@@ -855,12 +873,13 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
   // .bashrc / .profile / NVM init — a Railway service is non-interactive.
   const childPath = buildChildPath(ws.root);
 
-  // Force bind to 0.0.0.0
+  // Bind host follows the parent terminal-server's own resolved policy —
+  // see previewBindHost() / ../network-bind.ts.
   const env: Record<string, string> = {
     ...process.env,
     PATH: childPath,
     PORT: String(port),
-    HOSTNAME: "0.0.0.0",
+    HOSTNAME: previewBindHost(),
     // Override NODE_ENV=production (inherited from Railway) to development
     // for the dev server. Next.js warns about non-standard NODE_ENV values
     // and pnpm skips devDependencies when NODE_ENV=production.
@@ -881,7 +900,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
   // For Next.js, set PORT and HOSTNAME
   if (detected.framework === "nextjs") {
     env.PORT = String(port);
-    env.HOSTNAME = "0.0.0.0";
+    env.HOSTNAME = previewBindHost();
   }
 
   // ─── Clerk env normalization ──────────────────────────────────────
@@ -1170,7 +1189,7 @@ export async function restartPreview(workspaceId: string): Promise<PreviewRuntim
         testServer.once("listening", () => {
           testServer.close(() => resolve());
         });
-        testServer.listen(port, "0.0.0.0");
+        testServer.listen(port, previewBindHost());
       });
       pushLog(rt, `[preview] Port ${port} is free after ${(i + 1) * 500}ms`);
       break;
