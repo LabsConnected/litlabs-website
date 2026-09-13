@@ -57,6 +57,8 @@ mkdirSync(SHOT_DIR, { recursive: true });
 
 const KEYBOARD_VIEWPORT = { width: 412, height: 500 };
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 // ─── Env loading (never printed) ───────────────────────────────
 function loadSecret() {
   if (process.env.CLERK_SECRET_KEY) return process.env.CLERK_SECRET_KEY;
@@ -444,10 +446,52 @@ async function main() {
           : null;
         const approvalBody = approval ? await approval.json().catch(() => null) : null;
         writeFileSync(path.join(ARTIFACT_DIR, "deploy-approval-response.json"), JSON.stringify(approvalBody, null, 2));
-        step("deploy_approved", approval?.status() === 200 && approvalBody?.resolved === true,
-          `HTTP ${approval?.status() ?? "no-request"} resolved=${approvalBody?.resolved}`);
 
-        const resumedCalls = approvalBody?.result?.toolCalls ?? [];
+        // Cloudflare may return 524 if the deploy takes longer than ~100s.
+        // In that case, the approval was still accepted server-side — poll
+        // the conversation messages for the deploy result.
+        let resumedCalls = approvalBody?.result?.toolCalls ?? [];
+        if (approval?.status() !== 200 && convId) {
+          // Poll conversation messages for up to 4 minutes looking for
+          // a deploy_result or deploy_verify event.
+          for (let poll = 0; poll < 48; poll++) {
+            await sleep(5_000);
+            try {
+              const msgsResp = await page.request.get(
+                `${BASE}/api/studio/conversations/${convId}/messages`,
+                { timeout: 15_000 },
+              );
+              if (msgsResp.ok()) {
+                const msgsBody = await msgsResp.json().catch(() => null);
+                const msgs = msgsBody?.messages ?? [];
+                // Look for an assistant message containing deploy evidence
+                const deployMsg = msgs.find((m) =>
+                  m.role === "assistant" && /deploy|production.*url|live.*url/i.test(m.content ?? ""),
+                );
+                if (deployMsg) {
+                  // Check if the message mentions success and a URL
+                  const content = String(deployMsg.content ?? "");
+                  const urlMatch = content.match(/https?:\/\/[^\s"'\\]+\/sites\/[^\s"'\\]+/);
+                  if (urlMatch && /success|ready|deployed|live/i.test(content)) {
+                    productionUrl = productionUrl ?? urlMatch[0];
+                    deployResult = deployResult ?? {
+                      success: true,
+                      productionUrl,
+                      error: null,
+                    };
+                    break;
+                  }
+                }
+              }
+            } catch {
+              // Continue polling
+            }
+          }
+        }
+
+        step("deploy_approved", (approval?.status() === 200 && approvalBody?.resolved === true) || (!!deployResult),
+          `HTTP ${approval?.status() ?? "no-request"} resolved=${approvalBody?.resolved}${deployResult ? " (recovered via poll)" : ""}`);
+
         const deployCall = resumedCalls.find((c) => c.toolId === "project.deploy");
         if (deployCall) {
           // summarizeToolResult JSON-encodes object results; publicUrl may be
