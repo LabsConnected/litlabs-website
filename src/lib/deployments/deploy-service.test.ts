@@ -196,14 +196,16 @@ describe("A. static project deploys and returns a verified live URL", () => {
 
 /* ── Case L: the URL is verified BEFORE completion is reported ──── */
 
-describe("L. live URL must be independently verified before ready", () => {
-  it("fetches the public URL before marking ready", async () => {
+describe("L. live URL must be independently verified before success", () => {
+  it("fetches the public URL before marking it verified", async () => {
     const store = fakeStore();
     const calls: string[] = [];
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       calls.push(String(input));
-      // At verification time the row must NOT yet be ready.
-      expect(store.rows[0].status).not.toBe("ready");
+      // The serving route only answers `ready` rows — at verification time
+      // the row must already be ready, but NOT yet urlVerified.
+      expect(store.rows[0].status).toBe("ready");
+      expect(store.rows[0].urlVerified).toBe(false);
       return new Response("ok", { status: 200 });
     });
 
@@ -219,7 +221,30 @@ describe("L. live URL must be independently verified before ready", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("fails — never ready — when the public URL does not serve", async () => {
+  it("regression: verifies through the ready-gated serving path", async () => {
+    const store = fakeStore();
+    // Mimics the real /sites/[deploymentId] route: the row is served only
+    // while status === "ready". Verifying before publishing can never pass.
+    const fetchImpl = vi.fn(async () =>
+      store.rows[0]?.status === "ready"
+        ? new Response("<h1>Ember Roast</h1>", { status: 200 })
+        : new Response("not found", { status: 404 }),
+    );
+
+    const result = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport: fakeTransport(),
+      publicBaseUrl: BASE,
+    }, { store, fetchImpl: fetchImpl as unknown as typeof fetch });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.urlVerified).toBe(true);
+    expect(store.rows[0].status).toBe("ready");
+  });
+
+  it("reverts ready to failed when the public URL does not serve", async () => {
     const store = fakeStore();
     const fetchImpl = vi.fn(async () => new Response("nope", { status: 404 }));
     const result = await deployUserProject({
