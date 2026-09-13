@@ -30,6 +30,9 @@ function isTailscaleCgnatAddress(ip) {
   return parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127;
 }
 
+/**
+ * @param {Record<string, string | undefined>} [env]
+ */
 export function isRailwayRuntime(env = process.env) {
   return Boolean(env.RAILWAY_ENVIRONMENT_ID || env.RAILWAY_SERVICE_ID || env.RAILWAY_PROJECT_ID);
 }
