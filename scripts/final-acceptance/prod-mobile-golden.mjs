@@ -416,25 +416,79 @@ async function main() {
     );
     step("no_frame_violations", frameViolations.length === 0, frameViolations[0] ?? "clean");
 
-    // ── Step 7: deploy (if ship routing engaged) ──
-    const deployResult = events.find((e) => e.type === "deploy_result");
+    // ── Step 7: deploy — approval gate, resumed execution, live URL ──
+    // project.deploy is a sensitive action: the run MUST pause for explicit
+    // approval even in AUTO mode. A deployment that executed without a
+    // pending_approval pause would mean the gate was bypassed. The golden
+    // then approves through the real server-authoritative endpoint and reads
+    // the resumed run's toolCalls for the deployment outcome.
+    const approvalEvents = events.filter((e) => e.type === "pending_approval");
+    const deployApproval = approvalEvents.find((e) => e.toolId === "project.deploy");
+    let deployResult = events.find((e) => e.type === "deploy_result");
     const deployVerify = events.find((e) => e.type === "deploy_verify");
-    const productionUrl = deployResult?.productionUrl || deployVerify?.url || null;
+    let productionUrl = deployResult?.productionUrl || deployVerify?.url || null;
     if (DEPLOY_REQUESTED) {
-      if (deployResult) {
-        step("deploy_result", deployResult.success === true, deployResult.success ? `url=${productionUrl}` : `error=${deployResult.error}`);
-        if (productionUrl) {
-          const prodResp = await page.request.get(productionUrl, { timeout: 45_000 }).catch(() => null);
-          const prodStatus = prodResp?.status() ?? -1;
-          const prodBody = prodResp ? await prodResp.text().catch(() => "") : "";
-          step("production_url_verified", prodStatus === 200 && prodBody.length > 100,
-            `GET ${productionUrl} → ${prodStatus} (${prodBody.length}b)${deployVerify ? `; flow verify=${deployVerify.success}` : ""}`);
-        } else {
-          step("production_url_verified", false, "no productionUrl in events");
+      step("deploy_approval_gate", !!deployApproval, deployApproval
+        ? `pausedRunId=${deployApproval.pausedRunId ?? "none"} reason=${String(deployApproval.reason ?? "").slice(0, 120)}`
+        : approvalEvents.length > 0
+          ? `paused on ${approvalEvents.map((e) => e.toolId).join(",")} — not project.deploy`
+          : deployResult ? "deploy executed with NO approval pause — gate bypassed" : "no pending_approval event in stream");
+
+      if (deployApproval?.pausedRunId) {
+        const convId = (messagesApiSeen?.url ?? "").match(/conversations\/([^/]+)\/messages/)?.[1];
+        const approval = convId
+          ? await page.request.post(
+              `${BASE}/api/studio/conversations/${convId}/approvals/${deployApproval.pausedRunId}`,
+              { data: { decision: "approved" }, timeout: 5 * 60_000 },
+            ).catch(() => null)
+          : null;
+        const approvalBody = approval ? await approval.json().catch(() => null) : null;
+        writeFileSync(path.join(ARTIFACT_DIR, "deploy-approval-response.json"), JSON.stringify(approvalBody, null, 2));
+        step("deploy_approved", approval?.status() === 200 && approvalBody?.resolved === true,
+          `HTTP ${approval?.status() ?? "no-request"} resolved=${approvalBody?.resolved}`);
+
+        const resumedCalls = approvalBody?.result?.toolCalls ?? [];
+        const deployCall = resumedCalls.find((c) => c.toolId === "project.deploy");
+        if (deployCall) {
+          // summarizeToolResult JSON-encodes object results; publicUrl may be
+          // truncated at 200 chars, so fall back to constructing the URL from
+          // the deploymentId (both fields sit early in the serialized object).
+          const summary = String(deployCall.summary ?? "");
+          productionUrl = productionUrl
+            ?? summary.match(/"publicUrl":"(https?:\/\/[^"]+)"/)?.[1]
+            ?? (() => { const id = summary.match(/"deploymentId":"([^"]+)"/)?.[1]; return id ? `${BASE}/sites/${id}` : null; })()
+            ?? summary.match(/https?:\/\/[^\s"'\\]+\/sites\/[^\s"'\\]+/)?.[0]
+            ?? null;
+          deployResult = deployResult ?? {
+            success: deployCall.success === true && !!productionUrl && /"status":"ready"/.test(summary),
+            productionUrl,
+            error: String(summary).slice(0, 200),
+          };
         }
+        if (approvalBody?.result?.pendingApproval) {
+          verdict.notes.push(`resumed run paused again on ${approvalBody.result.pendingApproval.toolId}; a second-stage pause is not resumable via this endpoint`);
+        }
+      }
+
+      if (deployResult) {
+        step("deploy_result", deployResult.success === true,
+          deployResult.success ? `url=${productionUrl}` : `error=${deployResult.error ?? "failed"}`);
       } else {
-        verdict.notes.push("Deploy requested in prompt but no deploy_result event — routing likely stayed in non-ship mode.");
-        step("deploy_result", false, "no deploy_result event in stream");
+        verdict.notes.push("Deploy requested but produced no deploy_result event and no resumable project.deploy pause.");
+        step("deploy_result", false, "no deploy evidence");
+      }
+
+      if (productionUrl) {
+        const prodResp = await page.request.get(productionUrl, { timeout: 45_000 }).catch(() => null);
+        const prodStatus = prodResp?.status() ?? -1;
+        const prodBody = prodResp ? await prodResp.text().catch(() => "") : "";
+        writeFileSync(path.join(ARTIFACT_DIR, "deployment-body.html"), prodBody.slice(0, 50_000));
+        verdict.liveDeploymentUrl = productionUrl;
+        step("production_url_verified",
+          prodStatus === 200 && prodBody.length > 100 && /ember roast/i.test(prodBody),
+          `GET ${productionUrl} → ${prodStatus} (${prodBody.length}b, expectedContent=${/ember roast/i.test(prodBody)})${deployVerify ? `; flow verify=${deployVerify.success}` : ""}`);
+      } else {
+        step("production_url_verified", false, "no productionUrl in events or resumed run");
       }
     } else {
       verdict.notes.push("Deploy not requested (LITT_ACCEPTANCE_DEPLOY=0).");
