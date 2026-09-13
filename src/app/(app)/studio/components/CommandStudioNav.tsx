@@ -256,7 +256,7 @@ export function MobileCommandNav({
       aria-label="Studio navigation"
       className="flex md:hidden shrink-0 items-stretch border-t"
       style={{
-        height: "calc(62px + env(safe-area-inset-bottom))",
+        height: "calc(var(--studio-mobile-bottom-h) + env(safe-area-inset-bottom))",
         paddingBottom: "env(safe-area-inset-bottom)",
         backgroundColor: "rgba(8, 6, 15, 0.85)",
         borderTop: "1px solid var(--studio-border)",

@@ -29,7 +29,7 @@ import React, { createContext, useContext, useCallback, useRef, useEffect } from
 import { useInput, useStdin } from "ink";
 import type { EventEmitter } from "node:events";
 import * as fs from "fs";
-import { isEnter, isEscape, isRawF2, detectRawScrollKey, type KeyInfo } from "./keyboard-utils.js";
+import { isRawF2, detectRawScrollKey, type KeyInfo } from "./keyboard-utils.js";
 
 // Debug instrumentation — set LITT_KEY_DEBUG=1 to trace key events to stderr.
 // Writes to stderr (NOT stdout) so it doesn't corrupt the Ink render.

@@ -127,8 +127,8 @@ describe("provider-router", () => {
   });
 
   it("resolveGeminiVisionModel falls back to flash for non-gemini models", () => {
-    expect(resolveGeminiVisionModel({ message: "hi", requestedModel: "gpt-4o" })).toBe("gemini-2.5-flash");
-    expect(resolveGeminiVisionModel({ message: "hi" })).toBe("gemini-2.5-flash");
+    expect(resolveGeminiVisionModel({ message: "hi", requestedModel: "gpt-4o" })).toBe("gemini-3.6-flash");
+    expect(resolveGeminiVisionModel({ message: "hi" })).toBe("gemini-3.6-flash");
   });
 });
 

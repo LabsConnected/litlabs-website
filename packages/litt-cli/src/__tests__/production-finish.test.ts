@@ -23,7 +23,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   createRun,
   loadRun,
-  saveRun,
   startStep,
   completeStep,
   blockStep,
@@ -32,15 +31,12 @@ import {
   finishRun,
   findIncompleteRun,
   deleteRun,
-  type FinishRun,
   type FinishPhase,
 } from "../lib/production-run-store.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as os from "node:os";
 
 // Use a temp directory for test runs
-const TEST_RUNS_DIR = path.join(os.tmpdir(), "litt-test-production-runs");
 
 // Mock the runs directory
 vi.mock("node:os", async (importOriginal) => {

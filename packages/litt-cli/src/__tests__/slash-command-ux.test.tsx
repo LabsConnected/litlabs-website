@@ -33,7 +33,7 @@ const _require = createRequire(import.meta.url);
 const _inkRoot = dirname(_require.resolve("ink"));
 const parseKeypress = _require(join(_inkRoot, "parse-keypress.js")).default as typeof import("../../node_modules/ink/build/parse-keypress.js").default;
 import { Composer } from "../ink/shell/composer.js";
-import { CommandPalette, fuzzyScore, normalizeCommandQuery } from "../ink/command-palette.js";
+import {  fuzzyScore, normalizeCommandQuery } from "../ink/command-palette.js";
 import { LiTTShell } from "../ink/shell/shell.js";
 import type { LiTTShellProps } from "../ink/shell/shell.js";
 import type { KeyInfo } from "../ink/keyboard-utils.js";

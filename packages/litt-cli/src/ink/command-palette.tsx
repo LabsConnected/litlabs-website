@@ -136,7 +136,7 @@ export function CommandPalette({ actions, onSelect, onCancel, onSpace, initialQu
       setQuery((prev) => prev + input);
       setSelectedIdx(0);
     }
-  }, [filtered, selectedIdx, onSelect, onCancel, onSpace]));
+  }, [filtered, selectedIdx, onSelect, onCancel, query.length, onSpace]));
 
   // Render grouped; selectedIdx is a flat index across all groups.
   // Max visible rows to avoid overwhelming the shell.

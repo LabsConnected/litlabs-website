@@ -7,6 +7,7 @@ export interface LogContext {
   agentSlug?: string;
   agentInstanceId?: string | null;
   provider?: string;
+  model?: string;
   latencyMs?: number;
   status?: string;
   revisionBefore?: number;

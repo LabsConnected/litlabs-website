@@ -53,10 +53,10 @@ export function selectModelOptions(req: LiTTRunRequest): LLMOptions {
 
 /**
  * Resolve the Gemini model id for the multimodal (image) path.
- * Falls back to gemini-2.5-flash when the requested model isn't a Gemini id.
+ * Falls back to gemini-3.6-flash when the requested model isn't a Gemini id.
  */
 export function resolveGeminiVisionModel(req: LiTTRunRequest): string {
   return typeof req.requestedModel === "string" && req.requestedModel.startsWith("gemini")
     ? req.requestedModel
-    : "gemini-2.5-flash";
+    : "gemini-3.6-flash";
 }

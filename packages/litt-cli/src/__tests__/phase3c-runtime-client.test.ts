@@ -451,7 +451,7 @@ describe("RuntimeClient", () => {
   // ─── Reconnect ────────────────────────────────────────────────
 
   it("resync disconnects and reconnects with fresh state", async () => {
-    const { client, emit } = await setupClient();
+    const { client } = await setupClient();
     const connectHandler = mockSocket.on.mock.calls.find(
       ([event]) => event === "connect",
     )?.[1];
@@ -665,7 +665,7 @@ describe("RuntimeClient", () => {
   });
 
   it("reconciles: server says running, client thinks idle → adopts server run", async () => {
-    const { client, emit } = await setupClient();
+    const { client } = await setupClient();
 
     const serverRun = {
       command: "build",

@@ -1,4 +1,5 @@
-import { beforeEach } from "vitest";
+import { beforeEach, afterEach } from "vitest";
+import { cleanup } from "@testing-library/react";
 
 // Set test API keys before any module imports.
 // In local dev these come from .env.local; in CI they must be set here
@@ -107,4 +108,8 @@ if (typeof window !== "undefined" && !window.matchMedia) {
 beforeEach(() => {
   localStorage.clear();
   globalThis.__TEST_VIEWPORT_WIDTH__ = 1440;
+});
+
+afterEach(() => {
+  cleanup();
 });

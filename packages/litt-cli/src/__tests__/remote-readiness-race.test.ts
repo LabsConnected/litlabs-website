@@ -16,7 +16,7 @@
  *      "REMOTE ERR" (error) — never claim "REMOTE" until connected.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { RemoteConnectionTimeoutError } from "../lib/runtime-client.js";
 import { deriveTransport } from "../lib/transport-projection.js";
 import { loadModelPrefs, type ModelPrefs } from "../lib/provider-registry.js";
@@ -79,21 +79,6 @@ function makeFakeClient(state: "disconnected" | "connecting" | "connected" | "er
 }
 
 /** Write a temp model-prefs.json and return its path. */
-function writeTempPrefs(prefs: Partial<ModelPrefs>): string {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "litt-prefs-"));
-  const prefsPath = path.join(tmpDir, "model-prefs.json");
-  const full: ModelPrefs = {
-    prefsVersion: 2,
-    routingMode: "auto",
-    selectedModel: null,
-    capabilityOverrides: {},
-    lastUsedModel: null,
-    showFallbackNotifications: true,
-    ...prefs,
-  };
-  fs.writeFileSync(prefsPath, JSON.stringify(full, null, 2));
-  return prefsPath;
-}
 
 // ─── Tests ─────────────────────────────────────────────────────────
 

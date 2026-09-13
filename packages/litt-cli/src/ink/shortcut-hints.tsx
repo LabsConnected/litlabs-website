@@ -11,7 +11,6 @@
 
 import React from "react";
 import { Box, Text } from "ink";
-import { COLORS } from "./colors.js";
 import type { LayoutBand } from "./use-terminal-size.js";
 
 export interface ShortcutHintsProps {

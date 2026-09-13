@@ -15,7 +15,7 @@
  *   E. Ollama unavailable in LOCAL → hard local error, NO remote fallback
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   localRoutePolicy,
   resolveLocalModel,

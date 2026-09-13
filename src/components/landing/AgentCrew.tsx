@@ -5,20 +5,8 @@ import {
   ArrowRight,
   Bot,
   Boxes,
-  Check,
-  Terminal,
   Wrench,
 } from "lucide-react";
-
-const OPERATING_LOOP = [
-  "Understand",
-  "Plan",
-  "Build",
-  "Create",
-  "Use tools",
-  "Verify",
-  "Ship",
-] as const;
 
 const TOOL_CHIPS = [
   "Plan",
@@ -41,7 +29,7 @@ export function AgentCrew() {
             One operator. <span className="litt-gradient-text">The whole project loop.</span>
           </h2>
           <p className="mt-5 text-base leading-7 text-white/52 sm:text-lg sm:leading-8">
-            LiTT coordinates every stage of the work — understanding the brief, planning the mission, building, creating, using tools, verifying, and shipping. You stay in charge of the outcome.
+            LiTT coordinates every stage of the work — planning, building, creating, using tools, verifying, and shipping. You stay in charge of the outcome.
           </p>
         </div>
 
@@ -80,25 +68,12 @@ export function AgentCrew() {
           </div>
         </article>
 
-        <div data-reveal className="mt-5 grid gap-5 rounded-2xl border border-white/9 bg-white/[0.025] p-5 lg:grid-cols-[1.4fr_1fr] lg:items-center lg:p-7">
-          <div>
-            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-white/48"><Boxes size={14} className="text-[#65f4ff]" /> One project. One operating loop.</div>
-            <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              {OPERATING_LOOP.map((step, index) => (
-                <div key={step} className="flex items-center gap-2 rounded-xl border border-white/8 bg-[#05070d] px-3 py-3">
-                  <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-white/5 font-mono text-[9px] font-black text-[#a8ff2f]">0{index + 1}</span>
-                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-white/58">
-                    {index === OPERATING_LOOP.length - 1 ? <Check size={11} className="text-[#a8ff2f]" /> : <Terminal size={10} className="text-white/40" />}
-                    {step}
-                  </span>
-                </div>
-              ))}
-            </div>
+        <div data-reveal className="mt-5 flex flex-col gap-3 rounded-2xl border border-white/9 bg-white/[0.025] p-5 lg:flex-row lg:items-center lg:justify-between lg:p-7">
+          <div className="flex items-center gap-2 text-sm text-white/50">
+            <Boxes size={16} className="shrink-0 text-[#65f4ff]" />
+            Bring internal specialists or Marketplace agents into the loop when a mission needs more depth.
           </div>
-          <div className="flex flex-col gap-3 lg:items-end">
-            <p className="max-w-md text-sm leading-6 text-white/45 lg:text-right">Bring internal specialists or Marketplace agents into the loop when a mission needs more depth.</p>
-            <Link href="/agents" className="litt-secondary-button !min-h-11 !px-4 !py-2.5 text-xs">See the operator stack <ArrowRight size={13} /></Link>
-          </div>
+          <Link href="/agents" className="litt-secondary-button !min-h-11 !px-4 !py-2.5 text-xs lg:shrink-0">See the operator stack <ArrowRight size={13} /></Link>
         </div>
       </div>
     </section>

@@ -156,12 +156,15 @@ export function useEventBridge(
   // fire every render → render loop ("Maximum update depth exceeded").
   //
   // The ref holds the LATEST store; callbacks read from it at event
-  // time (not capture time). The ref is updated synchronously every
-  // render so the callbacks always see current state. The callbacks
-  // themselves are stable (empty deps) so the effect only re-runs when
-  // `client` or `sessionBridge` actually change.
+  // time (not capture time). The ref is updated after every commit so
+  // the callbacks always see current state — writing it during render
+  // trips react-hooks/refs, and callbacks never run during render
+  // anyway. The callbacks themselves are stable (empty deps) so the
+  // effect only re-runs when `client` or `sessionBridge` actually change.
   const storeRef = useRef(store);
-  storeRef.current = store;
+  useEffect(() => {
+    storeRef.current = store;
+  });
 
   // ─── Tool progress — drive the structured per-tool view ──────────
   // Maps lifecycle events to ToolProgressStore mutations. This is the

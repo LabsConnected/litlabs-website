@@ -28,17 +28,15 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text, useStdout } from "ink";
 import { COLORS } from "./colors.js";
-import { classifyWidth } from "./ui-primitives.js";
 import { LiTTMark, type MarkState } from "./litt-mark.js";
 import {
   type WorkstreamSnapshot,
-  type WorkstreamActivity,
   type WorkstreamPhase,
   type WorkstreamOverallStatus,
   type VerificationState,
   PHASE_DISPLAY,
 } from "./workstream-store.js";
-import { groupConsecutive, type ActivityGroup } from "./workstream-normalizer.js";
+import { groupConsecutive, subjectAddsInformation, type ActivityGroup } from "./workstream-normalizer.js";
 
 // ─── Phase → MarkState mapping ─────────────────────────────────────
 
@@ -181,6 +179,12 @@ function ActivityRow({
   const color = STATUS_COLOR[group.status] ?? COLORS.secondaryBright;
   const maxLabel = Math.max(16, width - 6);
 
+  // Only show subjects that add information beyond the row's own label.
+  // This suppresses junk like "Inspecting / Inspecting" or "Status / Status"
+  // while keeping useful file/command names visible.
+  const visibleSubjects = [...new Set(group.subjects.filter((s) => s && subjectAddsInformation(s, group.label, group.kind)))];
+  const hasSubjects = visibleSubjects.length > 0;
+
   return (
     <Box flexDirection="column">
       <Box>
@@ -188,23 +192,12 @@ function ActivityRow({
         <Text color={group.status === "failed" ? COLORS.error : COLORS.text}>
           {truncateTail(group.label, maxLabel)}
         </Text>
-        {group.count > 1 && (
-          <Text dimColor> ({group.count})</Text>
-        )}
       </Box>
-      {/* Show first subject as sub-line for file/test groups */}
-      {group.subjects.length > 0 && group.count <= 3 && (
+      {/* Show subject list when it adds information beyond the label */}
+      {hasSubjects && (
         <Box paddingLeft={2}>
           <Text dimColor>
-            {truncateTail(group.subjects.join(", "), Math.max(10, width - 8))}
-          </Text>
-        </Box>
-      )}
-      {/* For larger groups, show count summary */}
-      {group.subjects.length > 0 && group.count > 3 && (
-        <Box paddingLeft={2}>
-          <Text dimColor>
-            {group.subjects.length} files
+            {truncateTail(visibleSubjects.join(", "), Math.max(10, width - 8))}
           </Text>
         </Box>
       )}
@@ -365,7 +358,6 @@ export function WorkstreamDock({
 }: WorkstreamDockProps): React.ReactElement {
   const { stdout } = useStdout();
   const w = width ?? stdout?.columns ?? 80;
-  const widthClass = classifyWidth(w);
 
   // Terminal states get special cards
   if (snapshot.overallStatus === "complete") {
@@ -390,7 +382,6 @@ export function WorkstreamDock({
   const currentIdx = visibleGroups.findIndex((g) => g.status === "running");
 
   // Narrow width: condense
-  const showObjective = widthClass !== "narrow" || !!snapshot.objective;
   const showNext = !!snapshot.nextAction;
   const showVerification = snapshot.verification !== null;
 
@@ -448,9 +439,11 @@ export function estimateWorkstreamDockRows(
   const groups = groupConsecutive(visibleSlice);
   const visibleGroups = groups.slice(-maxActivityRows);
   rows += visibleGroups.length;
-  // Each group may have a sub-line for subjects
+  // Each group may have a sub-line for subjects, but only if the subject
+  // adds information beyond the group label (same rule as ActivityRow).
   for (const g of visibleGroups) {
-    if (g.subjects.length > 0) rows += 1;
+    const visible = g.subjects.filter((s) => s && subjectAddsInformation(s, g.label, g.kind));
+    if (visible.length > 0) rows += 1;
   }
   if (allActivities.length > visibleSlice.length) rows += 1; // "↑ N earlier"
 

@@ -30,7 +30,6 @@ import {
   type RuntimeEvent,
   type StreamChunk,
   type ToolDefinition,
-  type ToolEntry,
   type ToolResult,
   type ToolContext,
 } from "@litt/agent-core";

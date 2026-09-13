@@ -330,6 +330,19 @@ async function renderCommandStudio() {
 describe("CommandStudio — mounted Work-surface routing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.innerHeight = 844;
+    Object.defineProperty(window, "visualViewport", {
+      value: {
+        width: 390,
+        height: 844,
+        offsetTop: 0,
+        offsetLeft: 0,
+        scale: 1,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+      configurable: true,
+    });
   });
 
   it("initializes with preview surface when ?tool=chat", async () => {
@@ -647,7 +660,10 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       const input = screen.getByRole("textbox", { name: /message input/i });
       input.focus();
 
-      expect(sheet).toHaveStyle({ bottom: "calc(62px + env(safe-area-inset-bottom))" });
+      // Sheet geometry is computed from the Visual Viewport API so it
+      // stays above the mobile nav and any on-screen keyboard.
+      expect(sheet.getAttribute("style")).toContain("var(--studio-mobile-bottom-h)");
+      expect(sheet).toHaveStyle({ bottom: "62px" });
       expect(screen.getByTestId("studio-workspace-context").textContent).toContain("Private LiTT workspace");
       expect(document.activeElement).toBe(input);
       expect(screen.getByRole("button", { name: /send message|cancel response/i })).toBeVisible();

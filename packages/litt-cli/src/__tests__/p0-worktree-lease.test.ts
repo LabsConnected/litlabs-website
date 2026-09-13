@@ -19,7 +19,6 @@ import {
   checkLease,
   acquireLease,
   releaseLease,
-  removeLease,
   readLease,
   isPidAlive,
   newLeaseSessionId,

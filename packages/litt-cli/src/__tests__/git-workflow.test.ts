@@ -17,7 +17,7 @@
  *   - Branch name generation
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -41,14 +41,6 @@ function git(args: string[], cwd: string): string {
   return execFileSync("git", args, { cwd, encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] }).trim();
 }
 
-function gitOk(args: string[], cwd: string): boolean {
-  try {
-    execFileSync("git", args, { cwd, encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function makeTempRepo(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "litt-git-test-"));

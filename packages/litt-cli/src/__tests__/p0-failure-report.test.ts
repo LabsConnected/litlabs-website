@@ -2,7 +2,8 @@
  * P0-4: Useful Failure Reporting — regression tests.
  *
  * Proves:
- *   - A failure report shows FAILED + Task + Reason + Last successful step + Next action.
+ *   - A failure report shows FAILED + Task + Failed step + Reason +
+ *     Command/output excerpt + Last successful step + Next action.
  *   - The reason is the actual error, not blank.
  *   - deriveNextAction maps common patterns to actionable suggestions.
  *   - buildFailureReport produces a complete report.
@@ -17,10 +18,13 @@ import {
 
 describe("P0-4: Useful Failure Reporting", () => {
   describe("formatFailureReport", () => {
-    it("shows FAILED + Task + Reason + Last successful step + Next action", () => {
+    it("shows FAILED + Task + Failed step + Reason + Excerpt + Last successful step + Next action", () => {
       const report: FailureReport = {
         task: "Fix the billing bug",
+        failedStep: "Run billing tests",
         reason: "TypeError: Cannot read property 'price' of undefined",
+        commandExcerpt: "pnpm exec vitest run billing",
+        outputExcerpt: "Expected price to be defined",
         lastSuccessfulStep: "Inspect billing module",
         recommendedNextAction: "Fix the type error, then rebuild: pnpm build",
         runId: "run_abc123",
@@ -30,8 +34,13 @@ describe("P0-4: Useful Failure Reporting", () => {
       expect(text).toContain("FAILED");
       expect(text).toContain("Task:");
       expect(text).toContain("Fix the billing bug");
+      expect(text).toContain("Failed step:");
+      expect(text).toContain("Run billing tests");
       expect(text).toContain("Reason:");
       expect(text).toContain("TypeError: Cannot read property 'price' of undefined");
+      expect(text).toContain("Command/output excerpt:");
+      expect(text).toContain("pnpm exec vitest run billing");
+      expect(text).toContain("Expected price to be defined");
       expect(text).toContain("Last successful step:");
       expect(text).toContain("Inspect billing module");
       expect(text).toContain("Recommended next action:");
@@ -39,10 +48,13 @@ describe("P0-4: Useful Failure Reporting", () => {
       expect(text).toContain("Run ID: run_abc123");
     });
 
-    it("shows 'none' when there is no last successful step", () => {
+    it("shows 'none' when there is no last successful step or excerpt", () => {
       const report: FailureReport = {
         task: "Test task",
+        failedStep: null,
         reason: "Error",
+        commandExcerpt: null,
+        outputExcerpt: null,
         lastSuccessfulStep: null,
         recommendedNextAction: "Try again",
         runId: null,
@@ -108,9 +120,15 @@ describe("P0-4: Useful Failure Reporting", () => {
         "ECONNREFUSED: cannot connect to Ollama",
         "Inspect project structure",
         "run_xyz",
+        "Ollama health check",
+        "ollama list",
+        "Error: could not connect",
       );
       expect(report.task).toBe("Run audit");
+      expect(report.failedStep).toBe("Ollama health check");
       expect(report.reason).toBe("ECONNREFUSED: cannot connect to Ollama");
+      expect(report.commandExcerpt).toBe("ollama list");
+      expect(report.outputExcerpt).toBe("Error: could not connect");
       expect(report.lastSuccessfulStep).toBe("Inspect project structure");
       expect(report.runId).toBe("run_xyz");
       expect(report.recommendedNextAction).toContain("network");
@@ -119,6 +137,9 @@ describe("P0-4: Useful Failure Reporting", () => {
     it("handles null reason with a fallback", () => {
       const report = buildFailureReport("Task", "", null, null);
       expect(report.reason).toBe("Unknown error");
+      expect(report.failedStep).toBe(null);
+      expect(report.commandExcerpt).toBe(null);
+      expect(report.outputExcerpt).toBe(null);
       expect(report.lastSuccessfulStep).toBe(null);
       expect(report.runId).toBe(null);
     });

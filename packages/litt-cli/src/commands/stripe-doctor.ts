@@ -7,7 +7,7 @@
  * Never prints secret values.
  */
 
-import { ok, fail, warn, header, c } from "../lib/utils.js";
+import { header, c } from "../lib/utils.js";
 import {
   checkStripeAuth,
   checkStripeSecretKey,

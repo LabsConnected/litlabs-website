@@ -33,16 +33,6 @@ import { toolLabel, toolSummary } from "../lib/tool-labels.js";
 // ─── Helpers ──────────────────────────────────────────────────────
 
 /** Simulate a full tool lifecycle (start → complete) on the store. */
-function runTool(
-  store: ToolProgressStore,
-  toolCallId: string,
-  toolId: string,
-  toolName: string,
-  result: { success: boolean; message: string; durationMs?: number },
-): void {
-  store.startTool(toolCallId, toolId, toolName);
-  store.completeTool(toolCallId, result.success, result.message, result.durationMs);
-}
 
 // ─── ToolProgressStore invariants ─────────────────────────────────
 

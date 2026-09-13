@@ -1,0 +1,68 @@
+name: Final Acceptance — Production Mobile Golden
+
+# Manual trigger only. Runs scripts/final-acceptance/prod-mobile-golden.mjs
+# (a real, Clerk-authenticated Playwright session against production —
+# see that script's own header comment) on a normal Linux runner, since
+# Playwright's browser binaries have no Android/Termux build and cannot
+# be launched from an on-device CLI environment.
+#
+# CLERK_SECRET_KEY is the same repository secret build.yml's own
+# Playwright/production-build steps already use — never printed, never
+# written to the produced artifact (the script only ever uses it as a
+# Bearer header value to mint a short-lived sign-in token).
+#
+# LITT_ACCEPTANCE_USER_ID selects which Clerk user the golden run signs
+# in as. It must be wired here as a repository secret — the script
+# refuses to fall back to its hard-coded legacy QA user when running in
+# CI (see prod-mobile-golden.mjs), so an unset/removed secret fails this
+# step clearly instead of silently authenticating as a stale user.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  golden:
+    name: Golden mobile build/action journey
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI: true
+
+      - name: Install Playwright chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run production golden acceptance
+        run: node scripts/final-acceptance/prod-mobile-golden.mjs
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          LITT_ACCEPTANCE_USER_ID: ${{ secrets.LITT_ACCEPTANCE_USER_ID }}
+          # No production deploy target is configured for user workspaces
+          # (no RAILWAY_API_TOKEN/DEPLOY_PRODUCTION_URL on the web service),
+          # so the golden does not request "deploy it live" — the deploy path
+          # reports a truthful "not configured" error, which is proven by the
+          # deploy_result step only when a real target exists.
+          LITT_ACCEPTANCE_DEPLOY: "0"
+
+      - name: Upload acceptance artifacts (verdict, SSE log, screenshots, video)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-acceptance-golden-${{ github.run_id }}
+          path: artifacts/final-acceptance/**
+          retention-days: 14

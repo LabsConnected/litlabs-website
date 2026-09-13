@@ -8,7 +8,7 @@
  *   pnpm build 2>&1 | litt explain
  */
 
-import { ok, fail, warn, header, label, value, c, readStdin, detectProject, resolveProjectCwd } from "../lib/utils.js";
+import {  fail, warn, header, label, value, c, readStdin, detectProject, resolveProjectCwd } from "../lib/utils.js";
 
 export async function explainCommand(args: string[]): Promise<number> {
   // Get input from stdin or args

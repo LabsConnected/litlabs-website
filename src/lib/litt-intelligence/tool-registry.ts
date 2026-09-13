@@ -10,38 +10,70 @@
  */
 
 import type { LiTTToolDefinition, ApprovalPolicy } from "./types";
+import type { WorkspaceTransport } from "./workspace-transport";
 // Shared realtime capability from @litt/agent-core — the ONE implementation.
 // The web registry delegates to it so CLI and Studio have the same capability.
 import { webSearch as coreWebSearch, safeFetch as coreSafeFetch, weatherForecast as coreWeatherForecast, SafeFetchError } from "@litt/agent-core";
 
 type ToolHandler = (inputs: Record<string, unknown>, transport?: unknown) => Promise<unknown>;
 
+type V2Module = typeof import("./tool-handlers-v2");
+type V2Handler = (inputs: Record<string, unknown>, transport: WorkspaceTransport) => Promise<unknown>;
+
+/**
+ * Workspace-scoped tools MUST execute through the WorkspaceTransport
+ * (authenticated, workspace-rooted terminal-server endpoints). They must
+ * never fall back to the web service's own filesystem — process.cwd() on
+ * this service is the LiTT app deployment, not user project storage.
+ * Missing transport → fail closed.
+ */
+function workspaceTool(load: (mod: V2Module) => V2Handler): () => Promise<ToolHandler> {
+  return async () => {
+    const handler = load(await import("./tool-handlers-v2"));
+    return (inputs, transport) => {
+      if (!transport) {
+        throw new Error("This tool requires an active project workspace");
+      }
+      return handler(inputs, transport as WorkspaceTransport);
+    };
+  };
+}
+
 const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
-  // V1 handlers (legacy — still used by agent-loop.ts pre-LLM phase)
-  "project.scan": async () => (await import("./tool-handlers")).handleProjectScan,
-  "files.list": async () => (await import("./tool-handlers")).handleFilesList,
-  "files.read": async () => (await import("./tool-handlers")).handleFilesRead,
-  "files.write": async () => (await import("./tool-handlers")).handleFilesWrite,
-  "git.status": async () => (await import("./tool-handlers")).handleGitStatus,
-  "terminal.execute": async () => (await import("./tool-handlers")).handleTerminalExecute,
-  "project.health": async () => (await import("./tool-handlers")).handleProjectHealth,
+  // Workspace-scoped tools — workspace-transport handlers only.
+  "project.scan": workspaceTool((m) => m.handleProjectScan),
+  "files.list": workspaceTool((m) => m.handleFilesList),
+  "files.read": workspaceTool((m) => m.handleFilesRead),
+  "files.write": workspaceTool((m) => m.handleFilesWrite),
+  "git.status": workspaceTool((m) => m.handleGitStatus),
+  "terminal.execute": workspaceTool((m) => m.handleTerminalExecute),
+  "project.health": workspaceTool((m) => m.handleProjectHealth),
+  // App-level capability — server-side HTTP, not workspace-scoped.
   "image.generate": async () => (await import("./tool-handlers")).handleImageGenerate,
   // V2 workspace-aware handlers (used by agent-loop-v2.ts)
-  // V2 handlers accept an optional transport param; the agent loop binds it at call time.
-  "files.delete": async () => (await import("./tool-handlers-v2")).handleFilesDelete as ToolHandler,
-  "files.mkdir": async () => (await import("./tool-handlers-v2")).handleFilesMkdir as ToolHandler,
-  "files.rename": async () => (await import("./tool-handlers-v2")).handleFilesRename as ToolHandler,
-  "search_code": async () => (await import("./tool-handlers-v2")).handleSearchCode as ToolHandler,
-  "git.diff": async () => (await import("./tool-handlers-v2")).handleGitDiff as ToolHandler,
-  "git.log": async () => (await import("./tool-handlers-v2")).handleGitLog as ToolHandler,
-  "git.commit": async () => (await import("./tool-handlers-v2")).handleGitCommit as ToolHandler,
-  "apply_patch": async () => (await import("./tool-handlers-v2")).handleApplyPatch as ToolHandler,
-  "build.run": async () => (await import("./tool-handlers-v2")).handleBuildRun as ToolHandler,
-  "test.run": async () => (await import("./tool-handlers-v2")).handleTestRun as ToolHandler,
-  "typecheck.run": async () => (await import("./tool-handlers-v2")).handleTypecheckRun as ToolHandler,
-  "lint.run": async () => (await import("./tool-handlers-v2")).handleLintRun as ToolHandler,
-  "package.info": async () => (await import("./tool-handlers-v2")).handlePackageInfo as ToolHandler,
-  "project.deploy": async () => (await import("./tool-handlers-v2")).handleProjectDeploy as ToolHandler,
+  // All require a WorkspaceTransport — missing transport fails closed.
+  "files.delete": workspaceTool((m) => m.handleFilesDelete),
+  "files.mkdir": workspaceTool((m) => m.handleFilesMkdir),
+  "files.rename": workspaceTool((m) => m.handleFilesRename),
+  "search_code": workspaceTool((m) => m.handleSearchCode),
+  "git.diff": workspaceTool((m) => m.handleGitDiff),
+  "git.log": workspaceTool((m) => m.handleGitLog),
+  "git.commit": workspaceTool((m) => m.handleGitCommit),
+  "apply_patch": workspaceTool((m) => m.handleApplyPatch),
+  "build.run": workspaceTool((m) => m.handleBuildRun),
+  "test.run": workspaceTool((m) => m.handleTestRun),
+  "typecheck.run": workspaceTool((m) => m.handleTypecheckRun),
+  "lint.run": workspaceTool((m) => m.handleLintRun),
+  "package.info": workspaceTool((m) => m.handlePackageInfo),
+  "preview.start": workspaceTool((m) => m.handlePreviewStart),
+  "preview.status": workspaceTool((m) => m.handlePreviewStatus),
+  "preview.stop": workspaceTool((m) => m.handlePreviewStop),
+  // project.deploy publishes the USER'S project — identity comes from the
+  // transport (verified userId/projectId), never from model inputs.
+  "project.deploy": workspaceTool((m) => m.handleProjectDeploy),
+  // Deploy tools act on the configured deploy provider, not a workspace.
+  "deploy.execute": async () => (await import("./tool-handlers-v2")).handleDeployExecute as ToolHandler,
+  "deploy.verify": async () => (await import("./tool-handlers-v2")).handleDeployVerify as ToolHandler,
   // Browser Agent Mode handlers (lazy-loaded, session-scoped)
   "browser.navigate": async () => {
     const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.navigate"];
@@ -1290,6 +1322,117 @@ export function registerInternalTools(): void {
         enabled: true,
       },
       handler: lazyHandlers["package.info"],
+    },
+    // Preview tools (workspace mutation)
+    {
+      tool: {
+        id: "preview.start",
+        name: "Start Preview",
+        description: "Start the project's dev server and begin health probing. Returns the runtime status, port, and framework once the server responds.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: { type: "object", properties: { packageManager: { type: "string" } }, required: [] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["preview:open"],
+        risk: "medium",
+        approvalPolicy: MUTATION_APPROVAL,
+        timeoutMs: 120000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: 'workspace-write',
+        enabled: true,
+      },
+      handler: lazyHandlers["preview.start"],
+    },
+    {
+      tool: {
+        id: "preview.status",
+        name: "Preview Status",
+        description: "Get the current preview runtime status with a live health check and recent logs.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: { type: "object", properties: {}, required: [] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["preview:open"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 15000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: 'read',
+        enabled: true,
+      },
+      handler: lazyHandlers["preview.status"],
+    },
+    {
+      tool: {
+        id: "preview.stop",
+        name: "Stop Preview",
+        description: "Stop the project's running preview dev server.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: { type: "object", properties: {}, required: [] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["preview:open"],
+        risk: "medium",
+        approvalPolicy: MUTATION_APPROVAL,
+        timeoutMs: 15000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: 'workspace-write',
+        enabled: true,
+      },
+      handler: lazyHandlers["preview.stop"],
+    },
+    // Deploy tools (production actions)
+    {
+      tool: {
+        id: "deploy.execute",
+        name: "Execute Deployment",
+        description: "Trigger a Railway or Vercel deployment. Requires RAILWAY_API_TOKEN + RAILWAY_SERVICE_ID or VERCEL_TOKEN + VERCEL_PROJECT_ID. Returns the deployment ID, status, and verified production URL on success, or a truthful error on failure.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          required: [],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["deploy:execute"],
+        risk: "high",
+        approvalPolicy: MUTATION_APPROVAL,
+        timeoutMs: 600000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: 'production',
+        enabled: true,
+      },
+      handler: lazyHandlers["deploy.execute"],
+    },
+    {
+      tool: {
+        id: "deploy.verify",
+        name: "Verify Production URL",
+        description: "Fetch a production URL to confirm the deployed site is reachable and healthy.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["deploy:execute"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 60000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: 'read',
+        enabled: true,
+      },
+      handler: lazyHandlers["deploy.verify"],
     },
     // ─── Browser Agent Mode tools ─────────────────────────────
     // Read-only browser tools (auto-approved)

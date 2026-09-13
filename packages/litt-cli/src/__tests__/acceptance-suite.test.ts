@@ -55,9 +55,6 @@ import {
   type ChatMessage,
   type ModelProvider,
   type ModelStreamEvent,
-  type ShellExecutor,
-  type ShellResult,
-  type ShellExecuteOptions,
 } from "@litt/agent-core";
 
 // ─── Test helpers ───────────────────────────────────────────────────

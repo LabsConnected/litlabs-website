@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { clampSize, layoutBand, type TerminalSize } from "../ink/use-terminal-size.js";
+import { clampSize, layoutBand } from "../ink/use-terminal-size.js";
 import { TIPS } from "../ink/tip-line.js";
 
 // ─── useTerminalSize: clampSize ─────────────────────────────────────

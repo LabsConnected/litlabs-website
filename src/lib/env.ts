@@ -71,10 +71,19 @@ const optionalAISchema = z.object({
   CLOUDFLARE_AI_API_TOKEN: z.string().optional(),
   CLOUDFLARE_IMAGE_MODEL: z.string().optional(),
   SUPERMEMORY_API_KEY: z.string().optional(),
-  GEMINI_PRIMARY_MODEL: z.string().optional().default("gemini-2.5-flash"),
+  GEMINI_PRIMARY_MODEL: z.string().optional().default("gemini-3.6-flash"),
   GEMINI_FALLBACK_MODEL: z.string().optional().default("gemini-2.5-flash-lite"),
   OPENROUTER_MODEL: z.string().optional(),
+  GROQ_MODEL: z.string().optional(),
+  MISTRAL_API_KEY: z.string().optional(),
+  MISTRAL_MODEL: z.string().optional(),
+  CLOUDFLARE_AI_MODEL: z.string().optional(),
   OLLAMA_BASE_URL: z.string().optional(),
+  OLLAMA_HOST: z.string().optional(),
+  OLLAMA_HOST_PC: z.string().optional(),
+  LITT_OLLAMA_URL: z.string().optional(),
+  OLLAMA_MODEL: z.string().optional(),
+  LITT_DISABLE_OLLAMA: z.string().optional(),
 });
 
 // Optional integration keys.
@@ -127,6 +136,11 @@ const optionalIntegrationSchema = z.object({
   DISCORD_SYSTEM_WEBHOOK: z.string().optional(),
   VOICE_MONKEY_TOKEN: z.string().optional(),
   VOICE_MONKEY_DEVICE: z.string().optional(),
+  RAILWAY_API_TOKEN: z.string().optional(),
+  RAILWAY_SERVICE_ID: z.string().optional(),
+  RAILWAY_ENVIRONMENT_ID: z.string().optional(),
+  RAILWAY_PROJECT_ID: z.string().optional(),
+  DEPLOY_PRODUCTION_URL: z.string().optional(),
   VERCEL_TOKEN: z.string().optional(),
   VERCEL_PROJECT_ID: z.string().optional(),
   VERCEL_PROJECT_NAME: z.string().optional(),
@@ -249,6 +263,8 @@ export function validateEnv(): EnvValidationResult[] {
     process.env.GOOGLE_API_KEY ||
     process.env.OPENROUTER_API_KEY ||
     process.env.GROQ_API_KEY ||
+    process.env.MISTRAL_API_KEY ||
+    (process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_AI_API_TOKEN) ||
     process.env.OPENAI_API_KEY
   );
   results.push({
@@ -257,7 +273,7 @@ export function validateEnv(): EnvValidationResult[] {
     errors: [],
     warnings: hasAIKey
       ? []
-      : ["[ai] No AI provider key set — AI features will be unavailable. Set at least one of: GEMINI_API_KEY, OPENROUTER_API_KEY, GROQ_API_KEY, OPENAI_API_KEY"],
+      : ["[ai] No AI provider key set — AI features will be unavailable. Set at least one of: GEMINI_API_KEY, OPENROUTER_API_KEY, GROQ_API_KEY, MISTRAL_API_KEY, OPENAI_API_KEY"],
   });
 
   // Integration — optional, warnings only

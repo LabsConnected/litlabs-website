@@ -28,7 +28,7 @@
  * canonical state refresh).
  */
 
-import { getGitState, readBranchFromGitDir, readHeadStateFromGitDir, type GitHeadState } from "./git-state.js";
+import { getGitState, readHeadStateFromGitDir, type GitHeadState } from "./git-state.js";
 
 export type LocalFastPathKind =
   | "branch"

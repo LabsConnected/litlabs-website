@@ -65,7 +65,7 @@ function statusLabel(status: SubsystemStatus): string {
   return status.toUpperCase();
 }
 
-export function Subsystems({ selected, onSelect, localRuntime, remoteRuntime, holoState, modelReady }: SubsystemsProps): React.ReactElement {
+export function Subsystems({ selected, localRuntime, remoteRuntime, holoState, modelReady }: SubsystemsProps): React.ReactElement {
   // Derive independent subsystem states from actual data
   const cards: SubsystemCard[] = [
     {

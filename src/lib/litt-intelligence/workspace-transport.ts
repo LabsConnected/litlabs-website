@@ -63,6 +63,33 @@ export interface ProjectPackageInfo {
   hasTest: boolean;
 }
 
+export interface PreviewStartResult {
+  workspaceId: string;
+  status: "stopped" | "starting" | "ready" | "failed" | "restarting";
+  port: number;
+  framework: string;
+  command: string;
+  startedAt: number | null;
+  error?: string | null;
+}
+
+export interface PreviewStatusResult {
+  status: "stopped" | "starting" | "ready" | "failed" | "restarting";
+  port: number | null;
+  framework: string | null;
+  command: string | null;
+  startedAt: number | null;
+  lastHealthCheck: number | null;
+  error: string | null;
+  errorCode: string | null;
+  logs: string[];
+}
+
+export interface PreviewStopResult {
+  workspaceId: string;
+  status: "stopped";
+}
+
 // ─── Transport interface ──────────────────────────────────────────
 
 export interface WorkspaceTransport {
@@ -100,6 +127,11 @@ export interface WorkspaceTransport {
 
   // Checkpoint
   createCheckpointBeforeMutation(label: string): Promise<CheckpointInfo | null>;
+
+  // Preview
+  startPreview(packageManager?: string): Promise<PreviewStartResult>;
+  getPreviewStatus(): Promise<PreviewStatusResult>;
+  stopPreview(): Promise<PreviewStopResult>;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────
@@ -445,6 +477,63 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
 
     await this.writeFile(path, updated);
     return { applied: true };
+  }
+
+  // ── Preview ──
+
+  async startPreview(packageManager?: string): Promise<PreviewStartResult> {
+    const resp = await fetch(
+      `${terminalBase()}/internal/workspace/${this.workspaceId}/preview/start`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Internal-Service-Key": internalServiceKey(),
+        },
+        body: JSON.stringify({ userId: this.userId, packageManager }),
+        signal: AbortSignal.timeout(65_000),
+      },
+    );
+    if (!resp.ok) {
+      const err = await resp.text().catch(() => "Unknown error");
+      throw new Error(`Preview start failed (${resp.status}): ${err}`);
+    }
+    return resp.json() as Promise<PreviewStartResult>;
+  }
+
+  async getPreviewStatus(): Promise<PreviewStatusResult> {
+    const resp = await fetch(
+      `${terminalBase()}/internal/workspace/${this.workspaceId}/preview/status?userId=${encodeURIComponent(this.userId)}`,
+      {
+        headers: { "X-Internal-Service-Key": internalServiceKey() },
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!resp.ok) {
+      const err = await resp.text().catch(() => "Unknown error");
+      throw new Error(`Preview status failed (${resp.status}): ${err}`);
+    }
+    return resp.json() as Promise<PreviewStatusResult>;
+  }
+
+  async stopPreview(): Promise<PreviewStopResult> {
+    const resp = await fetch(
+      `${terminalBase()}/internal/workspace/${this.workspaceId}/preview/stop`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Internal-Service-Key": internalServiceKey(),
+        },
+        body: JSON.stringify({ userId: this.userId }),
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!resp.ok && resp.status !== 404) {
+      const err = await resp.text().catch(() => "Unknown error");
+      throw new Error(`Preview stop failed (${resp.status}): ${err}`);
+    }
+    return { workspaceId: this.workspaceId, status: "stopped" };
   }
 
   // ── Checkpoint ──

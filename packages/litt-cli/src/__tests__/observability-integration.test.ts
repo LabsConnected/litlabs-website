@@ -52,7 +52,6 @@ import { estimateExtraContentHeight, estimateResultBlockHeight } from "../ink/sh
 import { layoutTranscript, computeViewport } from "../ink/scroll-model.js";
 import type { CanonicalMissionProjection, MissionState, ActivityEntry } from "../ink/cockpit-store.js";
 import type { ChatMessage } from "../ink/cockpit-store.js";
-import type { ExecutionTarget } from "../lib/execution-target.js";
 
 // ─── Fixtures ───────────────────────────────────────────────────────
 

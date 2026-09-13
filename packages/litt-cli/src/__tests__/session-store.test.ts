@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   saveSession, listSessions, loadSession, deleteSession,
-  summarize, timeAgo, newSessionId, type SessionSnapshot,
+  summarize, timeAgo, newSessionId,
 } from "../lib/session-store.js";
 
 let tempFile: string;

@@ -10,15 +10,13 @@
  *   - Model provider availability
  */
 
-import { exec, ok, fail, warn, header, label, value, detectProject, resolveProjectCwd, c } from "../lib/utils.js";
+import {  ok, fail, warn, header, label, value, detectProject, resolveProjectCwd, c } from "../lib/utils.js";
 import { getGitState } from "../lib/git-state.js";
-import { hasProviderKey } from "../lib/model-provider.js";
 import { CLI_VERSION, CLI_PACKAGE_NAME } from "../lib/version.js";
 import { ensureConfig, getConfigPath } from "../lib/config.js";
 import { getTerminalUrl } from "../lib/auth/auth-config.js";
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import { createRequire } from "node:module";
 import { tryCommandOutputAsync, type WhichEnv } from "../lib/which.js";
 import { checkCanonicalMain } from "../lib/canonical-main.js";
@@ -479,7 +477,7 @@ async function doctorInputCommand(): Promise<number> {
 
   // Import the normalization layer dynamically (avoids pulling Ink
   // into the non-interactive doctor path).
-  const { normalizeKey, describeKeyEvent } = await import("../ink/input-keys.js");
+  const { describeKeyEvent } = await import("../ink/input-keys.js");
 
   console.log(c.bold + "Press keys to see their normalized events." + c.reset);
   console.log(`${c.dim}  Press Ctrl+C to exit.${c.reset}`);

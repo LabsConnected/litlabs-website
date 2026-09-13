@@ -302,6 +302,57 @@ describe("classifyIntent", () => {
     });
   });
 
+  // ─── Regression: "changed"/"changes" must not hijack READ into MISSION ───
+  // MISSION_TRIGGERS' "change" must match only the whole word "change",
+  // never as a substring of "changed"/"changes" — otherwise a read-only
+  // "what changed" question is misrouted into the full mission lifecycle.
+  describe("read: 'changed'/'changes' inflections do not trigger mission (word-boundary regression)", () => {
+    it("'what changed?' is read", () => {
+      expect(classifyIntent("what changed?")).toBe("read");
+    });
+
+    it("'show me what changed' is read", () => {
+      expect(classifyIntent("show me what changed")).toBe("read");
+    });
+
+    it("'summarize the changes' is read", () => {
+      expect(classifyIntent("summarize the changes")).toBe("read");
+    });
+
+    it("'what files changed?' is read", () => {
+      expect(classifyIntent("what files changed?")).toBe("read");
+    });
+
+    it("'show me the last 3 git commits and summarize what changed' is read", () => {
+      expect(classifyIntent("show me the last 3 git commits and summarize what changed")).toBe("read");
+    });
+  });
+
+  // ─── Regression: genuine mutation requests using "change"/"changes" ───
+  // The word-boundary fix above must not weaken real mission detection —
+  // an imperative "change ..." or "make ... changes" is still a mutation.
+  describe("mission: genuine 'change' action requests still route to mission", () => {
+    it("'change this file' is mission", () => {
+      expect(classifyIntent("change this file")).toBe("mission");
+    });
+
+    it("'make these changes' is mission", () => {
+      expect(classifyIntent("make these changes")).toBe("mission");
+    });
+
+    it("'change the API route' is mission", () => {
+      expect(classifyIntent("change the API route")).toBe("mission");
+    });
+
+    it("'update the implementation' is mission", () => {
+      expect(classifyIntent("update the implementation")).toBe("mission");
+    });
+
+    it("'fix the broken build' is mission", () => {
+      expect(classifyIntent("fix the broken build")).toBe("mission");
+    });
+  });
+
   describe("read vs mission boundary", () => {
     it("'inspect this repo and tell me the framework and branch' is mission", () => {
       expect(classifyIntent("inspect this repo and tell me the framework and branch")).toBe("mission");

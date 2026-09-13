@@ -14,16 +14,14 @@
  * These tests use only pure functions and mocked exec — no real Stripe,
  * Railway, or network calls. No secret values are printed or persisted.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   normalizeSHA,
   shasEqual,
   checkTerminalService,
   checkStudioPrerequisites,
-  type CheckResult,
 } from "../lib/production-checks.js";
 import { type EnvVarMap } from "../lib/railway-env.js";
-import { exec } from "../lib/utils.js";
 
 /** Build an EnvVarMap (ReadonlyMap<string,string>) from a plain object. */
 function mapFrom(obj: Record<string, string>): EnvVarMap {

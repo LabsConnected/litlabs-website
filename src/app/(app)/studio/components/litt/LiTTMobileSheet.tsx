@@ -3,19 +3,19 @@
 /**
  * LiTTMobileSheet — mobile (<1024px) access to LiTT.
  *
- * Phase C2.1: mobile previously had NO way to reach LiTT (the desktop
- * rail is `hidden` below `lg`, and the earlier collapsed HUD had no
- * mobile-hide rule, so mobile could show a stray 64px rail). This is a
- * minimal, real fix — not the full Phase I mobile redesign.
- *
  * Reuses the exact same chatContent/liveContent the desktop LiTTPanel
  * uses. Only mounted while the sheet is open, so there is never a
  * second CommandComposer / LiTTLiveActivity instance alongside the
- * desktop rail — the desktop rail simply isn't rendered on this tier.
+ * desktop rail.
+ *
+ * Geometry is driven by the Visual Viewport API so the sheet stays
+ * pinned above the mobile keyboard instead of being covered by it.
  */
 
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { MessageSquare, Activity, X } from "lucide-react";
+import { useVisualViewport } from "../../hooks/useVisualViewport";
+import { mobileDiag } from "../../lib/mobileDiagnostics";
 import type { LiTTTab } from "../LiTTPanel";
 
 export interface LiTTMobileSheetProps {
@@ -26,6 +26,8 @@ export interface LiTTMobileSheetProps {
   liveContent: ReactNode;
 }
 
+const MOBILE_BOTTOM_NAV_H = 62;
+
 export default function LiTTMobileSheet({
   activeTab,
   onTabChange,
@@ -33,22 +35,77 @@ export default function LiTTMobileSheet({
   chatContent,
   liveContent,
 }: LiTTMobileSheetProps) {
+  const vv = useVisualViewport();
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [safeBottom, setSafeBottom] = useState(0);
+
+  // Read the bottom safe-area once (env() cannot be read directly in JS).
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const probe = document.createElement("div");
+    probe.style.cssText =
+      "position:fixed;left:-9999px;padding-bottom:env(safe-area-inset-bottom);";
+    document.body.appendChild(probe);
+    const computed = window.getComputedStyle(probe);
+    const pb = parseInt(computed.paddingBottom || "0", 10);
+    setSafeBottom(Number.isFinite(pb) ? pb : 0);
+    document.body.removeChild(probe);
+  }, []);
+
+  const bottomInset = Math.max(0, Math.round(vv.bottomInset));
+  const bottomOffset = MOBILE_BOTTOM_NAV_H + safeBottom + bottomInset;
+  const availableHeight = Math.max(
+    200,
+    Math.round(vv.height - MOBILE_BOTTOM_NAV_H - safeBottom),
+  );
+  const MIN_SHEET_HEIGHT = 150;
+  const rawSheetHeight = Math.min(Math.round(vv.height * 0.88), availableHeight);
+  // Never let the sheet render at (near-)0px — a bad viewport reading
+  // should degrade to "small but usable", not "invisible/unusable".
+  const sheetHeight = Math.max(MIN_SHEET_HEIGHT, rawSheetHeight);
+
+  const loggedDegenerateRef = useRef(false);
+  useEffect(() => {
+    const degenerate = rawSheetHeight < MIN_SHEET_HEIGHT;
+    if (degenerate && !loggedDegenerateRef.current) {
+      loggedDegenerateRef.current = true;
+      mobileDiag("viewport", "degenerate_sheet_height", {
+        vvHeight: Math.round(vv.height),
+        vvWidth: Math.round(vv.width),
+        rawSheetHeight,
+      });
+    } else if (!degenerate) {
+      loggedDegenerateRef.current = false;
+    }
+  }, [rawSheetHeight, vv.height, vv.width]);
+
+  // When the keyboard opens, make sure the focused input (composer) is
+  // scrolled into view inside the sheet's scrollable content area.
+  useEffect(() => {
+    if (!contentRef.current) return;
+    const active = document.activeElement as HTMLElement | null;
+    if (active && (active.tagName === "TEXTAREA" || active.tagName === "INPUT")) {
+      active.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [vv.bottomInset, vv.height]);
+
   return (
     <>
       <button
         type="button"
         className="fixed inset-x-0 top-0 z-[10020] bg-black/55"
-        style={{ bottom: "calc(62px + env(safe-area-inset-bottom))" }}
+        style={{ bottom: `${bottomOffset}px` }}
         onClick={onClose}
         aria-label="Close LiTT"
         tabIndex={-1}
+        aria-hidden
       />
       <div
         className="fixed inset-x-0 z-[10021] flex min-h-0 min-w-0 flex-col overflow-hidden rounded-t-2xl border-t"
         style={{
-          bottom: "calc(62px + env(safe-area-inset-bottom))",
-          height: "min(88dvh, calc(100dvh - 62px - env(safe-area-inset-bottom)))",
-          maxHeight: "calc(100dvh - 62px - env(safe-area-inset-bottom))",
+          bottom: `${bottomOffset}px`,
+          height: `${sheetHeight}px`,
+          maxHeight: `calc(${vv.height}px - var(--studio-mobile-bottom-h) - env(safe-area-inset-bottom))`,
           backgroundColor: "var(--studio-surface)",
           borderColor: "var(--studio-border)",
         }}
@@ -79,7 +136,7 @@ export default function LiTTMobileSheet({
           <button
             type="button"
             onClick={() => onTabChange("chat")}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+            className="flex min-h-10 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
             style={{
               color: activeTab === "chat" ? "var(--litt-primary)" : "var(--text-muted)",
               backgroundColor: activeTab === "chat" ? "rgba(139,92,246,0.1)" : "transparent",
@@ -93,7 +150,7 @@ export default function LiTTMobileSheet({
           <button
             type="button"
             onClick={() => onTabChange("live")}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+            className="flex min-h-10 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
             style={{
               color: activeTab === "live" ? "var(--litt-primary)" : "var(--text-muted)",
               backgroundColor: activeTab === "live" ? "rgba(139,92,246,0.1)" : "transparent",
@@ -108,16 +165,20 @@ export default function LiTTMobileSheet({
           <button
             type="button"
             onClick={onClose}
-            className="grid h-6 w-6 place-items-center rounded-md transition hover:bg-white/10"
+            className="grid h-9 w-9 place-items-center rounded-md transition hover:bg-white/10"
             style={{ color: "var(--text-muted)" }}
             aria-label="Close LiTT"
             data-testid="litt-mobile-sheet-close"
           >
-            <X size={14} className="pointer-events-none" />
+            <X size={16} className="pointer-events-none" />
           </button>
         </div>
 
-        <div className="relative min-h-0 flex-1 overflow-hidden" data-testid="litt-mobile-sheet-content">
+        <div
+          ref={contentRef}
+          className="relative min-h-0 flex-1 overflow-hidden overscroll-contain"
+          data-testid="litt-mobile-sheet-content"
+        >
           <div
             className="absolute inset-0 flex min-w-0 flex-col overflow-hidden"
             style={{

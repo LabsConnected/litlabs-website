@@ -92,7 +92,7 @@ export async function resolveProjectContext(
     command: "git",
     args: ["rev-parse", "--is-inside-work-tree"],
     cwd: root,
-    timeoutMs: 3000,
+    timeoutMs: 10000,
   });
 
   const isGitRepo = gitDirResult.ok && gitDirResult.stdout.trim() === "true";
@@ -112,7 +112,7 @@ export async function resolveProjectContext(
     command: "git",
     args: ["branch", "--show-current"],
     cwd: root,
-    timeoutMs: 3000,
+    timeoutMs: 10000,
   });
 
   const branch = branchResult.ok ? branchResult.stdout.trim() || null : null;
@@ -122,7 +122,7 @@ export async function resolveProjectContext(
     command: "git",
     args: ["remote", "get-url", "origin"],
     cwd: root,
-    timeoutMs: 3000,
+    timeoutMs: 10000,
   });
 
   const remote = remoteResult.ok ? remoteResult.stdout.trim() || null : null;
@@ -204,7 +204,7 @@ export async function projectStatus(
     command: "git",
     args: ["status", "--porcelain=v1", "--branch"],
     cwd: root,
-    timeoutMs: 5000,
+    timeoutMs: 15000,
   });
 
   if (!statusRes.ok) {
@@ -252,7 +252,7 @@ export async function projectStatus(
     command: "git",
     args: ["remote", "get-url", "origin"],
     cwd: root,
-    timeoutMs: 3000,
+    timeoutMs: 10000,
   });
   if (remoteRes.ok && remoteRes.stdout.trim()) {
     remote = remoteRes.stdout.trim() || null;
@@ -283,7 +283,7 @@ export async function gitStatus(shell: ShellExecutor, cwd?: string): Promise<Too
     command: "git",
     args: ["status", "--porcelain=v1"],
     cwd: root,
-    timeoutMs: 5000,
+    timeoutMs: 15000,
   });
 
   if (!res.ok) {
@@ -355,7 +355,7 @@ export async function gitLog(
     command: "git",
     args: ["log", `--oneline`, `-n`, String(count)],
     cwd: root,
-    timeoutMs: 5000,
+    timeoutMs: 10000,
   });
 
   if (!res.ok) {
@@ -388,7 +388,7 @@ export async function gitBranch(shell: ShellExecutor, cwd?: string): Promise<Too
     command: "git",
     args: ["branch", "--show-current"],
     cwd: root,
-    timeoutMs: 3000,
+    timeoutMs: 10000,
   });
 
   if (!res.ok) {

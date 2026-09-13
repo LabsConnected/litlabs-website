@@ -18,6 +18,13 @@ export type ProgressEvent =
   | { type: "build_start"; check: string }
   | { type: "build_result"; check: string; passed: boolean; errorCount?: number }
   | { type: "repair_attempt"; attempt: number; maxAttempts: number }
+  | { type: "preview_start" }
+  | { type: "preview_status"; status: string; healthy?: boolean }
+  | { type: "preview_result"; success: boolean; previewUrl?: string | null; error?: string }
+  | { type: "deploy_start"; environment: string; provider?: string }
+  | { type: "deploy_status"; status: string; deploymentId?: string }
+  | { type: "deploy_result"; success: boolean; productionUrl?: string | null; error?: string }
+  | { type: "deploy_verify"; url: string; success: boolean; detail?: string }
   | { type: "finished"; totalSteps: number; totalDurationMs: number }
   | { type: "cancelled"; reason: string }
   | { type: "model_routing"; model: string; provider: string; fallbackFrom?: string; category?: string; latencyMs?: number }
@@ -35,6 +42,8 @@ export type AgentLoopPhase =
   | "observe"
   | "check_limits"
   | "build_fix"
+  | "preview"
+  | "deploy"
   | "finished"
   | "cancelled";
 

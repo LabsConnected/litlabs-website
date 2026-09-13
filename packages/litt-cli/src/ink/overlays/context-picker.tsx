@@ -95,7 +95,7 @@ export function ContextPicker({ cwd, mode = "context", initialQuery = "", onSele
       setQuery((prev) => prev + input);
       setSelectedIdx(0);
     }
-  }, [items, selectedIdx, onSelect, onCancel]));
+  }, [items, selectedIdx, onSelect, onCancel, query.length]));
 
   const visible = items.slice(0, 14);
   const specialItems = visible.filter((i) => i.kind === "special");

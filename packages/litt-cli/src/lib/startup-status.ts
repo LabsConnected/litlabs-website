@@ -59,16 +59,6 @@ export interface StartupStatus {
 }
 
 /** Resolve the provider name from env/config. */
-function resolveProviderName(): string {
-  if (process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST_PC) return "Ollama";
-  if (process.env.OPENAI_API_KEY) return "OpenAI";
-  if (process.env.GROQ_API_KEY) return "Groq";
-  if (process.env.OPENROUTER_API_KEY) return "OpenRouter";
-  if (process.env.ANTHROPIC_API_KEY) return "Anthropic";
-  if (process.env.DEEPSEEK_API_KEY) return "DeepSeek";
-  if (process.env.MISTRAL_API_KEY) return "Mistral";
-  return "none";
-}
 
 /**
  * Resolve the EFFECTIVE provider — the one that actually serves

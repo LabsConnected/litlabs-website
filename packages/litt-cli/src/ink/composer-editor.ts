@@ -253,7 +253,7 @@ export function moveEnd(state: ComposerState): ComposerState {
 }
 
 /** Clear all text and reset cursor */
-export function clear(state: ComposerState): ComposerState {
+export function clear(): ComposerState {
   return { text: "", caret: 0 };
 }
 

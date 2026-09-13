@@ -44,13 +44,11 @@ function cleanupTempDir(dir: string): void {
  */
 function createMockModel(toolCalls: string[]) {
   let callIndex = 0;
-  let turnCount = 0;
   return {
     stream: async (
       _messages: unknown,
       onEvent: (event: { type: string; text?: string; usage?: { total_tokens: number } }) => void,
     ) => {
-      turnCount++;
       if (callIndex < toolCalls.length) {
         const tool = toolCalls[callIndex];
         callIndex++;
@@ -68,35 +66,6 @@ function createMockModel(toolCalls: string[]) {
   };
 }
 
-/**
- * Mock model that emits tool calls with configurable success/failure.
- * Each tool call result is controlled by the toolResults map.
- */
-function createMockModelWithResults(
-  toolSequence: Array<{ tool: string; success: boolean; message: string }>,
-) {
-  let index = 0;
-  return {
-    stream: async (
-      _messages: unknown,
-      onEvent: (event: { type: string; text?: string; usage?: { total_tokens: number } }) => void,
-    ) => {
-      if (index < toolSequence.length) {
-        const entry = toolSequence[index];
-        index++;
-        onEvent({
-          type: "delta",
-          text: `Executing ${entry.tool}.\n\`\`\`tool_call\n{"tool":"${entry.tool}","inputs":{}}\n\`\`\``,
-        });
-        onEvent({ type: "done", usage: { total_tokens: 100 } });
-      } else {
-        onEvent({ type: "delta", text: "Done." });
-        onEvent({ type: "done", usage: { total_tokens: 50 } });
-      }
-    },
-    activeModel: "mock-model",
-  };
-}
 
 // ─── Tests ──────────────────────────────────────────────────────────
 
@@ -238,7 +207,6 @@ describe("Real Mission Lifecycle Vertical Slice", () => {
   it("Proof 5: session.getStore() returns the SAME instance used by the gateway", () => {
     const session = createRuntimeSession({ cwd: tmpDir });
     const store = session.getStore();
-    const gateway = session.getGateway();
 
     // The store is the canonical one — same instance throughout
     expect(store).toBeDefined();

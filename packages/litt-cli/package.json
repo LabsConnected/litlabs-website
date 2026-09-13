@@ -3,6 +3,30 @@
   "version": "0.1.0",
   "description": "LiTT CLI — AI operating system for your terminal",
   "type": "module",
+  "author": "LiTTree LabStudios",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LabsConnected/litlabs-website.git",
+    "directory": "packages/litt-cli"
+  },
+  "homepage": "https://litlabs.net/cli",
+  "bugs": {
+    "url": "https://github.com/LabsConnected/litlabs-website/issues"
+  },
+  "keywords": [
+    "litt",
+    "litlabs",
+    "ai",
+    "cli",
+    "developer-tools",
+    "agent",
+    "build",
+    "deploy"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "litt": "./dist/index.js"
   },

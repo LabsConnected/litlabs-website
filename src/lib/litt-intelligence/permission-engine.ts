@@ -76,6 +76,7 @@ const SENSITIVE_ACTIONS: ReadonlySet<string> = new Set([
   // makes their content reachable by anyone. Approval is required in ACT and
   // AUTO alike, never auto-approved as a "routine workspace edit".
   "project.deploy",
+  "deploy.execute",
 ]);
 
 export class PermissionEngine {

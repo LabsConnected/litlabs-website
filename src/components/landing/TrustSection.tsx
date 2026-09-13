@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, Check, Play, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight, Check, Download, FileStack, GitBranch, Play, ShieldCheck, Sparkles, Undo2 } from "lucide-react";
+import { track } from "@/lib/analytics";
 
 const PRODUCT_FACTS = [
   "Free starter plan with no credit card required",
@@ -10,14 +11,83 @@ const PRODUCT_FACTS = [
   "Beta capabilities are labeled clearly",
 ] as const;
 
+const TRUST_ITEMS = [
+  {
+    icon: FileStack,
+    title: "Your project stays yours",
+    copy: "Files and generated assets remain in your workspace and are exportable. No lock-in.",
+  },
+  {
+    icon: ShieldCheck,
+    title: "Sensitive actions require approval",
+    copy: "LiTT does not deploy, delete, or make production changes without your explicit confirmation.",
+  },
+  {
+    icon: Undo2,
+    title: "Project history survives the chat",
+    copy: "Context, decisions, and checkpoints carry forward. Return tomorrow without rebuilding the conversation.",
+  },
+  {
+    icon: Download,
+    title: "No lock-in",
+    copy: "Download your work and take it anywhere. The output belongs to your project, not the chat interface.",
+  },
+  {
+    icon: GitBranch,
+    title: "Connect GitHub",
+    copy: "Work directly on existing repositories. GitHub connection available on paid plans.",
+  },
+  {
+    icon: Sparkles,
+    title: "Beta features labeled clearly",
+    copy: "Voice, Terminal, and Deploy are in Beta. We label them honestly—not buried in fine print.",
+  },
+];
+
 export function TrustSection() {
   return (
     <section className="relative overflow-hidden border-t border-white/8 bg-[#05070d] px-5 py-16 lg:px-8 lg:py-24">
-      <div data-reveal className="litt-final-cta relative mx-auto max-w-[1500px] overflow-hidden rounded-[2rem] border border-white/11">
+      {/* Trust Q&A grid */}
+      <div data-reveal className="relative mx-auto max-w-[1500px]">
+        <div className="mx-auto max-w-3xl text-center">
+          <div className="litt-eyebrow">
+            <ShieldCheck size={13} /> Trust & control
+          </div>
+          <h2 className="mt-5 text-[clamp(2.25rem,5vw,4.75rem)] font-black leading-[0.98] tracking-[-0.055em] text-white">
+            Your work. <span className="litt-gradient-text">Your control.</span>
+          </h2>
+          <p className="mt-5 text-base leading-7 text-white/52 sm:text-lg sm:leading-8">
+            LiTT is built around your ownership, your approvals, and your ability to take the work anywhere.
+          </p>
+        </div>
+
+        <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {TRUST_ITEMS.map((item, index) => {
+            const Icon = item.icon;
+            return (
+              <article
+                key={item.title}
+                data-reveal
+                className="litt-trust-card"
+                style={{ "--reveal-index": index } as React.CSSProperties}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="litt-trust-icon"><Icon size={18} /></span>
+                  <h3 className="text-base font-black tracking-[-0.02em] text-white">{item.title}</h3>
+                </div>
+                <p className="mt-3 text-sm leading-6 text-white/50">{item.copy}</p>
+              </article>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Final CTA */}
+      <div data-reveal className="litt-final-cta relative mx-auto mt-16 max-w-[1500px] overflow-hidden rounded-[2rem] border border-white/11">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_30%,rgba(168,255,47,.13),transparent_34%),radial-gradient(circle_at_62%_78%,rgba(101,244,255,.1),transparent_30%),radial-gradient(circle_at_90%_28%,rgba(181,140,255,.12),transparent_30%)]" />
         <div className="litt-grid-fade pointer-events-none absolute inset-0 opacity-25" />
 
-        <div className="relative grid min-h-[620px] lg:grid-cols-[1.05fr_.95fr]">
+        <div className="relative grid min-h-[520px] lg:grid-cols-[1.05fr_.95fr]">
           <div className="relative z-10 flex flex-col justify-center p-7 sm:p-10 lg:p-14 xl:p-16">
             <div className="litt-eyebrow !mx-0"><Sparkles size={13} /> Your next project starts here</div>
             <h2 className="mt-6 max-w-3xl text-[clamp(3rem,6.5vw,6.6rem)] font-black leading-[0.88] tracking-[-0.07em] text-white">
@@ -28,8 +98,20 @@ export function TrustSection() {
             </p>
 
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-              <Link href="/sign-up" className="litt-primary-button">Start building free <ArrowRight size={16} /></Link>
-              <a href="#how-it-works" className="litt-secondary-button"><Play size={13} fill="currentColor" /> See how it works</a>
+              <Link
+                href="/sign-up"
+                className="litt-primary-button"
+                onClick={() => track("hero_cta_click", { source: "trust_cta" })}
+              >
+                Start building free <ArrowRight size={16} />
+              </Link>
+              <a
+                href="#how-it-works"
+                className="litt-secondary-button"
+                onClick={() => track("watch_litt_click", { source: "trust_cta" })}
+              >
+                <Play size={13} fill="currentColor" /> See how it works
+              </a>
             </div>
 
             <div className="mt-8 grid gap-2 sm:grid-cols-2">
@@ -49,7 +131,7 @@ export function TrustSection() {
             </div>
           </div>
 
-          <div className="relative min-h-[520px] overflow-hidden lg:min-h-full">
+          <div className="relative min-h-[420px] overflow-hidden lg:min-h-full">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,rgba(168,255,47,.14),transparent_35%)]" />
             <Image
               src="/brand/litt-mascot-hero.png"

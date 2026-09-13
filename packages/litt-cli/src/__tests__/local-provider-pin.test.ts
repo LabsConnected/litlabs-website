@@ -13,7 +13,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { OpenRouterModelProvider, resolveProviderAdapter } from "../lib/model-provider.js";
 
 let fetchMock: ReturnType<typeof vi.fn>;
-const ORIGINAL_ENV = { ...process.env };
 
 beforeEach(() => {
   fetchMock = vi.fn();

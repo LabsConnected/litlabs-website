@@ -18,7 +18,7 @@ import "server-only";
 import type { WorkspaceTransport } from "./workspace-transport";
 import { ProgressEmitter, type ProgressEvent } from "./progress-events";
 import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from "./permission-engine";
-import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, type ToolDefinition, type ToolCallResult } from "./llm-tool-calling";
+import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, AllRoutesFailedError, AgentBudgetExhaustedError, type ToolDefinition, type ToolCallResult, type LLMMessage } from "./llm-tool-calling";
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { toolRegistry } from "./tool-registry";
@@ -36,11 +36,13 @@ export interface AgentLoopConfig {
   systemPrompt: string;
   enableBuildFix: boolean;
   evalMetadata?: LLMCallMetadata;
+  /** Upstream/client AbortSignal propagated to all provider calls. */
+  signal?: AbortSignal;
 }
 
 export const DEFAULT_LOOP_CONFIG: AgentLoopConfig = {
   maxSteps: 20,
-  maxRuntimeMs: 300_000, // 5 minutes
+  maxRuntimeMs: 600_000, // 10 minutes — enough for full build+preview+deploy
   maxOutputChars: 50_000,
   maxRetries: 2,
   executionMode: "act",
@@ -55,7 +57,7 @@ export interface PendingApproval {
   inputs: Record<string, unknown>;
   reason: string;
   /** The conversation messages at the point of pause — resume from here after approval */
-  pausedMessages: Array<{ role: "user" | "assistant"; content: string }>;
+  pausedMessages: LLMMessage[];
 }
 
 export interface AgentLoopResult {
@@ -68,6 +70,12 @@ export interface AgentLoopResult {
   cancelled: boolean;
   cancelReason?: string;
   events: ProgressEvent[];
+  /** Set when the loop ended because every model call failed (provider outage, billing, etc.) — sanitized, no secrets */
+  modelFailed?: string;
+  /** User-facing message for a model failure — truthful and sanitized.
+   *  Only set when the loop produced a purpose-written failure message
+   *  (all routes exhausted / budget exhausted). */
+  modelFailureText?: string;
   /** Set when the loop paused because ACT mode requires approval for a mutation */
   pendingApproval?: PendingApproval;
 }
@@ -150,6 +158,11 @@ export async function runAgentLoopV2(
   const events: ProgressEvent[] = [];
   const toolCallRecords: ToolCallRecord[] = [];
   let hasInterveningMutation = false;
+  // Mutating tool calls that already executed successfully this run —
+  // keyed by toolId+inputs. A replacement provider that re-emits an
+  // identical mutation after failover replays the recorded result instead
+  // of executing it again.
+  const executedMutations = new Map<string, ToolCallResult>();
 
   // Collect progress events
   const localProgress = new ProgressEmitter((event) => {
@@ -169,7 +182,7 @@ export async function runAgentLoopV2(
   const toolDefs = availableTools.map(toToolDefinition);
 
   // Conversation messages for the LLM
-  const llmMessages: Array<{ role: "user" | "assistant"; content: string }> = [
+  const llmMessages: LLMMessage[] = [
     { role: "user", content: userMessage },
   ];
 
@@ -177,6 +190,8 @@ export async function runAgentLoopV2(
   let stepsUsed = 0;
   let cancelled = false;
   let cancelReason: string | undefined;
+  let modelFailed: string | undefined;
+  let modelFailureText: string | undefined;
   let checkpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
   const toolCallLog: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }> = [];
   let completedDeployment: CompletedDeployment | null = null;
@@ -209,13 +224,15 @@ export async function runAgentLoopV2(
           temperature: 0.15,
           maxTokens: 4096,
           evalMetadata: cfg.evalMetadata,
+          deadlineMs: startTime + cfg.maxRuntimeMs,
+          signal: cfg.signal,
         },
       );
-      // Emit model routing event so LiTT Live shows which model was actually used
+      // Emit model routing event so LiTT Live shows which provider/model was actually used
       localProgress.emit({
         type: "model_routing",
         model: llmResponse.model,
-        provider: "openrouter",
+        provider: llmResponse.provider ?? "unknown",
         fallbackFrom: cfg.model && llmResponse.model !== cfg.model ? cfg.model : undefined,
       });
     } catch (err) {
@@ -227,9 +244,18 @@ export async function runAgentLoopV2(
         category: "all_fallbacks_exhausted",
         message: errMsg.slice(0, 200),
       });
+      modelFailed = errMsg.slice(0, 200);
       finalText = completedDeployment
         ? describeProviderFailureAfterDeployment(completedDeployment, errMsg)
-        : `I encountered an error while reasoning: ${errMsg}`;
+        : err instanceof AllRoutesFailedError
+          ? err.userMessage
+          : err instanceof AgentBudgetExhaustedError
+            ? "I ran out of time before finishing this request. Your project and any completed work are preserved — try again."
+            : `I encountered an error while reasoning: ${errMsg}`;
+      modelFailureText =
+        err instanceof AllRoutesFailedError || err instanceof AgentBudgetExhaustedError
+          ? finalText
+          : undefined;
       break;
     }
 
@@ -255,10 +281,7 @@ export async function runAgentLoopV2(
     }
 
     // Add assistant message with tool calls to conversation
-    llmMessages.push({
-      role: "assistant",
-      content: buildAssistantToolCallMessage(llmResponse.toolCalls, llmResponse.text).content,
-    });
+    llmMessages.push(buildAssistantToolCallMessage(llmResponse.toolCalls, llmResponse.text, llmResponse.rawParts));
 
     // Process each tool call
     let batchHasMutation = false;
@@ -274,10 +297,7 @@ export async function runAgentLoopV2(
           success: false,
           error: `Unknown tool: ${toolCall.toolId}`,
         };
-        llmMessages.push({
-          role: "assistant",
-          content: buildToolResultMessage(result).content,
-        });
+        llmMessages.push(buildToolResultMessage(result));
         continue;
       }
 
@@ -291,11 +311,34 @@ export async function runAgentLoopV2(
           success: false,
           error: validationError,
         };
-        llmMessages.push({
-          role: "assistant",
-          content: buildToolResultMessage(result).content,
-        });
+        llmMessages.push(buildToolResultMessage(result));
         continue;
+      }
+
+      // Duplicate-mutation protection: if this exact mutating call already
+      // executed successfully in this run (e.g. a replacement provider
+      // re-emitted it after failover), replay the recorded result instead
+      // of executing the mutation a second time.
+      const dedupeKey = `${toolCall.toolId}:${hashInputs(toolCall.inputs)}`;
+      if (!toolDef.readOnly) {
+        const prior = executedMutations.get(dedupeKey);
+        if (prior) {
+          llmMessages.push(buildToolResultMessage({
+            toolCallId: toolCall.toolCallId,
+            toolId: toolCall.toolId,
+            result: prior.result,
+            success: true,
+          }));
+          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true });
+          localProgress.emit({
+            type: "tool_result",
+            toolId: toolCall.toolId,
+            success: true,
+            summary: "skipped — already executed",
+            durationMs: 0,
+          });
+          continue;
+        }
       }
 
       // Check permissions
@@ -310,10 +353,7 @@ export async function runAgentLoopV2(
           success: false,
           error: permResult.reason ?? "Permission denied",
         };
-        llmMessages.push({
-          role: "assistant",
-          content: buildToolResultMessage(result).content,
-        });
+        llmMessages.push(buildToolResultMessage(result));
         localProgress.emit({
           type: "approval_required",
           toolId: toolCall.toolId,
@@ -436,6 +476,7 @@ export async function runAgentLoopV2(
       if (!toolDef.readOnly) {
         hasInterveningMutation = true;
         batchHasMutation = true;
+        if (result.success) executedMutations.set(dedupeKey, result);
       }
 
       // Log the call
@@ -452,10 +493,7 @@ export async function runAgentLoopV2(
       });
 
       // Add result to conversation
-      llmMessages.push({
-        role: "assistant",
-        content: buildToolResultMessage(result).content,
-      });
+      llmMessages.push(buildToolResultMessage(result));
 
       // Check output size limit
       const totalOutput = llmMessages.map((m) => m.content).join("").length;
@@ -479,7 +517,7 @@ export async function runAgentLoopV2(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal),
     });
   }
 
@@ -489,6 +527,14 @@ export async function runAgentLoopV2(
     cancelReason = `Max steps reached (${cfg.maxSteps})`;
   }
 
+  // Surface build-fix failures in the final text so callers cannot
+  // accidentally report success when validation did not pass.
+  const effectiveFinalText =
+    finalText ||
+    (buildFixResult && !buildFixResult.allPassed
+      ? `The build checks did not all pass after ${buildFixResult.repairAttempts} repair attempts.`
+      : describeSilentOutcome(toolCallLog, cancelled, cancelReason));
+
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
     ...(cancelled ? { reason: cancelReason ?? "Unknown" } : { totalSteps: stepsUsed, totalDurationMs: Date.now() - startTime }),
@@ -497,7 +543,7 @@ export async function runAgentLoopV2(
   return {
     // Never fabricate a completion claim. When the model produced no text,
     // report what the evidence supports instead of asserting success.
-    finalText: finalText || describeSilentOutcome(toolCallLog, cancelled, cancelReason),
+    finalText: effectiveFinalText,
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,
@@ -506,6 +552,8 @@ export async function runAgentLoopV2(
     cancelled,
     cancelReason,
     events,
+    modelFailed,
+    modelFailureText,
   };
 }
 
@@ -585,7 +633,7 @@ function describeProviderFailureAfterDeployment(
 
 export interface ResumeInput {
   /** The paused conversation messages at the point of approval pause */
-  pausedMessages: Array<{ role: "user" | "assistant"; content: string }>;
+  pausedMessages: LLMMessage[];
   /** The tool that was pending approval */
   toolId: string;
   toolCallId: string;
@@ -629,6 +677,7 @@ export async function resumeAgentLoopV2(
   const events: ProgressEvent[] = [];
   const toolCallRecords: ToolCallRecord[] = [];
   let hasInterveningMutation = resume.hadInterveningMutation;
+  const executedMutations = new Map<string, ToolCallResult>();
 
   const localProgress = new ProgressEmitter((event) => {
     events.push(event);
@@ -646,7 +695,7 @@ export async function resumeAgentLoopV2(
   const toolDefs = availableTools.map(toToolDefinition);
 
   // Resume from paused messages — these are server-verified, not client-supplied
-  const llmMessages: Array<{ role: "user" | "assistant"; content: string }> = [
+  const llmMessages: LLMMessage[] = [
     ...resume.pausedMessages,
   ];
 
@@ -654,6 +703,8 @@ export async function resumeAgentLoopV2(
   let stepsUsed = resume.stepsUsedBeforePause;
   let cancelled = false;
   let cancelReason: string | undefined;
+  let modelFailed: string | undefined;
+  let modelFailureText: string | undefined;
   let checkpoint = resume.existingCheckpoint;
   const toolCallLog: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }> = [];
   let completedDeployment: CompletedDeployment | null = null;
@@ -713,10 +764,7 @@ export async function resumeAgentLoopV2(
       durationMs: Date.now() - startTime,
     });
 
-    llmMessages.push({
-      role: "assistant",
-      content: buildToolResultMessage(result).content,
-    });
+    llmMessages.push(buildToolResultMessage(result));
 
     const toolDef = availableTools.find((t) => t.id === resume.toolId);
     if (toolDef && !toolDef.readOnly) {
@@ -749,10 +797,7 @@ export async function resumeAgentLoopV2(
       durationMs: 0,
     });
 
-    llmMessages.push({
-      role: "assistant",
-      content: buildToolResultMessage(result).content,
-    });
+    llmMessages.push(buildToolResultMessage(result));
   }
 
   // Continue the loop
@@ -778,15 +823,30 @@ export async function resumeAgentLoopV2(
           temperature: 0.15,
           maxTokens: 4096,
           evalMetadata: cfg.evalMetadata,
+          deadlineMs: startTime + cfg.maxRuntimeMs,
+          signal: cfg.signal,
         },
       );
     } catch (err) {
-      {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        finalText = completedDeployment
-          ? describeProviderFailureAfterDeployment(completedDeployment, errMsg)
-          : `I encountered an error while reasoning: ${errMsg}`;
-      }
+      const errMsg = err instanceof Error ? err.message : String(err);
+      localProgress.emit({
+        type: "model_failed",
+        model: cfg.model ?? "default",
+        category: "all_fallbacks_exhausted",
+        message: errMsg.slice(0, 200),
+      });
+      modelFailed = errMsg.slice(0, 200);
+      finalText = completedDeployment
+        ? describeProviderFailureAfterDeployment(completedDeployment, errMsg)
+        : err instanceof AllRoutesFailedError
+          ? err.userMessage
+          : err instanceof AgentBudgetExhaustedError
+            ? "I ran out of time before finishing this request. Your project and any completed work are preserved — try again."
+            : `I encountered an error while reasoning: ${errMsg}`;
+      modelFailureText =
+        err instanceof AllRoutesFailedError || err instanceof AgentBudgetExhaustedError
+          ? finalText
+          : undefined;
       break;
     }
 
@@ -795,10 +855,7 @@ export async function resumeAgentLoopV2(
       break;
     }
 
-    llmMessages.push({
-      role: "assistant",
-      content: buildAssistantToolCallMessage(llmResponse.toolCalls, llmResponse.text).content,
-    });
+    llmMessages.push(buildAssistantToolCallMessage(llmResponse.toolCalls, llmResponse.text, llmResponse.rawParts));
 
     let batchHasMutation = false;
 
@@ -813,7 +870,7 @@ export async function resumeAgentLoopV2(
           success: false,
           error: `Unknown tool: ${toolCall.toolId}`,
         };
-        llmMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+        llmMessages.push(buildToolResultMessage(result));
         continue;
       }
 
@@ -826,8 +883,24 @@ export async function resumeAgentLoopV2(
           success: false,
           error: validationError,
         };
-        llmMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+        llmMessages.push(buildToolResultMessage(result));
         continue;
+      }
+
+      const dedupeKey = `${toolCall.toolId}:${hashInputs(toolCall.inputs)}`;
+      if (!toolDef.readOnly) {
+        const prior = executedMutations.get(dedupeKey);
+        if (prior) {
+          llmMessages.push(buildToolResultMessage({
+            toolCallId: toolCall.toolCallId,
+            toolId: toolCall.toolId,
+            result: prior.result,
+            success: true,
+          }));
+          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true });
+          localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: true, summary: "skipped — already executed", durationMs: 0 });
+          continue;
+        }
       }
 
       const permInfo = toPermissionInfo(toolDef);
@@ -841,7 +914,7 @@ export async function resumeAgentLoopV2(
           success: false,
           error: permResult.reason ?? "Permission denied",
         };
-        llmMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+        llmMessages.push(buildToolResultMessage(result));
         localProgress.emit({ type: "approval_required", toolId: toolCall.toolId, reason: permResult.reason ?? "Permission denied" });
         continue;
       }
@@ -874,7 +947,7 @@ export async function resumeAgentLoopV2(
           success: false,
           error: "Approval required — this operation is not in the AUTO-approve safe set",
         };
-        llmMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+        llmMessages.push(buildToolResultMessage(result));
         continue;
       }
 
@@ -919,6 +992,7 @@ export async function resumeAgentLoopV2(
       if (!toolDef.readOnly) {
         hasInterveningMutation = true;
         batchHasMutation = true;
+        if (result.success) executedMutations.set(dedupeKey, result);
       }
 
       const summary = summarizeToolResult(toolCall.toolId, result.result);
@@ -927,7 +1001,7 @@ export async function resumeAgentLoopV2(
 
       localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: result.success, summary, durationMs: 0 });
 
-      llmMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+      llmMessages.push(buildToolResultMessage(result));
 
       const totalOutput = llmMessages.map((m) => m.content).join("").length;
       if (totalOutput > cfg.maxOutputChars) {
@@ -946,7 +1020,7 @@ export async function resumeAgentLoopV2(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal),
     });
   }
 
@@ -954,6 +1028,12 @@ export async function resumeAgentLoopV2(
     cancelled = true;
     cancelReason = `Max steps reached (${cfg.maxSteps})`;
   }
+
+  const effectiveFinalText =
+    finalText ||
+    (buildFixResult && !buildFixResult.allPassed
+      ? `The build checks did not all pass after ${buildFixResult.repairAttempts} repair attempts.`
+      : describeSilentOutcome(toolCallLog, cancelled, cancelReason));
 
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
@@ -963,7 +1043,7 @@ export async function resumeAgentLoopV2(
   return {
     // Never fabricate a completion claim. When the model produced no text,
     // report what the evidence supports instead of asserting success.
-    finalText: finalText || describeSilentOutcome(toolCallLog, cancelled, cancelReason),
+    finalText: effectiveFinalText,
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,
@@ -972,6 +1052,8 @@ export async function resumeAgentLoopV2(
     cancelled,
     cancelReason,
     events,
+    modelFailed,
+    modelFailureText,
   };
 }
 
@@ -982,14 +1064,16 @@ export async function resumeAgentLoopV2(
  * back to the LLM, lets it inspect and fix the code, then re-runs checks.
  * Max 3 repair cycles.
  */
-function createAutonomousRepairCallback(
+export function createAutonomousRepairCallback(
   transport: WorkspaceTransport,
   systemPrompt: string,
   toolDefs: ToolDefinition[],
+  deadlineMs?: number,
+  signal?: AbortSignal,
 ): (attempt: number, errors: string) => Promise<boolean> {
   return async (attempt: number, errors: string) => {
     // Feed the error output to the LLM and let it repair
-    const repairMessages: Array<{ role: "user" | "assistant"; content: string }> = [
+    const repairMessages: LLMMessage[] = [
       {
         role: "user",
         content: `The build/check failed with the following output. Please inspect the relevant code, fix the issue, and verify your fix.\n\n--- Error output ---\n${errors}\n--- End error output ---\n\nRepair attempt ${attempt}/3. Use the available tools to read the failing files, identify the issue, and write the fix.`,
@@ -1002,6 +1086,8 @@ function createAutonomousRepairCallback(
         const response = await callLLMWithTools(systemPrompt, repairMessages, toolDefs, {
           temperature: 0.1,
           maxTokens: 4096,
+          deadlineMs,
+          signal,
         });
 
         if (response.toolCalls.length === 0) {
@@ -1009,10 +1095,7 @@ function createAutonomousRepairCallback(
           return true;
         }
 
-        repairMessages.push({
-          role: "assistant",
-          content: buildAssistantToolCallMessage(response.toolCalls, response.text).content,
-        });
+        repairMessages.push(buildAssistantToolCallMessage(response.toolCalls, response.text, response.rawParts));
 
         // Execute each tool call
         for (const toolCall of response.toolCalls) {
@@ -1029,7 +1112,7 @@ function createAutonomousRepairCallback(
               ? { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: execResult.result, success: true }
               : { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: null, success: false, error: execResult.error };
 
-            repairMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+            repairMessages.push(buildToolResultMessage(result));
           } catch (err) {
             const result: ToolCallResult = {
               toolCallId: toolCall.toolCallId,
@@ -1038,7 +1121,7 @@ function createAutonomousRepairCallback(
               success: false,
               error: err instanceof Error ? err.message : String(err),
             };
-            repairMessages.push({ role: "assistant", content: buildToolResultMessage(result).content });
+            repairMessages.push(buildToolResultMessage(result));
           }
         }
       }

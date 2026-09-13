@@ -480,7 +480,6 @@ async function main(): Promise<number> {
   // LITT_CLERK_TOKEN test bypass, and the logged-out/BYOK allow-lists).
   // Absence of env overrides must NOT disable mandatory authentication.
   const isCockpitCommand = command === "cockpit" || command === "shell" || command === "tui";
-  const localOnlyBypass = isLocalOnlyMode() && isCockpitCommand;
   const byokKeyPresent = hasByokKey();
   const localTarget = isLocalTarget();
 

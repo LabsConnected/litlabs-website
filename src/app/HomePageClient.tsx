@@ -28,15 +28,20 @@ import { InteractiveProductDemo } from "@/components/landing/InteractiveProductD
 import { CapabilityStatus } from "@/components/landing/CapabilityStatus";
 import { AgentCrew } from "@/components/landing/AgentCrew";
 import { RealCreations } from "@/components/landing/RealCreations";
-import { WhyDifferent } from "@/components/landing/WhyDifferent";
 import { TrustSection } from "@/components/landing/TrustSection";
+import { RealProductProof } from "@/components/landing/RealProductProof";
+import { OnboardingSteps } from "@/components/landing/OnboardingSteps";
+import { ComparisonTable } from "@/components/landing/ComparisonTable";
+import { FAQSection } from "@/components/landing/FAQSection";
 import { useViewportReveals } from "@/components/landing/useViewportReveals";
 
 const NAV_ITEMS = [
   { label: "Capabilities", href: "#what-we-do" },
   { label: "How it works", href: "#how-it-works" },
   { label: "Studio", href: "#operator" },
+  { label: "CLI", href: "/cli" },
   { label: "Creations", href: "#creations" },
+  { label: "FAQ", href: "#faq" },
   { label: "Community", href: "/discover" },
 ] as const;
 
@@ -142,14 +147,14 @@ function Header() {
               </Link>
             ),
           )}
-          <Link href="/pricing" className="litt-nav-link">Pricing</Link>
+          <Link href="/pricing" className="litt-nav-link" onClick={() => track("pricing_link_click", { source: "nav" })}>Pricing</Link>
         </nav>
 
         <div className="flex items-center gap-2">
           <Link href="/sign-in" className="hidden px-3 py-2 text-sm font-bold text-white/55 transition hover:text-white sm:block">
             Sign in
           </Link>
-          <Link href="/sign-up" className="litt-primary-button !min-h-10 !px-4 !py-2 text-sm">
+          <Link href="/sign-up" className="litt-primary-button !min-h-10 !px-4 !py-2 text-sm" onClick={() => track("hero_cta_click", { source: "header" })}>
             Start free <ArrowRight size={14} />
           </Link>
           <button
@@ -193,7 +198,7 @@ function Header() {
                 </Link>
               ),
             )}
-            <Link href="/pricing" onClick={() => setMenuOpen(false)} className="flex items-center justify-between rounded-xl px-3 py-3 text-sm font-bold text-white/72 hover:bg-white/5 hover:text-white">
+            <Link href="/pricing" onClick={() => { setMenuOpen(false); track("pricing_link_click", { source: "mobile_nav" }); }} className="flex items-center justify-between rounded-xl px-3 py-3 text-sm font-bold text-white/72 hover:bg-white/5 hover:text-white">
               Pricing <ChevronRight size={15} />
             </Link>
           </div>
@@ -315,22 +320,6 @@ function CreationsSection() {
   );
 }
 
-function WhySection() {
-  return (
-    <section className="litt-section relative overflow-hidden border-t border-white/8">
-      <div className="litt-grid-fade pointer-events-none absolute inset-0 opacity-30" />
-      <div className="relative mx-auto max-w-[1500px] px-5 lg:px-8">
-        <SectionHeading
-          eyebrow="Built for finishing"
-          title={<>The difference is what <span className="litt-gradient-text">survives the chat.</span></>}
-          copy="LiTTree creates durable project state: files, context, checkpoints, approvals, and a path to launch. Your work keeps moving even after the conversation ends."
-        />
-        <div className="mt-12"><WhyDifferent /></div>
-      </div>
-    </section>
-  );
-}
-
 function Footer() {
   return (
     <footer className="border-t border-white/8 bg-[#03050a] px-5 py-10 pb-[calc(2.5rem+env(safe-area-inset-bottom))] lg:px-8">
@@ -365,10 +354,13 @@ function LandingPage() {
       <CapabilityStatus />
       <CapabilityGrid />
       <MissionDemo />
+      <RealProductProof />
+      <ComparisonTable />
       <AgentCrew />
       <CreationsSection />
-      <WhySection />
+      <OnboardingSteps />
       <TrustSection />
+      <FAQSection />
       <Footer />
     </main>
   );

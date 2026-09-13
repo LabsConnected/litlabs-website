@@ -5,8 +5,8 @@
  * Reads from ~/.litt/runs/*.json via the RunStore.
  */
 
-import { header, ok, fail, c, label, value } from "../lib/utils.js";
-import { listRuns, formatRunListEntry, timeAgo } from "../lib/run-store.js";
+import { header, ok, c } from "../lib/utils.js";
+import { listRuns, timeAgo } from "../lib/run-store.js";
 
 export async function runsCommand(): Promise<number> {
   header("Recent Runs");

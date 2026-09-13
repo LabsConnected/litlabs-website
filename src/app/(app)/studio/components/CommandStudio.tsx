@@ -35,6 +35,8 @@ import StudioTranscript from "./StudioTranscript";
 import LiTTLiveActivity from "./LiTTLiveActivity";
 import LiTTPanel from "./LiTTPanel";
 import LiTTMobileSheet from "./litt/LiTTMobileSheet";
+import MobileDiagOverlay from "./MobileDiagOverlay";
+import { mobileDiag, isMobileDiagEnabled } from "../lib/mobileDiagnostics";
 import ContextDrawer, { type ContextDrawerTab } from "./context/ContextDrawer";
 import AssetsPanel from "./context/AssetsPanel";
 import { StudioContextProvider } from "../context/StudioContext";
@@ -780,18 +782,38 @@ function CommandStudioContent() {
   const handleComposerSend = useCallback(async (value: string, attachments?: string[]) => {
     // The canonical controller provisions a starter project and conversation
     // when needed. Do not block first-time users at the composer boundary.
+    if (isMobileLitt) {
+      mobileDiag("composer", "send_attempt", {
+        hasProject: !!capabilities.projectId,
+        attachmentCount: attachments?.length ?? 0,
+      });
+    }
     try {
       const result = await conversation.send(value, attachments);
+      if (isMobileLitt) {
+        // errorKind is already a small, non-content-bearing enum
+        // ("auth" | "network" | "conflict" | "provider" | "validation") —
+        // safe to log verbatim.
+        mobileDiag(
+          result?.errorKind === "auth" ? "auth" : "chat_api",
+          result?.accepted ? "send_accepted" : "send_rejected",
+          { errorKind: result?.errorKind ?? null, persisted: !!result?.persisted },
+        );
+      }
       if (result?.accepted) {
         const execution = useExecutionStore.getState();
         const changes = execution.changesSummary ?? { added: 0, modified: 0, deleted: 0, renamed: 0 };
         const filesChanged = changes.added + changes.modified + changes.deleted + changes.renamed;
         const repaired = execution.events.some((event) => event.type === "repair_attempt");
-        if (filesChanged > 0 && capabilities.projectId) {
+        // The launch flow can start/refresh the workspace preview without any
+        // file writes (e.g. template preview, or model failure after preview
+        // start). Re-poll preview status in that case so the iframe appears.
+        const previewReady = execution.events.some((event) => event.type === "preview" && event.success);
+        if ((filesChanged > 0 || previewReady) && capabilities.projectId) {
           setWorkspaceRevision((revision) => revision + 1);
           window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId: capabilities.projectId, source: "assistant" } }));
         }
-        setCompletion({ changes, previewUpdated: Boolean(capabilities.projectId), repaired });
+        setCompletion({ changes, previewUpdated: previewReady, repaired });
         setAdvancedToolsOpen(false);
         setContextDrawerOpen(false);
         setLittActiveTab("chat");
@@ -805,9 +827,14 @@ function CommandStudioContent() {
       // surface the error so the user knows why their message didn't send.
       setComposerValue(value);
       console.error("[Studio] Composer send failed:", err);
+      if (isMobileLitt) {
+        mobileDiag("chat_api", "send_threw", {
+          errorName: err instanceof Error ? err.name : typeof err,
+        });
+      }
       return { accepted: false, persisted: false, errorKind: "network" as const };
     }
-  }, [conversation, capabilities.projectId, refreshCapabilities]);
+  }, [conversation, capabilities.projectId, refreshCapabilities, isMobileLitt]);
 
   const [projectCreateError, setProjectCreateError] = useState<string | null>(null);
 
@@ -834,6 +861,7 @@ function CommandStudioContent() {
         const msg = (err as { error?: string }).error || `Failed to create project (${res.status})`;
         setProjectCreateError(msg);
         console.error("[handleStartBlank] Failed to create project:", err);
+        if (isMobileLitt) mobileDiag("project", "create_failed", { status: res.status });
         return;
       }
       const { project } = await res.json();
@@ -861,10 +889,11 @@ function CommandStudioContent() {
       const msg = err instanceof Error ? err.message : "Network error while creating project.";
       setProjectCreateError(msg);
       console.error("[handleStartBlank] Error:", err);
+      if (isMobileLitt) mobileDiag("project", "create_threw", { errorName: err instanceof Error ? err.name : typeof err });
     } finally {
       setCreatingProject(false);
     }
-  }, [searchParams, pathname, router, refreshCapabilities, userId, getToken]);
+  }, [searchParams, pathname, router, refreshCapabilities, userId, getToken, isMobileLitt]);
 
   const handlePrepareWorkspace = useCallback(async () => {
     if (!runtimeState.projectId) return;
@@ -890,10 +919,11 @@ function CommandStudioContent() {
       await Promise.all([refreshCapabilities(), runtime?.refresh() ?? Promise.resolve()]);
     } catch (error) {
       setProjectCreateError(error instanceof Error ? error.message : "Workspace preparation failed.");
+      if (isMobileLitt) mobileDiag("project", "workspace_prepare_failed", { errorName: error instanceof Error ? error.name : typeof error });
     } finally {
       setCreatingProject(false);
     }
-  }, [getToken, refreshCapabilities, runtime, runtimeState.projectId]);
+  }, [getToken, refreshCapabilities, runtime, runtimeState.projectId, isMobileLitt]);
 
   const handleSelectProject = useCallback((projectId: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -1915,10 +1945,10 @@ function CommandStudioContent() {
           <button
             type="button"
             onClick={() => setMobileLittOpen(true)}
-            className="fixed z-[10015] flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-[11px] font-bold shadow-lg"
+            className="fixed z-[10015] flex min-h-10 items-center gap-1.5 rounded-full border px-3.5 py-2 text-[11px] font-bold shadow-lg"
             style={{
               right: 12,
-              bottom: "calc(64px + env(safe-area-inset-bottom) + 12px)",
+              bottom: "calc(var(--studio-mobile-bottom-h) + env(safe-area-inset-bottom) + 12px)",
               backgroundColor: "var(--studio-surface)",
               borderColor: "var(--studio-border-strong)",
               color: "var(--litt-primary)",
@@ -1948,12 +1978,15 @@ function CommandStudioContent() {
             liveContent={littLiveContent}
           />
         )}
+        {/* TEMPORARY: real-phone diagnostic HUD — opt-in only (?mobileDiag=1),
+            remove once mobile Studio is confirmed working end-to-end on device. */}
+        {isMobileLitt && isMobileDiagEnabled(searchParams) && <MobileDiagOverlay />}
       </div>
 
       {/* Canvas overlay — opens when a canvas action is executed from chat */}
       {canvasOpen && (
         <aside
-          className="fixed z-[10009] flex flex-col overflow-hidden border shadow-2xl md:bottom-0 md:right-0 md:top-[calc(var(--studio-header-h)+4px)] md:w-full md:max-w-[520px] md:border-l bottom-[calc(56px+env(safe-area-inset-bottom))] left-0 right-0 top-auto h-[55dvh] rounded-t-2xl border-t"
+          className="fixed z-[10009] flex flex-col overflow-hidden border shadow-2xl md:bottom-0 md:right-0 md:top-[calc(var(--studio-header-h)+4px)] md:w-full md:max-w-[520px] md:border-l bottom-[calc(var(--studio-mobile-bottom-h)+env(safe-area-inset-bottom))] left-0 right-0 top-auto h-[55dvh] rounded-t-2xl border-t"
           style={{
             backgroundColor: "rgba(8,9,13,0.97)",
             borderColor: "var(--studio-border-strong)",
