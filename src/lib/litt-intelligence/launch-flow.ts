@@ -189,6 +189,14 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
         enableBuildFix: options.enableBuildFix ?? true,
         evalMetadata: options.evalMetadata,
         maxRuntimeMs: DEFAULT_LOOP_CONFIG.maxRuntimeMs,
+        // The launch flow needs more room than the bare agent-loop defaults:
+        // a full build explores the workspace, writes multiple files, runs
+        // build-fix, starts a preview, and deploys — all within the 10-minute
+        // runtime budget. The output-char and step limits are safety valves
+        // that must not trigger during normal build activity; the runtime
+        // budget remains the real bound.
+        maxSteps: 40,
+        maxOutputChars: 200_000,
         signal,
       },
       progress,
@@ -294,6 +302,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           maxSteps: options.runtimeRepairBudgetSteps ?? 8,
           // Repair must not restart the global agent runtime budget.
           maxRuntimeMs: Math.max(0, startTime + DEFAULT_LOOP_CONFIG.maxRuntimeMs - Date.now()),
+          maxOutputChars: 200_000,
           signal,
         },
         progress,

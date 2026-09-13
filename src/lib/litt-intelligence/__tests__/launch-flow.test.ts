@@ -430,6 +430,46 @@ describe("Launch Flow: no false completion", () => {
   });
 });
 
+// ─── Tests: budget limits adequate for full build+preview+deploy ───
+
+describe("Launch Flow: budget limits", () => {
+  it("passes maxOutputChars and maxSteps large enough for a full build to the main agent loop", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(successAgentResult());
+    const options = makeOptions({ runAgentLoop });
+    await runLaunchFlow(options);
+
+    const config = runAgentLoop.mock.calls[0][2] as Record<string, unknown>;
+    expect(config.maxOutputChars).toBe(200_000);
+    expect(config.maxSteps).toBe(40);
+    // Runtime budget must still be the real bound
+    expect(config.maxRuntimeMs).toBe(600_000);
+  });
+
+  it("passes maxOutputChars to the repair agent loop too", async () => {
+    let agentCallCount = 0;
+    const runAgentLoop = vi.fn().mockImplementation(async () => {
+      agentCallCount++;
+      return successAgentResult();
+    });
+    let statusCallCount = 0;
+    const getPreviewStatus = vi.fn().mockImplementation(async () => {
+      statusCallCount++;
+      if (statusCallCount === 1) return { status: "failed", port: null, framework: null, command: null, startedAt: null, lastHealthCheck: null, error: "Cannot find module 'react'", errorCode: "preview_dev_server_failed", logs: [] };
+      return { status: "ready", port: 4101, framework: "nextjs", command: "pnpm dev", startedAt: Date.now(), lastHealthCheck: Date.now(), error: null, errorCode: null, logs: [] };
+    });
+    const transport = createMockTransport({ getPreviewStatus });
+    const options = makeOptions({ transport, runAgentLoop, maxRuntimeRepairAttempts: 2 });
+    await runLaunchFlow(options);
+
+    // Second call is the repair call
+    expect(runAgentLoop.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const repairConfig = runAgentLoop.mock.calls[1][2] as Record<string, unknown>;
+    expect(repairConfig.maxOutputChars).toBe(200_000);
+    // Repair must not restart the global runtime budget
+    expect(repairConfig.maxRuntimeMs).toBeLessThan(600_000);
+  });
+});
+
 // ─── Tests: preservation of existing project work ───────────────────
 
 describe("Launch Flow: preservation of existing project work", () => {
