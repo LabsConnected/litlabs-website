@@ -753,14 +753,20 @@ export function useCanonicalConversation({
         const s = getStore();
         const expectedRevision = s.revision;
         const isAutoBest = selectedModel.id === "auto" || selectedModel.category === "auto";
-        // Abort after 120s — the route now streams (maxDuration=120), so
-        // reasoning/thinking models get room to think before emitting text
-        // instead of being killed at 55s ("cut out").
+        // Stall watchdog — abort only after 120s with NO streamed bytes.
+        // A real build can legitimately stream for several minutes (the
+        // launch flow runs under a 10-minute server-side budget), so a fixed
+        // 120s cap killed healthy long builds mid-stream. Resetting on every
+        // received chunk preserves the anti-stall protection the original
+        // timer was added for.
         const controller = new AbortController();
         requestController = controller;
         requestAbortRef.current = controller;
-        const timeoutId = setTimeout(() => controller.abort(), 120_000);
-        requestTimeoutId = timeoutId;
+        const resetStallWatchdog = () => {
+          if (requestTimeoutId) clearTimeout(requestTimeoutId);
+          requestTimeoutId = setTimeout(() => controller.abort(), 120_000);
+        };
+        resetStallWatchdog();
         const makeRequest = async (revision: number) => fetch(`/api/studio/conversations/${activeConversationId}/messages`, {
           method: "POST",
           credentials: "include",
@@ -973,6 +979,9 @@ export function useCanonicalConversation({
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
+          // Any received bytes prove the server is still working — reset the
+          // stall watchdog so long builds aren't killed mid-stream.
+          resetStallWatchdog();
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
           buffer = lines.pop() ?? "";
