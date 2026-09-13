@@ -85,7 +85,7 @@ describe("LLM Client & Studio Models Test Suite", () => {
       const reasoning = resolveLittAlias("litt-reasoning");
       expect(reasoning).not.toBeNull();
       expect(reasoning?.apiProvider).toBe("openrouter-deepseek");
-      expect(reasoning?.apiModel).toBe("deepseek/deepseek-chat:free");
+      expect(reasoning?.apiModel).toBe("nvidia/nemotron-3-ultra-550b-a55b:free");
 
       expect(resolveLittAlias("unknown")).toBeNull();
     });
@@ -214,7 +214,7 @@ describe("LLM Client & Studio Models Test Suite", () => {
         }
         if (url.includes("openrouter.ai")) {
           const body = init?.body ? JSON.parse(init.body) : {};
-          if (body.model && body.model.includes("qwen")) {
+          if (body.model && body.model.includes("nemotron-3-super")) {
             return {
               ok: false,
               status: 404,

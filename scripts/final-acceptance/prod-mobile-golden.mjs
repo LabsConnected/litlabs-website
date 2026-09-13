@@ -194,7 +194,9 @@ async function main() {
       if (/\/api\/studio\/conversations\/[^/]+\/messages/.test(url)) {
         const contentType = resp.headers.get("content-type") ?? "";
         if (contentType.includes("text/event-stream") && resp.body) {
-          const reader = resp.body.getReader();
+          // resp.clone() tees the stream — reading the original body here would
+          // lock it and the app's own getReader() would throw, breaking the run.
+          const reader = resp.clone().body.getReader();
           const decoder = new TextDecoder();
           let buffer = "";
           (async () => {
