@@ -26,11 +26,9 @@ import {
   Workflow,
   FolderKanban,
   Bell,
-  Gamepad2 as GamesIcon,
   Compass,
   Terminal,
   Mic,
-  Rocket,
 } from "lucide-react";
 
 export type NavItem = {
@@ -76,26 +74,21 @@ export const APP_NAV_SECTIONS: NavSection[] = [
     label: "Command",
     items: [
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, shortcut: "⌘D" },
-      { label: "Studio", href: "/studio", icon: Sparkles, shortcut: "⌘S" },
     ],
   },
   {
     id: "create",
     label: "Create",
     items: [
-      { label: "Create", href: "/studio?tool=image", icon: Sparkles },
-      { label: "Music", href: "/studio?tool=music", icon: Music },
-      { label: "Showcase", href: "/showcase", icon: Image },
+      { label: "Studio", href: "/studio", icon: Sparkles, shortcut: "⌘S" },
     ],
   },
   {
     id: "explore",
     label: "Explore",
     items: [
-      { label: "Games", href: "/games", icon: GamesIcon },
       { label: "Discover", href: "/discover", icon: Compass },
       { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
-      { label: "Hire LiTTree", href: "/hire", icon: Rocket },
     ],
   },
 ];
@@ -107,11 +100,14 @@ export const APP_NAV_BOTTOM: NavItem[] = [
   { label: "Settings", href: "/settings", icon: Settings },
 ];
 
-/* Mobile bottom bar — uses same canonical data, simplified to 5 slots */
+/* Mobile bottom bar — uses same canonical data, simplified to 5 slots.
+   The center slot is a dedicated Create button that routes into Studio,
+   so Studio is NOT listed as a standalone item here (avoids duplicate
+   Studio links). Left = Home + Discover, Right = Marketplace + Me. */
 export const APP_MOBILE_BOTTOM_ITEMS: MobileNavItem[] = [
   { label: "Home", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Studio", href: "/studio", icon: Sparkles },
   { label: "Discover", href: "/discover", icon: Compass },
+  { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
   { label: "Me", href: "/profile", icon: User },
 ];
 
