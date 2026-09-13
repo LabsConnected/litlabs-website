@@ -200,7 +200,7 @@ describe("callLLMWithTools — provider selection", () => {
     expect(result.text).toBe("OR free response.");
     expect(result.provider).toBe("openrouter");
     // The Basic route uses only the free router/model list — never a paid slug.
-    expect(lastBodyFor("openrouter").model).toBe("openrouter/free");
+    expect(lastBodyFor("openrouter").model).toMatch(/:free$|^openrouter\/free$/);
   });
 
   it("skips providers with missing credentials entirely", async () => {

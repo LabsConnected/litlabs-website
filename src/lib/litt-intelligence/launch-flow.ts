@@ -18,6 +18,7 @@ import "server-only";
 
 import type { WorkspaceTransport } from "./workspace-transport";
 import { runAgentLoopV2, type AgentLoopResult, type AgentLoopConfig, DEFAULT_LOOP_CONFIG } from "./agent-loop-v2";
+import { toolRegistry } from "./tool-registry";
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runDeployFlow, resolveDeployConfig, verifyProductionUrl, type DeployFlowOptions, type DeployResult, type DeployProvider } from "./deploy";
 import type { BuildFixLoopResult } from "./build-fix-loop";
@@ -34,6 +35,13 @@ export interface LaunchFlowOptions {
   systemPrompt?: string;
   model?: string;
   executionMode?: AgentLoopConfig["executionMode"];
+  /**
+   * Kernel intent routing flag (decision.routing.requiresExecution). When true
+   * and the first agent pass applies zero workspace mutations, the flow issues
+   * one bounded reprompt so weak models that end their turn after announcing
+   * writes get a second chance to actually write the files.
+   */
+  requiresExecution?: boolean;
   enableBuildFix?: boolean;
   enableDeploy?: boolean;
   deployEnvironment?: "production" | "preview";
@@ -111,6 +119,14 @@ function checkSignal(signal: AbortSignal | undefined): void {
   }
 }
 
+/** True when at least one successful call went to a non-read-only tool. */
+function hasAppliedMutation(result: AgentLoopResult): boolean {
+  return result.toolCalls.some((call) => {
+    if (!call.success) return false;
+    return toolRegistry.get(call.toolId)?.readOnly === false;
+  });
+}
+
 async function startAndWaitForPreview(
   transport: WorkspaceTransport,
   opts: {
@@ -179,81 +195,112 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
     emitStep(progress, steps, "Planning and generating the project...");
     progress.emit({ type: "phase", phase: "call_llm", step: 1 });
 
-    const agentResult = await (options.runAgentLoop ?? runAgentLoopV2)(
-      options.userMessage,
-      transport,
-      {
-        systemPrompt: options.systemPrompt ?? "",
-        model: options.model,
-        executionMode: options.executionMode ?? "act",
-        enableBuildFix: options.enableBuildFix ?? true,
-        evalMetadata: options.evalMetadata,
-        maxRuntimeMs: DEFAULT_LOOP_CONFIG.maxRuntimeMs,
-        // The launch flow needs more room than the bare agent-loop defaults:
-        // a full build explores the workspace, writes multiple files, runs
-        // build-fix, starts a preview, and deploys — all within the 10-minute
-        // runtime budget. The output-char and step limits are safety valves
-        // that must not trigger during normal build activity; the runtime
-        // budget remains the real bound.
-        maxSteps: 40,
-        maxOutputChars: 200_000,
-        signal,
-      },
-      progress,
-    );
+    const runPhase1 = (message: string) =>
+      (options.runAgentLoop ?? runAgentLoopV2)(
+        message,
+        transport,
+        {
+          systemPrompt: options.systemPrompt ?? "",
+          model: options.model,
+          executionMode: options.executionMode ?? "act",
+          enableBuildFix: options.enableBuildFix ?? true,
+          evalMetadata: options.evalMetadata,
+          // Always bounded by the global launch budget — a reprompt must not
+          // restart the clock.
+          maxRuntimeMs: Math.max(0, startTime + DEFAULT_LOOP_CONFIG.maxRuntimeMs - Date.now()),
+          // The launch flow needs more room than the bare agent-loop defaults:
+          // a full build explores the workspace, writes multiple files, runs
+          // build-fix, starts a preview, and deploys — all within the 10-minute
+          // runtime budget. The output-char and step limits are safety valves
+          // that must not trigger during normal build activity; the runtime
+          // budget remains the real bound.
+          maxSteps: 40,
+          maxOutputChars: 200_000,
+          signal,
+        },
+        progress,
+      );
+
+    const guardPhase1 = (r: AgentLoopResult): LaunchFlowResult | null => {
+      if (r.pendingApproval) {
+        return baseResult({
+          success: false,
+          status: "failed",
+          finalText: `I need your approval to continue: ${r.pendingApproval.reason}`,
+          pendingApproval: r.pendingApproval,
+          repairAttempts: r.buildFixResult?.repairAttempts ?? 0,
+          runtimeRepairAttempts,
+        });
+      }
+
+      if (r.cancelled) {
+        return baseResult({
+          success: false,
+          status: "cancelled",
+          finalText: r.cancelReason
+            ? `Cancelled: ${r.cancelReason}`
+            : "The launch was cancelled before completion.",
+          cancelled: true,
+          cancelReason: r.cancelReason,
+          repairAttempts: r.buildFixResult?.repairAttempts ?? 0,
+          runtimeRepairAttempts,
+        });
+      }
+
+      if (r.modelFailed) {
+        return baseResult({
+          success: false,
+          status: "failed",
+          // Prefer the sanitized purpose-written failure message when the loop
+          // produced one; otherwise surface the (sanitized) failure detail.
+          finalText:
+            r.modelFailureText ??
+            `The model could not complete the request: ${r.modelFailed}`,
+          error: r.modelFailed,
+          repairAttempts: r.buildFixResult?.repairAttempts ?? 0,
+          runtimeRepairAttempts,
+        });
+      }
+
+      if (r.buildFixResult && !r.buildFixResult.allPassed) {
+        return baseResult({
+          success: false,
+          status: "failed",
+          finalText:
+            `The project did not pass all checks after ${r.buildFixResult.repairAttempts} repair attempts.\n` +
+            formatBuildFixErrors(r.buildFixResult),
+          buildFixResult: r.buildFixResult,
+          repairAttempts: r.buildFixResult.repairAttempts,
+          runtimeRepairAttempts,
+        });
+      }
+
+      return null;
+    };
+
+    let agentResult = await runPhase1(options.userMessage);
     lastAgentLoopResult = agentResult;
+    let guarded = guardPhase1(agentResult);
+    if (guarded) return guarded;
 
-    if (agentResult.pendingApproval) {
-      return baseResult({
-        success: false,
-        status: "failed",
-        finalText: `I need your approval to continue: ${agentResult.pendingApproval.reason}`,
-        pendingApproval: agentResult.pendingApproval,
-        repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
-        runtimeRepairAttempts,
-      });
-    }
-
-    if (agentResult.cancelled) {
-      return baseResult({
-        success: false,
-        status: "cancelled",
-        finalText: agentResult.cancelReason
-          ? `Cancelled: ${agentResult.cancelReason}`
-          : "The launch was cancelled before completion.",
-        cancelled: true,
-        cancelReason: agentResult.cancelReason,
-        repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
-        runtimeRepairAttempts,
-      });
-    }
-
-    if (agentResult.modelFailed) {
-      return baseResult({
-        success: false,
-        status: "failed",
-        // Prefer the sanitized purpose-written failure message when the loop
-        // produced one; otherwise surface the (sanitized) failure detail.
-        finalText:
-          agentResult.modelFailureText ??
-          `The model could not complete the request: ${agentResult.modelFailed}`,
-        error: agentResult.modelFailed,
-        repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
-        runtimeRepairAttempts,
-      });
-    }
-
-    if (agentResult.buildFixResult && !agentResult.buildFixResult.allPassed) {
-      return baseResult({
-        success: false,
-        status: "failed",
-        finalText:
-          `The project did not pass all checks after ${agentResult.buildFixResult.repairAttempts} repair attempts.\n` +
-          formatBuildFixErrors(agentResult.buildFixResult),
-        buildFixResult: agentResult.buildFixResult,
-        repairAttempts: agentResult.buildFixResult.repairAttempts,
-        runtimeRepairAttempts,
-      });
+    // An execution request that ended with zero workspace mutations almost
+    // always means a weak model closed its turn after announcing writes it
+    // never made. Issue exactly one bounded reprompt, then continue — the
+    // second result flows through the same guards.
+    if (options.requiresExecution && !hasAppliedMutation(agentResult)) {
+      emitStep(
+        progress,
+        steps,
+        "No project files were changed — re-prompting the agent to apply the request...",
+      );
+      agentResult = await runPhase1(
+        `Your previous reply announced changes but did not write any project files. ` +
+        `Apply the original request now: ${options.userMessage}\n\n` +
+        `Write or modify the project files with the file tools (files.write / apply_patch), then stop.`,
+      );
+      lastAgentLoopResult = agentResult;
+      guarded = guardPhase1(agentResult);
+      if (guarded) return guarded;
     }
 
     // Phase 2: start and verify the live preview

@@ -146,12 +146,17 @@ export class ProviderAttemptError extends Error {
 const DEFAULT_ATTEMPT_TIMEOUT_MS = 30_000;
 
 /** Tool-capable OpenRouter :free models + the free auto-router. Paid slugs are
- *  never included: under the Basic cost policy they would be LITT_PAID. */
+ *  never included: under the Basic cost policy they would be LITT_PAID.
+ *  Ordering matters: the auto-router (openrouter/free) picks small random
+ *  models that fail to emit tool calls, so it stays last — specific large
+ *  free tool-callers are attempted first. */
 const OPENROUTER_FREE_MODELS = [
+  "nvidia/nemotron-3.5-lightning:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "nex-agi/nex-n2.5-pro:free",
+  "google/gemma-4-31b-it:free",
   "openrouter/free",
-  "meta-llama/llama-3.3-70b-instruct:free",
-  "qwen/qwen-2.5-coder-32b-instruct:free",
-  "deepseek/deepseek-chat:free",
 ];
 
 const TOOL_CAPABLE: ProviderCapabilities = {

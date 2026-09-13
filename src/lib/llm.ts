@@ -119,12 +119,12 @@ export const DEFAULT_MODELS: Record<LLMProvider, string> = {
   "groq-whisper": "whisper-large-v3",
   openai: OPENAI_MODEL,
   "openrouter-free": "openrouter/free",
-  "openrouter-qwen": "qwen/qwen-2.5-coder-32b-instruct:free",
-  "openrouter-deepseek": "deepseek/deepseek-chat:free",
-  "openrouter-mistral": "mistralai/mistral-small-3.2-24b-instruct:free",
-  "openrouter-llama": "meta-llama/llama-3.3-70b-instruct:free",
-  "openrouter-trinity": "microsoft/trinity-large-preview:free",
-  "openrouter-vision": "google/gemini-2.5-flash:free",
+  "openrouter-qwen": "nvidia/nemotron-3-super-120b-a12b:free",
+  "openrouter-deepseek": "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "openrouter-mistral": "nex-agi/nex-n2.5-pro:free",
+  "openrouter-llama": "google/gemma-4-31b-it:free",
+  "openrouter-trinity": "nvidia/nemotron-3.5-lightning:free",
+  "openrouter-vision": "google/gemma-4-31b-it:free",
 };
 
 /* Lazy singleton — don't construct until first use. */
