@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import PageShell from "@/components/PageShell";
@@ -18,24 +18,28 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
-type Project = {
+type Deployment = {
   id: string;
-  owner: string;
-  repository: string;
-  working_branch: string;
-  default_branch: string;
-  status: string;
-  updated_at?: string;
+  integration_project_id: string;
+  provider: string;
+  deployment_id: string | null;
+  environment: "production" | "preview" | "development";
+  status: "pending" | "building" | "ready" | "error" | "canceled";
+  url: string | null;
+  commit_sha: string | null;
+  commit_message: string | null;
+  branch: string | null;
+  created_at: string;
 };
 
 function statusIcon(status: string) {
-  if (status === "ready" || status === "online")
+  if (status === "ready")
     return <CheckCircle2 size={18} style={{ color: "#22c55e" }} />;
-  if (status === "building" || status === "starting")
+  if (status === "building" || status === "pending")
     return (
       <Clock size={18} className="animate-pulse" style={{ color: "#f59e0b" }} />
     );
-  if (status === "failed")
+  if (status === "error")
     return <AlertTriangle size={18} style={{ color: "#ef4444" }} />;
   return <Clock size={18} style={{ color: "#6b7280" }} />;
 }
@@ -43,23 +47,36 @@ function statusIcon(status: string) {
 export default function DeploymentsPageClient() {
   const { resolvedColors: T, tokens } = useTheme();
   const { isLoaded, isSignedIn } = useClerkAuth();
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const loadDeployments = useCallback(async (signal?: AbortSignal) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/deployments", { cache: "no-store", signal });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Deployments are unavailable");
+      setDeployments(Array.isArray(payload.deployments) ? payload.deployments : []);
+    } catch (loadError) {
+      if ((loadError as { name?: string })?.name !== "AbortError") {
+        setError("We couldn’t load deployment history. Your projects are unaffected—try again in a moment.");
+      }
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isLoaded || !isSignedIn) {
-      setLoading(false);  
+      setLoading(false);
       return;
     }
-    fetch("/api/projects")
-      .then((r) => (r.ok ? r.json() : Promise.reject(r.statusText)))
-      .then((data) => setProjects(data.projects || []))
-      .catch((e) =>
-        setError(typeof e === "string" ? e : "Failed to load deployments"),
-      )
-      .finally(() => setLoading(false));
-  }, [isLoaded, isSignedIn]);
+    const controller = new AbortController();
+    void loadDeployments(controller.signal);
+    return () => controller.abort();
+  }, [isLoaded, isSignedIn, loadDeployments]);
 
   if (!isLoaded) {
     return (
@@ -139,7 +156,7 @@ export default function DeploymentsPageClient() {
   return (
     <PageShell
       title="Deployments"
-      subtitle="Project builds and live deployment status"
+      subtitle="Verified build history, preview links, and production releases"
       icon="🚀"
     >
       {/* Header banner */}
@@ -162,9 +179,7 @@ export default function DeploymentsPageClient() {
               className="text-sm leading-relaxed max-w-2xl"
               style={{ color: tokens.textMuted }}
             >
-              Per-project deploy status is pulled from your connected
-              repositories. Connect a GitHub project to see live build and
-              deploy status here.
+              This history contains only deployments associated with your account. Open a live URL, inspect a failed release, or return to Studio for the next change.
             </p>
           </div>
           <Link
@@ -196,15 +211,17 @@ export default function DeploymentsPageClient() {
           </div>
         ) : error ? (
           <div
-            className="rounded-2xl border p-4 flex items-center gap-3"
+            className="rounded-2xl border p-5 flex flex-col items-start gap-3"
             style={{ borderColor: "#ef444430", backgroundColor: "#ef444408" }}
+            role="alert"
           >
-            <AlertTriangle size={18} style={{ color: "#ef4444" }} />
-            <span className="text-sm" style={{ color: tokens.text }}>
-              {error}
-            </span>
+            <div className="flex items-start gap-3">
+              <AlertTriangle size={18} className="mt-0.5 shrink-0" style={{ color: "#ef4444" }} />
+              <div className="text-sm" style={{ color: tokens.text }}><strong>Deployment history unavailable</strong><p className="mt-1 opacity-75">{error}</p></div>
+            </div>
+            <button type="button" onClick={() => void loadDeployments()} className="min-h-11 rounded-xl border px-4 text-sm font-bold" style={{ borderColor: "#ef444450", color: tokens.text }}>Try again</button>
           </div>
-        ) : projects.length === 0 ? (
+        ) : deployments.length === 0 ? (
           <div
             className="rounded-2xl border p-10 text-center"
             style={{ backgroundColor: T.boxBg, borderColor: T.borderColor }}
@@ -219,80 +236,80 @@ export default function DeploymentsPageClient() {
               className="mb-1 font-black text-sm"
               style={{ color: tokens.text }}
             >
-              No projects yet
+              No deployments yet
             </div>
             <p
               className="text-xs mb-5 max-w-xs mx-auto leading-relaxed"
               style={{ color: tokens.textMuted }}
             >
-              Connect a GitHub repository to start tracking deployments,
-              previews, and production releases.
+              When you deploy a project, its build state and verified URL will appear here. Start in Studio or connect a repository first.
             </p>
             <Link
-              href="/projects"
+              href="/studio"
               className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-black"
               style={{
                 backgroundColor: tokens.primary,
                 color: tokens.background,
               }}
             >
-              <GitBranch size={14} /> Connect a repo
+              <Sparkles size={14} /> Open Studio
             </Link>
           </div>
         ) : (
           <div className="space-y-3">
-            {projects.map((p) => (
+            {deployments.map((deployment) => (
               <div
-                key={p.id}
+                key={deployment.id}
                 className="group rounded-2xl border p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all hover:border-opacity-60"
                 style={{ backgroundColor: T.boxBg, borderColor: T.borderColor }}
               >
                 <div className="flex items-center gap-3">
-                  <div className="shrink-0">{statusIcon(p.status)}</div>
+                  <div className="shrink-0">{statusIcon(deployment.status)}</div>
                   <div>
                     <div
                       className="font-black text-sm"
                       style={{ color: tokens.text }}
                     >
-                      {p.owner}/{p.repository}
+                      {deployment.environment.charAt(0).toUpperCase() + deployment.environment.slice(1)} deployment
                     </div>
                     <div
                       className="flex items-center gap-2 text-[10px] mt-0.5"
                       style={{ color: tokens.textMuted }}
                     >
                       <GitBranch size={10} />
-                      <span>{p.working_branch}</span>
+                      <span>{deployment.branch || "Branch unavailable"}</span>
                       <span>·</span>
                       <span
                         className="rounded-full px-1.5 py-0.5 font-bold"
                         style={{
                           backgroundColor:
-                            p.status === "ready" || p.status === "online"
+                            deployment.status === "ready"
                               ? "#22c55e20"
-                              : p.status === "failed"
+                              : deployment.status === "error"
                                 ? "#ef444420"
                                 : `${tokens.primary}15`,
                           color:
-                            p.status === "ready" || p.status === "online"
+                            deployment.status === "ready"
                               ? "#22c55e"
-                              : p.status === "failed"
+                              : deployment.status === "error"
                                 ? "#ef4444"
                                 : tokens.primary,
                         }}
                       >
-                        {p.status}
+                        {deployment.status}
                       </span>
+                      <span>·</span>
+                      <span>{deployment.provider}</span>
                     </div>
+                    {deployment.commit_message && <p className="mt-1 max-w-xl truncate text-[11px]" style={{ color: tokens.textMuted }}>{deployment.commit_message}</p>}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Link
-                    href={`/projects?id=${p.id}`}
-                    className="inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition-all hover:opacity-80"
-                    style={{ borderColor: T.borderColor, color: tokens.text }}
-                  >
-                    <ExternalLink size={11} /> Mission Control
-                  </Link>
+                  {deployment.url && deployment.status === "ready" ? (
+                    <a href={deployment.url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition-all hover:opacity-80" style={{ borderColor: T.borderColor, color: tokens.text }}><ExternalLink size={11} /> Open deployment</a>
+                  ) : (
+                    <Link href="/studio" className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition-all hover:opacity-80" style={{ borderColor: T.borderColor, color: tokens.text }}><Sparkles size={11} /> Continue in Studio</Link>
+                  )}
                 </div>
               </div>
             ))}

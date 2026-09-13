@@ -553,9 +553,11 @@ export const toolCreatePreview: ToolHandler = async (userId, args) => {
 };
 
 /** get_deployment_status — read recent deployments, optionally by environment. */
-export const toolGetDeploymentStatus: ToolHandler = async (_userId, args) => {
+export const toolGetDeploymentStatus: ToolHandler = async (userId, args) => {
   const projectId = str(args.project_id);
   if (!projectId) return fail("get_deployment_status requires a project_id.");
+  const project = await getProject(projectId, userId);
+  if (!project) return fail("Project not found or not available to this account.");
   const environment = optStr(args.environment) as "preview" | "staging" | "production" | undefined;
   if (environment && !["preview", "staging", "production"].includes(environment)) {
     return fail("environment must be one of: preview, staging, production.");
@@ -563,7 +565,7 @@ export const toolGetDeploymentStatus: ToolHandler = async (_userId, args) => {
 
   let deployments;
   try {
-    deployments = await getDeployments({ environment, limit: 20 });
+    deployments = await getDeployments({ projectId, environment, limit: 20 });
   } catch (err) {
     return fail(err instanceof Error ? err.message : "Failed to fetch deployments.");
   }
