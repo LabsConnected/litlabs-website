@@ -47,6 +47,7 @@ import StudioOperatorBar from "./shell/StudioOperatorBar";
 import ResizeHandle from "./shell/ResizeHandle";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { useExecutionStore, type MutationSummary } from "../stores/useExecutionStore";
+import { submitApprovalAndPoll } from "../lib/approval-polling";
 import { StudioActivityPanel, StudioInspector, StudioDrawer } from "./StudioWorkspaceFrame";
 import type { PreviewSelection } from "./StudioPreviewPanel";
 import StudioProjectFiles from "./StudioProjectFiles";
@@ -1306,13 +1307,17 @@ function CommandStudioContent() {
       onResolveApproval={(decision) => {
         const pending = useExecutionStore.getState().pendingApproval;
         if (pending?.pausedRunId && conversation.selectedConversationId) {
-          void fetch(`/api/studio/conversations/${conversation.selectedConversationId}/approvals/${pending.pausedRunId}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ decision }),
-          }).then(() => {
-            useExecutionStore.getState().resolveApproval(decision);
-            conversation.regenerate();
+          useExecutionStore.getState().resolveApproval(decision);
+          submitApprovalAndPoll({
+            conversationId: conversation.selectedConversationId,
+            pausedRunId: pending.pausedRunId,
+            decision,
+            onCompleted: () => {
+              conversation.regenerate();
+            },
+            onFailed: () => {
+              conversation.regenerate();
+            },
           });
         } else {
           useExecutionStore.getState().resolveApproval(decision);
@@ -1920,13 +1925,17 @@ function CommandStudioContent() {
           onResolveApproval={(decision) => {
             const pending = useExecutionStore.getState().pendingApproval;
             if (pending?.pausedRunId && conversation.selectedConversationId) {
-              void fetch(`/api/studio/conversations/${conversation.selectedConversationId}/approvals/${pending.pausedRunId}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ decision }),
-              }).then(() => {
-                useExecutionStore.getState().resolveApproval(decision);
-                conversation.regenerate();
+              useExecutionStore.getState().resolveApproval(decision);
+              submitApprovalAndPoll({
+                conversationId: conversation.selectedConversationId,
+                pausedRunId: pending.pausedRunId,
+                decision,
+                onCompleted: () => {
+                  conversation.regenerate();
+                },
+                onFailed: () => {
+                  conversation.regenerate();
+                },
               });
             } else {
               useExecutionStore.getState().resolveApproval(decision);
