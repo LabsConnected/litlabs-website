@@ -36,6 +36,7 @@ import {
   type ClientRuntimeHint,
 } from "@/lib/litt-intelligence/canonical-runtime-context";
 import { detectAndExecuteTool } from "@/lib/litt-intelligence/tool-executor";
+import { deploymentEvidenceFrom } from "@/lib/studio/completion-evidence";
 import type { ConversationTurn } from "@/lib/litt-intelligence/turn-resolver";
 
 export const runtime = "nodejs";
@@ -702,7 +703,18 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             assistantMessage: {
               ...assistantMessage,
               content: assistantText,
+              // `status: "completed"` describes the MESSAGE STREAM only.
+              // Whether the WORK completed is judged from `execution` below.
               status: "completed",
+              execution: {
+                mode: built.kernelResult.decision.routing.mode,
+                toolCalls: v2Result.toolCalls.map((c) => ({
+                  toolId: c.toolId,
+                  success: c.success,
+                  mutating: c.mutating,
+                })),
+                deployment: deploymentEvidenceFrom(v2Result.toolCalls),
+              },
             },
             revision: newRevision,
             provider: "openrouter-v2",
@@ -801,6 +813,19 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               content: assistantText,
               reasoning: reasoningText || undefined,
               status: "completed",
+              // V1 is the read-only fallback: it can inspect but never
+              // mutate. Report the evidence bar and the (read-only) calls so
+              // a build request answered here shows as NOT started, never
+              // as completed work.
+              execution: {
+                mode: built.kernelResult.decision.routing.mode,
+                toolCalls: (v1Result?.toolExecutions ?? []).map((exec) => ({
+                  toolId: exec.toolId,
+                  success: exec.success,
+                  mutating: false,
+                })),
+                deployment: null,
+              },
             },
             revision: newRevision,
             provider: r.provider,

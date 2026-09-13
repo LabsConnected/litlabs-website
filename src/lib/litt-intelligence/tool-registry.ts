@@ -41,6 +41,7 @@ const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
   "typecheck.run": async () => (await import("./tool-handlers-v2")).handleTypecheckRun as ToolHandler,
   "lint.run": async () => (await import("./tool-handlers-v2")).handleLintRun as ToolHandler,
   "package.info": async () => (await import("./tool-handlers-v2")).handlePackageInfo as ToolHandler,
+  "project.deploy": async () => (await import("./tool-handlers-v2")).handleProjectDeploy as ToolHandler,
   // Browser Agent Mode handlers (lazy-loaded, session-scoped)
   "browser.navigate": async () => {
     const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.navigate"];
@@ -816,6 +817,40 @@ export function registerInternalTools(): void {
         permissionLevel: 'workspace-write',
         enabled: false, // No handler implemented
       },
+    },
+    {
+      tool: {
+        id: "project.deploy",
+        name: "Deploy Project",
+        description:
+          "Deploy the user's current project to a PUBLIC live URL and return it. "
+          + "Use this when the user asks to deploy, publish, ship, or go live. "
+          + "This is NOT the preview: a preview is a private dev server behind "
+          + "login, while this publishes a public snapshot anyone can open. "
+          + "Write the project's files first — the deployment publishes what is "
+          + "in the workspace, and requires an index.html. The live URL is "
+          + "fetched and verified before this reports success, so only report "
+          + "the site as live if this tool returned a publicUrl.",
+        source: "internal",
+        version: "1.0.0",
+        // No projectId, userId, provider, account or service inputs: identity
+        // and target come from the authorized server-side transport, so the
+        // model cannot deploy another tenant's project or aim this at LiTT's
+        // own infrastructure.
+        inputSchema: { type: "object", properties: {}, required: [] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["deploy:create"],
+        risk: "high",
+        approvalPolicy: MUTATION_APPROVAL,
+        // Collect + persist + publish + HTTP-verify.
+        timeoutMs: 60000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: 'workspace-write',
+        enabled: true,
+      },
+      handler: lazyHandlers["project.deploy"],
     },
     {
       tool: {

@@ -62,7 +62,7 @@ export interface AgentLoopResult {
   finalText: string;
   stepsUsed: number;
   totalDurationMs: number;
-  toolCalls: Array<{ toolId: string; success: boolean; summary: string }>;
+  toolCalls: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }>;
   buildFixResult?: BuildFixLoopResult;
   checkpoint?: { checkpointId: string; label: string; gitSha: string };
   cancelled: boolean;
@@ -178,7 +178,8 @@ export async function runAgentLoopV2(
   let cancelled = false;
   let cancelReason: string | undefined;
   let checkpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
-  const toolCallLog: Array<{ toolId: string; success: boolean; summary: string }> = [];
+  const toolCallLog: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }> = [];
+  let completedDeployment: CompletedDeployment | null = null;
 
   // Check if any mutations have been requested (for checkpoint logic)
   let mutationBatchPending = false;
@@ -226,7 +227,9 @@ export async function runAgentLoopV2(
         category: "all_fallbacks_exhausted",
         message: errMsg.slice(0, 200),
       });
-      finalText = `I encountered an error while reasoning: ${errMsg}`;
+      finalText = completedDeployment
+        ? describeProviderFailureAfterDeployment(completedDeployment, errMsg)
+        : `I encountered an error while reasoning: ${errMsg}`;
       break;
     }
 
@@ -326,12 +329,18 @@ export async function runAgentLoopV2(
           reason: permResult.reason ?? "Approval required",
         });
 
-        if (cfg.executionMode === "act") {
-          // ACT mode: pause the loop and return to caller for approval.
-          // The caller (messages route) must persist the pending state and
-          // wait for the user to approve before resuming.
+        {
+          // Pause the loop and return to the caller for approval — in AUTO
+          // mode as well as ACT.
+          //
+          // AUTO previously SKIPPED any tool outside its safe set, feeding the
+          // model an "approval required" error instead of asking the user. A
+          // sensitive action was therefore unreachable in AUTO: the user was
+          // never prompted, so `project.deploy` could never run. Pausing asks
+          // the user instead, which still never grants AUTO more privilege
+          // than ACT — the tool runs only after an explicit approval.
           return {
-            finalText: `I need your approval to run \`${toolCall.toolId}\`. ${permResult.reason ?? "This operation requires explicit approval in ACT mode."}`,
+            finalText: `I need your approval to run \`${toolCall.toolId}\`. ${permResult.reason ?? "This operation requires explicit approval."}`,
             stepsUsed,
             totalDurationMs: Date.now() - startTime,
             toolCalls: toolCallLog,
@@ -341,26 +350,12 @@ export async function runAgentLoopV2(
               toolId: toolCall.toolId,
               toolCallId: toolCall.toolCallId,
               inputs: toolCall.inputs,
-              reason: permResult.reason ?? "Approval required in ACT mode",
+              reason: permResult.reason ?? "Approval required",
               pausedMessages: [...llmMessages],
             },
           };
         }
 
-        // AUTO mode: auto-approve only explicitly safe operations.
-        // If it reached here, the tool is NOT in the safe set — skip it.
-        const result: ToolCallResult = {
-          toolCallId: toolCall.toolCallId,
-          toolId: toolCall.toolId,
-          result: null,
-          success: false,
-          error: "Approval required — this operation is not in the AUTO-approve safe set",
-        };
-        llmMessages.push({
-          role: "assistant",
-          content: buildToolResultMessage(result).content,
-        });
-        continue;
       }
 
       // Loop detection
@@ -445,7 +440,8 @@ export async function runAgentLoopV2(
 
       // Log the call
       const summary = summarizeToolResult(toolCall.toolId, result.result);
-      toolCallLog.push({ toolId: toolCall.toolId, success: result.success, summary });
+      toolCallLog.push({ toolId: toolCall.toolId, success: result.success, summary, mutating: !toolDef.readOnly });
+      completedDeployment = readDeploymentOutcome(toolCall.toolId, result.result) ?? completedDeployment;
 
       localProgress.emit({
         type: "tool_result",
@@ -499,7 +495,9 @@ export async function runAgentLoopV2(
   } as ProgressEvent);
 
   return {
-    finalText: finalText || "I've completed the requested work. Let me know if you need any adjustments.",
+    // Never fabricate a completion claim. When the model produced no text,
+    // report what the evidence supports instead of asserting success.
+    finalText: finalText || describeSilentOutcome(toolCallLog, cancelled, cancelReason),
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,
@@ -509,6 +507,78 @@ export async function runAgentLoopV2(
     cancelReason,
     events,
   };
+}
+
+/**
+ * Text for a run where the model returned no final message.
+ *
+ * The previous default asserted "I've completed the requested work", which
+ * claimed success for runs that changed nothing. This reports only what the
+ * tool log actually supports.
+ */
+function describeSilentOutcome(
+  toolCalls: Array<{ toolId: string; success: boolean; mutating: boolean }>,
+  cancelled: boolean,
+  cancelReason?: string,
+): string {
+  if (cancelled) {
+    return `I stopped before finishing: ${cancelReason ?? "the run was cancelled"}. Nothing further was changed.`;
+  }
+  const succeeded = toolCalls.filter((c) => c.success);
+  const mutations = succeeded.filter((c) => c.mutating);
+  if (toolCalls.length === 0) {
+    return "I did not run any tools and nothing was changed. Tell me how you'd like to proceed and I'll carry it out.";
+  }
+  if (mutations.length === 0) {
+    return `I ran ${succeeded.length} read-only step(s) but made no changes. Nothing was created, modified, or deployed.`;
+  }
+  return `I completed ${succeeded.length} step(s), including ${mutations.length} change(s) to the workspace, but produced no closing summary. Review the work log for what changed.`;
+}
+
+
+/**
+ * A deployment that already completed during this run.
+ *
+ * Held separately from the tool log so that if the provider dies on the
+ * continuation turn, the closing text can still report the live URL. The
+ * user's site IS published at that point; replacing that fact with a bare
+ * "I encountered an error" would hide completed work — and would also invite
+ * a retry that deploys a second time.
+ */
+interface CompletedDeployment {
+  deploymentId: string | null;
+  publicUrl: string;
+}
+
+/** Extract a completed deployment from a successful project.deploy result. */
+function readDeploymentOutcome(toolId: string, result: unknown): CompletedDeployment | null {
+  if (toolId !== "project.deploy" || !result || typeof result !== "object") return null;
+  const payload = result as {
+    success?: boolean;
+    liveUrl?: unknown;
+    deployment?: { deploymentId?: unknown; publicUrl?: unknown; status?: unknown };
+  };
+  if (payload.success !== true) return null;
+  const url = typeof payload.liveUrl === "string" && payload.liveUrl
+    ? payload.liveUrl
+    : typeof payload.deployment?.publicUrl === "string" ? payload.deployment.publicUrl : null;
+  if (!url) return null;
+  return {
+    deploymentId: typeof payload.deployment?.deploymentId === "string" ? payload.deployment.deploymentId : null,
+    publicUrl: url,
+  };
+}
+
+/** Closing text when the provider failed but a deployment had succeeded. */
+function describeProviderFailureAfterDeployment(
+  deployment: CompletedDeployment,
+  errMsg: string,
+): string {
+  return (
+    `Your site is live at ${deployment.publicUrl}. `
+    + "The deployment completed and the URL was verified, so it does not need to be run again. "
+    + `I then hit a provider error while writing the summary: ${errMsg}`
+  );
 }
 
 // ─── Resume from paused approval ──────────────────────────────────
@@ -585,7 +655,8 @@ export async function resumeAgentLoopV2(
   let cancelled = false;
   let cancelReason: string | undefined;
   let checkpoint = resume.existingCheckpoint;
-  const toolCallLog: Array<{ toolId: string; success: boolean; summary: string }> = [];
+  const toolCallLog: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }> = [];
+  let completedDeployment: CompletedDeployment | null = null;
   let mutationBatchPending = false;
 
   // Execute the approved/rejected tool FIRST, then continue the loop
@@ -628,7 +699,11 @@ export async function resumeAgentLoopV2(
     }
 
     const summary = summarizeToolResult(resume.toolId, result.result);
-    toolCallLog.push({ toolId: resume.toolId, success: result.success, summary });
+    // A resumed call is one that required approval, so treat an unknown
+    // tool as mutating rather than silently crediting a read-only step.
+    const resumedReadOnly = availableTools.find((t) => t.id === resume.toolId)?.readOnly ?? false;
+    toolCallLog.push({ toolId: resume.toolId, success: result.success, summary, mutating: !resumedReadOnly });
+    completedDeployment = readDeploymentOutcome(resume.toolId, result.result) ?? completedDeployment;
 
     localProgress.emit({
       type: "tool_result",
@@ -659,7 +734,12 @@ export async function resumeAgentLoopV2(
       error: `REJECTED: ${rejectionMsg}`,
     };
 
-    toolCallLog.push({ toolId: resume.toolId, success: false, summary: "rejected by user" });
+    toolCallLog.push({
+      toolId: resume.toolId,
+      success: false,
+      summary: "rejected by user",
+      mutating: !(availableTools.find((t) => t.id === resume.toolId)?.readOnly ?? false),
+    });
 
     localProgress.emit({
       type: "tool_result",
@@ -701,7 +781,12 @@ export async function resumeAgentLoopV2(
         },
       );
     } catch (err) {
-      finalText = `I encountered an error while reasoning: ${err instanceof Error ? err.message : String(err)}`;
+      {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        finalText = completedDeployment
+          ? describeProviderFailureAfterDeployment(completedDeployment, errMsg)
+          : `I encountered an error while reasoning: ${errMsg}`;
+      }
       break;
     }
 
@@ -837,7 +922,8 @@ export async function resumeAgentLoopV2(
       }
 
       const summary = summarizeToolResult(toolCall.toolId, result.result);
-      toolCallLog.push({ toolId: toolCall.toolId, success: result.success, summary });
+      toolCallLog.push({ toolId: toolCall.toolId, success: result.success, summary, mutating: !toolDef.readOnly });
+      completedDeployment = readDeploymentOutcome(toolCall.toolId, result.result) ?? completedDeployment;
 
       localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: result.success, summary, durationMs: 0 });
 
@@ -875,7 +961,9 @@ export async function resumeAgentLoopV2(
   } as ProgressEvent);
 
   return {
-    finalText: finalText || "I've completed the requested work. Let me know if you need any adjustments.",
+    // Never fabricate a completion claim. When the model produced no text,
+    // report what the evidence supports instead of asserting success.
+    finalText: finalText || describeSilentOutcome(toolCallLog, cancelled, cancelReason),
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,

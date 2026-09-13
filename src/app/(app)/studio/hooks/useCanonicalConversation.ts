@@ -12,6 +12,7 @@ import {
   AGENT_META,
   type ChatMessage,
   type AgentId,
+  type MessageExecution,
 } from "../stores/useStudioAgentStore";
 import { useStudioModelStore } from "../stores/useStudioModelStore";
 import type { StudioTool } from "../components/StudioSidebar";
@@ -99,6 +100,8 @@ function toUIMessage(
     agentMode: msg.agentMode ?? null,
     createdAt: new Date(msg.createdAt).getTime() || Date.now(),
     reasoning: msg.reasoning,
+    // Execution evidence drives the truthful work log. Absent = no execution.
+    execution: msg.execution ?? undefined,
   };
 }
 
@@ -1087,6 +1090,7 @@ export function useCanonicalConversation({
             agentMode: assistantMsg.agentMode ?? activeAgentMode,
             pendingApproval: pendingApprovalState ?? undefined,
             toolActivity: toolActivity.length > 0 ? toolActivity : undefined,
+            execution: (assistantMsg as { execution?: MessageExecution }).execution ?? null,
           });
 
           s3.setRevision((donePayload.revision as number) ?? expectedRevision + 1);

@@ -369,3 +369,71 @@ export const handlePackageInfo: ToolHandler = async (_inputs, transport) => {
   const info = await transport.discoverPackageInfo();
   return { success: true, ...info };
 };
+
+// ─── Deployment ───────────────────────────────────────────────────
+
+/**
+ * project.deploy — publish the USER'S project to a public URL.
+ *
+ * Identity is taken from the transport, never from `inputs`. The transport
+ * was built by createWorkspaceTransport(projectId, userId), which ran
+ * verifyProjectWorkspace() (project exists, owned by this user, workspace
+ * ready). So the model cannot name a different tenant, project, workspace,
+ * hosting provider, or Railway service — there are no such inputs, and
+ * nothing here reads them.
+ *
+ * The result is structured for the model's next turn: on success it carries
+ * the verified live URL; on failure it says the deployment failed and never
+ * reports a URL.
+ */
+export const handleProjectDeploy: ToolHandler = async (_inputs, transport) => {
+  const { deployUserProject } = await import("@/lib/deployments/deploy-service");
+  const { supabaseDeploymentStore } = await import("@/lib/deployments/deployment-store");
+
+  const publicBaseUrl =
+    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "") ||
+    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, "") ||
+    "https://litlabs.net";
+
+  const result = await deployUserProject(
+    {
+      userId: transport.userId,
+      projectId: transport.projectId,
+      transport,
+      publicBaseUrl,
+    },
+    { store: supabaseDeploymentStore },
+  );
+
+  if (!result.ok) {
+    return {
+      success: false,
+      deployment: {
+        deploymentId: result.deploymentId,
+        status: result.status,
+        publicUrl: null,
+      },
+      errorClass: result.errorClass,
+      error: result.message,
+      retryable: result.retryable,
+    };
+  }
+
+  return {
+    success: true,
+    deployment: {
+      deploymentId: result.deploymentId,
+      status: result.status,
+      publicUrl: result.publicUrl,
+      urlVerified: result.urlVerified,
+      target: result.target,
+      projectId: result.projectId,
+      workspaceId: result.workspaceId,
+      fileCount: result.fileCount,
+      totalBytes: result.totalBytes,
+      reused: result.reused,
+    },
+    // Stated explicitly so the model's closing answer can cite it.
+    liveUrl: result.publicUrl,
+  };
+};

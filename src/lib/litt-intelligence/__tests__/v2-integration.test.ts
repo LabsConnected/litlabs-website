@@ -75,6 +75,8 @@ function makeCtx(overrides: Partial<CanonicalRuntimeContext> = {}): CanonicalRun
     model: null,
     provider: null,
     sourceType: "github",
+    deploymentStatus: "not_started",
+    deploymentUrl: null,
     ...overrides,
   };
 }
@@ -101,6 +103,8 @@ describe("V2 Integration: Runtime Truth", () => {
       githubConnected: true,
       repository: "LabsConnected/litlabs-website",
       sourceType: "github",
+      deploymentStatus: "not_started",
+      deploymentUrl: null,
     });
     const block = buildRuntimeContextBlock(ctx);
 
