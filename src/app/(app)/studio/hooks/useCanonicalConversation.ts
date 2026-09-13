@@ -12,6 +12,7 @@ import {
   AGENT_META,
   type ChatMessage,
   type AgentId,
+  type MessageExecution,
 } from "../stores/useStudioAgentStore";
 import { useStudioModelStore } from "../stores/useStudioModelStore";
 import type { StudioTool } from "../components/StudioSidebar";
@@ -100,6 +101,8 @@ function toUIMessage(
     agentMode: msg.agentMode ?? null,
     createdAt: new Date(msg.createdAt).getTime() || Date.now(),
     reasoning: msg.reasoning,
+    // Execution evidence drives the truthful work log. Absent = no execution.
+    execution: msg.execution ?? undefined,
   };
 }
 
@@ -753,17 +756,20 @@ export function useCanonicalConversation({
         const s = getStore();
         const expectedRevision = s.revision;
         const isAutoBest = selectedModel.id === "auto" || selectedModel.category === "auto";
-        // Abort after 10 minutes — the V2 agent loop can run for up to 10
-        // minutes (DEFAULT_LOOP_CONFIG.maxRuntimeMs = 600_000ms) doing
-        // multi-step builds with provider fallback. A 120s timeout kills
-        // legitimate build flows before the agent can write files and start
-        // the preview. The server-side heartbeat (SSE comment lines every
-        // 15s) keeps the connection alive through proxy idle timeouts.
+        // Stall watchdog — abort only after 120s with NO streamed bytes.
+        // A real build can legitimately stream for several minutes (the
+        // launch flow runs under a 10-minute server-side budget), so a fixed
+        // 120s cap killed healthy long builds mid-stream. Resetting on every
+        // received chunk preserves the anti-stall protection the original
+        // timer was added for.
         const controller = new AbortController();
         requestController = controller;
         requestAbortRef.current = controller;
-        const timeoutId = setTimeout(() => controller.abort(), 600_000);
-        requestTimeoutId = timeoutId;
+        const resetStallWatchdog = () => {
+          if (requestTimeoutId) clearTimeout(requestTimeoutId);
+          requestTimeoutId = setTimeout(() => controller.abort(), 120_000);
+        };
+        resetStallWatchdog();
         const makeRequest = async (revision: number) => fetch(`/api/studio/conversations/${activeConversationId}/messages`, {
           method: "POST",
           credentials: "include",
@@ -976,6 +982,9 @@ export function useCanonicalConversation({
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
+          // Any received bytes prove the server is still working — reset the
+          // stall watchdog so long builds aren't killed mid-stream.
+          resetStallWatchdog();
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
           buffer = lines.pop() ?? "";
@@ -1098,6 +1107,7 @@ export function useCanonicalConversation({
             agentMode: assistantMsg.agentMode ?? activeAgentMode,
             pendingApproval: pendingApprovalState ?? undefined,
             toolActivity: toolActivity.length > 0 ? toolActivity : undefined,
+            execution: (assistantMsg as { execution?: MessageExecution }).execution ?? null,
           });
 
           s3.setRevision((donePayload.revision as number) ?? expectedRevision + 1);

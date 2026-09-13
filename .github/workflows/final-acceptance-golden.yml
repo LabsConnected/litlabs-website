@@ -52,6 +52,11 @@ jobs:
         env:
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           LITT_ACCEPTANCE_USER_ID: ${{ secrets.LITT_ACCEPTANCE_USER_ID }}
+          # project.deploy is the production deploy target for user projects
+          # (publishes a verified snapshot to /sites/[deploymentId]). The
+          # golden requests "deploy it live", proves the approval gate
+          # engages, approves via the real endpoint, and fetches the live URL.
+          LITT_ACCEPTANCE_DEPLOY: "1"
 
       - name: Upload acceptance artifacts (verdict, SSE log, screenshots, video)
         if: always()

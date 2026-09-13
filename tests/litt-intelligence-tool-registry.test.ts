@@ -198,6 +198,57 @@ describe("LiTT Intelligence — Tool Registry", () => {
     expect(result.ok).toBe(true);
   });
 
+  // ─── Workspace transport enforcement ──────────────────────────
+  // Workspace-scoped tools must NEVER execute against the web service's
+  // own filesystem (process.cwd()). Without a WorkspaceTransport they
+  // fail closed — this is a security invariant, not a UX nicety.
+
+  it("workspace tools fail closed without a transport", async () => {
+    for (const toolId of ["files.list", "files.read", "project.scan", "git.status", "project.health"]) {
+      const result = await toolRegistry.execute(toolId, { projectId: "p1", path: "." });
+      expect(result.ok, `${toolId} should fail without transport`).toBe(false);
+      if (!result.ok) expect(result.error).toContain("workspace");
+    }
+  });
+
+  it("files.write fails closed without a transport even when approval is granted", async () => {
+    const result = await toolRegistry.execute(
+      "files.write",
+      { projectId: "p1", path: "pwned.txt", content: "x" },
+      { hasApproval: true },
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("workspace");
+  });
+
+  it("files.list executes through the provided workspace transport", async () => {
+    const transport = {
+      listFiles: vi.fn().mockResolvedValue({ entries: [{ name: "index.html", type: "file" }] }),
+    };
+    const result = await toolRegistry.execute(
+      "files.list",
+      { projectId: "p1", path: "." },
+      { transport },
+    );
+    expect(result.ok).toBe(true);
+    expect(transport.listFiles).toHaveBeenCalledWith(".");
+    const payload = result.ok ? (result.result as { items?: unknown[] }) : null;
+    expect(payload?.items?.length).toBe(1);
+  });
+
+  it("files.write executes through the provided workspace transport", async () => {
+    const transport = {
+      writeFile: vi.fn().mockResolvedValue({ saved: true }),
+    };
+    const result = await toolRegistry.execute(
+      "files.write",
+      { projectId: "p1", path: "index.html", content: "<html/>" },
+      { hasApproval: true, transport },
+    );
+    expect(result.ok).toBe(true);
+    expect(transport.writeFile).toHaveBeenCalledWith("index.html", "<html/>");
+  });
+
   // ─── canExecute ───────────────────────────────────────────────
 
   it("canExecute returns true for enabled read-only tool", () => {

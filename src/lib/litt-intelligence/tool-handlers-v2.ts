@@ -146,7 +146,23 @@ export const handleSearchCode: ToolHandler = async (inputs, transport) => {
 export const handleGitStatus: ToolHandler = async (_inputs, transport) => {
   try {
     const status = await transport.gitStatus();
-    return { success: true, ...status };
+    // Compat fields consumed by the V1 auto-inspection formatter
+    // (agent-loop.ts formatToolResultsBlock / summarizeResult).
+    const changeCount = status.staged.length + status.modified.length + status.untracked.length;
+    let recentCommits = "";
+    try {
+      const { commits } = await transport.gitLog({ maxCount: 10 });
+      recentCommits = commits
+        .map((c) => `${c.sha.slice(0, 7)} ${c.message}`)
+        .join("\n");
+    } catch { /* git log unavailable — leave empty */ }
+    return {
+      success: true,
+      ...status,
+      hasChanges: !status.clean,
+      status: status.clean ? "Clean working tree" : `${changeCount} uncommitted change(s)`,
+      recentCommits,
+    };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : "Git status failed" };
   }
@@ -454,4 +470,72 @@ export const handleDeployVerify: ToolHandler = async (inputs) => {
   }
   const result = await verifyProductionUrl(url);
   return { success: result.success, detail: result.detail };
+};
+
+// ─── Deployment ───────────────────────────────────────────────────
+
+/**
+ * project.deploy — publish the USER'S project to a public URL.
+ *
+ * Identity is taken from the transport, never from `inputs`. The transport
+ * was built by createWorkspaceTransport(projectId, userId), which ran
+ * verifyProjectWorkspace() (project exists, owned by this user, workspace
+ * ready). So the model cannot name a different tenant, project, workspace,
+ * hosting provider, or Railway service — there are no such inputs, and
+ * nothing here reads them.
+ *
+ * The result is structured for the model's next turn: on success it carries
+ * the verified live URL; on failure it says the deployment failed and never
+ * reports a URL.
+ */
+export const handleProjectDeploy: ToolHandler = async (_inputs, transport) => {
+  const { deployUserProject } = await import("@/lib/deployments/deploy-service");
+  const { supabaseDeploymentStore } = await import("@/lib/deployments/deployment-store");
+
+  const publicBaseUrl =
+    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "") ||
+    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, "") ||
+    "https://litlabs.net";
+
+  const result = await deployUserProject(
+    {
+      userId: transport.userId,
+      projectId: transport.projectId,
+      transport,
+      publicBaseUrl,
+    },
+    { store: supabaseDeploymentStore },
+  );
+
+  if (!result.ok) {
+    return {
+      success: false,
+      deployment: {
+        deploymentId: result.deploymentId,
+        status: result.status,
+        publicUrl: null,
+      },
+      errorClass: result.errorClass,
+      error: result.message,
+      retryable: result.retryable,
+    };
+  }
+
+  return {
+    success: true,
+    deployment: {
+      deploymentId: result.deploymentId,
+      status: result.status,
+      publicUrl: result.publicUrl,
+      urlVerified: result.urlVerified,
+      target: result.target,
+      projectId: result.projectId,
+      workspaceId: result.workspaceId,
+      fileCount: result.fileCount,
+      totalBytes: result.totalBytes,
+      reused: result.reused,
+    },
+    // Stated explicitly so the model's closing answer can cite it.
+    liveUrl: result.publicUrl,
+  };
 };

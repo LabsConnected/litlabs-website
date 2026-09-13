@@ -6,6 +6,7 @@ import {
 } from "@/lib/agent-registry";
 import type { PlanId } from "@/config/plans";
 import type { AgentMode } from "@/lib/studio/types";
+import type { ToolCallEvidence, DeploymentEvidence } from "@/lib/studio/completion-evidence";
 
 export type AgentId =
   | "litt"
@@ -33,6 +34,21 @@ export interface ChatMessage {
   actions?: ArtifactAction[];
   /** Provider reasoning/thinking trace (client-side only, not persisted). */
   reasoning?: string;
+  /**
+   * Execution evidence for this response — the ONLY basis for claiming work
+   * was completed. Absent means no execution was attempted, which is not the
+   * same as completed work. `status: "completed"` describes the message
+   * stream, never the work.
+   */
+  execution?: MessageExecution;
+}
+
+/** Execution evidence attached to an assistant message. */
+export interface MessageExecution {
+  /** Kernel routing mode that set the evidence bar (build, ship, think…). */
+  mode: string;
+  toolCalls: ToolCallEvidence[];
+  deployment?: DeploymentEvidence | null;
 }
 
 export interface AgentMeta {

@@ -273,3 +273,56 @@ describe("Intent classifier edge cases", () => {
     expect(intent.requiresProject).toBe(false);
   });
 });
+
+/* ── Build requests must reach an executing loop ─────────────────── */
+
+/**
+ * Production evidence (Ember Roast V1 Acceptance): a plain site-build
+ * request classified as `think` with requiresExecution:false, which routes to
+ * the read-only V1 fallback loop. The model could then only talk about the
+ * work — no tool call, no file mutation — while the transcript stamped the
+ * message complete.
+ *
+ * The `build` pattern required a technical noun (file|component|code|page…),
+ * so "build me a website" matched nothing.
+ */
+describe("classifyIntent — site build requests require execution", () => {
+  const buildRequests = [
+    "Build me a website for Ember Roast",
+    "build a website",
+    "make me a landing site for a coffee roastery",
+    "create a site for my bakery",
+    "build a web app for tracking runs",
+    "can you build me a portfolio website",
+  ];
+
+  for (const request of buildRequests) {
+    it(`routes "${request}" to an executing mode`, () => {
+      const intent = classifyIntent(request);
+      expect(intent.requiresExecution).toBe(true);
+      expect(["build", "ship"]).toContain(intent.mode);
+    });
+  }
+
+  it("still requires execution for the full Ember Roast acceptance prompt", () => {
+    const intent = classifyIntent(
+      "Build a simple single-page landing site for a coffee roastery called Ember Roast "
+      + "with a hero, a menu section, and a contact section, then deploy it live.",
+    );
+    expect(intent.requiresExecution).toBe(true);
+    // Deployment is part of the request, so it must route to ship.
+    expect(intent.mode).toBe("ship");
+  });
+
+  it("does not force execution for conversational messages", () => {
+    for (const chat of ["We gooed", "hello", "what do you think about this design"]) {
+      expect(classifyIntent(chat).requiresExecution).toBe(false);
+    }
+  });
+
+  it("does not force execution for questions about a website", () => {
+    // Asking about a site is not asking to build one.
+    expect(classifyIntent("what is a landing page").requiresExecution).toBe(false);
+    expect(classifyIntent("explain how websites are deployed").requiresExecution).toBe(false);
+  });
+});
