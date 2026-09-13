@@ -25,38 +25,37 @@ describe("AppShell Navigation", () => {
       expect(ids).toEqual(["command", "create", "explore"]);
     });
 
-    it("Command section has Dashboard and Studio", () => {
+    it("Command section has Dashboard only (Studio moved to Create)", () => {
       const command = APP_NAV_SECTIONS.find((s) => s.id === "command");
       expect(command).toBeDefined();
       const labels = command!.items.map((i) => i.label);
       expect(labels).toContain("Dashboard");
-      expect(labels).toContain("Studio");
+      expect(labels).not.toContain("Studio");
     });
 
-    it("Create section has Create, Music, and Showcase", () => {
+    it("Create section has Studio", () => {
       const create = APP_NAV_SECTIONS.find((s) => s.id === "create");
       expect(create).toBeDefined();
       const labels = create!.items.map((i) => i.label);
-      expect(labels).toContain("Create");
-      expect(labels).toContain("Music");
-      expect(labels).toContain("Showcase");
+      expect(labels).toEqual(["Studio"]);
     });
 
-    it("Create nav item links to /studio?tool=image (not chat)", () => {
+    it("Create nav item links to /studio", () => {
       const create = APP_NAV_SECTIONS.find((s) => s.id === "create");
       expect(create).toBeDefined();
-      const createItem = create!.items.find((i) => i.label === "Create");
-      expect(createItem).toBeDefined();
-      expect(createItem!.href).toBe("/studio?tool=image");
+      const studioItem = create!.items.find((i) => i.label === "Studio");
+      expect(studioItem).toBeDefined();
+      expect(studioItem!.href).toBe("/studio");
     });
 
-    it("Explore section has Games, Discover, Marketplace", () => {
+    it("Explore section has Discover and Marketplace (no Games/Hire)", () => {
       const explore = APP_NAV_SECTIONS.find((s) => s.id === "explore");
       expect(explore).toBeDefined();
       const labels = explore!.items.map((i) => i.label);
-      expect(labels).toContain("Games");
       expect(labels).toContain("Discover");
       expect(labels).toContain("Marketplace");
+      expect(labels).not.toContain("Games");
+      expect(labels).not.toContain("Hire LiTTree");
     });
   });
 
@@ -132,16 +131,16 @@ describe("AppShell Navigation", () => {
       expect(APP_MOBILE_BOTTOM_ITEMS).toHaveLength(4);
     });
 
-    it("includes Home (Dashboard) and Studio", () => {
+    it("includes Home (Dashboard), Discover, Marketplace, and Me (no standalone Studio — center CTA handles it)", () => {
       const labels = APP_MOBILE_BOTTOM_ITEMS.map((i) => i.label);
       expect(labels).toContain("Home");
-      expect(labels).toContain("Studio");
-    });
-
-    it("includes Discover and Me", () => {
-      const labels = APP_MOBILE_BOTTOM_ITEMS.map((i) => i.label);
       expect(labels).toContain("Discover");
+      expect(labels).toContain("Marketplace");
       expect(labels).toContain("Me");
+      // Studio is intentionally NOT a standalone mobile item — the dedicated
+      // center Create CTA in MobileBottomBar routes to Studio, so a standalone
+      // Studio entry would be a duplicate link.
+      expect(labels).not.toContain("Studio");
     });
 
     it("all items have valid hrefs", () => {

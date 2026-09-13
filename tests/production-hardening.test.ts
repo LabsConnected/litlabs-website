@@ -122,14 +122,13 @@ describe("Canvas Build button renamed to Edit", () => {
 // ─── Navigation consistency ───────────────────────────────────────
 
 describe("Navigation routes Music to Studio", () => {
-  it("create group Music links to /studio?tool=music", async () => {
+  it("Music is NOT a top-level nav item (moved inside Studio)", async () => {
     const mod = await import("../src/lib/navigation");
     const createGroup = mod.APP_NAV_SECTIONS.find((g) => g.id === "create");
     expect(createGroup).toBeDefined();
     const musicItem = createGroup!.items.find((i) => i.label === "Music");
-    expect(musicItem).toBeDefined();
-    expect(musicItem!.href).toBe("/studio?tool=music");
-    expect(musicItem!.href).not.toContain("/dashboard?app=music");
+    // Music is now accessed inside Studio, not as a top-level nav entry.
+    expect(musicItem).toBeUndefined();
   });
 
   it("sidebar Music links to /studio?tool=music", async () => {
