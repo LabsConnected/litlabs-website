@@ -31,7 +31,9 @@ import { probeLocalLane } from "../lib/local-lane.js";
 import {
   localRoutePolicy,
   isLocalModelId,
+  resolveRequestedLocalModel,
 } from "../lib/local-model-resolution.js";
+import { loadModelPrefs, getDefaultPrefsPath } from "../lib/provider-registry.js";
 import { resolveExecutionTarget, resolveLocalOnly } from "../lib/execution-target.js";
 import { ok, fail, warn, header, c, detectProject } from "../lib/utils.js";
 import { resolveActiveProject } from "../lib/active-project.js";
@@ -140,8 +142,16 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     // When executionTarget=local (LITT_LOCAL_MODE=1, --local, or default),
     // the local daemon (Ollama/LM Studio) is the ONLY provider lane.
     // A persisted or env-selected remote model is never used in LOCAL mode.
-    const requestedLocalModel = process.env.LITT_MODEL?.trim()
-      || (isLocalModelId(selectedModel) ? selectedModel : null);
+    //
+    // CANONICAL RESOLUTION: read prefs so `litt ask` uses the same
+    // precedence as the TUI and doctor — LITT_MODEL env → persisted
+    // ollama: selection → null (preference order).  Without this, ask
+    // would ignore a persisted "ollama:qwen3:4b-instruct" selection and
+    // silently fall back to the lane preference order (e.g.
+    // litt-coder:3b), which is the exact split-brain bug being fixed.
+    const prefs = loadModelPrefs(getDefaultPrefsPath());
+    const requestedLocalModelInfo = resolveRequestedLocalModel(prefs.selectedModel);
+    const requestedLocalModel = requestedLocalModelInfo.model;
     const policy = localRoutePolicy({
       executionTarget,
       localOnly,
@@ -152,10 +162,28 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
 
     let routed;
     let routingMode: "auto" | "fixed";
+    let localResolutionReason: string | null = null;
     if (policy.kind === "local-required") {
       // LOCAL mode: route through the local daemon.
       const lane = await probeLocalLane();
-      routed = modelRuntime.routeLocal(lane, requestedLocalModel);
+      const outcome = resolveLocalModel(lane, requestedLocalModel);
+      if (!outcome.ok) {
+        fail(outcome.error);
+        return 1;
+      }
+      // Surface route-change decisions: if the effective model differs
+      // from what was explicitly requested (env/prefs), say WHY instead
+      // of silently serving a different model.
+      const res = outcome.resolution;
+      if (res.isRouteChange && res.configuredInput) {
+        console.log(`${c.yellow}⚠ Route change:${c.reset} ${c.dim}requested "${res.configuredInput}" but ${res.reason}${c.reset}`);
+      } else if (!res.configuredInput && requestedLocalModelInfo.source === "none") {
+        // No explicit request — show which model the preference order
+        // picked, so the operator knows what will serve the request.
+        localResolutionReason = res.reason;
+      }
+      routed = localRoutedModel(res);
+      modelRuntime.registerLocalModel(res);
       routingMode = "fixed";
     } else {
       // REMOTE/BYOK mode: route through the cloud catalog.
@@ -175,6 +203,9 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     });
 
     console.log(`${c.dim}Provider: ${providerLabel(model.providerId)} | Model: ${model.configuredModel}${c.reset}`);
+    if (localResolutionReason) {
+      console.log(`${c.dim}  Routing: ${localResolutionReason}${c.reset}`);
+    }
     console.log(`${c.cyan}▶${c.reset} Asking: ${c.bold}${question}${c.reset}\n`);
 
     const result = await runAgentLoop(question, {

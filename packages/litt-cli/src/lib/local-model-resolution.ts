@@ -231,10 +231,15 @@ export type LocalModelOutcome =
 export function resolveLocalModel(
   lane: LocalLaneStatus,
   requested: string | null,
+  source: RequestedModelSource = "env",
 ): LocalModelOutcome {
   // Track the configured input and its source so callers (doctor, ask,
   // TUI) can surface route-change decisions instead of silently serving
   // a different model than the one the operator named.
+  // The `source` parameter is threaded from resolveRequestedLocalModel()
+  // so that a persisted prefs selection correctly reports "prefs" (not
+  // the previous hardcode "env"). Default "env" preserves backward compat
+  // for callers that don't thread the source yet.
   const configuredInput = requested ? ollamaTagOf(requested) : null;
 
   if (!lane.available) {
@@ -273,7 +278,7 @@ export function resolveLocalModel(
           ? `explicitly requested local model "${tag}"`
           : `explicitly requested "${tag}" → installed "${hit}"`,
         configuredInput,
-        configuredSource: "env",
+        configuredSource: source,
         isRouteChange: hit !== tag,
       },
     };

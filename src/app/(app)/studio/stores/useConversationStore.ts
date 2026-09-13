@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import type { AgentSlug, AgentMode, Conversation, ConversationMessage } from "@/lib/studio/types";
+import type { MessageExecution } from "./useStudioAgentStore";
 
 export interface ChatMessage {
   id: string;
@@ -20,6 +21,12 @@ export interface ChatMessage {
   pendingApproval?: { toolId: string; reason: string; pausedRunId?: string; inputs?: Record<string, unknown> } | null;
   /** V2: Tool activity log for progress display */
   toolActivity?: Array<{ toolId: string; success?: boolean; summary: string }> | null;
+  /**
+   * Execution evidence — the only basis for claiming the requested work was
+   * completed. `status: "completed"` above describes the message stream, not
+   * the work.
+   */
+  execution?: MessageExecution | null;
 }
 
 // Zustand selectors are backed by useSyncExternalStore. Returning a fresh []

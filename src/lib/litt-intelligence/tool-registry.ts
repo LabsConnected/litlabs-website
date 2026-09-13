@@ -68,6 +68,9 @@ const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
   "preview.start": workspaceTool((m) => m.handlePreviewStart),
   "preview.status": workspaceTool((m) => m.handlePreviewStatus),
   "preview.stop": workspaceTool((m) => m.handlePreviewStop),
+  // project.deploy publishes the USER'S project — identity comes from the
+  // transport (verified userId/projectId), never from model inputs.
+  "project.deploy": workspaceTool((m) => m.handleProjectDeploy),
   // Deploy tools act on the configured deploy provider, not a workspace.
   "deploy.execute": async () => (await import("./tool-handlers-v2")).handleDeployExecute as ToolHandler,
   "deploy.verify": async () => (await import("./tool-handlers-v2")).handleDeployVerify as ToolHandler,
@@ -846,6 +849,40 @@ export function registerInternalTools(): void {
         permissionLevel: 'workspace-write',
         enabled: false, // No handler implemented
       },
+    },
+    {
+      tool: {
+        id: "project.deploy",
+        name: "Deploy Project",
+        description:
+          "Deploy the user's current project to a PUBLIC live URL and return it. "
+          + "Use this when the user asks to deploy, publish, ship, or go live. "
+          + "This is NOT the preview: a preview is a private dev server behind "
+          + "login, while this publishes a public snapshot anyone can open. "
+          + "Write the project's files first — the deployment publishes what is "
+          + "in the workspace, and requires an index.html. The live URL is "
+          + "fetched and verified before this reports success, so only report "
+          + "the site as live if this tool returned a publicUrl.",
+        source: "internal",
+        version: "1.0.0",
+        // No projectId, userId, provider, account or service inputs: identity
+        // and target come from the authorized server-side transport, so the
+        // model cannot deploy another tenant's project or aim this at LiTT's
+        // own infrastructure.
+        inputSchema: { type: "object", properties: {}, required: [] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["deploy:create"],
+        risk: "high",
+        approvalPolicy: MUTATION_APPROVAL,
+        // Collect + persist + publish + HTTP-verify.
+        timeoutMs: 60000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: 'workspace-write',
+        enabled: true,
+      },
+      handler: lazyHandlers["project.deploy"],
     },
     {
       tool: {

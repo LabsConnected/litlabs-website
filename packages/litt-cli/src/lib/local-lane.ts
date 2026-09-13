@@ -35,8 +35,14 @@ import {
 /** How long a probe result stays fresh. */
 const PROBE_CACHE_MS = 10_000;
 
-/** Per-candidate timeout — the probe may try up to three hosts. */
-const PROBE_TIMEOUT_MS = 1_500;
+/**
+ * Per-candidate timeout — the probe may try up to three hosts.
+ * Configurable via LITT_OLLAMA_PROBE_TIMEOUT_MS for slow Ollama startups
+ * or high-latency LAN/Tailscale links. Must be > 0.
+ */
+const PROBE_TIMEOUT_MS = Number(process.env.LITT_OLLAMA_PROBE_TIMEOUT_MS) > 0
+  ? Number(process.env.LITT_OLLAMA_PROBE_TIMEOUT_MS)
+  : 3_000;
 
 export interface LocalLaneStatus {
   /** True only when the daemon answered AND has at least one model. */

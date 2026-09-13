@@ -25,6 +25,7 @@ import { checkStaleBuild } from "../lib/build-metadata.js";
 import { resolveExecutionTarget, resolveLocalOnly } from "../lib/execution-target.js";
 import { loadModelPrefs, getDefaultPrefsPath } from "../lib/provider-registry.js";
 import { probeLocalLane } from "../lib/local-lane.js";
+import { resolveLocalModel, resolveRequestedLocalModel, ollamaTagOf } from "../lib/local-model-resolution.js";
 import { REMOTE_LITT_LABEL } from "@litt/models";
 
 export async function doctorCommand(args: string[]): Promise<number> {
@@ -256,8 +257,8 @@ export async function doctorCommand(args: string[]): Promise<number> {
   // Model + provider
   header("Model & Provider");
   const prefs = loadModelPrefs(getDefaultPrefsPath());
-  const modelLabel = prefs.selectedModel ?? "qwen3:4b-instruct (default)";
-  ok(`Model: ${modelLabel}`);
+  const configuredLabel = prefs.selectedModel ?? "(none — preference order will pick)";
+  ok(`Configured: ${configuredLabel}`);
   ok(`Routing: ${prefs.routingMode}`);
 
   // Determine the EFFECTIVE provider — the one that actually serves
@@ -269,7 +270,7 @@ export async function doctorCommand(args: string[]): Promise<number> {
   // REMOTE + OpenAI key → OpenAI (the remote provider)
   // LOCAL + no ollama model → local/credentialless
   const isLocalTarget = execTarget === "local";
-  const modelIsOllama = modelLabel.toLowerCase().startsWith("ollama:");
+  const modelIsOllama = configuredLabel.toLowerCase().startsWith("ollama:");
   const hasOllamaEndpoint = !!(process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST_PC);
 
   let effectiveProvider: string;
@@ -322,6 +323,29 @@ export async function doctorCommand(args: string[]): Promise<number> {
     if (lane.available) {
       ok(`Active route: ${lane.routeLabel} (${lane.endpoint})`);
       console.log(`${c.dim}  Models: ${lane.models.join(", ")}${c.reset}`);
+
+      // Show the EFFECTIVE model — the one that would actually serve a
+      // request right now, using the same canonical resolution as ask/TUI.
+      // This is NOT just the persisted preference; it probes the lane and
+      // applies the same LITT_MODEL → prefs → preference-order precedence.
+      const reqInfo = resolveRequestedLocalModel(prefs.selectedModel);
+      const outcome = resolveLocalModel(lane, reqInfo.model);
+      if (outcome.ok) {
+        const res = outcome.resolution;
+        ok(`Effective model: ${res.tag}`);
+        console.log(`${c.dim}  Source: ${res.reason}${c.reset}`);
+        if (res.isRouteChange && res.configuredInput) {
+          warn(`  Route change: requested "${res.configuredInput}" but effective is "${res.tag}"`);
+        }
+        // Verify the effective model is actually in the probed list
+        // (it always should be — resolveLocalModel checks this — but
+        // showing it explicitly makes the doctor output self-evident).
+        if (lane.models.includes(res.tag)) {
+          ok(`Serving: confirmed "${res.tag}" is installed and available`);
+        }
+      } else {
+        fail(`Effective model: unavailable — ${outcome.error}`);
+      }
     } else {
       fail(`Active route: none — ${lane.reason ?? "Ollama unreachable"}`);
       console.log(`${c.dim}  Tried, in priority order: this device's own Ollama, then OLLAMA_LAN_URL, then OLLAMA_TAILSCALE_URL.${c.reset}`);

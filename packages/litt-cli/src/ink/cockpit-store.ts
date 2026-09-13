@@ -919,6 +919,48 @@ export function useCockpitStore() {
     }, delayMs);
   }, []);
 
+  // ─── Watchdog (UI-level) — agent cannot remain RUNNING forever ─────
+  // This is the UI-level safety net. It resets cockpit state so the
+  // shell never stays locked. The CONTROLLER-level watchdog (in
+  // controller.ts) does the actual cancellation: session.cancel() to
+  // kill spawned processes, and cancelRemoteModel() to abort in-flight
+  // model streams. Both fire on the same timer — defense-in-depth.
+  const watchdogTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (isProcessing) {
+      // Start watchdog when processing begins
+      if (watchdogTimerRef.current) clearTimeout(watchdogTimerRef.current);
+      const maxMs = parseInt(process.env.LITT_MAX_RUN_MS ?? "", 10) || 600_000;
+      watchdogTimerRef.current = setTimeout(() => {
+        watchdogTimerRef.current = null;
+        // Force terminal state — the run is stuck
+        setIsProcessing(false);
+        stopBusy();
+        setHoloState("FAILED");
+        failToolProgressMission();
+        addActivity({
+          id: `act_${Date.now()}_watchdog`,
+          ts: Date.now(),
+          type: "error",
+          tag: "WATCHDOG",
+          text: "Watchdog: run timed out — the shell was force-recovered after exceeding the maximum run duration.",
+        });
+      }, maxMs);
+    } else {
+      // Clear watchdog when processing ends normally
+      if (watchdogTimerRef.current) {
+        clearTimeout(watchdogTimerRef.current);
+        watchdogTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (watchdogTimerRef.current) {
+        clearTimeout(watchdogTimerRef.current);
+        watchdogTimerRef.current = null;
+      }
+    };
+  }, [isProcessing]);
+
   /** Explicit focus restoration (e.g. typing returns from history). */
   const bumpFocus = useCallback(() => {
     const tracker = focusTrackerRef.current!;

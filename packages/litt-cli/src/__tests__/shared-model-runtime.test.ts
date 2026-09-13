@@ -14,6 +14,31 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { ModelRuntime, type ProviderStatus } from "../lib/model-runtime.js";
+import type { Fetcher, FetchResponse } from "@litt/models";
+
+/**
+ * Deterministic mock fetcher — never hits the network.
+ *
+ * The old test called runtime.refresh() which triggered real OpenRouter
+ * /models discovery. That test was non-deterministic: it could time out
+ * or fail based on network conditions, and passed repeatedly in isolation
+ * only because the network was fast. This mock fetcher returns a DOWN
+ * response for every URL, making the test fully deterministic while
+ * still exercising the real discovery → health cache → provider status
+ * pipeline.
+ */
+function createMockFetcher(): Fetcher {
+  return {
+    async fetch(_url: string, _options: { headers?: Record<string, string>; timeoutMs?: number; method?: "GET" | "POST"; body?: string }): Promise<FetchResponse> {
+      return {
+        ok: false,
+        status: 0,
+        json: null,
+        latencyMs: 1,
+      };
+    },
+  };
+}
 
 const ENV_KEYS = ["OPENROUTER_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY"] as const;
 const savedEnv: Record<string, string | undefined> = {};
@@ -102,8 +127,9 @@ describe("truthful discovery error state", () => {
 
   it("refresh() with no credential records a down reason (not silent)", async () => {
     delete process.env.OPENROUTER_API_KEY;
-    const runtime = new ModelRuntime();
+    const runtime = new ModelRuntime(false, createMockFetcher());
     // refresh() should not throw — it records DOWN per provider.
+    // Uses a mock fetcher so the test is deterministic (no network).
     await runtime.refresh();
     // After refresh, lastRefreshError is null (orchestrator doesn't throw),
     // but provider statuses carry reasons. This is the truthful path.

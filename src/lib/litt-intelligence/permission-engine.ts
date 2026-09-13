@@ -72,6 +72,10 @@ const SENSITIVE_ACTIONS: ReadonlySet<string> = new Set([
   "git.rebase",
   "files.delete",
   "deploy.production",
+  // Publishing the user's project to a PUBLIC url is outward-facing: it
+  // makes their content reachable by anyone. Approval is required in ACT and
+  // AUTO alike, never auto-approved as a "routine workspace edit".
+  "project.deploy",
   "deploy.execute",
 ]);
 

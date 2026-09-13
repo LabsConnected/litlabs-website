@@ -34,6 +34,7 @@ import {
   type ProviderHealthResult,
   type ProviderId,
   type CredentialInfo,
+  type Fetcher,
 } from "@litt/models";
 
 import {
@@ -103,7 +104,7 @@ export class ModelRuntime {
   /** Last refresh error (null when last refresh succeeded). For truthful UI. */
   private _lastRefreshError: string | null = null;
 
-  constructor(remoteMode = false) {
+  constructor(remoteMode = false, fetcher?: Fetcher) {
     const envAccessor = envAccessorFromProcess();
     const baseResolver = createEnvCredentialResolver(envAccessor.get);
     const resolver = remoteMode
@@ -113,7 +114,7 @@ export class ModelRuntime {
     this.healthCache = new HealthCache(30_000);
     this.discovery = new ProviderDiscoveryOrchestrator(
       envAccessor,
-      undefined, // default fetcher
+      fetcher, // undefined → default fetcher (real network); inject for tests
       this.healthCache,
     );
   }
@@ -182,8 +183,8 @@ export class ModelRuntime {
    * footer, and Model Center render its real name rather than a raw
    * "ollama:…" id.
    */
-  routeLocal(lane: LocalLaneStatus, requested: string | null): RoutedModel {
-    const outcome = resolveLocalModel(lane, requested);
+  routeLocal(lane: LocalLaneStatus, requested: string | null, source: import("./local-model-resolution.js").RequestedModelSource = "env"): RoutedModel {
+    const outcome = resolveLocalModel(lane, requested, source);
     if (!outcome.ok) throw new Error(outcome.error);
     this.registerLocalModel(outcome.resolution);
     return localRoutedModel(outcome.resolution);

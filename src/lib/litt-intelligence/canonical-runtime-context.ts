@@ -20,6 +20,8 @@ import "server-only";
 
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { getStudioContext } from "@/lib/capabilities/studio-context";
+import { capabilityNotice, type WorkspaceShape } from "@/lib/studio/workspace-capability";
+import type { DeploymentStatus } from "@/lib/deployments/user-deployment";
 import type { StudioContext } from "@/lib/capabilities/studio-context";
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -45,6 +47,16 @@ export interface CanonicalRuntimeContext {
   model: string | null;
   provider: string | null;
   sourceType: "github" | "blank" | "template" | "upload" | null;
+  /** Workspace capability shape — drives not-applicable classification. */
+  workspaceShape?: WorkspaceShape | null;
+  /**
+   * Deployment state — INDEPENDENT of previewStatus. A ready preview is a dev
+   * process answering behind auth; a ready deployment is a public URL anyone
+   * can open. Neither implies the other.
+   */
+  deploymentStatus: DeploymentStatus;
+  /** The verified public URL, set only when deploymentStatus is "ready". */
+  deploymentUrl: string | null;
 }
 
 export interface ClientRuntimeHint {
@@ -102,6 +114,9 @@ export async function buildCanonicalRuntimeContext(
     model: options?.model ?? null,
     provider: options?.provider ?? null,
     sourceType: null,
+    workspaceShape: null,
+    deploymentStatus: "not_started",
+    deploymentUrl: null,
   };
 
   if (!projectId || !userId) {
@@ -135,10 +150,41 @@ export async function buildCanonicalRuntimeContext(
     ctx.repository = verified.project.githubFullName ?? null;
     ctx.githubConnected = !!verified.project.githubFullName;
     ctx.writePermission = true;
-    ctx.previewStatus = "ready";
+    // Preview readiness is a SEPARATE fact from workspace readiness. It was
+    // previously set to "ready" here, so a verified workspace silently
+    // implied a running preview. Preview state comes from the project's
+    // runtime status, and stays "unknown" when nothing has reported it.
+    ctx.previewStatus = verified.project.runtimeStatus === "ready" && verified.project.previewUrl
+      ? "ready"
+      : verified.project.runtimeStatus === "failed" || verified.project.runtimeError
+        ? "unavailable"
+        : "unknown";
+    // Record workspace shape so repo-only checks can be classified N/A.
+    ctx.workspaceShape = {
+      framework: verified.project.framework,
+      packageManager: verified.project.packageManager,
+      githubFullName: verified.project.githubFullName,
+      sourceType: verified.project.sourceType ?? null,
+    };
   } catch {
     // Workspace not ready — check client hint for terminal-based write surface
     ctx.workspaceReady = false;
+  }
+
+  // Deployment state — read independently of preview. Any failure here
+  // leaves it at "not_started": the context never guesses that something was
+  // published.
+  try {
+    const { findLatestDeploymentForProject } = await import("@/lib/deployments/deployment-store");
+    const latest = await findLatestDeploymentForProject(projectId, userId);
+    if (latest) {
+      ctx.deploymentStatus = latest.status;
+      // A URL is reported only for a ready, verified deployment.
+      ctx.deploymentUrl = latest.status === "ready" && latest.urlVerified ? latest.publicUrl : null;
+    }
+  } catch {
+    // Storage unavailable (or the table not yet migrated) — stay at
+    // "not_started" rather than implying a deployment exists.
   }
 
   // Terminal status: trust client hint (it knows PTY state)
@@ -194,6 +240,8 @@ export function buildRuntimeContextBlock(ctx: CanonicalRuntimeContext): string {
     `- Branch: ${ctx.branch ?? "none"}`,
     `- Write permission: ${ctx.writePermission ? "allowed" : "not allowed"}`,
     `- Preview: ${ctx.previewStatus}`,
+    `- Deployment: ${ctx.deploymentStatus}`,
+    `- Live URL: ${ctx.deploymentUrl ?? "none"}`,
     `- Available tools: ${ctx.availableTools.length > 0 ? ctx.availableTools.join(", ") : "none"}`,
     `- Execution mode: ${ctx.executionMode}`,
   ];
@@ -212,6 +260,28 @@ export function buildRuntimeContextBlock(ctx: CanonicalRuntimeContext): string {
 
   lines.push("");
   lines.push("RULE: Never claim a capability is ready, connected, or running if the runtime context above says otherwise.");
+  if (ctx.deploymentStatus !== "ready") {
+    lines.push(
+      "IMPORTANT: A preview is NOT a deployment. Nothing has been deployed and there is no live URL. "
+      + "The preview runs behind this app's login; only a deployment produces a public address. "
+      + "To publish, call project.deploy and report the URL it returns — never present a preview link as a live site.",
+    );
+  } else {
+    lines.push(`The project is deployed and its verified public URL is ${ctx.deploymentUrl ?? "unknown"}.`);
+  }
+  lines.push("RULE: These states are INDEPENDENT. A ready preview does not mean the terminal is connected, the repository is healthy, the build succeeded, or anything was deployed. Report each state on its own evidence.");
+  lines.push("RULE: Never report work as complete without evidence. A build is complete only after a mutating tool call returned a successful result; a deployment is complete only after it succeeded and its live URL was verified. Acknowledging a request is not completing it.");
+
+  // Static / repo-less workspaces: absent tooling is the workspace type, not
+  // a defect. Without this the model reports "tsc is broken", "ESLint config
+  // missing", "git is not installed" and proposes installs for a workspace
+  // that intentionally has none.
+  const notice = ctx.workspaceShape ? capabilityNotice(ctx.workspaceShape) : null;
+  if (notice) {
+    lines.push(notice);
+  } else if (!ctx.githubConnected) {
+    lines.push("WORKSPACE TYPE: no repository is connected, so git tooling (status, diff, log, commit, push, pull requests) is NOT APPLICABLE — not broken. Do not report it as a failure and do not propose installing Git.");
+  }
 
   if (ctx.workspaceExecutionAvailable && !ctx.terminalConnected) {
     lines.push("IMPORTANT: Workspace execution is available even though the visible terminal UI is disconnected. You CAN read files, write files, and run commands. Do NOT say 'terminal is not connected' — say 'I can execute workspace operations' instead.");

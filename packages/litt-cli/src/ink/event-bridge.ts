@@ -17,7 +17,7 @@
  *   (idle)            → IDLE
  */
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { RuntimeClient, LifecycleEvent } from "../lib/runtime-client.js";
 import type { RuntimeState } from "@litt/agent-core";
 import type { CockpitStore, ActivityEntry, HoloState } from "./cockpit-store.js";
@@ -147,71 +147,92 @@ export function useEventBridge(
   store: CockpitStore,
   sessionBridge: SessionEventBridge | null,
 ): void {
+  // ─── Store ref — breaks the render loop ──────────────────────────
+  // `store` is a new object every render (useCockpitStore returns a
+  // fresh {state, actions} literal). Without this ref, every callback
+  // below depends on `store` → gets a new identity every render → the
+  // subscription effect re-runs every render → subscriptions are torn
+  // down and recreated → setLocalRuntime("ready")/setConnected(true)
+  // fire every render → render loop ("Maximum update depth exceeded").
+  //
+  // The ref holds the LATEST store; callbacks read from it at event
+  // time (not capture time). The ref is updated after every commit so
+  // the callbacks always see current state — writing it during render
+  // trips react-hooks/refs, and callbacks never run during render
+  // anyway. The callbacks themselves are stable (empty deps) so the
+  // effect only re-runs when `client` or `sessionBridge` actually change.
+  const storeRef = useRef(store);
+  useEffect(() => {
+    storeRef.current = store;
+  });
+
   // ─── Tool progress — drive the structured per-tool view ──────────
   // Maps lifecycle events to ToolProgressStore mutations. This is the
   // canonical wiring: tool.started → startTool, tool.completed →
   // completeTool, tool.stdout/stderr → appendChunk, mission.* →
   // mission lifecycle. The renderer reads from store.state.toolProgress.
   const updateToolProgress = useCallback((event: LifecycleEvent) => {
+    const s = storeRef.current;
     switch (event.type) {
       case "mission.created":
       case "mission.started":
-        store.actions.startToolProgressMission();
+        s.actions.startToolProgressMission();
         break;
       case "mission.completed":
-        store.actions.completeToolProgressMission();
+        s.actions.completeToolProgressMission();
         break;
       case "mission.failed":
-        store.actions.failToolProgressMission();
+        s.actions.failToolProgressMission();
         break;
       case "tool.started": {
         const toolId = (event.data.toolId as string) ?? (event.data.tool as string) ?? "";
         const toolName = (event.data.tool as string) ?? toolId;
-        store.actions.startToolProgress(event.toolCallId ?? "", toolId, toolName);
+        s.actions.startToolProgress(event.toolCallId ?? "", toolId, toolName);
         break;
       }
       case "tool.completed": {
         const success = (event.data.success as boolean) ?? true;
         const message = (event.data.message as string) ?? "";
         const durationMs = event.data.durationMs as number | undefined;
-        store.actions.completeToolProgress(event.toolCallId ?? "", success, message, durationMs);
+        s.actions.completeToolProgress(event.toolCallId ?? "", success, message, durationMs);
         break;
       }
       case "tool.failed": {
         const message = (event.data.error as string) ?? (event.data.message as string) ?? "error";
         const durationMs = event.data.durationMs as number | undefined;
-        store.actions.failToolProgress(event.toolCallId ?? "", message, durationMs);
+        s.actions.failToolProgress(event.toolCallId ?? "", message, durationMs);
         break;
       }
       case "tool.cancelled": {
         const message = (event.data.message as string) ?? "cancelled";
-        store.actions.terminalToolProgress(event.toolCallId ?? "", "cancelled", message);
+        s.actions.terminalToolProgress(event.toolCallId ?? "", "cancelled", message);
         break;
       }
       case "tool.timeout": {
         const message = (event.data.message as string) ?? "timed out";
-        store.actions.terminalToolProgress(event.toolCallId ?? "", "timeout", message);
+        s.actions.terminalToolProgress(event.toolCallId ?? "", "timeout", message);
         break;
       }
       case "tool.stdout":
       case "tool.stderr": {
         const chunk = String(event.data.chunk ?? "");
-        if (chunk) store.actions.appendToolProgressChunk(event.toolCallId ?? "", chunk);
+        if (chunk) s.actions.appendToolProgressChunk(event.toolCallId ?? "", chunk);
         break;
       }
       default:
         break;
     }
-  }, [store]);
+  }, []);
 
   const onLifecycle = useCallback((event: LifecycleEvent) => {
+    const s = storeRef.current;
     // Map event to activity entry
     let entry: ActivityEntry | null = null;
 
     switch (event.type) {
       case "run.started":
         entry = makeEntry("run.started", `${event.data.command ?? "command"}`, event, undefined, undefined, "RUN");
-        store.actions.setCurrentRunId(event.runId);
+        s.actions.setCurrentRunId(event.runId);
         break;
       case "tool.started":
         entry = makeEntry("tool.started", toolLabel(event.data), event, undefined, undefined, toolTag(event.data) ?? "RUN");
@@ -249,7 +270,7 @@ export function useEventBridge(
           resultMessage(event.data),
           status === "success" ? "DONE" : "FAIL",
         );
-        store.actions.setCurrentRunId(null);
+        s.actions.setCurrentRunId(null);
         break;
       }
 
@@ -264,7 +285,7 @@ export function useEventBridge(
           ? `Mission: ${String(event.data.goal).slice(0, 80)}`
           : "Mission created", event, undefined, undefined, "MISSION");
         // Project canonical mission into cockpit
-        store.actions.setCanonicalMission({
+        s.actions.setCanonicalMission({
           id: (event.data.missionId as string) ?? "",
           goal: (event.data.goal as string) ?? "",
           status: "planning",
@@ -313,7 +334,7 @@ export function useEventBridge(
     }
 
     if (entry) {
-      store.actions.addActivity(entry);
+      s.actions.addActivity(entry);
     }
 
     // ─── Live workstream feed (observable intent, NO chain-of-thought) ──
@@ -322,7 +343,7 @@ export function useEventBridge(
     // conclusions only. Failures stay visible even when retried later.
     // The normalization layer (workstream-normalizer.ts) maps raw tool
     // names to semantic kinds + human-readable labels.
-    store.actions.workstreamPush((ws) => {
+    s.actions.workstreamPush((ws) => {
       switch (event.type) {
         case "run.started": {
           const cmd = String(event.data.command ?? "task");
@@ -431,68 +452,74 @@ export function useEventBridge(
       // checks must not regress the display back to RUNNING — the mission
       // has finished executing and the runtime is proving it. Terminal
       // states (FAILED etc.) still apply.
-      const isVerifying = store.state.holoState === "VERIFYING";
+      const isVerifying = s.state.holoState === "VERIFYING";
       if (!(holo === "RUNNING" && isVerifying)) {
-        store.actions.setHoloState(holo);
-        // Auto-return to IDLE after terminal states (except APPROVAL which stays).
-        // Use scheduleIdle so a new run started during the delay window does
-        // not get clobbered by a stale terminal→IDLE timer (runtime-state P0).
+        s.actions.setHoloState(holo);
+        // Auto-return to IDLE after terminal states — use the race-safe
+        // scheduleIdle() instead of a fire-and-forget setTimeout. The old
+        // pattern scheduled multiple competing timers that could override
+        // a new run's state back to IDLE (the exact bug scheduleIdle was
+        // created to fix). scheduleIdle clears any pending timer and uses
+        // a functional updater that only transitions from terminal states.
         if (holo === "COMPLETE" || holo === "FAILED" || holo === "CANCELLED" || holo === "TIMEOUT") {
-          store.actions.scheduleIdle(2000);
+          s.actions.scheduleIdle(2000);
         }
       }
     }
-  }, [store, updateToolProgress]);
+  }, [updateToolProgress]);
   // the cockpit's remoteRuntime field. This is INDEPENDENT of local runtime.
   // Local runtime readiness is set once on mount — it does not flap.
   const onConnection = useCallback((state: string) => {
+    const s = storeRef.current;
     // Map ConnectionState → RemoteRuntimeState
     switch (state) {
       case "connected":
         // Socket connected — also check heartbeat freshness
-        store.actions.setRemoteRuntime("connected");
+        s.actions.setRemoteRuntime("connected");
         // Update legacy connected flag for backward compat
-        store.actions.setConnected(isHeartbeatFresh(client?.getState() ?? null));
+        s.actions.setConnected(isHeartbeatFresh(client?.getState() ?? null));
         break;
       case "connecting":
-        store.actions.setRemoteRuntime("connecting");
-        store.actions.setConnected(false);
+        s.actions.setRemoteRuntime("connecting");
+        s.actions.setConnected(false);
         break;
       case "reconnecting":
-        store.actions.setRemoteRuntime("reconnecting");
-        store.actions.setConnected(false);
+        s.actions.setRemoteRuntime("reconnecting");
+        s.actions.setConnected(false);
         break;
       case "error":
-        store.actions.setRemoteRuntime("error");
-        store.actions.setConnected(false);
+        s.actions.setRemoteRuntime("error");
+        s.actions.setConnected(false);
         break;
       default:
-        store.actions.setRemoteRuntime("offline");
-        store.actions.setConnected(false);
+        s.actions.setRemoteRuntime("offline");
+        s.actions.setConnected(false);
     }
-  }, [store, client]);
+  }, [client]);
 
   // Re-evaluate remote connection when runtime state updates (heartbeat may go stale)
   const onState = useCallback((state: RuntimeState) => {
+    const s = storeRef.current;
     if (client?.is_connected()) {
-      store.actions.setConnected(isHeartbeatFresh(state));
+      s.actions.setConnected(isHeartbeatFresh(state));
       if (!isHeartbeatFresh(state)) {
-        store.actions.setRemoteRuntime("error");
+        s.actions.setRemoteRuntime("error");
       }
     }
-  }, [store, client]);
+  }, [client]);
 
   useEffect(() => {
+    const s = storeRef.current;
     const cleanups: Array<() => void> = [];
 
     // Local runtime: the RuntimeSession is always available.
     // This proves LOCAL readiness only — it does NOT fabricate remote connectivity.
     if (sessionBridge) {
       cleanups.push(sessionBridge.subscribe(onLifecycle));
-      store.actions.setLocalRuntime("ready");
+      s.actions.setLocalRuntime("ready");
       // Legacy connected flag: true only because local runtime is ready.
       // Remote connectivity is tracked separately in remoteRuntime.
-      store.actions.setConnected(true);
+      s.actions.setConnected(true);
     }
 
     // Remote runtime: subscribe to terminal-server events if available.
@@ -503,7 +530,7 @@ export function useEventBridge(
       cleanups.push(client.onState(onState));
     } else {
       // No remote client — explicitly mark remote as offline
-      store.actions.setRemoteRuntime("offline");
+      s.actions.setRemoteRuntime("offline");
     }
 
     return () => {
@@ -511,5 +538,5 @@ export function useEventBridge(
         try { cleanup(); } catch { /* ignore */ }
       }
     };
-  }, [client, sessionBridge, onLifecycle, onConnection, onState, store]);
+  }, [client, sessionBridge, onLifecycle, onConnection, onState]);
 }

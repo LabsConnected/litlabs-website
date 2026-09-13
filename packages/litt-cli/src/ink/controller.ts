@@ -174,6 +174,15 @@ function requestedLocalModel(selectedModel: string | null): string | null {
 }
 
 /**
+ * Full requested-model info (model + source) for callers that need to
+ * thread configuredSource through to resolveLocalModel/routeLocal.
+ * Use this instead of requestedLocalModel() when the source matters.
+ */
+function requestedLocalModelInfo(selectedModel: string | null): { model: string | null; source: import("../lib/local-model-resolution.js").RequestedModelSource } {
+  return resolveRequestedLocalModel(selectedModel);
+}
+
+/**
  * Route a request, honouring executionTarget.
  *
  * ModelRuntime.route() resolves against the cloud catalog and has no
@@ -197,7 +206,8 @@ function routeForTarget(
         "LOCAL execution requires the local model daemon, but its status was not probed for this request.",
       );
     }
-    return modelRuntime.routeLocal(lane, requestedLocalModel(store.state.selectedModel));
+    const reqInfo = requestedLocalModelInfo(store.state.selectedModel);
+    return modelRuntime.routeLocal(lane, reqInfo.model, reqInfo.source);
   }
   return modelRuntime.route(store.state.routingMode, store.state.selectedModel, input);
 }
@@ -931,6 +941,17 @@ export interface CockpitControllerOptions {
 }
 
 export function useCockpitController({ session, store, approvalBridge, sessionBridge, onExit, projectName, branch, modelRuntime, client, signedIn }: CockpitControllerOptions) {
+  // ─── Store ref — breaks the render loop ──────────────────────────
+  // `store` (from useCockpitStore) is a new object every render. Without
+  // this ref, every useCallback that depends on `store` gets a new
+  // identity every render, and the reconcileLocalModel effect re-runs
+  // every render (calling probeLocalLane + setState each time → render
+  // loop / "Maximum update depth exceeded"). The ref holds the latest
+  // store; callbacks read from it at CALL TIME (not capture time) via
+  // `const s = storeRef.current` at the top of each callback body.
+  const storeRef = useRef(store);
+  storeRef.current = store;
+
   // Telemetry store is controller-local (not model truth).
   // useState lazy initializer keeps a single stable instance for the
   // hook's lifetime without touching refs during render.
@@ -944,6 +965,62 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   const cancelRemoteModel = useCallback(() => {
     currentRemoteModelRef.current?.cancel();
   }, []);
+
+  // ─── Watchdog — cancels ALL underlying execution, not just UI state ──
+  // The cockpit-store watchdog only resets UI state (isProcessing,
+  // holoState, etc.). That is insufficient: spawned processes, in-flight
+  // model streams, and tool executions continue running — consuming CPU,
+  // memory, API credits, and performing unwanted filesystem operations.
+  //
+  // This controller-level watchdog does the REAL cancellation:
+  //   1. session.cancel() — kills the entire process tree (ShellExecutor)
+  //   2. cancelRemoteModel() — aborts the in-flight RemoteModelProvider stream
+  //   3. Resets UI state via storeRef (defense-in-depth with the store watchdog)
+  //
+  // The timer starts when isProcessing becomes true and is cleared when
+  // it becomes false. Configurable via LITT_MAX_RUN_MS (default 10 min).
+  const watchdogTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isProcessing = store.state.isProcessing;
+  useEffect(() => {
+    if (isProcessing) {
+      if (watchdogTimerRef.current) clearTimeout(watchdogTimerRef.current);
+      const maxMs = parseInt(process.env.LITT_MAX_RUN_MS ?? "", 10) || 600_000;
+      watchdogTimerRef.current = setTimeout(() => {
+        watchdogTimerRef.current = null;
+        // ── Cancel ALL underlying execution ──
+        // 1. Kill spawned process tree (local tools, shell commands)
+        session.cancel().catch(() => {});
+        // 2. Abort in-flight remote model stream (API credits, network)
+        cancelRemoteModel();
+        // 3. Reset UI state (defense-in-depth with cockpit-store watchdog)
+        const s = storeRef.current;
+        s.actions.setIsProcessing(false);
+        s.actions.stopBusy();
+        s.actions.setHoloState("FAILED");
+        s.actions.clearMission();
+        s.actions.clearToolProgress();
+        s.actions.failToolProgressMission();
+        s.actions.addActivity({
+          id: `act_${Date.now()}_watchdog`,
+          ts: Date.now(),
+          type: "error",
+          tag: "WATCHDOG",
+          text: "Watchdog: run timed out — all underlying execution was cancelled (processes killed, model stream aborted) after exceeding the maximum run duration.",
+        });
+      }, maxMs);
+    } else {
+      if (watchdogTimerRef.current) {
+        clearTimeout(watchdogTimerRef.current);
+        watchdogTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (watchdogTimerRef.current) {
+        clearTimeout(watchdogTimerRef.current);
+        watchdogTimerRef.current = null;
+      }
+    };
+  }, [isProcessing, session, cancelRemoteModel]);
 
   // ─── @mention context logs ──────────────────────────────────────
   // Captured from the runtime event stream so @terminal:last and
@@ -979,16 +1056,17 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   // ─── Session persistence (/resume) ──────────────────────────────
   /** Persist the current shell session (transcript + context). */
   const persistSession = useCallback(() => {
-    const messages = store.state.chatTranscript;
+    const s = storeRef.current;
+    const messages = s.state.chatTranscript;
     if (messages.length === 0) return;
     const firstUser = messages.find((m) => m.role === "user");
     saveSession({
-      project: store.state.project || projectName || "unnamed",
+      project: s.state.project || projectName || "unnamed",
       cwd: session.getCwd(),
-      branch: store.state.branch,
-      mode: store.state.mode,
-      routingMode: store.state.routingMode,
-      selectedModel: store.state.selectedModel,
+      branch: s.state.branch,
+      mode: s.state.mode,
+      routingMode: s.state.routingMode,
+      selectedModel: s.state.selectedModel,
       summary: summarize(firstUser?.content ?? "untitled"),
       messages: messages.map((m) => ({
         role: m.role,
@@ -997,7 +1075,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         ts: m.ts,
       })),
     });
-  }, [store, session, projectName]);
+  }, [session, projectName]);
 
   // Trigger background discovery on mount — populates model availability
   // from real OpenRouter /models endpoint. Non-blocking. The shared
@@ -1023,32 +1101,39 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   const reconcileLocalModel = useCallback(async (
     opts: { force?: boolean } = {},
   ): Promise<string | null> => {
-    if (resolveRoutePolicy(store, signedIn).kind !== "local-required") return null;
+    const s = storeRef.current;
+    if (resolveRoutePolicy(s, signedIn).kind !== "local-required") return null;
     if (opts.force) resetLocalLaneCache();
     const lane = await probeLocalLane();
-    const outcome = resolveLocalModel(lane, requestedLocalModel(store.state.selectedModel));
+    const reqInfo = requestedLocalModelInfo(s.state.selectedModel);
+    const outcome = resolveLocalModel(lane, reqInfo.model, reqInfo.source);
     if (!outcome.ok) {
-      act(store, outcome.error, "error", undefined, "LOCAL");
+      act(s, outcome.error, "error", undefined, "LOCAL");
       return null;
     }
     const { resolution } = outcome;
     modelRuntime.registerLocalModel(resolution);
     // FIXED so cliModeToRouteOptions honours the pick — in "auto" mode
     // the selected id is ignored entirely and the badge would drift back.
-    if (store.state.selectedModel !== resolution.canonicalId) {
-      store.actions.updateSelectedModel(resolution.canonicalId);
+    if (s.state.selectedModel !== resolution.canonicalId) {
+      s.actions.updateSelectedModel(resolution.canonicalId);
     }
-    if (store.state.routingMode !== "fixed") store.actions.updateRoutingMode("fixed");
-    store.actions.setActiveModel(resolution.tag);
-    store.actions.setActiveProvider("ollama");
+    if (s.state.routingMode !== "fixed") s.actions.updateRoutingMode("fixed");
+    s.actions.setActiveModel(resolution.tag);
+    s.actions.setActiveProvider("ollama");
     return resolution.tag;
-  }, [store, signedIn, modelRuntime]);
+  }, [signedIn, modelRuntime]);
 
   // Reconcile once at startup so the footer is truthful BEFORE the first
-  // message, not only after a run has confirmed a served model.
+  // message, not only after a run has confirmed a served model. Also
+  // re-reconcile when executionTarget changes (e.g. /local switch).
+  // NOTE: reconcileLocalModel is now stable (uses storeRef), so this
+  // effect only runs on mount and when executionTarget actually changes —
+  // NOT every render (which was the render-loop root cause).
+  const executionTargetForReconcile = store.state.executionTarget;
   useEffect(() => {
     void reconcileLocalModel();
-  }, [reconcileLocalModel]);
+  }, [reconcileLocalModel, executionTargetForReconcile]);
 
   // Subscribe to approval bridge — when the gateway requests approval,
   // the bridge sets a pending approval and notifies us. Any open overlay
@@ -1056,8 +1141,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   // hidden behind an overlay).
   useEffect(() => {
     return approvalBridge.subscribe((pending) => {
+      const s = storeRef.current;
       if (pending) {
-        store.actions.setApprovalPrompt({
+        s.actions.setApprovalPrompt({
           runId: pending.runId,
           toolCallId: pending.toolCallId,
           toolId: pending.toolId,
@@ -1067,34 +1153,36 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           since: pending.createdAt,
           depth: pending.depth,
         });
-        store.actions.setHoloState("APPROVAL");
-        store.actions.setOverlay("none");
+        s.actions.setHoloState("APPROVAL");
+        s.actions.setOverlay("none");
       }
     });
-  }, [approvalBridge, store]);
+  }, [approvalBridge]);
 
   // ─── Mode toggle (Tab) — live Plan/Act switch ───────────────────
   // PLAN is enforced at the ExecutionGateway: mutations are DENIED,
   // never silently allowed. We only flip the session + store flag.
   const toggleMode = useCallback(() => {
-    const next = store.state.mode === "act" ? "plan" : "act";
-    store.actions.setMode(next);
+    const s = storeRef.current;
+    const next = s.state.mode === "act" ? "plan" : "act";
+    s.actions.setMode(next);
     session.setMode(next);
     act(
-      store,
+      s,
       `Mode: ${next.toUpperCase()}${next === "plan" ? " — read-only, mutations blocked" : " — full execution"}`,
       "mode",
       "decision",
       "MODE",
     );
     persistSession();
-  }, [store, session, persistSession]);
+  }, [session, persistSession]);
 
   // ─── Overlay handlers ───────────────────────────────────────────
   const openPalette = useCallback((query: string) => {
-    store.actions.setOverlay("command-palette");
-    store.actions.setOverlayQuery(query);
-  }, [store]);
+    const s = storeRef.current;
+    s.actions.setOverlay("command-palette");
+    s.actions.setOverlayQuery(query);
+  }, []);
 
   const openFailureView = useCallback(() => {
     const mission = store.state.missionState ?? store.state.lastCompletedMission;
@@ -1105,29 +1193,32 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   }, [store]);
 
   const openContext = useCallback((query: string) => {
-    store.actions.setOverlay("context-picker");
-    store.actions.setOverlayQuery(query);
-  }, [store]);
+    const s = storeRef.current;
+    s.actions.setOverlay("context-picker");
+    s.actions.setOverlayQuery(query);
+  }, []);
 
   /** Append a @token selected from the context picker to the draft. */
   const attachToken = useCallback((token: string) => {
-    const current = store.state.composerValue;
+    const s = storeRef.current;
+    const current = s.state.composerValue;
     // Strip any partial @... already being typed, then append the token.
     const base = current.replace(/@[\w./\\:@-]*$/, "").trimEnd();
-    store.actions.setComposerValue(`${base ? `${base} ` : ""}${token} `);
-    store.actions.setOverlay("none");
-    store.actions.setOverlayQuery("");
-  }, [store]);
+    s.actions.setComposerValue(`${base ? `${base} ` : ""}${token} `);
+    s.actions.setOverlay("none");
+    s.actions.setOverlayQuery("");
+  }, []);
 
   // ─── /diff handlers ─────────────────────────────────────────────
   const [diffRefreshKey, setDiffRefreshKey] = useState(0);
   const openDiffViewer = useCallback(() => {
     setDiffRefreshKey((k) => k + 1);
-    store.actions.setOverlay("diff-viewer");
-  }, [store]);
+    storeRef.current.actions.setOverlay("diff-viewer");
+  }, []);
 
   /** Revert a file (git checkout -- <path>) through the canonical gateway. */
   const revertFile = useCallback(async (path: string) => {
+    const s = storeRef.current;
     const gateway = session.getGateway();
     try {
       const result = await gateway.execute({
@@ -1138,54 +1229,57 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         identity: CLI_IDENTITY,
       });
       act(
-        store,
+        s,
         result.result.success ? `Reverted ${path}` : `Revert failed: ${result.result.message}`,
         result.result.success ? "info" : "error",
         result.result.success ? "success" : "failed",
         "DIFF",
       );
       const gs = getGitState(session.getCwd());
-      store.actions.setWorkspace({ gitModified: gs.changed, gitUntracked: gs.untracked });
+      s.actions.setWorkspace({ gitModified: gs.changed, gitUntracked: gs.untracked });
       setDiffRefreshKey((k) => k + 1);
       persistSession();
     } catch (err) {
-      act(store, `Revert error: ${err instanceof Error ? err.message : String(err)}`, "error", "failed", "DIFF");
+      act(s, `Revert error: ${err instanceof Error ? err.message : String(err)}`, "error", "failed", "DIFF");
     }
-  }, [session, store, persistSession]);
+  }, [session, persistSession]);
 
   const openFileInEditor = useCallback((path: string) => {
     openInEditor(join(session.getCwd(), path));
-    act(store, `Opened ${path}`, "info", "decision", "OPEN");
-  }, [session, store]);
+    act(storeRef.current, `Opened ${path}`, "info", "decision", "OPEN");
+  }, [session]);
 
   const acceptDiff = useCallback(() => {
-    act(store, "Diff reviewed and accepted", "info", "success", "DIFF");
-    store.actions.setOverlay("none");
-  }, [store]);
+    const s = storeRef.current;
+    act(s, "Diff reviewed and accepted", "info", "success", "DIFF");
+    s.actions.setOverlay("none");
+  }, []);
 
   // ─── /workspace ─────────────────────────────────────────────────
   const switchWorkspace = useCallback((entry: WorkspaceEntry) => {
+    const s = storeRef.current;
     session.setCwd(entry.root);
     const gs = getGitState(entry.root);
-    store.actions.setWorkspace({
+    s.actions.setWorkspace({
       project: entry.name,
       cwd: entry.root,
       branch: gs.branch ?? "unknown",
       gitModified: gs.changed,
       gitUntracked: gs.untracked,
     });
-    store.actions.setOverlay("none");
-    act(store, `Workspace → ${entry.name}`, "info", "decision", "WS");
+    s.actions.setOverlay("none");
+    act(s, `Workspace → ${entry.name}`, "info", "decision", "WS");
     persistSession();
-  }, [session, store, persistSession]);
+  }, [session, persistSession]);
 
   // ─── /resume + /new ─────────────────────────────────────────────
   const restoreSession = useCallback((snapshot: SessionSnapshot) => {
+    const s = storeRef.current;
     // Transcript — restore the saved conversation exactly once.
-    store.actions.clearChatTranscript();
+    s.actions.clearChatTranscript();
     for (const m of snapshot.messages) {
       if (m.role !== "user" && m.role !== "assistant") continue;
-      store.actions.addChatMessage({
+      s.actions.addChatMessage({
         role: m.role,
         content: m.content,
         ts: m.ts,
@@ -1194,17 +1288,17 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     }
     // Mode + model route.
     if (snapshot.mode === "plan" || snapshot.mode === "act") {
-      store.actions.setMode(snapshot.mode);
+      s.actions.setMode(snapshot.mode);
       session.setMode(snapshot.mode);
     }
-    if (snapshot.routingMode) store.actions.updateRoutingMode(snapshot.routingMode as RoutingMode);
-    if (snapshot.selectedModel) store.actions.updateSelectedModel(snapshot.selectedModel);
+    if (snapshot.routingMode) s.actions.updateRoutingMode(snapshot.routingMode as RoutingMode);
+    if (snapshot.selectedModel) s.actions.updateSelectedModel(snapshot.selectedModel);
     // Workspace (when the dir still exists).
     try {
       if (existsSync(snapshot.cwd)) {
         session.setCwd(snapshot.cwd);
         const gs = getGitState(snapshot.cwd);
-        store.actions.setWorkspace({
+        s.actions.setWorkspace({
           project: snapshot.project,
           cwd: snapshot.cwd,
           branch: gs.branch ?? snapshot.branch,
@@ -1215,21 +1309,22 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     } catch {
       // Rest of the session restores even if the workspace is gone.
     }
-    store.actions.setOverlay("none");
-    store.actions.setComposerValue("");
-    act(store, `Session restored: ${snapshot.summary}`, "info", "decision", "RESUME");
-  }, [session, store]);
+    s.actions.setOverlay("none");
+    s.actions.setComposerValue("");
+    act(s, `Session restored: ${snapshot.summary}`, "info", "decision", "RESUME");
+  }, [session]);
 
   const newSession = useCallback(() => {
-    store.actions.clearChatTranscript();
-    store.actions.clearMission();
-    store.actions.clearToolProgress();
-    store.actions.setHoloState("IDLE");
-    store.actions.setIsProcessing(false);
-    store.actions.setOverlay("none");
-    store.actions.setComposerValue("");
-    act(store, "New session", "info", "decision", "NEW");
-  }, [store]);
+    const s = storeRef.current;
+    s.actions.clearChatTranscript();
+    s.actions.clearMission();
+    s.actions.clearToolProgress();
+    s.actions.setHoloState("IDLE");
+    s.actions.setIsProcessing(false);
+    s.actions.setOverlay("none");
+    s.actions.setComposerValue("");
+    act(s, "New session", "info", "decision", "NEW");
+  }, []);
 
   // ─── /ship ──────────────────────────────────────────────────────
   const runShipVerify = useCallback(async (): Promise<VerificationResult> => {
@@ -1241,18 +1336,19 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
 
   /** Commit (optionally push) through the canonical gateway. */
   const runShipCommit = useCallback(async (message: string, push: boolean): Promise<{ ok: boolean; message: string }> => {
+    const s = storeRef.current;
     // Runtime gate (defense-in-depth): a commit is ONLY allowed after a
     // verification that PROVEN the work. Missing or failed verification
     // is rejected here regardless of how this function is called — the
     // UI gate in ShipFlow is a first layer, this is the second.
     if (!isShipCommitAllowed(shipVerificationRef.current)) {
-      act(store, "Ship blocked: verification gate has not proven the work.", "error", "failed", "SHIP");
+      act(s, "Ship blocked: verification gate has not proven the work.", "error", "failed", "SHIP");
       return { ok: false, message: "Verification gate not proven — fix failures, then re-open /ship to re-verify before committing." };
     }
     const cwd = session.getCwd();
     const gs = getGitState(cwd);
     if (!gs.isGitRepo) {
-      act(store, "Ship blocked: not a git repository.", "error", "failed", "SHIP");
+      act(s, "Ship blocked: not a git repository.", "error", "failed", "SHIP");
       return { ok: false, message: "Not a git repository" };
     }
 
@@ -1270,7 +1366,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     }
 
     if (changedFiles.length === 0) {
-      act(store, "Ship blocked: no tracked changes to commit.", "error", "failed", "SHIP");
+      act(s, "Ship blocked: no tracked changes to commit.", "error", "failed", "SHIP");
       return { ok: false, message: "No tracked changes to commit" };
     }
 
@@ -1285,25 +1381,25 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       });
 
       const updatedGs = getGitState(cwd);
-      store.actions.setWorkspace({
+      s.actions.setWorkspace({
         gitModified: updatedGs.changed,
         gitUntracked: updatedGs.untracked,
-        branch: updatedGs.branch ?? store.state.branch,
+        branch: updatedGs.branch ?? s.state.branch,
       });
 
       if (result.ok) {
-        act(store, push ? `Shipped: committed + pushed (${result.branch})` : `Shipped: committed (${result.branch})`, "info", "success", "SHIP");
+        act(s, push ? `Shipped: committed + pushed (${result.branch})` : `Shipped: committed (${result.branch})`, "info", "success", "SHIP");
         persistSession();
         return { ok: true, message: push ? `Committed + pushed — ${message} (${result.branch})` : `Committed — ${message} (${result.branch})` };
       } else {
-        act(store, `Ship failed: ${result.message}`, "error", "failed", "SHIP");
+        act(s, `Ship failed: ${result.message}`, "error", "failed", "SHIP");
         return { ok: false, message: result.message };
       }
     } catch (err) {
-      act(store, `Ship failed: ${err instanceof Error ? err.message : String(err)}`, "error", "failed", "SHIP");
+      act(s, `Ship failed: ${err instanceof Error ? err.message : String(err)}`, "error", "failed", "SHIP");
       return { ok: false, message: err instanceof Error ? err.message : String(err) };
     }
-  }, [session, store, persistSession]);
+  }, [session, persistSession]);
 
   // Self-reference for nested submissions (/inspect /fix → mission goal).
   // Kept in a ref so recursion always calls the LATEST submit.
@@ -1312,6 +1408,13 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   // directly without relying on the model to call them.
   const inspectMatchRef = useRef<{ match: import("../lib/read-lane.js").ReadMatch; focus: string } | null>(null);
   const submit = useCallback(async (input: string, opts?: { forceMission?: boolean; forceRead?: boolean; promptOverride?: string }) => {
+    // ─── Store ref — read the LATEST store at CALL TIME ─────────────
+    // submit is a stable callback (no `store` in deps) so it captures
+    // storeRef (a stable ref object). Reading .current here gives the
+    // store at the moment the user pressed Enter — not a stale snapshot
+    // from the render where the callback was created. All subsequent
+    // references to `store` in this function use this local binding.
+    const store = storeRef.current;
     // ─── Re-entrancy guard (defense in depth) ──────────────────────
     // The composer UI disables input while isProcessing is true, but
     // that's a UI-layer debounce, not a hard guarantee — a fast double
@@ -3537,7 +3640,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       text: "LOCAL mode: the local model daemon (Ollama/LM Studio) is not available. Start Ollama with a model installed, or use /remote for cloud execution.",
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, store, onExit, approvalBridge, persistSession, openDiffViewer, newSession, runShipCommit, toggleMode]);
+  }, [session, onExit, approvalBridge, persistSession, openDiffViewer, newSession, runShipCommit, toggleMode]);
 
   // Keep submitRef pointing at the latest submit (self-recursion).
   useEffect(() => {
@@ -3545,13 +3648,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   }, [submit]);
 
   const handleApproval = useCallback(async (approved: boolean) => {
-    const prompt = store.state.approvalPrompt;
+    const s = storeRef.current;
+    const prompt = s.state.approvalPrompt;
     if (!prompt) return;
 
-    store.actions.clearApproval();
+    s.actions.clearApproval();
 
     if (approved) {
-      store.actions.addActivity({
+      s.actions.addActivity({
         id: `act_${Date.now()}`,
         ts: Date.now(),
         type: "approval.granted",
@@ -3560,7 +3664,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         text: `approved: ${prompt.action}`,
       });
     } else {
-      store.actions.addActivity({
+      s.actions.addActivity({
         id: `act_${Date.now()}`,
         ts: Date.now(),
         type: "approval.denied",
@@ -3578,7 +3682,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     // Don't set IDLE here — the gateway execution is still in flight.
     // The submit() callback will set the final holo state when
     // gateway.execute() returns with the actual result.
-  }, [store, approvalBridge]);
+  }, [approvalBridge]);
 
   return {
     submit,
