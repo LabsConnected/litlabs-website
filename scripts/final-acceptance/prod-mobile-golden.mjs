@@ -47,7 +47,7 @@ const DEPLOY_REQUESTED = (process.env.LITT_ACCEPTANCE_DEPLOY ?? "1") !== "0";
 const PROMPT =
   process.env.LITT_ACCEPTANCE_PROMPT ||
   (DEPLOY_REQUESTED
-    ? "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section, then deploy it live."
+    ? "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section, then publish it live to a public URL."
     : "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section.");
 
 const STAMP = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
