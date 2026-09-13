@@ -10,7 +10,7 @@ CREATE EXTENSION IF NOT EXISTS pgtap;
 -- ============================================
 -- Plan: number of test assertions
 -- ============================================
-SELECT plan(44);
+SELECT plan(68);
 
 -- ============================================
 -- 1. Users table: internal UUID + clerk_id
@@ -152,6 +152,88 @@ SELECT ok(
        AND policyname = 'agent_system_notifications_user_isolation'),
     'agent_system_notifications_user_isolation policy exists'
 );
+
+-- ============================================
+-- 5b. V1 user-project deployment tables
+--     (20260912230000_add_project_deployments.sql)
+--     These are the USER-PROJECT publish tables — distinct from the
+--     integration-platform project_deployments table below.
+-- ============================================
+SELECT has_table('public', 'user_project_deployments',
+    'user_project_deployments table exists');
+SELECT has_column('public', 'user_project_deployments', 'id',
+    'user_project_deployments.id exists');
+SELECT col_type_is('public', 'user_project_deployments', 'id', 'uuid',
+    'user_project_deployments.id is UUID');
+SELECT has_column('public', 'user_project_deployments', 'user_id',
+    'user_project_deployments.user_id exists');
+SELECT col_type_is('public', 'user_project_deployments', 'user_id', 'text',
+    'user_project_deployments.user_id is TEXT (Clerk id)');
+SELECT has_column('public', 'user_project_deployments', 'project_id',
+    'user_project_deployments.project_id exists');
+SELECT col_type_is('public', 'user_project_deployments', 'project_id', 'uuid',
+    'user_project_deployments.project_id is UUID');
+SELECT has_column('public', 'user_project_deployments', 'workspace_id',
+    'user_project_deployments.workspace_id exists');
+SELECT has_column('public', 'user_project_deployments', 'status',
+    'user_project_deployments.status exists');
+SELECT has_column('public', 'user_project_deployments', 'public_url',
+    'user_project_deployments.public_url exists');
+SELECT has_column('public', 'user_project_deployments', 'url_verified',
+    'user_project_deployments.url_verified exists');
+SELECT has_column('public', 'user_project_deployments', 'content_hash',
+    'user_project_deployments.content_hash exists');
+
+SELECT has_table('public', 'user_project_deployment_files',
+    'user_project_deployment_files table exists');
+SELECT has_column('public', 'user_project_deployment_files', 'deployment_id',
+    'user_project_deployment_files.deployment_id exists');
+SELECT has_column('public', 'user_project_deployment_files', 'path',
+    'user_project_deployment_files.path exists');
+SELECT has_column('public', 'user_project_deployment_files', 'content_type',
+    'user_project_deployment_files.content_type exists');
+SELECT fk_ok(
+    'public', 'user_project_deployment_files', 'deployment_id',
+    'public', 'user_project_deployments', 'id',
+    'user_project_deployment_files.deployment_id FK → user_project_deployments.id'
+);
+SELECT ok(
+    (SELECT confdeltype = 'c' FROM pg_constraint
+     WHERE conrelid = 'public.user_project_deployment_files'::regclass
+       AND confrelid = 'public.user_project_deployments'::regclass
+       AND contype = 'f'
+     LIMIT 1),
+    'user_project_deployment_files.deployment_id is ON DELETE CASCADE'
+);
+
+-- RLS: both tables are service-role only.
+SELECT ok(
+    (SELECT rowsecurity FROM pg_tables WHERE schemaname = 'public' AND tablename = 'user_project_deployments'),
+    'RLS enabled on user_project_deployments'
+);
+SELECT ok(
+    (SELECT rowsecurity FROM pg_tables WHERE schemaname = 'public' AND tablename = 'user_project_deployment_files'),
+    'RLS enabled on user_project_deployment_files'
+);
+
+-- Duplicate suppression index: one READY deployment per project+content hash.
+SELECT ok(
+    (SELECT COUNT(*) > 0 FROM pg_indexes
+     WHERE schemaname = 'public' AND tablename = 'user_project_deployments'
+       AND indexname = 'uq_user_project_deployments_ready_content'),
+    'uq_user_project_deployments_ready_content index exists'
+);
+
+-- ============================================
+-- 5c. Integration-platform project_deployments is UNTOUCHED
+--     The V1 user deploy tables must never replace or repurpose it.
+-- ============================================
+SELECT has_table('public', 'project_deployments',
+    'integration-platform project_deployments still exists');
+SELECT has_column('public', 'project_deployments', 'integration_project_id',
+    'project_deployments keeps integration_project_id (integration schema intact)');
+SELECT hasnt_column('public', 'project_deployments', 'workspace_id',
+    'project_deployments was NOT repurposed with user-deploy columns');
 
 -- ============================================
 -- 6. Diagnostic SQL absent from migrations
