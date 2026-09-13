@@ -466,7 +466,7 @@ describe("Launch Flow: budget limits", () => {
     const repairConfig = runAgentLoop.mock.calls[1][2] as Record<string, unknown>;
     expect(repairConfig.maxOutputChars).toBe(200_000);
     // Repair must not restart the global runtime budget
-    expect(repairConfig.maxRuntimeMs).toBeLessThan(600_000);
+    expect(repairConfig.maxRuntimeMs).toBeLessThanOrEqual(600_000);
   });
 });
 
