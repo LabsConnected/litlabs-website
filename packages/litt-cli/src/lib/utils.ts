@@ -180,6 +180,7 @@ const LITT_RUNTIME_PACKAGE_NAMES = new Set([
   "litt-runtime",
   "litt-cli",
   "@litlabs/litt-cli",
+  "@litlabs1/litt-cli",
   "@litt/litt-cli",
   "@litt/agent-core",
 ]);

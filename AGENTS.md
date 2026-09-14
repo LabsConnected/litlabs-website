@@ -22,7 +22,7 @@ cd ~/litt-canonical/packages/litt-cli && pnpm link --global
 
 Verify:
 which litt
-the global @litlabs/litt-cli link target should resolve to
+the global @litlabs1/litt-cli link target should resolve to
 ~/litt-canonical/packages/litt-cli
 
 ## Verification Commands

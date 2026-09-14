@@ -13,17 +13,17 @@ Use it to start projects, run local agents, inspect code, run checks, and ship â
 ## Install
 
 ```bash
-npm install -g @litlabs/litt-cli
+npm install -g @litlabs1/litt-cli
 # or
-pnpm add -g @litlabs/litt-cli
+pnpm add -g @litlabs1/litt-cli
 ```
 
 Run once without installing:
 
 ```bash
-npx @litlabs/litt-cli --version
+npx @litlabs1/litt-cli --version
 # or
-pnpm dlx @litlabs/litt-cli --version
+pnpm dlx @litlabs1/litt-cli --version
 ```
 
 ## Quick start
@@ -69,8 +69,8 @@ To build from source:
 git clone https://github.com/LabsConnected/litlabs-website.git
 cd litlabs-website
 pnpm install
-pnpm --filter @litlabs/litt-cli build
-pnpm --filter @litlabs/litt-cli link --global
+pnpm --filter @litlabs1/litt-cli build
+pnpm --filter @litlabs1/litt-cli link --global
 litt --version
 ```
 

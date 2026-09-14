@@ -10,7 +10,7 @@ export const CLI_VERSION = "0.1.0";
 /**
  * The npm package name for upgrade checks.
  */
-export const CLI_PACKAGE_NAME = "@litlabs/litt-cli";
+export const CLI_PACKAGE_NAME = "@litlabs1/litt-cli";
 
 /**
  * Get a human-readable version string.
