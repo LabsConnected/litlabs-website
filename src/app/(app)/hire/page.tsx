@@ -1,8 +1,5 @@
 import { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { SERVICE_OFFER_LIST, formatServicePrice } from "@/config/service-offers";
-import { isFeatureEnabled } from "@/config/feature-flags";
-import HireClient from "./HireClient";
 
 export const metadata: Metadata = {
   title: "Hire LiTTree LabStudios — Launch Sprint, Automation, Brand",
@@ -15,42 +12,15 @@ export const metadata: Metadata = {
   },
 };
 
-export default async function HirePage() {
-  // Retired from the public V1 product. Redirect rather than 404: the
-  // signed-in sidebar still links here until the nav simplification in
-  // PR #209 lands, and sending a visitor to Studio beats a dead link.
-  if (!isFeatureEnabled("hireServices")) {
-    redirect("/studio");
-  }
-
-  // Resolve Stripe Payment Links server-side for each offer.
-  // If a link isn't configured, the button shows "Coming soon".
-  const offers = SERVICE_OFFER_LIST.map((offer) => {
-    let paymentLink: string | null = null;
-    try {
-      const url = process.env[offer.stripePaymentLinkEnv ?? ""];
-      if (url && url.startsWith("https://")) {
-        paymentLink = url;
-      }
-    } catch {
-      // ignore
-    }
-    return {
-      id: offer.id,
-      name: offer.name,
-      tagline: offer.tagline,
-      description: offer.description,
-      price: formatServicePrice(offer.priceCents),
-      deliverables: offer.deliverables,
-      exclusions: offer.exclusions,
-      turnaround: offer.turnaround,
-      icon: offer.icon,
-      accent: offer.accent,
-      featured: offer.featured ?? false,
-      enabled: offer.enabled,
-      paymentLink,
-    };
-  });
-
-  return <HireClient offers={offers} />;
+export default function HirePage() {
+  // /hire is permanently retired from the public V1 product. This redirect
+  // is authoritative and unconditional — it must not be gated behind the
+  // hireServices feature flag (that flag previously let this route flip
+  // back to rendering the retired offer catalog, which conflicted with the
+  // decision to retire it). The offer catalog UI (HireClient), its config
+  // (@/config/service-offers), and the lead-capture API
+  // (/api/leads/service-inquiry) are intentionally left in place in case
+  // the services offering is relaunched, but nothing wires them back into
+  // this route until that decision is made explicitly.
+  redirect("/studio");
 }
