@@ -103,15 +103,29 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     beta: true,
     enabled: true,
   },
+  // RETIRED FROM SALE — existing Founding Members keep everything.
+  //
+  // The $149 one-time offer is no longer sold. The plan definition stays
+  // because it is load-bearing for people who already bought it:
+  // ENTITLEMENTS_BY_PLAN.founder, FOUNDER_ENTITLEMENTS, PLAN_RANK.founder
+  // (equal to creator_beta) and the Stripe webhook path all resolve through
+  // it, and the `plan` column in the subscriptions table stores the literal
+  // id "founder". Deleting it would strand those rows on STARTER_ENTITLEMENTS.
+  //
+  // Two independent things close the purchase path:
+  //   enabled: false        -> removed from PLAN_LIST (so no pricing card)
+  //                            and rejected by the checkout route's
+  //                            `!plan.enabled` guard.
+  //   no stripePriceIdEnv   -> getStripePriceId() returns null, so a session
+  //                            cannot be created even if the guard changed.
   founder: {
     id: "founder",
     name: "Founding Member",
-    description: "Permanent Creator-level access — $149 one-time",
+    description: "Retired one-time tier — permanent Creator-level access for existing members",
     billingType: "one_time",
     monthlyPriceCents: 14900,
     standardPriceCents: null,
     default_price: 14900,
-    stripePriceIdEnv: "STRIPE_PRICE_FOUNDER",
     monthlyCredits: 0,
     activeProjectLimit: 5,
     features: [
@@ -119,7 +133,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
       "Founder badge",
     ],
     beta: true,
-    enabled: true,
+    enabled: false,
     founderLimit: 100,
   },
   owner: {

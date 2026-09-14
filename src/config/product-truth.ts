@@ -227,11 +227,12 @@ export const PLAN_CONTRACTS: Record<PlanId, PlanContract> = {
     billingType: "one_time",
     priceCents: 14900,
     standardPriceCents: null,
-    stripePriceIdEnv: "STRIPE_PRICE_FOUNDER",
+    // Retired from sale — no stripePriceIdEnv, so no purchase path can resolve.
+    // Existing Founding Members keep their entitlements.
     credits: 0,
     creditGrantFrequency: "none",
     activeProjectLimit: 5,
-    checkoutEnabled: true,
+    checkoutEnabled: false,
     beta: true,
     features: [
       "Permanent Creator-level access",
@@ -404,6 +405,13 @@ export const POLICY_STATUSES = {
  * The three official plan products already exist in Stripe at the correct
  * prices. They need to be wired to environment variables — do NOT create
  * new Stripe products for these.
+ *
+ * This is an inventory of what exists in STRIPE, not of what LiTT sells.
+ * The founder entry is retained deliberately: the $149 price object still
+ * exists and still backs historical purchases, so it must not be deleted.
+ * What changed is that LiTT no longer offers it — PLANS.founder has no
+ * stripePriceIdEnv and PLAN_CONTRACTS.founder.checkoutEnabled is false, so
+ * nothing can resolve a new checkout against it.
  */
 export const VERIFIED_STRIPE_PLANS = {
   creator_beta: {

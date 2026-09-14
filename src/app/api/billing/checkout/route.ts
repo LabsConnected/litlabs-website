@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { PLANS, getStripePriceId, type PlanId } from "@/config/plans";
+import { isFeatureEnabled } from "@/config/feature-flags";
 import { withRateLimit } from "@/lib/rate-limiter";
 
 export const runtime = "nodejs";
@@ -22,6 +23,17 @@ async function handler(req: NextRequest) {
     const plan = PLANS[planId as PlanId];
     if (!plan || !plan.enabled) {
       return NextResponse.json({ error: "Invalid or disabled plan" }, { status: 400 });
+    }
+
+    // The founderCheckout flag was previously decorative: nothing read it, so
+    // with STRIPE_PRICE_FOUNDER set in the environment a real $149 one-time
+    // charge could still be created. Enforce it here as well as relying on
+    // `plan.enabled` above.
+    if (plan.id === "founder" && !isFeatureEnabled("founderCheckout")) {
+      return NextResponse.json(
+        { error: "The Founding Member tier is no longer available for purchase." },
+        { status: 410 },
+      );
     }
 
     if (plan.billingType === "free") {

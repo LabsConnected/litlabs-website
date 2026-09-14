@@ -39,10 +39,11 @@ describe("Stripe catalog — verified plan products", () => {
     expect(PLANS.founder.billingType).toBe("one_time");
   });
 
-  it("all three plan env vars are declared", () => {
+  it("both purchasable plan env vars are declared; the retired one is not", () => {
     expect(PLANS.creator_beta.stripePriceIdEnv).toBe("STRIPE_PRICE_CREATOR_BETA");
     expect(PLANS.pro_builder_beta.stripePriceIdEnv).toBe("STRIPE_PRICE_PRO_BUILDER_BETA");
-    expect(PLANS.founder.stripePriceIdEnv).toBe("STRIPE_PRICE_FOUNDER");
+    // Founding Member is retired from sale — deliberately unwired.
+    expect(PLANS.founder.stripePriceIdEnv).toBeUndefined();
   });
 });
 
@@ -84,9 +85,9 @@ describe("Founder entitlement contract", () => {
     expect(features).not.toContain("unlimited");
   });
 
-  it("Founder checkout is enabled", () => {
-    expect(PLANS.founder.enabled).toBe(true);
-    expect(PLAN_CONTRACTS.founder.checkoutEnabled).toBe(true);
+  it("Founder checkout is retired", () => {
+    expect(PLANS.founder.enabled).toBe(false);
+    expect(PLAN_CONTRACTS.founder.checkoutEnabled).toBe(false);
   });
 
   it("Founder plan rank equals Creator Beta (Creator-level access)", () => {
@@ -304,8 +305,9 @@ describe("Billing checkout route requirements", () => {
 
   it("rejects disabled plans", () => {
     // The route checks plan.enabled and returns 400 for disabled plans.
-    // Founder is currently disabled.
-    expect(PLANS.founder.enabled).toBe(true);
+    // Founder is retired, so it is disabled. (This assertion previously
+    // claimed enabled === true while its own comment said otherwise.)
+    expect(PLANS.founder.enabled).toBe(false);
   });
 
   it("returns setup_required when Price ID is not configured", () => {

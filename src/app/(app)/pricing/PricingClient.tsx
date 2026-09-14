@@ -122,11 +122,6 @@ const faq = [
     answer:
       "No. Billable AI and runtime actions have a LiTTBit cost. Free navigation, project organization, and local editing do not. Expensive actions show an estimate before they run.",
   },
-  {
-    question: "What is the Founding Member offer?",
-    answer:
-      "A one-time $149 purchase that grants permanent Creator-level feature access and a Founder badge. No recurring subscription charge. Does not include monthly credit grants — purchase credits separately or subscribe to a paid plan for recurring credits. Checkout is currently unavailable pending an approved Stripe price. Limited to 100 supporters.",
-  },
 ];
 
 function CheckIcon() {
@@ -235,7 +230,7 @@ function PlanCard({
   );
 }
 
-export default function PricingClient({ founderAvailable }: { founderAvailable: boolean }) {
+export default function PricingClient() {
   const { isSignedIn } = useClerkAuth();
   const [loading, setLoading] = useState<PlanId | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -337,43 +332,6 @@ export default function PricingClient({ founderAvailable }: { founderAvailable: 
             />
           ))}
         </div>
-
-        <article className={styles.founderBanner}>
-          <div className={styles.founderMark}>L</div>
-
-          <div className={styles.founderCopy}>
-            <div className={styles.founderTitleRow}>
-              <p>Founding Member</p>
-              {founderAvailable ? (
-                <span>Limited to {PLANS.founder.founderLimit}</span>
-              ) : (
-                <span>Currently Unavailable</span>
-              )}
-            </div>
-            <h2>
-              $149 once. Permanent Creator-level feature access.
-            </h2>
-            <p>
-              Founding Member grants permanent Creator-level feature access and a
-              Founder badge — no recurring subscription charge. Does not include
-              monthly credit grants; purchase credits separately or subscribe to
-              a paid plan for recurring credits.
-              Limited to {PLANS.founder.founderLimit} supporters.
-              {!founderAvailable
-                ? " Checkout is currently unavailable pending an approved Stripe price."
-                : ""}
-            </p>
-          </div>
-
-          <button
-            type="button"
-            className={styles.founderButton}
-            disabled={!founderAvailable}
-            onClick={() => founderAvailable && handleCheckout(PLANS.founder)}
-          >
-            {founderAvailable ? "Become a Founding Member" : "Currently Unavailable"}
-          </button>
-        </article>
 
         {error ? <div className={styles.errorBanner}>{error}</div> : null}
       </section>

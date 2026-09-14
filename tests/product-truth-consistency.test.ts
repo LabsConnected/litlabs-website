@@ -87,9 +87,9 @@ describe("Product-truth consistency", () => {
       expect(PLAN_CONTRACTS.founder.credits).toBe(0);
     });
 
-    it("Founder checkout is enabled", () => {
-      expect(PLANS.founder.enabled).toBe(true);
-      expect(PLAN_CONTRACTS.founder.checkoutEnabled).toBe(true);
+    it("Founder checkout is retired in both sources", () => {
+      expect(PLANS.founder.enabled).toBe(false);
+      expect(PLAN_CONTRACTS.founder.checkoutEnabled).toBe(false);
     });
 
     it("Founder features do not mention six months, $49, or credit-pack discounts", () => {
@@ -196,10 +196,17 @@ describe("Product-truth consistency", () => {
       expect(VERIFIED_STRIPE_PLANS.founder.priceCents).toBe(PLANS.founder.monthlyPriceCents);
     });
 
-    it("verified Stripe plan env vars match plans.ts", () => {
+    it("verified Stripe plan env vars match plans.ts for purchasable plans", () => {
       expect(VERIFIED_STRIPE_PLANS.creator_beta.envVar).toBe(PLANS.creator_beta.stripePriceIdEnv);
       expect(VERIFIED_STRIPE_PLANS.pro_builder_beta.envVar).toBe(PLANS.pro_builder_beta.stripePriceIdEnv);
-      expect(VERIFIED_STRIPE_PLANS.founder.envVar).toBe(PLANS.founder.stripePriceIdEnv);
+    });
+
+    it("the retired Founder price still exists in Stripe but is unwired", () => {
+      // VERIFIED_STRIPE_PLANS is an inventory of Stripe, so the $149 price
+      // stays recorded — historical purchases refer to it. plans.ts no longer
+      // points at it, which is what closes the purchase path.
+      expect(VERIFIED_STRIPE_PLANS.founder.envVar).toBe("STRIPE_PRICE_FOUNDER");
+      expect(PLANS.founder.stripePriceIdEnv).toBeUndefined();
     });
 
     it("LiTT Growth mismatch is documented", () => {
