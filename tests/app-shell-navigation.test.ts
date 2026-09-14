@@ -50,26 +50,22 @@ describe("AppShell Navigation", () => {
       expect(createItem!.href).toBe("/studio?tool=image");
     });
 
-    it("Explore section has Discover and Marketplace", () => {
+    it("Explore section has Games, Discover, Marketplace", () => {
       const explore = APP_NAV_SECTIONS.find((s) => s.id === "explore");
       expect(explore).toBeDefined();
       const labels = explore!.items.map((i) => i.label);
+      expect(labels).toContain("Games");
       expect(labels).toContain("Discover");
       expect(labels).toContain("Marketplace");
     });
 
-    // Regression: Games (/games) and Hire LiTTree (/hire) are retired
-    // behind the retroGameRuntime / hireServices feature flags (both
-    // disabled for v1). /games 404s and /hire redirects straight to
-    // /studio (see tests/hire-redirect.test.ts), so a sidebar link to
-    // either strands the signed-in user on a dead end. The nav must stay
-    // in sync with the same flags their routes check — mirroring the
-    // public Navbar's identical gating.
-    it("does NOT link to /games or /hire while their feature flags are disabled", () => {
+    // Regression: /hire is permanently retired — the page always redirects
+    // to /studio (see tests/hire-redirect.test.ts) — so the signed-in
+    // sidebar must not link to it and strand visitors on a dead-end bounce.
+    it("does NOT link to /hire", () => {
       const explore = APP_NAV_SECTIONS.find((s) => s.id === "explore");
       expect(explore).toBeDefined();
       const hrefs = explore!.items.map((i) => i.href);
-      expect(hrefs).not.toContain("/games");
       expect(hrefs).not.toContain("/hire");
     });
   });

@@ -30,9 +30,7 @@ import {
   Compass,
   Terminal,
   Mic,
-  Rocket,
 } from "lucide-react";
-import { isFeatureEnabled } from "@/config/feature-flags";
 
 export type NavItem = {
   label: string;
@@ -92,25 +90,13 @@ export const APP_NAV_SECTIONS: NavSection[] = [
   {
     id: "explore",
     label: "Explore",
-    // Games (retroGameRuntime) and Hire (hireServices) are retired for v1
-    // behind feature flags — /games 404s and /hire redirects to /studio
-    // while their flags are off, so a sidebar link to either is a dead
-    // end. Filtered here (the single source AppShell renders from) using
-    // the same flags their routes already check, so this list stays in
-    // sync automatically if either flag is re-enabled. Mirrors the public
-    // Navbar's identical gating (src/components/Navbar.tsx). See
-    // src/config/feature-flags.ts.
     items: [
       { label: "Games", href: "/games", icon: GamesIcon },
       { label: "Discover", href: "/discover", icon: Compass },
       { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
-      { label: "Hire LiTTree", href: "/hire", icon: Rocket },
-    ].filter((item) => {
-      if (item.href === "/games") return isFeatureEnabled("retroGameRuntime");
-      if (item.href === "/hire") return isFeatureEnabled("hireServices");
-      if (item.href === "/discover") return isFeatureEnabled("communitySocial");
-      return true;
-    }),
+      // /hire is permanently retired (always redirects to /studio — see
+      // src/app/(app)/hire/page.tsx) so it is not a nav destination.
+    ],
   },
 ];
 
