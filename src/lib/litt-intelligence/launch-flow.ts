@@ -314,6 +314,10 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
 
     let agentResult = await runPhase1(options.userMessage);
     lastAgentLoopResult = agentResult;
+    // An execution abort that landed mid-loop surfaces inside the agent
+    // result as a provider failure — re-check the signal so an explicit
+    // cancellation is reported as "cancelled", not a model failure.
+    checkSignal(signal);
 
     // A pause for a sensitive action (e.g. project.deploy) is not a failure:
     // the build output already exists in the workspace, so still bring the
@@ -340,6 +344,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           `Write or modify the project files with the file tools (files.write / apply_patch), then stop.`,
         );
         lastAgentLoopResult = agentResult;
+        checkSignal(signal);
         pausedApproval = agentResult.pendingApproval;
         if (!pausedApproval) {
           const guarded = guardPhase1(agentResult);
@@ -400,6 +405,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
         progress,
       );
       lastAgentLoopResult = repairResult;
+      checkSignal(signal);
 
       if (repairResult.pendingApproval) {
         return baseResult({

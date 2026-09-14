@@ -77,6 +77,13 @@ export interface LLMOptions {
   byokProvider?: "openai" | "anthropic";
   /** Braintrust eval metadata (agent slug, mode, conversation ID, etc.). */
   evalMetadata?: LLMCallMetadata;
+  /**
+   * Optional caller-provided execution signal. When aborted, the in-flight
+   * provider request/stream is cancelled and streamText rejects — the
+   * provider failover chain is NOT used for aborts (an explicit stop is
+   * not a provider failure).
+   */
+  signal?: AbortSignal;
 }
 
 export interface LLMUsage {
@@ -252,13 +259,25 @@ async function fetchWithTimeout(
   url: string,
   init: RequestInit,
   timeoutMs: number,
+  externalSignal?: AbortSignal,
 ): Promise<Response> {
   const ctrl = new AbortController();
   const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+  // An external execution abort wins over the timeout — forward it into
+  // the same controller so the fetch rejects immediately.
+  const onExternalAbort = () => ctrl.abort(externalSignal?.reason);
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      ctrl.abort(externalSignal.reason);
+    } else {
+      externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+    }
+  }
   try {
     return await fetch(url, { ...init, signal: ctrl.signal });
   } finally {
     clearTimeout(tid);
+    externalSignal?.removeEventListener("abort", onExternalAbort);
   }
 }
 
@@ -683,6 +702,10 @@ export async function streamText(
 
   let lastErr: unknown = null;
   for (const provider of chain) {
+    // An aborted execution signal must not start another provider call.
+    if (options.signal?.aborted) {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    }
     // Circuit breaker: skip models temporarily marked unavailable
     if (isModelInCooldown(provider)) {
       failover.push(provider);
@@ -747,6 +770,13 @@ export async function streamText(
       });
       return result;
     } catch (err) {
+      // An explicit caller abort is not a provider failure — surface it
+      // immediately instead of failing over to the next provider.
+      if (options.signal?.aborted) {
+        throw err instanceof Error
+          ? err
+          : new DOMException("The operation was aborted.", "AbortError");
+      }
       lastErr = err;
       const isProviderError = err instanceof ProviderError;
       recordLLMCall({
@@ -794,8 +824,13 @@ async function streamViaGemini(
   const fullPrompt = p.systemPrompt
     ? `${p.systemPrompt}\n\n${p.prompt}`
     : p.prompt;
-  const result = await model.generateContentStream(fullPrompt);
+  const result = await model.generateContentStream(fullPrompt, {
+    signal: p.opts.signal,
+  });
   for await (const chunk of result.stream) {
+    if (p.opts.signal?.aborted) {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    }
     // Gemini 2.5 thinking models emit thought parts separately from text.
     // chunk.text() concatenates only the non-thought text parts, so we also
     // inspect parts for thoughtSignature/thought markers when present.
@@ -863,6 +898,7 @@ async function streamViaOpenRouter(
       body: JSON.stringify(body),
     },
     timeoutMs,
+    p.opts.signal,
   );
 
   if (!res.ok || !res.body) {
@@ -876,6 +912,16 @@ async function streamViaOpenRouter(
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
+  // Cancel the HTTP stream promptly on a caller abort — real cancellation,
+  // not just ignoring the remaining chunks. Check `aborted` first: an
+  // already-aborted signal never re-fires the listener, and skipping this
+  // would leave reader.read() hanging forever.
+  const abortReader = () => { void reader.cancel().catch(() => {}); };
+  if (p.opts.signal?.aborted) {
+    abortReader();
+  } else {
+    p.opts.signal?.addEventListener("abort", abortReader, { once: true });
+  }
   let buffer = "";
   while (true) {
     const { done, value } = await reader.read();
@@ -901,6 +947,10 @@ async function streamViaOpenRouter(
         // ignore malformed chunk
       }
     }
+  }
+  p.opts.signal?.removeEventListener("abort", abortReader);
+  if (p.opts.signal?.aborted) {
+    throw new DOMException("The operation was aborted.", "AbortError");
   }
   return { provider, model: modelName, latencyMs: Date.now() - t0, failover };
 }
@@ -944,6 +994,7 @@ async function streamViaOpenAI(
       body: JSON.stringify(body),
     },
     timeoutMs,
+    p.opts.signal,
   );
 
   if (!res.ok || !res.body) {
@@ -957,6 +1008,12 @@ async function streamViaOpenAI(
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
+  const abortReader = () => { void reader.cancel().catch(() => {}); };
+  if (p.opts.signal?.aborted) {
+    abortReader();
+  } else {
+    p.opts.signal?.addEventListener("abort", abortReader, { once: true });
+  }
   let buffer = "";
   while (true) {
     const { done, value } = await reader.read();
@@ -977,6 +1034,10 @@ async function streamViaOpenAI(
         // Ignore malformed chunks and continue consuming the stream.
       }
     }
+  }
+  p.opts.signal?.removeEventListener("abort", abortReader);
+  if (p.opts.signal?.aborted) {
+    throw new DOMException("The operation was aborted.", "AbortError");
   }
 
   return {
@@ -1027,6 +1088,7 @@ async function streamViaGroq(
       body: JSON.stringify(body),
     },
     timeoutMs,
+    p.opts.signal,
   );
 
   if (!res.ok || !res.body) {
@@ -1040,6 +1102,12 @@ async function streamViaGroq(
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
+  const abortReader = () => { void reader.cancel().catch(() => {}); };
+  if (p.opts.signal?.aborted) {
+    abortReader();
+  } else {
+    p.opts.signal?.addEventListener("abort", abortReader, { once: true });
+  }
   let buffer = "";
   while (true) {
     const { done, value } = await reader.read();
@@ -1061,6 +1129,10 @@ async function streamViaGroq(
         // ignore malformed chunk
       }
     }
+  }
+  p.opts.signal?.removeEventListener("abort", abortReader);
+  if (p.opts.signal?.aborted) {
+    throw new DOMException("The operation was aborted.", "AbortError");
   }
   return { provider, model: modelName, latencyMs: Date.now() - t0, failover };
 }
