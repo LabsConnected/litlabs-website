@@ -1,5 +1,5 @@
 {
-  "name": "@litlabs/litt-cli",
+  "name": "@litlabs1/litt-cli",
   "version": "0.1.0",
   "description": "LiTT CLI — AI operating system for your terminal",
   "type": "module",
@@ -7,7 +7,7 @@
   "license": "UNLICENSED",
   "repository": {
     "type": "git",
-    "url": "https://github.com/LabsConnected/litlabs-website.git",
+    "url": "git+https://github.com/LabsConnected/litlabs-website.git",
     "directory": "packages/litt-cli"
   },
   "homepage": "https://litlabs.net/cli",
@@ -25,10 +25,11 @@
     "deploy"
   ],
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "bin": {
-    "litt": "./dist/index.js"
+    "litt": "dist/index.js"
   },
   "files": [
     "dist",
@@ -60,5 +61,9 @@
   },
   "engines": {
     "node": ">=22"
-  }
+  },
+  "bundleDependencies": [
+    "@litt/models",
+    "@litt/agent-core"
+  ]
 }
