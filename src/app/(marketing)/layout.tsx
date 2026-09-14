@@ -3,6 +3,8 @@ import { WalletProvider } from "@/context/WalletContext";
 import UserSync from "@/components/UserSync";
 import CookieConsent from "@/components/CookieConsent";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
+import MarketingHeader from "@/components/marketing/MarketingHeader";
+import MarketingFooter from "@/components/marketing/MarketingFooter";
 
 /**
  * Marketing layout — public-facing pages.
@@ -11,6 +13,10 @@ import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
  * auth component (LandingHeaderAuth → NavAuth) calls useProfile/useWallet
  * to show the right auth state. These are lightweight context providers,
  * NOT app chrome.
+ *
+ * Renders the shared MarketingHeader/MarketingFooter inside a .litt-landing
+ * wrapper so every public marketing page (/, /cli, /pricing) gets the same
+ * navigation, footer, and landing design tokens.
  *
  * This layout does NOT include:
  * - LayoutShell / AppShell (dashboard sidebar, bottom nav)
@@ -30,7 +36,11 @@ export default function MarketingLayout({
     <ProfileProvider>
       <WalletProvider>
         {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-        {children}
+        <div className="litt-landing">
+          <MarketingHeader />
+          {children}
+          <MarketingFooter />
+        </div>
         <CookieConsent />
         <ServiceWorkerRegistration />
       </WalletProvider>

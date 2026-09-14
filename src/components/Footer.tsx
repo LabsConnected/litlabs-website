@@ -25,7 +25,7 @@ const COMPANY_LINKS = [
 ];
 
 const CONNECT_LINKS = [
-  { href: "https://github.com", label: "GitHub", external: true },
+  { href: "https://github.com/LabsConnected", label: "GitHub", external: true },
 ];
 
 export default function Footer() {

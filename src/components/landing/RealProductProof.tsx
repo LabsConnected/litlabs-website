@@ -84,10 +84,11 @@ export function RealProductProof() {
                     <Play size={28} fill="currentColor" />
                   </div>
                   <div>
-                    <p className="text-lg font-black text-white">Real recording coming soon</p>
+                    <p className="text-lg font-black text-white">A mission, step by step</p>
                     <p className="mt-2 max-w-md text-sm leading-6 text-white/42">
-                      This section is ready for an authentic LiTT session capture.
-                      The placeholder shows the exact flow a real recording should demonstrate.
+                      Every LiTT session follows the same visible path — understand
+                      the brief, plan the work, edit real files, run tools, verify
+                      the result, and hand it back to you.
                     </p>
                   </div>
                 </div>
@@ -110,12 +111,6 @@ export function RealProductProof() {
                       </div>
                     );
                   })}
-                </div>
-
-                <div className="mt-6 rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3 text-center">
-                  <p className="text-[10px] font-bold text-white/30">
-                    Required asset: <span className="text-white/50">/demos/litt-real-session.mp4</span> — H.264, 1280×720, 20–45s, muted, with poster image
-                  </p>
                 </div>
               </div>
             </div>

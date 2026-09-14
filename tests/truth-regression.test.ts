@@ -176,7 +176,7 @@ describe("Billable cost claims are accurate", () => {
     const path = await import("path");
     const pricingPath = path.resolve(
       process.cwd(),
-      "src/app/(app)/pricing/PricingClient.tsx",
+      "src/app/(marketing)/pricing/PricingClient.tsx",
     );
     const src = await fs.readFile(pricingPath, "utf-8");
     // The old claim "Every action shows its cost before it runs" is

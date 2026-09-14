@@ -1,9 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
-import { Terminal, Copy, Check, Download, ArrowRight } from "lucide-react";
-import Footer from "@/components/Footer";
+import { Terminal, Copy, Check, Download } from "lucide-react";
 
 const INSTALL_COMMANDS = {
   npm: "npm install -g @litlabs/litt-cli",
@@ -43,45 +41,9 @@ function CodeBlock({ command, label }: { command: string; label: string }) {
   );
 }
 
-function BrandMark() {
-  return (
-    <span className="relative grid h-9 w-9 place-items-center overflow-hidden rounded-xl border border-[#a8ff2f]/30 bg-[#a8ff2f]/10 text-[#a8ff2f] shadow-[0_0_26px_rgba(168,255,47,.16)]">
-      <Terminal size={18} />
-      <span className="absolute inset-x-1 bottom-0 h-px bg-linear-to-r from-transparent via-[#a8ff2f] to-transparent" />
-    </span>
-  );
-}
-
-function Header() {
-  return (
-    <header className="fixed inset-x-0 top-0 z-50 border-b border-white/8 bg-[#03050a]/90 backdrop-blur-xl">
-      <div className="mx-auto flex h-[68px] max-w-[1500px] items-center justify-between px-5 lg:px-8">
-        <Link href="/" className="flex items-center gap-2.5 font-black tracking-[-0.02em] text-white">
-          <BrandMark />
-          <span className="hidden sm:block">LiTTree <span className="text-white/48">LabStudios</span></span>
-          <span className="sm:hidden">LiTTree</span>
-        </Link>
-        <nav aria-label="Primary navigation" className="hidden items-center gap-7 text-[13px] font-bold text-white/55 lg:flex">
-          <Link href="/" className="transition hover:text-white">Home</Link>
-          <Link href="/studio" className="transition hover:text-white">Studio</Link>
-          <Link href="/pricing" className="transition hover:text-white">Pricing</Link>
-        </nav>
-        <Link
-          href="/sign-up"
-          className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-[#a8ff2f] px-4 py-2 text-sm font-bold text-[#03050a] transition hover:brightness-105"
-        >
-          Get LiTT free <ArrowRight size={14} />
-        </Link>
-      </div>
-    </header>
-  );
-}
-
 export default function CliPageClient() {
   return (
     <main id="main-content" className="min-h-dvh bg-[#03050a] text-white selection:bg-[#a8ff2f] selection:text-[#03050a]">
-      <Header />
-
       <section className="relative overflow-hidden pb-12 pt-[120px] lg:pt-[160px]">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(169,112,255,.12),transparent_40%),radial-gradient(circle_at_80%_100%,rgba(168,255,47,.08),transparent_40%)]" />
         <div className="relative mx-auto max-w-[1100px] px-5 lg:px-8">
@@ -153,8 +115,6 @@ export default function CliPageClient() {
           </div>
         </div>
       </section>
-
-      <Footer />
     </main>
   );
 }
