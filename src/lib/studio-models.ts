@@ -147,7 +147,11 @@ export const CODE_MODELS: StudioModel[] = [
   { id: "qwen-coder", name: "Qwen3 Coder", short: "Qwen", provider: "openrouter", cost: "free", speed: "fast", icon: "⌨️", apiProvider: "openrouter-qwen" },
   { id: "gemini-flash", name: "Gemini 3.6 Flash", short: "Gemini", provider: "gemini", cost: "free", speed: "fast", icon: "⚡" },
   { id: "groq-llama", name: "Groq Llama 70B", short: "Groq", provider: "groq", cost: "free", speed: "fast", icon: "🚀", apiProvider: "groq" },
-  { id: "gpt-4o", name: "GPT-4o", short: "GPT-4o", provider: "openai", cost: "paid", speed: "fast", icon: "🔮" },
+  // BYOK only — consistent with the CHAT_MODELS entry above. Previously this
+  // offered GPT-4o as a plain paid option with no `category: "byok"`, so the
+  // code-model picker advertised a route that would have billed LiTT's own
+  // OpenAI credential rather than the user's.
+  { id: "gpt-4o", name: "GPT-4o (BYOK)", short: "GPT-4o", provider: "openai", cost: "paid", speed: "fast", icon: "🔑", category: "byok", apiModel: "gpt-4o", description: "Provider bills you directly. No LiTT model markup.", bitsLabel: "No LiTTBits" },
 ];
 
 export type MediaModel = {
