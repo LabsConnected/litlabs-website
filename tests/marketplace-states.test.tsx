@@ -6,9 +6,10 @@
  *  5. Marketplace distinguishes loading, empty, and error states.
  *
  * The marketplace page (src/app/(app)/marketplace/page.tsx) fetches
- * items from /api/marketplace/items via requestAnimationFrame. We use
- * real timers (rAF is not fakeable in jsdom) and waitFor for async
- * state transitions.
+ * items from /api/marketplace/items directly on mount (see the
+ * requestAnimationFrame regression test below for why it must not be
+ * deferred behind rAF). waitFor is used for the resulting async state
+ * transitions.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, act } from "@testing-library/react";
@@ -107,6 +108,117 @@ describe("Marketplace state distinctions", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.clearAllMocks();
+  });
+
+  it("times out and shows a retry action when the items fetch never settles", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // Fetch that never resolves and never rejects — simulates a stalled
+    // network / hung backend. It only settles if aborted.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string, init?: { signal?: AbortSignal }) => {
+        if (url.includes("/api/marketplace/items")) {
+          return new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              const err = new Error("Aborted");
+              err.name = "AbortError";
+              reject(err);
+            });
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ installations: [] }),
+        });
+      }),
+    );
+
+    const mod = await import("@/app/(app)/marketplace/page");
+    await act(async () => {
+      render(React.createElement(mod.default));
+    });
+
+    // Before the timeout fires, it's still loading.
+    expect(screen.getByText("Loading capabilities...")).toBeTruthy();
+
+    // Fast-forward past the bounded fetch timeout — the fetch must abort
+    // and the page must surface the existing error + Retry UI instead of
+    // spinning forever.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15000);
+    });
+
+    expect(screen.getByText(/Marketplace couldn.*load/)).toBeTruthy();
+    expect(screen.getByText("Retry")).toBeTruthy();
+
+    vi.useRealTimers();
+  });
+
+  it("times out and shows a retry action when auth never reports isLoaded", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const useClerkAuthMock = vi.mocked((await import("@/hooks/useClerkAuth")).useClerkAuth);
+    useClerkAuthMock.mockReturnValue({
+      isLoaded: false,
+      isSignedIn: false,
+      userId: null,
+      sessionClaims: undefined,
+      getToken: vi.fn(),
+      signOut: vi.fn(),
+    });
+    mockFetchItems([SAMPLE_ITEM]);
+
+    const mod = await import("@/app/(app)/marketplace/page");
+    await act(async () => {
+      render(React.createElement(mod.default));
+    });
+
+    expect(screen.getByText("Loading marketplace...")).toBeTruthy();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
+
+    expect(
+      screen.getByText("Marketplace is taking longer than expected to load."),
+    ).toBeTruthy();
+    expect(screen.getByText("Retry")).toBeTruthy();
+
+    vi.useRealTimers();
+    // vi.clearAllMocks() (afterEach) resets call history but not a
+    // mockReturnValue — restore the module's default so later tests get
+    // a signed-in, loaded user again.
+    useClerkAuthMock.mockReturnValue({
+      isLoaded: true,
+      isSignedIn: true,
+      userId: "u1",
+      sessionClaims: undefined,
+      getToken: vi.fn(),
+      signOut: vi.fn(),
+    });
+  });
+
+  it("starts loading items without waiting on requestAnimationFrame", async () => {
+    // Regression for the marketplace first-load stall: browsers pause
+    // requestAnimationFrame entirely while a tab is backgrounded/hidden
+    // (e.g. a link opened in a new background tab), so gating the very
+    // first data fetch behind rAF could leave the page on the loading
+    // skeleton forever — the fetch never even started, so the bounded
+    // fetch timeout above never had anything in flight to abort. The
+    // initial load must not depend on rAF ever firing.
+    const rafSpy = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 0);
+    mockFetchItems([SAMPLE_ITEM]);
+
+    const mod = await import("@/app/(app)/marketplace/page");
+    await act(async () => {
+      render(React.createElement(mod.default));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Test Tool")).toBeTruthy();
+    });
+
+    rafSpy.mockRestore();
   });
 
   it("shows a loading message while items are being fetched", async () => {

@@ -68,6 +68,12 @@ type MarketplaceStats = {
 
 const ALL_ITEMS_FREE_DURING_BETA = false;
 
+// Bounds on first-load waits so a slow/stalled network or auth provider
+// can never leave the page spinning forever — see marketplace first-load
+// stall fix.
+const ITEMS_FETCH_TIMEOUT_MS = 12000;
+const AUTH_LOAD_TIMEOUT_MS = 8000;
+
 // --- Category config ---
 
 const CATEGORIES = [
@@ -138,23 +144,41 @@ function MarketplaceInner() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [activeTab, setActiveTab] = useState<"marketplace" | "beta">("marketplace");
+  const [authTimedOut, setAuthTimedOut] = useState(false);
 
   // Sync tab from URL after hydration to avoid SSR/client mismatch (React #418)
   useEffect(() => {
     if (searchParams.get("tab") === "beta") setActiveTab("beta");
   }, [searchParams]);
 
+  // If the auth provider never reports isLoaded (slow/blocked script,
+  // network blip), stop spinning after a bound and offer a retry instead
+  // of hanging indefinitely (see marketplace first-load stall fix).
+  useEffect(() => {
+    if (isLoaded) {
+      setAuthTimedOut(false);
+      return;
+    }
+    const id = setTimeout(() => setAuthTimedOut(true), AUTH_LOAD_TIMEOUT_MS);
+    return () => clearTimeout(id);
+  }, [isLoaded]);
+
   const showToast = (msg: string, type: "success" | "error" | "info" = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   };
 
-  // Load items from /api/marketplace/items
+  // Load items from /api/marketplace/items. Bounded by a client-side
+  // timeout — a stalled network or slow backend must surface the retry
+  // UI below instead of spinning forever (see marketplace first-load
+  // stall fix).
   const loadItems = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), ITEMS_FETCH_TIMEOUT_MS);
     try {
-      const res = await fetch("/api/marketplace/items");
+      const res = await fetch("/api/marketplace/items", { signal: controller.signal });
       if (!res.ok) {
         setLoadError(true);
         return;
@@ -164,8 +188,10 @@ function MarketplaceInner() {
         setItems(data.items);
       }
     } catch {
+      // Covers network failure and the abort-on-timeout case above.
       setLoadError(true);
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   }, []);
@@ -188,12 +214,17 @@ function MarketplaceInner() {
     }
   }, [isSignedIn]);
 
+  // Root cause of the first-load stall: browsers pause
+  // requestAnimationFrame entirely while a tab is backgrounded/hidden (a
+  // link opened in a new background tab, a quick tab-switch during
+  // navigation, low-power mode, etc). This effect used to gate the very
+  // first items/installations fetch behind an rAF callback, so on an
+  // affected first load the fetch never even started and the page sat on
+  // the loading skeleton indefinitely — before the bounded timeouts below
+  // ever had anything in flight to time out. Fire the load directly.
   useEffect(() => {
-    const id = requestAnimationFrame(() => {
-      loadItems();
-      if (isSignedIn) loadInstalled();
-    });
-    return () => cancelAnimationFrame(id);
+    loadItems();
+    if (isSignedIn) loadInstalled();
   }, [loadItems, loadInstalled, isSignedIn]);
 
   const installItem = useCallback(async (item: MarketplaceItem) => {
@@ -311,6 +342,21 @@ function MarketplaceInner() {
   }), [items, installations]);
 
   if (!isLoaded) {
+    if (authTimedOut) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-[#0a0a0f] text-white/50">
+          <div className="text-center">
+            <p className="text-sm text-white/60">Marketplace is taking longer than expected to load.</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-3 rounded-lg border border-white/10 px-4 py-2 text-sm text-white/60 hover:bg-white/5"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0a0a0f] text-white/50">
         <div className="text-center">
