@@ -1,19 +1,9 @@
 ---
-description: "Core engineering, validation, git-workflow, performance, and error-handling rules for all work in this repo"
+description: "Core engineering, validation, performance, and error-handling rules for all work in this repo"
 trigger: always_on
 ---
 
 # Core Engineering & Workflow
-
-## Repository & branch workflow
-
-- Treat `~/litt-canonical` as the canonical repository; it should normally remain on `main`.
-- Feature work belongs in `~/litt-worktrees/...` or another dedicated worktree.
-- Never leave canonical `main` in the middle of a merge, rebase, or cherry-pick.
-- If canonical is dirty or mid-operation, diagnose it before starting new work.
-- Do not copy files manually between worktrees when Git can perform the operation safely.
-- Do not merge partially validated work into `main`; do not force-push `main`; do not reset canonical `main` to a feature branch.
-- Delete temporary worktrees/branches only after the work is safely merged or intentionally abandoned.
 
 ## Validation
 
