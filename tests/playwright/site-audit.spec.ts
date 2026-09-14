@@ -273,7 +273,10 @@ test.describe("Site Audit — Navigation Links @public", () => {
         !href.startsWith("#") &&
         !href.startsWith("tel:")
       ) {
-        hrefs.add(href);
+        // Strip the fragment: same-document hash links (e.g. /#section)
+        // return a null response from page.goto — the fragment is scroll
+        // position, not part of the route being verified.
+        hrefs.add(href.split("#")[0] || "/");
       }
     }
 

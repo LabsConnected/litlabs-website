@@ -12,8 +12,9 @@ import { YouTubePlayerShell } from "@/components/youtube/YouTubePlayerShell";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 
 // Routes that render minimal chrome (no navbar / footer).
-// Only truly public pages: auth, legal, docs, pricing.
+// Only truly public pages: auth, legal, docs.
 // Note: /hire is hybrid — bare for signed-out, AppShell for signed-in.
+// /pricing lives in the (marketing) route group now — it never renders here.
 const BARE_PUBLIC_PATHS = [
   "/login",
   "/sign-in",
@@ -23,7 +24,6 @@ const BARE_PUBLIC_PATHS = [
   "/terms",
   "/cookies",
   "/docs",
-  "/pricing",
 ];
 
 // Routes that are bare-public ONLY when signed out.
