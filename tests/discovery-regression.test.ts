@@ -365,3 +365,67 @@ describe("Discovery regression — showcase metadata", () => {
     expect(src).toContain('path: "/showcase"');
   });
 });
+
+// ── Discover feed visitor copy ──────────────────────────
+describe("Discovery regression — Discover feed visitor copy", () => {
+  it("does not expose backend implementation detail to visitors", () => {
+    const src = readFileSync(
+      path.resolve(__dirname, "../src/components/SocialPageContent.tsx"),
+      "utf-8"
+    );
+    expect(src.toLowerCase()).not.toContain("connect supabase");
+  });
+
+  it("mock feed comments match the ApiPost comments shape (author object, content field)", () => {
+    const src = readFileSync(
+      path.resolve(__dirname, "../src/app/api/posts/route.ts"),
+      "utf-8"
+    );
+    expect(src).toMatch(/content:\s*\n\s*"Excellent execution/);
+    expect(src).toMatch(/author:\s*\{\s*name:\s*"Director"/);
+  });
+});
+
+// ── Sign-up / Sign-in metadata and heading ──────────────
+describe("Discovery regression — Sign-up page", () => {
+  it("layout exports buildMetadata with a Sign Up title", () => {
+    const src = readFileSync(
+      path.resolve(__dirname, "../src/app/(app)/sign-up/layout.tsx"),
+      "utf-8"
+    );
+    expect(src).toContain("buildMetadata");
+    expect(src).toContain('title: "Sign Up"');
+    expect(src).toContain('path: "/sign-up"');
+  });
+
+  it("hides Clerk's built-in header to avoid a duplicate stacked heading", () => {
+    const src = readFileSync(
+      path.resolve(
+        __dirname,
+        "../src/app/(app)/sign-up/[[...sign-up]]/page.tsx"
+      ),
+      "utf-8"
+    );
+    expect(src).toContain('header: { display: "none" }');
+  });
+});
+
+describe("Discovery regression — Sign-in page", () => {
+  it("layout exports buildMetadata with a Sign In title", () => {
+    const src = readFileSync(
+      path.resolve(__dirname, "../src/app/sign-in/layout.tsx"),
+      "utf-8"
+    );
+    expect(src).toContain("buildMetadata");
+    expect(src).toContain('title: "Sign In"');
+    expect(src).toContain('path: "/sign-in"');
+  });
+
+  it("hides Clerk's built-in header to avoid a duplicate stacked heading", () => {
+    const src = readFileSync(
+      path.resolve(__dirname, "../src/app/sign-in/page.tsx"),
+      "utf-8"
+    );
+    expect(src).toContain('header: { display: "none" }');
+  });
+});
