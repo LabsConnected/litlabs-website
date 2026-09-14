@@ -9,14 +9,18 @@
  */
 import { describe, it, expect } from "vitest";
 import { render, screen, within } from "@testing-library/react";
+import { ThemeProvider } from "@/context/ThemeContext";
 import DocsLayout from "@/app/(app)/docs/layout";
 
 describe("/docs layout", () => {
   it("renders the shared MarketingHeader and MarketingFooter around the page content", () => {
+    // DocsShell uses useTheme; the root layout always provides ThemeProvider in production.
     render(
-      <DocsLayout>
-        <div data-testid="docs-page-content">docs content</div>
-      </DocsLayout>,
+      <ThemeProvider>
+        <DocsLayout>
+          <div data-testid="docs-page-content">docs content</div>
+        </DocsLayout>
+      </ThemeProvider>,
     );
 
     // Header: brand link + primary nav landmark.
