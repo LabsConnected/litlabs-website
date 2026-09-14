@@ -9,17 +9,14 @@
  */
 import { describe, it, expect } from "vitest";
 import { render, screen, within } from "@testing-library/react";
-import * as React from "react";
 import DocsLayout from "@/app/(app)/docs/layout";
 
 describe("/docs layout", () => {
   it("renders the shared MarketingHeader and MarketingFooter around the page content", () => {
     render(
-      React.createElement(
-        DocsLayout,
-        {},
-        React.createElement("div", { "data-testid": "docs-page-content" }, "docs content"),
-      ),
+      <DocsLayout>
+        <div data-testid="docs-page-content">docs content</div>
+      </DocsLayout>,
     );
 
     // Header: brand link + primary nav landmark.
