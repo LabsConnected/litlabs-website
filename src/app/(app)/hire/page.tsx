@@ -1,5 +1,7 @@
 import { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { SERVICE_OFFER_LIST, formatServicePrice } from "@/config/service-offers";
+import { isFeatureEnabled } from "@/config/feature-flags";
 import HireClient from "./HireClient";
 
 export const metadata: Metadata = {
@@ -14,6 +16,13 @@ export const metadata: Metadata = {
 };
 
 export default async function HirePage() {
+  // Retired from the public V1 product. Redirect rather than 404: the
+  // signed-in sidebar still links here until the nav simplification in
+  // PR #209 lands, and sending a visitor to Studio beats a dead link.
+  if (!isFeatureEnabled("hireServices")) {
+    redirect("/studio");
+  }
+
   // Resolve Stripe Payment Links server-side for each offer.
   // If a link isn't configured, the button shows "Coming soon".
   const offers = SERVICE_OFFER_LIST.map((offer) => {

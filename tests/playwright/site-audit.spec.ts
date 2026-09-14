@@ -36,7 +36,6 @@ const PUBLIC_ROUTES = [
   { path: "/sign-up", name: "Signup", expectedText: /Sign|sign|Create|create|free|Free|Clerk|clerk/i, allowRedirect: true },
   { path: "/discover", name: "Discover", expectedText: /Discover|Community|community|Creator|creator/i },
   { path: "/agents", name: "Agents", expectedText: /Agent|agent|AI/i },
-  { path: "/games", name: "Games", expectedText: /Game|game|Play|play|Arcade|arcade/i },
   { path: "/social", name: "Social", expectedText: /Social|social|Community|community|Discover|discover/i, redirectsTo: "/discover" },
 ];
 

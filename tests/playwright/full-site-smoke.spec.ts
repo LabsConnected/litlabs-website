@@ -40,10 +40,7 @@ const PUBLIC_PAGES = [
   "/discover",
   "/showcase",
   "/gallery",
-  "/games",
-  "/games/cloud",
-  "/games/dos",
-  "/games/retro",
+  // /games* retired from public V1 (retroGameRuntime flag) — they 404 now
   "/marketplace",
   "/social",
   "/landing",
@@ -425,16 +422,6 @@ test.describe("Screenshots of key pages", () => {
     console.log("Saved screenshot: full-gallery.png");
   });
 
-  test("screenshot games", async ({ page }) => {
-    await page.goto(`${BASE_URL}/games`, { waitUntil: "domcontentloaded" });
-    await page.waitForTimeout(1500);
-    await page.screenshot({
-      path: `${SCREENSHOT_DIR}/full-games.png`,
-      fullPage: true,
-    });
-    console.log("Saved screenshot: full-games.png");
-  });
-
   test("screenshot marketplace", async ({ page }) => {
     await page.goto(`${BASE_URL}/marketplace`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(1500);
@@ -510,7 +497,6 @@ test.describe("Page load timing (FCP, LCP)", () => {
     "/discover",
     "/showcase",
     "/gallery",
-    "/games",
     "/marketplace",
     "/social",
     "/landing",

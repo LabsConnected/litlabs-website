@@ -138,7 +138,7 @@ describe("Discovery regression — sitemap.xml entries", () => {
       "/",
       "/about",
       "/marketplace",
-      "/games",
+      // "/games" intentionally absent — retired from public V1
       "/pricing",
       "/docs",
       "/showcase",
