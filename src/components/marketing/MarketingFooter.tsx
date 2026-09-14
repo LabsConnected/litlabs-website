@@ -1,5 +1,6 @@
 import Link from "next/link";
 import BrandMark from "./BrandMark";
+import SmartLink from "./SmartLink";
 
 export default function MarketingFooter() {
   return (
@@ -10,8 +11,8 @@ export default function MarketingFooter() {
           <p className="mt-4 max-w-sm text-sm leading-6 text-white/38">An AI creative operating system for turning ideas into real, ownable work.</p>
         </div>
         <div className="flex flex-wrap gap-x-6 gap-y-3 text-xs font-bold text-white/42 md:justify-end">
-          <Link href="/studio" className="litt-footer-link">Studio</Link>
-          <Link href="/agents" className="litt-footer-link">Agents</Link>
+          <SmartLink href="/studio" className="litt-footer-link">Studio</SmartLink>
+          <SmartLink href="/agents" className="litt-footer-link">Agents</SmartLink>
           <Link href="/marketplace" className="litt-footer-link">Marketplace</Link>
           <Link href="/discover" className="litt-footer-link">Community</Link>
           <Link href="/pricing" className="litt-footer-link">Pricing</Link>

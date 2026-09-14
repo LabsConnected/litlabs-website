@@ -1,6 +1,6 @@
 import Image from "next/image";
-import Link from "next/link";
 import type { CSSProperties } from "react";
+import SmartLink from "@/components/marketing/SmartLink";
 import {
   ArrowRight,
   Bot,
@@ -63,7 +63,7 @@ export function AgentCrew() {
                   </span>
                 ))}
               </div>
-              <Link href="/agents/litt" className="mt-5 inline-flex items-center gap-2 text-xs font-black text-white/74 transition hover:text-[#a8ff2f]">Meet LiTT <ArrowRight size={13} /></Link>
+              <SmartLink href="/agents/litt" className="mt-5 inline-flex items-center gap-2 text-xs font-black text-white/74 transition hover:text-[#a8ff2f]">Meet LiTT <ArrowRight size={13} /></SmartLink>
             </div>
           </div>
         </article>
@@ -73,7 +73,7 @@ export function AgentCrew() {
             <Boxes size={16} className="shrink-0 text-[#65f4ff]" />
             Bring internal specialists or Marketplace agents into the loop when a mission needs more depth.
           </div>
-          <Link href="/agents" className="litt-secondary-button !min-h-11 !px-4 !py-2.5 text-xs lg:shrink-0">See the operator stack <ArrowRight size={13} /></Link>
+          <SmartLink href="/agents" className="litt-secondary-button !min-h-11 !px-4 !py-2.5 text-xs lg:shrink-0">See the operator stack <ArrowRight size={13} /></SmartLink>
         </div>
       </div>
     </section>
