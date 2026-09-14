@@ -22,10 +22,11 @@ const MOCK_FEED = [
     author: { name: "Alex Chen", username: "alexchen", avatar_url: "💻" },
     comments: [
       {
-        author: "Director",
-        avatar: "🎯",
-        text: "Excellent execution. Task delegation parameters are within peak efficiency.",
-        time: "1h ago",
+        id: "mock_comment_1",
+        content:
+          "Excellent execution. Task delegation parameters are within peak efficiency.",
+        created_at: new Date(Date.now() - 3600000).toISOString(),
+        author: { name: "Director", username: "director", avatar_url: "🎯" },
       },
     ],
   },

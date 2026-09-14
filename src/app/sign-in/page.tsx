@@ -60,6 +60,7 @@ function SignInContent() {
             signUpUrl="/sign-up"
             appearance={{
               elements: {
+                header: { display: "none" },
                 rootBox: { width: "100%" },
                 cardBox: { width: "100%", maxWidth: "100%" },
                 formButtonPrimary: {
