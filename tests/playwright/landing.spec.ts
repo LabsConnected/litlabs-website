@@ -392,13 +392,16 @@ test.describe("Landing page — LiTT operator homepage", () => {
     }
   });
 
-  test("real product proof section exists with placeholder", async ({ page }) => {
+  test("product proof section exists and does not advertise a missing recording", async ({ page }) => {
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
     const proofSection = page.locator("#real-proof");
     await expect(proofSection).toBeVisible();
     await expect(proofSection).toContainText("See LiTT work on a real project");
-    // Placeholder is honest about what it is
-    await expect(proofSection).toContainText("Real recording coming soon");
+    // Until a real session recording is embedded, the section must stay
+    // honest: it shows the mission steps, never a fake "coming soon"
+    // recording claim.
+    await expect(proofSection).toContainText("A mission, step by step");
+    await expect(proofSection).not.toContainText("coming soon", { ignoreCase: true });
   });
 
   test("onboarding steps section exists with 5 steps", async ({ page }) => {
