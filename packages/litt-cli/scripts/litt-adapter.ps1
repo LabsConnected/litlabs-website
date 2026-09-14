@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
     LiTT shell adapter — thin PowerShell shim that routes deterministic commands
-    through @litlabs/litt-cli → @litt/agent-core.
+    through @litlabs1/litt-cli → @litt/agent-core.
 
 .DESCRIPTION
     This is the canonical, reproducible PowerShell adapter for LiTT.
@@ -285,7 +285,7 @@ if (-not $cliPath) {
     Write-Host "    2. Set LITT_BRAIN_REPO env var to the repo root" -ForegroundColor Gray
     Write-Host "    3. Run the installer: pwsh -File packages/litt-cli/scripts/install-litt-cli.ps1" -ForegroundColor Gray
     Write-Host "    4. Run from inside the litlabs-website repo" -ForegroundColor Gray
-    Write-Host "    5. Build it: pnpm --filter @litlabs/litt-cli build" -ForegroundColor Gray
+    Write-Host "    5. Build it: pnpm --filter @litlabs1/litt-cli build" -ForegroundColor Gray
     exit 1
 }
 

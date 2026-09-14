@@ -6,7 +6,7 @@
 #   bash scripts/install-termux.sh
 #
 # This script:
-#   1. Builds @litt/agent-core, @litt/models, and @litlabs/litt-cli from source
+#   1. Builds @litt/agent-core, @litt/models, and @litlabs1/litt-cli from source
 #   2. Installs the litt launcher at ~/.local/bin/litt
 #   3. The launcher preserves the caller's cwd (no cd ~/litt trap)
 #   4. Groq support is built in — just set GROQ_API_KEY in ~/.bashrc
@@ -42,8 +42,8 @@ cd "$PROJECT_ROOT/packages/litt-models"
 pnpm install --frozen-lockfile 2>/dev/null || pnpm install
 pnpm build
 
-# ─── 3. Build @litlabs/litt-cli ─────────────────────────────────────
-echo "Building @litlabs/litt-cli..."
+# ─── 3. Build @litlabs1/litt-cli ─────────────────────────────────────
+echo "Building @litlabs1/litt-cli..."
 cd "$PROJECT_ROOT/packages/litt-cli"
 pnpm install --frozen-lockfile 2>/dev/null || pnpm install
 pnpm build

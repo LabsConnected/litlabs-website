@@ -92,12 +92,12 @@ if (Test-Path $profilePath) {
 $cliDist = Join-Path $repoRoot "packages\litt-cli\dist\index.js"
 if (-not (Test-Path $cliDist)) {
     Write-Host ""
-    Write-Host "Building @litlabs/litt-cli..." -ForegroundColor Cyan
+    Write-Host "Building @litlabs1/litt-cli..." -ForegroundColor Cyan
     Push-Location $repoRoot
     try {
-        & pnpm --filter @litlabs/litt-cli build 2>&1 | Out-Host
+        & pnpm --filter @litlabs1/litt-cli build 2>&1 | Out-Host
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "WARNING: Build failed. Run manually: pnpm --filter @litlabs/litt-cli build" -ForegroundColor Yellow
+            Write-Host "WARNING: Build failed. Run manually: pnpm --filter @litlabs1/litt-cli build" -ForegroundColor Yellow
         } else {
             Write-Host "Build complete." -ForegroundColor Green
         }
