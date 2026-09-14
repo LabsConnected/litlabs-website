@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 import {
   ArrowRight,
   Bot,
@@ -18,6 +19,9 @@ const DOC_SECTIONS = [
     title: "Start in Studio",
     body: "Use Studio as the main workspace for image, audio, video, agent chat, flow, gallery, and external space tools.",
     href: "/studio",
+    // Product action, not docs — signed-out visitors get the signup funnel
+    // instead of bouncing off the Studio login wall.
+    signedOutHref: "/sign-up",
   },
   {
     icon: Bot,
@@ -30,6 +34,8 @@ const DOC_SECTIONS = [
     title: "Build Flows",
     body: "Chain prompts and media tasks into repeatable workflows for creative production and publishing.",
     href: "/flow",
+    // Same as above: the flow builder needs an account.
+    signedOutHref: "/sign-up",
   },
   {
     icon: GalleryVerticalEnd,
@@ -41,9 +47,17 @@ const DOC_SECTIONS = [
 
 export default function DocsPageClient() {
   const { resolvedColors: T } = useTheme();
+  const { isSignedIn, isLoaded } = useClerkAuth();
   const searchParams = useSearchParams();
   const topic = searchParams.get("topic");
   const isSupport = topic === "support";
+
+  // Product-action cards (Studio, Flows) need an account. Signed-out
+  // visitors go to the signup funnel instead of bouncing off a login wall.
+  const cardHref = (section: (typeof DOC_SECTIONS)[number]) =>
+    "signedOutHref" in section && section.signedOutHref && !(isLoaded && isSignedIn)
+      ? section.signedOutHref
+      : section.href;
 
   return (
     // A <div>, not <main> — LayoutShell already renders a #main-content
@@ -117,7 +131,7 @@ export default function DocsPageClient() {
             return (
               <Link
                 key={section.title}
-                href={section.href}
+                href={cardHref(section)}
                 aria-label={`Open ${section.title}`}
                 className="group rounded-2xl border p-6 transition-all hover:-translate-y-1"
                 style={{

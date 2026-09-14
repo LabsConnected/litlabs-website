@@ -1,32 +1,31 @@
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useTheme } from "@/context/ThemeContext";
 import PageShell from "@/components/PageShell";
+import PublicShowcaseGallery from "./PublicShowcaseGallery";
 
 export default function ShowcasePage() {
   const { isLoaded, userId } = useClerkAuth();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (isLoaded && !userId) {
-      router.push("/sign-in?redirect_url=/showcase");
-    }
-  }, [isLoaded, userId, router]);
 
   if (!isLoaded) {
     return (
-      <PageShell>
-        <div className="flex min-h-[50vh] items-center justify-center text-sm text-neutral-500">
-          Loading showcase...
-        </div>
-      </PageShell>
+      <div className="flex min-h-[50vh] items-center justify-center text-sm text-neutral-500">
+        Loading showcase...
+      </div>
     );
+  }
+
+  // Signed-out visitors get the public demo gallery instead of a login
+  // wall — the /showcase/[slug] demos are public, so the index is too.
+  // (LayoutShell renders shared marketing chrome for signed-out visitors
+  // on this hybrid-public route.) Signed-in users keep the full
+  // app-shell showcase experience below.
+  if (!userId) {
+    return <PublicShowcaseGallery />;
   }
 
   return <ShowcasePageInner />;
