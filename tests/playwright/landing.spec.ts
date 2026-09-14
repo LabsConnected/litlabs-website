@@ -397,10 +397,12 @@ test.describe("Landing page — LiTT operator homepage", () => {
     const proofSection = page.locator("#real-proof");
     await expect(proofSection).toBeVisible();
     await expect(proofSection).toContainText("See LiTT work on a real project");
-    // Until a real session recording is embedded, the section must stay
-    // honest: it shows the mission steps, never a fake "coming soon"
-    // recording claim.
-    await expect(proofSection).toContainText("A mission, step by step");
+    // The section renders either the real trailer video or the honest
+    // mission-steps fallback — never a fake "coming soon" recording claim.
+    const videoCount = await proofSection.locator("video").count();
+    if (videoCount === 0) {
+      await expect(proofSection).toContainText("A mission, step by step");
+    }
     await expect(proofSection).not.toContainText("coming soon", { ignoreCase: true });
   });
 
