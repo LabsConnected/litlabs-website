@@ -32,24 +32,6 @@ trigger: always_on
 - Do not introduce silent fallbacks that hide failures.
 - Do not leave temporary debug code, logs, commented-out code, or dead files behind.
 
-## Error handling
-
-- Never silently ignore important failures.
-- Log enough context to diagnose failures without leaking secrets.
-- Give users clear failure states.
-- Distinguish retryable failures from permanent failures.
-- Preserve the original error cause where useful internally.
-- Never convert an actual failure into a fake success response.
-
-## Performance
-
-- Avoid unnecessary client bundles.
-- Avoid unnecessary polling.
-- Clean up timers, subscriptions, listeners, and spawned processes.
-- Avoid duplicate network requests where single-flight behavior is appropriate.
-- Prefer incremental/targeted work over expensive full-repo operations.
-- Do not introduce obvious N+1 requests or repeated expensive model/API calls.
-
 ## Working style
 
 - Inspect first, edit second.
