@@ -12,7 +12,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
-import * as React from "react";
+import type * as React from "react";
 
 vi.mock("next/navigation", () => ({
   usePathname: vi.fn(() => "/marketplace"),
@@ -43,11 +43,9 @@ describe("LayoutShell hybrid-public chrome (signed-out /marketplace, /discover)"
     const { default: LayoutShell } = await import("@/components/LayoutShell");
 
     render(
-      React.createElement(
-        LayoutShell,
-        {},
-        React.createElement("div", { "data-testid": "hybrid-page-content" }, "marketplace content"),
-      ),
+      <LayoutShell>
+        <div data-testid="hybrid-page-content">marketplace content</div>
+      </LayoutShell>,
     );
 
     // Header: brand link home + primary nav landmark — the way back to
@@ -68,11 +66,9 @@ describe("LayoutShell hybrid-public chrome (signed-out /marketplace, /discover)"
     const { default: LayoutShell } = await import("@/components/LayoutShell");
 
     render(
-      React.createElement(
-        LayoutShell,
-        {},
-        React.createElement("div", { "data-testid": "hybrid-page-content" }, "marketplace content"),
-      ),
+      <LayoutShell>
+        <div data-testid="hybrid-page-content">marketplace content</div>
+      </LayoutShell>,
     );
 
     expect(screen.queryByRole("link", { name: /LiTTree LabStudios home/i })).toBeNull();
