@@ -10,6 +10,8 @@ import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import { GlobalCompanion } from "@/components/companion/GlobalCompanion";
 import { YouTubePlayerShell } from "@/components/youtube/YouTubePlayerShell";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import MarketingHeader from "@/components/marketing/MarketingHeader";
+import MarketingFooter from "@/components/marketing/MarketingFooter";
 
 // Routes that render minimal chrome (no navbar / footer).
 // Only truly public pages: auth, legal, docs.
@@ -71,15 +73,24 @@ export default function LayoutShell({
   const ownChrome = hasOwnChrome(pathname);
   const ownShell = hasOwnShell(pathname);
 
-  // Hybrid pages: bare public for signed-out, AppShell for signed-in
+  // Hybrid pages: bare public for signed-out, AppShell for signed-in.
+  // Signed-out visitors previously got zero site chrome here — no logo,
+  // no way back to "/", pricing, or sign-in short of the browser back
+  // button, on pages that are public and indexed (e.g. /marketplace,
+  // /discover). Give them the same shared MarketingHeader/Footer every
+  // other public page uses, same as the /docs fix. pt-[68px] clears the
+  // header's fixed h-[68px] (MarketingHeader.tsx) exactly; the pages'
+  // own internal top padding supplies the visual breathing room below it.
   if (hybridPublic && !isSignedIn) {
     return (
       <>
         <AnimatedBackgroundWrapper />
         {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-        <main id="main-content" className="relative z-10 min-h-dvh">
+        <MarketingHeader />
+        <main id="main-content" className="relative z-10 min-h-dvh pt-[68px]">
           {children}
         </main>
+        <MarketingFooter />
         <GlobalCompanion />
         <CookieConsent />
         <ServiceWorkerRegistration />
