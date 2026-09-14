@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import Link from "next/link";
+import SmartLink from "@/components/marketing/SmartLink";
 import styles from "./pricing.module.css";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { track } from "@/lib/analytics";
@@ -211,10 +212,10 @@ function PlanCard({
       </ul>
 
       {plan.free ? (
-        <Link className={styles.planButton} href="/studio">
+        <SmartLink className={styles.planButton} href="/studio">
           <span>{plan.cta}</span>
           <ArrowIcon />
-        </Link>
+        </SmartLink>
       ) : (
         <button
           type="button"
@@ -299,7 +300,8 @@ export default function PricingClient() {
         </h1>
 
         <p className={styles.heroCopy}>
-          One workspace with LiTT and Spark. Start free, then unlock research,
+          One workspace with LiTT, your project operator, and Spark, your
+          creative specialist — sharing one runtime and one memory. Start free, then unlock research,
           writing, and marketing skills with Creator Beta — or add coding and
           analytics skills with Pro Builder Beta.
         </p>
@@ -349,7 +351,7 @@ export default function PricingClient() {
             { title: "Cancel anytime", copy: "Cancellation stops future renewals. Access continues through the paid period." },
             { title: "No surprise charges", copy: "Expensive actions show an estimate before they run. Credits are used predictably." },
             { title: "Your assets stay yours", copy: "Downgrades and cancellations never delete projects, media, or data." },
-            { title: "Support channel", copy: "Need help? Reach out from Settings → Connections → Diagnostics." },
+            { title: "Support channel", copy: "Need help? Open an issue at github.com/LabsConnected — we read every one." },
           ].map((item) => (
             <article key={item.title} className={styles.trustCard}>
               <h3>{item.title}</h3>
@@ -434,10 +436,10 @@ export default function PricingClient() {
         </div>
 
         <div className={styles.ctaActions}>
-          <Link className={styles.primaryCta} href="/studio">
+          <SmartLink className={styles.primaryCta} href="/studio">
             Launch Studio
             <ArrowIcon />
-          </Link>
+          </SmartLink>
           <Link className={styles.secondaryCta} href="/marketplace">
             Explore Marketplace
           </Link>
