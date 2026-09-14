@@ -46,8 +46,13 @@ export default function DocsPageClient() {
   const isSupport = topic === "support";
 
   return (
-    <main
-      className="min-h-screen px-4 py-16"
+    // A <div>, not <main> — LayoutShell already renders a #main-content
+    // <main> landmark around this page; a second nested <main> is an
+    // invalid/duplicate landmark for assistive tech.
+    // pt-28/pt-32 clears the fixed 68px MarketingHeader (see docs/layout.tsx)
+    // with room to breathe, matching the offset other marketing pages use.
+    <div
+      className="min-h-screen px-4 pb-16 pt-28 sm:pt-32"
       style={{ backgroundColor: T.bgColor, color: T.textColor }}
     >
       <div className="mx-auto max-w-5xl">
@@ -162,6 +167,6 @@ export default function DocsPageClient() {
           })}
         </div>
       </div>
-    </main>
+    </div>
   );
 }
