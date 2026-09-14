@@ -20,6 +20,13 @@ export default function SignUpPage() {
           <p className="text-xs opacity-70" style={{ color: "#94a3b8" }}>
             Start with 500 credits. No credit card required.
           </p>
+          <p
+            className="text-[11px] mt-2 leading-relaxed opacity-60"
+            style={{ color: "#94a3b8" }}
+          >
+            Verify your email, land in Studio, and give LiTT your first
+            mission — you&apos;ll be building in under two minutes.
+          </p>
         </div>
 
         <div
@@ -79,14 +86,35 @@ export default function SignUpPage() {
           />
         </div>
 
-        <div className="text-center mt-5">
-          <Link
-            href="/"
-            className="text-[11px] opacity-70 hover:opacity-100 transition-opacity"
-            style={{ color: "#94a3b8", textDecoration: "none" }}
-          >
-            ← Back to Home
-          </Link>
+        <div className="text-center mt-5 space-y-2">
+          <p className="text-[11px] opacity-60" style={{ color: "#94a3b8" }}>
+            By signing up you agree to our{" "}
+            <Link
+              href="/terms"
+              className="hover:opacity-100 transition-opacity underline"
+              style={{ color: "#94a3b8" }}
+            >
+              Terms
+            </Link>{" "}
+            and{" "}
+            <Link
+              href="/privacy"
+              className="hover:opacity-100 transition-opacity underline"
+              style={{ color: "#94a3b8" }}
+            >
+              Privacy Policy
+            </Link>
+            .
+          </p>
+          <div>
+            <Link
+              href="/"
+              className="text-[11px] opacity-70 hover:opacity-100 transition-opacity"
+              style={{ color: "#94a3b8", textDecoration: "none" }}
+            >
+              ← Back to Home
+            </Link>
+          </div>
         </div>
       </div>
     </div>

@@ -9,7 +9,7 @@ import BrandMark from "./BrandMark";
 const NAV_ITEMS = [
   { label: "Capabilities", href: "/#what-we-do" },
   { label: "How it works", href: "/#how-it-works" },
-  { label: "Studio", href: "/#operator" },
+  { label: "Studio", href: "/studio" },
   { label: "CLI", href: "/cli" },
   { label: "Creations", href: "/#creations" },
   { label: "FAQ", href: "/#faq" },

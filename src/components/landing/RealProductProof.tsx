@@ -132,6 +132,12 @@ export function RealProductProof() {
           >
             <Play size={13} fill="currentColor" /> See the walkthrough
           </a>
+          <Link
+            href="/showcase/artist-launch-site"
+            className="litt-secondary-button"
+          >
+            See an example session <ArrowRight size={13} />
+          </Link>
         </div>
       </div>
     </section>
