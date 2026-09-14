@@ -35,7 +35,7 @@ function SignInContent() {
 
   return (
     <div
-      className="min-h-dvh flex items-center justify-center px-4 py-8"
+      className="min-h-[calc(100dvh-68px)] flex items-center justify-center px-4 py-8"
       style={{ backgroundColor: "#0f0f14" }}
     >
       <div className="w-full max-w-sm">

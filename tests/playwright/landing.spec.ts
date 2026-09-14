@@ -380,7 +380,7 @@ test.describe("Landing page — LiTT operator homepage", () => {
       "/studio",
       "/agents",
       "/marketplace",
-      "/gallery",
+      "/cli",
       "/discover",
       "/pricing",
       "/privacy",
@@ -392,13 +392,52 @@ test.describe("Landing page — LiTT operator homepage", () => {
     }
   });
 
-  test("real product proof section exists with placeholder", async ({ page }) => {
+  test("footer does not advertise auth-gated gallery", async ({ page }) => {
+    await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+    const footerNav = page.locator('nav[aria-label="Footer navigation"]');
+    await expect(footerNav).toBeVisible();
+    // /gallery redirects to /showcase, which requires sign-in — the public
+    // footer must not send anonymous visitors into an auth wall.
+    await expect(footerNav.locator('a[href="/gallery"]')).toHaveCount(0);
+    await expect(footerNav.locator('a[href="/showcase"]')).toHaveCount(0);
+    // The public-facing creations destination stays available.
+    await expect(footerNav.locator('a[href="/#creations"]')).toHaveCount(1);
+  });
+
+  test("session pipeline section exists without placeholder copy", async ({ page }) => {
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
     const proofSection = page.locator("#real-proof");
     await expect(proofSection).toBeVisible();
     await expect(proofSection).toContainText("See LiTT work on a real project");
-    // Placeholder is honest about what it is
-    await expect(proofSection).toContainText("Real recording coming soon");
+    await expect(proofSection).toContainText("Session pipeline");
+    await expect(proofSection).toContainText("Approval ready");
+    // No internal production notes or coming-soon placeholder copy.
+    await expect(proofSection).not.toContainText("coming soon");
+    await expect(proofSection).not.toContainText("Required asset");
+    await expect(proofSection).not.toContainText("recording");
+  });
+
+  test("headline 'Not a chat. A working system.' appears exactly once", async ({ page }) => {
+    await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+    const body = (await page.locator("body").textContent()) || "";
+    expect(body.match(/Not a chat\.\s*A working system\./g) ?? []).toHaveLength(1);
+  });
+
+  test("public surfaces render shared site chrome", async ({ page }) => {
+    for (const path of ["/pricing", "/marketplace", "/sign-in"]) {
+      await page.goto(`${BASE_URL}${path}`, { waitUntil: "domcontentloaded" });
+      const header = page.locator("header.litt-site-header");
+      await expect(header, `${path} must render the shared site header`).toBeVisible();
+      // Obvious path back to the main site.
+      await expect(
+        header.getByRole("link", { name: /LiTTree LabStudios home/i }),
+        `${path} header must link back home`,
+      ).toHaveAttribute("href", "/");
+      await expect(
+        page.locator('nav[aria-label="Footer navigation"]'),
+        `${path} must render the shared site footer`,
+      ).toBeVisible();
+    }
   });
 
   test("onboarding steps section exists with 5 steps", async ({ page }) => {

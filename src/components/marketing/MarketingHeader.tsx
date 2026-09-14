@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowRight, ChevronRight, Menu, X } from "lucide-react";
 import { track } from "@/lib/analytics";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 import BrandMark from "./BrandMark";
 
 const NAV_ITEMS = [
@@ -18,6 +19,7 @@ const NAV_ITEMS = [
 
 export default function MarketingHeader() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const { isLoaded, isSignedIn } = useClerkAuth();
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -28,7 +30,7 @@ export default function MarketingHeader() {
   }, []);
 
   return (
-    <header className="litt-site-header fixed inset-x-0 top-0 z-50 border-b border-white/8">
+    <header className="litt-landing litt-site-header fixed inset-x-0 top-0 z-50 border-b border-white/8">
       <div className="mx-auto flex h-[68px] max-w-[1500px] items-center justify-between px-5 lg:px-8">
         <Link
           href="/"
@@ -56,12 +58,20 @@ export default function MarketingHeader() {
         </nav>
 
         <div className="flex items-center gap-2">
-          <Link href="/sign-in" className="hidden px-3 py-2 text-sm font-bold text-white/55 transition hover:text-white sm:block">
-            Sign in
-          </Link>
-          <Link href="/sign-up" className="litt-primary-button !min-h-10 !px-4 !py-2 text-sm" onClick={() => track("hero_cta_click", { source: "header" })}>
-            Start free <ArrowRight size={14} />
-          </Link>
+          {isLoaded && isSignedIn ? (
+            <Link href="/studio" className="litt-primary-button !min-h-10 !px-4 !py-2 text-sm">
+              Open Studio <ArrowRight size={14} />
+            </Link>
+          ) : (
+            <>
+              <Link href="/sign-in" className="hidden px-3 py-2 text-sm font-bold text-white/55 transition hover:text-white sm:block">
+                Sign in
+              </Link>
+              <Link href="/sign-up" className="litt-primary-button !min-h-10 !px-4 !py-2 text-sm" onClick={() => track("hero_cta_click", { source: "header" })}>
+                Start free <ArrowRight size={14} />
+              </Link>
+            </>
+          )}
           <button
             type="button"
             aria-label={menuOpen ? "Close menu" : "Open menu"}

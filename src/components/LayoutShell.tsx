@@ -9,6 +9,8 @@ import AnimatedBackgroundWrapper from "@/components/AnimatedBackgroundWrapper";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import { GlobalCompanion } from "@/components/companion/GlobalCompanion";
 import { YouTubePlayerShell } from "@/components/youtube/YouTubePlayerShell";
+import MarketingHeader from "@/components/marketing/MarketingHeader";
+import MarketingFooter from "@/components/marketing/MarketingFooter";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 
 // Routes that render minimal chrome (no navbar / footer).
@@ -38,6 +40,12 @@ const SELF_CONTAINED_CHROME = ["/games/cloud"];
 // These pages still require auth but manage their own chrome.
 const OWN_SHELL_PATHS = ["/settings"];
 
+// Public surfaces rendered through this shell that still get the shared
+// marketing header + footer, so a first-time visitor always has an obvious
+// path back to the main site. (/pricing lives in the (marketing) route
+// group and gets the same chrome from that layout instead.)
+const PUBLIC_CHROME_PATHS = ["/marketplace"];
+
 function isBarePublicPath(path: string) {
   return BARE_PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
 }
@@ -58,6 +66,12 @@ function hasOwnShell(path: string) {
   );
 }
 
+function hasPublicChrome(path: string) {
+  return PUBLIC_CHROME_PATHS.some(
+    (p) => path === p || path.startsWith(`${p}/`),
+  );
+}
+
 export default function LayoutShell({
   children,
 }: {
@@ -70,6 +84,7 @@ export default function LayoutShell({
   const isStudio = pathname.startsWith("/studio");
   const ownChrome = hasOwnChrome(pathname);
   const ownShell = hasOwnShell(pathname);
+  const publicChrome = hasPublicChrome(pathname);
 
   // Hybrid pages: bare public for signed-out, AppShell for signed-in
   if (hybridPublic && !isSignedIn) {
@@ -77,9 +92,14 @@ export default function LayoutShell({
       <>
         <AnimatedBackgroundWrapper />
         {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-        <main id="main-content" className="relative z-10 min-h-dvh">
+        {publicChrome && <MarketingHeader />}
+        <main
+          id="main-content"
+          className={`relative z-10 min-h-dvh${publicChrome ? " pt-[68px]" : ""}`}
+        >
           {children}
         </main>
+        {publicChrome && <MarketingFooter />}
         <GlobalCompanion />
         <CookieConsent />
         <ServiceWorkerRegistration />
@@ -92,9 +112,14 @@ export default function LayoutShell({
       <>
         <AnimatedBackgroundWrapper />
         {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-        <main id="main-content" className="relative z-10 min-h-dvh">
+        {publicChrome && <MarketingHeader />}
+        <main
+          id="main-content"
+          className={`relative z-10 min-h-dvh${publicChrome ? " pt-[68px]" : ""}`}
+        >
           {children}
         </main>
+        {publicChrome && <MarketingFooter />}
         <GlobalCompanion />
         <CookieConsent />
         <ServiceWorkerRegistration />

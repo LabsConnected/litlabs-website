@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
 import { ArrowUpRight, Sparkles } from "lucide-react";
+import { SITE_COPYRIGHT_YEAR, SITE_GITHUB_URL } from "@/lib/siteConfig";
 
 const PRODUCT_LINKS = [
   { href: "/agents", label: "Agents" },
@@ -25,7 +26,7 @@ const COMPANY_LINKS = [
 ];
 
 const CONNECT_LINKS = [
-  { href: "https://github.com/LabsConnected", label: "GitHub", external: true },
+  { href: SITE_GITHUB_URL, label: "GitHub", external: true },
 ];
 
 export default function Footer() {
@@ -168,7 +169,7 @@ export default function Footer() {
             >
               LiTTree LabStudios™
             </span>
-            <span className="text-xs opacity-60">© 2026 · LiTT™ · Spark™</span>
+            <span className="text-xs opacity-60">© {SITE_COPYRIGHT_YEAR} · LiTT™ · Spark™</span>
           </div>
           <div className="flex items-center gap-1.5 text-xs opacity-60">
             <span

@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import MarketingHeader from "@/components/marketing/MarketingHeader";
+import MarketingFooter from "@/components/marketing/MarketingFooter";
 
 export const metadata: Metadata = {
   robots: {
@@ -12,5 +14,11 @@ export default function SignInLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return children;
+  return (
+    <div className="litt-landing min-h-dvh text-white">
+      <MarketingHeader />
+      <div className="pt-[68px]">{children}</div>
+      <MarketingFooter />
+    </div>
+  );
 }

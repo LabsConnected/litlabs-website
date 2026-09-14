@@ -30,6 +30,7 @@ import {
   Zap,
 } from "lucide-react";
 import { AGENTS } from "@/lib/agents";
+import { SITE_COPYRIGHT_YEAR } from "@/lib/siteConfig";
 
 type TaskStatus = "queued" | "processing" | "success" | "failed" | "cancelled";
 type Mission = {
@@ -622,7 +623,7 @@ export default function AgentsPageClient() {
         </details>
 
         <footer className="flex flex-col gap-2 border-t border-white/8 px-1 py-4 text-[9px] text-white/30 sm:flex-row sm:items-center sm:justify-between">
-          <span>© {new Date().getFullYear()} LiTTree LabStudios™. All rights reserved.</span>
+          <span>© {SITE_COPYRIGHT_YEAR} LiTTree LabStudios™. All rights reserved.</span>
           <span>LiTTree LabStudios™, LiTT™, Spark™, and the LiTTree mark are trademarks of LiTTree LabStudios.</span>
         </footer>
       </div>
