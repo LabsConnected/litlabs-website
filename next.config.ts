@@ -214,6 +214,36 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      // Deployed USER-AUTHORED project output (/sites/[deploymentId]/...).
+      //
+      // This MUST override the application CSP above. The global "/(.*)" rule
+      // would otherwise apply the full app CSP to user-generated HTML, and a
+      // next.config header wins over one set inside a route handler — so the
+      // `sandbox` directive that src/app/sites/[deploymentId]/[[...path]]/route.ts
+      // documents as its primary control was silently stripped in production.
+      // Verified against a live deployment: exactly one Content-Security-Policy
+      // header was served, with no sandbox directive.
+      //
+      // Without `allow-same-origin` the document loads in an opaque origin: it
+      // cannot read document.cookie or localStorage, and cannot make credentialed
+      // same-origin requests to /api/*. That is what makes serving untrusted user
+      // output from LiTT's own domain acceptable for V1.
+      //
+      // Keep this rule AFTER the global rule — for a duplicated header key the
+      // later matching rule wins (same mechanism /arcade-runtime/:path* relies on).
+      {
+        source: "/sites/:path*",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: "sandbox allow-scripts allow-forms allow-popups",
+          },
+          {
+            key: "X-Content-Type-Options",
+            value: "nosniff",
+          },
+        ],
+      },
       // Cache static assets for 1 year
       {
         source: "/static/(.*)",
