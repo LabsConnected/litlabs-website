@@ -51,6 +51,71 @@ test.describe("Mobile viewport @mobile", () => {
     assertNoErrors(errors);
   });
 
+  test("Discover has no horizontal overflow on mobile", async ({ page }) => {
+    const errors = monitorApplicationErrors(page);
+    await page.goto("/discover");
+    await page.waitForLoadState("networkidle");
+
+    const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
+
+    expect(scrollWidth).toBeLessThanOrEqual(clientWidth + 1);
+
+    assertNoErrors(errors);
+  });
+
+  test("Docs has no horizontal overflow on mobile", async ({ page }) => {
+    const errors = monitorApplicationErrors(page);
+    await page.goto("/docs");
+    await page.waitForLoadState("networkidle");
+
+    const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
+
+    expect(scrollWidth).toBeLessThanOrEqual(clientWidth + 1);
+
+    assertNoErrors(errors);
+  });
+
+  test("CLI page has no horizontal overflow on mobile", async ({ page }) => {
+    const errors = monitorApplicationErrors(page);
+    await page.goto("/cli");
+    await page.waitForLoadState("networkidle");
+
+    const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
+
+    expect(scrollWidth).toBeLessThanOrEqual(clientWidth + 1);
+
+    assertNoErrors(errors);
+  });
+
+  test("Sign-in has no horizontal overflow on mobile", async ({ page }) => {
+    const errors = monitorApplicationErrors(page);
+    await page.goto("/sign-in");
+    await page.waitForLoadState("networkidle");
+
+    const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
+
+    expect(scrollWidth).toBeLessThanOrEqual(clientWidth + 1);
+
+    assertNoErrors(errors);
+  });
+
+  test("Sign-up has no horizontal overflow on mobile", async ({ page }) => {
+    const errors = monitorApplicationErrors(page);
+    await page.goto("/sign-up");
+    await page.waitForLoadState("networkidle");
+
+    const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
+
+    expect(scrollWidth).toBeLessThanOrEqual(clientWidth + 1);
+
+    assertNoErrors(errors);
+  });
+
   test("Mobile bottom navigation is visible and has adequate touch targets", async ({ page }) => {
     const errors = monitorApplicationErrors(page);
     await page.goto("/");

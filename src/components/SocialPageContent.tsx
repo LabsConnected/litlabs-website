@@ -197,7 +197,14 @@ export default function SocialPageContent() {
       {/* Toast */}
       {toast && (
         <div
-          className="fixed top-4 right-4 z-50 px-4 py-2 text-xs font-bold border"
+          // Signed-out visitors render under LayoutShell's hybrid-public
+          // branch, which now has a fixed 68px MarketingHeader above this
+          // page (see LayoutShell.tsx) — top-4 would sit underneath/inside
+          // it. Signed-in visitors render inside AppShell, which has no
+          // top header bar, so top-4 is correct there.
+          className={`fixed right-4 z-50 px-4 py-2 text-xs font-bold border ${
+            isSignedIn ? "top-4" : "top-20"
+          }`}
           style={{
             backgroundColor: C.boxBg,
             borderColor: C.success,
