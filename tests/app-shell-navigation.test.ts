@@ -58,6 +58,16 @@ describe("AppShell Navigation", () => {
       expect(labels).toContain("Discover");
       expect(labels).toContain("Marketplace");
     });
+
+    // Regression: /hire is permanently retired — the page always redirects
+    // to /studio (see tests/hire-redirect.test.ts) — so the signed-in
+    // sidebar must not link to it and strand visitors on a dead-end bounce.
+    it("does NOT link to /hire", () => {
+      const explore = APP_NAV_SECTIONS.find((s) => s.id === "explore");
+      expect(explore).toBeDefined();
+      const hrefs = explore!.items.map((i) => i.href);
+      expect(hrefs).not.toContain("/hire");
+    });
   });
 
   describe("Bottom utility items", () => {

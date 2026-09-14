@@ -30,7 +30,6 @@ import {
   Compass,
   Terminal,
   Mic,
-  Rocket,
 } from "lucide-react";
 
 export type NavItem = {
@@ -95,7 +94,8 @@ export const APP_NAV_SECTIONS: NavSection[] = [
       { label: "Games", href: "/games", icon: GamesIcon },
       { label: "Discover", href: "/discover", icon: Compass },
       { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
-      { label: "Hire LiTTree", href: "/hire", icon: Rocket },
+      // /hire is permanently retired (always redirects to /studio — see
+      // src/app/(app)/hire/page.tsx) so it is not a nav destination.
     ],
   },
 ];
