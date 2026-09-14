@@ -73,8 +73,8 @@ litt_local_bootstrap() {
 
   if litt_local_needs_build "$repo_root"; then
     echo "◬ Building LiTT workspace dependencies"
-    if ! (cd "$repo_root" && pnpm --filter '@litlabs/litt-cli...' build); then
-      echo "❌ Workspace build failed (pnpm --filter '@litlabs/litt-cli...' build)." >&2
+    if ! (cd "$repo_root" && pnpm --filter '@litlabs1/litt-cli...' build); then
+      echo "❌ Workspace build failed (pnpm --filter '@litlabs1/litt-cli...' build)." >&2
       echo "   Fix the error above, then re-run litt-local." >&2
       return 1
     fi

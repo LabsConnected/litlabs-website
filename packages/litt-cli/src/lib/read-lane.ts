@@ -93,7 +93,7 @@ export function matchReadTools(input: string): ReadMatch | null {
   // LOCAL fast lane deterministically (using the canonical directory name
   // from basename(projectRoot), NOT package.json name). The READ lane
   // does NOT map "repo" to project.inspect_package because that tool
-  // returns package.json.name (e.g. "@litlabs/litt-cli") which is the
+  // returns package.json.name (e.g. "@litlabs1/litt-cli") which is the
   // package name, not the repository name.
 
   const calls: ReadToolCall[] = [];

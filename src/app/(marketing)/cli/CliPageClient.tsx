@@ -4,10 +4,10 @@ import { useState } from "react";
 import { Terminal, Copy, Check, Download } from "lucide-react";
 
 const INSTALL_COMMANDS = {
-  npm: "npm install -g @litlabs/litt-cli",
-  pnpm: "pnpm add -g @litlabs/litt-cli",
-  npx: "npx @litlabs/litt-cli --version",
-  dlx: "pnpm dlx @litlabs/litt-cli --version",
+  npm: "npm install -g @litlabs1/litt-cli",
+  pnpm: "pnpm add -g @litlabs1/litt-cli",
+  npx: "npx @litlabs1/litt-cli --version",
+  dlx: "pnpm dlx @litlabs1/litt-cli --version",
 };
 
 function CodeBlock({ command, label }: { command: string; label: string }) {

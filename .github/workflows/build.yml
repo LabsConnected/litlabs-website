@@ -91,13 +91,13 @@ jobs:
         env:
           CI: true
 
-      - name: Build @litlabs/litt-cli
-        run: pnpm --filter @litlabs/litt-cli build
+      - name: Build @litlabs1/litt-cli
+        run: pnpm --filter @litlabs1/litt-cli build
         env:
           CI: true
 
-      - name: Test @litlabs/litt-cli
-        run: pnpm --filter @litlabs/litt-cli test
+      - name: Test @litlabs1/litt-cli
+        run: pnpm --filter @litlabs1/litt-cli test
         env:
           CI: true
 

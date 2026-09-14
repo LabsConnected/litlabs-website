@@ -41,13 +41,13 @@ export type LocalFastPathKind =
 export interface LocalFastPathContext {
   /** cwd the tools/git use — passed to getGitState for fresh reads. */
   cwd: string;
-  /** Package name from package.json (e.g. "@litlabs/litt-cli"). May be a scoped name. */
+  /** Package name from package.json (e.g. "@litlabs1/litt-cli"). May be a scoped name. */
   projectName?: string;
   /**
    * Canonical repository name — the directory name of the git/project root
    * (e.g. "litt-final-integration"). This is the identity users mean when
    * they ask "what repo is this?" — NOT the package.json name, which can
-   * be a scoped monorepo package name like "@litlabs/litt-cli".
+   * be a scoped monorepo package name like "@litlabs1/litt-cli".
    * Derived from basename(projectRoot) in the controller.
    */
   repoName?: string;
@@ -130,7 +130,7 @@ const TRAILING_POLICY_PATTERNS: RegExp[] = [
  * Return the canonical repository name for display.
  * Prefers `repoName` (directory name of the project root) over
  * `projectName` (package.json name, which may be a scoped monorepo
- * package like "@litlabs/litt-cli"). Falls back to projectName if
+ * package like "@litlabs1/litt-cli"). Falls back to projectName if
  * repoName is not provided, then to "(unknown)".
  */
 function getRepoDisplayName(ctx: LocalFastPathContext): string {
