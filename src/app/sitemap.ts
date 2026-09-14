@@ -35,6 +35,20 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "weekly",
       priority: 0.6,
     },
+    ...[
+      "/docs/quick-start",
+      "/docs/studio",
+      "/docs/building",
+      "/docs/preview-deploy",
+      "/docs/cli",
+      "/docs/marketplace",
+      "/docs/safety",
+      "/docs/troubleshooting",
+    ].map((path) => ({
+      url: absoluteUrl(path),
+      changeFrequency: "monthly" as const,
+      priority: 0.5,
+    })),
     {
       url: absoluteUrl("/showcase"),
       changeFrequency: "weekly",

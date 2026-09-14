@@ -1,13 +1,13 @@
 import MarketingHeader from "@/components/marketing/MarketingHeader";
 import MarketingFooter from "@/components/marketing/MarketingFooter";
+import DocsShell from "./_components/DocsShell";
 
 /**
- * /docs is public documentation (see BARE_PUBLIC_PATHS in LayoutShell.tsx)
- * but previously rendered with no header/footer at all. Give it the same
- * shared MarketingHeader/MarketingFooter every other public marketing page
- * uses, without pulling in the (marketing) route group's providers or
- * moving the route — LayoutShell/AppLayout already provide what this page
- * needs.
+ * /docs is public documentation (see BARE_PUBLIC_PATHS in LayoutShell.tsx).
+ * Every docs route renders inside DocsShell, which provides the section
+ * sidebar (desktop), the collapsible section nav (mobile), and the
+ * prev/next pager — while MarketingHeader/MarketingFooter keep the
+ * surrounding chrome consistent with the rest of the marketing site.
  */
 export default function DocsLayout({
   children,
@@ -17,7 +17,7 @@ export default function DocsLayout({
   return (
     <>
       <MarketingHeader />
-      {children}
+      <DocsShell>{children}</DocsShell>
       <MarketingFooter />
     </>
   );
