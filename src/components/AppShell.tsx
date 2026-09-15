@@ -41,6 +41,8 @@ import {
   APP_NAV_SECTIONS,
   APP_NAV_BOTTOM,
   APP_MOBILE_BOTTOM_ITEMS,
+  STUDIO_NAV_ITEMS,
+  STUDIO_NAV_BOTTOM,
   isAppNavActive,
   COLLAPSED_KEY,
   type NavItem,
@@ -470,6 +472,114 @@ function DesktopSidebar({
   );
 }
 
+/* ─── Focused Studio shell ────────────────────────────────────────── */
+function StudioShellSidebar({
+  mobileOpen,
+  onMobileOpen,
+  onMobileClose,
+}: {
+  mobileOpen: boolean;
+  onMobileOpen: () => void;
+  onMobileClose: () => void;
+}) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const { resolvedColors: T } = useTheme();
+  const checkActive = useCallback(
+    (href: string) => isAppNavActive(pathname, searchParams, href),
+    [pathname, searchParams],
+  );
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const previousOverflow = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onMobileClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.documentElement.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [mobileOpen, onMobileClose]);
+
+  const renderLink = (item: NavItem) => (
+    <DesktopNavItem
+      key={item.label}
+      item={item}
+      active={checkActive(item.href ?? "")}
+      collapsed={false}
+      T={T}
+    />
+  );
+
+  return (
+    <>
+      <aside
+        aria-label="Studio workspace navigation"
+        className="hidden h-dvh w-[232px] shrink-0 flex-col border-r lg:flex"
+        style={{
+          background: `linear-gradient(180deg, ${T.bgColor}f2 0%, #07060d 50%, ${T.bgColor}f2 100%)`,
+          borderColor: `${T.borderColor}20`,
+          boxShadow: "16px 0 48px rgba(0,0,0,0.25)",
+        }}
+      >
+        <header className="flex h-14 shrink-0 items-center border-b px-3" style={{ borderColor: `${T.borderColor}15` }}>
+          <BrandLogo href="/studio" size={28} showText />
+        </header>
+        <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-3" aria-label="Studio primary navigation">
+          {STUDIO_NAV_ITEMS.map(renderLink)}
+        </nav>
+        <div className="shrink-0 border-t px-2 py-2.5" style={{ borderColor: `${T.borderColor}15` }}>
+          <div className="space-y-0.5">{STUDIO_NAV_BOTTOM.map(renderLink)}</div>
+          <div className="mt-2 border-t pt-2" style={{ borderColor: `${T.borderColor}10` }}>
+            <IdentityDock collapsed={false} />
+          </div>
+        </div>
+      </aside>
+
+      <button
+        type="button"
+        className="fixed left-3 top-3 z-50 grid h-10 w-10 place-items-center rounded-xl border lg:hidden"
+        style={{ backgroundColor: `${T.bgColor}e8`, borderColor: `${T.borderColor}30`, color: T.textMuted }}
+        aria-label={mobileOpen ? "Close Studio navigation" : "Open Studio navigation"}
+        aria-expanded={mobileOpen}
+        onClick={mobileOpen ? onMobileClose : onMobileOpen}
+      >
+        {mobileOpen ? <X size={19} className="pointer-events-none" /> : <Menu size={19} className="pointer-events-none" />}
+      </button>
+
+      {mobileOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden" role="presentation">
+          <button type="button" className="absolute inset-0 h-full w-full bg-black/60" onClick={onMobileClose} aria-label="Close Studio navigation" />
+          <aside
+            aria-label="Studio workspace navigation"
+            className="relative flex h-full w-[min(280px,85vw)] max-w-full flex-col border-r"
+            style={{ background: `linear-gradient(180deg, ${T.bgColor}f8, #07060d 60%, ${T.bgColor}f8)`, borderColor: `${T.borderColor}30` }}
+          >
+            <header className="flex h-14 shrink-0 items-center justify-between border-b px-4" style={{ borderColor: `${T.borderColor}20` }}>
+              <BrandLogo href="/studio" size={28} showText />
+              <button type="button" className="grid h-10 w-10 place-items-center rounded-lg" onClick={onMobileClose} aria-label="Close Studio navigation">
+                <X size={20} className="pointer-events-none" />
+              </button>
+            </header>
+            <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-3" aria-label="Studio primary navigation">
+              {STUDIO_NAV_ITEMS.map((item) => <div key={item.label} onClick={onMobileClose}>{renderLink(item)}</div>)}
+            </nav>
+            <div className="shrink-0 border-t px-2 py-2.5" style={{ borderColor: `${T.borderColor}15` }}>
+              <div className="space-y-0.5">{STUDIO_NAV_BOTTOM.map((item) => <div key={item.label} onClick={onMobileClose}>{renderLink(item)}</div>)}</div>
+              <div className="mt-2 border-t pt-2" style={{ borderColor: `${T.borderColor}10` }}>
+                <IdentityDock collapsed={false} />
+              </div>
+            </div>
+          </aside>
+        </div>
+      )}
+    </>
+  );
+}
+
 /* ─── Desktop Nav Item ─────────────────────────────────────────────── */
 
 function DesktopNavItem({
@@ -830,10 +940,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setMobileOpen(false);
   }, [pathname]);
 
-  // Studio manages its own full-height chrome (header, mobile bottom nav,
-  // composer). The shared sidebar still renders on desktop, but we suppress
-  // AppShell's mobile top bar, mobile bottom bar, and main bottom padding
-  // to avoid double chrome on mobile.
+  // Studio manages its own full-height chrome and composer. Its focused
+  // workspace shell is rendered here so site discovery navigation never leaks
+  // into the Studio workspace.
   const isStudio = pathname?.startsWith("/studio") ?? false;
 
   const toggleCollapse = useCallback(() => {
@@ -846,17 +955,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-dvh">
-      {/* Desktop sidebar — wrapped in Suspense for useSearchParams SSG safety */}
-      <Suspense fallback={<div className="hidden md:block" style={{ width: collapsed ? 72 : 256 }} />}>
-        <DesktopSidebar collapsed={collapsed} onToggleCollapse={toggleCollapse} />
-      </Suspense>
-
-      {/* Mobile drawer (conditional) — wrapped in Suspense for useSearchParams SSG safety.
-          Skipped for Studio (Studio has its own mobile nav with a Home link). */}
-      {!isStudio && (
-        <Suspense fallback={null}>
-          <MobileDrawer open={mobileOpen} onClose={() => setMobileOpen(false)} />
+      {/* Studio gets a focused shell; the site directory never renders here. */}
+      {isStudio ? (
+        <Suspense fallback={<div className="hidden lg:block w-[232px]" />}>
+          <StudioShellSidebar mobileOpen={mobileOpen} onMobileOpen={() => setMobileOpen(true)} onMobileClose={() => setMobileOpen(false)} />
         </Suspense>
+      ) : (
+        <>
+          {/* Desktop sidebar — wrapped in Suspense for useSearchParams SSG safety */}
+          <Suspense fallback={<div className="hidden md:block" style={{ width: collapsed ? 72 : 256 }} />}>
+            <DesktopSidebar collapsed={collapsed} onToggleCollapse={toggleCollapse} />
+          </Suspense>
+          <Suspense fallback={null}>
+            <MobileDrawer open={mobileOpen} onClose={() => setMobileOpen(false)} />
+          </Suspense>
+        </>
       )}
 
       {/* Main content area */}

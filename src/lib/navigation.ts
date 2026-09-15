@@ -68,7 +68,7 @@ export const GROUP_ACCENTS: Record<string, string> = {
   More: "#94a3b8",
 };
 
-/* ─── Canonical App Shell navigation (COMMAND / CREATE / EXPLORE) ─── */
+/* ─── Canonical App Shell navigation (COMMAND / STUDIO / EXPLORE) ── */
 
 export const APP_NAV_SECTIONS: NavSection[] = [
   {
@@ -76,16 +76,13 @@ export const APP_NAV_SECTIONS: NavSection[] = [
     label: "Command",
     items: [
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, shortcut: "⌘D" },
-      { label: "Studio", href: "/studio", icon: Sparkles, shortcut: "⌘S" },
     ],
   },
   {
-    id: "create",
-    label: "Create",
+    id: "studio",
+    label: "Studio",
     items: [
-      { label: "Create", href: "/studio?tool=image", icon: Sparkles },
-      { label: "Music", href: "/studio?tool=music", icon: Music },
-      { label: "Showcase", href: "/showcase", icon: Image },
+      { label: "Studio", href: "/studio", icon: Sparkles, shortcut: "⌘S" },
     ],
   },
   {
@@ -95,10 +92,28 @@ export const APP_NAV_SECTIONS: NavSection[] = [
       { label: "Games", href: "/games", icon: GamesIcon },
       { label: "Discover", href: "/discover", icon: Compass },
       { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
-      { label: "Hire LiTTree", href: "/hire", icon: Rocket },
     ],
   },
 ];
+
+/** Navigation shown by the focused Studio shell, intentionally separate from site discovery. */
+export const STUDIO_NAV_ITEMS: NavItem[] = [
+  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { label: "Studio", href: "/studio", icon: Sparkles },
+  { label: "Projects", href: "/projects", icon: FolderKanban },
+];
+
+export const STUDIO_NAV_BOTTOM: NavItem[] = [
+  { label: "Wallet", href: "/wallet", icon: Wallet },
+  { label: "Settings", href: "/settings", icon: Settings },
+];
+
+export type StudioShellMode = "wide" | "drawer";
+
+/** Keep Studio's full workspace available below the desktop shell breakpoint. */
+export function getStudioShellMode(viewportWidth: number): StudioShellMode {
+  return viewportWidth >= 1024 ? "wide" : "drawer";
+}
 
 /* Bottom-of-sidebar utility items (always visible).
    Profile is NOT here — it lives inside the identity dock's account menu. */

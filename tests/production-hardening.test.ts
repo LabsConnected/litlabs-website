@@ -122,14 +122,11 @@ describe("Canvas Build button renamed to Edit", () => {
 // ─── Navigation consistency ───────────────────────────────────────
 
 describe("Navigation routes Music to Studio", () => {
-  it("create group Music links to /studio?tool=music", async () => {
+  it("does not expose Music through the canonical app sidebar", async () => {
     const mod = await import("../src/lib/navigation");
-    const createGroup = mod.APP_NAV_SECTIONS.find((g) => g.id === "create");
-    expect(createGroup).toBeDefined();
-    const musicItem = createGroup!.items.find((i) => i.label === "Music");
-    expect(musicItem).toBeDefined();
-    expect(musicItem!.href).toBe("/studio?tool=music");
-    expect(musicItem!.href).not.toContain("/dashboard?app=music");
+    const sidebarLabels = mod.APP_NAV_SECTIONS.flatMap((group) => group.items.map((item) => item.label));
+    expect(sidebarLabels).not.toContain("Music");
+    expect(sidebarLabels).not.toContain("Create");
   });
 
   it("sidebar Music links to /studio?tool=music", async () => {

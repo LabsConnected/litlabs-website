@@ -20,34 +20,22 @@ import {
 
 describe("AppShell Navigation", () => {
   describe("Canonical nav sections", () => {
-    it("has exactly 3 sections: Command, Create, Explore", () => {
+    it("has exactly 3 sections: Command, Studio, Explore", () => {
       const ids = APP_NAV_SECTIONS.map((s) => s.id);
-      expect(ids).toEqual(["command", "create", "explore"]);
+      expect(ids).toEqual(["command", "studio", "explore"]);
     });
 
-    it("Command section has Dashboard and Studio", () => {
+    it("keeps Dashboard and Studio as separate primary sections", () => {
       const command = APP_NAV_SECTIONS.find((s) => s.id === "command");
-      expect(command).toBeDefined();
-      const labels = command!.items.map((i) => i.label);
-      expect(labels).toContain("Dashboard");
-      expect(labels).toContain("Studio");
+      const studio = APP_NAV_SECTIONS.find((s) => s.id === "studio");
+      expect(command?.items.map((i) => i.label)).toEqual(["Dashboard"]);
+      expect(studio?.items.map((i) => i.label)).toEqual(["Studio"]);
     });
 
-    it("Create section has Create, Music, and Showcase", () => {
-      const create = APP_NAV_SECTIONS.find((s) => s.id === "create");
-      expect(create).toBeDefined();
-      const labels = create!.items.map((i) => i.label);
-      expect(labels).toContain("Create");
-      expect(labels).toContain("Music");
-      expect(labels).toContain("Showcase");
-    });
-
-    it("Create nav item links to /studio?tool=image (not chat)", () => {
-      const create = APP_NAV_SECTIONS.find((s) => s.id === "create");
-      expect(create).toBeDefined();
-      const createItem = create!.items.find((i) => i.label === "Create");
-      expect(createItem).toBeDefined();
-      expect(createItem!.href).toBe("/studio?tool=image");
+    it("does not expose a Create section or Create item", () => {
+      const labels = APP_NAV_SECTIONS.flatMap((section) => section.items.map((item) => item.label));
+      expect(APP_NAV_SECTIONS.some((section) => section.id === "create")).toBe(false);
+      expect(labels).not.toContain("Create");
     });
 
     it("Explore section has Games, Discover, Marketplace", () => {
