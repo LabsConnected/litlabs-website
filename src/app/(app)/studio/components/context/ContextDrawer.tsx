@@ -26,8 +26,9 @@
  * there and would still intercept focus.
  */
 
-import { type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Folder, ClipboardList, PanelRightClose, PanelLeftClose, ImageIcon, Activity } from "lucide-react";
+import { useVisualViewport } from "../../hooks/useVisualViewport";
 
 export type ContextDrawerTab = "work" | "files" | "assets" | "inspector";
 
@@ -85,6 +86,19 @@ export default function ContextDrawer({
   const pxWidth = `${width}px`;
   const isLeft = position === "left";
   const CloseIcon = isLeft ? PanelLeftClose : PanelRightClose;
+  // Mobile (below lg) the drawer is fixed; the virtual keyboard shrinks the
+  // visual viewport, so pin the drawer to it — otherwise the keyboard
+  // covers the drawer's lower content. Desktop keeps CSS inset behavior.
+  const vv = useVisualViewport();
+  const [isMobileLayout, setIsMobileLayout] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(max-width: 1023.98px)");
+    const update = () => setIsMobileLayout(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
   return (
     <>
       {/* Mobile backdrop — only present while open */}
@@ -112,6 +126,11 @@ export default function ContextDrawer({
           backgroundColor: "var(--studio-surface)",
           borderColor: open ? "var(--studio-border)" : "transparent",
           backdropFilter: "blur(12px)",
+          // Pin to the visual viewport on mobile so the keyboard can't
+          // cover the drawer. (top+height override inset-y-0's bottom.)
+          ...(isMobileLayout && vv.height > 0
+            ? { top: vv.offsetTop, height: vv.height }
+            : {}),
         }}
         data-testid="context-drawer"
         data-open={open}

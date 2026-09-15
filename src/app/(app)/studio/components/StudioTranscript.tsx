@@ -13,7 +13,8 @@ import {
   type AgentId,
 } from "../stores/useStudioAgentStore";
 import type { StudioTool } from "./StudioSidebar";
-import type { MutationSummary } from "../stores/useExecutionStore";
+import type { MutationSummary, ExecutionEvent, ExecutionPhase } from "../stores/useExecutionStore";
+import { useExecutionStore } from "../stores/useExecutionStore";
 import {
   requirementForMode,
   evaluateCompletion,
@@ -66,6 +67,90 @@ function deriveWorkLog(
       ? "#ef4444"
       : "#e3b341";
   return { label, color };
+}
+
+/* ── Live run progress shown inline in the streaming assistant bubble ── */
+
+/** Concise headline labels for the chat surface — no low-level noise. */
+function phaseHeadline(phase: ExecutionPhase): string {
+  switch (phase) {
+    case "planning": return "Understanding request";
+    case "inspecting": return "Looking at the project";
+    case "editing": return "Building";
+    case "testing": return "Checking the build";
+    case "verifying": return "Verifying";
+    case "awaiting_approval": return "Waiting for your approval";
+    default: return "Working";
+  }
+}
+
+/** Event types too low-level for the compact chat progress list. */
+const PROGRESS_HIDDEN_TYPES = new Set(["reasoning", "status", "model_routing"]);
+
+function eventDotColor(event: ExecutionEvent): string {
+  if (event.type === "tool_error" || (event.type === "build_result" && event.success === false)) return "#ef4444";
+  if (event.type === "tool_result" || event.type === "build_result" || event.type === "finished") {
+    return event.success === false ? "#ef4444" : "#4ade80";
+  }
+  if (event.type === "checkpoint" || event.type === "preview" || event.type === "deploy") return "var(--litt-primary)";
+  return "#e3b341";
+}
+
+/**
+ * StreamingProgress — the concise, live progress block at the top of the
+ * streaming assistant bubble. Reads the existing execution store (the same
+ * state that feeds the LiTT Live tab), so no new plumbing was needed.
+ * Shows a headline ("Understanding request" → "Building" →
+ * "Starting preview" → "Preview ready") plus the last few meaningful
+ * steps, never low-level file reads or model-routing chatter.
+ */
+function StreamingProgress() {
+  const phase = useExecutionStore((s) => s.phase);
+  const events = useExecutionStore((s) => s.events);
+  const isRunning = useExecutionStore((s) => s.isRunning);
+  if (!isRunning) return null;
+
+  const lastPreview = [...events].reverse().find((e) => e.type === "preview");
+  const lastDeploy = [...events].reverse().find((e) => e.type === "deploy");
+  let headline: string;
+  if (lastPreview) {
+    headline = lastPreview.success === true
+      ? "Preview ready"
+      : lastPreview.success === false ? "Preview needs attention" : "Starting preview";
+  } else if (lastDeploy) {
+    headline = lastDeploy.success === true
+      ? "Deploy complete"
+      : lastDeploy.success === false ? "Deploy needs attention" : "Deploying";
+  } else {
+    headline = phaseHeadline(phase);
+  }
+
+  const steps = events
+    .filter((e) => !e.lowLevel && !PROGRESS_HIDDEN_TYPES.has(e.type) && e.summary?.trim())
+    .slice(-4);
+
+  return (
+    <div data-testid="studio-live-progress" className="mb-2 border-b pb-2" style={{ borderColor: "rgba(155,77,255,0.14)" }} aria-live="polite">
+      <div className="flex items-center gap-2 text-[11px] font-bold" style={{ color: "var(--text-main)" }}>
+        <span className="studio-anim-blink inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: "var(--litt-primary)" }} aria-hidden />
+        {headline}
+      </div>
+      {steps.length > 0 && (
+        <ul className="mt-1.5 flex flex-col gap-1">
+          {steps.map((event) => (
+            <li key={event.id} className="flex items-start gap-1.5 text-[10px] leading-4" style={{ color: "var(--text-muted)" }}>
+              <span
+                className="mt-1 inline-block h-1 w-1 shrink-0 rounded-full"
+                style={{ backgroundColor: eventDotColor(event) }}
+                aria-hidden
+              />
+              <span className="min-w-0 flex-1 truncate">{event.summary}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 /* ── Inline SVG icons for hover actions (lucide-react is pinned to ^1.24) ── */
@@ -145,7 +230,8 @@ function MessageHoverActions({
   onCopyText: () => void;
   onCopyMarkdown: () => void;
   onSpeak: () => void;
-  onRegenerate?: () => void;
+  /** Optional assistant message id lets Retry target the exact failed turn. */
+  onRegenerate?: (assistantMessageId?: string) => void;
   onReply?: () => void;
   onPin?: () => void;
   onBranch?: () => void;
@@ -171,13 +257,14 @@ function MessageHoverActions({
     actions.push({ icon: <IconCopy />, label: "MD", onClick: onCopyMarkdown, testId: `hover-md-${message.id}` });
   }
   if (isLastAssistant && !isFailed && onRegenerate) {
-    actions.push({ icon: <IconRefresh />, label: "Regenerate", onClick: onRegenerate });
+    actions.push({ icon: <IconRefresh />, label: "Regenerate", onClick: () => onRegenerate() });
   }
   if (onBranch) {
     actions.push({ icon: <IconBranch />, label: "Branch", onClick: onBranch });
   }
   if (isFailed && onRegenerate) {
-    actions.push({ icon: <IconRefresh />, label: "Retry", onClick: onRegenerate });
+    // Retry re-runs THIS failed turn, not the last completed response.
+    actions.push({ icon: <IconRefresh />, label: "Retry", onClick: () => onRegenerate(message.id) });
   }
   return (
     <div
@@ -303,7 +390,7 @@ export default function StudioTranscript({
   busy: boolean;
   activeAgentId: AgentId;
   onRouteToolAction?: (tool: StudioTool, command?: string) => void;
-  onRegenerateAction?: () => void;
+  onRegenerateAction?: (assistantMessageId?: string) => void;
   completion?: { changes: MutationSummary; previewUpdated: boolean; repaired: boolean } | null;
   onDismissCompletion?: () => void;
   onUndoCompletion?: () => void;
@@ -505,6 +592,7 @@ export default function StudioTranscript({
                   }}
                   aria-busy={showThinkingPlaceholder}
                 >
+                  {!isUser && isStreaming && <StreamingProgress />}
                   {isUser ? (
                     <span className="select-text">{message.content}</span>
                   ) : showThinkingPlaceholder ? (

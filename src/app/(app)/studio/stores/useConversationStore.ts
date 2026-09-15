@@ -15,6 +15,12 @@ export interface ChatMessage {
   createdAt: string;
   parentMessageId: string | null;
   regenerationOfMessageId: string | null;
+  /**
+   * Client request identity persisted by the server. Lets a fresh page
+   * reconcile an interrupted run (refresh mid-run) against canonical
+   * server state instead of leaving a stuck "streaming" bubble.
+   */
+  clientRequestId?: string | null;
   /** Provider reasoning/thinking trace (client-side only, not persisted). */
   reasoning?: string;
   /** V2: Pending approval state when LiTT pauses for ACT-mode approval */
@@ -175,6 +181,7 @@ export function toChatMessage(msg: ConversationMessage): ChatMessage {
     createdAt: msg.createdAt,
     parentMessageId: msg.parentMessageId,
     regenerationOfMessageId: msg.regenerationOfMessageId,
+    clientRequestId: msg.clientRequestId ?? null,
   };
 }
 

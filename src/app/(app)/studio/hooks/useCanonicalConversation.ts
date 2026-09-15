@@ -5,7 +5,7 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { parseBuilderLocalCommand } from "../lib/builder-command-router";
 import { detectIntent, type IntentResult } from "../lib/studio-intent";
-import { useConnectionSummary } from "./useConnectionSummary";
+import { useConnectionSummary, type ConnectionCapabilities } from "./useConnectionSummary";
 import { useVoiceSession } from "@/app/(app)/studio/context/VoiceSessionContext";
 import {
   useStudioAgentStore,
@@ -140,6 +140,7 @@ export function useCanonicalConversation({
   serverProjectId,
   cameraState,
   previewSelection,
+  capabilities: externalCapabilities,
 }: {
   onRouteToolAction?: (tool: StudioTool, command?: string) => void;
   onRouteInspectorAction?: (tab: InspectorTab) => void;
@@ -150,6 +151,12 @@ export function useCanonicalConversation({
   cameraState?: { active: boolean; status: string };
   /** Element selected in the live preview, used as context for the next request. */
   previewSelection?: { label: string; selector: string; tagName: string } | null;
+  /**
+   * Shared capabilities from the caller's own useConnectionSummary. When
+   * provided, the hook does NOT start a second polling instance — one
+   * summary per Studio mount.
+   */
+  capabilities?: ConnectionCapabilities;
 } = {}) {
   const [busy, setBusy] = useState(false);
   const [sendError, setSendErrorState] = useState<string | null>(null);
@@ -167,7 +174,10 @@ export function useCanonicalConversation({
   // execution. Survives the end of the fetch/reader lifecycle — transport
   // lifetime != execution lifetime on the client side too.
   const activeRunRef = useRef<ActiveRun | null>(null);
-  const { capabilities } = useConnectionSummary();
+  // Prefer the caller's shared capabilities; the internal instance is
+  // disabled then so Studio runs exactly one capability/runtime poll stack.
+  const { capabilities: internalCapabilities } = useConnectionSummary({ disabled: Boolean(externalCapabilities) });
+  const capabilities = externalCapabilities ?? internalCapabilities;
   const { voiceTransportConnected, voiceInputState, voiceState, voiceOutputState } = useVoiceSession();
   const { userId, getToken, isLoaded, isSignedIn } = useClerkAuth();
 
@@ -218,6 +228,11 @@ export function useCanonicalConversation({
   const searchParamsRef = useRef(searchParams);
   useEffect(() => { searchParamsRef.current = searchParams; }, [searchParams]);
   const loadedProjectIdRef = useRef<string | null | undefined>(undefined);
+  // Bumped every time the active project actually changes. Sends capture
+  // the generation at start; a send that hasn't dispatched yet is cancelled
+  // when the project switches under it, so a message can never land in the
+  // wrong project's conversation.
+  const projectGenerationRef = useRef(0);
 
   const initialPrompt = searchParams.get("mission") || searchParams.get("prompt") || "";
   const runtimeContext = useMemo(() => ({
@@ -264,6 +279,9 @@ export function useCanonicalConversation({
         cache: "no-store",
         credentials: "include",
         headers: await authHeaders(),
+        // Bounded: a hung message list must not leave the chat in a
+        // perpetual loading state.
+        signal: AbortSignal.timeout(15000),
       });
       if (!res.ok) return;
       const data = await res.json();
@@ -297,172 +315,6 @@ export function useCanonicalConversation({
       // Non-fatal
     }
   }, [getStore, authHeaders]);
-
-  // Load conversations from server on mount
-  const loadConversations = useCallback(async () => {
-    const projectId = getActiveProjectId(serverProjectId, userId);
-    const s = getStore();
-    if (loadedProjectIdRef.current !== projectId) {
-      s.resetForProject();
-      loadedProjectIdRef.current = projectId;
-    }
-    if (!projectId) return;
-
-    s.setLoading(true);
-    try {
-      const res = await fetch(`/api/studio/conversations?projectId=${encodeURIComponent(projectId)}`, {
-        cache: "no-store",
-        credentials: "include",
-        headers: await authHeaders(),
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      const conversations = (data.conversations || []) as Conversation[];
-      s.setConversations(conversations);
-
-      const { conversationId, agentSlug } = parseConversationFromUrl(searchParamsRef.current);
-      const agentInstanceFromUrl = searchParamsRef.current?.get("agentInstance") ?? null;
-      if (conversationId && conversations.some((c) => c.id === conversationId)) {
-        s.selectConversation(conversationId);
-        if (agentInstanceFromUrl) {
-          useStudioAgentStore.getState().setActiveAgentInstance(agentInstanceFromUrl, agentSlug ?? undefined);
-        } else if (agentSlug) {
-          s.setActiveAgent(agentSlug);
-          setActiveAgentId(agentSlug);
-        }
-        await loadMessages(conversationId);
-      } else if (conversations.length > 0) {
-        s.selectConversation(conversations[0].id);
-        await loadMessages(conversations[0].id);
-      }
-    } catch {
-      // Non-fatal — offline or server unavailable
-    } finally {
-      getStore().setLoading(false);
-    }
-  }, [getStore, setActiveAgentId, loadMessages, serverProjectId, userId, authHeaders]);
-
-  // Create a new conversation
-  const createConversation = useCallback(async (
-    options?: { optimisticConversationId?: string },
-  ): Promise<Conversation | null> => {
-    let projectId = getActiveProjectId(serverProjectId, userId);
-
-    try {
-      const res = await fetch("/api/studio/conversations", {
-        method: "POST",
-        credentials: "include",
-        headers: await authHeaders(true),
-        body: JSON.stringify({
-          projectId: projectId || undefined,
-          activeAgentSlug: activeAgentId,
-        }),
-      });
-      if (!res.ok) {
-        const errorBody = await res.json().catch(() => null);
-        if (res.status === 429) {
-          const retryAfter = res.headers.get("Retry-After");
-          const secs = retryAfter ? parseInt(retryAfter, 10) : 60;
-          setSendError(`You're sending messages too fast. Try again in ${secs} second${secs > 1 ? "s" : ""}.`);
-        } else {
-          setSendError(res.status === 401
-            ? "Your Studio session expired. Refresh the page and sign in again."
-            : errorBody?.error || `Failed to create conversation (${res.status}).`);
-        }
-        return null;
-      }
-      const data = await res.json();
-      const conversation = data.conversation as Conversation;
-      projectId = data.projectId ?? conversation.projectId ?? projectId;
-      if (projectId) setActiveProjectId(projectId, userId);
-      const s = getStore();
-      if (options?.optimisticConversationId) {
-        const optimisticMessages = s.messagesByConversationId[options.optimisticConversationId] ?? [];
-        if (optimisticMessages.length > 0) {
-          s.setMessages(conversation.id, optimisticMessages);
-        }
-      }
-      s.setConversations([conversation, ...s.conversations]);
-      s.selectConversation(conversation.id);
-      if (!options?.optimisticConversationId) {
-        s.setMessages(conversation.id, []);
-      }
-      s.setRevision(1);
-      return conversation;
-    } catch {
-      setSendError("Network error while creating conversation.");
-      return null;
-    }
-  }, [getStore, activeAgentId, serverProjectId, userId, authHeaders, setSendError]);
-
-  // Sync URL when conversation or agent changes
-  const syncUrl = useCallback(() => {
-    if (isSyncingFromUrl.current) return;
-    const conversationForUrl = selectedConversationId?.startsWith(OPTIMISTIC_CONVERSATION_ID_PREFIX)
-      ? null
-      : selectedConversationId;
-    const params = serializeConversationToUrl(
-      conversationForUrl,
-      activeAgentId as AgentSlug,
-      searchParams,
-    );
-    const target = `${pathname}${params.toString() ? `?${params.toString()}` : ""}`;
-    // Avoid router.replace loop — only replace if the URL actually changes
-    if (target !== `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`) {
-      router.replace(target, { scroll: false });
-    }
-  }, [selectedConversationId, activeAgentId, searchParams, router, pathname]);
-
-  // Sync from URL on mount and browser navigation
-  useEffect(() => {
-    isSyncingFromUrl.current = true;
-    const s = getStore();
-    if (s.selectedConversationId?.startsWith(OPTIMISTIC_CONVERSATION_ID_PREFIX)) {
-      isSyncingFromUrl.current = false;
-      return;
-    }
-    const { conversationId, agentSlug } = parseConversationFromUrl(searchParams);
-    const agentInstanceFromUrl = searchParams.get("agentInstance") ?? null;
-    if (conversationId !== s.selectedConversationId) {
-      if (conversationId && s.conversations.some((c) => c.id === conversationId)) {
-        s.selectConversation(conversationId);
-        void loadMessages(conversationId);
-      } else if (!conversationId && s.selectedConversationId) {
-        s.selectConversation(null);
-      }
-    }
-    if (agentInstanceFromUrl) {
-      useStudioAgentStore.getState().setActiveAgentInstance(agentInstanceFromUrl, agentSlug ?? undefined);
-    } else if (agentSlug && agentSlug !== activeAgentIdRef.current) {
-      s.setActiveAgent(agentSlug);
-      setActiveAgentId(agentSlug);
-    }
-    isSyncingFromUrl.current = false;
-  }, [searchParams, getStore, loadMessages, setActiveAgentId]);
-
-  // Sync URL when state changes
-  useEffect(() => {
-    syncUrl();
-  }, [syncUrl]);
-
-  // Clear stale project IDs from other users on sign-in
-  useEffect(() => {
-    if (userId) {
-      clearStaleProjectIds(userId);
-    }
-  }, [userId]);
-
-  // Clear requiresReauth when Clerk reports a valid signed-in session again
-  useEffect(() => {
-    if (isLoaded && isSignedIn) {
-      setRequiresReauth(false);
-    }
-  }, [isLoaded, isSignedIn]);
-
-  // Load conversations on mount
-  useEffect(() => {
-    void loadConversations();
-  }, [loadConversations]);
 
   // Reconcile canonical conversation state after an SSE transport loss or
   // an explicit Stop. The server-side execution keeps running after a
@@ -612,6 +464,229 @@ export function useCanonicalConversation({
     }
   }, [getStore, authHeaders, setSendError]);
 
+  // Recover a run interrupted by a page refresh (or tab crash) mid-run.
+  // After loadMessages, a persisted message may still be "streaming" even
+  // though this page never started a run. Rebuild the exact run identity
+  // from the persisted user message's clientRequestId + the assistant
+  // message's id (which the server uses as parentMessageId), then run the
+  // standard reconciliation: Stop keeps working, busy stays true while the
+  // server is still running, and a finished run resolves from canonical
+  // state instead of leaving a stuck "thinking" bubble.
+  const recoverInterruptedRuns = useCallback(async (conversationId: string) => {
+    const store = getStore();
+    const messages = store.messagesByConversationId[conversationId] ?? [];
+    const streamingAssistant = messages.find(
+      (m) => m.role === "assistant" && m.status === "streaming",
+    );
+    if (!streamingAssistant) return;
+    const userTurn = [...messages]
+      .reverse()
+      .find((m) => m.role === "user" && m.id === streamingAssistant.parentMessageId);
+    const clientRequestId = userTurn?.clientRequestId;
+    if (!clientRequestId) {
+      // No run identity survived — resolve from canonical state so the
+      // bubble can't stick forever. Treat it as an interrupted assistant.
+      await reconcileAndApply({
+        conversationId,
+        clientRequestId: "",
+        optimisticUserId: userTurn?.id ?? streamingAssistant.parentMessageId ?? "",
+        optimisticAssistantId: streamingAssistant.id,
+      }, {});
+      return;
+    }
+    activeRunRef.current = {
+      conversationId,
+      clientRequestId,
+      optimisticUserId: userTurn?.id ?? "",
+      optimisticAssistantId: streamingAssistant.id,
+    };
+    setBusy(true);
+    store.setStreaming(true);
+    await reconcileAndApply(activeRunRef.current, {});
+  }, [getStore, reconcileAndApply, setBusy]);
+
+  // Load conversations from server on mount
+  // Synchronous project-switch signal — bumped the moment the user picks
+  // another project (before router state settles), so an in-flight send
+  // sees the switch at its pre-dispatch checkpoint.
+  useEffect(() => {
+    const handler = () => { projectGenerationRef.current += 1; };
+    window.addEventListener("studio:project-switching", handler);
+    return () => window.removeEventListener("studio:project-switching", handler);
+  }, []);
+
+  const loadConversations = useCallback(async () => {
+    const projectId = getActiveProjectId(serverProjectId, userId);
+    const s = getStore();
+    if (loadedProjectIdRef.current !== projectId) {
+      s.resetForProject();
+      loadedProjectIdRef.current = projectId;
+      projectGenerationRef.current += 1;
+    }
+    if (!projectId) return;
+
+    s.setLoading(true);
+    try {
+      const res = await fetch(`/api/studio/conversations?projectId=${encodeURIComponent(projectId)}`, {
+        cache: "no-store",
+        credentials: "include",
+        headers: await authHeaders(),
+        // Bounded: a hung list must not leave Studio in a perpetual
+        // loading state on mount.
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const conversations = (data.conversations || []) as Conversation[];
+      s.setConversations(conversations);
+
+      const { conversationId, agentSlug } = parseConversationFromUrl(searchParamsRef.current);
+      const agentInstanceFromUrl = searchParamsRef.current?.get("agentInstance") ?? null;
+      if (conversationId && conversations.some((c) => c.id === conversationId)) {
+        s.selectConversation(conversationId);
+        if (agentInstanceFromUrl) {
+          useStudioAgentStore.getState().setActiveAgentInstance(agentInstanceFromUrl, agentSlug ?? undefined);
+        } else if (agentSlug) {
+          s.setActiveAgent(agentSlug);
+          setActiveAgentId(agentSlug);
+        }
+        await loadMessages(conversationId);
+        await recoverInterruptedRuns(conversationId);
+      } else if (conversations.length > 0) {
+        s.selectConversation(conversations[0].id);
+        await loadMessages(conversations[0].id);
+        await recoverInterruptedRuns(conversations[0].id);
+      }
+    } catch {
+      // Non-fatal — offline or server unavailable
+    } finally {
+      getStore().setLoading(false);
+    }
+  }, [getStore, setActiveAgentId, loadMessages, recoverInterruptedRuns, serverProjectId, userId, authHeaders]);
+
+  // Create a new conversation
+  const createConversation = useCallback(async (
+    options?: { optimisticConversationId?: string },
+  ): Promise<Conversation | null> => {
+    let projectId = getActiveProjectId(serverProjectId, userId);
+
+    try {
+      const res = await fetch("/api/studio/conversations", {
+        method: "POST",
+        credentials: "include",
+        headers: await authHeaders(true),
+        body: JSON.stringify({
+          projectId: projectId || undefined,
+          activeAgentSlug: activeAgentId,
+        }),
+      });
+      if (!res.ok) {
+        const errorBody = await res.json().catch(() => null);
+        if (res.status === 429) {
+          const retryAfter = res.headers.get("Retry-After");
+          const secs = retryAfter ? parseInt(retryAfter, 10) : 60;
+          setSendError(`You're sending messages too fast. Try again in ${secs} second${secs > 1 ? "s" : ""}.`);
+        } else {
+          setSendError(res.status === 401
+            ? "Your Studio session expired. Refresh the page and sign in again."
+            : errorBody?.error || `Failed to create conversation (${res.status}).`);
+        }
+        return null;
+      }
+      const data = await res.json();
+      const conversation = data.conversation as Conversation;
+      projectId = data.projectId ?? conversation.projectId ?? projectId;
+      if (projectId) setActiveProjectId(projectId, userId);
+      const s = getStore();
+      if (options?.optimisticConversationId) {
+        const optimisticMessages = s.messagesByConversationId[options.optimisticConversationId] ?? [];
+        if (optimisticMessages.length > 0) {
+          s.setMessages(conversation.id, optimisticMessages);
+        }
+      }
+      s.setConversations([conversation, ...s.conversations]);
+      s.selectConversation(conversation.id);
+      if (!options?.optimisticConversationId) {
+        s.setMessages(conversation.id, []);
+      }
+      s.setRevision(1);
+      return conversation;
+    } catch {
+      setSendError("Network error while creating conversation.");
+      return null;
+    }
+  }, [getStore, activeAgentId, serverProjectId, userId, authHeaders, setSendError]);
+
+  // Sync URL when conversation or agent changes
+  const syncUrl = useCallback(() => {
+    if (isSyncingFromUrl.current) return;
+    const conversationForUrl = selectedConversationId?.startsWith(OPTIMISTIC_CONVERSATION_ID_PREFIX)
+      ? null
+      : selectedConversationId;
+    const params = serializeConversationToUrl(
+      conversationForUrl,
+      activeAgentId as AgentSlug,
+      searchParams,
+    );
+    const target = `${pathname}${params.toString() ? `?${params.toString()}` : ""}`;
+    // Avoid router.replace loop — only replace if the URL actually changes
+    if (target !== `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`) {
+      router.replace(target, { scroll: false });
+    }
+  }, [selectedConversationId, activeAgentId, searchParams, router, pathname]);
+
+  // Sync from URL on mount and browser navigation
+  useEffect(() => {
+    isSyncingFromUrl.current = true;
+    const s = getStore();
+    if (s.selectedConversationId?.startsWith(OPTIMISTIC_CONVERSATION_ID_PREFIX)) {
+      isSyncingFromUrl.current = false;
+      return;
+    }
+    const { conversationId, agentSlug } = parseConversationFromUrl(searchParams);
+    const agentInstanceFromUrl = searchParams.get("agentInstance") ?? null;
+    if (conversationId !== s.selectedConversationId) {
+      if (conversationId && s.conversations.some((c) => c.id === conversationId)) {
+        s.selectConversation(conversationId);
+        void loadMessages(conversationId);
+      } else if (!conversationId && s.selectedConversationId) {
+        s.selectConversation(null);
+      }
+    }
+    if (agentInstanceFromUrl) {
+      useStudioAgentStore.getState().setActiveAgentInstance(agentInstanceFromUrl, agentSlug ?? undefined);
+    } else if (agentSlug && agentSlug !== activeAgentIdRef.current) {
+      s.setActiveAgent(agentSlug);
+      setActiveAgentId(agentSlug);
+    }
+    isSyncingFromUrl.current = false;
+  }, [searchParams, getStore, loadMessages, setActiveAgentId]);
+
+  // Sync URL when state changes
+  useEffect(() => {
+    syncUrl();
+  }, [syncUrl]);
+
+  // Clear stale project IDs from other users on sign-in
+  useEffect(() => {
+    if (userId) {
+      clearStaleProjectIds(userId);
+    }
+  }, [userId]);
+
+  // Clear requiresReauth when Clerk reports a valid signed-in session again
+  useEffect(() => {
+    if (isLoaded && isSignedIn) {
+      setRequiresReauth(false);
+    }
+  }, [isLoaded, isSignedIn]);
+
+  // Load conversations on mount
+  useEffect(() => {
+    void loadConversations();
+  }, [loadConversations]);
+
+
   // The send function — matches useStudioConversation's contract
   const send = useCallback(
     async (value: string, attachments?: string[]): Promise<SendResult> => {
@@ -622,6 +697,11 @@ export function useCanonicalConversation({
       // while reauthentication is required (expired session banner shown).
       if (!isLoaded) return { accepted: false, persisted: false };
       if (requiresReauth) return { accepted: false, persisted: false, errorKind: "auth" };
+
+      // Capture the project generation — checked before dispatch so a
+      // mid-send project switch can't route this message to the wrong
+      // project's conversation.
+      const sendGeneration = projectGenerationRef.current;
 
       // 1. Slash commands — local, no server call
       const localCommand = parseBuilderLocalCommand(text);
@@ -1026,7 +1106,20 @@ export function useCanonicalConversation({
             signal: controller.signal,
           });
         };
-        let response = await makeRequest(expectedRevision);
+        let response: Response;
+        // Project-switch race: if the user picked another project after
+        // this send started but before dispatch, cancel instead of sending
+        // into the wrong project's conversation. (After dispatch the run is
+        // correctly scoped to its conversation; reconciliation handles the
+        // rest, and the server-side run continues safely.)
+        if (projectGenerationRef.current !== sendGeneration) {
+          rollbackOptimistic(activeConversationId);
+          useExecutionStore.getState().endRun("cancelled");
+          setBusy(false);
+          setSendError("Project switched before your message was sent — it wasn't sent. Send it again if you still want to.");
+          return { accepted: false, persisted: false, errorKind: "cancelled" };
+        }
+        response = await makeRequest(expectedRevision);
 
         // Error / conflict paths still return JSON.
         if (response.status === 409) {
@@ -1462,29 +1555,39 @@ export function useCanonicalConversation({
   );
 
   // Regenerate — calls canonical regenerate API
-  const regenerate = useCallback(async () => {
+  const regenerate = useCallback(async (assistantMessageId?: string) => {
     const s = getStore();
     const conversationId = s.selectedConversationId;
     if (!conversationId || busy) return;
 
     const allMessages = s.getMessages();
-    const lastAssistantIdx = allMessages.findLastIndex((m) => m.role === "assistant" && m.status === "completed");
-    if (lastAssistantIdx === -1) return;
-    const lastAssistant = allMessages[lastAssistantIdx];
+    // Retry targets the exact failed turn the user pressed Retry on. The
+    // hover "Regenerate" (no id) keeps re-answering the last completed
+    // assistant message.
+    const target = assistantMessageId
+      ? allMessages.find((m) => m.id === assistantMessageId && m.role === "assistant")
+      : allMessages.findLast((m) => m.role === "assistant" && m.status === "completed");
+    if (!target?.id) return;
 
     setBusy(true);
     getStore().setStreaming(true);
+    // Bounded and cancellable: the 120s timeout matches the send() stall
+    // watchdog, and Stop aborts the request via the shared requestAbortRef.
+    const regenController = new AbortController();
+    const timeoutId = setTimeout(() => regenController.abort(), 120000);
+    requestAbortRef.current = regenController;
     try {
       const response = await fetch(`/api/studio/conversations/${conversationId}/regenerate`, {
         method: "POST",
         credentials: "include",
         headers: await authHeaders(true),
         body: JSON.stringify({
-          assistantMessageId: lastAssistant.id,
+          assistantMessageId: target.id,
           clientRequestId: generateClientRequestId(),
           expectedRevision: s.revision,
           runtimeContext,
         }),
+        signal: regenController.signal,
       });
 
       const data = await response.json();
@@ -1510,8 +1613,14 @@ export function useCanonicalConversation({
       s2.addMessage(conversationId, toCanonicalChatMessage(newMsg));
       s2.setRevision(data.revision ?? s2.revision + 1);
     } catch (error) {
-      setSendError(error instanceof Error ? error.message : "Regeneration failed. Please try again.");
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setSendError("Regeneration stopped.");
+      } else {
+        setSendError(error instanceof Error ? error.message : "Regeneration failed. Please try again.");
+      }
     } finally {
+      clearTimeout(timeoutId);
+      if (requestAbortRef.current === regenController) requestAbortRef.current = null;
       getStore().setStreaming(false);
       useExecutionStore.getState().endRun();
       setBusy(false);

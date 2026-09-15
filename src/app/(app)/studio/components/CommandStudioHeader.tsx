@@ -64,6 +64,8 @@ export default function CommandStudioHeader({
   onOpenToolsAction,
   toolsVisible = false,
   onProjectSelectAction,
+  onCreateProjectAction,
+  onDeployAction,
   onClearChatAction,
   onNewChatAction,
   onDeleteChatAction,
@@ -94,6 +96,10 @@ export default function CommandStudioHeader({
   onOpenToolsAction?: () => void;
   toolsVisible?: boolean;
   onProjectSelectAction?: (projectId: string) => void;
+  /** Creates a new blank project (picker "+ New project" entry). */
+  onCreateProjectAction?: () => void;
+  /** Prefills the chat composer with a deploy request (real deploy runs through LiTT). */
+  onDeployAction?: () => void;
   onClearChatAction?: () => void;
   onNewChatAction?: () => void;
   onDeleteChatAction?: () => void;
@@ -222,6 +228,7 @@ export default function CommandStudioHeader({
         projectId={capabilities.projectId}
         projectName={capabilities.projectName}
         onSelect={(projectId) => onProjectSelectAction?.(projectId)}
+        onCreateProject={() => onCreateProjectAction?.()}
       />
 
       {/* Workspace status dot — compact indicator only, no popover.
@@ -361,11 +368,11 @@ export default function CommandStudioHeader({
             border: "1px solid rgba(155,77,255,0.4)",
             boxShadow: "var(--studio-glow-purple)",
           }}
-          title="Preview / Deploy project"
-          aria-label="Deploy"
+          title="Open the live preview"
+          aria-label="Preview"
         >
-          <Rocket size={11} className="pointer-events-none" />
-          <span className="pointer-events-none">Deploy</span>
+          <Eye size={11} className="pointer-events-none" />
+          <span className="pointer-events-none">Preview</span>
         </button>
       )}
 
@@ -437,6 +444,7 @@ export default function CommandStudioHeader({
             rect={overflowRect}
             onClose={() => setOverflowOpen(false)}
             onPreviewAction={onPreviewAction}
+            onDeployAction={onDeployAction}
             onNewChatAction={onNewChatAction}
             onClearChatAction={onClearChatAction}
             onDeleteChatAction={onDeleteChatAction}
@@ -755,6 +763,7 @@ function OverflowMenu({
   rect,
   onClose,
   onPreviewAction,
+  onDeployAction,
   onNewChatAction,
   onClearChatAction,
   onDeleteChatAction,
@@ -769,6 +778,7 @@ function OverflowMenu({
   rect: DOMRect;
   onClose: () => void;
   onPreviewAction?: () => void;
+  onDeployAction?: () => void;
   onNewChatAction?: () => void;
   onClearChatAction?: () => void;
   onDeleteChatAction?: () => void;
@@ -889,6 +899,19 @@ function OverflowMenu({
         <Eye size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
         Preview
       </button>
+      {onDeployAction && (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => { onClose(); onDeployAction(); }}
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+          style={{ color: "var(--text-primary)" }}
+          title="Ask LiTT to deploy this project to a live public URL"
+        >
+          <Rocket size={13} className="pointer-events-none" style={{ color: "var(--litt-primary)" }} />
+          Deploy…
+        </button>
+      )}
       {onOpenTerminalAction && (
         <button
           type="button"
