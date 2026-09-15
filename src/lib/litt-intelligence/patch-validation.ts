@@ -31,11 +31,22 @@ const MOUSTACHE_TOKEN = /\{\{\s*[^}{]+\s*\}\}/;
  */
 const SNAKE_BRACKET_TOKEN = /\[[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\]/;
 
+/**
+ * Single-word canonical redaction slots: [EMAIL], [PHONE], [ADDRESS].
+ * These carry no underscore, so SNAKE_BRACKET_TOKEN cannot see them —
+ * they are enumerated explicitly rather than widening the generic rule,
+ * which keeps arbitrary single-word brackets ([TODO], [OK], [WIP],
+ * array-style [A-Z] headers) legitimate.
+ */
+const SINGLE_WORD_REDACTION_TOKEN = /\[(?:EMAIL|PHONE|ADDRESS)\]/;
+
 function findPlaceholderToken(text: string): string | null {
   const moustache = text.match(MOUSTACHE_TOKEN);
   if (moustache) return moustache[0];
   const bracket = text.match(SNAKE_BRACKET_TOKEN);
   if (bracket) return bracket[0];
+  const single = text.match(SINGLE_WORD_REDACTION_TOKEN);
+  if (single) return single[0];
   return null;
 }
 
