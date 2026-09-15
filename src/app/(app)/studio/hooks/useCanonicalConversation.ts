@@ -273,13 +273,15 @@ export function useCanonicalConversation({
       s.setMessages(conversationId, chatMsgs);
       s.setRevision(data.revision ?? 1);
       // Rehydrate a paused approval gate: when the latest assistant message
-      // is awaiting_approval with a resumable pausedRunId, the Approve/Reject
-      // card must remount after reload. Live runs manage this via SSE — only
-      // restore when no run is active locally.
+      // carries a resumable pausedRunId, the Approve/Reject card must remount
+      // after reload. The paused message may persist as awaiting_approval or
+      // streaming (the DB status CHECK predates awaiting_approval), so key
+      // off the attached pendingApproval instead of the message status.
+      // Live runs manage this via SSE — only restore when no run is active.
       const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant");
       const exec = useExecutionStore.getState();
       if (
-        lastAssistant?.status === "awaiting_approval"
+        (lastAssistant?.status === "awaiting_approval" || lastAssistant?.status === "streaming")
         && lastAssistant.pendingApproval?.pausedRunId
         && !exec.isRunning
         && !exec.pendingApproval
