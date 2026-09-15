@@ -94,9 +94,23 @@ for c in litt litt-local litt-dev litt-status litt-sync litt-save litt-pr \
     esac
     continue
   fi
-  if [ -f "$p" ] && ! bash -n "$p" 2>/dev/null; then
-    bad "$c exists but has syntax errors: $p"
-    continue
+  if [ -f "$p" ]; then
+    first_line="$(head -n 1 "$p" 2>/dev/null || true)"
+    case "$first_line" in
+      *node*)
+        target="$(readlink -f "$p" 2>/dev/null || printf '%s' "$p")"
+        if ! node --check "$target" >/dev/null 2>&1; then
+          bad "$c exists but has JavaScript syntax errors: $p"
+          continue
+        fi
+        ;;
+      *bash*|*sh*)
+        if ! bash -n "$p" 2>/dev/null; then
+          bad "$c exists but has shell syntax errors: $p"
+          continue
+        fi
+        ;;
+    esac
   fi
   ok "$c -> $p"
 done
@@ -251,14 +265,37 @@ echo "── OLLAMA ROUTE ──"
 LAN="${LITT_OLLAMA_LAN:-${OLLAMA_LAN_URL:-}}"
 TS_="${LITT_OLLAMA_TAILSCALE:-${OLLAMA_TAILSCALE_URL:-}}"
 
-if [ -n "$LAN" ] && curl --max-time 2 -fsS "$LAN/api/tags" >/dev/null 2>&1; then
-  ok "Ollama via LAN ($LAN)"
-elif [ -n "$TS_" ] && curl --max-time 3 -fsS "$TS_/api/tags" >/dev/null 2>&1; then
-  ok "Ollama via Tailscale ($TS_)"
-else
-  warn "Ollama unreachable on LAN and Tailscale"
+MODEL="${LITT_LOCAL_MODEL:-${LITT_MODEL:-}}"
+OLLAMA_ACTIVE=""
+OLLAMA_TAGS=""
+
+if [ -n "$LAN" ]; then
+  OLLAMA_TAGS="$(curl --max-time 2 -fsS "$LAN/api/tags" 2>/dev/null || true)"
+  if [ -n "$OLLAMA_TAGS" ]; then
+    OLLAMA_ACTIVE="$LAN"
+    ok "Ollama via LAN ($LAN)"
+  fi
 fi
-info "model: ${LITT_LOCAL_MODEL:-${LITT_MODEL:-unset}}"
+
+if [ -z "$OLLAMA_ACTIVE" ] && [ -n "$TS_" ]; then
+  OLLAMA_TAGS="$(curl --max-time 3 -fsS "$TS_/api/tags" 2>/dev/null || true)"
+  if [ -n "$OLLAMA_TAGS" ]; then
+    OLLAMA_ACTIVE="$TS_"
+    ok "Ollama via Tailscale ($TS_)"
+  fi
+fi
+
+if [ -z "$OLLAMA_ACTIVE" ]; then
+  warn "Ollama unreachable on LAN and Tailscale"
+elif [ -z "$MODEL" ]; then
+  warn "Ollama reachable but no LiTT local model is configured"
+elif printf '%s' "$OLLAMA_TAGS" | jq -e --arg model "$MODEL"   '.models[]? | select(.name == $model or .model == $model)'   >/dev/null 2>&1; then
+  ok "configured model available: $MODEL"
+else
+  warn "configured model missing from Ollama: $MODEL"
+fi
+
+info "model: ${MODEL:-unset}"
 
 echo
 echo "── LOCAL TERMINAL SERVER ──"
