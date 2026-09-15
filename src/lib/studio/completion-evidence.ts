@@ -53,9 +53,49 @@ export interface DeploymentEvidence {
   urlVerified: boolean;
 }
 
+/**
+ * What the workspace itself says, compared against the checkpoint taken
+ * before the run's first mutation.
+ *
+ * Tool success flags describe what the model was TOLD happened. Only this
+ * describes what is actually on disk. A tool that wrote bytes and then
+ * returned failure leaves `changed: true` with no successful mutation, and
+ * the run must not claim nothing happened.
+ */
+export type WorkspaceChangeStatus =
+  /** The diff ran and found differences from the checkpoint. */
+  | "changed"
+  /** The diff ran and found none. */
+  | "unchanged"
+  /**
+   * The comparison could not be made — no checkpoint, unreachable
+   * workspace, or a failed diff. This is NOT "unchanged": claiming the
+   * workspace is untouched because we failed to look is the exact false
+   * negative this evidence exists to prevent.
+   */
+  | "unknown";
+
+export interface WorkspaceChangeEvidence {
+  status: WorkspaceChangeStatus;
+  /** Paths that differ, when the diff could enumerate them. */
+  files?: string[];
+  /** The checkpoint the comparison was made against. */
+  checkpointSha?: string;
+  /** Whether restoring that checkpoint is still possible. */
+  rollbackAvailable?: boolean;
+  /** Why the status is "unknown" — surfaced for support, never a claim. */
+  unknownReason?: string;
+}
+
 export interface ExecutionEvidence {
   toolCalls: ToolCallEvidence[];
   deployment?: DeploymentEvidence | null;
+  /**
+   * Absent when no checkpoint existed (no mutation was ever attempted) or
+   * the diff could not be taken. Absence is NOT proof that nothing changed,
+   * so it never licenses a "nothing was changed" claim on its own.
+   */
+  workspaceChange?: WorkspaceChangeEvidence | null;
 }
 
 export interface CompletionVerdict {
@@ -68,6 +108,17 @@ export interface CompletionVerdict {
   missing: string[];
   /** Human-readable justification for the verdict. */
   reason: string;
+  /**
+   * What the workspace itself says. "unknown" when no comparison was
+   * possible — which is never the same as "unchanged".
+   */
+  workspaceChange?: WorkspaceChangeStatus;
+  /** Paths that differ, when known. */
+  changedFiles?: string[];
+  /** Checkpoint the comparison was made against. */
+  checkpointSha?: string;
+  /** Whether restoring that checkpoint is still possible. */
+  rollbackAvailable?: boolean;
 }
 
 /**
@@ -83,8 +134,43 @@ export function requirementForMode(mode: string): WorkRequirement {
   return { mutation: false, deployment: false };
 }
 
-/** Judge completion from evidence alone. */
+/** Surface workspace-diff facts on the verdict for the UI to render. */
+function changeFields(change: WorkspaceChangeEvidence | null) {
+  if (!change) return { workspaceChange: "unknown" as const };
+  return {
+    workspaceChange: change.status,
+    changedFiles: change.files,
+    checkpointSha: change.checkpointSha,
+    rollbackAvailable: change.rollbackAvailable,
+  };
+}
+
+/** " (2 files)" / " (index.html)" — empty when the diff could not name them. */
+function fileSummary(change: WorkspaceChangeEvidence): string {
+  const files = change.files ?? [];
+  if (files.length === 0) return "";
+  if (files.length === 1) return ` (${files[0]})`;
+  return ` (${files.length} files)`;
+}
+
+/**
+ * Judge completion from evidence alone.
+ *
+ * Every verdict carries the workspace-diff facts, on success and failure
+ * alike, so no caller can render a completion state that contradicts what is
+ * actually persisted.
+ */
 export function evaluateCompletion(
+  requirement: WorkRequirement,
+  evidence: ExecutionEvidence,
+): CompletionVerdict {
+  return {
+    ...evaluateCompletionState(requirement, evidence),
+    ...changeFields(evidence.workspaceChange ?? null),
+  };
+}
+
+function evaluateCompletionState(
   requirement: WorkRequirement,
   evidence: ExecutionEvidence,
 ): CompletionVerdict {
@@ -124,24 +210,53 @@ export function evaluateCompletion(
     missing.push("file mutation");
     if (requirement.deployment) missing.push("deployment");
 
-    // A mutation was attempted and failed — that is a failure, not an
-    // untouched task.
+    // Tool flags say no mutation SUCCEEDED. They do not say the workspace
+    // is untouched: a tool can write bytes and then fail, and a run can be
+    // cancelled after a write lands. Only the checkpoint diff settles it,
+    // so "nothing was changed" is claimed ONLY when the diff confirms it.
+    const change = evidence.workspaceChange ?? null;
+
+    if (change?.status === "changed") {
+      return {
+        ...base,
+        ...changeFields(change),
+        state: "failed",
+        missing,
+        reason: failedMutations > 0
+          ? `No mutating tool call succeeded (${failedMutations} failed), but the workspace was changed${fileSummary(change)}. The run failed after making changes.`
+          : `No mutating tool call reported success, but the workspace was changed${fileSummary(change)}. The run failed after making changes.`,
+      };
+    }
+
+    // The diff is only evidence of "untouched" when it was actually taken.
+    // Without it we say what we know — no successful mutation — and do not
+    // assert anything about the workspace.
+    const verifiedUnchanged = change?.status === "unchanged";
+
     if (failedMutations > 0) {
       return {
         ...base,
+        ...changeFields(change),
         state: "failed",
         missing,
-        reason: `No mutating tool call succeeded (${failedMutations} failed) — nothing was changed.`,
+        reason: verifiedUnchanged
+          ? `No mutating tool call succeeded (${failedMutations} failed) — the run failed before making changes.`
+          : `No mutating tool call succeeded (${failedMutations} failed).`,
       };
     }
 
     return {
       ...base,
+      ...changeFields(change),
       state: "not_started",
       missing,
       reason: attemptedMutations > 0
-        ? "No mutating tool call returned a successful result — nothing was changed."
-        : "No mutating tool call was made — nothing was changed.",
+        ? verifiedUnchanged
+          ? "No mutating tool call returned a successful result — the run failed before making changes."
+          : "No mutating tool call returned a successful result."
+        : verifiedUnchanged
+          ? "No mutating tool call was made — nothing was changed."
+          : "No mutating tool call was made.",
     };
   }
 

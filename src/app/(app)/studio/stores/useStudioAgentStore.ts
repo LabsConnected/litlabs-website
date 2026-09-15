@@ -6,7 +6,11 @@ import {
 } from "@/lib/agent-registry";
 import type { PlanId } from "@/config/plans";
 import type { AgentMode } from "@/lib/studio/types";
-import type { ToolCallEvidence, DeploymentEvidence } from "@/lib/studio/completion-evidence";
+import type {
+  ToolCallEvidence,
+  DeploymentEvidence,
+  WorkspaceChangeEvidence,
+} from "@/lib/studio/completion-evidence";
 
 export type AgentId =
   | "litt"
@@ -49,6 +53,13 @@ export interface MessageExecution {
   mode: string;
   toolCalls: ToolCallEvidence[];
   deployment?: DeploymentEvidence | null;
+  /**
+   * What the workspace itself says, diffed against the checkpoint taken
+   * before the run's first mutation. Tool flags describe what the model was
+   * told happened; only this describes what is persisted — a failed run that
+   * wrote bytes must not be labelled "no work completed".
+   */
+  workspaceChange?: WorkspaceChangeEvidence | null;
 }
 
 export interface AgentMeta {

@@ -1,4 +1,5 @@
-import { readdirSync, readFileSync, writeFileSync, mkdirSync, statSync, existsSync } from "fs";
+import { readdirSync, readFileSync, mkdirSync, statSync, existsSync } from "fs";
+import { writeFileAtomic } from "./atomic-write";
 import { join, dirname, relative, basename } from "path";
 import { createHash } from "crypto";
 import { resolveWorkspacePath, isIgnoredDir, MAX_READ_SIZE, MAX_WRITE_SIZE } from "./WorkspaceSecurity";
@@ -102,8 +103,9 @@ export function writeFile(
     }
   }
 
-  mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, content, "utf-8");
+  // Atomic replacement: a failed or interrupted write must never leave the
+  // destination truncated. See workspace/atomic-write.ts.
+  writeFileAtomic(target, content);
 
   const version = createHash("sha256").update(content).digest("hex").slice(0, 16);
   return {

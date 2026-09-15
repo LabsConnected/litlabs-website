@@ -43,11 +43,40 @@ function deriveWorkLog(
 ): { label: string; color: string } | null {
   const execution = message.execution;
 
-  // A failed message reports failure regardless of evidence detail.
+  // A failed message still has to tell the truth about the workspace.
+  //
+  // This previously hardcoded "Failed — no work completed" without consulting
+  // any evidence. A run that wrote bytes and then failed — or was cancelled
+  // after a write landed — was labelled as having done nothing, while the
+  // user's file on disk had already been rewritten. The checkpoint diff is
+  // the authority, so it is consulted here too.
   if (isFailed) {
     const attempted = execution?.toolCalls.length ?? 0;
+    const change = execution?.workspaceChange ?? null;
+
+    if (change?.status === "changed") {
+      const count = change.files?.length ?? 0;
+      const detail = count === 1 ? change.files![0] : count > 1 ? `${count} files` : "changes";
+      return {
+        label: `Failed after changing ${detail} — review or roll back`,
+        color: "#ef4444",
+      };
+    }
+
+    // Only claim nothing happened when the diff actually says so. Without a
+    // diff we report the failure without asserting anything about the files.
+    // Only claim nothing happened when the diff actually says so. When the
+    // comparison could not be made we say that plainly rather than guessing.
+    if (change?.status === "unknown" || change === null) {
+      return {
+        label: "Failed — could not verify whether files changed",
+        color: "#ef4444",
+      };
+    }
     return {
-      label: attempted > 0 ? `0 of ${attempted} steps complete — failed` : "Failed — no work completed",
+      label: attempted > 0
+        ? `0 of ${attempted} steps complete — failed`
+        : "Failed — no work completed",
       color: "#ef4444",
     };
   }
@@ -58,6 +87,7 @@ function deriveWorkLog(
   const verdict = evaluateCompletion(requirementForMode(execution.mode), {
     toolCalls: execution.toolCalls,
     deployment: execution.deployment ?? null,
+    workspaceChange: execution.workspaceChange ?? null,
   });
   const label = workLogLabel(verdict);
   if (!label) return null;
