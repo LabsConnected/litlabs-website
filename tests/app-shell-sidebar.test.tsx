@@ -125,18 +125,18 @@ describe("AppShell sidebar", () => {
     );
     const aside = getSidebar();
     const nav = within(aside);
-    // "Studio" and "Create" appear as both section headers and item labels.
-    for (const label of ["Dashboard", "Studio", "Create", "Games", "Discover", "Marketplace", "Wallet", "Settings"]) {
+    // Studio appears as both a section header and item label.
+    for (const label of ["Dashboard", "Studio", "Games", "Discover", "Marketplace", "Wallet", "Settings"]) {
       expect(nav.getAllByText(label).length).toBeGreaterThanOrEqual(1);
     }
-    for (const removed of ["Music", "Showcase", "Projects"]) {
+    for (const removed of ["Create", "Music", "Showcase", "Projects"]) {
       expect(nav.queryByText(removed)).toBeNull();
     }
     // Section headers present in the required order — the label is the
     // first div child of each section wrapper inside the nav.
     const headers = Array.from(aside.querySelectorAll("nav > div > div:first-child"))
       .map((el) => el.textContent);
-    expect(headers).toEqual(["Command", "Studio", "Create", "Explore"]);
+    expect(headers).toEqual(["Command", "Studio", "Explore"]);
   });
 
   it("keeps layout overflow guards in place (shrink-0 rail, min-w-0 main)", () => {

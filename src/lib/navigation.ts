@@ -67,10 +67,10 @@ export const GROUP_ACCENTS: Record<string, string> = {
   More: "#94a3b8",
 };
 
-/* ─── Canonical App Shell navigation (COMMAND / STUDIO / CREATE / EXPLORE) ─── */
+/* ─── Canonical App Shell navigation (COMMAND / STUDIO / EXPLORE) ─── */
 // Studio is its own top-level section — it is the primary product surface
-// and must not sit under Command. Music and Showcase were removed from the
-// sidebar; the routes still exist and remain reachable directly.
+// and must not sit under Command. Creation routes remain reachable directly
+// through Studio without adding a separate Create sidebar section.
 
 export const APP_NAV_SECTIONS: NavSection[] = [
   {
@@ -85,13 +85,6 @@ export const APP_NAV_SECTIONS: NavSection[] = [
     label: "Studio",
     items: [
       { label: "Studio", href: "/studio", icon: Sparkles, shortcut: "⌘S" },
-    ],
-  },
-  {
-    id: "create",
-    label: "Create",
-    items: [
-      { label: "Create", href: "/studio?tool=image", icon: Sparkles },
     ],
   },
   {

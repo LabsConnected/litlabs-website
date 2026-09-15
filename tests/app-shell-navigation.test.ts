@@ -20,9 +20,9 @@ import {
 
 describe("AppShell Navigation", () => {
   describe("Canonical nav sections", () => {
-    it("has exactly 4 sections in order: Command, Studio, Create, Explore", () => {
+    it("has exactly 3 sections in order: Command, Studio, Explore", () => {
       const ids = APP_NAV_SECTIONS.map((s) => s.id);
-      expect(ids).toEqual(["command", "studio", "create", "explore"]);
+      expect(ids).toEqual(["command", "studio", "explore"]);
     });
 
     it("Command section has Dashboard only", () => {
@@ -40,12 +40,10 @@ describe("AppShell Navigation", () => {
       expect(studio!.items[0].href).toBe("/studio");
     });
 
-    it("Create section has Create linking to /studio?tool=image", () => {
-      const create = APP_NAV_SECTIONS.find((s) => s.id === "create");
-      expect(create).toBeDefined();
-      const labels = create!.items.map((i) => i.label);
-      expect(labels).toEqual(["Create"]);
-      expect(create!.items[0].href).toBe("/studio?tool=image");
+    it("does not expose a Create section or Create item", () => {
+      const labels = APP_NAV_SECTIONS.flatMap((section) => section.items.map((item) => item.label));
+      expect(APP_NAV_SECTIONS.some((section) => section.id === "create")).toBe(false);
+      expect(labels).not.toContain("Create");
     });
 
     it("Explore section has Games, Discover, Marketplace", () => {

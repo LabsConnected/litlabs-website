@@ -122,9 +122,10 @@ describe("Canvas Build button renamed to Edit", () => {
 // ─── Navigation consistency ───────────────────────────────────────
 
 describe("Navigation routes Music to Studio", () => {
-  it("sidebar has no dedicated Music entry (tool shortcuts were removed)", async () => {
+  it("sidebar has no dedicated Create or Music entries", async () => {
     const mod = await import("../src/lib/navigation");
     const labels = mod.APP_NAV_SECTIONS.flatMap((g) => g.items.map((i) => i.label));
+    expect(labels).not.toContain("Create");
     expect(labels).not.toContain("Music");
   });
 
