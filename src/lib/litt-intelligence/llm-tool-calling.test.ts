@@ -246,6 +246,108 @@ describe("callLLMWithTools — pseudo-tool text is never executable", () => {
   });
 });
 
+describe("callLLMWithTools — in-text tool_call markup never leaks", () => {
+  it("strips a fenced ```tool_call block from the visible text", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(
+      makeSuccessResponse(
+        "llama-3.3-70b-versatile",
+        'Let me write that file.\n```tool_call\n{"tool":"write_file","inputs":{"path":"index.html"}}\n```',
+      ),
+    );
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+
+    expect(result.text).toBe("Let me write that file.");
+    // In-text markup is never executed — the module contract requires
+    // structured tool_calls only.
+    expect(result.toolCalls).toHaveLength(0);
+  });
+
+  it("strips <tool_call> XML markup from the visible text", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(
+      makeSuccessResponse(
+        "llama-3.3-70b-versatile",
+        'Done.\n<tool_call>{"name":"write_file","arguments":{"path":"a.txt"}}</tool_call>',
+      ),
+    );
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+
+    expect(result.text).toBe("Done.");
+    expect(result.toolCalls).toHaveLength(0);
+  });
+
+  it("strips an unclosed trailing tool_call fence", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(
+      makeSuccessResponse(
+        "llama-3.3-70b-versatile",
+        'Working on it.\n```tool_call\n{"tool":"write_file","inputs":',
+      ),
+    );
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+
+    expect(result.text).toBe("Working on it.");
+    expect(result.toolCalls).toHaveLength(0);
+  });
+
+  it("strips a bare JSON tool object left mid-prose", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(
+      makeSuccessResponse(
+        "llama-3.3-70b-versatile",
+        'Here you go {"tool": "write_file", "inputs": {"path": "x"}} — all set.',
+      ),
+    );
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+
+    expect(result.text).not.toContain('"tool"');
+    expect(result.text).toContain("Here you go");
+    expect(result.text).toContain("all set");
+    expect(result.toolCalls).toHaveLength(0);
+  });
+
+  it("a completion that is only tool-call markup is a model failure — fails over", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    vi.stubEnv("MISTRAL_API_KEY", "test-mistral-key");
+    const markupOnly = () =>
+      makeSuccessResponse(
+        "llama-3.3-70b-versatile",
+        '```tool_call\n{"tool":"write_file","inputs":{"path":"a.txt"}}\n```',
+      );
+    // Groq's Basic route has two candidate models — a model-scoped
+    // bad_response must exhaust both before the router moves to Mistral.
+    mockFetch
+      .mockResolvedValueOnce(markupOnly())
+      .mockResolvedValueOnce(markupOnly())
+      .mockResolvedValueOnce(makeSuccessResponse("mistral-small-latest", "Mistral answered cleanly."));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+
+    expect(result.provider).toBe("mistral");
+    expect(result.text).toBe("Mistral answered cleanly.");
+  });
+
+  it("leaves ordinary prose containing JSON untouched", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(
+      makeSuccessResponse(
+        "llama-3.3-70b-versatile",
+        'The object looks like {"name": "Alice", "age": 3} in the data file.',
+      ),
+    );
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+
+    expect(result.text).toBe('The object looks like {"name": "Alice", "age": 3} in the data file.');
+    expect(result.toolCalls).toHaveLength(0);
+  });
+});
+
 describe("callLLMWithTools — failure classification and failover", () => {
   it("402 on OpenRouter disables the provider — no second OR model is attempted", async () => {
     // This is the golden-run-34720866763 regression: an account-level 402
