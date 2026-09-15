@@ -32,6 +32,7 @@ import {
   noteDeployment,
   noteToolResult,
   runQualityInspection,
+  shouldEnableQualityLoop,
   startQualityLoopSession,
   verifyLiveUrl,
   type QualityLoopSession,
@@ -523,5 +524,173 @@ describe("buildRedesignPrompt", () => {
     );
     expect(prompt).toContain("Fix hero.");
     expect(prompt).toContain("design pass 1 of 2");
+  });
+});
+
+describe("shouldEnableQualityLoop — mode opt-in", () => {
+  it("opts in ACT runs with a project", () => {
+    expect(shouldEnableQualityLoop("act", "proj-1")).toBe(true);
+  });
+
+  it("opts in AUTO runs with a project", () => {
+    expect(shouldEnableQualityLoop("auto", "proj-1")).toBe(true);
+  });
+
+  it("never opts in PLAN mode", () => {
+    expect(shouldEnableQualityLoop("plan", "proj-1")).toBe(false);
+  });
+
+  it("never opts in without a project", () => {
+    expect(shouldEnableQualityLoop("act", null)).toBe(false);
+    expect(shouldEnableQualityLoop("auto", undefined)).toBe(false);
+    expect(shouldEnableQualityLoop("act", "")).toBe(false);
+  });
+
+  it("never opts in for unknown modes", () => {
+    expect(shouldEnableQualityLoop("turbo", "proj-1")).toBe(false);
+    expect(shouldEnableQualityLoop(undefined, "proj-1")).toBe(false);
+  });
+});
+
+describe("AUTO-mode quality gating", () => {
+  /**
+   * Simulates an AUTO run's evidence path: no conversational checkpoints,
+   * no human in the loop — evidence comes only from agent QUALITY markers
+   * in assistant messages and machine observations from tool events.
+   */
+  async function autoSession(opts: {
+    withBuild?: boolean;
+    withPreview?: boolean;
+    withTest?: boolean;
+    judgeScore?: number;
+  }): Promise<QualityLoopSession> {
+    const s = makeSession();
+    harvestStageMarkers(s, [
+      {
+        role: "assistant",
+        content: [
+          "QUALITY: understand — Dog owners; goal: bookings.",
+          "QUALITY: research — No external research needed; standard grooming site.",
+          "QUALITY: plan — Hero, services with prices, contact.",
+          "QUALITY: design — Warm palette, big type, generous spacing.",
+          "QUALITY: polish — Copy tightened, hover states added.",
+        ].join("\n"),
+      },
+    ]);
+    if (opts.withBuild !== false) {
+      noteToolResult(
+        s,
+        "files.write",
+        { success: true, result: {}, mutating: true, summary: "wrote index.html" },
+        "ws-1",
+      );
+    }
+    if (opts.withPreview !== false) {
+      noteToolResult(
+        s,
+        "preview.status",
+        { success: true, result: { status: "ready" }, mutating: false, summary: "ready" },
+        "ws-1",
+      );
+    }
+    mockRunJudge.mockResolvedValue({
+      status: "scored",
+      scorecard: makeScorecard(opts.judgeScore ?? 8.5),
+      verdict:
+        (opts.judgeScore ?? 8.5) >= 7
+          ? { passed: true, scorecard: makeScorecard(opts.judgeScore ?? 8.5), reason: "Pass" }
+          : { passed: false, scorecard: makeScorecard(opts.judgeScore ?? 5.0), reason: "Below threshold" },
+    });
+    await runQualityInspection(s);
+    if (opts.withTest !== false) {
+      noteBuildFix(s, { allPassed: true, results: [] });
+    }
+    return s;
+  }
+
+  it("AUTO run with full evidence → success verdict", async () => {
+    const s = await autoSession({});
+    const finale = finalizeQualityLoop(s, { deployRequested: false });
+    expect(finale.verdict.ok).toBe(true);
+    expect(finale.verdict.missing).toHaveLength(0);
+  });
+
+  it("AUTO run with missing evidence → refused success naming the missing stages", async () => {
+    const s = await autoSession({ withBuild: false, withTest: false });
+    const finale = finalizeQualityLoop(s, { deployRequested: false });
+    expect(finale.verdict.ok).toBe(false);
+    expect(finale.verdict.missing).toContain("build");
+    expect(finale.verdict.missing).toContain("test");
+    expect(finale.verdict.reason).toMatch(/"build"/);
+    expect(finale.verdict.reason).toMatch(/"test"/);
+  });
+
+  it("agent-only deploy claim never satisfies DEPLOY — the loop cannot auto-approve a deploy", async () => {
+    const s = await autoSession({});
+    // The agent *says* it deployed, but no machine deployment happened
+    // (e.g. project.deploy was blocked awaiting approval in AUTO).
+    harvestStageMarkers(s, [
+      { role: "assistant", content: "QUALITY: deploy — Shipped it to https://example.com" },
+    ]);
+    harvestStageMarkers(s, [
+      { role: "assistant", content: "QUALITY: verify — Checked the live URL, looks good" },
+    ]);
+
+    const finale = finalizeQualityLoop(s, { deployRequested: true });
+    expect(finale.verdict.ok).toBe(false);
+    expect(finale.verdict.missing).toContain("deploy");
+    expect(finale.verdict.missing).toContain("verify");
+    expect(s.state.stages.deploy.status).not.toBe("passed");
+  });
+
+  it("machine deployment evidence satisfies DEPLOY/VERIFY in AUTO", async () => {
+    const s = await autoSession({});
+    noteDeployment(s, "https://example.com");
+    mockVerifyUrl.mockResolvedValue({
+      success: true,
+      detail: "200, expected marker found",
+      url: "https://example.com",
+    });
+    await verifyLiveUrl(s, "https://example.com");
+
+    const finale = finalizeQualityLoop(s, { deployRequested: true });
+    expect(finale.verdict.ok).toBe(true);
+    expect(finale.verdict.missing).toHaveLength(0);
+  });
+
+  it("judge below threshold in AUTO → automatic redesign pass", async () => {
+    const s = makeSession();
+    // Mirror the real AUTO flow: earlier stages evidenced before inspection.
+    harvestStageMarkers(s, [
+      {
+        role: "assistant",
+        content: "QUALITY: understand — Dog owners; goal: bookings.\nQUALITY: plan — Hero, services, contact.\nQUALITY: design — Warm palette, big type.",
+      },
+    ]);
+    noteToolResult(
+      s,
+      "files.write",
+      { success: true, result: {}, mutating: true, summary: "wrote index.html" },
+      "ws-1",
+    );
+    noteToolResult(
+      s,
+      "preview.status",
+      { success: true, result: { status: "ready" }, mutating: false, summary: "ready" },
+      "ws-1",
+    );
+    mockRunJudge.mockResolvedValue({
+      status: "scored",
+      scorecard: makeScorecard(5.2),
+      verdict: { passed: false, scorecard: makeScorecard(5.2), reason: "Cramped hero, weak hierarchy" },
+    });
+
+    const inspection = await runQualityInspection(s);
+    expect(inspection.ran).toBe(true);
+    expect(inspection.needsRedesign).toBe(true);
+    expect(inspection.fixes.length).toBeGreaterThan(0);
+    expect(s.state.designPasses).toBe(1);
+    expect(s.critiqueFailed).toBe(true);
+    expect(s.state.stages.critique.evidence[0].by).toBe("judge");
   });
 });

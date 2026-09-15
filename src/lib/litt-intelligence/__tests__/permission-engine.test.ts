@@ -82,6 +82,27 @@ describe("PermissionEngine", () => {
       const result = engine.check(sensitiveTool, { command: "rm -rf /" }, "auto");
       expect(result.requiresApproval).toBe(true);
     });
+
+    it("project.deploy ALWAYS requires human approval, even in AUTO", () => {
+      const deployTool: ToolPermissionInfo = {
+        toolId: "project.deploy",
+        permissionLevel: "workspace-write",
+        isReadOnly: false,
+        isMutation: true,
+        enabled: true,
+      };
+      for (const mode of ["plan", "act", "auto"] as const) {
+        const result = engine.check(deployTool, {}, mode);
+        // PLAN blocks it outright; ACT/AUTO allow it only with approval.
+        // The quality loop must never auto-approve a deploy.
+        if (mode === "plan") {
+          expect(result.allowed).toBe(false);
+        } else {
+          expect(result.allowed).toBe(true);
+          expect(result.requiresApproval).toBe(true);
+        }
+      }
+    });
   });
 
   describe("disabled tools", () => {

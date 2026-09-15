@@ -44,6 +44,14 @@ export interface LaunchFlowOptions {
   requiresExecution?: boolean;
   enableBuildFix?: boolean;
   enableDeploy?: boolean;
+  /**
+   * Quality-loop opt-in, passed through to the main agent-loop phase.
+   * When set, the build is gated by the UNDERSTAND→VERIFY evidence stages
+   * plus the visual-quality judge. (Was silently dropped before AUTO-mode
+   * support: the option existed on the route's loop config but never
+   * reached the agent loop.)
+   */
+  qualityLoop?: AgentLoopConfig["qualityLoop"];
   maxPreviewWaitMs?: number;
   previewPollIntervalMs?: number;
   maxRuntimeRepairAttempts?: number;
@@ -211,6 +219,10 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           maxSteps: 40,
           maxOutputChars: 200_000,
           signal,
+          // Quality loop: gate the main build phase when the caller opted in.
+          // (The repair phase below runs without it — it is a bounded
+          // sub-task of the already-gated build, not a new build.)
+          qualityLoop: options.qualityLoop,
         },
         progress,
       );

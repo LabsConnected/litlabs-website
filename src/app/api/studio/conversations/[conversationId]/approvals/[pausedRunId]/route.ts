@@ -12,6 +12,7 @@ import {
 } from "@/lib/litt-intelligence/paused-run-store";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { resumeAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
+import { shouldEnableQualityLoop } from "@/lib/litt-intelligence/quality-loop-flow";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import {
   getAwaitingApprovalAssistantMessage,
@@ -243,7 +244,9 @@ export async function POST(
     enableBuildFix: true,
     // Quality loop: resume with a fresh evidence session so the resumed
     // run is gated the same way (agent markers re-harvest from history).
-    qualityLoop: resolved.executionMode === "act"
+    // AUTO resumes opt in too — an AUTO run pauses for deploy approval,
+    // and the resumed run must stay gated through DEPLOY/VERIFY.
+    qualityLoop: shouldEnableQualityLoop(resolved.executionMode, resolved.projectId)
       ? {
           enabled: true,
           runId: `resume:${pausedRunId}:${randomUUID()}`,

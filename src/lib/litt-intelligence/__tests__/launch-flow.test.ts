@@ -558,3 +558,38 @@ describe("Launch Flow: preservation of existing project work", () => {
     expect(transport.createCheckpointBeforeMutation).toHaveBeenCalled();
   });
 });
+
+// ─── Tests: quality-loop pass-through ───────────────────────────────
+
+describe("Launch Flow: quality-loop pass-through", () => {
+  beforeEach(() => {
+    toolRegistry.clear();
+    registerInternalTools();
+  });
+
+  it("passes the qualityLoop opt-in to the main agent-loop phase", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(successAgentResult());
+    const qualityLoop = {
+      enabled: true,
+      runId: "run-ql",
+      projectId: "proj-test",
+      userId: "user-test",
+      userRequest: "Build a site",
+    };
+    const options = makeOptions({ runAgentLoop, qualityLoop });
+    await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalled();
+    const mainConfig = runAgentLoop.mock.calls[0][2] as Record<string, unknown>;
+    expect(mainConfig.qualityLoop).toEqual(qualityLoop);
+  });
+
+  it("leaves qualityLoop unset on the agent loop when not opted in", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(successAgentResult());
+    const options = makeOptions({ runAgentLoop });
+    await runLaunchFlow(options);
+
+    const mainConfig = runAgentLoop.mock.calls[0][2] as Record<string, unknown>;
+    expect(mainConfig.qualityLoop).toBeUndefined();
+  });
+});
