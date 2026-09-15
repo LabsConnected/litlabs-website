@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { streamText } from "./llm";
+import { streamText, AllProvidersEmptyError } from "./llm";
 
 /**
  * Provider-level abort coverage — proves an explicit execution abort
@@ -148,5 +148,66 @@ describe("streamText — provider abort propagation", () => {
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
     // groq aborted → NO fallback to gemini/openrouter.
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("streamText — empty provider responses", () => {
+  /** OpenAI-compatible SSE body: role-only delta, then DONE — no content. */
+  const emptySse = () =>
+    new Response(
+      `data: ${JSON.stringify({ choices: [{ delta: { role: "assistant" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+    );
+  const contentSse = (text: string) =>
+    new Response(
+      `data: ${JSON.stringify({ choices: [{ delta: { content: text }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+    );
+
+  it("an empty stream from the only provider rejects as EMPTY_PROVIDER_RESPONSE, not a silent success", async () => {
+    const fetchMock = vi.fn(async () => emptySse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      streamText("hi", () => {}, { task: "chat", provider: "groq" }),
+    ).rejects.toMatchObject({ code: "EMPTY_PROVIDER_RESPONSE" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("an empty stream fails over — the next provider's real content is used", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("api.groq.com")) return emptySse();
+      if (u.includes("generativelanguage")) {
+        // Gemini runs through the SDK over the same stubbed fetch — a 500
+        // there is a normal provider failure continuing the chain.
+        return new Response("unavailable", { status: 500 });
+      }
+      return contentSse("real answer");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const chunks: string[] = [];
+    const result = await streamText(
+      "hi",
+      (c) => chunks.push(c),
+      { task: "chat", provider: "groq", category: "litt-alias" },
+    );
+
+    expect(chunks.join("")).toBe("real answer");
+    expect(result.provider).toBe("openrouter-free");
+    expect(result.failover).toContain("groq");
+  });
+
+  it("when every attempted provider returns an empty stream the aggregate error names what was tried", async () => {
+    const fetchMock = vi.fn(async () => emptySse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    const err = await streamText("hi", () => {}, {
+      task: "chat",
+      provider: "groq",
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(AllProvidersEmptyError);
+    expect(err.providers).toEqual(["groq"]);
+    expect(err.message).toMatch(/empty responses/i);
   });
 });

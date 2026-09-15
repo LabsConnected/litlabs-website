@@ -335,6 +335,44 @@ class ProviderError extends Error {
   }
 }
 
+/**
+ * A provider request completed "successfully" but produced no usable
+ * content — a well-formed empty payload is still a provider failure, not
+ * a valid answer. Retryable so the chain fails over to the next provider;
+ * callers classify it via `code` as EMPTY_PROVIDER_RESPONSE.
+ */
+export class EmptyProviderResponseError extends ProviderError {
+  readonly code = "EMPTY_PROVIDER_RESPONSE" as const;
+  constructor(provider: LLMProvider, model: string, detail?: string) {
+    super(
+      provider,
+      null,
+      `${provider} (${model}) returned an empty response${detail ? ` (${detail})` : ""}`,
+    );
+    this.name = "EmptyProviderResponseError";
+  }
+}
+
+/** Every attempted provider returned an empty payload — the classified,
+ *  truthful terminal failure for EMPTY_PROVIDER_RESPONSE. */
+export class AllProvidersEmptyError extends Error {
+  readonly code = "EMPTY_PROVIDER_RESPONSE" as const;
+  constructor(readonly providers: LLMProvider[]) {
+    super(`All LLM providers returned empty responses. Tried: ${providers.join(", ")}`);
+    this.name = "AllProvidersEmptyError";
+  }
+}
+
+/** True when an error carries the EMPTY_PROVIDER_RESPONSE classification —
+ *  an instanceof-independent check so wrapped/rethrown errors still match. */
+export function isEmptyProviderResponse(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { code?: unknown }).code === "EMPTY_PROVIDER_RESPONSE"
+  );
+}
+
 async function fetchWithTimeout(
   url: string,
   init: RequestInit,
@@ -636,21 +674,30 @@ export async function generateText(
   const timeoutMs = options.timeoutMs ?? 30_000;
   const chain = defaultChain(task, options);
   const failover: LLMProvider[] = [];
+  const emptyProviders: LLMProvider[] = [];
   const t0 = Date.now();
 
   let lastErr: unknown = null;
+  let attempted = 0;
   for (const provider of chain) {
     // Circuit breaker: skip models temporarily marked unavailable
     if (isModelInCooldown(provider)) {
       failover.push(provider);
       continue;
     }
+    attempted++;
     try {
       const r = await dispatchProvider(
         provider,
         { prompt, systemPrompt, task, opts: options },
         timeoutMs,
       );
+      if (!r.text.trim()) {
+        // A well-formed but empty completion is not a usable answer —
+        // classify it as a provider failure so the chain fails over.
+        emptyProviders.push(provider);
+        throw new EmptyProviderResponseError(provider, r.model);
+      }
       const result = {
         text: r.text,
         provider,
@@ -705,6 +752,9 @@ export async function generateText(
       // Retryable: try the next provider
       failover.push(provider);
     }
+  }
+  if (attempted > 0 && emptyProviders.length === attempted) {
+    throw new AllProvidersEmptyError(emptyProviders);
   }
   throw new Error(
     `All LLM providers failed. Tried: ${[...failover].join(", ")}. Last error: ${lastErr instanceof Error ? lastErr.message : String(lastErr)
@@ -766,11 +816,14 @@ export async function streamText(
   model: string;
   latencyMs: number;
   failover: LLMProvider[];
+  /** Provider-reported finish reason, when the stream carried one. */
+  finishReason?: string;
 }> {
   const task = options.task ?? "chat";
   const timeoutMs = options.timeoutMs ?? 60_000;
   const chain = defaultChain(task, options);
   const failover: LLMProvider[] = [];
+  const emptyProviders: LLMProvider[] = [];
   const t0 = Date.now();
 
   // Accumulate streamed chunks for Braintrust logging on stream completion.
@@ -781,6 +834,7 @@ export async function streamText(
   };
 
   let lastErr: unknown = null;
+  let attempted = 0;
   for (const provider of chain) {
     // An aborted execution signal must not start another provider call.
     if (options.signal?.aborted) {
@@ -791,8 +845,10 @@ export async function streamText(
       failover.push(provider);
       continue;
     }
+    attempted++;
     try {
-      let result: { provider: LLMProvider; model: string; latencyMs: number; failover: LLMProvider[] };
+      const chunksBefore = _chunks.length;
+      let result: { provider: LLMProvider; model: string; latencyMs: number; failover: LLMProvider[]; finishReason?: string };
       if (provider === "gemini") {
         result = await streamViaGemini(
           { prompt, systemPrompt, task, opts: options },
@@ -828,6 +884,16 @@ export async function streamText(
           failover,
           timeoutMs,
           onReasoning,
+        );
+      }
+      // A stream that completed cleanly but produced no usable content is
+      // a provider failure — fail over rather than reporting empty success.
+      if (!_chunks.slice(chunksBefore).join("").trim()) {
+        emptyProviders.push(provider);
+        throw new EmptyProviderResponseError(
+          provider,
+          result.model,
+          result.finishReason ? `finish_reason=${result.finishReason}` : undefined,
         );
       }
       logLLMCall({
@@ -878,6 +944,9 @@ export async function streamText(
       failover.push(provider);
     }
   }
+  if (attempted > 0 && emptyProviders.length === attempted) {
+    throw new AllProvidersEmptyError(emptyProviders);
+  }
   throw new Error(
     `All LLM streaming providers failed. Tried: ${[...failover].join(", ")}. Last error: ${lastErr instanceof Error ? lastErr.message : String(lastErr)
     }`,
@@ -895,6 +964,7 @@ async function streamViaGemini(
   model: string;
   latencyMs: number;
   failover: LLMProvider[];
+  finishReason?: string;
 }> {
   const genAI = getGenAI();
   if (!genAI) throw new ProviderError("gemini", null, "GEMINI_API_KEY not set");
@@ -907,6 +977,7 @@ async function streamViaGemini(
   const result = await model.generateContentStream(fullPrompt, {
     signal: p.opts.signal,
   });
+  let finishReason: string | undefined;
   for await (const chunk of result.stream) {
     if (p.opts.signal?.aborted) {
       throw new DOMException("The operation was aborted.", "AbortError");
@@ -916,6 +987,13 @@ async function streamViaGemini(
     // inspect parts for thoughtSignature/thought markers when present.
     const t = chunk.text();
     if (t) onChunk(t);
+    try {
+      const fr = (chunk as { candidates?: Array<{ finishReason?: string }> })
+        .candidates?.[0]?.finishReason;
+      if (fr) finishReason = fr;
+    } catch {
+      // finish-reason extraction is best-effort; ignore shape mismatches
+    }
     if (onReasoning) {
       try {
         const parts = (chunk as { candidates?: Array<{ content?: { parts?: Array<{ thought?: boolean; text?: string }> } }> })
@@ -933,6 +1011,7 @@ async function streamViaGemini(
     model: modelName,
     latencyMs: Date.now() - t0,
     failover,
+    finishReason,
   };
 }
 
@@ -949,6 +1028,7 @@ async function streamViaOpenRouter(
   model: string;
   latencyMs: number;
   failover: LLMProvider[];
+  finishReason?: string;
 }> {
   if (!OPENROUTER_KEY)
     throw new ProviderError(provider, null, "OPENROUTER_API_KEY not set");
@@ -1003,6 +1083,7 @@ async function streamViaOpenRouter(
     p.opts.signal?.addEventListener("abort", abortReader, { once: true });
   }
   let buffer = "";
+  let finishReason: string | undefined;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -1017,8 +1098,10 @@ async function streamViaOpenRouter(
       if (payload === "[DONE]") continue;
       try {
         const json = JSON.parse(payload);
-        const delta = json.choices?.[0]?.delta;
+        const choice = json.choices?.[0];
+        const delta = choice?.delta;
         if (delta?.content) onChunk(delta.content);
+        if (choice?.finish_reason) finishReason = choice.finish_reason;
         // OpenRouter emits `reasoning` on reasoning models (DeepSeek-R1,
         // Qwen3 thinking, etc.). Forward it separately so the UI can show
         // a "Thinking…" trace alongside the final answer.
@@ -1032,7 +1115,7 @@ async function streamViaOpenRouter(
   if (p.opts.signal?.aborted) {
     throw new DOMException("The operation was aborted.", "AbortError");
   }
-  return { provider, model: modelName, latencyMs: Date.now() - t0, failover };
+  return { provider, model: modelName, latencyMs: Date.now() - t0, failover, finishReason };
 }
 
 async function streamViaOpenAI(
@@ -1046,6 +1129,7 @@ async function streamViaOpenAI(
   model: string;
   latencyMs: number;
   failover: LLMProvider[];
+  finishReason?: string;
 }> {
   if (!OPENAI_KEY) {
     throw new ProviderError("openai", null, "OPENAI_API_KEY not set");
@@ -1095,6 +1179,7 @@ async function streamViaOpenAI(
     p.opts.signal?.addEventListener("abort", abortReader, { once: true });
   }
   let buffer = "";
+  let finishReason: string | undefined;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -1108,8 +1193,10 @@ async function streamViaOpenAI(
       if (payload === "[DONE]") continue;
       try {
         const json = JSON.parse(payload);
-        const content = json.choices?.[0]?.delta?.content;
+        const choice = json.choices?.[0];
+        const content = choice?.delta?.content;
         if (content) onChunk(content);
+        if (choice?.finish_reason) finishReason = choice.finish_reason;
       } catch {
         // Ignore malformed chunks and continue consuming the stream.
       }
@@ -1125,6 +1212,7 @@ async function streamViaOpenAI(
     model: modelName,
     latencyMs: Date.now() - t0,
     failover,
+    finishReason,
   };
 }
 
@@ -1141,6 +1229,7 @@ async function streamViaGroq(
   model: string;
   latencyMs: number;
   failover: LLMProvider[];
+  finishReason?: string;
 }> {
   if (!GROQ_KEY)
     throw new ProviderError(provider, null, "GROQ_API_KEY not set");
@@ -1189,6 +1278,7 @@ async function streamViaGroq(
     p.opts.signal?.addEventListener("abort", abortReader, { once: true });
   }
   let buffer = "";
+  let finishReason: string | undefined;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -1202,8 +1292,10 @@ async function streamViaGroq(
       if (payload === "[DONE]") continue;
       try {
         const json = JSON.parse(payload);
-        const delta = json.choices?.[0]?.delta;
+        const choice = json.choices?.[0];
+        const delta = choice?.delta;
         if (delta?.content) onChunk(delta.content);
+        if (choice?.finish_reason) finishReason = choice.finish_reason;
         if (onReasoning && delta?.reasoning) onReasoning(delta.reasoning);
       } catch {
         // ignore malformed chunk
@@ -1214,7 +1306,7 @@ async function streamViaGroq(
   if (p.opts.signal?.aborted) {
     throw new DOMException("The operation was aborted.", "AbortError");
   }
-  return { provider, model: modelName, latencyMs: Date.now() - t0, failover };
+  return { provider, model: modelName, latencyMs: Date.now() - t0, failover, finishReason };
 }
 
 /* ------------------------------------------------------------------ */

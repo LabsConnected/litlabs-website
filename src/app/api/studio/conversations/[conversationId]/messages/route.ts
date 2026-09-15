@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { streamText, type ModelCategory, type LLMProvider } from "@/lib/llm";
+import { streamText, isEmptyProviderResponse, type ModelCategory, type LLMProvider } from "@/lib/llm";
 import {
   getConversation,
   listMessages,
@@ -761,8 +761,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 checkpointId: v2Result.checkpoint?.checkpointId ?? null,
               });
               pausedRunId = pausedRun.id;
-            } catch {
-              // If persistence fails, still send the approval event without a resume ID
+            } catch (pausedErr) {
+              // If persistence fails, still send the approval event without a
+              // resume ID — but log it: without pausedRunId the client's
+              // Approve button cannot resume anything and becomes a dead end.
+              studioLog("message:paused_run_persist_failed", {
+                conversationId: conversation.id,
+                projectId: conversation.projectId,
+                userId,
+                tool: v2Result.pendingApproval.toolId,
+                errorClass: pausedErr instanceof Error ? pausedErr.message : "unknown",
+              });
             }
 
             safeEvent({
@@ -774,11 +783,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             });
           }
 
+          // A run that produced no response text cannot be reported as
+          // completed — empty provider output is a failure, not success.
+          const v2Empty = !launchFlowResult?.cancelled
+            && !v2Result?.pendingApproval
+            && !assistantText.trim();
+
           const finalMessageStatus: MessageStatus = launchFlowResult?.cancelled
             ? "cancelled"
             : launchFlowResult?.pendingApproval
               ? "awaiting_approval"
-              : launchFlowResult?.success
+              : launchFlowResult?.success && !v2Empty
                 ? "completed"
                 : "failed";
 
@@ -939,7 +954,11 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             }
           }
 
-          const v1MessageStatus: MessageStatus = cancelledV1 ? "cancelled" : "completed";
+          // Defense in depth: streamText now throws on empty provider
+          // payloads, but if a run still resolves with no usable text the
+          // outcome is failed — never a completed empty response.
+          const v1Empty = !cancelledV1 && !assistantText.trim();
+          const v1MessageStatus: MessageStatus = cancelledV1 ? "cancelled" : v1Empty ? "failed" : "completed";
           await updateMessageStatus(
             assistantMessage.id,
             userId,
@@ -954,16 +973,16 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               inputTokens: Math.ceil(finalPrompt.length / 4),
               outputTokens: Math.ceil(assistantText.length / 4),
               actualCredits,
-              status: cancelledV1 ? "cancelled" : "completed",
+              status: cancelledV1 ? "cancelled" : v1Empty ? "failed" : "completed",
             }, reservedCredits, reservationId).catch(() => {
               // Best-effort settlement — must not leak unhandled rejection
             });
           }
 
-          // Skip memory persistence for cancelled runs — partial output
-          // produced before Stop must not become a normal
-          // conversation_summary in long-term memory.
-          if (!cancelledV1) {
+          // Skip memory persistence for cancelled and empty runs — partial
+          // or absent output must not become a normal conversation_summary
+          // in long-term memory.
+          if (!cancelledV1 && !v1Empty) {
             persistMemory(
               `User: ${message}\n${agentDisplayName}: ${assistantText}`,
               userId,
@@ -996,33 +1015,56 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           if (cancelledV1) {
             safeEvent({ type: "cancelled", reason: "user_stop" });
           }
-          safeEvent({
-            type: "done",
-            userMessage,
-            assistantMessage: {
-              ...assistantMessage,
-              content: assistantText,
-              reasoning: reasoningText || undefined,
-              status: v1MessageStatus,
-              // V1 is the read-only fallback: it can inspect but never
-              // mutate. Report the evidence bar and the (read-only) calls so
-              // a build request answered here shows as NOT started, never
-              // as completed work.
-              execution: {
-                mode: built.kernelResult.decision.routing.mode,
-                toolCalls: (v1Result?.toolExecutions ?? []).map((exec) => ({
-                  toolId: exec.toolId,
-                  success: exec.success,
-                  mutating: false,
-                })),
-                deployment: null,
+          if (v1Empty) {
+            // Truthful terminal state for an empty provider payload: an
+            // explicit classified error (with the bumped revision so the
+            // client's next send doesn't 409 on a stale expectedRevision).
+            studioLog("message:empty_provider_response", {
+              conversationId: conversation.id,
+              projectId: conversation.projectId,
+              userId,
+              agentSlug,
+              provider: r?.provider,
+              model: r?.model,
+              latencyMs: r?.latencyMs ?? 0,
+              finishReason: r?.finishReason,
+              failover: r?.failover,
+            });
+            safeEvent({
+              type: "error",
+              code: "EMPTY_PROVIDER_RESPONSE",
+              message: "The AI provider returned an empty response.",
+              revision: newRevision,
+            });
+          } else {
+            safeEvent({
+              type: "done",
+              userMessage,
+              assistantMessage: {
+                ...assistantMessage,
+                content: assistantText,
+                reasoning: reasoningText || undefined,
+                status: v1MessageStatus,
+                // V1 is the read-only fallback: it can inspect but never
+                // mutate. Report the evidence bar and the (read-only) calls so
+                // a build request answered here shows as NOT started, never
+                // as completed work.
+                execution: {
+                  mode: built.kernelResult.decision.routing.mode,
+                  toolCalls: (v1Result?.toolExecutions ?? []).map((exec) => ({
+                    toolId: exec.toolId,
+                    success: exec.success,
+                    mutating: false,
+                  })),
+                  deployment: null,
+                },
               },
-            },
-            revision: newRevision,
-            provider: r?.provider,
-            model: r?.model,
-            latencyMs: r?.latencyMs ?? 0,
-          });
+              revision: newRevision,
+              provider: r?.provider,
+              model: r?.model,
+              latencyMs: r?.latencyMs ?? 0,
+            });
+          }
         }
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : "LLM provider unavailable";
@@ -1073,6 +1115,11 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             type: "error",
             message: errorMsg,
             partialText: assistantText || undefined,
+            // The revision RPC already bumped the conversation — the client
+            // MUST learn the new revision even on failure, or its next send
+            // posts a stale expectedRevision and gets a 409.
+            revision: newRevision,
+            ...(isEmptyProviderResponse(err) ? { code: "EMPTY_PROVIDER_RESPONSE" } : {}),
           });
         }
       } finally {

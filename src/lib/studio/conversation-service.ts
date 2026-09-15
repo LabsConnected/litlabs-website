@@ -363,6 +363,30 @@ export async function updateMessageStatus(
 }
 
 /**
+ * Get the latest assistant message still awaiting approval in a
+ * conversation. Used when a paused run resumes — the resumed result is
+ * written back onto the message that originally paused, so the transcript
+ * reflects the real outcome instead of a forever-"awaiting_approval" stub.
+ */
+export async function getAwaitingApprovalAssistantMessage(
+  conversationId: string,
+  ownerId: string,
+): Promise<ConversationMessage | null> {
+  const { data, error } = await supabaseAdmin
+    .from("studio_conversation_messages")
+    .select("*")
+    .eq("conversation_id", conversationId)
+    .eq("owner_id", ownerId)
+    .eq("role", "assistant")
+    .eq("status", "awaiting_approval")
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (error || !data || data.length === 0) return null;
+  return mapMessage(data[0] as DbMessage);
+}
+
+/**
  * Get the active assistant message for a conversation.
  * When regenerations exist, the latest regeneration is the active one.
  */

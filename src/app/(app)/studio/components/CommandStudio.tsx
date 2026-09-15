@@ -820,10 +820,22 @@ function CommandStudioContent() {
           setWorkspaceRevision((revision) => revision + 1);
           window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId: capabilities.projectId, source: "assistant" } }));
         }
-        setCompletion({ changes, previewUpdated: previewReady, repaired });
-        setAdvancedToolsOpen(false);
-        setContextDrawerOpen(false);
-        setLittActiveTab("chat");
+        if (result.pendingApproval) {
+          // The run paused at an approval gate — it is NOT done. Surface
+          // the Live tab (where the Approve/Reject control lives) instead
+          // of showing a false "Done · No files changed" completion card.
+          setLittActiveTab("live");
+          if (isMobileLitt) {
+            setMobileLittOpen(true);
+          } else {
+            setLittCollapsed(false);
+          }
+        } else {
+          setCompletion({ changes, previewUpdated: previewReady, repaired });
+          setAdvancedToolsOpen(false);
+          setContextDrawerOpen(false);
+          setLittActiveTab("chat");
+        }
         if (!capabilities.projectId) {
           await refreshCapabilities();
         }
@@ -842,6 +854,57 @@ function CommandStudioContent() {
       return { accepted: false, persisted: false, errorKind: "network" as const };
     }
   }, [conversation, capabilities.projectId, refreshCapabilities, isMobileLitt]);
+
+  // Approval decisions resume the SAME paused server-side execution — never
+  // a new run. When no pausedRunId exists (persistence failed or the paused
+  // run expired), silently dropping the click would leave the user thinking
+  // the work resumed while nothing ran — surface a truthful error instead.
+  const handleResolveApproval = useCallback((decision: "approved" | "rejected") => {
+    const pending = useExecutionStore.getState().pendingApproval;
+    const convId = conversation.selectedConversationId;
+    if (pending?.pausedRunId && convId) {
+      useExecutionStore.getState().resolveApproval(decision);
+      submitApprovalAndPoll({
+        conversationId: convId,
+        pausedRunId: pending.pausedRunId,
+        decision,
+        onCompleted: (result) => {
+          // The SAME paused run finished server-side and its result was
+          // written back to the conversation — pull the authoritative
+          // transcript instead of fabricating or regenerating anything.
+          void conversation.loadMessages(convId);
+          // The resumed run may have mutated workspace files — refresh the
+          // file tree and preview like a normal completed send would.
+          if (result.toolCalls.some((c) => c.mutating && c.success)) {
+            setWorkspaceRevision((revision) => revision + 1);
+            if (capabilities.projectId) {
+              window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId: capabilities.projectId, source: "assistant" } }));
+            }
+          }
+          // The resumed run can pause again on another gate — surface it
+          // instead of leaving the message stuck in awaiting_approval.
+          if (result.pendingApproval?.pausedRunId) {
+            useExecutionStore.getState().setPendingApproval({
+              toolId: result.pendingApproval.toolId,
+              reason: result.pendingApproval.reason,
+              pausedRunId: result.pendingApproval.pausedRunId,
+            });
+          }
+        },
+        onFailed: (error) => {
+          void conversation.loadMessages(convId);
+          conversation.reportSendError?.(error || "The resumed run failed on the server.");
+        },
+      });
+    } else {
+      useExecutionStore.getState().resolveApproval(decision);
+      if (decision === "approved") {
+        conversation.reportSendError?.(
+          "This approval could not be resumed — the paused run expired or was not saved. Please resend your request.",
+        );
+      }
+    }
+  }, [conversation, capabilities.projectId]);
 
   const [projectCreateError, setProjectCreateError] = useState<string | null>(null);
 
@@ -1309,25 +1372,7 @@ function CommandStudioContent() {
         useExecutionStore.getState().endRun("cancelled");
       }}
       onRollback={handleRollback}
-      onResolveApproval={(decision) => {
-        const pending = useExecutionStore.getState().pendingApproval;
-        if (pending?.pausedRunId && conversation.selectedConversationId) {
-          useExecutionStore.getState().resolveApproval(decision);
-          submitApprovalAndPoll({
-            conversationId: conversation.selectedConversationId,
-            pausedRunId: pending.pausedRunId,
-            decision,
-            onCompleted: () => {
-              conversation.regenerate();
-            },
-            onFailed: () => {
-              conversation.regenerate();
-            },
-          });
-        } else {
-          useExecutionStore.getState().resolveApproval(decision);
-        }
-      }}
+      onResolveApproval={handleResolveApproval}
     />
   );
 
@@ -1929,25 +1974,7 @@ function CommandStudioContent() {
             conversation.cancel();
             useExecutionStore.getState().endRun("cancelled");
           }}
-          onResolveApproval={(decision) => {
-            const pending = useExecutionStore.getState().pendingApproval;
-            if (pending?.pausedRunId && conversation.selectedConversationId) {
-              useExecutionStore.getState().resolveApproval(decision);
-              submitApprovalAndPoll({
-                conversationId: conversation.selectedConversationId,
-                pausedRunId: pending.pausedRunId,
-                decision,
-                onCompleted: () => {
-                  conversation.regenerate();
-                },
-                onFailed: () => {
-                  conversation.regenerate();
-                },
-              });
-            } else {
-              useExecutionStore.getState().resolveApproval(decision);
-            }
-          }}
+          onResolveApproval={handleResolveApproval}
           terminalStatus={capabilities.terminalStatus}
           modelLabel={modelLabel}
         />

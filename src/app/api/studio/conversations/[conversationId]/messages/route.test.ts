@@ -149,6 +149,12 @@ vi.mock("@/lib/litt-intelligence/tool-executor", () => ({
 
 vi.mock("@/lib/llm", () => ({
   streamText: vi.fn(),
+  // Mirrors the real code-based check — an error classified
+  // EMPTY_PROVIDER_RESPONSE stays classified through the mock boundary.
+  isEmptyProviderResponse: (err: unknown) =>
+    typeof err === "object" &&
+    err !== null &&
+    (err as { code?: unknown }).code === "EMPTY_PROVIDER_RESPONSE",
 }));
 
 import { auth } from "@/lib/auth";
@@ -791,6 +797,121 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
     );
 
     // The failed execution was unregistered — cleanup runs on every path.
+    expect(getActiveExecution("conv-123")).toBeNull();
+  });
+
+  it("a V1 run that resolves with no text emits a classified error with the bumped revision — never an empty done", async () => {
+    // Force V1: no workspace execution available.
+    vi.mocked(buildCanonicalRuntimeContext).mockResolvedValue({
+      workspaceExecutionAvailable: false,
+      executionMode: "auto",
+    } as any);
+    vi.mocked(runAgentLoop).mockResolvedValue({
+      enrichedPrompt: "enriched",
+      ranTools: false,
+      toolExecutions: [],
+    } as any);
+    // Provider stream completes normally but emits no content — the exact
+    // production failure mode behind "The response was empty".
+    vi.mocked(streamText).mockResolvedValue({
+      provider: "groq",
+      model: "openai/gpt-oss-120b",
+      latencyMs: 120,
+      failover: [],
+      finishReason: "stop",
+    } as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    expect(res.status).toBe(200);
+
+    const { events, raw } = await readSSE(res);
+
+    // Truthful terminal state: a classified error, not a done card.
+    const errorEvents = events.filter((e) => e.type === "error");
+    expect(errorEvents.length).toBe(1);
+    expect(errorEvents[0].code).toBe("EMPTY_PROVIDER_RESPONSE");
+    // The client must learn the bumped revision or its next send 409s.
+    expect(errorEvents[0].revision).toBe(2);
+    expect(events.filter((e) => e.type === "done")).toHaveLength(0);
+    expect(raw).toContain("data: [DONE]");
+
+    // Persisted as failed — not completed with empty content.
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      undefined,
+    );
+    expect(getActiveExecution("conv-123")).toBeNull();
+  });
+
+  it("a V2 run that returns empty finalText is persisted and reported as failed, not completed", async () => {
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      previewUrl: "https://preview.example.com",
+      productionUrl: null,
+      finalText: "",
+      agentLoopResult: {
+        stepsUsed: 1,
+        toolCalls: [],
+        cancelled: false,
+        pendingApproval: null,
+      } as any,
+      cancelled: false,
+      totalDurationMs: 100,
+    } as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    const { events } = await readSSE(res);
+
+    // The terminal event exists but must NOT claim completion — an empty
+    // provider outcome is a failure.
+    const doneEvents = events.filter((e) => e.type === "done");
+    expect(doneEvents.length).toBe(1);
+    expect(doneEvents[0].assistantMessage.status).toBe("failed");
+    expect(doneEvents[0].revision).toBe(2);
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      "",
+    );
+    expect(getActiveExecution("conv-123")).toBeNull();
+  });
+
+  it("a failed run releases the conversation — an immediate second send is not rejected", async () => {
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(runLaunchFlow).mockRejectedValue(new Error("Provider connection refused"));
+
+    const first = await POST(makeRequest({}), { params: Promise.resolve({ conversationId: "conv-123" }) });
+    const { events: firstEvents } = await readSSE(first);
+    expect(firstEvents.some((e) => e.type === "error")).toBe(true);
+    expect(getActiveExecution("conv-123")).toBeNull();
+
+    // Same conversation, immediately after — must reach the SSE stream,
+    // not a 409/lock. expectedRevision now matches the bumped value.
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      previewUrl: null,
+      productionUrl: null,
+      finalText: "Recovered answer.",
+      agentLoopResult: { stepsUsed: 1, toolCalls: [], cancelled: false, pendingApproval: null } as any,
+      cancelled: false,
+      totalDurationMs: 50,
+    } as any);
+    const second = await POST(makeRequest({ expectedRevision: 2 }), { params: Promise.resolve({ conversationId: "conv-123" }) });
+    expect(second.status).toBe(200);
+    expect(second.headers.get("Content-Type")).toContain("text/event-stream");
+    const { events: secondEvents } = await readSSE(second);
+    const doneEvents = secondEvents.filter((e) => e.type === "done");
+    expect(doneEvents.length).toBe(1);
+    expect(doneEvents[0].assistantMessage.status).toBe("completed");
     expect(getActiveExecution("conv-123")).toBeNull();
   });
 

@@ -1179,7 +1179,7 @@ export function useCanonicalConversation({
         const decoder = new TextDecoder();
         let buffer = "";
         let donePayload: Record<string, unknown> | null = null;
-        let errorPayload: { message?: string; partialText?: string } | null = null;
+        let errorPayload: { message?: string; code?: string; revision?: number; partialText?: string } | null = null;
         let pendingApprovalState: { toolId: string; reason: string; pausedRunId?: string; inputs?: Record<string, unknown> } | null = null;
         const toolActivity: Array<{ toolId: string; success?: boolean; summary: string }> = [];
 
@@ -1210,6 +1210,8 @@ export function useCanonicalConversation({
                 type: string;
                 text?: string;
                 message?: string;
+                code?: string;
+                revision?: number;
                 partialText?: string;
                 detail?: { message?: string; partialText?: string };
                 toolId?: string;
@@ -1261,7 +1263,12 @@ export function useCanonicalConversation({
                 donePayload = evt as unknown as Record<string, unknown>;
               } else if (evt.type === "error") {
                 const src = evt.detail ?? { message: evt.message, partialText: evt.partialText };
-                errorPayload = { message: src.message, partialText: src.partialText };
+                errorPayload = {
+                  message: src.message,
+                  partialText: src.partialText,
+                  code: evt.code,
+                  revision: evt.revision,
+                };
               }
 
               // Feed every event into the execution store for the LiTT Live panel
@@ -1274,12 +1281,19 @@ export function useCanonicalConversation({
 
         if (errorPayload) {
           const partial = errorPayload.partialText;
-          const reply = sanitizeErrorMessage(errorPayload.message || "Provider unavailable");
+          const reply = errorPayload.code === "EMPTY_PROVIDER_RESPONSE"
+            ? "The AI provider returned an empty response. Please try again."
+            : sanitizeErrorMessage(errorPayload.message || "Provider unavailable");
           getStore().updateMessage(activeConversationId, optimisticAssistantId, {
             status: "failed",
             content: partial ? partial : reply,
             reasoning: reasoningText || undefined,
           });
+          // A failed run still bumped the server-side revision — sync it or
+          // the next send posts a stale expectedRevision and gets a 409.
+          if (typeof errorPayload.revision === "number") {
+            getStore().setRevision(errorPayload.revision);
+          }
           setSendError(reply);
           // User message was persisted (server accepted the 200), but the
           // provider failed. Don't restore the draft — show Retry instead.
@@ -1321,6 +1335,9 @@ export function useCanonicalConversation({
               status: "failed",
               createdAt: assistantMsg.createdAt,
             });
+            // The run failed but the revision was still bumped — keep the
+            // client in sync so a retry doesn't hit a 409 stale revision.
+            s3.setRevision((donePayload.revision as number) ?? expectedRevision + 1);
             setSendError("The AI returned an empty response. Please try again.");
             // User message persisted, provider returned empty — don't restore draft.
             return { accepted: false, persisted: true, errorKind: "provider" };
@@ -1330,7 +1347,9 @@ export function useCanonicalConversation({
             id: assistantMsg.id,
             content: assistantMsg.content,
             reasoning: reasoningText || undefined,
-            status: pendingApprovalState ? "awaiting_approval" : "completed",
+            status: assistantMsg.status === "failed"
+              ? "failed"
+              : pendingApprovalState ? "awaiting_approval" : "completed",
             createdAt: assistantMsg.createdAt,
             agentSlug: assistantMsg.agentSlug ?? activeAgentId as AgentSlug,
             agentMode: assistantMsg.agentMode ?? activeAgentMode,
@@ -1340,6 +1359,15 @@ export function useCanonicalConversation({
           });
 
           s3.setRevision((donePayload.revision as number) ?? expectedRevision + 1);
+
+          // A run the server persisted as failed is NOT an accepted send —
+          // even when it produced truthful failure text. Returning
+          // accepted:false keeps the composer out of the "Done" completion
+          // state and surfaces the failure for retry.
+          if (assistantMsg.status === "failed") {
+            setSendError(assistantMsg.content);
+            return { accepted: false, persisted: true, errorKind: "provider" };
+          }
 
           if (donePayload.usedFallbackModel) {
             setFallbackNotice(`${selectedModel.label} was unavailable. This response used ${donePayload.usedFallbackModel}.`);
@@ -1648,6 +1676,7 @@ export function useCanonicalConversation({
     conversations,
     loading: loadingState,
     sendError,
+    reportSendError: setSendError,
     clearSendError: () => setSendError(null),
     requiresReauth,
     clearRequiresReauth: () => setRequiresReauth(false),
@@ -1685,6 +1714,9 @@ function buildIntentResponseMessage(
 }
 
 function sanitizeErrorMessage(raw: string): string {
+  if (/empty responses?|EMPTY_PROVIDER_RESPONSE/i.test(raw)) {
+    return "The AI provider returned an empty response. Please try again.";
+  }
   if (/All LLM .*(failed|providers)/i.test(raw)) {
     return "LiTT couldn't reach the selected AI model. I tried the available backups, but none responded.\n\nTry again, or choose a different model from the selector.";
   }

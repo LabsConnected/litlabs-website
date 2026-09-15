@@ -204,6 +204,7 @@ vi.mock("../hooks/useConnectionSummary", () => ({
       voiceHealth: { configured: false, tokenService: "unknown", available: false },
     },
     loading: false,
+    refresh: vi.fn(),
   }),
 }));
 
@@ -239,11 +240,13 @@ vi.mock("../stores/useStudioAgentStore", () => ({
   ],
 }));
 
+const sendMock = vi.hoisted(() => vi.fn());
+
 vi.mock("../hooks/useCanonicalConversation", () => ({
   useCanonicalConversation: () => ({
     messages: [],
     busy: false,
-    send: vi.fn().mockResolvedValue({ accepted: true }),
+    send: sendMock,
     regenerate: vi.fn(),
     clear: vi.fn(),
     activeAgentId: "litt",
@@ -273,30 +276,34 @@ vi.mock("../stores/useStudioModelStore", () => ({
     }),
 }));
 
-vi.mock("../stores/useExecutionStore", () => ({
-  useExecutionStore: (selector: (s: Record<string, unknown>) => unknown) =>
-    selector({
-      events: [],
-      phase: "idle",
-      isRunning: false,
-      currentStep: 0,
-      pendingApproval: null,
-      checkpoint: null,
-      toolCalls: [],
-      changesSummary: null,
-      startRun: vi.fn(),
-      endRun: vi.fn(),
-      addEvent: vi.fn(),
-      setPhase: vi.fn(),
-      setPendingApproval: vi.fn(),
-      resolveApproval: vi.fn(),
-      setCheckpoint: vi.fn(),
-      collapseEvent: vi.fn(),
-      collapseLowLevel: vi.fn(),
-      clearEvents: vi.fn(),
-      reset: vi.fn(),
-    }),
-}));
+vi.mock("../stores/useExecutionStore", () => {
+  const state: Record<string, unknown> = {
+    events: [],
+    phase: "idle",
+    isRunning: false,
+    currentStep: 0,
+    pendingApproval: null,
+    checkpoint: null,
+    toolCalls: [],
+    changesSummary: null,
+    startRun: vi.fn(),
+    endRun: vi.fn(),
+    addEvent: vi.fn(),
+    setPhase: vi.fn(),
+    setPendingApproval: vi.fn(),
+    resolveApproval: vi.fn(),
+    setCheckpoint: vi.fn(),
+    collapseEvent: vi.fn(),
+    collapseLowLevel: vi.fn(),
+    clearEvents: vi.fn(),
+    reset: vi.fn(),
+  };
+  const useExecutionStore = Object.assign(
+    (selector: (s: Record<string, unknown>) => unknown) => selector(state),
+    { getState: () => state },
+  );
+  return { useExecutionStore };
+});
 
 vi.mock("../stores/useConversationStore", () => ({
   useConversationStore: (selector: (s: Record<string, unknown>) => unknown) =>
@@ -387,6 +394,7 @@ async function settle() {
 describe("CommandStudio — single active preview", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sendMock.mockResolvedValue({ accepted: true });
     window.innerHeight = 844;
     Object.defineProperty(window, "visualViewport", {
       value: {
@@ -464,6 +472,32 @@ describe("CommandStudio — single active preview", () => {
     await settle();
     expect(previewPanels()).toHaveLength(1);
     expect(screen.getByTestId("studio-center-workspace").querySelector("[data-testid='studio-plan-surface']")).toBeTruthy();
+  });
+
+  it("does NOT show a Done completion card when the run pauses for approval", async () => {
+    globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+    // A send accepted into an approval gate is not completed work — the
+    // production bug showed "Done · No files changed" while the run was
+    // still waiting on the user.
+    sendMock.mockResolvedValueOnce({
+      accepted: true,
+      persisted: true,
+      reply: "I need approval to write files.",
+      pendingApproval: {
+        toolId: "files.write",
+        reason: "Mutation requires approval in ACT mode",
+        pausedRunId: "paused-1",
+      },
+    });
+    const { user } = await renderCommandStudio();
+    await settle();
+
+    await user.type(screen.getByTestId("studio-command-input"), "build a page");
+    await user.click(screen.getByTestId("studio-send-button"));
+    await waitFor(() => expect(sendMock).toHaveBeenCalled());
+    await settle();
+
+    expect(screen.queryByTestId("studio-completion")).toBeNull();
   });
 });
 
