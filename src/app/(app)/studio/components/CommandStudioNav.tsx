@@ -258,8 +258,8 @@ export function MobileCommandNav({
       style={{
         height: "calc(var(--studio-mobile-bottom-h) + env(safe-area-inset-bottom))",
         paddingBottom: "env(safe-area-inset-bottom)",
-        backgroundColor: "rgba(8, 6, 15, 0.85)",
-        borderTop: "1px solid var(--studio-border)",
+        backgroundColor: "rgba(7,5,13,0.85)",
+        borderTop: "1px solid rgba(255,255,255,0.07)",
         backdropFilter: "blur(20px)",
         WebkitBackdropFilter: "blur(20px)",
       }}
@@ -285,7 +285,7 @@ export function MobileCommandNav({
             onClick={() => onSelect(item.id)}
             className="relative flex flex-1 flex-col items-center justify-center gap-1 transition-colors"
             style={{
-              color: isActive ? "var(--litt-primary)" : "var(--text-muted)",
+              color: isActive ? "#22d3ee" : "var(--text-muted)",
             }}
             aria-label={item.label}
             aria-current={isActive ? "page" : undefined}
@@ -294,8 +294,8 @@ export function MobileCommandNav({
               <span
                 className="absolute top-0 h-0.5 w-8 rounded-b-full"
                 style={{
-                  backgroundColor: "var(--litt-primary)",
-                  boxShadow: "0 0 8px var(--litt-primary)",
+                  backgroundColor: "#22d3ee",
+                  boxShadow: "0 0 8px #22d3ee",
                 }}
                 aria-hidden
               />

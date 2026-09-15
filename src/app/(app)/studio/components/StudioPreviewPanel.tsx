@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ExternalLink, Eye, Loader2, Monitor, MousePointer2, RefreshCw, RotateCcw, Smartphone, Tablet, Copy, Check, Square, X } from "lucide-react";
+import { Check, Copy, ExternalLink, Eye, Loader2, Monitor, MoreHorizontal, MousePointer2, RefreshCw, RotateCcw, Smartphone, Square, Tablet, X } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { formatSourceSummary } from "@/lib/projects/project-source";
 import { useExecutionStore } from "../stores/useExecutionStore";
@@ -44,6 +44,31 @@ const STATUS_DOT_COLOR: Record<PreviewState, string> = {
   failed: "#EF4444",
   not_started: "#6b7280",
 };
+
+/**
+ * Startup phase for the staged loading display. The runtime reports one
+ * aggregated "starting" state — the only HONEST distinctions derivable from
+ * the existing status logic are:
+ *   provision  — the workspace lifecycle itself is still provisioning
+ *                (workspaceStatus "preparing"/"provisioning")
+ *   devserver  — workspace provisioning is done (workspaceStatus "ready")
+ *                while the runtime still reports "starting"
+ * "Health check" is never marked current: nothing in the status payload
+ * distinguishes it, so it stays upcoming until the preview is ready.
+ * null means the stage cannot be distinguished — the panel then renders the
+ * single honest "Preparing preview…" state instead of inventing stages.
+ */
+type StartPhase = "provision" | "devserver" | null;
+const START_STAGES = ["Provision", "Dev server", "Health check"] as const;
+
+function deriveStartPhase(state: PreviewState, workspaceStatus: string | null, runtimeStatusRaw: string | null): StartPhase {
+  if (state !== "starting" && state !== "restarting") return null;
+  // A restart re-starts the dev server; provisioning is not repeated.
+  if (state === "restarting") return "devserver";
+  if (workspaceStatus === "preparing" || workspaceStatus === "provisioning") return "provision";
+  if (workspaceStatus === "ready" && runtimeStatusRaw === "starting") return "devserver";
+  return null;
+}
 
 interface PreviewPayload {
   runtimeStatus?: unknown;
@@ -162,6 +187,9 @@ export default function StudioPreviewPanel({
   const [selectionMode, setSelectionMode] = useState(true);
   const [selectedElement, setSelectedElement] = useState<PreviewSelection | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [startPhase, setStartPhase] = useState<StartPhase>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const selectionCleanupRef = useRef<(() => void) | null>(null);
   const selectedElementRef = useRef<PreviewSelection | null>(null);
@@ -379,6 +407,10 @@ export default function StudioPreviewPanel({
         throw new Error(typeof payload?.runtimeError === "string" ? payload.runtimeError : `Preview status failed (${response.status})`);
       }
       const next = statusFromPayload(payload, workspaceStatus);
+      const runtimeStatusRaw = typeof payload.runtimeStatus === "string" ? payload.runtimeStatus : null;
+      // Display-only: pin the staged-loading indicator to what the status
+      // logic can truthfully distinguish. null → the honest single state.
+      setStartPhase(deriveStartPhase(next.state, workspaceStatus, runtimeStatusRaw));
       setState((prevState) => {
         // Only reload iframe when transitioning from non-ready to ready,
         // or when a file change explicitly requested a refresh.
@@ -411,6 +443,7 @@ export default function StudioPreviewPanel({
     startPollAttemptsRef.current = 0;
     reloadFrameOnNextReadyRef.current = false;
     statusSeqRef.current++;
+    setStartPhase(null);
     void loadStatus();
   }, [loadStatus]);
 
@@ -454,6 +487,7 @@ export default function StudioPreviewPanel({
         clearInterval(interval);
         statusSeqRef.current++;
         setState("failed");
+        setStartPhase(null);
         setError("The preview took too long to start. The dev server may have crashed during startup — check the logs, then try restarting.");
         setErrorCode(null);
         return;
@@ -490,7 +524,9 @@ export default function StudioPreviewPanel({
           // and a working Retry instead of a dead "auto-preparing" state.
           const died = next.state === "not_started";
           statusSeqRef.current++;
-          setState(died ? "failed" : next.state);
+          const nextState = died ? "failed" : next.state;
+          setState(nextState);
+          setStartPhase(deriveStartPhase(nextState, workspaceStatus, typeof payload.runtimeStatus === "string" ? payload.runtimeStatus : null));
           setError(died ? "The preview dev server stopped unexpectedly." : next.error);
           setErrorCode(next.errorCode);
           if (!died) setPreviewUrl(next.url);

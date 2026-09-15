@@ -62,7 +62,7 @@ describe("LiTTMobileSheet (real component)", () => {
     expect(screen.getByTestId("litt-mobile-live-panel")).toHaveAttribute("data-active", "false");
   });
 
-  it("keeps the bounded sheet above the mobile nav with reachable chat controls", () => {
+  it("keeps the full-screen sheet above the mobile nav with reachable chat controls", () => {
     renderSheet({
       chatContent: (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -76,15 +76,13 @@ describe("LiTTMobileSheet (real component)", () => {
     const input = screen.getByRole("textbox", { name: "Message input" });
     input.focus();
 
-    // Geometry is driven by the Visual Viewport API so the sheet stays
-    // above the 62px bottom nav and any on-screen keyboard.
-    const expectedHeight = Math.min(Math.round(844 * 0.88), 844 - 62); // 742
+    // Geometry is driven by the Visual Viewport API so the full-screen
+    // sheet stays above the 62px bottom nav and any on-screen keyboard.
+    const expectedHeight = 844 - 62; // 782
     expect(sheet).toHaveStyle({
-      bottom: "62px",
+      top: "0px",
       height: `${expectedHeight}px`,
     });
-    expect(sheet.getAttribute("style")).toContain("max-height");
-    expect(sheet.getAttribute("style")).toContain("var(--studio-mobile-bottom-h)");
     expect(screen.getByTestId("litt-mobile-sheet-content")).toHaveClass("min-h-0", "flex-1", "overflow-hidden");
     expect(screen.getByTestId("litt-mobile-chat-panel").className).toContain("min-w-0");
     expect(document.activeElement).toBe(input);
@@ -99,10 +97,11 @@ describe("LiTTMobileSheet (real component)", () => {
     renderSheet();
 
     const sheet = screen.getByTestId("litt-mobile-sheet");
-    const expectedHeight = Math.min(Math.round(500 * 0.88), 500 - 62); // 438
+    // innerHeight 844 - visualViewport 500 => bottomInset 344,
+    // bottomOffset 62 + 344 = 406, height 500 + 344 - 406 = 438.
     expect(sheet).toHaveStyle({
-      bottom: "406px", // 62 + (844 - 500)
-      height: `${expectedHeight}px`,
+      top: "0px",
+      height: "438px",
     });
   });
 
@@ -111,6 +110,26 @@ describe("LiTTMobileSheet (real component)", () => {
     fireEvent.click(screen.getByTestId("litt-mobile-tab-live"));
     expect(onTabChange).toHaveBeenCalledWith("live");
     expect(screen.getByTestId("litt-mobile-live-panel")).toHaveAttribute("data-active", "false");
+  });
+
+  it("labels the tabs Chat | Activity", () => {
+    renderSheet();
+    expect(screen.getByTestId("litt-mobile-tab-chat")).toHaveTextContent("Chat");
+    expect(screen.getByTestId("litt-mobile-tab-live")).toHaveTextContent("Activity");
+  });
+
+  it("renders the approval slot above the tabs when provided", () => {
+    renderSheet({
+      approvalSlot: <div data-testid="approval-card">Approve me</div>,
+    });
+    const slot = screen.getByTestId("litt-mobile-approval-slot");
+    expect(slot).toHaveTextContent("Approve me");
+    expect(slot).toContainElement(screen.getByTestId("approval-card"));
+  });
+
+  it("omits the approval slot when not provided", () => {
+    renderSheet();
+    expect(screen.queryByTestId("litt-mobile-approval-slot")).not.toBeInTheDocument();
   });
 
   it("clicking close calls onClose", () => {

@@ -399,8 +399,13 @@ async function renderCommandStudio() {
   return { user, ...view };
 }
 
-async function openAdvancedTools(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: /open advanced tools/i }));
+async function openAdvancedTools(_user: ReturnType<typeof userEvent.setup>) {
+  // The old "Open advanced tools" button is gone (unified dock topology);
+  // advanced-tools state is now route-driven. Routing to "chat" opens the
+  // advanced workspace while keeping the center on the Plan surface.
+  act(() => {
+    window.dispatchEvent(new CustomEvent("studio:switch-tool", { detail: "chat" }));
+  });
 }
 
 function previewPanels() {
