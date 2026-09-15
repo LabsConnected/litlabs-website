@@ -165,8 +165,9 @@ export function legacyToolToLiTTMode(tool: string | null): LiTTMode | null {
       return "code";
     // build/canvas/design are workspace stages, not LiTT creation modes.
     // They fall through to the switch in mapLegacyToolToDestination which
-    // sets the correct legacyTool and mode (files/design/work) with
-    // littMode: "website" explicitly.
+    // sets the correct legacyTool and mode (files/design/work). Canvas and
+    // design carry littMode "website"; build carries "auto" so the
+    // LiTT-mode→stage sync does not stomp the Builder surface.
     default:
       return null;
   }
@@ -242,9 +243,12 @@ export function mapLegacyToolToDestination(
     // Studio / Preview — the app preview surface
     case "preview":
       return { destination: "studio", legacyTool: "preview", mode: "preview", littMode: "auto" };
-    // Studio / Work but rendering the Builder adapter (not ChatTool)
+    // Studio / Work but rendering the Builder adapter (not ChatTool).
+    // littMode is "auto" — Builder is a workspace surface, not a LiTT
+    // creation mode. Mapping it to "website" made the LiTT-mode→stage
+    // sync stomp studioMode to "files" on every ?tool=build load.
     case "build":
-      return { destination: "studio", legacyTool: "build", mode: "work", littMode: "website", command };
+      return { destination: "studio", legacyTool: "build", mode: "work", littMode: "auto", command };
     // Studio / Work with the bottom drawer open on Terminal
     case "terminal":
       return { destination: "studio", legacyTool: "terminal", mode: "work", littMode: "auto", command, openDrawer: "terminal" };
@@ -297,17 +301,25 @@ export function mapLegacyToolToDestination(
 }
 
 /**
- * Reverse mapping: given a destination + mode, produce the canonical
- * `?tool=` value to write back to the URL. The canonical route is
- * always `tool=chat` — modes travel as `?mode=<mode>`.
+ * Which surface renders inside Studio/Work — the LiTT conversation, or
+ * the Builder adapter. Part of Builder's canonical routing identity:
+ * (studio, work, builder) ⟷ ?tool=build.
+ */
+export type WorkSurface = "conversation" | "builder";
+
+/**
+ * Reverse mapping: given a destination + mode (+ work surface), produce
+ * the canonical `?tool=` value to write back to the URL. The canonical
+ * route is always `tool=chat` — modes travel as `?mode=<mode>`.
  *
  * The only exceptions are workspace stages that have their own URL
- * (code, canvas, preview) for deep-linking — but even those preserve
- * the LiTT mode in the URL.
+ * (code, canvas, preview, build) for deep-linking — but even those
+ * preserve the LiTT mode in the URL.
  */
 export function destinationToLegacyTool(
   destination: StudioDestination,
   mode?: string,
+  workSurface?: WorkSurface,
 ): StudioTool {
   switch (destination) {
     case "studio":
@@ -316,6 +328,9 @@ export function destinationToLegacyTool(
       if (mode === "files") return "canvas";
       if (mode === "design") return "design";
       if (mode === "preview") return "preview";
+      // Builder is a canonical Studio destination — ?tool=build, not
+      // the generic chat URL (which remaps to Preview on load).
+      if (mode === "work" && workSurface === "builder") return "build";
       // Everything else is the canonical LiTT chat surface
       return "chat";
     case "create":
