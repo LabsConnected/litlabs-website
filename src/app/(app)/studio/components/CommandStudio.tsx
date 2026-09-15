@@ -1553,7 +1553,7 @@ function CommandStudioContent() {
       <AgentVoiceSync />
 
       <div
-        className="studio-shell flex h-dvh w-full flex-col overflow-hidden"
+        className="studio-shell flex h-full w-full flex-col overflow-hidden"
         data-layout={theme.layoutStyle}
         style={{
           backgroundColor: "var(--bg-main)",

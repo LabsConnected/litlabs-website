@@ -3,16 +3,13 @@
 /**
  * AppShell — the ONE canonical authenticated application shell.
  *
- * Replaces NavbarWrapper + MobileBottomNav with a unified system:
- *   - Desktop (≥1280px): glass sidebar (72px collapsed / 256px expanded)
- *   - Narrow desktop/tablet (768–1279px): sidebar is forced to the 72px
- *     icon rail so it cannot consume a large share of the viewport
- *   - Mobile: slide-out drawer + simplified bottom bar
- *   - Shared navigation data from lib/navigation.ts
- *   - Collapsed state persisted in localStorage
- *   - Owner/BITS status at bottom
- *   - LiTT Online indicator
- *   - Active route gets illuminated glass pill + vertical accent
+ * Top-bar navigation everywhere (product direction 2026-09-15):
+ *   - One sticky glass top bar on all viewports: logo, primary nav,
+ *     LiTT status, BITS balance, and the identity dock.
+ *   - Mobile gets a second horizontally-scrollable nav strip under the
+ *     bar. Studio keeps its own mobile chrome, so the strip is skipped
+ *     there (the single-row bar with logo + account stays).
+ *   - Shared navigation data from lib/navigation.ts (flag-gated).
  *
  * Public pages and Studio keep their own layouts (handled by LayoutShell).
  */
@@ -20,31 +17,21 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import {
-  PanelLeftClose,
-  PanelLeftOpen,
-  X,
-  Menu,
-  Plus,
-  ChevronUp,
   LogOut,
-  User as UserIcon,
+  UserCircle,
   Wallet as WalletIcon,
   Settings as SettingsIcon,
-  UserCircle,
 } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useClerkAuth, useAppUser } from "@/hooks/useClerkAuth";
 import { useLittHealth } from "@/hooks/useLittHealth";
-import { useMediaQuery } from "@/hooks/useMediaQuery";
 import {
   getVisibleNavSections,
   APP_NAV_BOTTOM,
-  APP_MOBILE_BOTTOM_ITEMS,
   isAppNavActive,
-  COLLAPSED_KEY,
   type NavItem,
 } from "@/lib/navigation";
 import { BrandLogo } from "@/components/branding/BrandLogo";
@@ -52,17 +39,13 @@ import { BrandLogo } from "@/components/branding/BrandLogo";
 /* ─── Identity Dock ────────────────────────────────────────────────── */
 
 /**
- * IdentityDock — the bottom-of-sidebar account/identity tray.
+ * IdentityDock — the top-bar account/identity tray.
  *
- * Shows the Clerk avatar + name + role. Clicking opens a styled dropdown
- * with Profile / Wallet / Settings / Account / Sign out.
- *
- * Signed-out state shows "Sign in" and "Create account" links.
- *
- * When the sidebar is collapsed, only the avatar (with status dot) is
- * shown. Clicking the avatar opens the same dropdown.
+ * Shows the Clerk avatar with an online dot. Clicking opens a dropdown
+ * (below the bar, right-aligned) with Profile / Wallet / Settings /
+ * Account / Sign out. Signed-out state shows a Sign in button.
  */
-function IdentityDock({ collapsed }: { collapsed: boolean }) {
+function IdentityDock() {
   const T = useTheme().resolvedColors;
   const { isSignedIn, isLoaded, signOut } = useClerkAuth();
   const { user } = useAppUser();
@@ -80,7 +63,7 @@ function IdentityDock({ collapsed }: { collapsed: boolean }) {
     return () => { active = false; };
   }, [isSignedIn, user?.id]);
 
-  // Close on outside click
+  // Close on outside click / Escape
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
@@ -99,58 +82,25 @@ function IdentityDock({ collapsed }: { collapsed: boolean }) {
 
   // ── Signed-out state ──
   if (isLoaded && !isSignedIn) {
-    if (collapsed) {
-      return (
-        <div className="flex justify-center">
-          <Link
-            href="/sign-in"
-            className="grid h-9 w-9 place-items-center rounded-lg transition hover:bg-white/5"
-            style={{ color: T.textMuted }}
-            aria-label="Sign in"
-            title="Sign in"
-          >
-            <UserIcon size={18} />
-          </Link>
-        </div>
-      );
-    }
     return (
-      <div className="space-y-1">
-        <Link
-          href="/sign-in"
-          className="flex h-9 items-center justify-center gap-2 rounded-xl border text-xs font-bold transition hover:bg-white/5"
-          style={{ borderColor: `${T.accentColor}30`, color: T.textColor }}
-        >
-          Sign in
-        </Link>
-        <Link
-          href="/sign-up"
-          className="flex h-9 items-center justify-center gap-2 rounded-xl text-xs font-bold transition hover:bg-white/5"
-          style={{ color: T.textMuted }}
-        >
-          Create account
-        </Link>
-      </div>
+      <Link
+        href="/sign-in"
+        className="flex h-9 items-center rounded-xl border px-4 text-xs font-bold transition hover:bg-white/5"
+        style={{ borderColor: `${T.accentColor}40`, color: T.accentColor }}
+      >
+        Sign in
+      </Link>
     );
   }
 
   // ── Loading state ──
   if (!isLoaded || !user) {
-    if (collapsed) {
-      return (
-        <div className="flex justify-center">
-          <div className="h-9 w-9 animate-pulse rounded-full" style={{ background: `${T.borderColor}20` }} />
-        </div>
-      );
-    }
     return (
-      <div className="flex items-center gap-2.5 rounded-xl border px-2.5 py-2" style={{ borderColor: `${T.borderColor}15` }}>
-        <div className="h-8 w-8 animate-pulse rounded-full" style={{ background: `${T.borderColor}20` }} />
-        <div className="flex-1 space-y-1">
-          <div className="h-2.5 w-20 animate-pulse rounded" style={{ background: `${T.borderColor}20` }} />
-          <div className="h-2 w-12 animate-pulse rounded" style={{ background: `${T.borderColor}15` }} />
-        </div>
-      </div>
+      <div
+        className="h-9 w-9 animate-pulse rounded-full"
+        style={{ background: `${T.borderColor}20` }}
+        aria-label="Loading account"
+      />
     );
   }
 
@@ -166,93 +116,37 @@ function IdentityDock({ collapsed }: { collapsed: boolean }) {
     { label: "Settings", href: "/settings", icon: SettingsIcon },
   ];
 
-  if (collapsed) {
-    return (
-      <div ref={dockRef} className="relative flex justify-center">
-        <button
-          onClick={() => setOpen((v) => !v)}
-          className="relative h-9 w-9 overflow-hidden rounded-full border-2 transition hover:opacity-80"
-          style={{ borderColor: `${T.accentColor}40` }}
-          aria-label={`${displayName} — open account menu`}
-          title={displayName}
-        >
-          {avatarUrl ? (
-            <Image src={avatarUrl} alt={displayName} fill sizes="36px" className="object-cover" />
-          ) : (
-            <div className="grid h-full w-full place-items-center text-xs font-bold" style={{ background: `${T.accentColor}20`, color: T.accentColor }}>
-              {displayName.charAt(0).toUpperCase()}
-            </div>
-          )}
-          {/* Online status dot */}
-          <span
-            className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2"
-            style={{ background: "#22c55e", borderColor: T.bgColor }}
-          />
-        </button>
-        {open && (
-          <div
-            className="absolute bottom-0 left-full ml-2 z-50 w-56 rounded-xl border p-1.5 shadow-2xl"
-            style={{ borderColor: `${T.borderColor}30`, background: `${T.bgColor}f8`, backdropFilter: "blur(16px)" }}
-          >
-            <IdentityMenuHeader name={displayName} email={email} role={role} roleColor={roleColor} T={T} />
-            <IdentityMenuItems items={menuItems} T={T} onClick={() => setOpen(false)} />
-            <IdentityMenuDivider T={T} />
-            <IdentityMenuSignOut onClick={() => { setOpen(false); void signOut(); }} />
-          </div>
-        )}
-      </div>
-    );
-  }
-
   return (
     <div ref={dockRef} className="relative">
-      {/* Trigger — avatar + name + role + chevron */}
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2.5 rounded-xl border px-2.5 py-2 transition hover:bg-white/5"
-        style={{ borderColor: open ? `${T.accentColor}30` : `${T.borderColor}15`, background: open ? `${T.accentColor}08` : "transparent" }}
-        aria-label="Open account menu"
+        className="relative block h-9 w-9 overflow-hidden rounded-full border-2 transition hover:opacity-80"
+        style={{ borderColor: open ? T.accentColor : `${T.accentColor}40` }}
+        aria-label={`${displayName} — open account menu`}
         aria-expanded={open}
+        title={displayName}
       >
-        {/* Avatar */}
-        <div className="relative h-8 w-8 shrink-0 overflow-hidden rounded-full border" style={{ borderColor: `${T.accentColor}30` }}>
-          {avatarUrl ? (
-            <Image src={avatarUrl} alt={displayName} fill sizes="32px" className="object-cover" />
-          ) : (
-            <div className="grid h-full w-full place-items-center text-xs font-bold" style={{ background: `${T.accentColor}20`, color: T.accentColor }}>
-              {displayName.charAt(0).toUpperCase()}
-            </div>
-          )}
-        </div>
-        {/* Name + role */}
-        <div className="flex min-w-0 flex-1 flex-col text-left">
-          <span className="truncate text-xs font-bold" style={{ color: T.textColor }}>
-            {displayName}
-          </span>
-          <span className="text-[9px] font-black uppercase tracking-wider" style={{ color: roleColor }}>
-            {role}
-          </span>
-        </div>
-        <ChevronUp
-          size={14}
-          className={`shrink-0 transition-transform duration-200 ${open ? "" : "rotate-180"}`}
-          style={{ color: T.textMuted }}
+        {avatarUrl ? (
+          <Image src={avatarUrl} alt={displayName} fill sizes="36px" className="object-cover" />
+        ) : (
+          <div className="grid h-full w-full place-items-center text-xs font-bold" style={{ background: `${T.accentColor}20`, color: T.accentColor }}>
+            {displayName.charAt(0).toUpperCase()}
+          </div>
+        )}
+        {/* Online status dot */}
+        <span
+          className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2"
+          style={{ background: "#22c55e", borderColor: T.bgColor }}
         />
       </button>
-
-      {/* Dropdown menu */}
       {open && (
         <div
-          className="absolute bottom-full left-0 right-0 mb-1.5 z-50 rounded-xl border p-1.5 shadow-2xl"
+          className="absolute right-0 top-full z-50 mt-2 w-60 rounded-xl border p-1.5 shadow-2xl"
           style={{ borderColor: `${T.borderColor}30`, background: `${T.bgColor}f8`, backdropFilter: "blur(16px)" }}
         >
-          {/* Header — full name + email + role badge */}
           <IdentityMenuHeader name={displayName} email={email} role={role} roleColor={roleColor} T={T} />
-          {/* Menu items */}
           <IdentityMenuItems items={menuItems} T={T} onClick={() => setOpen(false)} />
-          {/* Divider */}
           <IdentityMenuDivider T={T} />
-          {/* Sign out */}
           <IdentityMenuSignOut onClick={() => { setOpen(false); void signOut(); }} />
         </div>
       )}
@@ -324,216 +218,45 @@ function IdentityMenuSignOut({ onClick }: { onClick: () => void }) {
   );
 }
 
-/* ─── Desktop Sidebar ──────────────────────────────────────────────── */
+/* ─── Nav item (top-bar pill) ──────────────────────────────────────── */
 
-function DesktopSidebar({
-  collapsed,
-  onToggleCollapse,
-}: {
-  collapsed: boolean;
-  onToggleCollapse: () => void;
-}) {
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const { resolvedColors: T } = useTheme();
-  const { isSignedIn } = useClerkAuth();
-  const { balance } = useWallet();
-  const littHealth = useLittHealth();
-
-  const checkActive = useCallback(
-    (href: string) => isAppNavActive(pathname, searchParams, href),
-    [pathname, searchParams],
-  );
-
-  return (
-    <aside
-      data-collapsed={collapsed}
-      className={`sticky top-0 z-20 hidden h-dvh shrink-0 flex-col border-r transition-[width] duration-200 ease-out md:flex ${
-        collapsed ? "w-[72px]" : "w-[256px]"
-      }`}
-      style={{
-        background: `linear-gradient(180deg, ${T.bgColor}f2 0%, #07060d 50%, ${T.bgColor}f2 100%)`,
-        borderColor: `${T.borderColor}20`,
-        boxShadow: "16px 0 48px rgba(0,0,0,0.25)",
-      }}
-    >
-      {/* Header — logo + collapse toggle */}
-      <header
-        className="flex h-14 shrink-0 items-center border-b px-3"
-        style={{ borderColor: `${T.borderColor}15` }}
-      >
-        <div className="flex min-w-0 flex-1 items-center gap-2.5">
-          <BrandLogo href="/dashboard" size={28} showText={!collapsed} />
-        </div>
-        <button
-          onClick={onToggleCollapse}
-          className="grid h-8 w-8 place-items-center rounded-lg transition hover:bg-white/5"
-          style={{ color: T.textMuted }}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
-        </button>
-      </header>
-
-      {/* Navigation sections */}
-      <nav className="sidebar-scroll flex-1 overflow-y-auto px-2 py-3">
-        {getVisibleNavSections().map((section) => (
-          <div key={section.id} className="mb-4">
-            {/* Section label */}
-            <div
-              className={`mb-1.5 text-[8px] font-black uppercase tracking-[.2em] ${
-                collapsed ? "text-center" : "px-2.5"
-              }`}
-              style={{ color: "rgba(255,255,255,0.28)" }}
-            >
-              {collapsed ? "•" : section.label}
-            </div>
-            {/* Items */}
-            <div className="space-y-0.5">
-              {section.items.map((item) => (
-                <DesktopNavItem
-                  key={item.label}
-                  item={item}
-                  active={checkActive(item.href ?? "")}
-                  collapsed={collapsed}
-                  T={T}
-                />
-              ))}
-            </div>
-          </div>
-        ))}
-      </nav>
-
-      {/* Bottom — status + utility items + identity dock */}
-      <div className="shrink-0 border-t px-2 py-2.5" style={{ borderColor: `${T.borderColor}15` }}>
-        {/* LiTT health + BITS — truthful status derived from real health check */}
-        <div
-          className={`mb-2 ${collapsed ? "flex flex-col items-center gap-1" : "flex items-center justify-between rounded-lg border px-2.5 py-2"}`}
-          style={!collapsed ? { borderColor: `${T.borderColor}15`, background: `${T.boxBg}50` } : undefined}
-        >
-          {/* Health indicator — derived from /api/health */}
-          <div className={`flex items-center gap-1.5 ${collapsed ? "justify-center" : ""}`}>
-            <span className="relative flex h-2 w-2">
-              {littHealth.pulse && (
-                <span
-                  className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60"
-                  style={{ backgroundColor: littHealth.color }}
-                />
-              )}
-              <span
-                className="relative inline-flex h-2 w-2 rounded-full"
-                style={{ backgroundColor: littHealth.color }}
-              />
-            </span>
-            {!collapsed && (
-              <span
-                className="text-[9px] font-black uppercase tracking-wider"
-                style={{ color: littHealth.color }}
-              >
-                {littHealth.label}
-              </span>
-            )}
-          </div>
-          {/* BITS — only show for signed-in users */}
-          {!collapsed && isSignedIn && (
-            <span className="text-[10px] font-bold" style={{ color: T.textMuted }}>
-              {balance.toLocaleString()} <span style={{ color: T.accentColor }}>BITS</span>
-            </span>
-          )}
-        </div>
-
-        {/* Utility items — Wallet + Settings (only for signed-in users) */}
-        {isSignedIn && (
-          <div className="space-y-0.5">
-            {APP_NAV_BOTTOM.map((item) => (
-              <DesktopNavItem
-                key={item.label}
-                item={item}
-                active={checkActive(item.href ?? "")}
-                collapsed={collapsed}
-                T={T}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Identity dock — Clerk avatar + name + role + account menu */}
-        <div className={`mt-2 ${collapsed ? "" : "border-t pt-2"}`} style={{ borderColor: `${T.borderColor}10` }}>
-          <IdentityDock collapsed={collapsed} />
-        </div>
-      </div>
-    </aside>
-  );
-}
-
-/* ─── Desktop Nav Item ─────────────────────────────────────────────── */
-
-function DesktopNavItem({
+function TopNavItem({
   item,
   active,
-  collapsed,
   T,
 }: {
   item: NavItem;
   active: boolean;
-  collapsed: boolean;
   T: ReturnType<typeof useTheme>["resolvedColors"];
 }) {
   const Icon = item.icon;
   return (
     <Link
       href={item.href ?? "#"}
-      title={collapsed ? item.label : undefined}
       aria-current={active ? "page" : undefined}
-      className={`group relative flex items-center rounded-xl border transition-all duration-200 ${
-        collapsed ? "mx-auto h-10 w-10 justify-center" : "h-10 gap-3 px-3"
-      }`}
+      className="flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-[13px] font-bold transition-all"
       style={{
-        background: active
-          ? `linear-gradient(90deg, ${T.accentColor}1a, ${T.accentColor}06, transparent)`
-          : "transparent",
-        borderColor: active ? `${T.accentColor}30` : "transparent",
+        background: active ? `${T.accentColor}14` : "transparent",
         color: active ? T.textColor : T.textMuted,
-        boxShadow: active ? `inset 2px 0 0 ${T.accentColor}` : "none",
+        boxShadow: active ? `inset 0 -2px 0 ${T.accentColor}` : "none",
       }}
     >
       <Icon
-        size={17}
+        size={16}
+        className="shrink-0"
         style={{
           color: active ? T.accentColor : undefined,
           filter: active ? `drop-shadow(0 0 4px ${T.accentColor}40)` : undefined,
         }}
-        className="shrink-0"
       />
-      {!collapsed && (
-        <span className="min-w-0 flex-1 truncate text-[12px] font-bold">{item.label}</span>
-      )}
-      {/* Tooltip when collapsed */}
-      {collapsed && (
-        <span
-          className="pointer-events-none absolute left-full ml-2 z-50 whitespace-nowrap rounded-md border px-2 py-1 text-[11px] font-bold opacity-0 transition-opacity duration-150 group-hover:opacity-100"
-          style={{
-            borderColor: T.borderColor,
-            background: T.bgColor,
-            color: T.textColor,
-          }}
-        >
-          {item.label}
-        </span>
-      )}
+      <span className="whitespace-nowrap">{item.label}</span>
     </Link>
   );
 }
 
-/* ─── Mobile Drawer ────────────────────────────────────────────────── */
+/* ─── Top Bar ──────────────────────────────────────────────────────── */
 
-function MobileDrawer({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
+function TopBar() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { resolvedColors: T } = useTheme();
@@ -541,288 +264,168 @@ function MobileDrawer({
   const { balance } = useWallet();
   const littHealth = useLittHealth();
 
-  const checkActive = useCallback(
-    (href: string) => isAppNavActive(pathname, searchParams, href),
-    [pathname, searchParams],
-  );
+  // Studio manages its own mobile chrome (header, bottom nav, composer),
+  // so the scrollable nav strip is skipped there — the single-row bar
+  // (logo + status + account) still renders.
+  const isStudio = pathname?.startsWith("/studio") ?? false;
 
-  // Lock body scroll when open
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.documentElement.style.overflow;
-    document.documentElement.style.overflow = "hidden";
-    return () => { document.documentElement.style.overflow = prev; };
-  }, [open]);
+  const checkActive = (href: string) => isAppNavActive(pathname, searchParams, href);
+  const sections = getVisibleNavSections();
 
-  if (!open) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 md:hidden">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
-
-      {/* Drawer */}
-      <div
-        className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col border-r"
-        style={{
-          background: `linear-gradient(180deg, ${T.bgColor}f8, #07060d 60%, ${T.bgColor}f8)`,
-          borderColor: `${T.borderColor}30`,
-        }}
-      >
-        {/* Header */}
-        <div
-          className="flex h-14 shrink-0 items-center justify-between border-b px-4"
-          style={{ borderColor: `${T.borderColor}20` }}
-        >
-          <BrandLogo href="/dashboard" size={32} showText />
-          <button
-            onClick={onClose}
-            className="grid h-9 w-9 place-items-center rounded-lg transition hover:bg-white/5"
-            style={{ color: T.textMuted }}
-            aria-label="Close navigation"
-          >
-            <X size={20} />
-          </button>
-        </div>
-
-        {/* Nav sections */}
-        <nav className="sidebar-scroll flex-1 overflow-y-auto px-3 py-4">
-          {getVisibleNavSections().map((section) => (
-            <div key={section.id} className="mb-5">
-              <div
-                className="mb-2 px-2 text-[8px] font-black uppercase tracking-[.2em]"
-                style={{ color: "rgba(255,255,255,0.28)" }}
-              >
-                {section.label}
-              </div>
-              <div className="space-y-0.5">
-                {section.items.map((item) => {
-                  const active = checkActive(item.href ?? "");
-                  const Icon = item.icon;
-                  return (
-                    <Link
-                      key={item.label}
-                      href={item.href ?? "#"}
-                      onClick={onClose}
-                      aria-current={active ? "page" : undefined}
-                      className="flex h-11 items-center gap-3 rounded-xl border px-3 transition-all"
-                      style={{
-                        background: active
-                          ? `linear-gradient(90deg, ${T.accentColor}1a, transparent)`
-                          : "transparent",
-                        borderColor: active ? `${T.accentColor}30` : "transparent",
-                        color: active ? T.textColor : T.textMuted,
-                        boxShadow: active ? `inset 2px 0 0 ${T.accentColor}` : "none",
-                      }}
-                    >
-                      <Icon size={18} style={{ color: active ? T.accentColor : undefined }} />
-                      <span className="text-sm font-bold">{item.label}</span>
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-
-          {/* Bottom items — Wallet + Settings (Profile is in the identity dock) */}
-          <div className="mb-3">
-            <div
-              className="mb-2 px-2 text-[8px] font-black uppercase tracking-[.2em]"
-              style={{ color: "rgba(255,255,255,0.28)" }}
-            >
-              Account
-            </div>
-            <div className="space-y-0.5">
-              {APP_NAV_BOTTOM.map((item) => {
-                const active = checkActive(item.href ?? "");
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={item.label}
-                    href={item.href ?? "#"}
-                    onClick={onClose}
-                    aria-current={active ? "page" : undefined}
-                    className="flex h-11 items-center gap-3 rounded-xl border px-3 transition-all"
-                    style={{
-                      background: active
-                        ? `linear-gradient(90deg, ${T.accentColor}1a, transparent)`
-                        : "transparent",
-                      borderColor: active ? `${T.accentColor}30` : "transparent",
-                      color: active ? T.textColor : T.textMuted,
-                      boxShadow: active ? `inset 2px 0 0 ${T.accentColor}` : "none",
-                    }}
-                  >
-                    <Icon size={18} style={{ color: active ? T.accentColor : undefined }} />
-                    <span className="text-sm font-bold">{item.label}</span>
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-        </nav>
-
-        {/* Status footer + identity dock */}
-        <div
-          className="shrink-0 border-t px-3 py-3"
-          style={{ borderColor: `${T.borderColor}15` }}
-        >
-          <div className="mb-2 flex items-center justify-between rounded-lg border px-2.5 py-2" style={{ borderColor: `${T.borderColor}15`, background: `${T.boxBg}50` }}>
-            <div className="flex items-center gap-2">
-              <span className="relative flex h-2 w-2">
-                {littHealth.pulse && (
-                  <span
-                    className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60"
-                    style={{ backgroundColor: littHealth.color }}
-                  />
-                )}
-                <span
-                  className="relative inline-flex h-2 w-2 rounded-full"
-                  style={{ backgroundColor: littHealth.color }}
-                />
-              </span>
-              <span
-                className="text-[10px] font-black uppercase tracking-wider"
-                style={{ color: littHealth.color }}
-              >
-                {littHealth.label}
-              </span>
-            </div>
-            {isSignedIn && (
-              <span className="text-[11px] font-bold" style={{ color: T.textMuted }}>
-                {balance.toLocaleString()} <span style={{ color: T.accentColor }}>BITS</span>
-              </span>
-            )}
-          </div>
-          {/* Identity dock — same component as desktop, always expanded in mobile drawer */}
-          <IdentityDock collapsed={false} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ─── Mobile Bottom Bar ────────────────────────────────────────────── */
-
-function MobileBottomBar() {
-  const pathname = usePathname();
-  const { resolvedColors: T } = useTheme();
-
-  const isActive = (href: string) => {
-    if (href === "/dashboard") return pathname === "/dashboard";
-    return pathname === href || pathname?.startsWith(`${href}/`);
-  };
-
-  const items = APP_MOBILE_BOTTOM_ITEMS.slice(0, 2);
-  const rightItems = APP_MOBILE_BOTTOM_ITEMS.slice(2);
-
-  return (
-    <nav
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-[#080910]/95 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden"
-    >
-      <div className="relative grid h-16 grid-cols-5 items-center">
-        {/* Left items */}
-        {items.map((item) => {
-          const Icon = item.icon;
-          const active = isActive(item.href);
-          return (
-            <Link
-              key={item.label}
-              href={item.href}
-              aria-current={active ? "page" : undefined}
-              className="relative flex min-h-11 flex-col items-center justify-center gap-0.5 transition-all"
-              style={{ color: active ? T.accentColor : T.textMuted }}
-            >
-              {active && (
-                <span
-                  className="absolute inset-x-3 top-0 h-0.75 rounded-full"
-                  style={{ backgroundColor: T.accentColor, boxShadow: `0 0 8px ${T.accentColor}80` }}
-                />
-              )}
-              <Icon size={20} style={active ? { filter: `drop-shadow(0 0 4px ${T.accentColor}60)` } : undefined} />
-              <span className="text-[9px] font-black">{item.label}</span>
-            </Link>
-          );
-        })}
-
-        {/* Center Create button */}
-        <Link
-          href="/studio?tool=chat"
-          className="relative flex flex-col items-center justify-center"
-          aria-label="Create"
-        >
-          <span
-            className="grid h-12 w-12 place-items-center rounded-2xl border-2 transition-all active:scale-95"
-            style={{
-              background: `linear-gradient(135deg, ${T.accentColor}, ${T.accentColor}cc)`,
-              borderColor: `${T.accentColor}60`,
-              boxShadow: `0 4px 20px ${T.accentColor}40, 0 0 12px ${T.accentColor}30`,
-            }}
-          >
-            <Plus size={24} className="text-white" />
-          </span>
-        </Link>
-
-        {/* Right items */}
-        {rightItems.map((item) => {
-          const Icon = item.icon;
-          const active = isActive(item.href);
-          return (
-            <Link
-              key={item.label}
-              href={item.href}
-              aria-current={active ? "page" : undefined}
-              className="relative flex min-h-11 flex-col items-center justify-center gap-0.5 transition-all"
-              style={{ color: active ? T.accentColor : T.textMuted }}
-            >
-              {active && (
-                <span
-                  className="absolute inset-x-3 top-0 h-0.75 rounded-full"
-                  style={{ backgroundColor: T.accentColor, boxShadow: `0 0 8px ${T.accentColor}80` }}
-                />
-              )}
-              <Icon size={20} style={active ? { filter: `drop-shadow(0 0 4px ${T.accentColor}60)` } : undefined} />
-              <span className="text-[9px] font-black">{item.label}</span>
-            </Link>
-          );
-        })}
-      </div>
-    </nav>
-  );
-}
-
-/* ─── Mobile Top Bar (hamburger + logo) ────────────────────────────── */
-
-function MobileTopBar({ onMenuClick }: { onMenuClick: () => void }) {
-  const { resolvedColors: T } = useTheme();
   return (
     <header
-      className="sticky top-0 z-30 flex h-14 items-center justify-between border-b px-4 md:hidden"
+      className="sticky top-0 z-40 shrink-0"
       style={{
-        backgroundColor: `${T.bgColor}e6`,
-        borderColor: `${T.borderColor}20`,
+        background: `${T.bgColor}e6`,
         backdropFilter: "blur(14px)",
+        borderBottom: `1px solid ${T.borderColor}20`,
+        boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
       }}
     >
-      <button
-        onClick={onMenuClick}
-        className="grid h-10 w-10 place-items-center rounded-lg transition hover:bg-white/5"
-        style={{ color: T.textMuted }}
-        aria-label="Open menu"
-      >
-        <Menu size={22} />
-      </button>
-      <BrandLogo href="/dashboard" size={28} showText />
-      <Link
-        href="/settings"
-        className="grid h-10 w-10 place-items-center rounded-lg transition hover:bg-white/5"
-        style={{ color: T.textMuted }}
-        aria-label="Settings"
-      >
-        <SettingsIcon size={20} />
-      </Link>
+      {/* Main bar row */}
+      <div className="flex h-14 items-center gap-2 px-3 md:gap-3 md:px-4">
+        <BrandLogo href="/dashboard" size={30} showText />
+
+        {/* Desktop nav — sections inline, separated by dividers */}
+        <nav className="ml-2 hidden items-center gap-0.5 md:flex" aria-label="Primary">
+          {sections.map((section, si) => (
+            <div key={section.id} className="flex items-center gap-0.5">
+              {si > 0 && (
+                <span
+                  className="mx-1.5 h-4 w-px"
+                  style={{ background: `${T.borderColor}30` }}
+                  aria-hidden
+                />
+              )}
+              {section.items.map((item) => (
+                <TopNavItem
+                  key={item.label}
+                  item={item}
+                  active={checkActive(item.href ?? "")}
+                  T={T}
+                />
+              ))}
+            </div>
+          ))}
+        </nav>
+
+        <div className="flex-1" />
+
+        {/* LiTT health — pill on sm+, dot only on xs */}
+        <div
+          className="hidden items-center gap-1.5 rounded-full border px-2.5 py-1 sm:flex"
+          style={{ borderColor: `${T.borderColor}20`, background: `${T.boxBg}50` }}
+          title={`LiTT status: ${littHealth.label}`}
+        >
+          <span className="relative flex h-2 w-2">
+            {littHealth.pulse && (
+              <span
+                className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60"
+                style={{ backgroundColor: littHealth.color }}
+              />
+            )}
+            <span
+              className="relative inline-flex h-2 w-2 rounded-full"
+              style={{ backgroundColor: littHealth.color }}
+            />
+          </span>
+          <span
+            className="hidden text-[9px] font-black uppercase tracking-wider md:inline"
+            style={{ color: littHealth.color }}
+          >
+            {littHealth.label}
+          </span>
+        </div>
+
+        {/* BITS — signed-in users */}
+        {isSignedIn && (
+          <span
+            className="hidden text-[11px] font-bold sm:block"
+            style={{ color: T.textMuted }}
+            title="Your BITS balance"
+          >
+            {balance.toLocaleString()} <span style={{ color: T.accentColor }}>BITS</span>
+          </span>
+        )}
+
+        {/* Wallet + Settings — desktop only (in the mobile strip / account menu otherwise) */}
+        {isSignedIn && (
+          <div className="hidden items-center gap-0.5 md:flex">
+            {APP_NAV_BOTTOM.map((item) => {
+              const Icon = item.icon;
+              const active = checkActive(item.href ?? "");
+              return (
+                <Link
+                  key={item.label}
+                  href={item.href ?? "#"}
+                  aria-current={active ? "page" : undefined}
+                  aria-label={item.label}
+                  title={item.label}
+                  className="grid h-9 w-9 place-items-center rounded-lg transition hover:bg-white/5"
+                  style={{
+                    color: active ? T.accentColor : T.textMuted,
+                    background: active ? `${T.accentColor}10` : "transparent",
+                  }}
+                >
+                  <Icon size={18} />
+                </Link>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Identity dock — avatar + account menu */}
+        <IdentityDock />
+      </div>
+
+      {/* Mobile nav strip — horizontally scrollable, skipped on Studio */}
+      {!isStudio && (
+        <nav
+          className="flex items-center gap-0.5 overflow-x-auto border-t px-2 py-1.5 md:hidden"
+          style={{
+            borderColor: `${T.borderColor}15`,
+            scrollbarWidth: "none",
+          }}
+          aria-label="Primary"
+        >
+          {sections.map((section, si) => (
+            <div key={section.id} className="flex items-center gap-0.5">
+              {si > 0 && (
+                <span
+                  className="mx-1 h-4 w-px shrink-0"
+                  style={{ background: `${T.borderColor}30` }}
+                  aria-hidden
+                />
+              )}
+              {section.items.map((item) => (
+                <TopNavItem
+                  key={item.label}
+                  item={item}
+                  active={checkActive(item.href ?? "")}
+                  T={T}
+                />
+              ))}
+            </div>
+          ))}
+          {isSignedIn && (
+            <>
+              <span
+                className="mx-1 h-4 w-px shrink-0"
+                style={{ background: `${T.borderColor}30` }}
+                aria-hidden
+              />
+              {APP_NAV_BOTTOM.map((item) => (
+                <TopNavItem
+                  key={item.label}
+                  item={item}
+                  active={checkActive(item.href ?? "")}
+                  T={T}
+                />
+              ))}
+            </>
+          )}
+        </nav>
+      )}
     </header>
   );
 }
@@ -830,79 +433,31 @@ function MobileTopBar({ onMenuClick }: { onMenuClick: () => void }) {
 /* ─── Main AppShell Export ─────────────────────────────────────────── */
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const [collapsed, setCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
-
-  // Force the icon rail on narrow desktop/tablet widths (768–1279px).
-  // Below md the sidebar is hidden entirely in favour of the drawer nav;
-  // at ≥1280px the user's persisted collapse preference applies. This
-  // keeps the sidebar from consuming a large share of narrow viewports
-  // such as Studio at ~1024px.
-  const railOnly = useMediaQuery("(min-width: 768px) and (max-width: 1279px)");
-  const effectiveCollapsed = collapsed || railOnly;
-
-  // Load collapsed state from localStorage
-  useEffect(() => {
-    const stored = localStorage.getItem(COLLAPSED_KEY);
-    if (stored === "true") setCollapsed(true);
-  }, []);
-
-  // Close mobile drawer on route change
   const pathname = usePathname();
-  useEffect(() => {
-    setMobileOpen(false);
-  }, [pathname]);
 
-  // Studio manages its own full-height chrome (header, mobile bottom nav,
-  // composer). The shared sidebar still renders on desktop, but we suppress
-  // AppShell's mobile top bar, mobile bottom bar, and main bottom padding
-  // to avoid double chrome on mobile.
+  // Studio manages its own full-height chrome. Lock the shell to the
+  // viewport height so Studio fills exactly the space below the top bar
+  // (its root uses h-full); every other route scrolls the document.
   const isStudio = pathname?.startsWith("/studio") ?? false;
 
-  const toggleCollapse = useCallback(() => {
-    setCollapsed((prev) => {
-      const next = !prev;
-      localStorage.setItem(COLLAPSED_KEY, String(next));
-      return next;
-    });
-  }, []);
-
   return (
-    <div className="flex min-h-dvh">
-      {/* Desktop sidebar — wrapped in Suspense for useSearchParams SSG safety */}
-      <Suspense fallback={<div className="hidden md:block" style={{ width: effectiveCollapsed ? 72 : 256 }} />}>
-        <DesktopSidebar collapsed={effectiveCollapsed} onToggleCollapse={toggleCollapse} />
+    <div className={isStudio ? "flex h-dvh flex-col overflow-hidden" : "flex min-h-dvh flex-col"}>
+      {/* Top bar — wrapped in Suspense for useSearchParams SSG safety */}
+      <Suspense fallback={<div className="h-14 shrink-0" />}>
+        <TopBar />
       </Suspense>
 
-      {/* Mobile drawer (conditional) — wrapped in Suspense for useSearchParams SSG safety.
-          Skipped for Studio (Studio has its own mobile nav with a Home link). */}
-      {!isStudio && (
-        <Suspense fallback={null}>
-          <MobileDrawer open={mobileOpen} onClose={() => setMobileOpen(false)} />
-        </Suspense>
-      )}
-
-      {/* Main content area */}
-      <div className="flex min-w-0 flex-1 flex-col">
-        {/* Mobile top bar — skipped for Studio (Studio has its own header) */}
-        {!isStudio && <MobileTopBar onMenuClick={() => setMobileOpen(true)} />}
-
-        {/* Main content.
-            Studio is full-height (h-dvh) and manages its own mobile bottom nav,
-            so we skip the mobile bottom padding that reserves space for AppShell's
-            mobile bottom bar. */}
-        <main
-          id="main-content"
-          className={`flex-1 w-full max-w-full min-w-0 overflow-x-hidden ${
-            isStudio ? "" : "pb-[calc(88px+env(safe-area-inset-bottom))] md:pb-0"
-          }`}
-        >
-          {children}
-        </main>
-
-        {/* Mobile bottom bar — skipped for Studio (Studio has its own MobileCommandNav) */}
-        {!isStudio && <MobileBottomBar />}
-      </div>
+      {/* Main content */}
+      <main
+        id="main-content"
+        className={
+          isStudio
+            ? "flex min-h-0 flex-1 flex-col"
+            : "flex w-full max-w-full min-w-0 flex-1 flex-col overflow-x-hidden"
+        }
+      >
+        {children}
+      </main>
     </div>
   );
 }
