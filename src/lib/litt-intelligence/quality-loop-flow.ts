@@ -97,6 +97,47 @@ export function startQualityLoopSession(opts: {
   };
 }
 
+/**
+ * Whether a run should be quality-gated. ACT and AUTO modes opt in when
+ * there is a project to gate; PLAN mode is read-only inspection and never
+ * gates. The agent loop itself is mode-agnostic — this predicate is the
+ * single place the mode decision lives, shared by the initial-run and
+ * approval-resume entry points.
+ */
+export function shouldEnableQualityLoop(
+  executionMode: string | undefined,
+  projectId: string | null | undefined,
+): projectId is string {
+  return (executionMode === "act" || executionMode === "auto") && !!projectId;
+}
+
+/**
+ * Stages whose gate demands machine-verified evidence. An agent's
+ * self-report ("QUALITY: deploy — shipped it") can never satisfy these:
+ * a public deployment claim must be backed by the deployment system
+ * (noteDeployment) and the live-URL check (verifyLiveUrl), never by the
+ * agent's word. This is what keeps the loop from ever auto-approving a
+ * deploy — especially in AUTO mode, where no human is watching.
+ */
+const MACHINE_EVIDENCE_STAGES: ReadonlySet<QualityStage> = new Set(["deploy", "verify"]);
+
+function hasMachineEvidence(state: QualityLoopState, stage: QualityStage): boolean {
+  return state.stages[stage].evidence.some((e) => e.by !== "agent");
+}
+
+/**
+ * Whether a stage with evidence may be passed. Deploy/verify additionally
+ * require at least one non-agent evidence record — agent self-report
+ * alone leaves the stage open and the gate holds.
+ */
+function stagePassable(state: QualityLoopState, stage: QualityStage): boolean {
+  const s = state.stages[stage];
+  if (s.evidence.length === 0) return false;
+  if (blockedReason(state, stage)) return false;
+  if (MACHINE_EVIDENCE_STAGES.has(stage) && !hasMachineEvidence(state, stage)) return false;
+  return true;
+}
+
 // ─── Agent stage markers ──────────────────────────────────────────
 
 /**
@@ -232,7 +273,7 @@ function reconcile(session: QualityLoopSession): void {
       );
       if (
         s.evidence.length > 0 &&
-        !blockedReason(state, c) &&
+        stagePassable(state, c) &&
         laterHasEvidence &&
         (s.status === "pending" || s.status === "active")
       ) {
@@ -576,7 +617,7 @@ export function finalizeQualityLoop(
     if (!c) break;
     const s = state.stages[c];
     try {
-      if (s.evidence.length > 0 && !blockedReason(state, c)) {
+      if (stagePassable(state, c)) {
         passStage(state, c);
       } else if (s.evidence.length === 0 && STAGE_REQUIREMENTS[c].skippable) {
         const reason =

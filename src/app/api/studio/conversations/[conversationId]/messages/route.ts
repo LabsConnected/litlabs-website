@@ -28,6 +28,7 @@ import {
 import { runAgentLoop } from "@/lib/litt-intelligence/agent-loop";
 import { runAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
 import { runLaunchFlow, type LaunchFlowResult } from "@/lib/litt-intelligence/launch-flow";
+import { shouldEnableQualityLoop } from "@/lib/litt-intelligence/quality-loop-flow";
 import { ProgressEmitter, type ProgressEvent } from "@/lib/litt-intelligence/progress-events";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { createPausedRun, getPendingPausedRunForConversation } from "@/lib/litt-intelligence/paused-run-store";
@@ -497,9 +498,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       executionMode: canonicalCtx.executionMode,
       enableBuildFix: true,
       model: typeof body.model === "string" ? body.model : undefined,
-      // Quality loop: gate serious ACT-mode builds through the
+      // Quality loop: gate serious ACT/AUTO-mode builds through the
       // UNDERSTAND→VERIFY evidence stages + visual-quality judge.
-      qualityLoop: canonicalCtx.executionMode === "act" && conversation.projectId
+      qualityLoop: shouldEnableQualityLoop(canonicalCtx.executionMode, conversation.projectId)
         ? {
             enabled: true,
             runId: randomUUID(),
@@ -767,6 +768,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             model: v2Config.model,
             executionMode: v2Config.executionMode,
             enableBuildFix: true,
+            // Quality loop: the launch flow passes this to the main agent-loop
+            // phase (it was silently dropped before AUTO-mode support).
+            qualityLoop: v2Config.qualityLoop,
             enableDeploy: built.kernelResult.decision.routing.mode === "ship",
             requiresExecution: built.kernelResult.decision.routing.requiresExecution,
             evalMetadata: v2Config.evalMetadata,
