@@ -40,7 +40,7 @@ import { useClerkAuth, useAppUser } from "@/hooks/useClerkAuth";
 import { useLittHealth } from "@/hooks/useLittHealth";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import {
-  APP_NAV_SECTIONS,
+  getVisibleNavSections,
   APP_NAV_BOTTOM,
   APP_MOBILE_BOTTOM_ITEMS,
   isAppNavActive,
@@ -377,7 +377,7 @@ function DesktopSidebar({
 
       {/* Navigation sections */}
       <nav className="sidebar-scroll flex-1 overflow-y-auto px-2 py-3">
-        {APP_NAV_SECTIONS.map((section) => (
+        {getVisibleNavSections().map((section) => (
           <div key={section.id} className="mb-4">
             {/* Section label */}
             <div
@@ -590,7 +590,7 @@ function MobileDrawer({
 
         {/* Nav sections */}
         <nav className="sidebar-scroll flex-1 overflow-y-auto px-3 py-4">
-          {APP_NAV_SECTIONS.map((section) => (
+          {getVisibleNavSections().map((section) => (
             <div key={section.id} className="mb-5">
               <div
                 className="mb-2 px-2 text-[8px] font-black uppercase tracking-[.2em]"
