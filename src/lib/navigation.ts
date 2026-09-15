@@ -26,6 +26,8 @@ import {
   Workflow,
   FolderKanban,
   Bell,
+  Gamepad2 as GamesIcon,
+  Compass,
   Terminal,
   Mic,
 } from "lucide-react";
@@ -65,11 +67,10 @@ export const GROUP_ACCENTS: Record<string, string> = {
   More: "#94a3b8",
 };
 
-/* ─── Canonical App Shell navigation ─── */
-// The sidebar only exposes core product surfaces. Social/marketing
-// destinations (Showcase, Discover, Marketplace, Games) and tool
-// shortcuts (Create, Music) are reachable via their routes but do not
-// get dedicated sidebar entries.
+/* ─── Canonical App Shell navigation (COMMAND / STUDIO / CREATE / EXPLORE) ─── */
+// Studio is its own top-level section — it is the primary product surface
+// and must not sit under Command. Music and Showcase were removed from the
+// sidebar; the routes still exist and remain reachable directly.
 
 export const APP_NAV_SECTIONS: NavSection[] = [
   {
@@ -77,8 +78,29 @@ export const APP_NAV_SECTIONS: NavSection[] = [
     label: "Command",
     items: [
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, shortcut: "⌘D" },
+    ],
+  },
+  {
+    id: "studio",
+    label: "Studio",
+    items: [
       { label: "Studio", href: "/studio", icon: Sparkles, shortcut: "⌘S" },
-      { label: "Projects", href: "/projects", icon: FolderKanban },
+    ],
+  },
+  {
+    id: "create",
+    label: "Create",
+    items: [
+      { label: "Create", href: "/studio?tool=image", icon: Sparkles },
+    ],
+  },
+  {
+    id: "explore",
+    label: "Explore",
+    items: [
+      { label: "Games", href: "/games", icon: GamesIcon },
+      { label: "Discover", href: "/discover", icon: Compass },
+      { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
       // /hire is permanently retired (always redirects to /studio — see
       // src/app/(app)/hire/page.tsx) so it is not a nav destination.
     ],
@@ -96,7 +118,7 @@ export const APP_NAV_BOTTOM: NavItem[] = [
 export const APP_MOBILE_BOTTOM_ITEMS: MobileNavItem[] = [
   { label: "Home", href: "/dashboard", icon: LayoutDashboard },
   { label: "Studio", href: "/studio", icon: Sparkles },
-  { label: "Projects", href: "/projects", icon: FolderKanban },
+  { label: "Discover", href: "/discover", icon: Compass },
   { label: "Me", href: "/profile", icon: User },
 ];
 

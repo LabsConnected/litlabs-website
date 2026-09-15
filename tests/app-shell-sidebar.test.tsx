@@ -116,7 +116,7 @@ describe("AppShell sidebar", () => {
     expect(getSidebar().className).toContain("w-[72px]");
   });
 
-  it("renders core entries and none of the removed destinations at wide widths", () => {
+  it("renders the required entries and none of the removed ones at wide widths", () => {
     setViewportWidth(1440);
     render(
       <AppShell>
@@ -125,12 +125,18 @@ describe("AppShell sidebar", () => {
     );
     const aside = getSidebar();
     const nav = within(aside);
-    for (const label of ["Dashboard", "Studio", "Projects", "Wallet", "Settings"]) {
-      expect(nav.getByText(label)).toBeTruthy();
+    // "Studio" and "Create" appear as both section headers and item labels.
+    for (const label of ["Dashboard", "Studio", "Create", "Games", "Discover", "Marketplace", "Wallet", "Settings"]) {
+      expect(nav.getAllByText(label).length).toBeGreaterThanOrEqual(1);
     }
-    for (const removed of ["Create", "Music", "Showcase", "Games", "Discover", "Marketplace"]) {
+    for (const removed of ["Music", "Showcase", "Projects"]) {
       expect(nav.queryByText(removed)).toBeNull();
     }
+    // Section headers present in the required order — the label is the
+    // first div child of each section wrapper inside the nav.
+    const headers = Array.from(aside.querySelectorAll("nav > div > div:first-child"))
+      .map((el) => el.textContent);
+    expect(headers).toEqual(["Command", "Studio", "Create", "Explore"]);
   });
 
   it("keeps layout overflow guards in place (shrink-0 rail, min-w-0 main)", () => {
