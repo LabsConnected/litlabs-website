@@ -1173,6 +1173,11 @@ function CommandStudioContent() {
     || workSurface === "builder";
   const showAdvancedWorkspace = advancedToolsOpen && hasAdvancedSurface;
   const showDefaultChatPreview = !showAdvancedWorkspace;
+  // Single source of truth for the permanent right-column preview
+  // (desktop split >=1280px with advanced tools open). When it is
+  // mounted, every other preview surface must yield so exactly one
+  // StudioPreviewPanel exists at a time.
+  const permanentPreviewVisible = viewportTier !== null && advancedToolsOpen && isDesktopSplit;
 
   // Primary workspace tabs — canonical Ultra Vision stages.
   // Plan | Canvas | Code | Preview | Media
@@ -1679,7 +1684,7 @@ function CommandStudioContent() {
                 className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
                 data-testid="studio-center-workspace"
               >
-                {showDefaultChatPreview ? (
+                {showDefaultChatPreview && !permanentPreviewVisible ? (
                   <StudioPreviewPanel
                     projectId={capabilities.projectId}
                     projectName={capabilities.projectName}
@@ -1715,6 +1720,7 @@ function CommandStudioContent() {
                       branch={capabilities.activeBranch}
                       workspaceStatus={capabilities.workspaceStatus ?? null}
                       writeAccess={capabilities.writeAccess ?? true}
+                      externalPreviewActive={permanentPreviewVisible}
                     />
                   </div>
                 ) : isPreview ? (
@@ -1777,7 +1783,7 @@ function CommandStudioContent() {
                   on large displays (>=1280px). Always rendered on desktop split regardless
                   of which workspace tab is selected. Below 1280px, Preview is accessed
                   via the workspace tab to give the center workspace maximum room. */}
-              {viewportTier !== null && advancedToolsOpen && isDesktopSplit && (
+              {permanentPreviewVisible && (
                 <>
                   <ResizeHandle
                     onDragStart={previewResize.onDragStart}
@@ -1805,6 +1811,7 @@ function CommandStudioContent() {
                       branch={capabilities.activeBranch}
                       workspaceStatus={capabilities.workspaceStatus ?? null}
                       refreshKey={workspaceRevision}
+                      onSelectionChange={setPreviewSelection}
                     />
                   </div>
                 </>
