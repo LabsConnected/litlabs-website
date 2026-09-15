@@ -552,6 +552,9 @@ export class ExecutionGateway {
         label: `project.run: ${command}`,
         timeoutMs: request.timeoutMs,
         onStream: request.onStream,
+        // Restore stdin plumbing (e.g. `git commit --file=-`): the exec
+        // endpoint passes inputs.stdin, but nothing downstream consumed it.
+        stdin: typeof request.inputs.stdin === "string" ? request.inputs.stdin : undefined,
       };
 
       const execResult = await this._executor.execute(command, args, execOptions);

@@ -54,6 +54,11 @@ export interface ShellExecuteOptions {
   env?: Record<string, string>;
   /** Optional streaming callback — invoked for each stdout/stderr chunk */
   onStream?: (chunk: StreamChunk) => void;
+  /**
+   * Optional data written to the child process's stdin, then EOF.
+   * Only used when explicitly provided (e.g. `git commit --file=-`).
+   */
+  stdin?: string;
 }
 
 // ─── Tools ────────────────────────────────────────────────────────

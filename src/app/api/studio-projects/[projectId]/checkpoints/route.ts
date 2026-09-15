@@ -65,13 +65,22 @@ export async function POST(
         body: JSON.stringify({ command, userId, stdin }),
       });
       if (!resp.ok) throw new Error(`Git command failed: ${resp.status}`);
-      return (await resp.json()) as { exitCode: number; stdout: string };
+      const data = (await resp.json()) as { exitCode: number; stdout: string; stderr?: string };
+      // The endpoint returns HTTP 200 even when the command itself fails —
+      // check the exit code, otherwise a failed `git commit` would silently
+      // record a checkpoint pointing at the previous (stale) SHA.
+      if (data.exitCode !== 0) {
+        throw new Error(`Git command failed (exit ${data.exitCode}): ${command}${data.stderr ? ` — ${data.stderr.slice(0, 200)}` : ""}`);
+      }
+      return data;
     };
 
     await execInWorkspace("git add .");
     // Pass the commit message via stdin (--file=-) so the label never touches
     // the shell parser. This prevents command injection via backticks, $(),
     // newlines, or any other shell metacharacters in the user-supplied label.
+    // (stdin is piped through the ExecutionGateway → ShellExecutor; the
+    // gateway refactor briefly dropped it, which hung checkpoint creation.)
     const commitMessage = body.description
       ? `${body.label}\n\n${body.description}`
       : body.label;

@@ -656,12 +656,12 @@ export async function runCommand(
   shell: ShellExecutor,
   command: string,
   args: string[],
-  options?: { cwd?: string; timeoutMs?: number },
+  options?: { cwd?: string; timeoutMs?: number; stdin?: string },
 ): Promise<ToolResult> {
   const cwd = options?.cwd ?? shell.cwd;
   const timeoutMs = options?.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
 
-  const result = await shell.execute({ command, args, cwd, timeoutMs });
+  const result = await shell.execute({ command, args, cwd, timeoutMs, stdin: options?.stdin });
 
   // Surface timeout as TIMEOUT, not misleadingly as "exit 1".
   // The shell executor sets status="timeout" and exitCode=-1 when the

@@ -225,6 +225,7 @@ export class NodeShellExecutor implements ShellExecutor {
       maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES,
       env,
       onStream,
+      stdin,
     } = options;
 
     const t0 = Date.now();
@@ -252,6 +253,17 @@ export class NodeShellExecutor implements ShellExecutor {
       });
 
       this._child = child;
+
+      // Pipe explicit stdin to the child, then EOF. Without this, commands
+      // that read stdin (e.g. `git commit --file=-`) block forever.
+      if (stdin !== undefined) {
+        try {
+          child.stdin?.write(stdin);
+          child.stdin?.end();
+        } catch {
+          // If stdin is unavailable the child sees EOF; don't fail the spawn.
+        }
+      }
 
       let stdout = "";
       let stderr = "";
