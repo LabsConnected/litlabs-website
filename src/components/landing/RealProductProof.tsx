@@ -11,11 +11,16 @@ import { track } from "@/lib/analytics";
  * phone-style frame with a poster pulled from the trailer's end card.
  *
  * Assets live in `public/demos/`:
- * - litt-trailer.mp4 (H.264, 720x1280)
+ * - litt-trailer.webm (VP9, 720x1280) — primary source; plays in every
+ *   modern browser including Chromium builds without proprietary codecs
+ * - litt-trailer.mp4 (H.264, 720x1280) — fallback for older players
  * - litt-trailer-poster.jpg (720x1280)
  */
 
-const VIDEO_SRC = "/demos/litt-trailer.mp4";
+const VIDEO_SOURCES = [
+  { src: "/demos/litt-trailer.webm", type: "video/webm" },
+  { src: "/demos/litt-trailer.mp4", type: "video/mp4" },
+];
 const POSTER_SRC = "/demos/litt-trailer-poster.jpg";
 
 const DEMO_STEPS = [
@@ -66,7 +71,9 @@ export function RealProductProof() {
                   controls
                   preload="metadata"
                 >
-                  <source src={VIDEO_SRC} type="video/mp4" />
+                  {VIDEO_SOURCES.map((s) => (
+                    <source key={s.src} src={s.src} type={s.type} />
+                  ))}
                 </video>
               </div>
             </div>

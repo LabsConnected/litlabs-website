@@ -3,13 +3,23 @@ import { notFound } from "next/navigation";
 import { buildMetadata } from "@/lib/seo";
 import { isFeatureEnabled } from "@/config/feature-flags";
 
-export const metadata: Metadata = buildMetadata({
-  title: "Free Browser Games",
-  description:
-    "Play free browser games and discover interactive creations from the LiTTree LabStudios community.",
-  path: "/games",
-  index: false,
-});
+export async function generateMetadata(): Promise<Metadata> {
+  // While the games section is gated off, every route in this segment
+  // answers 404 — so the tab title must not advertise "Free Browser Games".
+  if (!isFeatureEnabled("retroGameRuntime")) {
+    return {
+      title: "404 — Page Not Found",
+      robots: { index: false, follow: false },
+    };
+  }
+  return buildMetadata({
+    title: "Free Browser Games",
+    description:
+      "Play free browser games and discover interactive creations from the LiTTree LabStudios community.",
+    path: "/games",
+    index: false,
+  });
+}
 
 export default function GamesLayout({
   children,
