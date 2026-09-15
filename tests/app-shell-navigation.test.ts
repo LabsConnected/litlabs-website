@@ -20,33 +20,50 @@ import {
 
 describe("AppShell Navigation", () => {
   describe("Canonical nav sections", () => {
-    it("has a single Command section", () => {
+    it("has exactly 4 sections in order: Command, Studio, Create, Explore", () => {
       const ids = APP_NAV_SECTIONS.map((s) => s.id);
-      expect(ids).toEqual(["command"]);
+      expect(ids).toEqual(["command", "studio", "create", "explore"]);
     });
 
-    it("Command section has Dashboard, Studio, and Projects", () => {
+    it("Command section has Dashboard only", () => {
       const command = APP_NAV_SECTIONS.find((s) => s.id === "command");
       expect(command).toBeDefined();
       const labels = command!.items.map((i) => i.label);
-      expect(labels).toEqual(["Dashboard", "Studio", "Projects"]);
+      expect(labels).toEqual(["Dashboard"]);
     });
 
-    it("Projects links to the real /projects route", () => {
-      const allHrefs = APP_NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.href));
-      expect(allHrefs).toContain("/projects");
+    it("Studio is its own section (not under Command)", () => {
+      const studio = APP_NAV_SECTIONS.find((s) => s.id === "studio");
+      expect(studio).toBeDefined();
+      const labels = studio!.items.map((i) => i.label);
+      expect(labels).toEqual(["Studio"]);
+      expect(studio!.items[0].href).toBe("/studio");
     });
 
-    // The sidebar only exposes core product surfaces. Social/marketing
-    // destinations and tool shortcuts were removed so the shell stays
-    // narrow and Studio-focused.
-    it("does NOT contain Create, Music, Showcase, Games, Discover, or Marketplace", () => {
+    it("Create section has Create linking to /studio?tool=image", () => {
+      const create = APP_NAV_SECTIONS.find((s) => s.id === "create");
+      expect(create).toBeDefined();
+      const labels = create!.items.map((i) => i.label);
+      expect(labels).toEqual(["Create"]);
+      expect(create!.items[0].href).toBe("/studio?tool=image");
+    });
+
+    it("Explore section has Games, Discover, Marketplace", () => {
+      const explore = APP_NAV_SECTIONS.find((s) => s.id === "explore");
+      expect(explore).toBeDefined();
+      const labels = explore!.items.map((i) => i.label);
+      expect(labels).toEqual(["Games", "Discover", "Marketplace"]);
+    });
+
+    // Music and Showcase were removed from the sidebar (routes still
+    // exist). Projects is not a sidebar entry.
+    it("does NOT contain Music, Showcase, or Projects", () => {
       const labels = APP_NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.label));
-      for (const removed of ["Create", "Music", "Showcase", "Games", "Discover", "Marketplace"]) {
+      for (const removed of ["Music", "Showcase", "Projects"]) {
         expect(labels).not.toContain(removed);
       }
       const hrefs = APP_NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.href));
-      for (const removedHref of ["/showcase", "/games", "/discover", "/marketplace"]) {
+      for (const removedHref of ["/studio?tool=music", "/showcase", "/projects"]) {
         expect(hrefs).not.toContain(removedHref);
       }
     });
@@ -138,9 +155,9 @@ describe("AppShell Navigation", () => {
       expect(labels).toContain("Studio");
     });
 
-    it("includes Projects and Me", () => {
+    it("includes Discover and Me", () => {
       const labels = APP_MOBILE_BOTTOM_ITEMS.map((i) => i.label);
-      expect(labels).toContain("Projects");
+      expect(labels).toContain("Discover");
       expect(labels).toContain("Me");
     });
 
