@@ -302,16 +302,31 @@ export async function updateProjectWorkspace(
     return rowToCanonical(data as StudioProjectRow);
   }
 
+  // A real database error must NOT be collapsed into the "0 rows matched"
+  // path below — callers otherwise report provisioning success while the
+  // workspaceId was never persisted, leaving the row stuck mid-transition.
+  if (error) {
+    studioLog("updateProjectWorkspace:update_error", {
+      projectId,
+      userId,
+      errorClass: error.message,
+    });
+    throw new Error(`[updateProjectWorkspace] workspace update failed: ${error.message}`);
+  }
+
   // UPDATE matched 0 rows in studio_projects. If the project exists in the
   // legacy `projects` table, migrate it into studio_projects so workspace
   // fields can be persisted. Without this, workspace preparation succeeds on
   // the terminal server but the workspaceId is never saved — every subsequent
   // token request would see workspaceStatus="not_prepared" and return 409.
-  if (!error) {
-    const migrated = await migrateLegacyProjectToStudio(projectId, userId, update);
-    if (migrated) return migrated;
-  }
+  const migrated = await migrateLegacyProjectToStudio(projectId, userId, update);
+  if (migrated) return migrated;
 
+  studioLog("updateProjectWorkspace:no_match", {
+    projectId,
+    userId,
+    errorClass: "UPDATE matched no owned studio_projects row and no legacy project could be migrated",
+  });
   return null;
 }
 
@@ -336,7 +351,15 @@ async function migrateLegacyProjectToStudio(
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (legacyErr || !legacyRow) return null;
+  if (legacyErr) {
+    studioLog("updateProjectWorkspace:legacy_query_error", {
+      projectId,
+      userId,
+      errorClass: legacyErr.message,
+    });
+    return null;
+  }
+  if (!legacyRow) return null;
 
   const legacy = legacyRow as LegacyProjectRow;
 
@@ -372,7 +395,22 @@ async function migrateLegacyProjectToStudio(
     .select()
     .maybeSingle();
 
-  if (insertErr || !inserted) return null;
+  if (insertErr) {
+    studioLog("updateProjectWorkspace:legacy_insert_error", {
+      projectId,
+      userId,
+      errorClass: insertErr.message,
+    });
+    return null;
+  }
+  if (!inserted) {
+    studioLog("updateProjectWorkspace:legacy_insert_no_data", {
+      projectId,
+      userId,
+      errorClass: "Insert returned no data",
+    });
+    return null;
+  }
   return rowToCanonical(inserted as StudioProjectRow);
 }
 
@@ -545,7 +583,17 @@ export async function claimProvisioningLock(
     .select()
     .maybeSingle();
 
-  if (error || !data) return null;
+  // A database error is not "another request owns the lock" — collapsing it
+  // into null makes every caller report PROVISIONING_IN_PROGRESS forever.
+  if (error) {
+    studioLog("claimProvisioningLock:update_error", {
+      projectId,
+      userId,
+      errorClass: error.message,
+    });
+    throw new Error(`[claimProvisioningLock] failed to claim provisioning lock: ${error.message}`);
+  }
+  if (!data) return null;
   return rowToCanonical(data as StudioProjectRow);
 }
 
@@ -577,7 +625,15 @@ export async function recoverStaleProvisioning(
     .lt("updated_at", cutoff)
     .maybeSingle();
 
-  if (fetchError || !stale) return false;
+  if (fetchError) {
+    studioLog("recoverStaleProvisioning:fetch_error", {
+      projectId,
+      userId,
+      errorClass: fetchError.message,
+    });
+    return false;
+  }
+  if (!stale) return false;
 
   const previousError = stale.workspace_error;
   const newError = previousError
@@ -596,7 +652,14 @@ export async function recoverStaleProvisioning(
     .eq("workspace_status", "provisioning")
     .lt("updated_at", cutoff);
 
-  if (updateError) return false;
+  if (updateError) {
+    studioLog("recoverStaleProvisioning:update_error", {
+      projectId,
+      userId,
+      errorClass: updateError.message,
+    });
+    return false;
+  }
   return true;
 }
 
@@ -628,7 +691,15 @@ export async function updateProjectRuntime(
     .select()
     .maybeSingle();
 
-  if (error || !data) return null;
+  if (error) {
+    studioLog("updateProjectRuntime:update_error", {
+      projectId,
+      userId,
+      errorClass: error.message,
+    });
+    return null;
+  }
+  if (!data) return null;
   return rowToCanonical(data as StudioProjectRow);
 }
 

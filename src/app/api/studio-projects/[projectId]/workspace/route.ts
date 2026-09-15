@@ -193,14 +193,19 @@ async function autoReprepare(
       });
     }
 
-    // Success — update the project record
-    await updateProjectWorkspace(projectId, userId, {
+    // Success — update the project record. A failed write must surface as
+    // an error: reporting "ready" while the row still says provisioning
+    // strands the workspace and the next token request 409s.
+    const persisted = await updateProjectWorkspace(projectId, userId, {
       workspaceId: result.workspaceId,
       workspaceStatus: "ready",
       workspaceRoot: result.root,
       workspaceBranch: result.branch ?? null,
       workspaceError: null,
     });
+    if (!persisted) {
+      throw new Error("Workspace re-prepared but the project record could not be persisted");
+    }
 
     return NextResponse.json({
       workspaceId: result.workspaceId,
@@ -210,10 +215,15 @@ async function autoReprepare(
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Workspace re-preparation failed";
-    await updateProjectWorkspace(projectId, userId, {
-      workspaceStatus: "failed",
-      workspaceError: message,
-    });
+    try {
+      await updateProjectWorkspace(projectId, userId, {
+        workspaceStatus: "failed",
+        workspaceError: message,
+      });
+    } catch {
+      // The write failure is already logged inside updateProjectWorkspace —
+      // don't let it mask the re-preparation error the user needs to see.
+    }
     return NextResponse.json({
       workspaceId: null,
       workspaceStatus: "failed",

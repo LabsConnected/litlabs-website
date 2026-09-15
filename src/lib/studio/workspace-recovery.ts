@@ -158,8 +158,10 @@ export async function reprepareWorkspace(
     throw new Error("Project has no valid source for workspace provisioning");
   }
 
-  // Persist the new workspace
-  await updateProjectWorkspace(projectId, userId, {
+  // Persist the new workspace — a failed write must surface, not return a
+  // workspaceId the project record never stored (the next request would
+  // see the stale status and re-prepare into a different workspace).
+  const persisted = await updateProjectWorkspace(projectId, userId, {
     workspaceId: result.workspaceId,
     workspaceStatus: "ready",
     workspaceRoot: result.root,
@@ -167,6 +169,9 @@ export async function reprepareWorkspace(
     workspacePreparedAt: new Date().toISOString(),
     workspaceError: null,
   });
+  if (!persisted) {
+    throw new Error("Workspace provisioned but the project record could not be persisted");
+  }
 
   return result.workspaceId;
 }
@@ -285,7 +290,7 @@ export async function provisionWorkspaceForProject(
       throw new Error("Project has no valid source for workspace provisioning");
     }
 
-    await updateProjectWorkspace(projectId, userId, {
+    const persisted = await updateProjectWorkspace(projectId, userId, {
       workspaceId: result.workspaceId,
       workspaceStatus: "ready",
       workspaceRoot: result.root,
@@ -293,14 +298,22 @@ export async function provisionWorkspaceForProject(
       workspacePreparedAt: new Date().toISOString(),
       workspaceError: null,
     });
+    if (!persisted) {
+      throw new Error("Workspace provisioned but the project record could not be persisted");
+    }
 
     return result.workspaceId;
   } catch (err) {
     const message = err instanceof Error ? err.message : "Workspace provisioning failed";
-    await updateProjectWorkspace(projectId, userId, {
-      workspaceStatus: "failed",
-      workspaceError: message,
-    });
+    try {
+      await updateProjectWorkspace(projectId, userId, {
+        workspaceStatus: "failed",
+        workspaceError: message,
+      });
+    } catch {
+      // The write failure is already logged inside updateProjectWorkspace —
+      // don't let it mask the provisioning error being rethrown below.
+    }
     throw err;
   }
 }

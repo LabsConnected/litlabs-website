@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+vi.mock("@/lib/studio/logger", () => ({
+  studioLog: vi.fn(),
+}));
+
 // Mock supabaseAdmin with a chain that supports the query patterns used by
 // recoverStaleProvisioning: select().eq().eq().eq().lt().maybeSingle() and
 // update().eq().eq().eq().lt()
@@ -8,6 +12,8 @@ vi.mock("@/lib/supabase", () => {
     rows: new Map<string, Record<string, unknown>>(),
     // Controls what the next update call returns (error or success)
     nextUpdateError: null as string | null,
+    // Controls what the next select call returns (error or success)
+    nextSelectError: null as string | null,
     // Tracks all update calls for assertions
     updateCalls: [] as Array<{
       table: string;
@@ -82,6 +88,12 @@ vi.mock("@/lib/supabase", () => {
       const row = state.rows.get(rowKey);
 
       if (this._method === "select") {
+        if (state.nextSelectError) {
+          const e = state.nextSelectError;
+          state.nextSelectError = null;
+          resolve({ data: null, error: { message: e } });
+          return;
+        }
         // recoverStaleProvisioning fetch: must match user_id + workspace_status='provisioning'
         // AND updated_at < cutoff (the lt filter)
         if (this._isMaybeSingle) {
@@ -160,6 +172,7 @@ vi.mock("@/lib/supabase", () => {
 
 // Import after mock is set up
 import { recoverStaleProvisioning } from "./project-repository";
+import { studioLog } from "@/lib/studio/logger";
 
 // Access the internal mock state for test setup
 const supabaseMock = (await import("@/lib/supabase")) as unknown as {
@@ -167,6 +180,7 @@ const supabaseMock = (await import("@/lib/supabase")) as unknown as {
   __testState: {
     rows: Map<string, Record<string, unknown>>;
     nextUpdateError: string | null;
+    nextSelectError: string | null;
     updateCalls: Array<{
       table: string;
       values: Record<string, unknown>;
@@ -191,8 +205,10 @@ function setRow(
 
 describe("recoverStaleProvisioning", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     supabaseMock.__testState.rows.clear();
     supabaseMock.__testState.nextUpdateError = null;
+    supabaseMock.__testState.nextSelectError = null;
     supabaseMock.__testState.updateCalls = [];
   });
 
@@ -288,6 +304,30 @@ describe("recoverStaleProvisioning", () => {
     const result = await recoverStaleProvisioning("proj-A", "user-A", 300000);
 
     expect(result).toBe(false);
+    // The failure must be observable — a stale lock that cannot be
+    // recovered leaves every future claim reporting "in progress".
+    expect(studioLog).toHaveBeenCalledWith(
+      "recoverStaleProvisioning:update_error",
+      expect.objectContaining({ projectId: "proj-A", userId: "user-A" }),
+    );
+  });
+
+  it("returns false and logs when the stale-row fetch fails (supabase error)", async () => {
+    setRow("proj-A", {
+      user_id: "user-A",
+      workspace_status: "provisioning",
+      updated_at: new Date(Date.now() - 600000).toISOString(),
+    });
+    supabaseMock.__testState.nextSelectError = "fetch failed";
+
+    const result = await recoverStaleProvisioning("proj-A", "user-A", 300000);
+
+    expect(result).toBe(false);
+    expect(studioLog).toHaveBeenCalledWith(
+      "recoverStaleProvisioning:fetch_error",
+      expect.objectContaining({ projectId: "proj-A", userId: "user-A" }),
+    );
+    expect(supabaseMock.__testState.updateCalls).toHaveLength(0);
   });
 
   it("allows retry: a second call succeeds after the first recovers", async () => {
