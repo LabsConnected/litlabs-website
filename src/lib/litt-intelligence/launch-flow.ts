@@ -16,11 +16,11 @@
 
 import "server-only";
 
+import { randomUUID } from "crypto";
 import type { WorkspaceTransport } from "./workspace-transport";
 import { runAgentLoopV2, type AgentLoopResult, type AgentLoopConfig, DEFAULT_LOOP_CONFIG } from "./agent-loop-v2";
 import { toolRegistry } from "./tool-registry";
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
-import { runDeployFlow, resolveDeployConfig, verifyProductionUrl, type DeployFlowOptions, type DeployResult, type DeployProvider } from "./deploy";
 import type { BuildFixLoopResult } from "./build-fix-loop";
 import { ProgressEmitter } from "./progress-events";
 import { buildPreviewProxyUrl } from "@/lib/terminal-internal-client";
@@ -44,7 +44,6 @@ export interface LaunchFlowOptions {
   requiresExecution?: boolean;
   enableBuildFix?: boolean;
   enableDeploy?: boolean;
-  deployEnvironment?: "production" | "preview";
   maxPreviewWaitMs?: number;
   previewPollIntervalMs?: number;
   maxRuntimeRepairAttempts?: number;
@@ -60,10 +59,6 @@ export interface LaunchFlowOptions {
     progress?: ProgressEmitter,
   ) => Promise<AgentLoopResult>;
   /** Injected for tests. */
-  runDeployFlow?: (options: DeployFlowOptions) => Promise<DeployResult>;
-  /** Injected for tests. */
-  resolveDeployConfig?: () => { ok: true; config: { provider: DeployProvider; token: string; projectId: string; productionUrl?: string } } | { ok: false; error: string };
-  /** Injected for tests. */
   buildPreviewUrl?: (workspaceId: string) => string;
 }
 
@@ -74,7 +69,6 @@ export interface LaunchFlowResult {
   productionUrl?: string | null;
   finalText: string;
   buildFixResult?: BuildFixLoopResult;
-  deployResult?: DeployResult;
   error?: string;
   repairAttempts: number;
   runtimeRepairAttempts: number;
@@ -517,90 +511,43 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
       });
     }
 
-    // Phase 3: deploy
+    // Phase 3: deploy — publishing is a sensitive action and MUST pause for
+    // explicit approval, exactly like an agent-initiated `project.deploy`
+    // call. Running a deploy inline here would bypass the approval gate —
+    // and the previous runDeployFlow path targeted the site's own hosting
+    // (DEPLOY_PRODUCTION_URL / a configured Railway service), not the user's
+    // project. The pause resolves through the approvals endpoint, which
+    // executes `project.deploy` via the normal tool pipeline
+    // (deployUserProject → verified public /sites/<id> URL).
     checkSignal(signal);
-    emitStep(progress, steps, "Deploying to production...");
+    emitStep(progress, steps, "Ready to publish — waiting for deploy approval...");
     progress.emit({ type: "phase", phase: "deploy", step: agentResult.stepsUsed + 2 });
-
-    const envConfig = (options.resolveDeployConfig ?? resolveDeployConfig)();
-    if (!envConfig.ok) {
-      progress.emit({ type: "deploy_result", success: false, error: envConfig.error });
-      return baseResult({
-        status: "failed",
-        previewUrl,
-        finalText: `Deployment cannot run: ${envConfig.error}`,
-        error: envConfig.error,
-        repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
-        runtimeRepairAttempts,
-      });
-    }
-
     progress.emit({
-      type: "deploy_start",
-      environment: options.deployEnvironment ?? "production",
-      provider: envConfig.config.provider,
+      type: "approval_required",
+      toolId: "project.deploy",
+      reason: "Sensitive action — requires explicit approval",
     });
 
-    const deployFlowOptions: DeployFlowOptions = {
-      config: envConfig.config,
-      signal,
+    const deployApproval: NonNullable<AgentLoopResult["pendingApproval"]> = {
+      toolId: "project.deploy",
+      toolCallId: `phase3-deploy-${randomUUID()}`,
+      inputs: {},
+      reason: "Sensitive action — requires explicit approval",
+      // Resume context: the original request, so the resumed loop's model
+      // continuation knows what it was doing when it reports the live URL.
+      pausedMessages: [{ role: "user", content: options.userMessage }],
     };
-
-    const deployResult = await (options.runDeployFlow ?? runDeployFlow)(deployFlowOptions);
-
-    if (!deployResult.success) {
-      progress.emit({ type: "deploy_result", success: false, error: deployResult.error });
-      return baseResult({
-        status: "failed",
-        previewUrl,
-        finalText: deployResult.error
-          ? `Deployment failed: ${deployResult.error}`
-          : "Deployment failed for an unknown reason.",
-        error: deployResult.error,
-        deployResult,
-        repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
-        runtimeRepairAttempts,
-      });
-    }
-
-    const productionUrl = deployResult.productionUrl ?? null;
-    progress.emit({ type: "deploy_result", success: true, productionUrl });
-
-    if (productionUrl) {
-      checkSignal(signal);
-      const verify =
-        deployResult.verification ??
-        (await verifyProductionUrl(productionUrl));
-      progress.emit({
-        type: "deploy_verify",
-        url: verify.url ?? productionUrl,
-        success: verify.success,
-        detail: verify.detail,
-      });
-
-      if (!verify.success) {
-        return baseResult({
-          status: "failed",
-          previewUrl,
-          productionUrl,
-          finalText: `Deployment succeeded but the production URL could not be verified: ${verify.detail}`,
-          error: verify.detail,
-          deployResult,
-          repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
-          runtimeRepairAttempts,
-        });
-      }
-    }
+    // The messages route persists the paused run off agentLoopResult —
+    // the synthesized pause must be visible there or the approval card
+    // would have no pausedRunId to resume.
+    lastAgentLoopResult = { ...agentResult, pendingApproval: deployApproval };
 
     return baseResult({
-      success: true,
-      status: "deployed",
+      status: "preview_ready",
       previewUrl,
-      productionUrl,
-      finalText: productionUrl
-        ? `Deployed and verified: ${productionUrl}`
-        : "Deployment succeeded, but no production URL was returned for verification.",
-      deployResult,
+      finalText: `I need your approval to continue: ${deployApproval.reason}`,
+      pendingApproval: deployApproval,
+      buildFixResult: agentResult.buildFixResult,
       repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
       runtimeRepairAttempts,
     });
