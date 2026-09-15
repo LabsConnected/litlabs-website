@@ -26,6 +26,7 @@
 
 import "server-only";
 
+import { stripToolCallBlocks } from "@litt/agent-core";
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { SITE_URL } from "@/lib/siteConfig";
 import { logLLMCall, type LLMCallMetadata } from "@/lib/evals/braintrust";
@@ -1009,6 +1010,47 @@ function buildAllFailedMessage(
   );
 }
 
+// ─── In-text tool-call markup hygiene ─────────────────────────────
+//
+// Models that regress from native function calling emit tool calls as
+// text markup — ```tool_call fences (closed or truncated), <tool_call>
+// XML tags, or bare JSON tool objects mid-prose. Per this module's
+// contract ("No text-parsed fake tool calls") they are NEVER executed —
+// but they must not leak verbatim into the user-facing transcript.
+// XML tags are normalized to the fence form first so the shared
+// @litt/agent-core stripper covers every shape with one implementation.
+
+/** `<tool_call …>…</tool_call>` including an unclosed trailing tag and
+ *  attribute-bearing openers. The `(?=[\s/>])` lookahead keeps
+ *  `<tool_calls>` (plural) from matching. */
+const XML_TOOL_CALL_RE = /<tool_call(?=[\s/>])[^>]*>([\s\S]*?)(<\/tool_call[^>]*>|$)/gi;
+/** Orphan `</tool_call>` close tag (truncated markup mid-stream). */
+const XML_TOOL_CALL_CLOSE_RE = /<\/tool_call[^>]*>/gi;
+/** antml-style `<arg_key>…</arg_key>` / `<arg_value>…</arg_value>` tags —
+ *  protocol junk emitted inside tool_call markup; only stripped when the
+ *  text already contained tool_call markers. */
+const XML_ARG_TAG_RE = /<arg_(key|value)\s*>[\s\S]*?<\/arg_\1\s*>/gi;
+
+function normalizeXmlToolCallTags(text: string): string {
+  if (!text.includes("<tool_call") && !text.includes("</tool_call")) return text;
+  const fenced = text.replace(XML_TOOL_CALL_RE, (_m, inner: string) => `\`\`\`tool_call\n${inner}\n\`\`\``);
+  return fenced.replace(XML_TOOL_CALL_CLOSE_RE, "").replace(XML_ARG_TAG_RE, "");
+}
+
+/**
+ * Strip in-text tool-call markup from a provider response. Returns the
+ * response unchanged when the text contains no recognizable markup, so
+ * the common path is a no-op.
+ */
+function stripInTextToolCallMarkup(resp: LLMToolCallResponse): LLMToolCallResponse {
+  const text = resp.text;
+  if (!text) return resp;
+  const normalized = normalizeXmlToolCallTags(text);
+  const stripped = stripToolCallBlocks(normalized).trim();
+  if (stripped === text.trim()) return resp;
+  return { ...resp, text: stripped };
+}
+
 // ─── Call LLM with tools ──────────────────────────────────────────
 
 /**
@@ -1158,6 +1200,19 @@ export async function callLLMWithTools(
                   compatEndpointFor(route, ctx.secrets),
                 );
 
+        const normalized = stripInTextToolCallMarkup(result);
+
+        // A completion whose text was ONLY in-text tool-call markup is a
+        // malformed tool attempt, not a final answer — fail over like the
+        // empty-completion case instead of handing "" to the agent loop.
+        if (!normalized.text.trim() && normalized.toolCalls.length === 0) {
+          throw new ProviderAttemptError(route.provider, model, {
+            class: "bad_response",
+            scope: "model",
+            message: "completion contained only in-text tool-call markup",
+          });
+        }
+
         recordProviderSuccess(route.provider);
         const latencyMs = Date.now() - t0;
         logRoute("attempt_success", {
@@ -1172,14 +1227,14 @@ export async function callLLMWithTools(
         logLLMCall({
           prompt: promptLog,
           systemPrompt,
-          output: result.text,
+          output: normalized.text,
           provider: route.provider,
-          model: result.model,
+          model: normalized.model,
           latencyMs,
           failover: failures.map((f) => `${f.provider}/${f.model}`),
           metadata: options?.evalMetadata ?? {},
         });
-        return result;
+        return normalized;
       } catch (err) {
         const latencyMs = Date.now() - t0;
 
