@@ -989,6 +989,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
 describe("GET /api/studio/conversations/[conversationId]/messages — approval rehydration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetExecutionRegistryForTests();
     vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" } as any);
     vi.mocked(getConversation).mockResolvedValue({
       id: "conv-123",
@@ -1055,6 +1056,55 @@ describe("GET /api/studio/conversations/[conversationId]/messages — approval r
     });
     const body = await res.json();
     expect(body.messages.at(-1).pendingApproval).toBeUndefined();
+  });
+
+  it("clears a stale streaming message when no execution or approval is active", async () => {
+    vi.mocked(listMessages).mockResolvedValue([
+      {
+        id: "m-stale",
+        role: "assistant",
+        content: "",
+        status: "streaming",
+        updatedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+      },
+    ] as any);
+    vi.mocked(getPendingPausedRunForConversation).mockResolvedValue(null);
+    vi.mocked(updateMessageStatus).mockResolvedValue(true);
+
+    const res = await GET(new NextRequest("http://localhost/api/studio/conversations/conv-123/messages"), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    const body = await res.json();
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      "m-stale",
+      "user_123",
+      "failed",
+      "The previous run ended before it produced a result.",
+    );
+    expect(body.messages.at(-1).status).toBe("failed");
+    expect(body.messages.at(-1).content).toContain("ended before it produced a result");
+  });
+
+  it("does not clear a recent streaming message while registration may still be racing", async () => {
+    vi.mocked(listMessages).mockResolvedValue([
+      {
+        id: "m-recent",
+        role: "assistant",
+        content: "",
+        status: "streaming",
+        updatedAt: new Date(Date.now() - 5 * 1000).toISOString(),
+      },
+    ] as any);
+    vi.mocked(getPendingPausedRunForConversation).mockResolvedValue(null);
+
+    const res = await GET(new NextRequest("http://localhost/api/studio/conversations/conv-123/messages"), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    const body = await res.json();
+
+    expect(updateMessageStatus).not.toHaveBeenCalled();
+    expect(body.messages.at(-1).status).toBe("streaming");
   });
 
   it("does not query paused runs when the last assistant message is not awaiting approval", async () => {
