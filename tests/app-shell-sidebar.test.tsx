@@ -126,10 +126,12 @@ describe("AppShell sidebar", () => {
     const aside = getSidebar();
     const nav = within(aside);
     // Studio appears as both a section header and item label.
-    for (const label of ["Dashboard", "Studio", "Games", "Discover", "Marketplace", "Wallet", "Settings"]) {
+    // Games is flag-gated (retroGameRuntime off by default) so it must NOT
+    // appear — it 404s while the flag is disabled.
+    for (const label of ["Dashboard", "Studio", "Discover", "Marketplace", "Wallet", "Settings"]) {
       expect(nav.getAllByText(label).length).toBeGreaterThanOrEqual(1);
     }
-    for (const removed of ["Create", "Music", "Showcase", "Projects"]) {
+    for (const removed of ["Create", "Music", "Showcase", "Projects", "Games"]) {
       expect(nav.queryByText(removed)).toBeNull();
     }
     // Section headers present in the required order — the label is the
