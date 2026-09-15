@@ -296,3 +296,85 @@ describe("runAgentLoopV2 — invalid apply_patch never reaches the approval gate
     expect(result.pendingApproval?.toolCallId).toBe("tc-3");
   });
 });
+
+describe("runAgentLoopV2 — files.write placeholder content never reaches the approval gate", () => {
+  // Production defect: a full-file rewrite of index.html shipped
+  // `<title>[PERSON_NAME] — Premium Coffee Roasters</title>` — the model
+  // substituted a template slot for the literal brand name, and the
+  // placeholder guard only covered apply_patch, so files.write persisted
+  // the token verbatim.
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("a write containing an unresolved placeholder becomes a tool error, not an approval pause", async () => {
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{
+          toolCallId: "tc-w1",
+          toolId: "files.write",
+          inputs: {
+            projectId: "p-test",
+            path: "index.html",
+            content: "<html><title>[PERSON_NAME] — Premium Coffee Roasters</title></html>",
+          },
+        }],
+        finishReason: "tool_calls",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "Rewrote the file with the literal brand name.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      });
+
+    const result = await runAgentLoopV2(
+      "rewrite index.html for Ember Roast",
+      fakeTransport,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+      },
+    );
+
+    expect(result.pendingApproval).toBeUndefined();
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(2);
+    expect(result.finalText).toContain("literal brand name");
+    expect(result.toolCalls.some((t) => t.toolId === "files.write" && !t.success)).toBe(true);
+  });
+
+  it("a clean files.write still pauses for approval normally", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValueOnce({
+      text: "",
+      toolCalls: [{
+        toolCallId: "tc-w2",
+        toolId: "files.write",
+        inputs: {
+          projectId: "p-test",
+          path: "index.html",
+          content: "<html><title>Ember Roast — Premium Coffee Roasters</title></html>",
+        },
+      }],
+      finishReason: "tool_calls",
+      model: "test-model",
+    });
+
+    const result = await runAgentLoopV2(
+      "rewrite index.html for Ember Roast",
+      fakeTransport,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+      },
+    );
+
+    expect(result.pendingApproval?.toolId).toBe("files.write");
+    expect(result.pendingApproval?.toolCallId).toBe("tc-w2");
+  });
+});

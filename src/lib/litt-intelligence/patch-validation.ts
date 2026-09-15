@@ -44,6 +44,11 @@ export interface ApplyPatchInputs {
   patches?: unknown;
 }
 
+export interface FilesWriteInputs {
+  path?: unknown;
+  content?: unknown;
+}
+
 /**
  * Validate apply_patch inputs before they reach the approval gate.
  *
@@ -102,6 +107,36 @@ export async function validateApplyPatchInputs(
         `re-read ${path} to get the exact current content, then retry with the literal text.`
       );
     }
+  }
+
+  return null;
+}
+
+/**
+ * Validate files.write inputs before they reach the approval gate.
+ *
+ * A full-file write has no search string to verify — the only provable
+ * defect is an unresolved template placeholder embedded in the content
+ * itself. Production evidence: a rewrite of index.html shipped
+ * `<title>[PERSON_NAME] — Premium Coffee Roasters</title>` because the
+ * model substituted a template slot for the literal brand name, and the
+ * apply_patch-only guard never saw it. The approval gate freezes inputs,
+ * so a placeholder write can only persist the token verbatim.
+ */
+export function validateFilesWriteInputs(inputs: FilesWriteInputs): string | null {
+  const path = typeof inputs.path === "string" ? inputs.path : null;
+  const content = typeof inputs.content === "string" ? inputs.content : null;
+
+  if (!path || content === null) {
+    return "files.write requires a target path and string content — re-read the file and generate the full content.";
+  }
+
+  const token = findPlaceholderToken(content);
+  if (token) {
+    return (
+      `files.write rejected: content for ${path} contains an unresolved placeholder ${JSON.stringify(token)}. ` +
+      `Template slots never belong in produced file content — write the literal text for ${path}.`
+    );
   }
 
   return null;
