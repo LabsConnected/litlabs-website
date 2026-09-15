@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronDown, Folder, Plus } from "lucide-react";
+import { ChevronDown, Folder, Plus, Trash2 } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { isManagedSourceType } from "@/lib/projects/project-source";
 
@@ -10,6 +10,12 @@ interface ProjectOption {
   name: string;
   sourceType?: string;
   githubBranch?: string | null;
+  /**
+   * Legacy-table projects merge into the same list, but the DELETE endpoint
+   * only removes canonical studio_projects rows — the trash affordance is
+   * hidden for legacy entries rather than offering a button that 404s.
+   */
+  legacy?: boolean;
 }
 
 export default function StudioProjectPicker({
@@ -17,17 +23,26 @@ export default function StudioProjectPicker({
   projectName,
   onSelect,
   onCreateProject,
+  onDeleteProject,
 }: {
   projectId: string | null;
   projectName: string | null;
   onSelect: (projectId: string) => void;
   onCreateProject?: () => void;
+  /**
+   * Fired only after the server confirms the deletion. The parent clears
+   * the active project when it matches the deleted id.
+   */
+  onDeleteProject?: (projectId: string) => void;
 }) {
   const { getToken } = useClerkAuth();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || projects.length > 0) return;
@@ -45,7 +60,10 @@ export default function StudioProjectPicker({
         });
         const payload = await response.json().catch(() => null) as { projects?: ProjectOption[]; legacyOnly?: ProjectOption[]; error?: string } | null;
         if (!response.ok) throw new Error(payload?.error ?? `Failed to load projects (${response.status})`);
-        if (!cancelled) setProjects([...(payload?.projects ?? []), ...(payload?.legacyOnly ?? [])]);
+        if (!cancelled) setProjects([
+          ...(payload?.projects ?? []).map((p) => ({ ...p, legacy: false })),
+          ...(payload?.legacyOnly ?? []).map((p) => ({ ...p, legacy: true })),
+        ]);
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Failed to load projects");
       } finally {
@@ -54,6 +72,39 @@ export default function StudioProjectPicker({
     })();
     return () => { cancelled = true; };
   }, [getToken, open, projects.length]);
+
+  /**
+   * Delete a project through the canonical endpoint. The row is removed
+   * from the list only after the server confirms success — the UI never
+   * reports a deletion that did not happen.
+   */
+  const handleDeleteProject = async (project: ProjectOption) => {
+    setDeletingId(project.id);
+    setDeleteError(null);
+    try {
+      const token = await getToken?.();
+      const response = await fetch(
+        `/api/studio-projects/${encodeURIComponent(project.id)}`,
+        {
+          method: "DELETE",
+          credentials: "include",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal: AbortSignal.timeout(15000),
+        },
+      );
+      const payload = await response.json().catch(() => null) as { error?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.error ?? `Delete failed (${response.status})`);
+      }
+      setProjects((prev) => prev.filter((p) => p.id !== project.id));
+      setConfirmDeleteId(null);
+      onDeleteProject?.(project.id);
+    } catch (deleteErr) {
+      setDeleteError(deleteErr instanceof Error ? deleteErr.message : "Delete failed.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
     <div className="relative min-w-0 shrink-0">
@@ -94,19 +145,77 @@ export default function StudioProjectPicker({
               <div className="px-2.5 py-3 text-[12px]" style={{ color: "var(--text-muted)" }}>No projects available.</div>
             ) : (
               projects.map((project) => (
-                <button
-                  key={project.id}
-                  type="button"
-                  role="option"
-                  aria-selected={project.id === projectId}
-                  onClick={() => { onSelect(project.id); setOpen(false); }}
-                  className="flex min-h-11 w-full items-center gap-2 rounded-lg px-2.5 text-left transition hover:bg-white/8"
-                  style={{ color: project.id === projectId ? "var(--litt-primary)" : "var(--text-secondary)" }}
-                >
-                  <Folder size={13} className="shrink-0" />
-                  <span className="min-w-0 flex-1 truncate text-[12px] font-bold">{project.name}</span>
-                  <span className="shrink-0 text-[11px]" style={{ color: "var(--text-muted)" }}>{isManagedSourceType(project.sourceType ?? null) ? "LiTT Managed" : "GitHub"}</span>
-                </button>
+                confirmDeleteId === project.id ? (
+                  <div
+                    key={project.id}
+                    className="rounded-lg border p-2.5"
+                    style={{ borderColor: "#ef444440", backgroundColor: "#ef444408" }}
+                    role="alertdialog"
+                    aria-label={`Confirm deletion of ${project.name}`}
+                  >
+                    <div className="text-[12px] font-black" style={{ color: "var(--text-primary)" }}>
+                      Delete &ldquo;{project.name}&rdquo;?
+                    </div>
+                    <div className="mt-0.5 text-[11px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
+                      This permanently deletes the project and its files. This can&rsquo;t be undone.
+                    </div>
+                    {deleteError && deletingId === null && (
+                      <div className="mt-1.5 text-[11px] font-bold" style={{ color: "#fca5a5" }}>
+                        {deleteError}
+                      </div>
+                    )}
+                    <div className="mt-2 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { setConfirmDeleteId(null); setDeleteError(null); }}
+                        disabled={deletingId === project.id}
+                        className="rounded-lg border px-2.5 py-1 text-[11px] font-bold transition hover:bg-white/8 disabled:opacity-50"
+                        style={{ borderColor: "var(--studio-border)", color: "var(--text-secondary)" }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { void handleDeleteProject(project); }}
+                        disabled={deletingId === project.id}
+                        className="rounded-lg px-2.5 py-1 text-[11px] font-black text-white transition hover:opacity-90 disabled:opacity-50"
+                        style={{ backgroundColor: "#dc2626" }}
+                      >
+                        {deletingId === project.id ? "Deleting…" : "Delete project"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    key={project.id}
+                    role="option"
+                    aria-selected={project.id === projectId}
+                    className="group flex w-full items-center gap-1 rounded-lg transition hover:bg-white/8"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => { onSelect(project.id); setOpen(false); }}
+                      className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 text-left"
+                      style={{ color: project.id === projectId ? "var(--litt-primary)" : "var(--text-secondary)" }}
+                    >
+                      <Folder size={13} className="shrink-0" />
+                      <span className="min-w-0 flex-1 truncate text-[12px] font-bold">{project.name}</span>
+                      <span className="shrink-0 text-[11px]" style={{ color: "var(--text-muted)" }}>{isManagedSourceType(project.sourceType ?? null) ? "LiTT Managed" : "GitHub"}</span>
+                    </button>
+                    {!project.legacy && (
+                      <button
+                        type="button"
+                        onClick={() => { setConfirmDeleteId(project.id); setDeleteError(null); }}
+                        aria-label={`Delete project ${project.name}`}
+                        title={`Delete project ${project.name}`}
+                        className="mr-1 shrink-0 rounded-md p-1.5 opacity-60 transition hover:bg-white/10 hover:opacity-100 focus-visible:opacity-100"
+                        style={{ color: "#fca5a5" }}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+                )
               ))
             )}
             {onCreateProject && !loading && !error && (

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { auth } from "@/lib/auth";
 import {
   getPausedRun,
@@ -240,6 +241,19 @@ export async function POST(
     systemPrompt: resolved.systemPrompt,
     executionMode: resolved.executionMode,
     enableBuildFix: true,
+    // Quality loop: resume with a fresh evidence session so the resumed
+    // run is gated the same way (agent markers re-harvest from history).
+    qualityLoop: resolved.executionMode === "act"
+      ? {
+          enabled: true,
+          runId: `resume:${pausedRunId}:${randomUUID()}`,
+          projectId: resolved.projectId,
+          userId,
+          userRequest: String(
+            resolved.pausedMessages.find((m) => m.role === "user")?.content ?? "",
+          ).slice(0, 2000),
+        }
+      : undefined,
   };
 
   // Fire-and-forget with proper error handling — NOT a floating promise.
@@ -320,6 +334,15 @@ export async function POST(
               toolId: result.pendingApproval.toolId,
               pausedRunId: nestedPausedRunId,
               reason: result.pendingApproval.reason,
+            }
+          : undefined,
+        // Persist the quality-loop finale on the run record: the durable,
+        // machine-readable answer to "was this good enough to ship?"
+        qualityLoop: result.qualityLoop
+          ? {
+              verdict: result.qualityLoop.verdict,
+              stages: result.qualityLoop.stages,
+              designPasses: result.qualityLoop.designPasses,
             }
           : undefined,
       };

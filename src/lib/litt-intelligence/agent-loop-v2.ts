@@ -23,6 +23,21 @@ import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { toolRegistry } from "./tool-registry";
 import type { LiTTToolDefinition } from "./types";
+import {
+  QUALITY_LOOP_PROMPT_SECTION,
+  buildRedesignPrompt,
+  finalizeQualityLoop,
+  harvestStageMarkers,
+  MAX_DESIGN_PASSES,
+  noteBuildFix,
+  noteDeployment,
+  noteToolResult,
+  runQualityInspection,
+  startQualityLoopSession,
+  verifyLiveUrl,
+  type QualityFinale,
+  type QualityLoopSession,
+} from "./quality-loop-flow";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -38,6 +53,22 @@ export interface AgentLoopConfig {
   evalMetadata?: LLMCallMetadata;
   /** Upstream/client AbortSignal propagated to all provider calls. */
   signal?: AbortSignal;
+  /**
+   * Opt-in to the LiTT quality loop (gated UNDERSTAND→VERIFY stages +
+   * visual-quality judge). When enabled, the loop records stage evidence
+   * from tool events and agent declarations, runs one visual inspection
+   * before the final answer, and attaches a success verdict to the result.
+   * Additive only: the loop never throws mid-run and never blocks tool
+   * execution; the gate bites at finalize() time.
+   */
+  qualityLoop?: {
+    enabled: boolean;
+    runId: string;
+    projectId: string;
+    userId: string;
+    /** The user's original request (judge context). Falls back to the first user message. */
+    userRequest?: string;
+  };
 }
 
 export const DEFAULT_LOOP_CONFIG: AgentLoopConfig = {
@@ -78,6 +109,16 @@ export interface AgentLoopResult {
   modelFailureText?: string;
   /** Set when the loop paused because ACT mode requires approval for a mutation */
   pendingApproval?: PendingApproval;
+  /**
+   * Quality-loop finale for runs that opted in via config.qualityLoop.
+   * The verdict is the machine-readable answer to "is this actually good
+   * enough to ship?" — success may only be claimed when verdict.passed.
+   */
+  qualityLoop?: {
+    verdict: QualityFinale["verdict"];
+    stages: QualityFinale["stages"];
+    designPasses: number;
+  };
 }
 
 // ─── Loop detection ───────────────────────────────────────────────
@@ -145,6 +186,101 @@ function toPermissionInfo(tool: LiTTToolDefinition): ToolPermissionInfo {
   };
 }
 
+// ─── Quality loop hooks ───────────────────────────────────────────
+
+/**
+ * Quality-gate hook at the point the agent produces its final answer.
+ * Harvests any final QUALITY stage markers, then runs the visual
+ * inspection once. Returns true when a below-threshold critique demands
+ * another design pass — a follow-up prompt has been injected into
+ * llmMessages and the caller should `continue` the loop.
+ * Never throws: inspection failures degrade to recorded "unavailable".
+ */
+async function maybeInspectBeforeFinal(
+  qualitySession: QualityLoopSession | null,
+  llmMessages: LLMMessage[],
+  localProgress: ProgressEmitter,
+  finalAnswerText: string,
+  stepsUsed: number,
+  maxSteps: number,
+  cancelled: boolean,
+): Promise<boolean> {
+  if (!qualitySession || cancelled) return false;
+  try {
+    harvestStageMarkers(qualitySession, [
+      { role: "assistant" as const, content: finalAnswerText },
+    ]);
+    // After a demanded redesign the judge must re-score the new output:
+    // reset the once-per-session latch so the next final answer is judged
+    // again. Bounded by MAX_DESIGN_PASSES inside runQualityInspection.
+    if (
+      qualitySession.critiqueFailed &&
+      qualitySession.state.designPasses < MAX_DESIGN_PASSES
+    ) {
+      qualitySession.inspectionRan = false;
+    }
+    const inspection = await runQualityInspection(qualitySession);
+    if (inspection.needsRedesign && stepsUsed < maxSteps) {
+      localProgress.emit({ type: "phase", phase: "quality_redesign", step: stepsUsed });
+      localProgress.emit({
+        type: "status",
+        summary:
+          `Visual quality ${inspection.score?.toFixed(1) ?? "below"} / 10 ` +
+          `under threshold — automatic design pass ${qualitySession.state.designPasses} of 2`,
+      });
+      llmMessages.push({
+        role: "user",
+        content: buildRedesignPrompt(inspection, qualitySession.state.designPasses),
+      });
+      return true;
+    }
+  } catch {
+    // The gate must never break the run.
+  }
+  return false;
+}
+
+/**
+ * Finalize a quality-gated run: record build-fix / deploy / verify
+ * evidence, compute the success verdict, emit it for LiTT Live, and
+ * attach it to the result. Returns the finale (null when not gated).
+ */
+async function finalizeQualityGatedRun(
+  qualitySession: QualityLoopSession | null,
+  opts: {
+    buildFixResult?: BuildFixLoopResult;
+    publicUrl?: string | null;
+    deployAttempted: boolean;
+    finalText: string;
+    localProgress: ProgressEmitter;
+  },
+): Promise<QualityFinale | null> {
+  if (!qualitySession) return null;
+  try {
+    if (opts.buildFixResult) noteBuildFix(qualitySession, opts.buildFixResult);
+    if (opts.publicUrl) {
+      noteDeployment(qualitySession, opts.publicUrl);
+      await verifyLiveUrl(qualitySession, opts.publicUrl);
+    }
+    harvestStageMarkers(qualitySession, [
+      { role: "assistant" as const, content: opts.finalText },
+    ]);
+    const finale = finalizeQualityLoop(qualitySession, {
+      deployRequested: !!opts.publicUrl || opts.deployAttempted,
+    });
+    opts.localProgress.emit({
+      type: "quality_verdict",
+      passed: finale.verdict.ok,
+      missing: [...finale.verdict.missing],
+      reason: finale.verdict.reason,
+      designPasses: finale.designPasses,
+    });
+    return finale;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Agent Loop ───────────────────────────────────────────────────
 
 export async function runAgentLoopV2(
@@ -155,6 +291,21 @@ export async function runAgentLoopV2(
 ): Promise<AgentLoopResult> {
   const cfg = { ...DEFAULT_LOOP_CONFIG, ...config };
   const startTime = Date.now();
+
+  // Quality loop (opt-in): create the evidence session and teach the agent
+  // the stage contract. All hooks below degrade gracefully — the gate
+  // itself is enforced at finalize() time, never mid-run.
+  let qualitySession: QualityLoopSession | null = null;
+  if (cfg.qualityLoop?.enabled) {
+    qualitySession = startQualityLoopSession({
+      runId: cfg.qualityLoop.runId,
+      projectId: cfg.qualityLoop.projectId,
+      userId: cfg.qualityLoop.userId,
+      userRequest: cfg.qualityLoop.userRequest ?? userMessage,
+    });
+    cfg.systemPrompt += QUALITY_LOOP_PROMPT_SECTION;
+  }
+
   const events: ProgressEvent[] = [];
   const toolCallRecords: ToolCallRecord[] = [];
   let hasInterveningMutation = false;
@@ -261,6 +412,21 @@ export async function runAgentLoopV2(
 
     // If no tool calls, we're done — the LLM produced a final answer
     if (llmResponse.toolCalls.length === 0) {
+      // Quality gate: the visual judge may demand another design pass
+      // before this answer is accepted as final.
+      if (
+        await maybeInspectBeforeFinal(
+          qualitySession,
+          llmMessages,
+          localProgress,
+          llmResponse.text ?? "",
+          stepsUsed,
+          cfg.maxSteps,
+          cancelled,
+        )
+      ) {
+        continue;
+      }
       finalText = llmResponse.text;
       // Emit a reasoning summary so LiTT Live shows the final reasoning step
       if (llmResponse.text) {
@@ -282,6 +448,9 @@ export async function runAgentLoopV2(
 
     // Add assistant message with tool calls to conversation
     llmMessages.push(buildAssistantToolCallMessage(llmResponse.toolCalls, llmResponse.text, llmResponse.rawParts));
+    if (qualitySession) {
+      harvestStageMarkers(qualitySession, [{ role: "assistant" as const, content: llmResponse.text ?? "" }]);
+    }
 
     // Process each tool call
     let batchHasMutation = false;
@@ -494,6 +663,14 @@ export async function runAgentLoopV2(
       const summary = summarizeToolResult(toolCall.toolId, result.result);
       toolCallLog.push({ toolId: toolCall.toolId, success: result.success, summary, mutating: !toolDef.readOnly });
       completedDeployment = readDeploymentOutcome(toolCall.toolId, result.result) ?? completedDeployment;
+      if (qualitySession) {
+        noteToolResult(
+          qualitySession,
+          toolCall.toolId,
+          { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
+          transport.workspaceId,
+        );
+      }
 
       localProgress.emit({
         type: "tool_result",
@@ -548,13 +725,28 @@ export async function runAgentLoopV2(
       ? `The build checks did not all pass after ${buildFixResult.repairAttempts} repair attempts.`
       : describeSilentOutcome(toolCallLog, cancelled, cancelReason));
 
+  // Quality gate: finalize the evidence ledger and compute the verdict.
+  // When the verdict refuses success, say so plainly in the closing text
+  // instead of letting it imply the work is done.
+  const qualityFinale = await finalizeQualityGatedRun(qualitySession, {
+    buildFixResult,
+    publicUrl: completedDeployment?.publicUrl ?? null,
+    deployAttempted: toolCallLog.some((t) => t.toolId === "project.deploy"),
+    finalText: effectiveFinalText,
+    localProgress,
+  });
+  const gatedFinalText =
+    qualityFinale && !qualityFinale.verdict.ok
+      ? `${effectiveFinalText}\n\nQuality check — ${qualityFinale.verdict.reason.charAt(0).toLowerCase()}${qualityFinale.verdict.reason.slice(1)}`
+      : effectiveFinalText;
+
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
     ...(cancelled ? { reason: cancelReason ?? "Unknown" } : { totalSteps: stepsUsed, totalDurationMs: Date.now() - startTime }),
   } as ProgressEvent);
 
   return {
-    finalText: effectiveFinalText,
+    finalText: gatedFinalText,
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,
@@ -565,6 +757,13 @@ export async function runAgentLoopV2(
     events,
     modelFailed,
     modelFailureText,
+    qualityLoop: qualityFinale
+      ? {
+          verdict: qualityFinale.verdict,
+          stages: qualityFinale.stages,
+          designPasses: qualityFinale.designPasses,
+        }
+      : undefined,
   };
 }
 
@@ -685,6 +884,21 @@ export async function resumeAgentLoopV2(
 ): Promise<AgentLoopResult> {
   const cfg = { ...DEFAULT_LOOP_CONFIG, ...resume.config };
   const startTime = Date.now();
+
+  // Quality loop (opt-in): a fresh evidence session for the resumed run.
+  // Cognitive-stage markers in the paused messages are re-harvested below,
+  // so agent-declared evidence survives the approval pause.
+  let qualitySession: QualityLoopSession | null = null;
+  if (cfg.qualityLoop?.enabled) {
+    qualitySession = startQualityLoopSession({
+      runId: cfg.qualityLoop.runId,
+      projectId: cfg.qualityLoop.projectId,
+      userId: cfg.qualityLoop.userId,
+      userRequest: cfg.qualityLoop.userRequest ?? "",
+    });
+    cfg.systemPrompt += QUALITY_LOOP_PROMPT_SECTION;
+  }
+
   const events: ProgressEvent[] = [];
   const toolCallRecords: ToolCallRecord[] = [];
   let hasInterveningMutation = resume.hadInterveningMutation;
@@ -709,6 +923,10 @@ export async function resumeAgentLoopV2(
   const llmMessages: LLMMessage[] = [
     ...resume.pausedMessages,
   ];
+  if (qualitySession) {
+    // Re-harvest agent stage markers from before the approval pause.
+    harvestStageMarkers(qualitySession, resume.pausedMessages);
+  }
 
   let finalText = "";
   let stepsUsed = resume.stepsUsedBeforePause;
@@ -862,11 +1080,27 @@ export async function resumeAgentLoopV2(
     }
 
     if (llmResponse.toolCalls.length === 0) {
+      if (
+        await maybeInspectBeforeFinal(
+          qualitySession,
+          llmMessages,
+          localProgress,
+          llmResponse.text ?? "",
+          stepsUsed,
+          cfg.maxSteps,
+          cancelled,
+        )
+      ) {
+        continue;
+      }
       finalText = llmResponse.text;
       break;
     }
 
     llmMessages.push(buildAssistantToolCallMessage(llmResponse.toolCalls, llmResponse.text, llmResponse.rawParts));
+    if (qualitySession) {
+      harvestStageMarkers(qualitySession, [{ role: "assistant" as const, content: llmResponse.text ?? "" }]);
+    }
 
     let batchHasMutation = false;
 
@@ -1009,6 +1243,14 @@ export async function resumeAgentLoopV2(
       const summary = summarizeToolResult(toolCall.toolId, result.result);
       toolCallLog.push({ toolId: toolCall.toolId, success: result.success, summary, mutating: !toolDef.readOnly });
       completedDeployment = readDeploymentOutcome(toolCall.toolId, result.result) ?? completedDeployment;
+      if (qualitySession) {
+        noteToolResult(
+          qualitySession,
+          toolCall.toolId,
+          { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
+          transport.workspaceId,
+        );
+      }
 
       localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: result.success, summary, durationMs: 0 });
 
@@ -1046,13 +1288,26 @@ export async function resumeAgentLoopV2(
       ? `The build checks did not all pass after ${buildFixResult.repairAttempts} repair attempts.`
       : describeSilentOutcome(toolCallLog, cancelled, cancelReason));
 
+  // Quality gate: finalize the evidence ledger and compute the verdict.
+  const qualityFinale = await finalizeQualityGatedRun(qualitySession, {
+    buildFixResult,
+    publicUrl: completedDeployment?.publicUrl ?? null,
+    deployAttempted: toolCallLog.some((t) => t.toolId === "project.deploy"),
+    finalText: effectiveFinalText,
+    localProgress,
+  });
+  const gatedFinalText =
+    qualityFinale && !qualityFinale.verdict.ok
+      ? `${effectiveFinalText}\n\nQuality check — ${qualityFinale.verdict.reason.charAt(0).toLowerCase()}${qualityFinale.verdict.reason.slice(1)}`
+      : effectiveFinalText;
+
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
     ...(cancelled ? { reason: cancelReason ?? "Unknown" } : { totalSteps: stepsUsed, totalDurationMs: Date.now() - startTime }),
   } as ProgressEvent);
 
   return {
-    finalText: effectiveFinalText,
+    finalText: gatedFinalText,
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,
@@ -1063,6 +1318,13 @@ export async function resumeAgentLoopV2(
     events,
     modelFailed,
     modelFailureText,
+    qualityLoop: qualityFinale
+      ? {
+          verdict: qualityFinale.verdict,
+          stages: qualityFinale.stages,
+          designPasses: qualityFinale.designPasses,
+        }
+      : undefined,
   };
 }
 

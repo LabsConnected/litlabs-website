@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { getSupabaseAdmin } from "@/lib/supabase";
@@ -496,6 +497,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       executionMode: canonicalCtx.executionMode,
       enableBuildFix: true,
       model: typeof body.model === "string" ? body.model : undefined,
+      // Quality loop: gate serious ACT-mode builds through the
+      // UNDERSTAND→VERIFY evidence stages + visual-quality judge.
+      qualityLoop: canonicalCtx.executionMode === "act" && conversation.projectId
+        ? {
+            enabled: true,
+            runId: randomUUID(),
+            projectId: conversation.projectId,
+            userId,
+            userRequest: resolvedMessage.slice(0, 2000),
+          }
+        : undefined,
       evalMetadata: {
         agentSlug,
         agentMode: "v2-execution",
