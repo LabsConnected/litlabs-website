@@ -273,7 +273,8 @@ const runHandler: ToolHandler = async (ctx, args) => {
     return { status: "failed", success: false, message: "Missing required arg: command", data: {} };
   }
   const cmdArgs = Array.isArray(args.args) ? args.args.filter((a): a is string => typeof a === "string") : [];
-  return runCommand(ctx.shell, command, cmdArgs, { cwd: ctx.cwd });
+  const stdin = typeof args.stdin === "string" ? args.stdin : undefined;
+  return runCommand(ctx.shell, command, cmdArgs, { cwd: ctx.cwd, stdin });
 };
 
 // ─── Registry ─────────────────────────────────────────────────────

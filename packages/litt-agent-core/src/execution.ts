@@ -82,6 +82,7 @@ export type ExecutionErrorCode =
   | "SYMLINK_ESCAPE"
   | "TIMEOUT"
   | "CANCELLED"
+  | "STDIN_TOO_LARGE"
   | "SHELL_EXECUTION_DISABLED";
 
 export class ExecutionError extends Error {
@@ -669,6 +670,11 @@ export interface ExecutionOptions {
   skipScriptInspection?: boolean;
   /** Optional streaming callback — invoked for each stdout/stderr chunk */
   onStream?: (chunk: StreamChunk) => void;
+  /**
+   * Optional data piped to the child process's stdin (then EOF).
+   * Capped at 1 MiB to bound memory use.
+   */
+  stdin?: string;
 }
 
 // ─── Structured execution ─────────────────────────────────────────
@@ -705,6 +711,16 @@ export async function runCommand(
   const workspaceRoot = options?.workspaceRoot ?? cwd;
   const timeoutMs = options?.timeoutMs ?? 120_000;
   const label = options?.commandLabel ?? command;
+
+  // Bound stdin payload size — stdin is piped verbatim to the child.
+  if (options?.stdin !== undefined && options.stdin.length > 1_048_576) {
+    return executionError(
+      new ExecutionError(
+        `stdin payload exceeds 1 MiB limit (${options.stdin.length} chars)`,
+        "STDIN_TOO_LARGE",
+      ),
+    );
+  }
 
   // 1. Classify command by capability
   const risk = classifyCommand(command, args, cwd);
@@ -790,6 +806,7 @@ export async function runCommand(
     maxOutputBytes: options?.maxOutputBytes,
     env: filteredEnv,
     onStream: options?.onStream,
+    stdin: options?.stdin,
   });
   const durationMs = Date.now() - t0;
 
