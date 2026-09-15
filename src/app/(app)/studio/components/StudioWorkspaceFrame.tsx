@@ -29,6 +29,107 @@ import StudioHealthPanel from "./StudioHealthPanel";
 import StudioPreviewPanel from "./StudioPreviewPanel";
 import StudioProjectFiles from "./StudioProjectFiles";
 import StudioBrowserJobsPanel from "./StudioBrowserJobsPanel";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
+
+interface DeploymentSummary {
+  id: string;
+  status: string;
+  publicUrl: string | null;
+  urlVerified: boolean;
+  errorMessage: string | null;
+}
+
+/**
+ * Durable deployment status — the visible record of what project.deploy did.
+ * Reads the deployment store (the same record the agent's deploy tool
+ * writes), so a deploy that finished while the user was elsewhere still
+ * shows up here with its verified public URL.
+ */
+function DeploymentStatusSection({ projectId }: { projectId: string | null }) {
+  const { getToken } = useClerkAuth();
+  const [deployment, setDeployment] = useState<DeploymentSummary | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!projectId) {
+      setDeployment(null);
+      return;
+    }
+    let cancelled = false;
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const load = async () => {
+      try {
+        const token = await getToken?.();
+        const res = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/deployments`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null) as { deployment?: DeploymentSummary | null } | null;
+        if (!cancelled) setDeployment(data?.deployment ?? null);
+      } catch {
+        // Non-fatal — the section simply shows the last known state.
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    setLoading(true);
+    void load();
+    // A deploy runs server-side via the agent; poll lightly so a deploy
+    // that finishes while the inspector is open appears without a refresh.
+    interval = setInterval(() => { void load(); }, 30_000);
+    return () => {
+      cancelled = true;
+      if (interval) clearInterval(interval);
+    };
+  }, [projectId, getToken]);
+
+  if (!projectId) return null;
+
+  const statusLabel =
+    loading && !deployment ? "Checking…" :
+    !deployment ? "Not deployed yet" :
+    deployment.status === "ready" ? (deployment.urlVerified ? "Live" : "Ready — verifying") :
+    deployment.status === "failed" ? "Failed" :
+    deployment.status === "building" ? "Building…" :
+    deployment.status === "deploying" ? "Deploying…" :
+    deployment.status;
+  const tone = deployment?.status === "ready" && deployment.urlVerified ? "ok"
+    : deployment?.status === "failed" ? "warn" : "muted";
+
+  return (
+    <InspectorSection title="Deployment">
+      <InspectorRow label="Status" value={statusLabel} tone={tone} />
+      {deployment?.publicUrl && deployment.urlVerified ? (
+        <div className="flex items-start justify-between gap-3 border-b py-2 last:border-0" style={{ borderColor: "var(--studio-border)" }}>
+          <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>Live URL</span>
+          <a
+            href={deployment.publicUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="max-w-[62%] truncate text-right text-[10px] font-bold underline"
+            style={{ color: "var(--litt-primary)" }}
+            title={deployment.publicUrl}
+          >
+            {deployment.publicUrl.replace(/^https?:\/\//, "")}
+          </a>
+        </div>
+      ) : null}
+      {deployment?.status === "failed" && deployment.errorMessage ? (
+        <div className="py-2 text-[10px] leading-4" style={{ color: "#fca5a5" }} title={deployment.errorMessage}>
+          {deployment.errorMessage.length > 140 ? `${deployment.errorMessage.slice(0, 140)}…` : deployment.errorMessage}
+        </div>
+      ) : null}
+      {!deployment && !loading ? (
+        <div className="py-2 text-[10px] leading-4" style={{ color: "var(--text-muted)" }}>
+          Ask LiTT in chat to deploy this project — you&apos;ll get a live public URL here when it&apos;s ready.
+        </div>
+      ) : null}
+    </InspectorSection>
+  );
+}
 
 /**
  * StudioWorkspaceFrame — collapsible right inspector + bottom drawer.
@@ -177,6 +278,7 @@ function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspec
         <InspectorRow label="Branch" value={describeSourceRows(capabilities).branch} />
         <InspectorRow label="Permission" value={capabilities.writeAccess ? "Writes allowed" : "Approval required"} tone={capabilities.writeAccess ? "ok" : "warn"} />
       </InspectorSection>
+      <DeploymentStatusSection projectId={capabilities.projectId} />
       <div className="rounded-xl border px-3 py-2.5 text-[10px] leading-4" style={{ borderColor: "rgba(114,242,56,0.2)", backgroundColor: "rgba(114,242,56,0.04)", color: "var(--text-secondary)" }}>
         {data.busy ? "LiTT is working in the active workspace." : capabilities.projectId ? "Workspace context is attached to the next request." : "Start with a blank project or connect a repository to unlock project actions."}
       </div>

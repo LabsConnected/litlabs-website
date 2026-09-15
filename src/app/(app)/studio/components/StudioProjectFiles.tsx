@@ -157,6 +157,11 @@ export default function StudioProjectFiles({
   const [error, setError] = useState<string | null>(null);
   const [unsupportedPath, setUnsupportedPath] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
+  /**
+   * Set when LiTT changed the open file while the user had unsaved edits.
+   * Save is blocked until the user reloads or explicitly keeps their version.
+   */
+  const [conflictNotice, setConflictNotice] = useState<string | null>(null);
 
   const dirty = activePath !== null && content !== originalContent;
 
@@ -266,6 +271,7 @@ export default function StudioProjectFiles({
     setContent("");
     setOriginalContent("");
     setUnsupportedPath(null);
+    setConflictNotice(null);
     setError(null);
     if (projectId) {
       // Always try to load — the files route will auto-recover if the
@@ -296,6 +302,27 @@ export default function StudioProjectFiles({
     await loadDirectory(".");
   }, [loadDirectory]);
 
+  // Re-read a file's content from disk without the dirty-confirm gate.
+  // Used when an external change (agent/canvas) lands on the open file.
+  const reloadFileContent = useCallback(async (path: string) => {
+    if (!projectId) return;
+    setFileLoading(true);
+    try {
+      const payload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files`, {
+        method: "POST",
+        body: JSON.stringify({ action: "read", path: normalizePath(path) }),
+      });
+      if (!payload || typeof payload.content !== "string") throw new Error("Malformed file response");
+      setContent(payload.content);
+      setOriginalContent(payload.content);
+      setConflictNotice(null);
+    } catch (readError) {
+      setError(readError instanceof Error ? readError.message : "Failed to reload file");
+    } finally {
+      setFileLoading(false);
+    }
+  }, [projectId, requestJson]);
+
   // Listen for Canvas Accept events — refresh file tree when Canvas writes files
   useEffect(() => {
     if (!projectId) return;
@@ -303,11 +330,23 @@ export default function StudioProjectFiles({
       const detail = (e as CustomEvent).detail;
       if (detail?.projectId === projectId) {
         void refresh();
+        // Keep the open editor truthful: if LiTT rewrote the file we're
+        // editing, reload it — otherwise Save would clobber the new
+        // content. Unsaved user edits are flagged instead of silently
+        // overwritten.
+        const changedPath = typeof detail.path === "string" ? detail.path : null;
+        if (activePath && (!changedPath || changedPath === "." || changedPath === activePath)) {
+          if (dirty) {
+            setConflictNotice("LiTT changed this file while you had unsaved edits. Saving now would overwrite those changes.");
+          } else {
+            void reloadFileContent(activePath);
+          }
+        }
       }
     };
     window.addEventListener("studio:files-changed", handler);
     return () => window.removeEventListener("studio:files-changed", handler);
-  }, [projectId, refresh]);
+  }, [projectId, refresh, activePath, dirty, reloadFileContent]);
 
   const toggleFolder = useCallback(async (entry: FileEntry) => {
     if (entry.type !== "folder") return;
@@ -329,6 +368,7 @@ export default function StudioProjectFiles({
     setActivePath(entry.path);
     setActiveFile(entry.path); // Drive canonical StudioContext.activeFile
     setUnsupportedPath(null);
+    setConflictNotice(null);
     setError(null);
     if (!isTextFile(entry.path)) {
       setContent("");
@@ -371,6 +411,7 @@ export default function StudioProjectFiles({
     try {
       await mutate("write", { path: normalizePath(activePath), content });
       setOriginalContent(content);
+      setConflictNotice(null);
       await loadDirectory(parentPath(activePath), true);
       onSaved?.();
     } catch (saveError) {
@@ -511,8 +552,15 @@ export default function StudioProjectFiles({
                 <FileText size={12} style={{ color: "var(--litt-primary)" }} />
                 <span className="min-w-0 flex-1 truncate text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>{activePath}</span>
                 {dirty && <span className="shrink-0 text-[9px] font-bold" style={{ color: "#e3b341" }}>Unsaved</span>}
-                <button type="button" onClick={() => void saveFile()} disabled={!dirty || saving || !writeAccess || Boolean(unsupportedPath)} className="flex min-h-10 items-center gap-1 rounded-md px-2 text-[9px] font-bold disabled:cursor-not-allowed disabled:opacity-35" style={{ backgroundColor: dirty && writeAccess ? "var(--litt-primary)" : "var(--studio-surface)", color: dirty && writeAccess ? "#000" : "var(--text-muted)" }}><Save size={11} /> {saving ? "Saving" : "Save"}</button>
+                <button type="button" onClick={() => void saveFile()} disabled={!dirty || saving || !writeAccess || Boolean(unsupportedPath) || Boolean(conflictNotice)} className="flex min-h-10 items-center gap-1 rounded-md px-2 text-[9px] font-bold disabled:cursor-not-allowed disabled:opacity-35" style={{ backgroundColor: dirty && writeAccess && !conflictNotice ? "var(--litt-primary)" : "var(--studio-surface)", color: dirty && writeAccess && !conflictNotice ? "#000" : "var(--text-muted)" }} title={conflictNotice ? "LiTT changed this file — reload first" : undefined}><Save size={11} /> {saving ? "Saving" : "Save"}</button>
               </div>
+              {conflictNotice && (
+                <div className="flex shrink-0 items-center gap-2 border-b px-2.5 py-1.5 text-[9px]" style={{ borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.08)", color: "#fca5a5" }}>
+                  <span className="min-w-0 flex-1">{conflictNotice}</span>
+                  <button type="button" onClick={() => activePath && void reloadFileContent(activePath)} className="shrink-0 rounded-md px-2 py-1 font-bold" style={{ backgroundColor: "rgba(239,68,68,0.15)", color: "#fecaca" }}>Reload latest</button>
+                  <button type="button" onClick={() => setConflictNotice(null)} className="shrink-0 rounded-md px-2 py-1 font-bold" style={{ color: "var(--text-muted)" }} title="Dismiss — your next save will overwrite LiTT's change">Keep mine</button>
+                </div>
+              )}
               {/* Contextual selection actions bar — Explain, Fix, Refactor, Add tests, Ask LiTT */}
               {!unsupportedPath && !fileLoading && (
                 <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b px-2 py-1" style={{ borderColor: "var(--studio-border)" }}>

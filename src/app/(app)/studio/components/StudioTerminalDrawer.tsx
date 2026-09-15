@@ -41,6 +41,8 @@ export default function StudioTerminalDrawer({ projectId, repositoryName, branch
       try {
         const res = await fetch(`/api/studio-projects/${projectId}/workspace/prepare`, {
           method: "POST",
+          // Provisioning can take a while, but it must still terminate.
+          signal: AbortSignal.timeout(120000),
         });
         if (cancelled) return;
         if (res.ok) {
@@ -69,7 +71,10 @@ export default function StudioTerminalDrawer({ projectId, repositoryName, branch
     if (!projectId) return;
     setWorkspaceStatus("preparing");
     setWorkspaceError(null);
-    void fetch(`/api/studio-projects/${projectId}/workspace/prepare`, { method: "POST" })
+    void fetch(`/api/studio-projects/${projectId}/workspace/prepare`, {
+      method: "POST",
+      signal: AbortSignal.timeout(120000),
+    })
       .then(async (res) => {
         if (res.ok) {
           const data = await res.json().catch(() => ({}));

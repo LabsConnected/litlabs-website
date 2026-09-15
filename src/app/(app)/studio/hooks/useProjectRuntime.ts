@@ -32,7 +32,7 @@ export interface UseProjectRuntimeResult {
   refresh: () => Promise<void>;
 }
 
-export function useProjectRuntime(): UseProjectRuntimeResult {
+export function useProjectRuntime(options?: { disabled?: boolean }): UseProjectRuntimeResult {
   const [state, setState] = useState<ProjectRuntimeState>(INITIAL_RUNTIME_STATE);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -124,8 +124,10 @@ export function useProjectRuntime(): UseProjectRuntimeResult {
     }
   }, [authLoaded, isSignedIn, getToken, explicitProjectId, terminalStatus, terminalSessionId, terminalCwd]);
 
-  // Initial resolve + polling
+  // Initial resolve + polling — skipped entirely when disabled so a
+  // second hook instance can't double the runtime poll stack.
   useEffect(() => {
+    if (options?.disabled) return;
     mountedRef.current = true;
     void refresh();
 
@@ -138,7 +140,7 @@ export function useProjectRuntime(): UseProjectRuntimeResult {
       mountedRef.current = false;
       if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
     };
-  }, [refresh]);
+  }, [refresh, options?.disabled]);
 
   // Re-merge terminal state when it changes (without re-fetching from server)
   useEffect(() => {

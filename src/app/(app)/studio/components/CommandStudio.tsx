@@ -622,6 +622,8 @@ function CommandStudioContent() {
     serverProjectId: capabilities.projectId,
     cameraState: { active: cameraDock.open, status: cameraStatus },
     previewSelection,
+    // Shared capabilities — the hook must not start a second poll stack.
+    capabilities,
   });
 
   const launchpadState = useMemo(
@@ -1024,6 +1026,7 @@ function CommandStudioContent() {
       // Update URL with project ID
       const params = new URLSearchParams(searchParams.toString());
       params.set("project", project.id);
+      window.dispatchEvent(new CustomEvent("studio:project-switching"));
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });
       // Refresh capabilities so projectId propagates
       await refreshCapabilities();
@@ -1071,6 +1074,9 @@ function CommandStudioContent() {
   }, [getToken, refreshCapabilities, runtime, runtimeState.projectId, isMobileLitt]);
 
   const handleSelectProject = useCallback((projectId: string) => {
+    // Synchronous signal first — an in-flight send must see the switch
+    // before router state settles.
+    window.dispatchEvent(new CustomEvent("studio:project-switching"));
     const params = new URLSearchParams(searchParams.toString());
     params.set("project", projectId);
     params.delete("conversation");
@@ -1083,6 +1089,14 @@ function CommandStudioContent() {
   const handlePreview = useCallback(() => {
     setDestination("studio");
     setStudioMode("preview");
+  }, []);
+  // Real deploy runs through LiTT in chat (project.deploy tool with
+  // approval). This prefills the composer with a deploy request and opens
+  // the chat surface — one tap, no developer tooling.
+  const handleDeployRequest = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("studio:ask-litt", {
+      detail: { prompt: "Deploy this project to a live public URL" },
+    }));
   }, []);
   const handleOpenTerminal = useCallback(() => {
     setAdvancedToolsOpen(true);
@@ -1518,6 +1532,8 @@ function CommandStudioContent() {
           onOpenToolsAction={() => advancedToolsOpen ? handleCloseAdvancedTools() : handleOpenAdvancedTools()}
           toolsVisible={advancedToolsOpen}
           onProjectSelectAction={handleSelectProject}
+          onCreateProjectAction={() => { void handleStartBlank(); }}
+          onDeployAction={handleDeployRequest}
           onClearChatAction={conversation.clear}
           onNewChatAction={() => { void conversation.createConversation(); }}
           onDeleteChatAction={() => { void conversation.deleteConversation(); }}
@@ -2318,7 +2334,7 @@ function StudioWorkSurface({
   activeAgentId: import("../stores/useStudioAgentStore").AgentId;
   fallbackNotice: string | null;
   onRouteToolAction: (tool: StudioTool, command?: string) => void;
-  onRegenerateAction: () => void;
+  onRegenerateAction: (assistantMessageId?: string) => void;
   onSelectConversation?: (conversationId: string) => void;
   launchpadState: FirstMissionLaunchpadState;
   displayName?: string | null;

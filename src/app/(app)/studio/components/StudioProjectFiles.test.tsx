@@ -59,12 +59,57 @@ describe("StudioProjectFiles", () => {
     expect((screen.getByRole("button", { name: /prepare/i }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("shows the read-only notice when the workspace is ready but not writable", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ entries: [] }), { status: 200 }));
-    render(<StudioProjectFiles projectId="project-1" repositoryName={null} branch={null} workspaceStatus="ready" writeAccess={false} />);
+  it("blocks save and offers reload when LiTT rewrites the open file with unsaved edits", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ entries: [{ name: "App.tsx", type: "file", size: 20 }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ content: "v1 from disk" }), { status: 200 }))
+      // Directory refresh triggered by the files-changed event
+      .mockResolvedValueOnce(new Response(JSON.stringify({ entries: [{ name: "App.tsx", type: "file", size: 21 }] }), { status: 200 }))
+      // Reload latest after the conflict
+      .mockResolvedValueOnce(new Response(JSON.stringify({ content: "v2 written by LiTT" }), { status: 200 }));
 
-    await screen.findByText("No files found.");
-    expect((screen.getByTitle("Create file") as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(/editing is unavailable/i)).toBeTruthy();
+    render(<StudioProjectFiles projectId="project-1" repositoryName="owner/repo" branch="main" workspaceStatus="ready" writeAccess />);
+
+    await screen.findByText("App.tsx");
+    fireEvent.click(screen.getByTitle("App.tsx"));
+    const editor = await screen.findByRole("textbox", { name: "Edit App.tsx" });
+    fireEvent.change(editor, { target: { value: "my unsaved edits" } });
+
+    // LiTT rewrites the same file while the user has unsaved edits.
+    window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId: "project-1", path: "App.tsx" } }));
+
+    await screen.findByText(/LiTT changed this file while you had unsaved edits/i);
+    const saveBtn = screen.getByRole("button", { name: /^Save$/i }) as HTMLButtonElement;
+    expect(saveBtn.disabled).toBe(true);
+
+    // Reload latest pulls LiTT's content and clears the conflict.
+    fireEvent.click(screen.getByRole("button", { name: /Reload latest/i }));
+    const editorAfter = await screen.findByRole("textbox", { name: "Edit App.tsx" });
+    await waitFor(() => expect((editorAfter as HTMLTextAreaElement).value).toBe("v2 written by LiTT"));
+    expect(screen.queryByText(/LiTT changed this file while you had unsaved edits/i)).toBeNull();
+    expect((screen.getByRole("button", { name: /^Save$/i }) as HTMLButtonElement).disabled).toBe(true); // clean, nothing to save
+  });
+
+  it("reloads a clean open file silently when LiTT rewrites it", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ entries: [{ name: "App.tsx", type: "file", size: 20 }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ content: "v1 from disk" }), { status: 200 }))
+      // Directory refresh triggered by the files-changed event
+      .mockResolvedValueOnce(new Response(JSON.stringify({ entries: [{ name: "App.tsx", type: "file", size: 21 }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ content: "v2 written by LiTT" }), { status: 200 }));
+
+    render(<StudioProjectFiles projectId="project-1" repositoryName="owner/repo" branch="main" workspaceStatus="ready" writeAccess />);
+
+    await screen.findByText("App.tsx");
+    fireEvent.click(screen.getByTitle("App.tsx"));
+    const editor = await screen.findByRole("textbox", { name: "Edit App.tsx" });
+
+    window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId: "project-1", path: "App.tsx" } }));
+
+    const editorAfter = await screen.findByRole("textbox", { name: "Edit App.tsx" });
+    await waitFor(() => expect((editorAfter as HTMLTextAreaElement).value).toBe("v2 written by LiTT"));
+    expect(screen.queryByText(/LiTT changed this file while you had unsaved edits/i)).toBeNull();
   });
 });

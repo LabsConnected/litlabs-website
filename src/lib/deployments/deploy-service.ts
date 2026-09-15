@@ -80,6 +80,13 @@ export interface DeploymentCreateInput {
 
 export interface DeploymentStore {
   findReadyByContentHash(projectId: string, contentHash: string): Promise<DeploymentRecord | null>;
+  /**
+   * Newest deployment for this project+content still building/deploying.
+   * Used to attach a concurrent duplicate deploy to the in-flight one
+   * instead of publishing twice.
+   */
+  findInFlightByContentHash(projectId: string, contentHash: string): Promise<DeploymentRecord | null>;
+  findById(id: string): Promise<DeploymentRecord | null>;
   create(input: DeploymentCreateInput): Promise<DeploymentRecord>;
   update(id: string, patch: Partial<DeploymentRecord>): Promise<DeploymentRecord>;
   putFiles(
@@ -223,6 +230,34 @@ function failure(
   };
 }
 
+const deploySleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Poll a deployment row until it leaves building/deploying, or the timeout
+ * elapses. Returns the latest observed record (possibly still in-flight, or
+ * null when the row vanished).
+ */
+async function waitForDeploymentResolved(
+  store: DeploymentStore,
+  deploymentId: string,
+  timeoutMs: number,
+): Promise<DeploymentRecord | null> {
+  const deadline = Date.now() + timeoutMs;
+  let latest: DeploymentRecord | null = null;
+  for (;;) {
+    try {
+      latest = await store.findById(deploymentId);
+    } catch {
+      // A transient store error shouldn't abort the wait; keep polling.
+    }
+    if (!latest || (latest.status !== "building" && latest.status !== "deploying")) {
+      return latest;
+    }
+    if (Date.now() >= deadline) return latest;
+    await deploySleep(2_000);
+  }
+}
+
 /**
  * Deploy the user's project and return a verified public URL.
  *
@@ -294,6 +329,32 @@ export async function deployUserProject(
       totalBytes: existing.totalBytes,
       reused: true,
     };
+  }
+
+  // ── In-flight duplicate suppression ──
+  // The ready check above can't see a deploy that is still building, so two
+  // concurrent deploys of identical content would both publish. Attach to
+  // the in-flight one instead: wait (bounded) for it to resolve, then
+  // return its outcome. If it fails or the wait times out, fall through
+  // and deploy fresh.
+  const inFlight = await store.findInFlightByContentHash(projectId, contentHash);
+  if (inFlight) {
+    const resolved = await waitForDeploymentResolved(store, inFlight.id, 120_000);
+    if (resolved && resolved.status === "ready" && resolved.publicUrl && resolved.urlVerified) {
+      return {
+        ok: true,
+        deploymentId: resolved.id,
+        status: "ready",
+        publicUrl: resolved.publicUrl,
+        urlVerified: true,
+        target: resolved.target,
+        projectId: resolved.projectId,
+        workspaceId: resolved.workspaceId,
+        fileCount: resolved.fileCount,
+        totalBytes: resolved.totalBytes,
+        reused: true,
+      };
+    }
   }
 
   // ── Create the deployment and store the snapshot ──

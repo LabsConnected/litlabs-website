@@ -133,6 +133,16 @@ export function CodeWorkspace({
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["."]));
   const [openTabs, setOpenTabs] = useState<{ path: string; content: string; original: string }[]>([]);
   const [activeTab, setActiveTab] = useState<string | null>(null);
+  /**
+   * Tabs whose file changed on disk (agent/canvas write) while the user
+   * had unsaved edits. Saving is blocked until they reload — otherwise
+   * the stale editor content would clobber the agent's newer change.
+   */
+  const [conflictPaths, setConflictPaths] = useState<Set<string>>(new Set());
+  const openTabsRef = useRef(openTabs);
+  useEffect(() => {
+    openTabsRef.current = openTabs;
+  });
   const [loading, setLoading] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -212,6 +222,7 @@ export function CodeWorkspace({
       setExpanded(new Set(["."]));
       setOpenTabs([]);
       setActiveTab(null);
+      setConflictPaths(new Set());
       setError(null);
     }
     if (projectId) void loadDirectory(".");
@@ -277,13 +288,39 @@ export function CodeWorkspace({
       setOpenTabs((prev) => prev.map((t) => t.path === path ? { ...t, original: t.content } : t));
       void loadDirectory(parentPath(path), true);
       setPreviewRefreshKey((k) => k + 1);
-      window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId, path } }));
+      // Mark the source so our own files-changed handler doesn't re-read
+      // the tab we just saved (a reload racing the user's next keystroke
+      // could discard it).
+      window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId, path, source: "code-save" } }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save file");
     } finally {
       setSaving(false);
     }
   }, [projectId, requestJson, writeAccess, openTabs, loadDirectory]);
+
+  // Reload a tab's content from disk (after an external change). Clears any
+  // conflict flag for the path.
+  const reloadTabContent = useCallback(async (path: string) => {
+    if (!projectId) return;
+    try {
+      const payload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files`, {
+        method: "POST",
+        body: JSON.stringify({ action: "read", path }),
+      });
+      const content = typeof payload?.content === "string" ? payload.content : "";
+      setOpenTabs((prev) => prev.map((t) => t.path === path ? { ...t, content, original: content } : t));
+      setConflictPaths((prev) => {
+        if (!prev.has(path)) return prev;
+        const next = new Set(prev);
+        next.delete(path);
+        return next;
+      });
+    } catch {
+      // Keep the stale content; the tree refresh already happened and the
+      // user can retry via the conflict strip.
+    }
+  }, [projectId, requestJson]);
 
   // Generic mutation helper
   const mutate = useCallback(async (action: MutationAction, body: Record<string, unknown>) => {
@@ -368,6 +405,13 @@ export function CodeWorkspace({
         const newIdx = Math.min(idx, remaining.length - 1);
         return remaining[newIdx].path;
       });
+      // A closed tab can't stay conflicted — it will re-read on next open.
+      setConflictPaths((cprev) => {
+        if (!cprev.has(path)) return cprev;
+        const next = new Set(cprev);
+        next.delete(path);
+        return next;
+      });
       return remaining;
     });
   }, []);
@@ -390,6 +434,15 @@ export function CodeWorkspace({
           return current;
         });
         return remaining;
+      });
+      // Deleted files can't stay conflicted either.
+      setConflictPaths((cprev) => {
+        const next = new Set(cprev);
+        let changed = false;
+        for (const p of cprev) {
+          if (p === entry.path || p.startsWith(prefix)) { next.delete(p); changed = true; }
+        }
+        return changed ? next : cprev;
       });
       window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId, path: entry.path } }));
     } catch (err) {
@@ -450,11 +503,26 @@ export function CodeWorkspace({
         // Also reload root to catch top-level changes
         if (changedPath !== ".") void loadDirectory(".", true);
         setPreviewRefreshKey((k) => k + 1);
+        // Skip our own save echo — the tab already holds the saved content
+        // and a re-read could race the user's next keystroke.
+        if (detail?.source === "code-save") return;
+        // Keep open tabs truthful: a file the agent just rewrote must not
+        // stay stale in the editor, or Save would clobber the new content.
+        // Tabs with unsaved user edits are flagged instead of silently
+        // overwritten — the user reloads explicitly from the conflict strip.
+        for (const tab of openTabsRef.current) {
+          if (changedPath !== "." && tab.path !== changedPath) continue;
+          if (tab.content !== tab.original) {
+            setConflictPaths((prev) => new Set(prev).add(tab.path));
+          } else {
+            void reloadTabContent(tab.path);
+          }
+        }
       }
     };
     window.addEventListener("studio:files-changed", handler);
     return () => window.removeEventListener("studio:files-changed", handler);
-  }, [projectId, loadDirectory]);
+  }, [projectId, loadDirectory, reloadTabContent]);
 
   const activeTabData = openTabs.find((t) => t.path === activeTab);
   const isDirty = activeTabData && activeTabData.content !== activeTabData.original;
@@ -642,6 +710,7 @@ export function CodeWorkspace({
                 {openTabs.map((tab) => {
                   const dirty = tab.content !== tab.original;
                   const isActive = tab.path === activeTab;
+                  const conflicted = conflictPaths.has(tab.path);
                   const name = tab.path.split("/").pop() ?? tab.path;
                   return (
                     <div
@@ -653,9 +722,11 @@ export function CodeWorkspace({
                         color: isActive ? "var(--text-primary)" : "var(--text-muted)",
                         borderBottom: isActive ? "2px solid #9b4dff" : "2px solid transparent",
                       }}
+                      title={conflicted ? "Changed by LiTT — reload to see the latest before saving" : undefined}
                     >
                       <span className="truncate max-w-[120px]">{name}</span>
-                      {dirty && <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: "#e3b341" }} />}
+                      {conflicted && <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: "#ef4444" }} aria-label="External change conflict" />}
+                      {!conflicted && dirty && <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: "#e3b341" }} />}
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); closeTab(tab.path); }}
@@ -672,16 +743,40 @@ export function CodeWorkspace({
                   <button
                     type="button"
                     onClick={() => void saveFile(activeTab)}
-                    disabled={saving}
-                    className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-[10px] font-bold transition hover:bg-white/8"
+                    disabled={saving || conflictPaths.has(activeTab)}
+                    className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-[10px] font-bold transition hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-40"
                     style={{ color: "#72f238" }}
-                    title="Save (Ctrl+S)"
+                    title={conflictPaths.has(activeTab) ? "LiTT changed this file — reload first" : "Save (Ctrl+S)"}
                   >
                     {saving ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
                     Save
                   </button>
                 )}
               </div>
+
+              {/* External-change conflict strip — saving a stale tab must be explicit */}
+              {activeTab && conflictPaths.has(activeTab) && (
+                <div className="flex shrink-0 items-center gap-2 border-b px-2 py-1.5 text-[10px]" style={{ borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.08)", color: "#fca5a5" }}>
+                  <span className="min-w-0 flex-1">LiTT changed this file while you had unsaved edits. Saving now would overwrite those changes.</span>
+                  <button
+                    type="button"
+                    onClick={() => void reloadTabContent(activeTab)}
+                    className="shrink-0 rounded-md px-2 py-1 font-bold"
+                    style={{ backgroundColor: "rgba(239,68,68,0.15)", color: "#fecaca" }}
+                  >
+                    Reload latest
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConflictPaths((prev) => { const next = new Set(prev); next.delete(activeTab); return next; })}
+                    className="shrink-0 rounded-md px-2 py-1 font-bold"
+                    style={{ color: "var(--text-muted)" }}
+                    title="Dismiss — your next save will overwrite LiTT's change"
+                  >
+                    Keep mine
+                  </button>
+                </div>
+              )}
 
               {/* Breadcrumb + quick actions */}
               {activeTabData && (

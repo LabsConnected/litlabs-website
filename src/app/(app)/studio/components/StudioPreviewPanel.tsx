@@ -181,6 +181,16 @@ export default function StudioPreviewPanel({
   // Track which projectId we've auto-started for so we don't re-trigger on
   // every render of the same project (e.g. after it reaches "ready").
   const autoStartedForRef = useRef<string | null>(null);
+  // Sequence counter for status fetches — late responses from an older
+  // request must never overwrite newer state.
+  const statusSeqRef = useRef(0);
+  // Bounded startup polling: a start that never resolves must become a
+  // terminal failure, never an infinite spinner.
+  const startPollAttemptsRef = useRef(0);
+  const MAX_START_POLL_ATTEMPTS = 40; // 40 × 3s ≈ 2 minutes
+  // Set by the files-changed handler so the next status check that reports
+  // ready also reloads the iframe (a "stale" preview must actually refresh).
+  const reloadFrameOnNextReadyRef = useRef(false);
 
   const postInspectorCommand = useCallback((type: "enable" | "disable" | "clear") => {
     const bridge = bridgeRef.current;
@@ -350,6 +360,7 @@ export default function StudioPreviewPanel({
       clearSelection(false);
       return;
     }
+    const seq = ++statusSeqRef.current;
     if (stale) setState((current) => current === "ready" ? "stale" : current);
     else setState("loading");
     setIframeFailed(false);
@@ -358,15 +369,24 @@ export default function StudioPreviewPanel({
         cache: "no-store",
         credentials: "include",
         headers: await authHeaders(),
+        // A hung status check must not wedge the panel in "loading" forever.
+        signal: AbortSignal.timeout(15000),
       });
+      // Ignore late responses — a newer request has already superseded this one.
+      if (seq !== statusSeqRef.current) return;
       const payload = await response.json().catch(() => null) as PreviewPayload | null;
       if (!response.ok || !payload) {
         throw new Error(typeof payload?.runtimeError === "string" ? payload.runtimeError : `Preview status failed (${response.status})`);
       }
       const next = statusFromPayload(payload, workspaceStatus);
       setState((prevState) => {
-        // Only reload iframe when transitioning from non-ready to ready
-        if (next.state === "ready" && prevState !== "ready" && prevState !== "stale") {
+        // Only reload iframe when transitioning from non-ready to ready,
+        // or when a file change explicitly requested a refresh.
+        const shouldReloadFrame =
+          (next.state === "ready" && prevState !== "ready" && prevState !== "stale") ||
+          (next.state === "ready" && reloadFrameOnNextReadyRef.current);
+        if (shouldReloadFrame) {
+          reloadFrameOnNextReadyRef.current = false;
           setFrameKey((value) => value + 1);
         }
         return next.state;
@@ -378,6 +398,7 @@ export default function StudioPreviewPanel({
       setDevCommand(typeof payload.developmentCommand === "string" ? payload.developmentCommand : null);
       setLogs(Array.isArray(payload.logs) ? payload.logs as string[] : []);
     } catch (loadError) {
+      if (seq !== statusSeqRef.current) return;
       setState("unreachable");
       setError(loadError instanceof Error ? loadError.message : "Preview runtime is unreachable");
     }
@@ -387,6 +408,9 @@ export default function StudioPreviewPanel({
     // Reset auto-start tracking when the project changes so a new project
     // gets a fresh auto-start.
     autoStartedForRef.current = null;
+    startPollAttemptsRef.current = 0;
+    reloadFrameOnNextReadyRef.current = false;
+    statusSeqRef.current++;
     void loadStatus();
   }, [loadStatus]);
 
@@ -398,11 +422,16 @@ export default function StudioPreviewPanel({
 
   // Listen for file change events from CodeWorkspace or other sources.
   // This covers the standalone Preview tab which doesn't receive refreshKey.
+  // A file change while the preview is live marks it stale and re-checks
+  // status; when the check reports ready the iframe is actually reloaded
+  // (reloadFrameOnNextReadyRef) so "stale" is a real transition, not a
+  // dead end.
   useEffect(() => {
     if (!projectId) return;
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail?.projectId === projectId) {
+        reloadFrameOnNextReadyRef.current = true;
         void loadStatus(true);
       }
     };
@@ -410,12 +439,77 @@ export default function StudioPreviewPanel({
     return () => window.removeEventListener("studio:files-changed", handler);
   }, [projectId, loadStatus]);
 
-  // Auto-poll while starting, restarting, or loading
+  // Auto-poll while starting, restarting, or loading — BOUNDED. A start that
+  // never resolves becomes a terminal "failed" instead of an infinite
+  // spinner. The counter resets whenever the panel leaves the polling set
+  // (e.g. reaching ready) or the project changes.
   useEffect(() => {
-    if (state !== "starting" && state !== "restarting" && state !== "loading") return;
-    const interval = setInterval(() => void loadStatus(true), 3000);
+    if (state !== "starting" && state !== "restarting" && state !== "loading") {
+      startPollAttemptsRef.current = 0;
+      return;
+    }
+    const interval = setInterval(() => {
+      startPollAttemptsRef.current += 1;
+      if (startPollAttemptsRef.current >= MAX_START_POLL_ATTEMPTS) {
+        clearInterval(interval);
+        statusSeqRef.current++;
+        setState("failed");
+        setError("The preview took too long to start. The dev server may have crashed during startup — check the logs, then try restarting.");
+        setErrorCode(null);
+        return;
+      }
+      void loadStatus(true);
+    }, 3000);
     return () => clearInterval(interval);
   }, [state, loadStatus]);
+
+  // Health check while ready. A dev server that dies AFTER reaching ready
+  // must not keep the green "Preview ready" dot over a dead iframe.
+  // Polls lightly (30s), pauses while the tab is hidden, and surfaces a
+  // truthful terminal state with a working Retry if the runtime is gone.
+  useEffect(() => {
+    if (state !== "ready" || !projectId) return;
+    let cancelled = false;
+    const check = async () => {
+      if (cancelled || document.hidden) return;
+      try {
+        const response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/preview`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: await authHeaders(),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (cancelled) return;
+        const payload = await response.json().catch(() => null) as PreviewPayload | null;
+        if (!response.ok || !payload) return;
+        const next = statusFromPayload(payload, workspaceStatus);
+        if (next.state !== "ready") {
+          // The runtime died post-ready. statusFromPayload maps a stopped
+          // dev server to not_started — but auto-start is already spent for
+          // this project, so surface it as failed with an honest message
+          // and a working Retry instead of a dead "auto-preparing" state.
+          const died = next.state === "not_started";
+          statusSeqRef.current++;
+          setState(died ? "failed" : next.state);
+          setError(died ? "The preview dev server stopped unexpectedly." : next.error);
+          setErrorCode(next.errorCode);
+          if (!died) setPreviewUrl(next.url);
+        }
+      } catch {
+        // Transient network blip — stay ready; the next 30s tick retries.
+        // A persistently dead runtime is caught by the iframe onError and
+        // by the user-visible Retry path.
+      }
+    };
+    const interval = setInterval(check, 30000);
+    const onVisible = () => { if (!document.hidden) void check(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [state, projectId, authHeaders, workspaceStatus]);
 
   // Keyboard shortcut: Cmd/Ctrl+R refreshes preview when the panel is focused.
   // This matches the universal "refresh" mental model without hijacking the
@@ -445,10 +539,38 @@ export default function StudioPreviewPanel({
     setIframeFailed(false);
     setPreviewPreparing(true);
     try {
+      // Pre-flight status check: a remount (or a second panel instance)
+      // racing the first start must NOT fire a duplicate POST. If the
+      // server already reports starting/restarting/ready, adopt that
+      // state and let the poll effect take over.
+      try {
+        const preflight = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/preview`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: await authHeaders(),
+          signal: AbortSignal.timeout(15000),
+        });
+        const preflightPayload = await preflight.json().catch(() => null) as PreviewPayload | null;
+        if (preflight.ok && preflightPayload) {
+          const adopted = statusFromPayload(preflightPayload, workspaceStatus);
+          if (adopted.state === "starting" || adopted.state === "restarting" || adopted.state === "ready") {
+            setState(adopted.state);
+            setPreviewUrl(adopted.url);
+            setError(adopted.error);
+            setErrorCode(adopted.errorCode);
+            return;
+          }
+        }
+      } catch {
+        // Pre-flight is best-effort — a failed check falls through to POST.
+      }
       const response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/preview`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+        // Starting a dev server can take a while (workspace provisioning);
+        // 2 minutes is generous, but it must still terminate.
+        signal: AbortSignal.timeout(120000),
       });
       const payload = await response.json().catch(() => null) as PreviewPayload | null;
       if (!response.ok || !payload) throw new Error(typeof payload?.runtimeError === "string" ? payload.runtimeError : `Preview preparation failed (${response.status})`);
@@ -505,6 +627,7 @@ export default function StudioPreviewPanel({
         method: "DELETE",
         credentials: "include",
         headers: await authHeaders(),
+        signal: AbortSignal.timeout(15000),
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => null) as PreviewPayload | null;
@@ -529,7 +652,7 @@ export default function StudioPreviewPanel({
   const displayUrl = previewUrl ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}studioRefresh=${frameKey}` : null;
   const isAuthConfigError = errorCode === "preview_clerk_config_error" || errorCode === "preview_auth_config_error";
   const label = state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (iframeFailed ? "Preview failed to load" : "Preview ready") : state === "stale" ? "Preview may be stale" : state === "not_started" ? "Preview not started" : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : "Preview failed to start") : "Preview runtime unreachable";
-  const detail = state === "not_started" ? "Preparing your preview automatically…" : state === "unreachable" ? (error ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed. Refreshing the project preview status." : state === "failed" ? (isAuthConfigError ? (error ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — update the Clerk keys in the terminal-server Railway env or workspace .env.local.") : error ?? "The dev server failed to start. Try restarting it.") : error ?? "The preview surface reports only real project runtime state.";
+  const detail = state === "not_started" ? "Preparing your preview automatically…" : state === "unreachable" ? (error ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (error ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — update the Clerk keys in the terminal-server Railway env or workspace .env.local.") : error ?? "The dev server failed to start. Try restarting it.") : error ?? "The preview surface reports only real project runtime state.";
   const dotColor = STATUS_DOT_COLOR[state];
   const isLive = state === "ready" || state === "stale";
   const sourceSummary = formatSourceSummary({

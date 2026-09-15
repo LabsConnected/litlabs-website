@@ -2,13 +2,16 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { StudioFilePreview, type FileSelectionState } from "./StudioFilePreview";
 
-// Mock URL.createObjectURL for jsdom
+// Mock URL.createObjectURL / URL.revokeObjectURL for jsdom
 const originalCreateObjectURL = URL.createObjectURL;
+const originalRevokeObjectURL = URL.revokeObjectURL;
 beforeAll(() => {
   URL.createObjectURL = (() => "blob:mock-url") as typeof URL.createObjectURL;
+  URL.revokeObjectURL = (() => {}) as typeof URL.revokeObjectURL;
 });
 afterAll(() => {
   URL.createObjectURL = originalCreateObjectURL;
+  URL.revokeObjectURL = originalRevokeObjectURL;
 });
 
 // Helper to create selection state

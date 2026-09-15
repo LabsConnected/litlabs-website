@@ -92,6 +92,32 @@ export const supabaseDeploymentStore: DeploymentStore = {
     return data ? rowToRecord(data as DeploymentRow) : null;
   },
 
+  async findInFlightByContentHash(projectId, contentHash) {
+    const db = requireDb();
+    const { data, error } = await db
+      .from(TABLE)
+      .select("*")
+      .eq("project_id", projectId)
+      .eq("content_hash", contentHash)
+      .in("status", ["building", "deploying"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(`Deployment lookup failed: ${error.message}`);
+    return data ? rowToRecord(data as DeploymentRow) : null;
+  },
+
+  async findById(id) {
+    const db = requireDb();
+    const { data, error } = await db
+      .from(TABLE)
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (error) throw new Error(`Deployment lookup failed: ${error.message}`);
+    return data ? rowToRecord(data as DeploymentRow) : null;
+  },
+
   async create(input: DeploymentCreateInput) {
     const db = requireDb();
     const { data, error } = await db

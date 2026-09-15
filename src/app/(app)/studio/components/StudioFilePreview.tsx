@@ -160,6 +160,20 @@ export function StudioFilePreview({ projectId, selection }: StudioFilePreviewPro
   const ext = useMemo(() => (path ? getExtension(path) : ""), [path]);
   const fileName = useMemo(() => path?.split("/").pop() ?? path ?? "", [path]);
 
+  // HTML preview blob URL — created once per content, revoked when the
+  // content changes or the preview unmounts. (Creating it in render leaks
+  // a blob URL on every render.)
+  const [htmlBlobUrl, setHtmlBlobUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (category !== "html" || !content) {
+      setHtmlBlobUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([content], { type: "text/html" }));
+    setHtmlBlobUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [category, content]);
+
   // Build the raw file URL for binary/media files
   const rawUrl = useMemo(() => {
     if (!projectId || !path) return null;
@@ -192,7 +206,11 @@ export function StudioFilePreview({ projectId, selection }: StudioFilePreviewPro
         const blob = await resp.blob();
         if (revoked) return;
         const url = URL.createObjectURL(blob);
-        setMediaUrl(url);
+        // Revoke the previous URL — overwriting state without revoking leaks it.
+        setMediaUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return url;
+        });
       } catch (err) {
         if (revoked || (err instanceof DOMException && err.name === "AbortError")) return;
         setMediaError(err instanceof Error ? err.message : "Failed to load media");
@@ -391,12 +409,11 @@ export function StudioFilePreview({ projectId, selection }: StudioFilePreviewPro
 
       // ─── HTML (sandboxed iframe) ────────────────────────────────
       case "html": {
-        const blob = content ? URL.createObjectURL(new Blob([content], { type: "text/html" })) : null;
         return (
           <div className="min-h-0 flex-1">
-            {blob && (
+            {htmlBlobUrl && (
               <iframe
-                src={blob}
+                src={htmlBlobUrl}
                 title="HTML preview"
                 className="h-full w-full border-0 bg-white"
                 sandbox="allow-scripts"

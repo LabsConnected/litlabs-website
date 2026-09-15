@@ -56,6 +56,15 @@ function fakeStore(): DeploymentStore & { rows: DeploymentRecord[]; files: Map<s
         (r) => r.projectId === projectId && r.contentHash === contentHash && r.status === "ready",
       ) ?? null;
     },
+    async findInFlightByContentHash(projectId, contentHash) {
+      return rows.find(
+        (r) => r.projectId === projectId && r.contentHash === contentHash &&
+          (r.status === "building" || r.status === "deploying"),
+      ) ?? null;
+    },
+    async findById(id) {
+      return rows.find((r) => r.id === id) ?? null;
+    },
     async create(input) {
       const row: DeploymentRecord = {
         id: `dep_${++seq}`,
@@ -191,6 +200,93 @@ describe("A. static project deploys and returns a verified live URL", () => {
     }, { store, fetchImpl: reachableFetch });
     const serialized = JSON.stringify(result);
     expect(serialized).not.toMatch(/service[-_]?key|secret|password|bearer|sk-/i);
+  });
+});
+
+/* ── Case M: concurrent duplicate deploys attach to the in-flight one ─ */
+
+describe("M. in-flight duplicate deploy is reused, not republished", () => {
+  it("waits for the in-flight deployment and returns its outcome", async () => {
+    const store = fakeStore();
+    // First deploy completes normally.
+    const first = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport: fakeTransport(),
+      publicBaseUrl: BASE,
+    }, { store, fetchImpl: reachableFetch });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const firstId = first.deploymentId;
+
+    // Simulate the row still being in-flight (a concurrent worker's deploy).
+    // The ready-dedup path must NOT match; the in-flight path must.
+    const row = store.rows.find((r) => r.id === firstId)!;
+    row.status = "building";
+    row.urlVerified = false;
+
+    // The "other worker" finishes on the second status poll.
+    let polls = 0;
+    const origFindById = store.findById.bind(store);
+    store.findById = async (id: string) => {
+      const rec = await origFindById(id);
+      polls += 1;
+      if (polls >= 2 && rec) {
+        rec.status = "ready";
+        rec.urlVerified = true;
+      }
+      return rec;
+    };
+
+    const second = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport: fakeTransport(),
+      publicBaseUrl: BASE,
+    }, { store, fetchImpl: reachableFetch });
+
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.reused).toBe(true);
+    expect(second.deploymentId).toBe(firstId);
+    expect(second.status).toBe("ready");
+    expect(second.urlVerified).toBe(true);
+    // No second deployment row was published.
+    expect(store.rows).toHaveLength(1);
+  });
+
+  it("falls through to a fresh deploy when the in-flight one fails", async () => {
+    const store = fakeStore();
+    const first = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport: fakeTransport(),
+      publicBaseUrl: BASE,
+    }, { store, fetchImpl: reachableFetch });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    const row = store.rows.find((r) => r.id === first.deploymentId)!;
+    row.status = "building";
+    row.urlVerified = false;
+    // The in-flight deploy fails immediately.
+    store.findById = async (id: string) => {
+      const rec = store.rows.find((r) => r.id === id) ?? null;
+      if (rec) rec.status = "failed";
+      return rec;
+    };
+
+    const second = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport: fakeTransport(),
+      publicBaseUrl: BASE,
+    }, { store, fetchImpl: reachableFetch });
+
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.reused).toBe(false);
+    expect(store.rows).toHaveLength(2);
   });
 });
 

@@ -103,7 +103,7 @@ const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
   },
 };
 
-export function useConnectionSummary() {
+export function useConnectionSummary(options?: { disabled?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [capabilities, setCapabilities] = useState<ConnectionCapabilities>(
     DEFAULT_CAPABILITIES,
@@ -112,7 +112,9 @@ export function useConnectionSummary() {
   // Canonical project runtime — the ONE source of truth for project identity
   // and readiness. Return the complete result so consumers do not derive
   // readiness from project existence or issue a second runtime request.
-  const runtime = useProjectRuntime();
+  // Disabled propagates: a disabled summary must not spin up a second
+  // runtime poller either.
+  const runtime = useProjectRuntime({ disabled: options?.disabled });
   const { state: runtimeState } = runtime;
 
   // Client-side terminal store is the source of truth for PTY status
@@ -306,10 +308,14 @@ export function useConnectionSummary() {
   }, [terminalStatus, terminalSessionId, terminalError, terminalFailureStage, terminalCwd, voiceTransportConnected, voiceInputState, getToken, explicitProjectId, runtimeState.projectId, runtimeState.projectName, runtimeState.repository, runtimeState.branch, runtimeState.workspaceStatus, runtimeState.writeAccess, runtimeState.sourceType, runtimeState.sourceKind, runtimeState.sourceLabel, runtimeState.sourceStatus, runtimeState.versionControl, runtimeState.githubConnected]);
 
   useEffect(() => {
+    // A disabled instance performs no fetches and no polling — used when the
+    // caller already receives capabilities from a shared instance, so a
+    // second hook doesn't double every capability/runtime poll.
+    if (options?.disabled) return;
     void refresh();
     const interval = window.setInterval(() => void refresh(), 15_000);
     return () => window.clearInterval(interval);
-  }, [refresh]);
+  }, [refresh, options?.disabled]);
 
   return { capabilities, refresh, loading, runtime };
 }
