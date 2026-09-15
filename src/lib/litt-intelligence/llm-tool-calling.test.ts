@@ -607,6 +607,91 @@ describe("callLLMWithTools — empty provider payloads", () => {
   });
 });
 
+describe("callLLMWithTools — text-format tool-call markup (P0-B)", () => {
+  // Production evidence: a model answered with literal
+  //   <tool_call>terminal<arg_key>command</arg_key>…</tool_call>
+  // which was persisted as assistant prose while the run reported
+  // `completed` — no tool executed. Invocation-intent markup is a
+  // model-level protocol failure: fail over, or fail truthfully.
+
+  const PRODUCTION_MARKUP =
+    "I need to read the current `index.html` to find the exact `</title>` line. Let me inspect the file first.\n" +
+    "<tool_call>terminal\n<arg_key>command</arg_key>\n<arg_value>cat -n index.html</arg_value>" +
+    "<arg_key>project_id</arg_key>\n<arg_value>f79fae8d-62f5-405d-b933-3d49a58acc61</arg_value>\n</tool_call>";
+
+  it("fails over to a sibling model when the first model emits <tool_call> markup", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    // First OpenRouter model returns text-format markup; the sibling model
+    // returns a proper structured tool call.
+    mockFetch
+      .mockResolvedValueOnce(makeSuccessResponse("m1", PRODUCTION_MARKUP))
+      .mockResolvedValueOnce(
+        makeSuccessResponse("m2", "", [
+          { id: "call_1", type: "function", function: { name: "write_file", arguments: '{"path":"a.txt","content":"x"}' } },
+        ]),
+      );
+
+    const result = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "read the file" }],
+      [WRITE_TOOL],
+    );
+
+    // The structured call from the SECOND model wins — markup never
+    // becomes the response text.
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].toolId).toBe("write_file");
+    expect(result.text).not.toContain("<tool_call>");
+    expect(callsTo("openrouter").length).toBe(2);
+  });
+
+  it("throws AllRoutesFailedError classified tool_call_parse_failed when every route emits markup", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValue(makeSuccessResponse("any", PRODUCTION_MARKUP));
+
+    const err = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "hi" }],
+      [WRITE_TOOL],
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(AllRoutesFailedError);
+    expect(err.failures.length).toBeGreaterThan(0);
+    expect(err.failures.every((f: { class: string }) => f.class === "tool_call_parse_failed")).toBe(true);
+    // No tool executed and no markup was returned as text — the error is
+    // the truthful terminal state, not a fake completion.
+    expect(err.userMessage).toMatch(/all currently available AI routes/i);
+  });
+
+  it("classifies markup on the Gemini adapter the same way", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch.mockResolvedValue(makeGeminiSuccessResponse(PRODUCTION_MARKUP));
+
+    const err = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "hi" }],
+      [WRITE_TOOL],
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(AllRoutesFailedError);
+    expect(err.failures[0].class).toBe("tool_call_parse_failed");
+  });
+
+  it("does not flag prose that merely quotes tool markup", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValue(
+      makeSuccessResponse(
+        "any",
+        "Models sometimes emit `<tool_call>example</tool_call>` instead of structured calls — yours is fine.",
+      ),
+    );
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(result.text).toContain("<tool_call>");
+    expect(result.toolCalls).toHaveLength(0);
+  });
+});
+
 describe("callLLMWithTools — deadline and abort", () => {
   it("does not start any provider call when the shared deadline is already exhausted", async () => {
     vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
