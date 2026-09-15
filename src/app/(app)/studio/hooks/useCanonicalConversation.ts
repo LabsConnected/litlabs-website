@@ -14,7 +14,7 @@ import {
   type MessageExecution,
 } from "../stores/useStudioAgentStore";
 import { useStudioModelStore } from "../stores/useStudioModelStore";
-import type { StudioTool } from "../components/StudioSidebar";
+import type { StudioTool } from "../lib/studio-destinations";
 import type { InspectorTab } from "../lib/studio-destinations";
 import type { AgentSlug, Conversation, ConversationMessage } from "@/lib/studio/types";
 import {

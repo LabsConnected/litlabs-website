@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 
 import { useState } from "react";
 import {
@@ -106,10 +107,14 @@ export function OutputPanel({
           <div className="flex h-full flex-col items-center justify-center gap-2">
             {artifact.type === "image" ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img
+              <Image
                 src={artifact.url}
                 alt={artifact.title}
-                className="max-h-full w-auto rounded-xl border border-neutral-800/60 object-contain"
+                width={1024}
+                height={768}
+                unoptimized={artifact.url.startsWith("blob:") || artifact.url.startsWith("data:")}
+                className="rounded-xl border border-neutral-800/60 object-contain"
+                style={{ maxHeight: "100%", width: "auto", height: "auto" }}
               />
             ) : (
               <video
@@ -128,10 +133,14 @@ export function OutputPanel({
             </div>
             {artifact.type === "image" ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img
+              <Image
                 src={artifact.url}
                 alt={artifact.title}
-                className="w-full rounded-xl border border-neutral-800/60 object-contain"
+                width={1024}
+                height={768}
+                unoptimized={artifact.url.startsWith("blob:") || artifact.url.startsWith("data:")}
+                className="rounded-xl border border-neutral-800/60 object-contain"
+                style={{ width: "100%", height: "auto" }}
               />
             ) : artifact.type === "video" ? (
               <video

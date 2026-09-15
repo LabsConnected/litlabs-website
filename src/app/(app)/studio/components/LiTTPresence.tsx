@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 
 export type LiTTState =
@@ -129,8 +130,7 @@ export default function LiTTPresence({
         }}
         aria-label={`LiTT ${state}`}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <Image
           src={imgSrc}
           alt="LiTT"
           width={dims.w}
@@ -156,8 +156,7 @@ export default function LiTTPresence({
         }}
         aria-label={`LiTT ${state}`}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <Image
           src="/brand/litt/litt-avatar-64.webp"
           alt="LiTT"
           width={dims.w - 8}
@@ -225,8 +224,7 @@ export default function LiTTPresence({
         className="litt-presence-figure relative grid place-items-center litt-float"
         style={{ width: dims.w, height: dims.h }}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <Image
           src={imgSrc}
           alt="LiTT mascot"
           width={dims.w}

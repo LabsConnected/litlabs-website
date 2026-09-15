@@ -10,16 +10,13 @@ import {
   type ProviderHealth,
 } from "../stores/useStudioModelStore";
 import {
-  ChevronDown,
   Eye,
   Rocket,
   CircleAlert,
   CircleCheck,
   CircleDot,
   Bell,
-  Bot,
-  PanelRightOpen,
-  Activity,
+  PanelBottom,
   MoreHorizontal,
   Plus,
   Terminal,
@@ -28,7 +25,6 @@ import {
   Download,
   Eraser,
   Settings,
-  Check,
 } from "lucide-react";
 import { OwnerTestModeIndicator } from "@/components/OwnerTestModeIndicator";
 import {
@@ -43,26 +39,32 @@ const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {
   locked: { color: "#6f7485", label: "Not configured" },
 };
 
+export type StudioTopBarMode = "plan" | "act" | "auto";
+export type StudioTopBarDockTab = "activity" | "files" | "terminal" | "inspector" | "media";
+
+const MODE_META: { id: StudioTopBarMode; label: string; desc: string; color: string; tint: string; border: string }[] = [
+  { id: "plan", label: "PLAN", desc: "Inspect and explain; do not change files", color: "#3b82f6", tint: "rgba(59,130,246,0.12)", border: "rgba(59,130,246,0.35)" },
+  { id: "act", label: "ACT", desc: "Make changes; approvals may be required", color: "#8b5cf6", tint: "rgba(139,92,246,0.12)", border: "rgba(139,92,246,0.35)" },
+  { id: "auto", label: "AUTO", desc: "LiTT chooses when to plan and when to act", color: "#22d3ee", tint: "rgba(34,211,238,0.10)", border: "rgba(34,211,238,0.32)" },
+];
+
 /**
- * CommandStudioHeader — one compact header (~46px).
+ * CommandStudioHeader — the single top command bar (52px).
  *
- * Replaces the stacked permanent rows (AutonomicLoopBanner + StudioTopBar).
- * Everything that used to be a permanent status chip — provider connections,
- * selected model, fallback, repository, PTY, write permission, pipeline
- * health, wallet, environment — collapses into a single Workspace Status
- * popover triggered by the status pill on the left.
+ * One bar owns: brand + project switcher · segmented PLAN/ACT/AUTO ·
+ * truthful agent-status pill (idle / working / approval needed) · preview
+ * quick action · dock toggle · overflow. The old 15-control header, the
+ * permanent mode-description strip, and the separate Activity/Tools/
+ * Terminal/Inspector buttons are gone — secondary surfaces live in the
+ * dock. Visual redesign only: every behavior is preserved.
  *
  * No fake readiness or health is ever displayed.
  */
 export default function CommandStudioHeader({
-  branch,
   onPreviewAction,
-  onOpenActivityAction,
-  activityVisible = false,
-  onOpenTerminalAction,
-  onOpenInspectorAction,
-  onOpenToolsAction,
-  toolsVisible = false,
+  onToggleDockAction,
+  onOpenDockTabAction,
+  dockOpen = false,
   onProjectSelectAction,
   onCreateProjectAction,
   onDeleteProjectAction,
@@ -78,24 +80,16 @@ export default function CommandStudioHeader({
   mutationActionsAllowed = false,
   capabilities,
   busy = false,
+  approvalPending = false,
   executionMode = "auto",
   onExecutionModeChange,
-  projectReady,
 }: {
-  projectReady?: boolean;
-  branch?: string;
   onPreviewAction?: () => void;
-  /** Opens LiTT -> Live (execution activity). This is an OPEN action,
-   *  not a toggle — clicking it always ensures Live is visible. */
-  onOpenActivityAction?: () => void;
-  /** Truthful: LiTT -> Live is actually visible right now (expanded on
-   *  desktop/laptop, or the mobile sheet open, AND the Live tab active).
-   *  Used only for styling — it does not gate the click handler. */
-  activityVisible?: boolean;
-  onOpenTerminalAction?: () => void;
-  onOpenInspectorAction?: () => void;
-  onOpenToolsAction?: () => void;
-  toolsVisible?: boolean;
+  /** Toggles the bottom dock (Activity/Files/Terminal/Inspector/Media). */
+  onToggleDockAction?: () => void;
+  /** Opens the dock on a specific tab (used by the status popover + overflow menu). */
+  onOpenDockTabAction?: (tab: StudioTopBarDockTab) => void;
+  dockOpen?: boolean;
   onProjectSelectAction?: (projectId: string) => void;
   /** Creates a new blank project (picker "+ New project" entry). */
   onCreateProjectAction?: () => void;
@@ -118,9 +112,11 @@ export default function CommandStudioHeader({
   capabilities: import("../hooks/useConnectionSummary").ConnectionCapabilities;
   /** True while an agent/conversation turn is in flight. */
   busy?: boolean;
-  /** Execution mode — shown as AUTO ▾ dropdown in the top bar. */
-  executionMode?: "plan" | "act" | "auto";
-  onExecutionModeChange?: (mode: "plan" | "act" | "auto") => void;
+  /** True while an approval gate is waiting on the user. */
+  approvalPending?: boolean;
+  /** Execution mode — shown as a segmented PLAN/ACT/AUTO control. */
+  executionMode?: StudioTopBarMode;
+  onExecutionModeChange?: (mode: StudioTopBarMode) => void;
 }) {
   const { balance, isLoading: walletLoading } = useWallet();
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
@@ -129,14 +125,11 @@ export default function CommandStudioHeader({
 
   const [statusOpen, setStatusOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
-  const [modeOpen, setModeOpen] = useState(false);
   const [notifCount, setNotifCount] = useState<number | null>(null);
   const statusTriggerRef = useRef<HTMLButtonElement>(null);
   const overflowTriggerRef = useRef<HTMLButtonElement>(null);
-  const modeTriggerRef = useRef<HTMLButtonElement>(null);
   const [statusRect, setStatusRect] = useState<DOMRect | null>(null);
   const [overflowRect, setOverflowRect] = useState<DOMRect | null>(null);
-  const [modeRect, setModeRect] = useState<DOMRect | null>(null);
 
   const updateRect = useCallback(() => {
     if (statusTriggerRef.current) {
@@ -144,9 +137,6 @@ export default function CommandStudioHeader({
     }
     if (overflowTriggerRef.current) {
       setOverflowRect(overflowTriggerRef.current.getBoundingClientRect());
-    }
-    if (modeTriggerRef.current) {
-      setModeRect(modeTriggerRef.current.getBoundingClientRect());
     }
   }, []);
 
@@ -169,7 +159,7 @@ export default function CommandStudioHeader({
   }, []);
 
   useEffect(() => {
-    if (!statusOpen && !overflowOpen && !modeOpen) return;
+    if (!statusOpen && !overflowOpen) return;
     updateRect();
     window.addEventListener("scroll", updateRect, true);
     window.addEventListener("resize", updateRect);
@@ -177,7 +167,7 @@ export default function CommandStudioHeader({
       window.removeEventListener("scroll", updateRect, true);
       window.removeEventListener("resize", updateRect);
     };
-  }, [statusOpen, overflowOpen, modeOpen, updateRect]);
+  }, [statusOpen, overflowOpen, updateRect]);
 
   const writesAllowed = capabilities.writeAccess;
   const modelHealth = providerHealth[selectedModel.provider]
@@ -200,34 +190,57 @@ export default function CommandStudioHeader({
               ? "Runtime verified"
               : "Runtime verified · provider degraded";
   const statusColor = statusLabel === "Runtime verified"
-    ? "var(--litt-primary)"
+    ? "#22d3ee"
     : runtimeLoading || modelHealth === undefined
       ? "#e3b341"
       : runtime.phase === "error" || runtime.phase === "unauthenticated" || modelHealth === "unavailable"
         ? "#ef4444"
         : "#e3b341";
 
+  // Status pill: approval gates and agent work take precedence over the
+  // ambient runtime label — both are truthful, derived from live state.
+  const pill = approvalPending
+    ? { label: "Approval needed", short: "Approval", color: "#e3b341", pulse: true }
+    : busy
+      ? { label: "Agent working", short: "Working", color: "#22d3ee", pulse: true }
+      : {
+          label: statusLabel,
+          short: statusLabel === "Runtime verified" ? "Ready"
+            : statusLabel === "Runtime verified · provider degraded" ? "Degraded"
+            : statusLabel === "Runtime status checking" ? "Checking"
+            : statusLabel === "No project selected" ? "No project"
+            : statusLabel === "AI provider unavailable" ? "No AI"
+            : statusLabel,
+          color: statusColor,
+          pulse: false,
+        };
+
   return (
-    <>
     <header
-      className="glass-shell flex shrink-0 items-center gap-1.5 sm:gap-2 overflow-x-auto whitespace-nowrap border-b px-3 sm:px-4 scrollbar-hide md:overflow-hidden"
+      className="flex h-[52px] shrink-0 items-center gap-1.5 overflow-hidden whitespace-nowrap border-b px-3 sm:gap-2 sm:px-4"
       style={{
-        height: "var(--studio-header-h)",
-        backgroundColor: "rgba(13,9,22,0.88)",
-        borderColor: "rgba(155,77,255,0.12)",
-        boxShadow: "0 4px 20px rgba(0,0,0,0.3), inset 0 1px 0 rgba(155,77,255,0.04)",
+        backgroundColor: "#0d0916",
+        borderColor: "rgba(255,255,255,0.07)",
+        boxShadow: "0 4px 20px rgba(0,0,0,0.35)",
       }}
       data-testid="studio-header"
     >
-      <div className="flex shrink-0 items-center gap-2 pr-1 sm:pr-2" data-testid="studio-brand">
+      {/* Brand */}
+      <div className="flex shrink-0 items-center gap-2 pr-1" data-testid="studio-brand">
         <div
           className="grid h-7 w-7 place-items-center rounded-lg"
-          style={{ background: "linear-gradient(135deg, rgba(155,77,255,0.3), rgba(114,242,56,0.12))", border: "1px solid rgba(155,77,255,0.35)" }}
+          style={{
+            background: "linear-gradient(135deg, rgba(34,211,238,0.25), rgba(139,92,246,0.18))",
+            border: "1px solid rgba(34,211,238,0.35)",
+            boxShadow: "0 0 12px rgba(34,211,238,0.25)",
+          }}
           aria-hidden="true"
         >
-          <span className="text-[11px] font-black" style={{ color: "var(--litt-primary)" }}>L</span>
+          <span className="text-[11px] font-black" style={{ color: "#22d3ee" }}>L</span>
         </div>
-        <span className="hidden text-[12px] font-black tracking-tight text-white sm:inline">LiTT <span style={{ color: "var(--litt-primary)" }}>Studio</span></span>
+        <span className="hidden text-[13px] font-bold tracking-tight text-white md:inline">
+          LiTT <span style={{ color: "#22d3ee" }}>Studio</span>
+        </span>
       </div>
 
       <StudioProjectPicker
@@ -238,117 +251,127 @@ export default function CommandStudioHeader({
         onDeleteProject={(projectId) => onDeleteProjectAction?.(projectId)}
       />
 
-      {/* Workspace status dot — compact indicator only, no popover.
-          The full status detail lives in the overflow menu (⋯). */}
-      <span
-        className="hidden sm:flex shrink-0 items-center gap-1"
-        title={statusLabel}
-        aria-label={statusLabel}
+      {/* Agent-status pill — truthful: working / approval needed / ambient runtime.
+          Clicking opens the full workspace-status popover. */}
+      <button
+        ref={statusTriggerRef}
+        type="button"
+        onClick={() => setStatusOpen((v) => !v)}
+        className="flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-all hover:bg-white/5 active:scale-95"
+        style={{
+          borderColor: `${pill.color}45`,
+          backgroundColor: `${pill.color}0f`,
+          color: pill.color,
+        }}
+        aria-label={pill.label}
+        aria-expanded={statusOpen}
+        title={pill.label}
+        data-testid="agent-status-pill"
       >
         <span
-          className="h-1.5 w-1.5 rounded-full"
+          className={`h-1.5 w-1.5 rounded-full ${pill.pulse ? "animate-pulse" : ""}`}
           aria-hidden
-          style={{ backgroundColor: statusColor, boxShadow: `0 0 4px ${statusColor}` }}
+          style={{ backgroundColor: pill.color, boxShadow: `0 0 6px ${pill.color}` }}
         />
-      </span>
-
-      {/* Execution mode dropdown — AUTO ▾ / PLAN ▾ / ACT ▾
-          Moved from the composer to the top bar so it's always visible. */}
-      {onExecutionModeChange && (
-        <button
-          ref={modeTriggerRef}
-          type="button"
-          onClick={() => setModeOpen((v) => !v)}
-          className="glass-chip flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-[11px] font-black transition-all hover:bg-white/5 active:scale-95"
-          style={{
-            color: executionMode === "auto"
-              ? "var(--litt-primary)"
-              : executionMode === "plan"
-                ? "#3b82f6"
-                : "var(--spark-primary)",
-            backgroundColor: executionMode === "auto"
-              ? "rgba(114,242,56,0.08)"
-              : executionMode === "plan"
-                ? "rgba(59,130,246,0.10)"
-                : "rgba(155,77,255,0.10)",
-            borderColor: executionMode === "auto"
-              ? "rgba(114,242,56,0.28)"
-              : executionMode === "plan"
-                ? "rgba(59,130,246,0.28)"
-                : "rgba(155,77,255,0.28)",
-          }}
-          aria-label={`Execution mode: ${executionMode.toUpperCase()}`}
-          aria-expanded={Boolean(modeOpen)}
-          title={
-            executionMode === "auto"
-              ? "Auto — work autonomously until complete"
-              : executionMode === "plan"
-                ? "Plan — inspect and plan without making changes"
-                : "Act — make changes and run commands"
-          }
-          data-testid="execution-mode-trigger"
-        >
-          <span className="pointer-events-none">{executionMode.toUpperCase()}</span>
-          <ChevronDown size={10} className="pointer-events-none" style={{ color: "var(--text-muted)" }} />
-        </button>
-      )}
-      {modeOpen && modeRect && onExecutionModeChange &&
+        <span className="hidden sm:inline">{pill.short}</span>
+      </button>
+      {statusOpen && statusRect &&
         createPortal(
-          <ExecutionModePopover
-            rect={modeRect}
-            currentMode={executionMode}
-            onSelect={(mode) => { onExecutionModeChange(mode); setModeOpen(false); }}
-            onClose={() => setModeOpen(false)}
+          <WorkspaceStatusPopover
+            rect={statusRect}
+            onClose={() => setStatusOpen(false)}
+            onOpenTerminalAction={() => onOpenDockTabAction?.("terminal")}
+            providerCount={providerCount}
+            repoConnected={capabilities.repository === "connected"}
+            repoName={capabilities.repositoryName}
+            ptyState={capabilities.terminalStatus}
+            writesAllowed={writesAllowed}
+            modelLabel={selectedModel.label}
+            modelHealth={modelHealth}
+            fallbackNotice={fallbackNotice}
+            walletBalance={walletLoading ? null : balance}
+            connectionSummary={capabilities.connectionSummary}
           />,
           document.body,
         )}
 
-      {/* Agent-active indicator — truthful: only while a turn is in flight */}
-      {busy && (
-        <span
-          className="hidden sm:inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-bold"
-          style={{
-            borderColor: "rgba(167,139,250,0.3)",
-            color: "#a78bfa",
-            backgroundColor: "rgba(167,139,250,0.08)",
-          }}
-          title="An agent is working"
-          data-testid="agent-active-pill"
+      {/* Execution mode — segmented PLAN / ACT / AUTO. Always visible. */}
+      {onExecutionModeChange && (
+        <div
+          className="flex shrink-0 items-center gap-0.5 rounded-lg border p-0.5"
+          style={{ borderColor: "rgba(255,255,255,0.07)", backgroundColor: "rgba(255,255,255,0.02)" }}
+          role="group"
+          aria-label="Execution mode"
+          data-testid="execution-mode-segmented"
         >
-          <Bot size={10} className="pointer-events-none" />
-          <span className="pointer-events-none">Agent working</span>
-          <span
-            className="h-1.5 w-1.5 rounded-full animate-pulse"
-            aria-hidden
-            style={{ backgroundColor: "#a78bfa" }}
-          />
-        </span>
+          {MODE_META.map((m) => {
+            const isActive = m.id === executionMode;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => onExecutionModeChange(m.id)}
+                className="rounded-md px-2 py-1 text-[11px] font-bold transition-all active:scale-95"
+                style={{
+                  color: isActive ? m.color : "var(--text-muted)",
+                  backgroundColor: isActive ? m.tint : "transparent",
+                  boxShadow: isActive ? `inset 0 0 0 1px ${m.border}` : "none",
+                }}
+                aria-pressed={isActive}
+                title={`${m.label} — ${m.desc}`}
+                data-testid={`execution-mode-${m.id}`}
+              >
+                {m.label}
+              </button>
+            );
+          })}
+        </div>
       )}
 
       <div className="flex-1" />
 
-      {/* Conversation controls — always visible instead of being hidden in slash commands. */}
+      {/* Preview quick action — only when the runtime is actually verified. */}
+      {mutationActionsAllowed && runtimeReady && (
+        <button
+          type="button"
+          onClick={onPreviewAction}
+          className="hidden shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-all active:scale-95 sm:flex"
+          style={{
+            background: "linear-gradient(135deg, rgba(34,211,238,0.9), rgba(59,130,246,0.9))",
+            color: "#04121a",
+            boxShadow: "0 0 14px rgba(34,211,238,0.35)",
+          }}
+          title="Open the live preview"
+          aria-label="Preview"
+          data-testid="preview-quick-action"
+        >
+          <Eye size={12} className="pointer-events-none" />
+          <span className="pointer-events-none">Preview</span>
+        </button>
+      )}
+
+      {/* New chat */}
       <button
         type="button"
         onClick={onNewChatAction}
         disabled={busy}
-        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+        className="flex shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[11px] font-bold transition-all hover:bg-white/5 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
         style={{
-          borderColor: "rgba(114,242,56,0.28)",
-          color: "var(--litt-primary)",
-          backgroundColor: "rgba(114,242,56,0.06)",
+          borderColor: "rgba(34,211,238,0.30)",
+          color: "#22d3ee",
+          backgroundColor: "rgba(34,211,238,0.06)",
         }}
         aria-label="New chat"
         title="Start a new chat"
       >
-        <Plus size={12} aria-hidden />
-        <span className="hidden sm:inline">New Chat</span>
+        <Plus size={13} aria-hidden />
+        <span className="hidden lg:inline">New Chat</span>
       </button>
 
       {/* Notifications — wired to /api/notifications/count */}
       <Link
         href="/dashboard"
-        className="relative hidden sm:grid min-h-9 min-w-9 shrink-0 place-items-center rounded-md transition-all hover:bg-white/10"
+        className="relative hidden min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition-all hover:bg-white/10 sm:grid"
         style={{ color: "var(--text-secondary)" }}
         aria-label={`Notifications${notifCount ? ` (${notifCount} unread)` : ""}`}
         title="Notifications"
@@ -357,93 +380,44 @@ export default function CommandStudioHeader({
         {notifCount ? (
           <span
             className="absolute -right-0.5 -top-0.5 grid h-3.5 min-w-3.5 place-items-center rounded-full px-1 text-[8px] font-black"
-            style={{ backgroundColor: "#ff00a0", color: "#fff" }}
+            style={{ backgroundColor: "#ef4444", color: "#fff" }}
           >
             {notifCount > 99 ? "99+" : notifCount}
           </span>
         ) : null}
       </Link>
 
-      {mutationActionsAllowed && runtimeReady && (
-        <button
-          type="button"
-          onClick={onPreviewAction}
-          className="hidden sm:flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1 text-[10px] font-black transition-all active:scale-95"
-          style={{
-            background: "linear-gradient(135deg, var(--spark-primary), var(--violet-accent))",
-            color: "#fff",
-            border: "1px solid rgba(155,77,255,0.4)",
-            boxShadow: "var(--studio-glow-purple)",
-          }}
-          title="Open the live preview"
-          aria-label="Preview"
-        >
-          <Eye size={11} className="pointer-events-none" />
-          <span className="pointer-events-none">Preview</span>
-        </button>
-      )}
-
+      {/* Dock toggle — the single entry point to Activity/Files/Terminal/Inspector/Media */}
       <button
         type="button"
-        onClick={onOpenToolsAction ?? onOpenInspectorAction}
-        className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-md border px-2 text-[10px] font-bold transition-all hover:bg-white/5 active:scale-95"
+        onClick={onToggleDockAction}
+        className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-bold transition-all hover:bg-white/5 active:scale-95"
         style={{
-          borderColor: toolsVisible ? "rgba(155,77,255,0.45)" : "var(--studio-border)",
-          color: toolsVisible ? "#c4b5fd" : "var(--text-secondary)",
-          backgroundColor: toolsVisible ? "rgba(155,77,255,0.12)" : "var(--studio-surface)",
+          borderColor: dockOpen ? "rgba(34,211,238,0.45)" : "rgba(255,255,255,0.07)",
+          color: dockOpen ? "#22d3ee" : "var(--text-secondary)",
+          backgroundColor: dockOpen ? "rgba(34,211,238,0.08)" : "transparent",
         }}
-        title="Open advanced tools"
-        aria-label={toolsVisible ? "Close advanced tools" : "Open advanced tools"}
-        aria-pressed={toolsVisible}
-        data-testid="studio-tools-toggle"
+        title="Toggle the dock — activity, files, terminal, inspector, media"
+        aria-label={dockOpen ? "Close dock" : "Open dock"}
+        aria-pressed={dockOpen}
+        data-testid="studio-dock-toggle"
       >
-        <PanelRightOpen size={13} className="pointer-events-none" />
-        <span className="hidden lg:inline">Tools</span>
+        <PanelBottom size={14} className="pointer-events-none" />
+        <span className="hidden lg:inline">Dock</span>
       </button>
 
-      {/* Activity — opens LiTT -> Live. This is an OPEN action: clicking
-          it always ensures Live is visible (expands LiTT if collapsed
-          on desktop/laptop, or opens the mobile sheet on mobile). It
-          does not collapse/hide LiTT — use the LiTT panel's own
-          collapse control for that. */}
-      <button
-        type="button"
-        onClick={onOpenActivityAction}
-        aria-label="Open Activity"
-        title="Open Activity"
-        data-testid="activity-toggle"
-        data-active={activityVisible}
-        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5 active:scale-95"
-        style={{
-          borderColor: activityVisible
-            ? "rgba(155,77,255,.45)"
-            : "var(--studio-border)",
-          backgroundColor: activityVisible
-            ? "rgba(155,77,255,.12)"
-            : "var(--studio-surface)",
-          color: activityVisible
-            ? "var(--spark-primary)"
-            : "var(--text-secondary)",
-        }}
-      >
-        <Activity size={13} className="pointer-events-none" />
-        <span className="hidden xl:inline pointer-events-none">
-          Activity
-        </span>
-      </button>
-
-      {/* Overflow menu — Preview + Deploy + Settings collapsed here */}
+      {/* Overflow — conversation actions, deploy, terminal, settings */}
       <button
         ref={overflowTriggerRef}
         type="button"
         onClick={() => setOverflowOpen((v) => !v)}
-        className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-md transition-all hover:bg-white/10"
+        className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition-all hover:bg-white/10"
         style={{ color: "var(--text-muted)" }}
         aria-label="More actions"
         aria-expanded={Boolean(overflowOpen)}
         title="More"
       >
-        <MoreHorizontal size={14} />
+        <MoreHorizontal size={15} />
       </button>
       {overflowOpen && overflowRect &&
         createPortal(
@@ -457,7 +431,7 @@ export default function CommandStudioHeader({
             onDeleteChatAction={onDeleteChatAction}
             onRenameChatAction={onRenameChatAction}
             onExportChatAction={onExportChatAction}
-            onOpenTerminalAction={onOpenTerminalAction}
+            onOpenDockTabAction={onOpenDockTabAction}
             hasConversation={Boolean(hasConversation)}
             previewDisabled={!runtimeReady}
             busy={busy}
@@ -467,35 +441,9 @@ export default function CommandStudioHeader({
         )}
 
       {/* Owner / test-role selector — inline in the header action cluster.
-          Self-hides for non-owners, so it adds zero clutter for regular users.
-          Treated as session/account context (not a chat action). */}
+          Self-hides for non-owners, so it adds zero clutter for regular users. */}
       <OwnerTestModeIndicator placement="inline" />
-
-      {/* Clerk UserButton removed — account/profile/settings are now accessed
-          through the unified AppShell sidebar (Wallet, Settings, Profile). */}
     </header>
-      <div
-        className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-0.5 border-b px-3 py-1 text-[9px] leading-tight"
-        style={{
-          borderColor: "rgba(155,77,255,0.1)",
-          backgroundColor: "rgba(13,9,22,0.72)",
-          color: "var(--text-muted)",
-        }}
-        data-testid="execution-mode-guide"
-        role="note"
-        aria-label="Execution mode guidance"
-      >
-        <span data-active={executionMode === "plan"} style={{ color: executionMode === "plan" ? "#60a5fa" : "var(--text-muted)" }}>
-          <strong>PLAN:</strong> inspect and explain; do not change files
-        </span>
-        <span data-active={executionMode === "act"} style={{ color: executionMode === "act" ? "var(--spark-primary)" : "var(--text-muted)" }}>
-          <strong>ACT:</strong> make changes; approvals may be required
-        </span>
-        <span data-active={executionMode === "auto"} style={{ color: executionMode === "auto" ? "var(--litt-primary)" : "var(--text-muted)" }}>
-          <strong>AUTO:</strong> LiTT chooses when to plan and when to act
-        </span>
-      </div>
-    </>
   );
 }
 
@@ -514,19 +462,19 @@ function StatusRow({
   detail?: string;
 }) {
   const Icon = ok ? CircleCheck : warn ? CircleAlert : CircleDot;
-  const color = ok ? "var(--litt-primary)" : warn ? "#e3b341" : "var(--text-muted)";
+  const color = ok ? "#22d3ee" : warn ? "#e3b341" : "var(--text-muted)";
   return (
     <div className="flex items-start gap-2.5 px-3 py-2">
       <Icon size={13} className="mt-0.5 shrink-0" style={{ color }} />
       <div className="min-w-0 flex-1">
-        <div className="text-[10px] font-black uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+        <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
           {label}
         </div>
-        <div className="text-[11px] font-bold" style={{ color: "var(--text-primary)" }}>
+        <div className="text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>
           {value}
         </div>
         {detail && (
-          <div className="text-[10px] leading-tight" style={{ color: "var(--text-secondary)" }}>
+          <div className="text-[11px] leading-tight" style={{ color: "var(--text-secondary)" }}>
             {detail}
           </div>
         )}
@@ -596,27 +544,27 @@ function WorkspaceStatusPopover({
       style={{
         left,
         top,
-        backgroundColor: "var(--studio-elevated)",
-        borderColor: "var(--studio-border-strong)",
+        backgroundColor: "rgba(24,18,38,0.96)",
+        borderColor: "rgba(255,255,255,0.13)",
       }}
     >
       <div
         className="flex items-center justify-between border-b px-3 py-2"
-        style={{ borderColor: "var(--studio-border)" }}
+        style={{ borderColor: "rgba(255,255,255,0.07)" }}
       >
-        <span className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: "var(--text-secondary)" }}>
+        <span className="text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--text-secondary)" }}>
           Workspace status
         </span>
         <span
           className="h-1.5 w-1.5 rounded-full"
           style={{
-            backgroundColor: providerCount ? "var(--litt-primary)" : "var(--text-muted)",
-            boxShadow: providerCount ? `0 0 4px var(--litt-primary)` : "none",
+            backgroundColor: providerCount ? "#22d3ee" : "var(--text-muted)",
+            boxShadow: providerCount ? "0 0 4px #22d3ee" : "none",
           }}
           aria-hidden
         />
       </div>
-      <div className="max-h-[60dvh] overflow-y-auto divide-y" style={{ borderColor: "var(--studio-border)" }}>
+      <div className="max-h-[60dvh] overflow-y-auto divide-y" style={{ borderColor: "rgba(255,255,255,0.07)" }}>
         <StatusRow
           label="AI Providers"
           value={providerCount ? `${providerCount} connected` : "None connected"}
@@ -643,7 +591,7 @@ function WorkspaceStatusPopover({
           value={ptyLabel}
           ok={ptyState === "available" || ptyState === "idle"}
           warn={ptyState === "connecting"}
-          detail={ptyState === "available" ? "Ready for command execution" : ptyState === "idle" ? "Server online — open terminal to start a session" : "Open the terminal drawer to connect"}
+          detail={ptyState === "available" ? "Ready for command execution" : ptyState === "idle" ? "Server online — open the terminal in the dock to connect" : "Open the terminal in the dock to connect"}
         />
         {ptyState !== "available" && onOpenTerminalAction && (
           <div className="px-3 py-2">
@@ -653,11 +601,11 @@ function WorkspaceStatusPopover({
                 onClose();
                 onOpenTerminalAction();
               }}
-              className="flex w-full items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[10px] font-bold transition hover:bg-white/5"
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition hover:bg-white/5"
               style={{
-                borderColor: "rgba(114,242,56,0.28)",
-                color: "var(--litt-primary)",
-                backgroundColor: "rgba(114,242,56,0.06)",
+                borderColor: "rgba(34,211,238,0.30)",
+                color: "#22d3ee",
+                backgroundColor: "rgba(34,211,238,0.06)",
               }}
             >
               <Terminal size={12} aria-hidden />
@@ -688,84 +636,7 @@ function WorkspaceStatusPopover({
   );
 }
 
-/* ── Execution mode popover ────────────────────────────────────── */
-function ExecutionModePopover({
-  rect,
-  currentMode,
-  onSelect,
-  onClose,
-}: {
-  rect: DOMRect;
-  currentMode: "plan" | "act" | "auto";
-  onSelect: (mode: "plan" | "act" | "auto") => void;
-  onClose: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
-
-  const modes: { id: "plan" | "act" | "auto"; label: string; desc: string; color: string }[] = [
-    { id: "auto", label: "AUTO", desc: "Work autonomously until complete", color: "var(--litt-primary)" },
-    { id: "plan", label: "PLAN", desc: "Inspect and plan without making changes", color: "#3b82f6" },
-    { id: "act", label: "ACT", desc: "Make changes and run commands", color: "var(--spark-primary)" },
-  ];
-
-  const left = Math.min(rect.left, window.innerWidth - 220);
-  const top = rect.bottom + 6;
-
-  return (
-    <div
-      ref={ref}
-      role="dialog"
-      aria-label="Execution mode"
-      className="fixed z-[200] w-52 overflow-hidden rounded-xl border shadow-2xl"
-      style={{
-        left,
-        top,
-        backgroundColor: "var(--studio-elevated)",
-        borderColor: "var(--studio-border-strong)",
-      }}
-    >
-      <div className="py-1">
-        {modes.map((m) => {
-          const isActive = currentMode === m.id;
-          return (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => onSelect(m.id)}
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-white/5"
-              style={{ backgroundColor: isActive ? "rgba(255,255,255,0.03)" : "transparent" }}
-            >
-              {isActive && <Check size={12} className="shrink-0" style={{ color: m.color }} />}
-              {!isActive && <span className="w-3 shrink-0" />}
-              <div className="min-w-0">
-                <div className="text-[11px] font-black" style={{ color: isActive ? m.color : "var(--text-primary)" }}>
-                  {m.label}
-                </div>
-                <div className="text-[10px] leading-tight" style={{ color: "var(--text-muted)" }}>
-                  {m.desc}
-                </div>
-              </div>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-/* ── Overflow menu — Conversation actions + Preview + Settings ──── */
+/* ── Overflow menu — Conversation actions + Preview + Deploy + Dock ──── */
 function OverflowMenu({
   rect,
   onClose,
@@ -776,7 +647,7 @@ function OverflowMenu({
   onDeleteChatAction,
   onRenameChatAction,
   onExportChatAction,
-  onOpenTerminalAction,
+  onOpenDockTabAction,
   hasConversation,
   previewDisabled,
   busy,
@@ -791,7 +662,7 @@ function OverflowMenu({
   onDeleteChatAction?: () => void;
   onRenameChatAction?: () => void;
   onExportChatAction?: () => void;
-  onOpenTerminalAction?: () => void;
+  onOpenDockTabAction?: (tab: StudioTopBarDockTab) => void;
   hasConversation: boolean;
   previewDisabled: boolean;
   busy: boolean;
@@ -824,28 +695,28 @@ function OverflowMenu({
       style={{
         top,
         right,
-        backgroundColor: "var(--studio-elevated)",
-        borderColor: "var(--studio-border-strong)",
+        backgroundColor: "rgba(24,18,38,0.96)",
+        borderColor: "rgba(255,255,255,0.13)",
       }}
     >
       {/* Section: Conversation */}
-      <div className="px-3 pt-2 pb-1 text-[9px] font-black uppercase tracking-[.16em]" style={{ color: "var(--text-muted)" }}>
+      <div className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--text-muted)" }}>
         Conversation
       </div>
       <button
         type="button"
         onClick={() => { onClose(); onNewChatAction?.(); }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5"
         style={{ color: "var(--text-primary)" }}
       >
-        <Plus size={13} className="pointer-events-none" style={{ color: "var(--litt-primary)" }} />
+        <Plus size={13} className="pointer-events-none" style={{ color: "#22d3ee" }} />
         New Chat
       </button>
       <button
         type="button"
         disabled={disabled}
         onClick={() => { onClose(); onRenameChatAction?.(); }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
         style={{ color: "var(--text-primary)" }}
       >
         <Edit2 size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
@@ -855,13 +726,13 @@ function OverflowMenu({
         type="button"
         disabled={disabled}
         onClick={() => { onClose(); onExportChatAction?.(); }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
         style={{ color: "var(--text-primary)" }}
       >
         <Download size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
         Export
       </button>
-      <div className="h-px mx-3" style={{ backgroundColor: "var(--studio-border)" }} />
+      <div className="h-px mx-3" style={{ backgroundColor: "rgba(255,255,255,0.07)" }} />
       <button
         type="button"
         disabled={disabled}
@@ -870,7 +741,7 @@ function OverflowMenu({
           onClose();
           onClearChatAction?.();
         }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
         style={{ color: "var(--text-primary)" }}
       >
         <Eraser size={13} className="pointer-events-none" style={{ color: "#e3b341" }} />
@@ -884,7 +755,7 @@ function OverflowMenu({
           onClose();
           onDeleteChatAction?.();
         }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-30"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
         style={{ color: "#f87171" }}
       >
         <Trash2 size={13} className="pointer-events-none" />
@@ -892,15 +763,15 @@ function OverflowMenu({
       </button>
 
       {/* Section: Workspace */}
-      <div className="h-px" style={{ backgroundColor: "var(--studio-border)" }} />
-      <div className="px-3 pt-2 pb-1 text-[9px] font-black uppercase tracking-[.16em]" style={{ color: "var(--text-muted)" }}>
+      <div className="h-px" style={{ backgroundColor: "rgba(255,255,255,0.07)" }} />
+      <div className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--text-muted)" }}>
         Workspace
       </div>
       <button
         type="button"
         disabled={previewDisabled}
         onClick={() => { onClose(); onPreviewAction?.(); }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
         style={{ color: "var(--text-primary)" }}
       >
         <Eye size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
@@ -911,19 +782,19 @@ function OverflowMenu({
           type="button"
           disabled={disabled}
           onClick={() => { onClose(); onDeployAction(); }}
-          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
           style={{ color: "var(--text-primary)" }}
           title="Ask LiTT to deploy this project to a live public URL"
         >
-          <Rocket size={13} className="pointer-events-none" style={{ color: "var(--litt-primary)" }} />
+          <Rocket size={13} className="pointer-events-none" style={{ color: "#22d3ee" }} />
           Deploy…
         </button>
       )}
-      {onOpenTerminalAction && (
+      {onOpenDockTabAction && (
         <button
           type="button"
-          onClick={() => { onClose(); onOpenTerminalAction(); }}
-          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5"
+          onClick={() => { onClose(); onOpenDockTabAction("terminal"); }}
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5"
           style={{ color: "var(--text-primary)" }}
           aria-label="Terminal"
         >
@@ -931,11 +802,11 @@ function OverflowMenu({
           Terminal
         </button>
       )}
-      <div className="h-px" style={{ backgroundColor: "var(--studio-border)" }} />
+      <div className="h-px" style={{ backgroundColor: "rgba(255,255,255,0.07)" }} />
       <Link
         href={settingsHref}
         onClick={onClose}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5"
         style={{ color: "var(--text-primary)" }}
       >
         <Settings size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />

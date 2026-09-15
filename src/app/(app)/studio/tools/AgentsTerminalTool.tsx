@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import {
@@ -911,12 +912,14 @@ export default function AgentsTerminalTool() {
                         <div key={i}>{text}</div>
                       ))}
                       {line.imageUrl && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
+                        <Image
                           src={line.imageUrl}
                           alt="attachment"
-                          className="mt-2 max-h-32 rounded border inline-block"
-                          style={{ borderColor: T.borderColor + "30" }}
+                          width={256}
+                          height={128}
+                          unoptimized={line.imageUrl.startsWith("blob:") || line.imageUrl.startsWith("data:")}
+                          className="mt-2 rounded border inline-block"
+                          style={{ borderColor: T.borderColor + "30", maxHeight: "8rem", width: "auto", height: "auto" }}
                         />
                       )}
                     </div>
@@ -969,11 +972,14 @@ export default function AgentsTerminalTool() {
             <div className="px-3 pb-1">
               <div className="flex items-center gap-2 flex-wrap">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
+                <Image
                   src={attachedImageUrl}
                   alt="attached"
-                  className="h-12 rounded border"
-                  style={{ borderColor: T.borderColor + "30" }}
+                  width={96}
+                  height={48}
+                  unoptimized={attachedImageUrl.startsWith("blob:") || attachedImageUrl.startsWith("data:")}
+                  className="rounded border"
+                  style={{ borderColor: T.borderColor + "30", height: "3rem", width: "auto" }}
                 />
                 <button
                   onClick={() => setAttachedImageUrl("")}

@@ -13,6 +13,7 @@
  *   - Link to full retro arcade page
  */
 
+import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
@@ -272,12 +273,12 @@ export function RetroArcadeEmbedded() {
               >
                 <div className="relative aspect-3/4 overflow-hidden">
                   {coverUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
+                    <Image
                       src={coverUrl}
                       alt={`${game.title} cover art`}
-                      className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                      loading="lazy"
+                      fill
+                      sizes="(max-width: 640px) 100vw, 50vw"
+                      className="object-cover transition-transform duration-500 group-hover:scale-105"
                       onError={(e) => {
                         (e.target as HTMLImageElement).style.display = "none";
                       }}

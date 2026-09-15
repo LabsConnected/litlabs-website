@@ -1,4 +1,6 @@
 "use client";
+
+import Image from "next/image";
 import React, { useState, useCallback } from "react";
 import { useSelfHeal } from "@/hooks/useSelfHeal";
 
@@ -375,10 +377,14 @@ export default function NeuralImagingStudio() {
             {previewImage ? (
               <>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
+                <Image
                   src={previewImage}
                   alt="Generated"
-                  className="w-full h-full object-contain"
+                  width={1280}
+                  height={720}
+                  unoptimized={previewImage.startsWith("blob:") || previewImage.startsWith("data:")}
+                  className="object-contain"
+                  style={{ width: "100%", height: "100%" }}
                 />
               </>
             ) : (
@@ -406,10 +412,14 @@ export default function NeuralImagingStudio() {
                     className="aspect-square rounded-lg overflow-hidden border-2 border-transparent hover:border-orange-500 transition"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
+                    <Image
                       src={img.url}
                       alt={`Gen ${idx + 1}`}
-                      className="w-full h-full object-cover"
+                      width={256}
+                      height={256}
+                      unoptimized={img.url.startsWith("blob:") || img.url.startsWith("data:")}
+                      className="object-cover"
+                      style={{ width: "100%", height: "100%" }}
                     />
                   </button>
                 ))}

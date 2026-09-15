@@ -1,25 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   PanelRightClose,
   PanelRightOpen,
-  PanelBottomClose,
-  PanelBottomOpen,
   ClipboardList,
   GitPullRequest,
   Folder,
   Eye,
   CircleCheck,
   ShieldCheck,
-  Activity,
-  Terminal,
-  Music,
-  Maximize2,
-  Minimize2,
   Globe,
 } from "lucide-react";
-import type { InspectorTab, DrawerTab } from "../lib/studio-destinations";
+import type { InspectorTab } from "../lib/studio-destinations";
 import type { ConnectionCapabilities } from "../hooks/useConnectionSummary";
 import { describeSourceRows } from "../lib/source-rows";
 import type { ChatMessage } from "../stores/useStudioAgentStore";
@@ -153,12 +146,6 @@ const INSPECTOR_TABS: { id: InspectorTab; label: string; icon: typeof ClipboardL
   { id: "checks", label: "Checks", icon: CircleCheck },
   { id: "approvals", label: "Approvals", icon: ShieldCheck },
   { id: "browser", label: "Browser", icon: Globe },
-];
-
-const DRAWER_TABS: { id: DrawerTab; label: string; icon: typeof Activity }[] = [
-  { id: "activity", label: "Activity", icon: Activity },
-  { id: "terminal", label: "Terminal", icon: Terminal },
-  { id: "media", label: "Media", icon: Music },
 ];
 
 export interface StudioInspectorData {
@@ -480,265 +467,6 @@ export function StudioActivityPanel({
         <span>{messages.length} message{messages.length === 1 ? "" : "s"}</span>
       </div>
       <StudioActivityTimeline />
-    </div>
-  );
-}
-
-export function StudioDrawer({
-  open,
-  onToggle,
-  activeTab,
-  onTabChange,
-  children,
-}: {
-  open: boolean;
-  onToggle: () => void;
-  activeTab: DrawerTab;
-  onTabChange: (t: DrawerTab) => void;
-  children?: React.ReactNode;
-}) {
-  const COLLAPSED_HEIGHT = 44;
-  const DRAWER_MIN = 180;
-  const DRAWER_DEFAULT = 280;
-  const DRAWER_MAX_DVH = 65;
-  const STORAGE_KEY = "studio-terminal-height";
-  const OPEN_KEY = "studio-terminal-open";
-
-  type DrawerView = "collapsed" | "normal" | "maximized";
-  const [view, setView] = useState<DrawerView>(() => {
-    if (typeof window === "undefined") return "collapsed";
-    return sessionStorage.getItem(OPEN_KEY) === "true" ? "normal" : "collapsed";
-  });
-  const [drawerHeight, setDrawerHeight] = useState<number>(() => {
-    if (typeof window === "undefined") return DRAWER_DEFAULT;
-    const stored = sessionStorage.getItem(STORAGE_KEY);
-    const parsed = stored ? Number(stored) : NaN;
-    return Number.isFinite(parsed) && parsed >= DRAWER_MIN ? parsed : DRAWER_DEFAULT;
-  });
-
-  const draggingRef = useRef(false);
-  const startYRef = useRef(0);
-  const startHeightRef = useRef(0);
-
-  const clampHeight = useCallback((h: number) => {
-    const max = Math.round(window.innerHeight * (DRAWER_MAX_DVH / 100));
-    return Math.max(DRAWER_MIN, Math.min(max, h));
-  }, []);
-
-  // Sync open state with view
-  useEffect(() => {
-    if (open && view === "collapsed") setView("normal");
-    if (!open && view !== "collapsed") setView("collapsed");
-  }, [open, view]);
-
-  // Persist state
-  useEffect(() => {
-    try {
-      sessionStorage.setItem(OPEN_KEY, view !== "collapsed" ? "true" : "false");
-      if (view === "normal") sessionStorage.setItem(STORAGE_KEY, String(drawerHeight));
-    } catch { /* noop */ }
-  }, [view, drawerHeight]);
-
-  const handleToggle = useCallback(() => {
-    if (view === "collapsed") {
-      setView("normal");
-      onToggle();
-    } else {
-      setView("collapsed");
-      onToggle();
-    }
-  }, [view, onToggle]);
-
-  const handleMaximize = useCallback(() => {
-    setView((v) => (v === "maximized" ? "normal" : "maximized"));
-  }, []);
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      // Don't intercept if typing in an input/textarea/contentEditable
-      const target = e.target as HTMLElement | null;
-      if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT" || target?.isContentEditable) {
-        return;
-      }
-      // Don't intercept if xterm has focus
-      const activeEl = document.activeElement;
-      if (activeEl?.closest(".xterm")) return;
-
-      if ((e.ctrlKey || e.metaKey) && e.key === "`") {
-        e.preventDefault();
-        if (e.shiftKey) {
-          setView((v) => (v === "maximized" ? "normal" : "maximized"));
-        } else {
-          handleToggle();
-        }
-      }
-      if (e.key === "Escape" && view === "maximized") {
-        e.preventDefault();
-        setView("normal");
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [view, handleToggle]);
-
-  const onHandlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if ((e.target as HTMLElement).dataset.resizeGrip !== "true") return;
-    e.preventDefault();
-    draggingRef.current = true;
-    startYRef.current = e.clientY;
-    startHeightRef.current = drawerHeight;
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    document.body.style.cursor = "row-resize";
-    document.body.style.userSelect = "none";
-  }, [drawerHeight]);
-
-  const onHandlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (!draggingRef.current) return;
-    const delta = startYRef.current - e.clientY;
-    const next = clampHeight(startHeightRef.current + delta);
-    setDrawerHeight(next);
-  }, [clampHeight]);
-
-  const onHandlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (!draggingRef.current) return;
-    draggingRef.current = false;
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
-    try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
-    try { sessionStorage.setItem(STORAGE_KEY, String(drawerHeight)); } catch { /* noop */ }
-  }, [drawerHeight]);
-
-  // Compute effective height
-  const effectiveHeight = view === "collapsed"
-    ? COLLAPSED_HEIGHT
-    : view === "maximized"
-      ? "calc(100dvh - 120px)"
-      : drawerHeight;
-
-  const statusColor = activeTab === "terminal" ? "#72f238" : "rgba(255,255,255,0.2)";
-  const statusLabel = activeTab === "terminal" ? "Ready" : activeTab === "media" ? "Media" : "Activity";
-
-  return (
-    <div
-      className="flex shrink-0 flex-col border-t"
-      style={{
-        backgroundColor: "var(--studio-surface)",
-        borderColor: "var(--studio-border)",
-        height: effectiveHeight,
-        transition: view === "collapsed" ? "height 0.15s ease" : undefined,
-      }}
-      onPointerDown={onHandlePointerDown}
-      onPointerMove={onHandlePointerMove}
-      onPointerUp={onHandlePointerUp}
-      onPointerCancel={onHandlePointerUp}
-    >
-      {/* Resize handle — only visible when expanded */}
-      {view !== "collapsed" && (
-        <div
-          data-resize-grip="true"
-          className="group flex shrink-0 cursor-row-resize items-center justify-center border-b py-0.5 transition hover:bg-white/5"
-          style={{ borderColor: "var(--studio-border)", touchAction: "none" }}
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label="Drag to resize panel"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "ArrowUp") { e.preventDefault(); setDrawerHeight((h) => clampHeight(h + 32)); }
-            if (e.key === "ArrowDown") { e.preventDefault(); setDrawerHeight((h) => clampHeight(h - 32)); }
-          }}
-        >
-          <div
-            data-resize-grip="true"
-            className="h-0.5 w-8 rounded-full bg-white/15 transition group-hover:bg-white/30 group-active:bg-[var(--litt-primary)]"
-          />
-        </div>
-      )}
-
-      {/* Toolbar header — always visible */}
-      <div
-        className="flex shrink-0 items-center justify-between border-b"
-        style={{ height: COLLAPSED_HEIGHT, borderColor: "var(--studio-border)" }}
-      >
-        {/* Left: tabs */}
-        <div className="flex h-full items-center gap-0.5 pl-2">
-          {DRAWER_TABS.map((t) => {
-            const Icon = t.icon;
-            const isActive = activeTab === t.id;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => { onTabChange(t.id); if (view === "collapsed") { setView("normal"); onToggle(); } }}
-                className="flex h-full items-center gap-1.5 px-2.5 text-[11px] font-bold transition"
-                style={{
-                  color: isActive ? "var(--litt-primary)" : "var(--text-muted)",
-                  borderBottom: isActive && view !== "collapsed" ? "2px solid var(--litt-primary)" : "2px solid transparent",
-                }}
-                aria-label={t.label}
-              >
-                <Icon size={13} className="pointer-events-none" />
-                {t.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Right: status + controls */}
-        <div className="flex h-full items-center gap-1 pr-2">
-          <span className="flex items-center gap-1.5 text-[10px] font-medium" style={{ color: "var(--text-muted)" }}>
-            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: statusColor }} />
-            {statusLabel}
-          </span>
-          {view !== "collapsed" && (
-            <>
-              <button
-                type="button"
-                onClick={handleMaximize}
-                className="grid h-7 w-7 place-items-center rounded transition hover:bg-white/8"
-                style={{ color: "var(--text-muted)" }}
-                aria-label={view === "maximized" ? "Restore" : "Maximize"}
-                title={view === "maximized" ? "Restore (Esc)" : "Maximize (Ctrl+Shift+`)"}
-              >
-                {view === "maximized" ? <Minimize2 size={13} className="pointer-events-none" /> : <Maximize2 size={13} className="pointer-events-none" />}
-              </button>
-              <button
-                type="button"
-                onClick={handleToggle}
-                className="grid h-7 w-7 place-items-center rounded transition hover:bg-white/8"
-                style={{ color: "var(--text-muted)" }}
-                aria-label="Close drawer"
-                title="Close (Ctrl+`)"
-              >
-                <PanelBottomClose size={13} className="pointer-events-none" />
-              </button>
-            </>
-          )}
-          {view === "collapsed" && (
-            <button
-              type="button"
-              onClick={handleToggle}
-              className="grid h-7 w-7 place-items-center rounded transition hover:bg-white/8"
-              style={{ color: "var(--text-muted)" }}
-              aria-label="Open drawer"
-              title="Open (Ctrl+`)"
-            >
-              <PanelBottomOpen size={13} className="pointer-events-none" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Content area — only when expanded */}
-      {view !== "collapsed" && (
-        <div className="min-h-0 flex-1 overflow-hidden">
-          {children ?? (
-            <div className="flex h-full items-center justify-center text-[11px]" style={{ color: "var(--text-muted)" }}>
-              {activeTab === "terminal" ? "Workspace ready · Terminal session not started" : activeTab === "media" ? "Media not loaded" : "No activity yet"}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }

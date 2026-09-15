@@ -132,7 +132,7 @@ export function MediaDock({ dock, actions, onOpenQueue, onOpenFocusMode }: Media
             aria-label="Open Focus Mode"
           >
             {dock.artworkUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
+              // eslint-disable-next-line @next/next/no-img-element -- remote artwork, mixed hosts
               <img src={dock.artworkUrl} alt="" className="h-full w-full object-cover" />
             ) : (
               <div className="flex h-full w-full items-center justify-center">
@@ -301,7 +301,7 @@ export function MediaDock({ dock, actions, onOpenQueue, onOpenFocusMode }: Media
             style={{ background: "rgba(18,18,21,0.8)" }}
           >
             {dock.artworkUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
+              // eslint-disable-next-line @next/next/no-img-element -- remote artwork, mixed hosts
               <img src={dock.artworkUrl} alt="" className="h-full w-full object-cover" />
             ) : null}
           </div>

@@ -1,5 +1,6 @@
 "use client";
 
+import NextImage from "next/image";
 import { HoloDirector } from "./HoloDirector";
 import { useDirectorRuntime } from "./DirectorRuntime";
 import { useTheme } from "@/context/ThemeContext";
@@ -194,11 +195,11 @@ export function MissionCanvas() {
                     className="relative aspect-square overflow-hidden rounded-xl border border-neutral-800/60"
                   >
                     {a.type === "image" ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
+                      <NextImage
                         src={a.url}
                         alt={a.title}
-                        className="h-full w-full object-cover"
+                        fill
+                        className="object-cover"
                       />
                     ) : (
                       <div className="flex h-full items-center justify-center text-[10px] text-neutral-400">
@@ -245,11 +246,13 @@ export function MissionCanvas() {
                 <div className="mb-2 text-[10px] font-black uppercase tracking-wider text-neutral-400">
                   Generated Artifact
                 </div>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
+                <NextImage
                   src={activeArtifact.url}
                   alt={activeArtifact.title}
-                  className="w-full rounded-xl object-contain"
+                  width={1024}
+                  height={1024}
+                  className="rounded-xl object-contain"
+                  style={{ width: "100%", height: "auto" }}
                 />
                 <div className="mt-2 text-xs font-bold text-neutral-300">
                   {activeArtifact.title}

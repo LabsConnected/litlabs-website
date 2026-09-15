@@ -14,6 +14,7 @@
  * Empty state is truthful.
  */
 
+import Image from "next/image";
 import { useEffect, useState, useCallback } from "react";
 import { useStudioContext } from "@/app/(app)/studio/context/StudioContext";
 import { useAssetsRefreshTrigger } from "@/app/(app)/studio/hooks/useAssetsRefresh";
@@ -241,11 +242,12 @@ export default function AssetsPanel({ projectId }: { projectId?: string | null }
                 >
                   {/* Thumbnail or icon */}
                   {asset.kind === "image" && asset.thumbnailUrl ? (
-                    <img
+                    <Image
                       src={asset.thumbnailUrl}
                       alt=""
+                      width={32}
+                      height={32}
                       className="h-8 w-8 shrink-0 rounded object-cover"
-                      loading="lazy"
                     />
                   ) : (
                     <div
@@ -339,9 +341,11 @@ export default function AssetsPanel({ projectId }: { projectId?: string | null }
                 >
                   {editResult && editState === "inserted" && (
                     <div className="flex items-center gap-2">
-                      <img
+                      <Image
                         src={editResult}
                         alt="Edited result"
+                        width={48}
+                        height={48}
                         className="h-12 w-12 rounded border object-cover"
                         style={{ borderColor: "var(--studio-border)" }}
                       />

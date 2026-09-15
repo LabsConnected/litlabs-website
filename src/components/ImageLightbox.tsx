@@ -1,5 +1,7 @@
 "use client";
 
+import Image from "next/image";
+
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import {
@@ -219,12 +221,19 @@ export default function ImageLightbox({
         onClick={(e) => e.stopPropagation()}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <Image
           ref={imageRef}
           src={currentImage}
           alt={`Image ${currentIndex + 1}`}
-          className="max-w-full max-h-full object-contain cursor-grab active:cursor-grabbing transition-transform"
+          width={1600}
+          height={900}
+          unoptimized={currentImage.startsWith("blob:") || currentImage.startsWith("data:")}
+          className="object-contain cursor-grab active:cursor-grabbing transition-transform"
           style={{
+            maxWidth: "100%",
+            maxHeight: "100%",
+            width: "auto",
+            height: "auto",
             transform: `scale(${zoom}) rotate(${rotation}deg) scaleX(${flip ? -1 : 1}) translate(${position.x}px, ${position.y}px)`,
             transformOrigin: "center center",
           }}

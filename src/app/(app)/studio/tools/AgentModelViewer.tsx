@@ -1,5 +1,7 @@
 "use client";
 
+import Image from "next/image";
+
 /**
  * AgentModelViewer — lazy-loaded 3D model viewer using <model-viewer>.
  *
@@ -153,12 +155,14 @@ export function AgentModelViewer({
           /* Fallback: show poster image only */
           <div className="flex h-full flex-col items-center justify-center">
             {posterUrl ? (
-              /* eslint-disable-next-line @next/next/no-img-element -- fallback poster */
-              <img
+              <Image
                 src={posterUrl}
                 alt={agentName}
-                className="max-h-[70vh] max-w-full rounded-xl object-contain"
-                style={{ filter: "drop-shadow(0 16px 48px rgba(0,0,0,0.5))" }}
+                width={1200}
+                height={1200}
+                sizes="90vw"
+                className="rounded-xl object-contain"
+                style={{ filter: "drop-shadow(0 16px 48px rgba(0,0,0,0.5))", maxHeight: "70vh", maxWidth: "100%", width: "auto", height: "auto" }}
               />
             ) : (
               <div className="text-center">

@@ -3,6 +3,7 @@
  * Widget data comes from canonical APIs, never from localStorage.
  */
 
+import Image from "next/image";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Icon } from "../../dashboard/v2/dashboard-v2-utils";
@@ -240,7 +241,7 @@ export function RecentCreationsWidget({ creations, collapsed, onToggleCollapse, 
             <Link key={c.id} href={`/gallery/${c.id}`} className="group relative aspect-square overflow-hidden rounded-lg border" style={{ borderColor: D.border }}>
               {c.thumbnailUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={c.thumbnailUrl} alt={c.title} className="h-full w-full object-cover transition group-hover:scale-105" />
+                <Image src={c.thumbnailUrl} alt={c.title} fill className="object-cover transition group-hover:scale-105" />
               ) : (
                 <div className="grid h-full w-full place-items-center" style={{ background: D.surface }}>
                   <Icon name={c.type === "video" ? "film" : c.type === "music" ? "music" : "image"} size={16} style={{ color: D.textMuted }} />
@@ -265,7 +266,7 @@ export function MyGalleryWidget({ items, collapsed, onToggleCollapse, onRemove }
             <Link key={item.id} href={`/gallery/${item.id}`} className="group relative aspect-square overflow-hidden rounded-lg border" style={{ borderColor: D.border }}>
               {item.imageUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={item.imageUrl} alt={item.title} className="h-full w-full object-cover transition group-hover:scale-105" />
+                <Image src={item.imageUrl} alt={item.title} fill className="object-cover transition group-hover:scale-105" />
               ) : (
                 <div className="grid h-full w-full place-items-center" style={{ background: D.surface }}>
                   <Icon name="image" size={16} style={{ color: D.textMuted }} />
@@ -290,7 +291,7 @@ export function TrendingGalleryWidget({ items, collapsed, onToggleCollapse, onRe
             <Link key={item.id} href={`/gallery/${item.id}`} className="group relative aspect-square overflow-hidden rounded-lg border" style={{ borderColor: D.border }}>
               {item.imageUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={item.imageUrl} alt={item.title} className="h-full w-full object-cover transition group-hover:scale-105" />
+                <Image src={item.imageUrl} alt={item.title} fill className="object-cover transition group-hover:scale-105" />
               ) : (
                 <div className="grid h-full w-full place-items-center" style={{ background: D.surface }}>
                   <Icon name="image" size={16} style={{ color: D.textMuted }} />

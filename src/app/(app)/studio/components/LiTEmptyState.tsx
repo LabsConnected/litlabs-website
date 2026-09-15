@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import {
   AlertCircle,
   ArrowRight,
@@ -63,8 +64,7 @@ export default function LiTEmptyState({
                 boxShadow: "0 0 36px rgba(244,114,182,.25)",
               }}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/brand/spark-agent-portrait.png" alt="Spark" className="h-full w-full object-contain p-1" />
+              <Image src="/brand/spark-agent-portrait.png" alt="Spark" fill sizes="144px" className="object-contain p-1" />
             </div>
           )}
           <span

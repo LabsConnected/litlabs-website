@@ -1,6 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 
+import Image from "next/image";
 import { useState, useEffect } from "react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useProfile } from "@/context/ProfileContext";
@@ -364,11 +365,12 @@ export default function UserProfilePage() {
           <div className="h-40 sm:h-48 w-full relative">
             {userProfile.cover?.startsWith("http") ? (
               <>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
+                <Image
                   src={userProfile.cover}
                   alt="Cover"
-                  className="w-full h-full object-cover"
+                  fill
+                  sizes="100vw"
+                  className="object-cover"
                 />
               </>
             ) : (
@@ -385,16 +387,18 @@ export default function UserProfilePage() {
             {/* Avatar */}
             <div className="relative -mt-12 mb-4">
               <div
-                className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden border-4 shadow-lg"
+                className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden border-4 shadow-lg"
                 style={{ backgroundColor: C.bgColor, borderColor: C.boxBg }}
               >
                 {userProfile.avatar?.startsWith("http") ? (
                   <>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
+                    <Image
                       src={userProfile.avatar}
                       alt={userProfile.displayName}
-                      className="w-full h-full object-cover"
+                      fill
+                      sizes="112px"
+                      className="object-cover"
                     />
                   </>
                 ) : (
@@ -846,10 +850,11 @@ export default function UserProfilePage() {
                     >
                       {userProfile.avatar?.startsWith("http") ? (
                         <>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
+                          <Image
                             src={userProfile.avatar}
                             alt=""
+                            width={24}
+                            height={24}
                             className="w-full h-full rounded-full object-cover"
                           />
                         </>

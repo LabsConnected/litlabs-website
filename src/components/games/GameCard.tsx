@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { Play, Trophy } from "lucide-react";
 import type { Game } from "@/lib/games";
 
@@ -18,11 +19,12 @@ export default function GameCard({
       className={`rounded-2xl overflow-hidden bg-white/5 border border-white/10 hover:border-orange-500/50 transition-all hover:scale-[1.02] group ${onClick ? "cursor-pointer" : ""}`}
     >
       <div className="aspect-video bg-linear-to-br from-purple-900 to-orange-900 relative overflow-hidden">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <Image
           src={game.coverUrl}
           alt={game.title}
-          className="w-full h-full object-cover"
+          fill
+          sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 33vw"
+          className="object-cover"
           onError={(e) => {
             (e.target as HTMLImageElement).src =
               'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="%23333"/><text x="50" y="50" text-anchor="middle" fill="%23666" font-size="40">🎮</text></svg>';

@@ -11,6 +11,11 @@
 
 import { supabaseAdmin } from "@/lib/supabase";
 import { studioLog } from "@/lib/studio/logger";
+import {
+  getPreviewStatusInternal,
+  buildPreviewProxyUrl,
+  type PreviewStatusResponse,
+} from "@/lib/terminal-internal-client";
 import type { StudioProjectRow, LegacyProjectRow } from "./types";
 import {
   rowToCanonical,
@@ -199,7 +204,8 @@ export async function getProject(
     .maybeSingle();
 
   if (studioRow) {
-    return rowToCanonical(studioRow as StudioProjectRow);
+    const project = rowToCanonical(studioRow as StudioProjectRow);
+    return reconcileStaleStartingStatus(project);
   }
 
   // Fall back to legacy table
@@ -218,6 +224,110 @@ export async function getProject(
 }
 
 /**
+ * Age after which a "starting" runtime_status is presumed abandoned.
+ *
+ * The preview-start flow writes "starting" optimistically and the
+ * terminal server reports "starting" while its health probe runs in the
+ * background — the row only resolves to ready/failed when something
+ * polls the preview status. A run that never polls (crashed loop,
+ * closed tab, abandoned acceptance run) leaves the lie in place
+ * forever. Past this age, reads reconcile the row against the terminal
+ * server's live state instead of trusting the database.
+ */
+export const STALE_STARTING_AFTER_MS = 10 * 60 * 1000;
+
+/**
+ * Reconcile a stale "starting" project against the terminal server.
+ *
+ * Returns the project unchanged when it isn't stale-starting (fresh
+ * "starting", any other status, no workspace). When stale, asks the
+ * terminal server for the live preview state and persists the truth:
+ * ready (with a fresh preview URL), failed/stopped (URL cleared), or —
+ * if the terminal server is unreachable — leaves the row untouched so
+ * the next read retries (updatedAt is not bumped on a failed check).
+ */
+export async function reconcileStaleStartingStatus(
+  project: CanonicalProject,
+): Promise<CanonicalProject> {
+  if (
+    project.runtimeStatus !== "starting" ||
+    !project.workspaceId ||
+    Number.isNaN(Date.parse(project.updatedAt)) ||
+    Date.now() - Date.parse(project.updatedAt) <= STALE_STARTING_AFTER_MS
+  ) {
+    return project;
+  }
+
+  let live: PreviewStatusResponse | null;
+  try {
+    live = await getPreviewStatusInternal(project.workspaceId, project.userId);
+  } catch {
+    return project;
+  }
+
+  const updates = live
+    ? live.status === "ready"
+      ? {
+          runtimeStatus: "ready" as const,
+          previewUrl: buildPreviewProxyUrl(project.workspaceId),
+          runtimeError: null,
+        }
+      : live.status === "failed"
+        ? {
+            runtimeStatus: "failed" as const,
+            previewUrl: null,
+            runtimeError: live.error ?? "Preview failed on the terminal server",
+          }
+        : live.status === "stopped"
+          ? {
+              runtimeStatus: "stopped" as const,
+              previewUrl: null,
+              runtimeError: null,
+            }
+          : {
+              // "starting" / "restarting" — the terminal server confirms a
+              // start is genuinely still in flight. Rewriting refreshes
+              // updatedAt so the next staleness window starts now.
+              runtimeStatus: "starting" as const,
+              previewUrl: null,
+              runtimeError: null,
+            }
+    : {
+        // The terminal server has no record of this workspace — nothing
+        // is starting. This is "stopped", not an error.
+        runtimeStatus: "stopped" as const,
+        previewUrl: null,
+        runtimeError: null,
+      };
+
+  return (
+    (await updateProjectRuntime(project.id, project.userId, updates)) ?? project
+  );
+}
+
+/**
+ * Explicit column lists for listProjects. These mirror exactly the fields
+ * consumed by rowToCanonical / legacyRowToCanonical — no more, no less.
+ * An explicit list (instead of select("*")) keeps future wide columns
+ * (settings blobs, snapshots, etc.) from silently inflating every
+ * project-switcher load. If a converter starts reading a new column,
+ * add it here.
+ *
+ * NOTE: these must stay string *literal* types (not string[]) — the
+ * Supabase client infers the row shape from the literal, and a widened
+ * string breaks type inference (GenericStringError).
+ */
+const STUDIO_LIST_COLUMNS =
+  "id, user_id, name, slug, source_type, access_mode, template_id, github_installation_id, github_repository_id, github_owner, github_repo, github_full_name, github_default_branch, github_branch, latest_commit_sha, workspace_id, workspace_branch, workspace_status, workspace_root, workspace_error, workspace_prepared_at, runtime_status, preview_url, runtime_error, framework, package_manager, root_directory, development_command, build_command, test_command, install_command, workspace_type, created_at, updated_at";
+
+// legacyRowToCanonical only reads these columns; the rest of the legacy
+// row (vercel_project_id, status, connection_*, repository_html_url,
+// repository_private, selected_branch) is never used by listProjects
+// callers, so it stays in the database.
+const LEGACY_LIST_COLUMNS =
+  "id, user_id, repository_full_name, repository, github_installation_id, repository_id, owner, default_branch, working_branch, workspace_id, created_at, updated_at";
+
+/**
  * List all projects for a user.
  * Returns canonical projects from studio_projects plus any legacy-only
  * projects that don't have a studio_projects counterpart.
@@ -227,12 +337,12 @@ export async function listProjects(userId: string): Promise<ProjectListResult> {
   const [studioResult, legacyResult] = await Promise.all([
     supabaseAdmin
       .from(TABLE)
-      .select("*")
+      .select(STUDIO_LIST_COLUMNS)
       .eq("user_id", userId)
       .order("updated_at", { ascending: false }),
     supabaseAdmin
       .from(LEGACY_TABLE)
-      .select("*")
+      .select(LEGACY_LIST_COLUMNS)
       .eq("user_id", userId)
       .order("updated_at", { ascending: false }),
   ]);

@@ -28,6 +28,7 @@
  * On mobile: avatar only
  */
 
+import Image from "next/image";
 import Link from "next/link";
 import { Component, type ReactNode, useState, useEffect, useRef } from "react";
 import { useUser, useClerk, SignInButton } from "@clerk/nextjs";
@@ -202,10 +203,11 @@ function AuthInner({ linkColor }: NavAuthProps) {
         {/* Avatar — 36px with green ring when online */}
         <div className="relative shrink-0">
           {avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <Image
               src={avatarUrl}
               alt={firstName}
+              width={32}
+              height={32}
               className="h-8 w-8 rounded-full object-cover"
               style={{ border: "2px solid #B6FF4A" }}
             />

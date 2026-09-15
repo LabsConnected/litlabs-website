@@ -9,6 +9,7 @@ interface Notification {
   [key: string]: unknown;
 }
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
@@ -447,8 +448,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
             <header className="flex shrink-0 items-center gap-3 border-b px-4 py-4" style={{ borderColor: resolvedColors.borderColor + "25" }}>
               {profile?.avatarUrl ? (
                 <>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={profile.avatarUrl} alt="" className="h-11 w-11 rounded-full object-cover" />
+                  <Image src={profile.avatarUrl} alt="" width={44} height={44} className="h-11 w-11 rounded-full object-cover" />
                 </>
               ) : (
                 <div className="grid h-11 w-11 place-items-center rounded-full text-sm font-black" style={{ backgroundColor: resolvedColors.accentColor + "22", color: resolvedColors.accentColor }}>{profile?.displayName?.[0]?.toUpperCase() || "U"}</div>

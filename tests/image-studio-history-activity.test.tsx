@@ -9,16 +9,17 @@
  *   4. Deleting the final generation removes localStorage history.
  *   5. Clear-all requires confirmation.
  *   6. Delete remains accessible on touch/mobile.
- *   7. Activity reflects Live visibility (false when Live is not shown).
- *   8. Header Activity calls the open handler.
- *   9. activityVisible is truthful (expanded-on-Chat is NOT visible).
+ *   7. Dock toggle reflects dockOpen (aria-pressed truthfulness).
+ *   8. Header dock toggle calls the toggle handler.
+ *   9. Opening a dock tab is an OPEN action (tab click while collapsed opens).
  *  11. No duplicate Activity rail/drawer opens.
- *  12. Terminal remains independent.
+ *  12. Terminal remains independent (its own dock tab).
  *  13/14. Obsolete side-panel / activity-rail localStorage keys are gone.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { INITIAL_RUNTIME_STATE } from "@/lib/projects/runtime-state";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import StudioDock from "@/app/(app)/studio/components/StudioDock";
 import "@testing-library/jest-dom";
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
@@ -394,173 +395,144 @@ const HEADER_CAPS = {
   defaultBranch: "main",
 } as const;
 
-describe("CommandStudioHeader Activity (LiTT Live) open action", () => {
-  it("7. Activity reflects Live visibility when activityVisible is false", () => {
-    render(
+describe("CommandStudioHeader dock toggle (top command bar)", () => {
+  it("7. dock toggle reflects dockOpen via aria-pressed", () => {
+    const { rerender } = render(
       <CommandStudioHeader
         runtime={INITIAL_RUNTIME_STATE}
         runtimeLoading={false}
         capabilities={HEADER_CAPS as never}
-        onOpenActivityAction={vi.fn()}
-        activityVisible={false}
+        onToggleDockAction={vi.fn()}
+        dockOpen={false}
       />,
     );
-    const toggle = screen.getByTestId("activity-toggle");
-    expect(toggle).toHaveAttribute("data-active", "false");
-    expect(toggle).toHaveAttribute("aria-label", "Open Activity");
+    const toggle = screen.getByTestId("studio-dock-toggle");
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    rerender(
+      <CommandStudioHeader
+        runtime={INITIAL_RUNTIME_STATE}
+        runtimeLoading={false}
+        capabilities={HEADER_CAPS as never}
+        onToggleDockAction={vi.fn()}
+        dockOpen={true}
+      />,
+    );
+    expect(screen.getByTestId("studio-dock-toggle")).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("8. clicking Activity button calls the open handler", () => {
-    const onOpen = vi.fn();
+  it("8. clicking the dock toggle calls the toggle handler", () => {
+    const onToggle = vi.fn();
     render(
       <CommandStudioHeader
         runtime={INITIAL_RUNTIME_STATE}
         runtimeLoading={false}
         capabilities={HEADER_CAPS as never}
-        onOpenActivityAction={onOpen}
-        activityVisible={false}
+        onToggleDockAction={onToggle}
+        dockOpen={false}
       />,
     );
-    fireEvent.click(screen.getByTestId("activity-toggle"));
-    expect(onOpen).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByTestId("studio-dock-toggle"));
+    expect(onToggle).toHaveBeenCalledTimes(1);
   });
 
-  it("8b. Activity button shows active styling when Live is visible", () => {
+  it("8b. dock toggle is a real toggle — clicking while open still calls the handler", () => {
+    const onToggle = vi.fn();
     render(
       <CommandStudioHeader
         runtime={INITIAL_RUNTIME_STATE}
         runtimeLoading={false}
         capabilities={HEADER_CAPS as never}
-        onOpenActivityAction={vi.fn()}
-        activityVisible={true}
+        onToggleDockAction={onToggle}
+        dockOpen={true}
       />,
     );
-    const toggle = screen.getByTestId("activity-toggle");
-    expect(toggle).toHaveAttribute("data-active", "true");
-    expect(toggle).toHaveAttribute("aria-label", "Open Activity");
+    fireEvent.click(screen.getByTestId("studio-dock-toggle"));
+    expect(onToggle).toHaveBeenCalledTimes(1);
   });
 
-  it("11. Activity button does NOT render a rail element itself", () => {
-    const onOpen = vi.fn();
+  it("11. header does NOT render an activity rail itself", () => {
+    const onToggle = vi.fn();
     render(
       <CommandStudioHeader
         runtime={INITIAL_RUNTIME_STATE}
         runtimeLoading={false}
         capabilities={HEADER_CAPS as never}
-        onOpenActivityAction={onOpen}
-        activityVisible={false}
+        onToggleDockAction={onToggle}
+        dockOpen={false}
       />,
     );
-    // The header only emits the open action; it does not own a rail.
-    fireEvent.click(screen.getByTestId("activity-toggle"));
-    expect(onOpen).toHaveBeenCalledTimes(1);
+    // The header only emits dock actions; it does not own a rail.
+    fireEvent.click(screen.getByTestId("studio-dock-toggle"));
+    expect(onToggle).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId("studio-activity-rail")).not.toBeInTheDocument();
   });
 
-  it("11b. Activity is an OPEN action — clicking while Live is visible still calls the handler", () => {
-    const onOpen = vi.fn();
+  it("11b. overflow Terminal opens the dock terminal tab", () => {
+    const onOpenDockTab = vi.fn();
     render(
       <CommandStudioHeader
         runtime={INITIAL_RUNTIME_STATE}
         runtimeLoading={false}
         capabilities={HEADER_CAPS as never}
-        onOpenActivityAction={onOpen}
-        activityVisible={true}
+        onOpenDockTabAction={onOpenDockTab}
       />,
     );
-    fireEvent.click(screen.getByTestId("activity-toggle"));
-    // Activity is always an open action; it does not toggle off.
-    expect(onOpen).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: /more actions/i }));
+    fireEvent.click(screen.getByRole("button", { name: /terminal/i }));
+    expect(onOpenDockTab).toHaveBeenCalledWith("terminal");
   });
 });
 
-// ─── Activity visibility truthfulness tests ─────────────────────────────────
-//
-// The old `activityRailOpen = !littCollapsed` derivation was false when LiTT
-// was expanded on Chat. The canonical `activityVisible` value must reflect
-// actual Live visibility (LiTT expanded/sheet open AND Live tab active).
+describe("Dock tab open semantics", () => {
+  // Opening a dock tab is an OPEN action: tab click while collapsed opens
+  // the dock on that tab. Truthful aria state comes from the dock itself.
 
-describe("Activity visible state truthfulness", () => {
-  // Helper preserves the union parameter type so the `=== "live"` comparison
-  // is not flagged by TS as a no-overlap literal comparison.
-  function computeActivityVisible(args: {
-    isMobileLitt: boolean;
-    mobileLittOpen: boolean;
-    littCollapsed: boolean;
-    littActiveTab: "chat" | "live";
-  }): boolean {
-    return (
-      (args.isMobileLitt ? args.mobileLittOpen : !args.littCollapsed) &&
-      args.littActiveTab === "live"
+  it("9. dock tab click while collapsed fires onTabChange + onToggle", () => {
+    const onTabChange = vi.fn();
+    const onToggle = vi.fn();
+    render(
+      <StudioDock
+        open={false}
+        activeTab="activity"
+        onTabChange={onTabChange}
+        onClose={vi.fn()}
+        onToggle={onToggle}
+        height={320}
+        onHeightChange={vi.fn()}
+        activityContent={<div>activity</div>}
+        filesContent={<div>files</div>}
+        terminalContent={<div>terminal</div>}
+        inspectorContent={<div>inspector</div>}
+        mediaContent={<div>media</div>}
+      />,
     );
-  }
-
-  it("9. activityVisible is false when LiTT is expanded on Chat (not Live)", () => {
-    // activityVisible must NOT be derived from `!littCollapsed` alone.
-    // Expanded LiTT on Chat → Live is NOT visible → activityVisible === false.
-    expect(
-      computeActivityVisible({
-        isMobileLitt: false,
-        mobileLittOpen: false,
-        littCollapsed: false,
-        littActiveTab: "chat",
-      }),
-    ).toBe(false);
+    fireEvent.click(screen.getByTestId("dock-tab-terminal"));
+    expect(onTabChange).toHaveBeenCalledWith("terminal");
+    expect(onToggle).toHaveBeenCalledTimes(1);
   });
 
-  it("9b. activityVisible is true when LiTT is expanded on Live (desktop)", () => {
-    expect(
-      computeActivityVisible({
-        isMobileLitt: false,
-        mobileLittOpen: false,
-        littCollapsed: false,
-        littActiveTab: "live",
-      }),
-    ).toBe(true);
-  });
-
-  it("9c. activityVisible is false when LiTT is collapsed (desktop)", () => {
-    expect(
-      computeActivityVisible({
-        isMobileLitt: false,
-        mobileLittOpen: false,
-        littCollapsed: true,
-        littActiveTab: "live",
-      }),
-    ).toBe(false);
-  });
-
-  it("9d. activityVisible is true when mobile sheet is open on Live", () => {
-    expect(
-      computeActivityVisible({
-        isMobileLitt: true,
-        mobileLittOpen: true,
-        littCollapsed: true, // desktop pref, irrelevant on mobile
-        littActiveTab: "live",
-      }),
-    ).toBe(true);
-  });
-
-  it("9e. activityVisible is false when mobile sheet is closed", () => {
-    expect(
-      computeActivityVisible({
-        isMobileLitt: true,
-        mobileLittOpen: false,
-        littCollapsed: false,
-        littActiveTab: "live",
-      }),
-    ).toBe(false);
-  });
-
-  it("12. Terminal remains independent (separate drawer state)", () => {
-    // Terminal uses drawerOpen + drawerTab="terminal"
-    // Activity visibility is derived from LiTT Live state, not drawer state.
-    const drawerTab = "terminal";
-    const activityVisible = false;
-
-    expect(drawerTab).toBe("terminal");
-    expect(activityVisible).toBe(false);
-    // Terminal can be open while Activity (Live) is not visible
+  it("12. Terminal is an independent dock tab (not tied to Activity visibility)", () => {
+    render(
+      <StudioDock
+        open={true}
+        activeTab="terminal"
+        onTabChange={vi.fn()}
+        onClose={vi.fn()}
+        onToggle={vi.fn()}
+        height={320}
+        onHeightChange={vi.fn()}
+        activityContent={<div>activity</div>}
+        filesContent={<div>files</div>}
+        terminalContent={<div>terminal</div>}
+        inspectorContent={<div>inspector</div>}
+        mediaContent={<div>media</div>}
+      />,
+    );
+    // Terminal tab active and visible while Activity content stays mounted
+    // but hidden — the PTY survives tab switches.
+    expect(screen.getByTestId("dock-tab-terminal")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("dock-content-terminal").style.display).not.toBe("none");
+    expect(screen.getByTestId("dock-content-activity").style.display).toBe("none");
   });
 });
 

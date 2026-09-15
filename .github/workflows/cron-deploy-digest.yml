@@ -20,6 +20,7 @@ jobs:
             exit 1
           fi
           RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            -A "LiTT-DeployDigest/1.0" \
             -H "Authorization: Bearer $INTERNAL_API_KEY" \
             "${DIGEST_URL}/api/deployments/digest")
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)

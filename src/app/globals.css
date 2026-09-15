@@ -2912,10 +2912,14 @@ main {
    ============================================================ */
 
 :root {
-  --font-ui: "Space Grotesk", sans-serif;
-  --font-display: "Sora", sans-serif;
-  --font-code: "JetBrains Mono", monospace;
-  --font-retro: "Pixelify Sans", monospace;
+  /* Brand fonts are self-hosted at build time via next/font in
+     src/app/layout.tsx, which defines --font-next-ui/display/code/retro
+     on <body> (custom props inherit, so :root can consume them here).
+     The literal family names stay as fallbacks if next/font ever fails. */
+  --font-ui: var(--font-next-ui), "Space Grotesk", sans-serif;
+  --font-display: var(--font-next-display), "Sora", sans-serif;
+  --font-code: var(--font-next-code), "JetBrains Mono", monospace;
+  --font-retro: var(--font-next-retro), "Pixelify Sans", monospace;
 
   --brand-primary: #9a4dff;
   --brand-secondary: #26e6ff;
