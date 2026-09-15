@@ -1,0 +1,171 @@
+// @vitest-environment jsdom
+/**
+ * AppShell top-bar navigation regression tests.
+ *
+ * Product direction 2026-09-15: the app nav lives in a top bar
+ * everywhere. The left sidebar, mobile drawer, and mobile bottom bar
+ * are gone. Verifies:
+ *   - No <aside> sidebar renders at any viewport
+ *   - Sticky top bar header with logo + primary nav + identity dock
+ *   - Required entries render; removed/flag-gated ones do not
+ *   - Current page is marked with aria-current="page"
+ *   - Studio keeps a single-row bar (its own mobile chrome; no strip)
+ *   - Layout overflow guards stay in place
+ */
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, within, cleanup } from "@testing-library/react";
+import * as React from "react";
+import { AppShell } from "@/components/AppShell";
+
+let mockPathname = "/dashboard";
+vi.mock("next/navigation", () => ({
+  usePathname: () => mockPathname,
+  useSearchParams: () => new URLSearchParams(),
+}));
+
+vi.mock("@/context/ThemeContext", () => ({
+  useTheme: () => ({
+    theme: "dark",
+    resolvedColors: {
+      bgColor: "#0a0a12",
+      boxBg: "#14141f",
+      borderColor: "#333344",
+      textMuted: "#888899",
+      textColor: "#ffffff",
+      accentColor: "#72f238",
+    },
+  }),
+}));
+
+vi.mock("@/context/WalletContext", () => ({
+  useWallet: () => ({ balance: 100 }),
+}));
+
+vi.mock("@/hooks/useClerkAuth", () => ({
+  useClerkAuth: () => ({
+    isSignedIn: true,
+    isLoaded: true,
+    userId: "u1",
+    signOut: vi.fn(),
+  }),
+  useAppUser: () => ({
+    user: { id: "u1", firstName: "Test", username: "test", role: "Member" },
+  }),
+}));
+
+vi.mock("@/hooks/useLittHealth", () => ({
+  useLittHealth: () => ({
+    status: "online",
+    pulse: true,
+    color: "#22c55e",
+    label: "LiTT Online",
+  }),
+}));
+
+vi.mock("@/components/branding/BrandLogo", () => ({
+  BrandLogo: () => <div data-testid="brand-logo" />,
+}));
+
+function getHeader(): HTMLElement {
+  const header = document.querySelector("header");
+  expect(header).not.toBeNull();
+  return header as HTMLElement;
+}
+
+describe("AppShell top bar", () => {
+  beforeEach(() => {
+    cleanup();
+    localStorage.clear();
+    mockPathname = "/dashboard";
+  });
+
+  it("renders no left sidebar — navigation lives in a sticky top bar", () => {
+    render(
+      <AppShell>
+        <div>content</div>
+      </AppShell>,
+    );
+    expect(document.querySelector("aside")).toBeNull();
+    const header = getHeader();
+    expect(header.className).toContain("sticky");
+    expect(header.className).toContain("top-0");
+    // Logo + identity dock present
+    expect(within(header).getByTestId("brand-logo")).toBeTruthy();
+    expect(header.querySelector('button[title="Test"]')).not.toBeNull();
+  });
+
+  it("shows the primary nav inline with the required entries", () => {
+    render(
+      <AppShell>
+        <div>content</div>
+      </AppShell>,
+    );
+    const header = getHeader();
+    const scope = within(header);
+    for (const label of ["Dashboard", "Studio", "Discover", "Marketplace", "Wallet", "Settings"]) {
+      expect(scope.getAllByText(label).length).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it("renders none of the removed entries; Games stays flag-gated", () => {
+    render(
+      <AppShell>
+        <div>content</div>
+      </AppShell>,
+    );
+    const scope = within(getHeader());
+    // Create lived in the old mobile bottom bar; Music/Showcase/Projects
+    // were removed from nav earlier. Games 404s while retroGameRuntime
+    // is off, so it must not appear.
+    for (const removed of ["Create", "Music", "Showcase", "Projects", "Games"]) {
+      expect(scope.queryByText(removed)).toBeNull();
+    }
+  });
+
+  it("marks the current page with aria-current on every nav surface", () => {
+    mockPathname = "/discover";
+    render(
+      <AppShell>
+        <div>content</div>
+      </AppShell>,
+    );
+    const current = Array.from(
+      getHeader().querySelectorAll('[aria-current="page"]'),
+    );
+    // Desktop inline nav + mobile scroll strip both mark Discover
+    expect(current.length).toBeGreaterThanOrEqual(2);
+    for (const el of current) {
+      expect(el.textContent).toContain("Discover");
+    }
+  });
+
+  it("keeps a single-row bar on Studio (its own mobile chrome, no strip)", () => {
+    mockPathname = "/studio";
+    render(
+      <AppShell>
+        <div>content</div>
+      </AppShell>,
+    );
+    // Only the desktop inline nav renders; the mobile strip is skipped
+    expect(
+      getHeader().querySelectorAll('nav[aria-label="Primary"]').length,
+    ).toBe(1);
+    // Studio fills exactly the space below the bar
+    const main = document.getElementById("main-content");
+    expect(main).not.toBeNull();
+    expect(main!.className).toContain("flex-1");
+  });
+
+  it("keeps layout overflow guards in place (min-w-0 main, no sideways scroll)", () => {
+    render(
+      <AppShell>
+        <div>content</div>
+      </AppShell>,
+    );
+    const main = document.getElementById("main-content");
+    expect(main).not.toBeNull();
+    expect(main!.className).toContain("min-w-0");
+    expect(main!.className).toContain("overflow-x-hidden");
+  });
+});

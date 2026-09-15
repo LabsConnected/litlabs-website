@@ -6,15 +6,17 @@ import { describe, expect, it } from "vitest";
 const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
 
 describe("signed-in product shell quality", () => {
-  it("marks active desktop and mobile navigation destinations for assistive technology", () => {
+  it("marks active navigation destinations for assistive technology", () => {
     const source = read("src/components/AppShell.tsx");
-    expect(source.match(/aria-current=\{active \? "page" : undefined\}/g)?.length).toBeGreaterThanOrEqual(4);
+    // TopNavItem + desktop Wallet/Settings icon buttons
+    expect(source.match(/aria-current=\{active \? "page" : undefined\}/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("uses real health state in both desktop and mobile navigation", () => {
+  it("uses real health state in the top bar", () => {
     const source = read("src/components/AppShell.tsx");
     expect(source).not.toContain(">LiTT Online</span>");
-    expect(source.match(/const littHealth = useLittHealth\(\);/g)?.length).toBe(2);
+    // One shared TopBar now owns the health indicator (was 2: desktop + mobile)
+    expect(source.match(/const littHealth = useLittHealth\(\);/g)?.length).toBe(1);
   });
 
   it("shows the current page in the shared breadcrumb", () => {
