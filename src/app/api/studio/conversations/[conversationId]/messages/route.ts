@@ -30,7 +30,7 @@ import { runLaunchFlow, type LaunchFlowResult } from "@/lib/litt-intelligence/la
 import { ProgressEmitter, type ProgressEvent } from "@/lib/litt-intelligence/progress-events";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { createPausedRun, getPendingPausedRunForConversation } from "@/lib/litt-intelligence/paused-run-store";
-import { registerExecution, unregisterExecution } from "@/lib/studio/execution-registry";
+import { getActiveExecution, registerExecution, unregisterExecution } from "@/lib/studio/execution-registry";
 import { resolveTurn } from "@/lib/litt-intelligence/turn-resolver";
 import {
   buildCanonicalRuntimeContext,
@@ -46,6 +46,12 @@ export const runtime = "nodejs";
 interface RouteParams {
   params: Promise<{ conversationId: string }>;
 }
+
+// A streamed assistant message is only live while the canonical execution
+// registry or the persisted approval record says so. If a process dies after
+// inserting the message, leaving it as "streaming" would render a permanent
+// "LiTT is thinking" bubble on the next load.
+const STALE_STREAMING_MESSAGE_MS = 2 * 60 * 1000;
 
 /**
  * POST /api/studio/conversations/[conversationId]/messages
@@ -462,6 +468,26 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         errorClass: transportErr instanceof Error ? transportErr.message : "unknown",
       });
     }
+  }
+
+  // Execution-required turns must never fall through to the read-only V1
+  // inspection + text-only stream. That path cannot execute mutations and
+  // would expose model pseudo-tool markup as if it were an answer.
+  if (built.kernelResult.decision.routing.requiresExecution && !(useV2 && v2Transport)) {
+    studioLog("message:tool_execution_unavailable", {
+      conversationId: conversation.id,
+      projectId: conversation.projectId,
+    });
+    return NextResponse.json(
+      {
+        error: "Tool execution unavailable for this task",
+        code: "TOOL_EXECUTION_UNAVAILABLE",
+        detail: "No verified workspace execution path is available. The request was not sent to a text-only model.",
+        projectId: conversation.projectId ?? null,
+        workspaceId: canonicalCtx.workspaceId ?? null,
+      },
+      { status: 409 },
+    );
   }
 
   if (useV2 && v2Transport) {
@@ -1203,6 +1229,29 @@ async function getHandler(req: NextRequest, routeCtx: RouteParams) {
           pausedRunId: pendingRun.id,
           inputs: pendingRun.inputs,
         };
+      } else if (
+        lastAssistant.status === "streaming" &&
+        lastAssistant.updatedAt &&
+        Number.isFinite(Date.parse(lastAssistant.updatedAt)) &&
+        Date.now() - Date.parse(lastAssistant.updatedAt) > STALE_STREAMING_MESSAGE_MS &&
+        !getActiveExecution(conversation.id)
+      ) {
+        // No active execution and no resumable approval means the stream is
+        // stale. Persist a truthful terminal state so reload cannot resurrect
+        // the message as an active thinking indicator.
+        const fallbackContent = lastAssistant.content?.trim()
+          ? lastAssistant.content
+          : "The previous run ended before it produced a result.";
+        const persisted = await updateMessageStatus(
+          lastAssistant.id,
+          userId,
+          "failed",
+          fallbackContent,
+        );
+        if (persisted !== false) {
+          lastAssistant.status = "failed";
+          lastAssistant.content = fallbackContent;
+        }
       }
     } catch {
       // Non-fatal — transcript still loads; the approval card just won't remount.

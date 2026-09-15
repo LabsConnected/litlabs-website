@@ -344,6 +344,19 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           const guarded = guardPhase1(agentResult);
           if (guarded) return guarded;
         }
+
+        // An action request is not successful merely because a model emitted
+        // prose (including pseudo-tool markup). No structured tool execution
+        // means there is no mutation evidence to verify.
+        if (!pausedApproval && !hasAppliedMutation(agentResult)) {
+          return baseResult({
+            status: "failed",
+            finalText: "Tool execution unavailable: the selected model did not produce an executable tool call, so no project files were changed.",
+            error: "TOOL_EXECUTION_UNAVAILABLE",
+            repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
+            runtimeRepairAttempts,
+          });
+        }
       }
     }
 
