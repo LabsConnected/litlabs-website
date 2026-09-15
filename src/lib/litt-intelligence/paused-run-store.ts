@@ -22,6 +22,7 @@ import "server-only";
 
 import { supabaseAdmin } from "@/lib/supabase";
 import type { LLMMessage } from "./llm-tool-calling";
+import type { QualityFinale } from "./quality-loop-flow";
 
 const APPROVAL_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const TABLE = "agent_paused_runs";
@@ -43,6 +44,14 @@ export interface RunResult {
     pausedRunId?: string;
     reason: string;
   };
+  /**
+   * Quality-loop finale for ACT-mode runs that opted into the gated loop.
+   * Durably persists the machine-readable answer to "is this actually good
+   * enough to ship?" (verdict + per-stage evidence state) on the run
+   * record. Optional for backwards compatibility — runs recorded before
+   * the quality loop existed simply lack it.
+   */
+  qualityLoop?: Pick<QualityFinale, "verdict" | "stages" | "designPasses">;
 }
 
 export interface PausedRunRecord {

@@ -83,6 +83,12 @@ export interface LLMToolCallResponse {
 export type LLMMessage = {
   role: "user" | "assistant" | "tool";
   content: string;
+  /**
+   * Optional image attachments (PNG data URLs) for vision-capable calls.
+   * Serialized as Gemini inlineData parts or OpenAI image_url content parts.
+   * Only honored when the call requests vision (requireVision).
+   */
+  images?: string[];
   /** Gemini-specific raw model parts preserved for subsequent turns. */
   parts?: GeminiPart[];
   /** OpenAI-compatible assistant tool_calls for multi-turn tool use. */
@@ -109,9 +115,15 @@ interface OpenRouterTool {
   };
 }
 
+interface OpenRouterContentPart {
+  type: "text" | "image_url";
+  text?: string;
+  image_url?: { url: string };
+}
+
 interface OpenRouterMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content: string;
+  content: string | OpenRouterContentPart[];
   tool_calls?: Array<{
     id: string;
     type: "function";
@@ -122,6 +134,13 @@ interface OpenRouterMessage {
 
 function toOpenRouterMessage(m: LLMMessage): OpenRouterMessage {
   const om: OpenRouterMessage = { role: m.role, content: m.content };
+  if (m.images && m.images.length > 0) {
+    const parts: OpenRouterContentPart[] = [{ type: "text", text: m.content }];
+    for (const image of m.images) {
+      parts.push({ type: "image_url", image_url: { url: image } });
+    }
+    om.content = parts;
+  }
   if (m.tool_calls) om.tool_calls = m.tool_calls;
   if (m.tool_call_id) om.tool_call_id = m.tool_call_id;
   return om;
@@ -171,6 +190,8 @@ type GeminiFunctionDeclaration = {
 
 export type GeminiPart = {
   text?: string;
+  /** Image input for vision calls (Gemini inlineData part). */
+  inlineData?: { mimeType: string; data: string };
   functionCall?: { id?: string; name: string; args: Record<string, unknown> };
   functionResponse?: { name: string; response: unknown };
   thoughtSignature?: string;
@@ -399,10 +420,22 @@ function createGeminiModel(config: Record<string, unknown>): GeminiModelLike {
  * Gemini expects parameters as a JSON schema with type, properties, required.
  */
 function toGeminiContent(m: LLMMessage): { role: "user" | "model"; parts: GeminiPart[] } {
+  const parts: GeminiPart[] = [...(m.parts ?? [{ text: m.content }])];
+  for (const image of m.images ?? []) {
+    const parsed = parseImageDataUrl(image);
+    if (parsed) parts.push({ inlineData: parsed });
+  }
   return {
     role: m.role === "assistant" ? "model" : "user",
-    parts: m.parts ?? [{ text: m.content }],
+    parts,
   };
+}
+
+/** Split a data URL into Gemini inlineData { mimeType, data }. Returns null for non-data URLs. */
+function parseImageDataUrl(dataUrl: string): { mimeType: string; data: string } | null {
+  const match = /^data:([^;,]+);base64,(.+)$/.exec(dataUrl.trim());
+  if (!match) return null;
+  return { mimeType: match[1], data: match[2] };
 }
 
 function toGeminiFunctionDeclarations(tools: ToolDefinition[]): GeminiFunctionDeclaration[] {
@@ -1014,11 +1047,17 @@ export async function callLLMWithTools(
     byokModel?: string;
     /** BYOK: base URL for an openai-compatible user endpoint. */
     byokBaseUrl?: string;
+    /**
+     * Require a vision-capable route (only vision providers are attempted)
+     * and honor LLMMessage.images as image input.
+     */
+    requireVision?: boolean;
   },
 ): Promise<LLMToolCallResponse> {
   const requirements: RouteRequirements = {
     tools: tools.length > 0,
     coding: tools.length > 0,
+    vision: options?.requireVision === true,
   };
 
   const plan = planBasicRoutes(requirements, {

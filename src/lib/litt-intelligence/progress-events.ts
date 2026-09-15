@@ -30,7 +30,8 @@ export type ProgressEvent =
   | { type: "model_routing"; model: string; provider: string; fallbackFrom?: string; category?: string; latencyMs?: number }
   | { type: "model_failed"; model: string; category: string; message: string }
   | { type: "reasoning"; summary: string }
-  | { type: "status"; summary: string };
+  | { type: "status"; summary: string }
+  | { type: "quality_verdict"; passed: boolean; missing: string[]; reason: string; designPasses: number };
 
 export type AgentLoopPhase =
   | "idle"
@@ -44,6 +45,7 @@ export type AgentLoopPhase =
   | "build_fix"
   | "preview"
   | "deploy"
+  | "quality_redesign"
   | "finished"
   | "cancelled";
 

@@ -1091,6 +1091,24 @@ function CommandStudioContent() {
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   }, [pathname, router, searchParams]);
 
+  /**
+   * The project switcher only fires this after the server confirms the
+   * deletion. When the deleted project was the active one, drop it from
+   * the URL so the studio stops pointing at a project that no longer
+   * exists — the capabilities refresh then settles to the no-project state.
+   */
+  const handleDeleteProject = useCallback((deletedProjectId: string) => {
+    if (capabilities.projectId !== deletedProjectId) return;
+    window.dispatchEvent(new CustomEvent("studio:project-switching"));
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("project");
+    params.delete("conversation");
+    params.delete("agentInstance");
+    setWorkspaceRevision(0);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    void refreshCapabilities();
+  }, [capabilities.projectId, pathname, router, searchParams, refreshCapabilities]);
+
   // Header actions — truthful.
   const handlePreview = useCallback(() => {
     setDestination("studio");
@@ -1539,6 +1557,7 @@ function CommandStudioContent() {
           toolsVisible={advancedToolsOpen}
           onProjectSelectAction={handleSelectProject}
           onCreateProjectAction={() => { void handleStartBlank(); }}
+          onDeleteProjectAction={handleDeleteProject}
           onDeployAction={handleDeployRequest}
           onClearChatAction={conversation.clear}
           onNewChatAction={() => { void conversation.createConversation(); }}

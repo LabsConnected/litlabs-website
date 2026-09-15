@@ -65,6 +65,7 @@ export default function CommandStudioHeader({
   toolsVisible = false,
   onProjectSelectAction,
   onCreateProjectAction,
+  onDeleteProjectAction,
   onDeployAction,
   onClearChatAction,
   onNewChatAction,
@@ -98,6 +99,11 @@ export default function CommandStudioHeader({
   onProjectSelectAction?: (projectId: string) => void;
   /** Creates a new blank project (picker "+ New project" entry). */
   onCreateProjectAction?: () => void;
+  /**
+   * Fired after the project switcher confirms a server-side project
+   * deletion. The parent clears the active project when it matches.
+   */
+  onDeleteProjectAction?: (projectId: string) => void;
   /** Prefills the chat composer with a deploy request (real deploy runs through LiTT). */
   onDeployAction?: () => void;
   onClearChatAction?: () => void;
@@ -229,6 +235,7 @@ export default function CommandStudioHeader({
         projectName={capabilities.projectName}
         onSelect={(projectId) => onProjectSelectAction?.(projectId)}
         onCreateProject={() => onCreateProjectAction?.()}
+        onDeleteProject={(projectId) => onDeleteProjectAction?.(projectId)}
       />
 
       {/* Workspace status dot — compact indicator only, no popover.
