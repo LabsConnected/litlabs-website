@@ -530,8 +530,10 @@ describe("CommandStudio — approval gate convergence", () => {
     sendMock.mockResolvedValue({ accepted: true });
     convState.selectedConversationId = null;
     convState.loadMessages.mockClear();
+    convState.reportSendError.mockClear();
     execState.state.pendingApproval = null;
     execState.state.isRunning = false;
+    execState.state.events = [];
     approvalWatch.onSettled = null;
   });
 
@@ -616,6 +618,66 @@ describe("CommandStudio — approval gate convergence", () => {
       expect.objectContaining({ toolId: "files.delete", pausedRunId: "paused-2" }),
     );
     expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "true");
+  });
+
+  it("does NOT report 'could not be resumed' when the gate already settled before the click", async () => {
+    globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+    // The detached resumed run completed and the watcher/store cleared
+    // pendingApproval — but the rendered card is one frame stale when the
+    // user clicks Approve. That click is a stale duplicate, not a failed
+    // resume: no banner, no second submission.
+    convState.selectedConversationId = "conv-1";
+    execState.state.pendingApproval = {
+      toolId: "project.deploy",
+      reason: "Sensitive action",
+      pausedRunId: "paused-1",
+    };
+    execState.state.events = [
+      { id: "e1", seq: 0, ts: Date.now(), type: "approval_required", summary: "Approval needed: project deploy" },
+    ];
+    const { user } = await renderCommandStudio();
+    await settle();
+
+    await user.click(screen.getByTestId("litt-tab-live"));
+    await settle();
+
+    // Gate settles between render and click (mock store doesn't re-render,
+    // so the card stays mounted — exactly the production race).
+    execState.state.pendingApproval = null;
+
+    await user.click(screen.getByRole("button", { name: /^approve$/i }));
+    await settle();
+
+    const { submitApprovalAndPoll } = await import("../lib/approval-polling");
+    expect(convState.reportSendError).not.toHaveBeenCalled();
+    expect(submitApprovalAndPoll).not.toHaveBeenCalled();
+  });
+
+  it("keeps the honest 'could not be resumed' error when the mounted gate has no pausedRunId", async () => {
+    globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+    // A gate with no resume identity (server-side persist failed) is a
+    // REAL dead end — the banner must stay truthful, not silently pass.
+    convState.selectedConversationId = "conv-1";
+    execState.state.pendingApproval = {
+      toolId: "files.write",
+      reason: "Mutation requires approval",
+    };
+    execState.state.events = [
+      { id: "e1", seq: 0, ts: Date.now(), type: "approval_required", summary: "Approval needed: files write" },
+    ];
+    const { user } = await renderCommandStudio();
+    await settle();
+
+    await user.click(screen.getByTestId("litt-tab-live"));
+    await settle();
+    await user.click(screen.getByRole("button", { name: /^approve$/i }));
+    await settle();
+
+    const { submitApprovalAndPoll } = await import("../lib/approval-polling");
+    expect(submitApprovalAndPoll).not.toHaveBeenCalled();
+    expect(convState.reportSendError).toHaveBeenCalledWith(
+      expect.stringContaining("could not be resumed"),
+    );
   });
 });
 

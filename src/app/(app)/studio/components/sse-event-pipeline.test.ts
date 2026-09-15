@@ -299,16 +299,26 @@ describe("SSE event pipeline — full LiTT task simulation", () => {
   it("simulates: approval pause → Approve → resume", () => {
     const feed = feedSSEEventToExecutionStore;
 
-    // LiTT wants to edit a file — approval required
+    // The agent loop hits the gate — progress signal only, no card yet.
     feed({
       type: "approval_required",
       toolId: "edit_file",
       reason: "Mutation requires approval in ACT mode",
     });
+    expect(useExecutionStore.getState().pendingApproval).toBeNull();
+
+    // The server persisted the paused run — now the card mounts.
+    feed({
+      type: "pending_approval",
+      toolId: "edit_file",
+      reason: "Mutation requires approval in ACT mode",
+      pausedRunId: "paused-1",
+    });
 
     // Verify approval is pending
     expect(useExecutionStore.getState().pendingApproval).not.toBeNull();
     expect(useExecutionStore.getState().pendingApproval?.toolId).toBe("edit_file");
+    expect(useExecutionStore.getState().pendingApproval?.pausedRunId).toBe("paused-1");
     expect(useExecutionStore.getState().phase).toBe("awaiting_approval");
 
     // User approves — resolve approval
@@ -477,5 +487,27 @@ describe("Approval gate lifecycle", () => {
     useExecutionStore.getState().endRun();
     useExecutionStore.getState().resolveApproval("approved");
     expect(useExecutionStore.getState().pendingApproval).toBeNull();
+  });
+
+  it("approval_required alone mounts no actionable card — denials keep running", () => {
+    // Regression: the agent loop emits approval_required for permission
+    // DENIALS and AUTO-mode skips that continue without pausing. Mounting
+    // a card from it left a dead Approve/Reject card behind after the run
+    // completed — clicking it falsely reported "could not be resumed".
+    feedSSEEventToExecutionStore({
+      type: "approval_required",
+      toolId: "edit_file",
+      reason: "Write operations are not allowed in PLAN mode",
+    });
+
+    const s = useExecutionStore.getState();
+    expect(s.pendingApproval).toBeNull();
+    // The gate is still visible in the Live event log.
+    expect(s.events.some((e) => e.type === "approval_required" && e.toolId === "edit_file")).toBe(true);
+
+    // The run completing must not resurrect an approval card.
+    useExecutionStore.getState().endRun();
+    expect(useExecutionStore.getState().pendingApproval).toBeNull();
+    expect(useExecutionStore.getState().phase).toBe("done");
   });
 });

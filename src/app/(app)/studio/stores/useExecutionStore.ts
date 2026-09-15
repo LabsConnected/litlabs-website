@@ -475,9 +475,18 @@ export function feedSSEEventToExecutionStore(
       break;
 
     case "approval_required":
-      s.setPendingApproval({
-        toolId: evt.toolId ?? "",
-        reason: evt.reason ?? "Approval required",
+      // A permission gate was hit — but this progress signal alone does
+      // not prove a resumable pause. The agent loop also emits it for
+      // permission denials and AUTO-mode skips that CONTINUE without
+      // pausing; mounting an Approve/Reject card from it leaves a dead
+      // card behind after the run completes, and clicking it reports a
+      // false "could not be resumed". Log the event only — only
+      // `pending_approval` (emitted after the paused run is persisted
+      // server-side and carrying its pausedRunId) mounts the card.
+      s.addEvent({
+        type: "approval_required",
+        summary: `Approval needed: ${(evt.toolId ?? "").replace(/_/g, " ")}`,
+        toolId: evt.toolId,
       });
       break;
 
