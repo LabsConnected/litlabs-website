@@ -504,3 +504,25 @@ describe("Discovery regression — Round 2 QA fixes", () => {
     expect(src).toContain('title: "404 — Page Not Found"');
   });
 });
+
+// ── Trailer playback robustness ──────────────────────────
+describe("Discovery regression — trailer sources", () => {
+  const proofSrc = readFileSync(
+    path.resolve(__dirname, "../src/components/landing/RealProductProof.tsx"),
+    "utf-8"
+  );
+
+  it("serves a WebM source ahead of the MP4 fallback", () => {
+    expect(proofSrc).toContain('"/demos/litt-trailer.webm"');
+    expect(proofSrc).toContain('"/demos/litt-trailer.mp4"');
+    expect(proofSrc.indexOf("litt-trailer.webm")).toBeLessThan(
+      proofSrc.indexOf("litt-trailer.mp4")
+    );
+  });
+
+  it("ships both trailer assets in public/demos", () => {
+    expect(existsSync(path.resolve(publicDir, "demos/litt-trailer.webm"))).toBe(true);
+    expect(existsSync(path.resolve(publicDir, "demos/litt-trailer.mp4"))).toBe(true);
+    expect(existsSync(path.resolve(publicDir, "demos/litt-trailer-poster.jpg"))).toBe(true);
+  });
+});
