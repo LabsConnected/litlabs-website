@@ -241,6 +241,40 @@ vi.mock("../stores/useStudioAgentStore", () => ({
 }));
 
 const sendMock = vi.hoisted(() => vi.fn());
+const execState = vi.hoisted(() => {
+  const state: Record<string, unknown> = {
+    events: [],
+    phase: "idle",
+    isRunning: false,
+    currentStep: 0,
+    pendingApproval: null,
+    checkpoint: null,
+    toolCalls: [],
+    changesSummary: null,
+    previewPreparing: false,
+    startRun: vi.fn(),
+    endRun: vi.fn(() => { state.pendingApproval = null; }),
+    addEvent: vi.fn(),
+    setPhase: vi.fn(),
+    setPendingApproval: vi.fn((approval: unknown) => { state.pendingApproval = approval; }),
+    resolveApproval: vi.fn(() => { state.pendingApproval = null; }),
+    setCheckpoint: vi.fn(),
+    collapseEvent: vi.fn(),
+    collapseLowLevel: vi.fn(),
+    clearEvents: vi.fn(),
+    setPreviewPreparing: vi.fn(),
+    reset: vi.fn(),
+  };
+  return { state };
+});
+const convState = vi.hoisted(() => ({
+  selectedConversationId: null as string | null,
+  loadMessages: vi.fn(async () => {}),
+  reportSendError: vi.fn(),
+}));
+const approvalWatch = vi.hoisted(() => ({
+  onSettled: null as null | ((outcome: unknown) => void),
+}));
 
 vi.mock("../hooks/useCanonicalConversation", () => ({
   useCanonicalConversation: () => ({
@@ -260,9 +294,19 @@ vi.mock("../hooks/useCanonicalConversation", () => ({
     deleteSession: vi.fn(),
     deleteAllSessions: vi.fn(),
     switchAgent: vi.fn(),
-    selectedConversationId: null,
+    selectedConversationId: convState.selectedConversationId,
+    loadMessages: convState.loadMessages,
+    reportSendError: convState.reportSendError,
     conversations: [],
     loading: false,
+  }),
+}));
+
+vi.mock("../lib/approval-polling", () => ({
+  submitApprovalAndPoll: vi.fn(),
+  watchApprovalResolution: vi.fn((opts: { onSettled?: (outcome: unknown) => void }) => {
+    approvalWatch.onSettled = opts.onSettled ?? null;
+    return vi.fn();
   }),
 }));
 
@@ -277,30 +321,9 @@ vi.mock("../stores/useStudioModelStore", () => ({
 }));
 
 vi.mock("../stores/useExecutionStore", () => {
-  const state: Record<string, unknown> = {
-    events: [],
-    phase: "idle",
-    isRunning: false,
-    currentStep: 0,
-    pendingApproval: null,
-    checkpoint: null,
-    toolCalls: [],
-    changesSummary: null,
-    startRun: vi.fn(),
-    endRun: vi.fn(),
-    addEvent: vi.fn(),
-    setPhase: vi.fn(),
-    setPendingApproval: vi.fn(),
-    resolveApproval: vi.fn(),
-    setCheckpoint: vi.fn(),
-    collapseEvent: vi.fn(),
-    collapseLowLevel: vi.fn(),
-    clearEvents: vi.fn(),
-    reset: vi.fn(),
-  };
   const useExecutionStore = Object.assign(
-    (selector: (s: Record<string, unknown>) => unknown) => selector(state),
-    { getState: () => state },
+    (selector: (s: Record<string, unknown>) => unknown) => selector(execState.state),
+    { getState: () => execState.state },
   );
   return { useExecutionStore };
 });
@@ -498,6 +521,101 @@ describe("CommandStudio — single active preview", () => {
     await settle();
 
     expect(screen.queryByTestId("studio-completion")).toBeNull();
+  });
+});
+
+describe("CommandStudio — approval gate convergence", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sendMock.mockResolvedValue({ accepted: true });
+    convState.selectedConversationId = null;
+    convState.loadMessages.mockClear();
+    execState.state.pendingApproval = null;
+    execState.state.isRunning = false;
+    approvalWatch.onSettled = null;
+  });
+
+  it("returns the LiTT panel to Chat when an approval gate settles without a local click", async () => {
+    globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+    // A gate resolved outside this client — approved on another device, a
+    // reload while the resumed run was executing, or the acceptance harness
+    // approving through the server-authoritative endpoint — used to leave
+    // the surface stuck on Live with the composer hidden.
+    convState.selectedConversationId = "conv-1";
+    execState.state.pendingApproval = {
+      toolId: "project.deploy",
+      reason: "Sensitive action — requires explicit approval",
+      pausedRunId: "paused-1",
+    };
+    const { user } = await renderCommandStudio();
+    await settle();
+
+    const { watchApprovalResolution } = await import("../lib/approval-polling");
+    expect(watchApprovalResolution).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: "conv-1", pausedRunId: "paused-1" }),
+    );
+
+    // The paused run surfaced Live (where the Approve/Reject card lives).
+    await user.click(screen.getByTestId("litt-tab-live"));
+    await settle();
+    expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "true");
+    expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "false");
+
+    act(() => {
+      approvalWatch.onSettled?.({
+        status: "approved",
+        runStatus: "completed",
+        runResult: { finalText: "Deployed", stepsUsed: 2, toolCalls: [], cancelled: false },
+        runError: null,
+      });
+    });
+    await settle();
+
+    expect(execState.state.resolveApproval).toHaveBeenCalledWith("approved");
+    expect(convState.loadMessages).toHaveBeenCalledWith("conv-1");
+    expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "true");
+    expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "false");
+  });
+
+  it("stays on Live when the resumed run pauses on a nested gate", async () => {
+    globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+    convState.selectedConversationId = "conv-1";
+    execState.state.pendingApproval = {
+      toolId: "project.deploy",
+      reason: "Sensitive action",
+      pausedRunId: "paused-1",
+    };
+    const { user } = await renderCommandStudio();
+    await settle();
+
+    await user.click(screen.getByTestId("litt-tab-live"));
+    await settle();
+
+    act(() => {
+      approvalWatch.onSettled?.({
+        status: "approved",
+        runStatus: "completed",
+        runResult: {
+          finalText: "",
+          stepsUsed: 2,
+          toolCalls: [],
+          cancelled: false,
+          pendingApproval: {
+            toolId: "files.delete",
+            reason: "Deletion requires approval",
+            pausedRunId: "paused-2",
+          },
+        },
+        runError: null,
+      });
+    });
+    await settle();
+
+    // A new gate mounted — the user must see the fresh Approve/Reject card.
+    expect(execState.state.setPendingApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ toolId: "files.delete", pausedRunId: "paused-2" }),
+    );
+    expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "true");
   });
 });
 

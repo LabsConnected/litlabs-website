@@ -47,7 +47,7 @@ import StudioOperatorBar from "./shell/StudioOperatorBar";
 import ResizeHandle from "./shell/ResizeHandle";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { useExecutionStore, type MutationSummary } from "../stores/useExecutionStore";
-import { submitApprovalAndPoll } from "../lib/approval-polling";
+import { submitApprovalAndPoll, watchApprovalResolution, type ApprovalRunResult } from "../lib/approval-polling";
 import { StudioActivityPanel, StudioInspector, StudioDrawer } from "./StudioWorkspaceFrame";
 import type { PreviewSelection } from "./StudioPreviewPanel";
 import StudioProjectFiles from "./StudioProjectFiles";
@@ -855,6 +855,55 @@ function CommandStudioContent() {
     }
   }, [conversation, capabilities.projectId, refreshCapabilities, isMobileLitt]);
 
+  // Converge the UI once an approval gate settles — regardless of whether
+  // the decision came from this client's Approve/Reject click or from the
+  // watchApprovalResolution watcher below (another session/device, a reload
+  // while the resumed run was still executing, or server-side TTL expiry).
+  // The outcome is the same: clear the card, pull the authoritative
+  // transcript, and return the user to Chat so the composer is usable again.
+  // Exception: a resumed run that pauses on a NEW gate stays on Live so the
+  // fresh Approve/Reject card is visible.
+  const applyApprovalOutcome = useCallback((opts: {
+    conversationId: string;
+    resolution: "approved" | "rejected" | "expired" | "gone";
+    runResult?: ApprovalRunResult | null;
+    runError?: string | null;
+  }) => {
+    const exec = useExecutionStore.getState();
+    if (opts.resolution === "approved" || opts.resolution === "rejected") {
+      // Idempotent on the click path — pendingApproval is already null, so
+      // this clears state without logging a duplicate decision event.
+      exec.resolveApproval(opts.resolution);
+    } else {
+      // Expired/gone — the gate can no longer be actioned. Clear the stale
+      // card without logging a decision the user never made.
+      exec.endRun("cancelled");
+    }
+    // The resumed run's outcome was written back onto the conversation
+    // transcript server-side — pull it instead of fabricating anything.
+    void conversation.loadMessages(opts.conversationId);
+    // The resumed run may have mutated workspace files — refresh the file
+    // tree and preview like a normal completed send would.
+    if (opts.runResult?.toolCalls.some((c) => c.mutating && c.success)) {
+      setWorkspaceRevision((revision) => revision + 1);
+      if (capabilities.projectId) {
+        window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId: capabilities.projectId, source: "assistant" } }));
+      }
+    }
+    if (opts.runResult?.pendingApproval?.pausedRunId) {
+      exec.setPendingApproval({
+        toolId: opts.runResult.pendingApproval.toolId,
+        reason: opts.runResult.pendingApproval.reason,
+        pausedRunId: opts.runResult.pendingApproval.pausedRunId,
+      });
+      return;
+    }
+    if (opts.runError) {
+      conversation.reportSendError?.(opts.runError);
+    }
+    setLittActiveTab("chat");
+  }, [conversation, capabilities.projectId]);
+
   // Approval decisions resume the SAME paused server-side execution — never
   // a new run. When no pausedRunId exists (persistence failed or the paused
   // run expired), silently dropping the click would leave the user thinking
@@ -868,32 +917,22 @@ function CommandStudioContent() {
         conversationId: convId,
         pausedRunId: pending.pausedRunId,
         decision,
-        onCompleted: (result) => {
-          // The SAME paused run finished server-side and its result was
-          // written back to the conversation — pull the authoritative
-          // transcript instead of fabricating or regenerating anything.
-          void conversation.loadMessages(convId);
-          // The resumed run may have mutated workspace files — refresh the
-          // file tree and preview like a normal completed send would.
-          if (result.toolCalls.some((c) => c.mutating && c.success)) {
-            setWorkspaceRevision((revision) => revision + 1);
-            if (capabilities.projectId) {
-              window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId: capabilities.projectId, source: "assistant" } }));
-            }
-          }
-          // The resumed run can pause again on another gate — surface it
-          // instead of leaving the message stuck in awaiting_approval.
-          if (result.pendingApproval?.pausedRunId) {
-            useExecutionStore.getState().setPendingApproval({
-              toolId: result.pendingApproval.toolId,
-              reason: result.pendingApproval.reason,
-              pausedRunId: result.pendingApproval.pausedRunId,
-            });
+        onAccepted: () => {
+          // A rejection runs nothing server-side — settle immediately so the
+          // user lands back on the composer instead of a dead Live tab.
+          if (decision === "rejected") {
+            applyApprovalOutcome({ conversationId: convId, resolution: "rejected" });
           }
         },
+        onCompleted: (result) => {
+          applyApprovalOutcome({ conversationId: convId, resolution: decision, runResult: result });
+        },
         onFailed: (error) => {
-          void conversation.loadMessages(convId);
-          conversation.reportSendError?.(error || "The resumed run failed on the server.");
+          applyApprovalOutcome({
+            conversationId: convId,
+            resolution: decision,
+            runError: error || "The resumed run failed on the server.",
+          });
         },
       });
     } else {
@@ -903,8 +942,43 @@ function CommandStudioContent() {
           "This approval could not be resumed — the paused run expired or was not saved. Please resend your request.",
         );
       }
+      setLittActiveTab("chat");
     }
-  }, [conversation, capabilities.projectId]);
+  }, [conversation, capabilities.projectId, applyApprovalOutcome]);
+
+  // An approval gate can settle without this client clicking anything:
+  // approved/rejected on another device or session, a reload while the
+  // resumed run was still executing (loadMessages rehydrates the gate), or
+  // server-side TTL expiry. The card alone cannot converge in those cases —
+  // watch the server-authoritative status and fold the outcome back into
+  // the store + transcript, returning the user to Chat. The click path is
+  // unaffected: resolveApproval clears pendingApproval on click, disarming
+  // this watcher before submitApprovalAndPoll's own polling begins.
+  const applyApprovalOutcomeRef = useRef(applyApprovalOutcome);
+  useEffect(() => {
+    applyApprovalOutcomeRef.current = applyApprovalOutcome;
+  });
+  const watchPausedRunId = useExecutionStore((s) => s.pendingApproval?.pausedRunId ?? null);
+  const watchConversationId = conversation.selectedConversationId;
+  useEffect(() => {
+    // Deps are only the gate identity — applyApprovalOutcome changes every
+    // render (conversation identity is unstable), and re-arming on each
+    // render would restart the poll loop per SSE event.
+    if (!watchPausedRunId || !watchConversationId) return;
+    return watchApprovalResolution({
+      conversationId: watchConversationId,
+      pausedRunId: watchPausedRunId,
+      onSettled: (outcome) => {
+        applyApprovalOutcomeRef.current({
+          conversationId: watchConversationId,
+          resolution: outcome.status,
+          runResult: outcome.runResult,
+          runError: outcome.runError
+            ?? (outcome.runStatus === "failed" ? "The resumed run failed on the server." : null),
+        });
+      },
+    });
+  }, [watchPausedRunId, watchConversationId]);
 
   const [projectCreateError, setProjectCreateError] = useState<string | null>(null);
 
