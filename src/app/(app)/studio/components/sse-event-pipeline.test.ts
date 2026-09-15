@@ -413,3 +413,69 @@ describe("SSE event pipeline — full LiTT task simulation", () => {
     // → git reset --hard <sha> in the workspace
   });
 });
+
+describe("Approval gate lifecycle", () => {
+  beforeEach(() => {
+    useExecutionStore.getState().reset();
+    useExecutionStore.getState().startRun();
+  });
+
+  it("pending_approval survives endRun — the run paused, it did not end", () => {
+    // Regression: production showed "Mutation requires approval in ACT mode"
+    // but endRun() wiped pendingApproval, unmounting the Approve/Reject card
+    // and leaving the paused run with no way to resume.
+    feedSSEEventToExecutionStore({
+      type: "pending_approval",
+      toolId: "files.write",
+      reason: "Mutation requires approval in ACT mode",
+      pausedRunId: "paused-1",
+      inputs: { path: "index.html" },
+    });
+
+    expect(useExecutionStore.getState().pendingApproval?.pausedRunId).toBe("paused-1");
+
+    // The SSE stream ends with done — the run is paused, not terminal.
+    useExecutionStore.getState().endRun();
+
+    const s = useExecutionStore.getState();
+    expect(s.pendingApproval?.pausedRunId).toBe("paused-1");
+    expect(s.phase).toBe("awaiting_approval");
+    expect(s.isRunning).toBe(false);
+  });
+
+  it("cancelled/failed endRun still clears pendingApproval", () => {
+    feedSSEEventToExecutionStore({
+      type: "pending_approval",
+      toolId: "files.write",
+      reason: "gate",
+      pausedRunId: "paused-2",
+    });
+    useExecutionStore.getState().endRun("cancelled");
+    expect(useExecutionStore.getState().pendingApproval).toBeNull();
+    expect(useExecutionStore.getState().phase).toBe("cancelled");
+
+    useExecutionStore.getState().reset();
+    useExecutionStore.getState().startRun();
+    feedSSEEventToExecutionStore({
+      type: "pending_approval",
+      toolId: "files.write",
+      reason: "gate",
+      pausedRunId: "paused-3",
+    });
+    useExecutionStore.getState().endRun("failed");
+    expect(useExecutionStore.getState().pendingApproval).toBeNull();
+    expect(useExecutionStore.getState().phase).toBe("done");
+  });
+
+  it("resolveApproval clears the card after the user decides", () => {
+    feedSSEEventToExecutionStore({
+      type: "pending_approval",
+      toolId: "files.write",
+      reason: "gate",
+      pausedRunId: "paused-4",
+    });
+    useExecutionStore.getState().endRun();
+    useExecutionStore.getState().resolveApproval("approved");
+    expect(useExecutionStore.getState().pendingApproval).toBeNull();
+  });
+});

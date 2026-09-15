@@ -29,7 +29,7 @@ import { runAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/ag
 import { runLaunchFlow, type LaunchFlowResult } from "@/lib/litt-intelligence/launch-flow";
 import { ProgressEmitter, type ProgressEvent } from "@/lib/litt-intelligence/progress-events";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
-import { createPausedRun } from "@/lib/litt-intelligence/paused-run-store";
+import { createPausedRun, getPendingPausedRunForConversation } from "@/lib/litt-intelligence/paused-run-store";
 import { registerExecution, unregisterExecution } from "@/lib/studio/execution-registry";
 import { resolveTurn } from "@/lib/litt-intelligence/turn-resolver";
 import {
@@ -1182,6 +1182,28 @@ async function getHandler(req: NextRequest, routeCtx: RouteParams) {
   }
 
   const messages = await listMessages(conversation.id, userId);
+
+  // Rehydration: a run paused for ACT-mode approval survives reload only in
+  // agent_paused_runs — the message row has no pending_approval column. When
+  // the latest assistant message is awaiting_approval, attach the resumable
+  // paused run so the client can remount the Approve/Reject card.
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+  if (lastAssistant?.status === "awaiting_approval") {
+    try {
+      const pendingRun = await getPendingPausedRunForConversation(conversation.id, userId);
+      if (pendingRun) {
+        lastAssistant.pendingApproval = {
+          toolId: pendingRun.toolId,
+          reason: pendingRun.reason,
+          pausedRunId: pendingRun.id,
+          inputs: pendingRun.inputs,
+        };
+      }
+    } catch {
+      // Non-fatal — transcript still loads; the approval card just won't remount.
+    }
+  }
+
   return NextResponse.json({ messages, revision: conversation.revision });
 }
 

@@ -250,11 +250,16 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     const updatedEvents = state.events.map((e) =>
       e.type === "tool_start" ? { ...e, type: "tool_result" as const, success: false, summary: e.summary + " (interrupted)" } : e,
     );
+    // A run paused at an approval gate is not done — the pending approval
+    // must survive endRun so the Approve/Reject card stays mounted and the
+    // user can resume the paused execution. Only a real terminal outcome
+    // (cancelled/failed) clears it.
+    const paused = state.pendingApproval != null && reason !== "cancelled" && reason !== "failed";
     set({
       isRunning: false,
-      phase: reason === "cancelled" ? "cancelled" : "done",
+      phase: reason === "cancelled" ? "cancelled" : paused ? "awaiting_approval" : "done",
       events: updatedEvents,
-      pendingApproval: null,
+      pendingApproval: paused ? state.pendingApproval : null,
     });
   },
 
