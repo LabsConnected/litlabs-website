@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react";
+import { isFeatureEnabled } from "@/config/feature-flags";
 import {
   LayoutDashboard,
   Users,
@@ -99,6 +100,21 @@ export const APP_NAV_SECTIONS: NavSection[] = [
     ],
   },
 ];
+
+/* ─── Flag-gated visibility ──────────────────────────────────────────── */
+// /games 404s while the retroGameRuntime flag is off (see
+// src/app/(app)/games/layout.tsx — games are not part of the public V1
+// product). The top navbar already hides the link behind the same flag;
+// this helper applies the same rule to the app-shell sidebar so no nav
+// surface ever links to a 404.
+export function getVisibleNavSections(): NavSection[] {
+  return APP_NAV_SECTIONS.map((section) => ({
+    ...section,
+    items: section.items.filter(
+      (item) => item.href !== "/games" || isFeatureEnabled("retroGameRuntime"),
+    ),
+  }));
+}
 
 /* Bottom-of-sidebar utility items (always visible).
    Profile is NOT here — it lives inside the identity dock's account menu. */
