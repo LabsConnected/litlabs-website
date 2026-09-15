@@ -1184,11 +1184,16 @@ async function getHandler(req: NextRequest, routeCtx: RouteParams) {
   const messages = await listMessages(conversation.id, userId);
 
   // Rehydration: a run paused for ACT-mode approval survives reload only in
-  // agent_paused_runs — the message row has no pending_approval column. When
-  // the latest assistant message is awaiting_approval, attach the resumable
-  // paused run so the client can remount the Approve/Reject card.
+  // agent_paused_runs — the message row has no pending_approval column, and
+  // the messages.status CHECK constraint does not (yet) accept
+  // 'awaiting_approval', so a paused message can persist as 'streaming'.
+  // The paused run row is authoritative: attach it to the latest assistant
+  // message whenever its status still reflects an open turn.
   const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
-  if (lastAssistant?.status === "awaiting_approval") {
+  if (
+    lastAssistant?.status === "awaiting_approval" ||
+    lastAssistant?.status === "streaming"
+  ) {
     try {
       const pendingRun = await getPendingPausedRunForConversation(conversation.id, userId);
       if (pendingRun) {

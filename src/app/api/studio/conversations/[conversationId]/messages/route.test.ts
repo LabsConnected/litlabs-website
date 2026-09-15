@@ -990,6 +990,24 @@ describe("GET /api/studio/conversations/[conversationId]/messages — approval r
     });
   });
 
+  it("attaches pendingApproval to a streaming last message — the messages CHECK constraint predates awaiting_approval so paused runs persist as streaming", async () => {
+    vi.mocked(listMessages).mockResolvedValue([
+      { id: "m2", role: "assistant", content: "", status: "streaming" },
+    ] as any);
+    vi.mocked(getPendingPausedRunForConversation).mockResolvedValue({
+      id: "paused-10",
+      toolId: "apply_patch",
+      reason: "Mutation requires approval in ACT mode",
+      inputs: { path: "index.html" },
+    } as any);
+
+    const res = await GET(new NextRequest("http://localhost/api/studio/conversations/conv-123/messages"), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    const body = await res.json();
+    expect(body.messages.at(-1).pendingApproval?.pausedRunId).toBe("paused-10");
+  });
+
   it("leaves the message untouched when no resumable paused run exists", async () => {
     vi.mocked(listMessages).mockResolvedValue([
       { id: "m2", role: "assistant", content: "I need your approval", status: "awaiting_approval" },
