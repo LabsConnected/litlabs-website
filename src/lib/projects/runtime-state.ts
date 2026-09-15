@@ -43,10 +43,24 @@ export interface ProjectRuntimeState {
   /** Project identity */
   projectId: string | null;
   projectName: string | null;
+  /** Connected GitHub repository ("owner/repo"), or null. OPTIONAL. */
   repository: string | null;
+  /** The workspace's real Git branch. Managed projects report "main". */
   branch: string | null;
-  /** How the project source was created */
-  sourceType: "github" | "upload" | "template" | "blank" | null;
+  /** How the project source was created (raw stored value) */
+  sourceType: "github" | "upload" | "template" | "blank" | "managed" | null;
+
+  // ─── Source model (Git != GitHub) ────────────────────────────────
+  /** Who owns the durable source: LiTT ("managed") or GitHub. */
+  sourceKind: "managed" | "github" | null;
+  /** Display label for the source: "LiTT Managed" or "GitHub". */
+  sourceLabel: string | null;
+  /** Provisioning state of the source itself, separate from the agent. */
+  sourceStatus: "provisioning" | "ready" | "error" | "needs_setup" | null;
+  /** Whether the workspace has a Git repository. Managed projects do. */
+  versionControl: "git" | "none";
+  /** Whether a GitHub repository is connected. Optional by design. */
+  githubConnected: boolean;
 
   /** Workspace identity */
   workspaceId: string | null;
@@ -100,6 +114,11 @@ export const INITIAL_RUNTIME_STATE: ProjectRuntimeState = {
   repository: null,
   branch: null,
   sourceType: null,
+  sourceKind: null,
+  sourceLabel: null,
+  sourceStatus: null,
+  versionControl: "none",
+  githubConnected: false,
   workspaceId: null,
   workspacePath: null,
   workspaceStatus: null,

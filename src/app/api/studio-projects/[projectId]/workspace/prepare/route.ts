@@ -10,6 +10,7 @@ import {
 } from "@/lib/projects/project-repository";
 import { prepareWorkspaceInternal, getWorkspaceInternal } from "@/lib/terminal-internal-client";
 import { getInstallationTokenForClone } from "@/lib/github-app";
+import { isManagedSourceType } from "@/lib/projects/project-source";
 
 /**
  * POST /api/studio-projects/[projectId]/workspace/prepare
@@ -60,22 +61,21 @@ export async function POST(
           workspaceRoot: project.workspaceRoot,
         });
       }
-      // Workspace lost on terminal-server — fall through to re-provision
-      // Reset stale DB record so provisioning can proceed
+      // Workspace lost on terminal-server (restart, crash, eviction) —
+      // fall through to re-provision. Reset ONLY the status: the recorded
+      // workspaceId and workspaceRoot are the adoption hints that let
+      // re-provisioning find the durable source still sitting on the
+      // volume. Nulling them here is what used to strand a legacy
+      // workspace at a path nothing could name any more, so the user
+      // came back to an empty project.
       await updateProjectWorkspace(projectId, userId, {
-        workspaceId: null,
         workspaceStatus: "not_prepared",
-        workspaceRoot: null,
         workspaceError: null,
       });
     } catch {
-      // If verification fails due to config issues, don't re-provision
-      // (the error will surface again during provisioning)
-      // Fall through to re-provision for network errors
+      // Terminal server unreachable — same reset, same reasoning.
       await updateProjectWorkspace(projectId, userId, {
-        workspaceId: null,
         workspaceStatus: "not_prepared",
-        workspaceRoot: null,
         workspaceError: null,
       });
     }
@@ -132,13 +132,26 @@ export async function POST(
 
   // We own the lock — proceed with provisioning
   try {
+    // Adoption hints — see WorkspaceAdoptionHints. Passing the
+    // project's recorded workspace lets the terminal server reuse
+    // durable source that already exists on the volume instead of
+    // provisioning an empty directory next to it.
+    const adoption = {
+      existingRoot: project.workspaceRoot,
+      existingWorkspaceId: project.workspaceId,
+    };
+
     let result;
-    if (project.sourceType === "blank") {
+    if (isManagedSourceType(project.sourceType)) {
+      // Managed source: LiTT owns the files. "blank" and "template"
+      // are both managed — "template" previously fell through to the
+      // "no valid source" branch and could never be provisioned.
       result = await prepareWorkspaceInternal({
-        sourceType: "blank",
+        sourceType: "managed",
         userId,
         projectId,
         templateId: project.templateId ?? "blank-static",
+        ...adoption,
       });
     } else if (project.sourceType === "github" && project.githubInstallationId && project.githubOwner && project.githubRepo) {
       // Generate a short-lived installation token so the terminal server can
@@ -159,6 +172,7 @@ export async function POST(
         branch: project.githubBranch ?? "main",
         commitSha: project.latestCommitSha,
         githubToken,
+        ...adoption,
       });
     } else {
       // Mark as failed — no valid source
@@ -173,10 +187,14 @@ export async function POST(
     }
 
     // Persist the workspace ID and root — transitions provisioning → ready
+    // Persist the branch the workspace actually reports. Without this
+    // a managed project has a real `main` branch on disk but renders
+    // "—", because github_branch is NULL for a project with no GitHub.
     await updateProjectWorkspace(projectId, userId, {
       workspaceId: result.workspaceId,
       workspaceStatus: "ready",
       workspaceRoot: result.root,
+      workspaceBranch: result.branch ?? null,
       workspacePreparedAt: new Date().toISOString(),
       workspaceError: null,
     });

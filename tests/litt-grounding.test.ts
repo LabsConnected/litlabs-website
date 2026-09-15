@@ -180,7 +180,10 @@ describe("Project Status Answer Generation", () => {
 
   it("generates accurate status for disconnected project", () => {
     const answer = generateProjectStatusAnswer(DISCONNECTED_CTX);
-    expect(answer).toContain("No repository is currently connected");
+    // Git is not GitHub — the absence of a GitHub repo must not read
+    // as "this project has no source".
+    expect(answer).toContain("No GitHub repository is connected");
+    expect(answer).toContain("own Git history");
     expect(answer).toContain("workspace is not_prepared");
   });
 
@@ -255,7 +258,7 @@ describe("Tool Capability Manifest", () => {
     const manifest = buildToolManifest(DISCONNECTED_CTX);
     const repoTool = manifest.tools.find((t) => t.id === "repository.info");
     expect(repoTool?.available).toBe(false);
-    expect(repoTool?.unavailableReason).toBe("No repository connected");
+    expect(repoTool?.unavailableReason).toContain("No GitHub repository connected");
   });
 
   it("marks workspace.write as unavailable when terminal is disconnected", () => {
@@ -307,8 +310,11 @@ describe("Unavailable Tool Error Messages", () => {
 
   it("explains repository not connected precisely", () => {
     const msg = explainUnavailableTool("repository.info", DISCONNECTED_CTX);
-    expect(msg).toContain("No repository is connected");
-    expect(msg).toContain("Connect a GitHub repository");
+    expect(msg).toContain("No GitHub repository is connected");
+    // Must not instruct the user to connect GitHub before editing.
+    expect(msg).toContain("does not block editing");
+    // Connecting GitHub is publishing, not a prerequisite.
+    expect(msg).toContain("Connect GitHub only to publish");
   });
 
   it("explains workspace not ready precisely", () => {

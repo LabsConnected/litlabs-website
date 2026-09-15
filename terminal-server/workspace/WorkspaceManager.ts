@@ -1,8 +1,8 @@
 import { resolve, join } from "path";
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from "fs";
+import { mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync } from "fs";
 import { execFileSync } from "child_process";
 import { simpleGit, type SimpleGit } from "simple-git";
-import { randomUUID } from "crypto";
+
 
 export interface WorkspaceDescriptor {
   workspaceId: string;
@@ -24,7 +24,14 @@ export interface PrepareInput {
   commitSha?: string | null;
   workspaceRoot: string;
   githubToken?: string | null;
+  /** Existing root from studio_projects, adopted when it still exists. */
+  existingRoot?: string | null;
+  /** Existing id from studio_projects, reused so the DB stays valid. */
+  existingWorkspaceId?: string | null;
 }
+
+/** Managed workspaces are always initialised on this branch. */
+const DEFAULT_BRANCH = "main";
 
 const workspaces = new Map<string, WorkspaceDescriptor>();
 
@@ -71,8 +78,15 @@ export function getWorkspaceRoot(workspaceId: string, userId?: string): string |
 export async function prepareWorkspace(
   input: PrepareInput,
 ): Promise<WorkspaceDescriptor> {
-  const workspaceId = `ws-${input.projectId.slice(0, 8)}-${randomUUID().slice(0, 8)}`;
-  const root = resolve(input.workspaceRoot, input.userId, workspaceId);
+  // Durable, project-identified root — see managedWorkspaceRoot(). A
+  // GitHub-backed workspace must also resolve to the same path across
+  // provisions, otherwise the "already cloned, just fetch" branch below
+  // is unreachable and every re-provision re-clones into a new
+  // directory, discarding uncommitted local work.
+  const root = input.existingRoot && existsSync(input.existingRoot)
+    ? input.existingRoot
+    : managedWorkspaceRoot(input.workspaceRoot, input.userId, input.projectId);
+  const workspaceId = input.existingWorkspaceId || managedWorkspaceId(input.projectId);
 
   mkdirSync(root, { recursive: true });
 
@@ -186,39 +200,160 @@ export function listWorkspaces(userId: string): WorkspaceDescriptor[] {
 }
 
 /**
- * Prepare a blank workspace (no GitHub clone).
- * Initializes a git repo and writes template files.
+ * A filesystem-safe segment derived from an identifier.
+ *
+ * Project and user ids come from Clerk and Supabase and are already
+ * opaque, but they are interpolated into a path, so anything that could
+ * traverse or escape is stripped rather than trusted.
  */
-export async function prepareBlankWorkspace(input: {
+function safeSegment(value: string): string {
+  const cleaned = value
+    // Drop separators and anything outside a conservative allowlist.
+    .replace(/[^A-Za-z0-9._-]/g, "")
+    // Collapse dot runs. A single path segment has no legitimate use for
+    // "..", so removing them leaves no traversal token behind even if a
+    // caller later joins this value without resolving.
+    .replace(/\.{2,}/g, "");
+  if (!cleaned || cleaned === ".") {
+    throw new Error("Invalid identifier for workspace path");
+  }
+  return cleaned.slice(0, 128);
+}
+
+/**
+ * The DURABLE root for a project's managed source.
+ *
+ * Derived from (userId, projectId) — NOT from a random workspace id.
+ * The previous scheme minted `ws-<pid8>-<uuid8>` on every prepare, so
+ * re-provisioning a project (after a terminal-server restart, or after
+ * the DB row was reset to not_prepared) created a brand-new EMPTY
+ * directory and silently orphaned the user's files. A project's source
+ * must resolve to the same path for the life of the project.
+ */
+export function managedWorkspaceRoot(
+  workspaceRoot: string,
+  userId: string,
+  projectId: string,
+): string {
+  return resolve(workspaceRoot, safeSegment(userId), safeSegment(projectId));
+}
+
+/**
+ * The deterministic workspace id for a project.
+ *
+ * Stable across restarts so a recovered workspace re-registers under
+ * the id already stored in studio_projects.workspace_id.
+ */
+export function managedWorkspaceId(projectId: string): string {
+  return `ws-${safeSegment(projectId)}`;
+}
+
+/** Whether a directory holds project content (ignoring .git). */
+function hasProjectContent(root: string): boolean {
+  try {
+    return readdirSync(root).some((entry) => entry !== ".git");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Ensure a directory is a Git repository with at least one commit.
+ *
+ * Managed source is Git-backed so checkpoints, diff and restore work
+ * without any GitHub repository existing. Safe to call on a workspace
+ * that is already initialised — it only fills in what is missing, and
+ * never rewrites existing history.
+ */
+async function ensureGitRepository(root: string): Promise<{ branch: string; commitSha: string }> {
+  const git: SimpleGit = simpleGit(root);
+
+  if (!existsSync(join(root, ".git"))) {
+    await git.init();
+  }
+
+  // Identity is required before a commit can be created. Set it
+  // locally so it never depends on a global git config being present
+  // in the container.
+  await git.addConfig("user.name", "LiTT Studio");
+  await git.addConfig("user.email", "studio@litt.dev");
+
+  let hasCommit = true;
+  try {
+    await git.revparse("HEAD");
+  } catch {
+    hasCommit = false;
+  }
+
+  if (!hasCommit) {
+    // Name the branch before the first commit so the repository lands
+    // on `main` regardless of the host's init.defaultBranch setting.
+    try {
+      await git.raw(["checkout", "-B", DEFAULT_BRANCH]);
+    } catch {
+      // Older git without -B on an unborn branch — fall back below.
+    }
+    await git.add(".");
+    await git.commit("Initial commit — LiTT managed project");
+  }
+
+  const status = await git.status();
+  const branch = status.current || DEFAULT_BRANCH;
+  const commitSha = (await git.revparse("HEAD")).trim();
+  return { branch, commitSha };
+}
+
+/**
+ * Prepare a MANAGED workspace — LiTT-owned durable source, no GitHub.
+ *
+ * Idempotent and adoption-first:
+ *   1. If durable source already exists on disk, ADOPT it. Files,
+ *      history and branch are preserved. This is what makes a project
+ *      survive a terminal-server restart: the in-memory registry is
+ *      lost, but the volume is not, so the workspace re-registers
+ *      against the same directory instead of being recreated empty.
+ *   2. Otherwise create the directory and write the template.
+ *   3. Either way, guarantee a Git repository with a commit.
+ *
+ * Never deletes or overwrites existing project content.
+ */
+export async function prepareManagedWorkspace(input: {
   userId: string;
   projectId: string;
   workspaceRoot: string;
   templateId: string;
+  /** Existing root from studio_projects, adopted when it still exists. */
+  existingRoot?: string | null;
+  /** Existing id from studio_projects, reused so the DB stays valid. */
+  existingWorkspaceId?: string | null;
 }): Promise<WorkspaceDescriptor> {
-  const workspaceId = `ws-${input.projectId.slice(0, 8)}-${randomUUID().slice(0, 8)}`;
-  const root = resolve(input.workspaceRoot, input.userId, workspaceId);
+  const canonicalRoot = managedWorkspaceRoot(input.workspaceRoot, input.userId, input.projectId);
+
+  // A legacy workspace lives under a random ws-* directory. Keep using
+  // it rather than stranding the user's files at an unreachable path.
+  const legacyRoot = input.existingRoot && existsSync(input.existingRoot) && hasProjectContent(input.existingRoot)
+    ? input.existingRoot
+    : null;
+
+  const root = legacyRoot ?? canonicalRoot;
+  const adopting = existsSync(root) && hasProjectContent(root);
 
   mkdirSync(root, { recursive: true });
 
-  // Initialize template files
-  writeTemplateFiles(root, input.templateId);
+  if (!adopting) {
+    writeTemplateFiles(root, input.templateId);
+  }
 
-  // Initialize git repo
-  const git: SimpleGit = simpleGit(root);
-  await git.init();
-  await git.addConfig("user.name", "LiTTree Studio");
-  await git.addConfig("user.email", "studio@litree.dev");
-  await git.add(".");
-  await git.commit("Initial blank project from LiTTree Studio template");
+  const { branch, commitSha } = await ensureGitRepository(root);
 
-  const commitSha = (await git.revparse("HEAD")).trim();
+  const workspaceId = input.existingWorkspaceId || managedWorkspaceId(input.projectId);
 
   const descriptor: WorkspaceDescriptor = {
     workspaceId,
     userId: input.userId,
     projectId: input.projectId,
     root,
-    branch: "main",
+    branch,
     commitSha,
     ready: true,
   };
@@ -226,6 +361,21 @@ export async function prepareBlankWorkspace(input: {
   workspaces.set(workspaceId, descriptor);
   persistWorkspaces();
   return descriptor;
+}
+
+/**
+ * Back-compat alias for the previous blank-project entry point.
+ * Managed source and "blank project" are the same thing.
+ */
+export async function prepareBlankWorkspace(input: {
+  userId: string;
+  projectId: string;
+  workspaceRoot: string;
+  templateId: string;
+  existingRoot?: string | null;
+  existingWorkspaceId?: string | null;
+}): Promise<WorkspaceDescriptor> {
+  return prepareManagedWorkspace(input);
 }
 
 /** Write initial template files for blank projects. */

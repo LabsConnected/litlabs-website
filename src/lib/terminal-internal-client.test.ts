@@ -178,7 +178,7 @@ describe("terminal client functions wire timeouts", () => {
   it.each([
     ["prepareWorkspaceInternal", () =>
       prepareWorkspaceInternal({
-        sourceType: "blank",
+        sourceType: "managed",
         userId: "u",
         projectId: "p",
         templateId: "blank-static",

@@ -468,6 +468,9 @@ export const toolRunProjectChecks: ToolHandler = async (userId, args) => {
     packageManager: project.packageManager,
     githubFullName: project.githubFullName,
     sourceType: project.sourceType,
+    // Git exists once the workspace is provisioned — managed projects
+    // are git init-ed, GitHub projects are clones.
+    gitInitialized: project.workspaceStatus === "ready",
   };
 
   for (const checkId of checks) {
@@ -1338,10 +1341,12 @@ export async function executeProjectTool(
     return fail(`Unknown tool "${toolName}". Valid: ${Object.keys(PROJECT_TOOLS).join(", ")}.`);
   }
 
-  // Repo-only tools on a workspace with no repository are NOT APPLICABLE.
-  // Letting them run produces "git is not installed"-style errors that the
-  // model then reports as project failures, and it proposes installing git
-  // for a workspace that intentionally has none.
+  // Git tools need a provisioned working tree; GitHub tools need a
+  // connected GitHub repository. These are separate — a managed project
+  // has real Git without any GitHub repo, so git_status/diff/checkpoint
+  // must stay available there. Letting an inapplicable tool run produces
+  // "git is not installed"-style errors that the model then reports as
+  // project failures.
   const projectId = str(args.project_id);
   if (entry.metadata.projectScoped && projectId) {
     const project = await getProject(projectId, userId);
@@ -1351,6 +1356,7 @@ export async function executeProjectTool(
         packageManager: project.packageManager,
         githubFullName: project.githubFullName,
         sourceType: project.sourceType,
+        gitInitialized: project.workspaceStatus === "ready",
       };
       if (repoOnlyToolApplicability(shape, toolName) === "not_applicable") {
         const reason = notApplicableReason(shape, toolName);

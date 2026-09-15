@@ -291,7 +291,7 @@ export function buildToolManifest(ctx: RuntimeContextSnapshot): ToolCapabilityMa
       name: "Repository Info",
       description: "Reports connected repository name, branch, and access level",
       available: ctx.repositoryConnected,
-      unavailableReason: !ctx.repositoryConnected ? "No repository connected" : undefined,
+      unavailableReason: !ctx.repositoryConnected ? "No GitHub repository connected (optional — the project has its own Git history)" : undefined,
     },
     {
       id: "terminal.status",
@@ -509,7 +509,7 @@ export function generateProjectStatusAnswer(ctx: RuntimeContextSnapshot): string
   if (ctx.repositoryConnected && ctx.repositoryName) {
     parts.push(`Your repository ${ctx.repositoryName} is connected on branch ${ctx.activeBranch || "main"}.`);
   } else {
-    parts.push("No repository is currently connected.");
+    parts.push("No GitHub repository is connected. The project uses LiTT-managed source with its own Git history — GitHub is optional.");
   }
 
   // Workspace
@@ -570,7 +570,7 @@ export function explainUnavailableTool(toolId: string, ctx: RuntimeContextSnapsh
 
     case "repository.info":
       if (!ctx.repositoryConnected) {
-        return "No repository is connected. Connect a GitHub repository in the Projects page.";
+        return "No GitHub repository is connected. This does not block editing, running or previewing the project — its source is LiTT-managed with its own Git history. Connect GitHub only to publish.";
       }
       return "Repository is connected but encountered an error.";
 

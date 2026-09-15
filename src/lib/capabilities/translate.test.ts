@@ -57,7 +57,9 @@ describe("translateCapabilities — workspace-aware status", () => {
       terminalExecution: "unavailable",
     };
     const result = translateCapabilities(caps);
-    expect(result.githubState).toContain("No repository is connected.");
+    expect(result.githubState).toContain("No GitHub repository is connected.");
+    // GitHub is optional publishing, not a prerequisite for building.
+    expect(result.githubState).toContain("GitHub is optional publishing");
     expect(result.terminalState).toContain("not connected");
     expect(result.contextBlock).not.toContain("Write access:");
   });

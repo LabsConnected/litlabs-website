@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, Eye, Loader2, Monitor, MousePointer2, RefreshCw, RotateCcw, Smartphone, Tablet, Copy, Check, Square, X } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { formatSourceSummary } from "@/lib/projects/project-source";
 import { useExecutionStore } from "../stores/useExecutionStore";
 
 /**
@@ -123,14 +124,24 @@ export default function StudioPreviewPanel({
   repositoryName,
   branch,
   workspaceStatus,
+  sourceKind = null,
+  sourceStatus = null,
+  versionControl = "none",
   refreshKey = 0,
   onSelectionChange,
 }: {
   projectId: string | null;
   projectName: string | null;
+  /** Connected GitHub repository ("owner/repo"), or null. OPTIONAL. */
   repositoryName: string | null;
   branch: string | null;
   workspaceStatus: string | null;
+  /** Who owns the durable source: LiTT ("managed") or GitHub. */
+  sourceKind?: "managed" | "github" | null;
+  /** Provisioning state of the source itself. */
+  sourceStatus?: "provisioning" | "ready" | "error" | "needs_setup" | null;
+  /** Whether the workspace has a Git repository. Managed projects do. */
+  versionControl?: "git" | "none";
   refreshKey?: number;
   onSelectionChange?: (selection: PreviewSelection | null) => void;
 }) {
@@ -521,6 +532,13 @@ export default function StudioPreviewPanel({
   const detail = state === "not_started" ? "Preparing your preview automatically…" : state === "unreachable" ? (error ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed. Refreshing the project preview status." : state === "failed" ? (isAuthConfigError ? (error ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — update the Clerk keys in the terminal-server Railway env or workspace .env.local.") : error ?? "The dev server failed to start. Try restarting it.") : error ?? "The preview surface reports only real project runtime state.";
   const dotColor = STATUS_DOT_COLOR[state];
   const isLive = state === "ready" || state === "stale";
+  const sourceSummary = formatSourceSummary({
+    kind: sourceKind,
+    status: sourceStatus,
+    versionControl,
+    branch,
+    githubRepository: repositoryName,
+  });
 
   return (
     <div className={`flex h-full min-h-0 flex-col ${maximized ? "fixed inset-0 z-[300] p-3" : ""}`} data-testid="studio-preview-panel">
@@ -539,13 +557,24 @@ export default function StudioPreviewPanel({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1">
             <span className="truncate text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>{projectName ?? "Project preview"}</span>
+            {/*
+              `framework` is the RUNTIME technology (static, nextjs, vite,
+              expo) — never source ownership. Titled so that "STATIC"
+              sitting above the source line cannot read as "no source".
+            */}
             {framework && (
-              <span className="shrink-0 rounded px-1 py-0.5 text-[8px] font-bold uppercase" style={{ backgroundColor: "rgba(139,92,246,0.12)", color: "#9b4dff" }}>
+              <span className="shrink-0 rounded px-1 py-0.5 text-[8px] font-bold uppercase" style={{ backgroundColor: "rgba(139,92,246,0.12)", color: "#9b4dff" }} title={`Runtime: ${framework}`} data-testid="preview-runtime-badge">
                 {framework}
               </span>
             )}
           </div>
-          <div className="truncate text-[9px]" style={{ color: "var(--text-muted)" }}>{repositoryName ?? "No repository"} · {branch ?? "—"}</div>
+          {/*
+            Source line. A managed project has durable source, Git
+            history and a branch without any GitHub repository, so this
+            must never render "No repository · —" — that reads as "this
+            project is empty" for a perfectly healthy project.
+          */}
+          <div className="truncate text-[9px]" style={{ color: "var(--text-muted)" }} title={sourceSummary} data-testid="preview-source-summary">{sourceSummary}</div>
         </div>
         {/* Device mode selector — compact */}
         {isLive && (

@@ -176,16 +176,37 @@ describe("workspace-recovery", () => {
       const result = await provisionWorkspaceForProject("proj-blank", "user-1");
 
       expect(result).toBe("ws-blank");
+      // "blank" is managed source — LiTT owns the files. The terminal
+      // server takes a single "managed" source type for blank/template.
       expect(prepareWorkspaceInternal).toHaveBeenCalledWith(expect.objectContaining({
-        sourceType: "blank",
+        sourceType: "managed",
         templateId: "blank-static",
       }));
     });
 
-    it("throws when project has no valid source", async () => {
-      // sourceType "template" matches neither the blank nor github branch,
-      // so the code falls through to the "no valid source" error.
-      vi.mocked(getProject).mockResolvedValue(fakeProject({ sourceType: "template" as unknown as "blank", workspaceId: null, workspaceStatus: "not_prepared" }));
+    it("provisions a template project as managed source", async () => {
+      // Regression: "template" is a legal source_type that previously
+      // matched neither the blank nor the github branch, so a template
+      // project could never be provisioned and reported "no valid source".
+      vi.mocked(getProject).mockResolvedValue(fakeProject({ sourceType: "template" as unknown as "blank", templateId: "nextjs", workspaceId: null, workspaceStatus: "not_prepared" }));
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(null);
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-tmpl", root: "/data/ws-tmpl", branch: "main" }) as unknown as WorkspacePrepareResponse,
+      );
+
+      await expect(provisionWorkspaceForProject("proj-tmpl", "user-1")).resolves.toBe("ws-tmpl");
+      expect(prepareWorkspaceInternal).toHaveBeenCalledWith(expect.objectContaining({
+        sourceType: "managed",
+        templateId: "nextjs",
+      }));
+    });
+
+    it("throws when a GitHub project is missing its installation details", async () => {
+      // A project that declares GitHub source but cannot reach it has a
+      // genuinely invalid source — unlike a managed project, which never does.
+      vi.mocked(getProject).mockResolvedValue(fakeProject({ sourceType: "github", githubInstallationId: null, githubOwner: null, githubRepo: null, workspaceId: null, workspaceStatus: "not_prepared" }));
       vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
       vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
       vi.mocked(updateProjectWorkspace).mockResolvedValue(null);
