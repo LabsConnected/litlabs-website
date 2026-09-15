@@ -34,6 +34,19 @@ export interface ApprovalRunStatus {
   runError: string | null;
 }
 
+export interface ApprovalWatchOutcome {
+  /**
+   * Final gate state observed on the server:
+   * - approved/rejected: a decision was recorded (by any session)
+   * - expired: the pause outlived its server-side TTL with no decision
+   * - gone: the paused run no longer exists (404) — the card is stale
+   */
+  status: "approved" | "rejected" | "expired" | "gone";
+  runStatus: ApprovalRunStatus["runStatus"];
+  runResult: ApprovalRunResult | null;
+  runError: string | null;
+}
+
 /**
  * Submit an approval decision and poll for the resumed execution result.
  *
@@ -151,6 +164,105 @@ export function submitApprovalAndPoll(opts: {
   }
 
   void run();
+
+  // Return cancel function
+  return () => {
+    cancelled = true;
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+  };
+}
+
+/**
+ * Watch a paused run's server-authoritative status until its approval gate
+ * settles — decided (approved/rejected), expired, gone, or the resumed
+ * execution reaches a terminal runStatus. READ-ONLY: never submits a
+ * decision, so it is safe to run while the gate is still pending.
+ *
+ * This covers resolutions the local client did not initiate — a decision
+ * made in another session/device, a page reload while the resumed run was
+ * still executing, or a pause expiring server-side — where the local
+ * pendingApproval card would otherwise stay mounted with no path to
+ * converge.
+ *
+ * Settles (stops polling and calls onSettled) when:
+ *   - status is "rejected" | "expired" → the decision is final, nothing is running
+ *   - runStatus is "completed" | "failed" → the resumed execution finished
+ *   - the paused run is gone (404) → the local card is stale
+ * Transient fetch/other failures keep polling until the timeout; a timeout
+ * simply stops watching — unknown server state is never reported as settled.
+ *
+ * @returns A cancel function to stop watching (for component teardown).
+ */
+export function watchApprovalResolution(opts: {
+  conversationId: string;
+  pausedRunId: string;
+  onSettled?: (outcome: ApprovalWatchOutcome) => void;
+  pollIntervalMs?: number;
+  timeoutMs?: number;
+  fetchStatus?: () => Promise<ApprovalRunStatus | "gone" | null>;
+  sleep?: (ms: number) => Promise<void>;
+}): () => void {
+  let cancelled = false;
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
+  const {
+    conversationId,
+    pausedRunId,
+    onSettled,
+    pollIntervalMs = POLL_INTERVAL_MS,
+    timeoutMs = POLL_TIMEOUT_MS,
+    sleep = (ms: number) => new Promise<void>((resolve) => {
+      timeoutHandle = setTimeout(() => resolve(), ms);
+    }),
+  } = opts;
+
+  const fetchStatus = opts.fetchStatus ?? (async () => {
+    const resp = await fetch(
+      `/api/studio/conversations/${conversationId}/approvals/${pausedRunId}`,
+      { credentials: "include" },
+    ).catch(() => null);
+    if (!resp) return null;
+    if (resp.status === 404) return "gone";
+    if (!resp.ok) return null;
+    return (await resp.json().catch(() => null)) as ApprovalRunStatus | null;
+  });
+
+  async function poll() {
+    const deadline = Date.now() + timeoutMs;
+    while (!cancelled && Date.now() < deadline) {
+      const status = await fetchStatus().catch(() => null);
+      if (cancelled) return;
+
+      if (status === "gone") {
+        onSettled?.({ status: "gone", runStatus: null, runResult: null, runError: null });
+        return;
+      }
+      if (status) {
+        if (status.status === "rejected" || status.status === "expired") {
+          onSettled?.({
+            status: status.status,
+            runStatus: status.runStatus,
+            runResult: status.runResult,
+            runError: status.runError,
+          });
+          return;
+        }
+        if (status.runStatus === "completed" || status.runStatus === "failed") {
+          onSettled?.({
+            status: "approved",
+            runStatus: status.runStatus,
+            runResult: status.runResult,
+            runError: status.runError,
+          });
+          return;
+        }
+        // "pending" (no decision yet) or "approved" + "processing" — keep watching
+      }
+      await sleep(pollIntervalMs);
+    }
+  }
+
+  void poll();
 
   // Return cancel function
   return () => {
