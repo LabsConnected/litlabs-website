@@ -124,16 +124,17 @@ export async function dispatchCommand(
     }
     cwd = resolvedCwd.cwd;
   } else if (typeof req.cwd === "string" && req.cwd.trim() !== "") {
-    // A directory cannot be requested without naming the owned workspace it
-    // belongs to; otherwise an absolute cwd would select any path on the
-    // container. Commands that need no workspace still run in the server cwd.
-    return errorResponse({
-      runId,
-      requestId,
-      code: "workspace_required",
-      message: "A workspaceId is required when a working directory is specified.",
-      timestamp,
-    });
+    // No workspace named — this is the machine lane (`litt --remote`, the
+    // Termux client, the PowerShell cockpit), where the caller asks for a
+    // directory on their OWN device and there is no tenant workspace to
+    // escape from. The tenant boundary is the workspace, enforced above;
+    // refusing a bare cwd here breaks that lane without adding isolation.
+    //
+    // The hosted web bridge is a separate concern: a Studio caller must not
+    // be able to omit workspaceId to obtain a free-form cwd on the shared
+    // container. That constraint belongs to /api/studio/command, which owns
+    // the browser-facing contract, not to this dispatcher.
+    cwd = req.cwd;
   }
 
   // ─── Reject unknown commands with a typed error ──────────────

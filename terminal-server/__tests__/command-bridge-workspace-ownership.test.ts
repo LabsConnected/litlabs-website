@@ -181,16 +181,35 @@ describe("dispatchCommand — workspace ownership", () => {
     expect(dispatchRegistryMock).not.toHaveBeenCalled();
   });
 
-  // 8. cwd without workspace identity
-  it("rejects a cwd supplied without a workspaceId", async () => {
+  // 8. cwd without workspace identity — the machine lane.
+  //
+  // `litt --remote`, the Termux client and the PowerShell cockpit all send an
+  // absolute cwd on the caller's own device with no workspaceId (see
+  // tests/termux-e2e-protocol.test.ts, whose helper defaults
+  // `cwd: req.cwd ?? repoRoot`). There is no tenant workspace to escape from
+  // here, so this stays allowed; the tenant boundary is the workspace, and
+  // the browser-facing constraint belongs to /api/studio/command.
+  it("allows a bare cwd when no workspace is named (machine lane)", async () => {
+    const res = await dispatchCommand({
+      command: "status",
+      cwd: ALICE_ROOT,
+    } as never);
+
+    expect(res.ok).toBe(true);
+    const ctx = dispatchRegistryMock.mock.calls[0][1] as { cwd: string };
+    expect(ctx.cwd).toBe(ALICE_ROOT);
+  });
+
+  it("a bare cwd never bypasses ownership once a workspace IS named", async () => {
     const res = await dispatchCommand({
       command: "status",
       userId: "user_alice",
-      cwd: "/etc",
+      workspaceId: "ws-bob",
+      cwd: ALICE_ROOT,
     } as never);
 
     expect(res.ok).toBe(false);
-    expect(res.error?.code).toBe("workspace_required");
+    expect(res.error?.code).toBe("workspace_unauthorized");
     expect(dispatchRegistryMock).not.toHaveBeenCalled();
   });
 
