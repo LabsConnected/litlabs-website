@@ -21,7 +21,7 @@ import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from ".
 import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, AllRoutesFailedError, AgentBudgetExhaustedError, type ToolDefinition, type ToolCallResult, type LLMMessage } from "./llm-tool-calling";
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
-import { validateApplyPatchInputs } from "./patch-validation";
+import { validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
 import { computeWorkspaceChange } from "./workspace-change-producer";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { toolRegistry } from "./tool-registry";
@@ -541,29 +541,35 @@ export async function runAgentLoopV2(
         continue;
       }
 
-      // Pre-approval patch sanity: an apply_patch whose inputs are provably
-      // invalid (unresolved template placeholders like [PERSON_NAME] or
-      // {{token}}, or a search string that cannot match the target file)
-      // must never become an Approve/Reject card — the approval freezes the
-      // inputs, so approving a dead patch can only fail on resume. Feed the
-      // error back as a tool result so the model re-reads and regenerates.
-      if (toolCall.toolId === "apply_patch" && permResult.allowed) {
-        const patchError = await validateApplyPatchInputs(toolCall.inputs, transport);
-        if (patchError) {
+      // Pre-approval write sanity: an apply_patch or files.write whose
+      // inputs are provably invalid (unresolved template placeholders like
+      // [PERSON_NAME] or {{token}}, or a patch search string that cannot
+      // match the target file) must never become an Approve/Reject card —
+      // the approval freezes the inputs, so approving a dead write can only
+      // fail on resume or persist the token verbatim. Feed the error back
+      // as a tool result so the model re-reads and regenerates.
+      if (permResult.allowed) {
+        const writeError =
+          toolCall.toolId === "apply_patch"
+            ? await validateApplyPatchInputs(toolCall.inputs, transport)
+            : toolCall.toolId === "files.write"
+              ? validateFilesWriteInputs(toolCall.inputs)
+              : null;
+        if (writeError) {
           const result: ToolCallResult = {
             toolCallId: toolCall.toolCallId,
             toolId: toolCall.toolId,
             result: null,
             success: false,
-            error: patchError,
+            error: writeError,
           };
           llmMessages.push(buildToolResultMessage(result));
-          toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: "invalid patch — regenerating", mutating: false });
+          toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: "invalid write — regenerating", mutating: false });
           localProgress.emit({
             type: "tool_result",
             toolId: toolCall.toolId,
             success: false,
-            summary: "Invalid patch — regenerating with real file content",
+            summary: "Invalid write — regenerating with real file content",
             durationMs: 0,
           });
           continue;

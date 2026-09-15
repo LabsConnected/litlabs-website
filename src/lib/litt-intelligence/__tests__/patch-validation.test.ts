@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from "vitest";
 import type { WorkspaceTransport } from "../workspace-transport";
-import { validateApplyPatchInputs } from "../patch-validation";
+import { validateApplyPatchInputs, validateFilesWriteInputs } from "../patch-validation";
 
 /**
  * Regression tests for the pre-approval apply_patch guard (P1 patch
@@ -109,5 +109,46 @@ describe("validateApplyPatchInputs — search must exist in the file", () => {
     const err = await validateApplyPatchInputs({ path: "index.html", patches: [] }, transport);
     expect(err).toContain("non-empty patches[]");
     expect(transport.readFile).not.toHaveBeenCalled();
+  });
+});
+
+describe("validateFilesWriteInputs — placeholder tokens in written content", () => {
+  // Production defect: a full-file rewrite shipped
+  // `<title>[PERSON_NAME] — Premium Coffee Roasters</title>` because the
+  // model substituted a template slot for the literal brand name, and the
+  // placeholder scan only guarded apply_patch — never files.write.
+
+  it("rejects [PERSON_NAME]-style bracket placeholders in content", () => {
+    const err = validateFilesWriteInputs({
+      path: "index.html",
+      content: "<html><title>[PERSON_NAME] — Premium Coffee Roasters</title></html>",
+    });
+    expect(err).toContain("[PERSON_NAME]");
+    expect(err).toContain("literal text");
+  });
+
+  it("rejects {{moustache}} placeholders in content", () => {
+    const err = validateFilesWriteInputs({
+      path: "index.html",
+      content: "<footer>By {{company_name}}</footer>",
+    });
+    expect(err).toContain("{{company_name}}");
+  });
+
+  it("accepts real file content, including legitimate bracket syntax", () => {
+    const legit = [
+      "<title>Ember Roast — Premium Coffee Roasters</title>",
+      "// [TODO] tighten spacing later\nconst a = items[0];",
+      "type Pair = [string, number];",
+    ];
+    for (const content of legit) {
+      expect(validateFilesWriteInputs({ path: "index.html", content })).toBeNull();
+    }
+  });
+
+  it("rejects malformed inputs", () => {
+    expect(validateFilesWriteInputs({ path: "index.html" })).toContain("string content");
+    expect(validateFilesWriteInputs({ content: "x" })).toContain("target path");
+    expect(validateFilesWriteInputs({})).toContain("target path");
   });
 });
