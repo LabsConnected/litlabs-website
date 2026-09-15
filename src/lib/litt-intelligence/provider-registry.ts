@@ -74,6 +74,7 @@ export type FailureClass =
   | "timeout" // 408 or local per-attempt timeout
   | "server_error" // 5xx
   | "bad_response" // malformed/empty provider payload
+  | "tool_call_parse_failed" // model emitted text-format tool markup, not a structured call
   | "network" // fetch threw before a response
   | "aborted" // upstream/client abort — not a provider failure
   | "budget_exhausted"; // agent deadline — not a provider failure
@@ -401,6 +402,7 @@ export function recordProviderFailure(provider: string, failure: ProviderFailure
     case "network":
     case "server_error":
     case "bad_response":
+    case "tool_call_parse_failed":
       next.state = consecutive >= DEGRADE_THRESHOLD ? "cooldown" : "degraded";
       if (next.state === "cooldown") next.cooldownUntil = now + TRANSIENT_COOLDOWN_MS;
       break;

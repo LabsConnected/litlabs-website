@@ -27,6 +27,7 @@
 import "server-only";
 
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { findToolCallMarkup } from "./tool-call-markup";
 import { SITE_URL } from "@/lib/siteConfig";
 import { logLLMCall, type LLMCallMetadata } from "@/lib/evals/braintrust";
 import {
@@ -663,7 +664,32 @@ async function attemptGemini(
       message: `empty completion (finishReason=${result.candidates[0]?.finishReason ?? "unknown"})`,
     });
   }
+  assertNoTextToolCallMarkup(parsed, req.toolIdMap, "gemini", model);
   return parsed;
+}
+
+/**
+ * Canonical tool-call normalization boundary: a response with no structured
+ * tool calls whose text shows invocation-intent markup is a model-level
+ * protocol failure, never assistant prose. Throwing a model-scope attempt
+ * error makes the router fail over to a sibling model/provider; if every
+ * route does this the run fails truthfully instead of completing with the
+ * raw markup persisted to the transcript.
+ */
+function assertNoTextToolCallMarkup(
+  parsed: { text: string; toolCalls: unknown[] },
+  toolIdMap: Map<string, string>,
+  provider: string,
+  model: string,
+): void {
+  if (parsed.toolCalls.length > 0) return;
+  const hit = findToolCallMarkup(parsed.text, new Set(toolIdMap.values()));
+  if (!hit) return;
+  throw new ProviderAttemptError(provider, model, {
+    class: "tool_call_parse_failed",
+    scope: "model",
+    message: `model emitted text-format tool markup (${hit.kind}${hit.toolId ? ` for ${hit.toolId}` : ""}) instead of a structured tool call`,
+  });
 }
 
 /** Provider-specific connection details for the shared OpenAI-compatible adapter. */
@@ -797,6 +823,8 @@ function parseOpenAiCompatibleResponse(
       message: `empty completion (finish_reason=${finishReason})`,
     });
   }
+
+  assertNoTextToolCallMarkup({ text, toolCalls }, toolIdMap, route.provider, model);
 
   return {
     text,
