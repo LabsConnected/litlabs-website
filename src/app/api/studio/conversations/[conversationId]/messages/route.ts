@@ -11,7 +11,6 @@ import {
 } from "@/lib/studio/conversation-service";
 import { resolveAgent, isValidAgentSlug } from "@/lib/studio/agent-registry";
 import { buildStudioContext } from "@/lib/studio/project-resolver";
-import { resolveCurrentProject } from "@/lib/projects/resolve-current-project";
 import { recallMemories, persistMemory, formatMemoryContext, harvestUserPreferences } from "@/lib/studio/memory-service";
 import { studioLog } from "@/lib/studio/logger";
 import type { AgentSlug, MessageStatus } from "@/lib/studio/types";
@@ -206,37 +205,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     });
   }
 
-  // 5. Resolve project server-side.
-  // Try the conversation's projectId first. If it's stale (project deleted,
-  // user switched projects, or the conversation references a different user's
-  // project), fall back to the canonical active project via
-  // resolveCurrentProject. This prevents the "LiTT can't find the project"
-  // divergence where the Studio UI shows a connected project but the agent
-  // chat returns 404 because conversation.projectId no longer resolves.
-  let ctx = await buildStudioContext(userId, conversation.id, conversation.projectId, agentSlug);
-  let effectiveProjectId = conversation.projectId;
+  // 5. Resolve the conversation's project server-side. A conversation is
+  // permanently scoped to its project; never rebind it to the user's current
+  // project when the stored identity is stale or unavailable.
+  const effectiveProjectId = conversation.projectId;
+  const ctx = await buildStudioContext(userId, conversation.id, effectiveProjectId, agentSlug);
 
   if (!ctx) {
-    // Stale conversation.projectId — try the active project
-    const activeProject = await resolveCurrentProject({ userId });
-    if (activeProject && activeProject.projectId !== conversation.projectId) {
-      ctx = await buildStudioContext(userId, conversation.id, activeProject.projectId, agentSlug);
-      if (ctx) {
-        effectiveProjectId = activeProject.projectId;
-        // Update the conversation's projectId so future messages use the
-        // corrected project. This is a one-time fix — subsequent messages
-        // will resolve directly.
-        await admin
-          .from("studio_conversations")
-          .update({ project_id: activeProject.projectId })
-          .eq("id", conversation.id)
-          .eq("owner_id", userId);
-      }
-    }
-  }
-
-  if (!ctx) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    return NextResponse.json(
+      { error: "Conversation project unavailable", code: "CONVERSATION_PROJECT_UNAVAILABLE", recoverable: true },
+      { status: 409 },
+    );
   }
 
   // 5.5. Build canonical runtime context — the ONE authoritative source

@@ -250,6 +250,19 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
     vi.mocked(updateMessageStatus).mockResolvedValue(true as any);
   });
 
+  it("does not rebind a stale conversation to another active project", async () => {
+    vi.mocked(buildStudioContext).mockResolvedValueOnce(null);
+
+    const response = await POST(makeRequest({}), { params: Promise.resolve({ conversationId: "conv-123" }) });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "CONVERSATION_PROJECT_UNAVAILABLE",
+      recoverable: true,
+    });
+    expect(buildStudioContext).toHaveBeenCalledWith("user_123", "conv-123", "proj-123", "litt");
+  });
+
   it("emits exactly one terminal `done` event and `[DONE]` marker on successful V2 run with fallback", async () => {
     vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
 
