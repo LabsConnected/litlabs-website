@@ -55,12 +55,7 @@ const INSPECTOR_TABS: { id: InspectorTab; label: string; icon: typeof ClipboardL
 
 const DRAWER_TABS: { id: DrawerTab; label: string; icon: typeof Activity }[] = [
   { id: "activity", label: "Activity", icon: Activity },
-  { id: "work", label: "Work", icon: Activity },
-  { id: "files", label: "Files", icon: Folder },
-  { id: "inspector", label: "Inspector", icon: ClipboardList },
   { id: "terminal", label: "Terminal", icon: Terminal },
-  { id: "media", label: "Media", icon: Music },
-  { id: "assets", label: "Assets", icon: Folder },
 ];
 
 export interface StudioInspectorData {
@@ -517,7 +512,7 @@ export function StudioDrawer({
       : drawerHeight;
 
   const statusColor = activeTab === "terminal" ? "#72f238" : "rgba(255,255,255,0.2)";
-  const statusLabel = activeTab === "terminal" ? "Ready" : activeTab === "media" ? "Media" : activeTab === "work" ? "Live" : "Activity";
+  const statusLabel = activeTab === "terminal" ? "Ready" : "Activity";
 
   return (
     <div
@@ -649,7 +644,7 @@ export function StudioDrawer({
       >
         {children ?? (
           <div className="flex h-full items-center justify-center text-[11px]" style={{ color: "var(--text-muted)" }}>
-            {activeTab === "terminal" ? "Workspace ready · Terminal session not started" : activeTab === "media" ? "Media not loaded" : activeTab === "files" ? "No files loaded" : activeTab === "assets" ? "No assets loaded" : activeTab === "inspector" ? "No selection yet" : activeTab === "work" ? "No work activity yet" : "No activity yet"}
+            {activeTab === "terminal" ? "Workspace ready · Terminal session not started" : "No activity yet"}
           </div>
         )}
       </div>

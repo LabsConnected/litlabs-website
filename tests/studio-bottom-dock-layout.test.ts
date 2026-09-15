@@ -5,18 +5,19 @@ const commandStudio = readFileSync("src/app/(app)/studio/components/CommandStudi
 const frame = readFileSync("src/app/(app)/studio/components/StudioWorkspaceFrame.tsx", "utf8");
 
 describe("Studio bottom-dock layout", () => {
-  it("keeps the primary workspace focused on Plan, Canvas, Code, and Preview", () => {
-    expect(commandStudio).toContain('{ id: "plan", label: "Plan" }');
-    expect(commandStudio).toContain('{ id: "canvas", label: "Canvas" }');
-    expect(commandStudio).toContain('{ id: "code", label: "Code" }');
-    expect(commandStudio).toContain('{ id: "preview", label: "Preview" }');
-    expect(commandStudio).not.toContain('{ id: "media", label: "Media" }');
+  it("exposes the exact canonical primary workspace tabs", () => {
+    for (const label of ["Plan", "Canvas", "Code", "Preview", "Media", "Files", "Assets", "Inspector"]) {
+      expect(commandStudio).toContain(`label: "${label}"`);
+    }
   });
 
   it("uses one desktop dock for all utility tabs", () => {
-    for (const label of ["Activity", "Work", "Files", "Inspector", "Terminal", "Media", "Assets"]) {
-      expect(frame).toContain(`label: "${label}"`);
+    const drawerTabs = frame.slice(frame.indexOf("const DRAWER_TABS"), frame.indexOf("export interface StudioInspectorData"));
+    for (const label of ["Activity", "Terminal"]) {
+      expect(drawerTabs).toContain(`label: "${label}"`);
     }
+    expect(drawerTabs).not.toContain('{ id: "work", label: "Work"');
+    expect(drawerTabs).not.toContain('{ id: "files", label: "Files"');
     expect(commandStudio).not.toContain('position="left"');
     expect(commandStudio).toContain('!isMobileLitt && (');
   });

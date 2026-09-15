@@ -33,7 +33,7 @@ export type StudioDestination =
  *   preview -> preview (app preview iframe)
  *   media   -> media   (generated images, video, music, audio)
  */
-export type WorkspaceStage = "plan" | "canvas" | "code" | "preview" | "media";
+export type WorkspaceStage = "plan" | "canvas" | "code" | "preview" | "media" | "files" | "assets" | "inspector";
 
 /**
  * Canonical Ultra Vision creator taxonomy — the seven creator surfaces.
@@ -66,6 +66,10 @@ export function workspaceStageToMode(stage: WorkspaceStage): StudioMode {
       return "preview";
     case "media":
       return "media" as StudioMode;
+    case "files":
+    case "assets":
+    case "inspector":
+      return "files";
   }
 }
 
@@ -122,7 +126,7 @@ export type MissionMode =
 export type InspectorTab = "plan" | "changes" | "files" | "preview" | "checks" | "approvals" | "browser";
 
 /** Internal tabs inside the bottom drawer. */
-export type DrawerTab = "activity" | "work" | "files" | "inspector" | "terminal" | "media" | "assets";
+export type DrawerTab = "activity" | "terminal";
 
 /**
  * LiTT Mode — what LiTT is about to create. This is the canonical

@@ -54,6 +54,7 @@ import { MediaUtilityDock } from "@/components/media/MediaUtilityDock";
 import {
   mapLegacyToolToDestination,
   destinationToLegacyTool,
+  modeToWorkspaceStage,
   workspaceStageToMode,
   legacyToolToLiTTMode,
   LITT_MODES,
@@ -386,13 +387,13 @@ function CommandStudioContent() {
     }
   });
   const [contextDrawerTab, setContextDrawerTab] = useState<ContextDrawerTab>(() => {
-    if (typeof window === "undefined") return "work";
+    if (typeof window === "undefined") return "inspector";
     try {
       const stored = localStorage.getItem(CONTEXT_TAB_KEY);
-      if (stored === "work" || stored === "files" || stored === "inspector" || stored === "assets") return stored;
-      return "work";
+      if (stored === "files" || stored === "inspector" || stored === "assets") return stored;
+      return "inspector";
     } catch {
-      return "work";
+      return "inspector";
     }
   });
   useEffect(() => {
@@ -418,9 +419,6 @@ function CommandStudioContent() {
   const activityVisible = isMobileLitt
     ? mobileLittOpen && littActiveTab === "live"
     : !littCollapsed && littActiveTab === "live";
-  // Files workspace-tab button only lights up when the drawer is open
-  // AND actually showing Files — never merely because the drawer is
-  // open on Inspector (Phase C2.1 fix).
   // Activity is an OPEN action, not a collapse/expand toggle (Phase
   // C2.2 fix). It always ensures LiTT -> Live is visible:
   //   desktop/laptop: switch to Live, expand LiTT if collapsed.
@@ -463,16 +461,15 @@ function CommandStudioContent() {
     return () => window.removeEventListener("studio:ask-litt", handler);
   }, [isMobileLitt]);
 
-  // Desktop utilities live in the single bottom dock. Mobile keeps its
-  // existing contextual sheet.
+  // Mobile keeps its existing contextual sheet; desktop uses the canonical
+  // primary workspace tabs for Files and Inspector.
   const handleOpenAdvancedTools = useCallback(() => {
     setAdvancedToolsOpen(true);
     if (isMobileLitt) {
       setContextDrawerTab("inspector");
       setContextDrawerOpen(true);
     } else {
-      setDrawerTab("inspector");
-      setDrawerOpen(true);
+      setWorkspaceTab("inspector");
     }
   }, [isMobileLitt]);
   const handleCloseAdvancedTools = useCallback(() => {
@@ -481,6 +478,7 @@ function CommandStudioContent() {
     setDrawerOpen(false);
     setDestination("studio");
     setStudioMode("preview");
+    setWorkspaceTab("preview");
     setWorkSurface("conversation");
   }, []);
   const handleOpenContextFiles = useCallback(() => {
@@ -489,8 +487,7 @@ function CommandStudioContent() {
       setContextDrawerTab("files");
       setContextDrawerOpen(true);
     } else {
-      setDrawerTab("files");
-      setDrawerOpen(true);
+      setWorkspaceTab("files");
     }
   }, [isMobileLitt]);
   const handleOpenContextInspector = useCallback(() => {
@@ -499,8 +496,7 @@ function CommandStudioContent() {
       setContextDrawerTab("inspector");
       setContextDrawerOpen(true);
     } else {
-      setDrawerTab("inspector");
-      setDrawerOpen(true);
+      setWorkspaceTab("inspector");
     }
   }, [isMobileLitt]);
   // Keyboard shortcut: Ctrl+Shift+A opens LiTT Activity (Live).
@@ -526,6 +522,7 @@ function CommandStudioContent() {
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [pendingCanvasAction, setPendingCanvasAction] = useState<ArtifactAction | null>(null);
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceStage>(() => modeToWorkspaceStage(studioMode) ?? "plan");
   const [healthRunTrigger, setHealthRunTrigger] = useState(0);
 
   // Files panel state is now managed by the Context Drawer (Phase C2).
@@ -551,14 +548,16 @@ function CommandStudioContent() {
     setDestination(mapped.destination);
     if (mapped.littMode) setLittMode(mapped.littMode);
     if (mapped.destination === "studio") {
-      setStudioMode((mapped.mode as StudioMode) ?? "work");
+      const mappedMode = (mapped.mode as StudioMode) ?? "work";
+      setStudioMode(mappedMode);
+      setWorkspaceTab(modeToWorkspaceStage(mappedMode) ?? "plan");
       // Explicit Build route → builder surface; anything else → conversation.
       setWorkSurface(tool === "build" ? "builder" : "conversation");
     }
     if (mapped.destination === "create") setCreateMode((mapped.mode as CreateMode) ?? "image");
     if (mapped.destination === "missions") setMissionMode((mapped.mode as MissionMode) ?? "overview");
     if (mapped.destination === "more") setMoreMode((mapped.mode as MoreMode) ?? "plugins");
-    if (mapped.openDrawer) {
+    if (mapped.openDrawer === "terminal" || mapped.openDrawer === "activity") {
       const terminalNeedsExplicitConnect =
         mapped.openDrawer === "terminal" && capabilities.terminalStatus !== "connected" && !command;
       if (!terminalNeedsExplicitConnect) {
@@ -685,32 +684,33 @@ function CommandStudioContent() {
     if (littMode === "code") {
       setDestination("studio");
       setStudioMode("code");
+      setWorkspaceTab("code");
     } else if (littMode === "website") {
       setDestination("studio");
       setStudioMode("files");
+      setWorkspaceTab("files");
     } else if (littMode === "image" || littMode === "video" || littMode === "music") {
       // Creative modes open the Media tab so generated artifacts have
       // somewhere to appear. The conversation is still primary.
       setDestination("studio");
       setStudioMode("media" as StudioMode);
+      setWorkspaceTab("media");
     }
     // auto: don't change the workspace — LiTT decides based on the prompt
   }, [littMode]);
 
-  // Auto-reveal Work tab when LiTT starts executing, without stealing focus.
-  // When the agent becomes busy, switch the right rail to the Work tab so
-  // the user can see live execution. This does NOT call .focus() on any
-  // element — the user's current focus (e.g., the composer) is preserved.
+  // When the agent becomes busy, reveal Agent Activity without stealing focus.
   const prevBusyRef = useRef(false);
   useEffect(() => {
     const isBusy = conversation.busy || creatingProject;
     if (isBusy && !prevBusyRef.current) {
       setAdvancedToolsOpen(true);
       if (isMobileLitt) {
-        setContextDrawerTab("work");
-        setContextDrawerOpen(true);
+        // Execution progress is represented by Chat/Live on mobile; the
+        // contextual drawer is reserved for Files, Assets, and Inspector.
+        setContextDrawerOpen(false);
       } else {
-        setDrawerTab("work");
+        setDrawerTab("activity");
         setDrawerOpen(true);
       }
     }
@@ -991,8 +991,7 @@ function CommandStudioContent() {
     setStudioMode("work");
     setWorkSurface("conversation");
     if (isMobileLitt) {
-      setContextDrawerTab("work");
-      setContextDrawerOpen(true);
+      setContextDrawerOpen(false);
     } else {
       setDrawerOpen(true);
       setDrawerTab("terminal");
@@ -1207,22 +1206,27 @@ function CommandStudioContent() {
   }, [destination, studioMode, createMode, moreMode, workSurface]);
 
   const WorkspaceComponent = activeLegacyTool ? TOOL_COMPONENTS[activeLegacyTool] : null;
-  const isPlan = destination === "studio" && studioMode === "work" && workSurface !== "builder";
-  const isCanvas = destination === "studio" && studioMode === "files";
-  const isCode = destination === "studio" && studioMode === "code";
-  const isPreview = destination === "studio" && studioMode === "preview";
-  const isMedia = destination === "studio" && studioMode === "media";
-  // Primary workspace tabs — creation surfaces only. Utility panels live in
-  // the single bottom dock below.
+  const isPlan = destination === "studio" && workspaceTab === "plan";
+  const isCanvas = destination === "studio" && workspaceTab === "canvas";
+  const isCode = destination === "studio" && workspaceTab === "code";
+  const isPreview = destination === "studio" && workspaceTab === "preview";
+  const isMedia = destination === "studio" && workspaceTab === "media";
+  const isFiles = destination === "studio" && workspaceTab === "files";
+  const isAssets = destination === "studio" && workspaceTab === "assets";
+  const isInspector = destination === "studio" && workspaceTab === "inspector";
+  // Canonical primary workspace tabs. Work is represented by Plan/Live and
+  // Agent Activity, not as a duplicate destination.
   // These map through workspaceStageToMode() to legacy StudioMode internals.
   // Chat lives inside the LiTT left panel (Chat | Live tabs).
-  // Files/Components live in the contextual right drawer.
-  // Media shows generated images, video, music, and audio artifacts.
   const workspaceTabs: { id: WorkspaceStage; label: string }[] = [
     { id: "plan", label: "Plan" },
     { id: "canvas", label: "Canvas" },
     { id: "code", label: "Code" },
     { id: "preview", label: "Preview" },
+    { id: "media", label: "Media" },
+    { id: "files", label: "Files" },
+    { id: "assets", label: "Assets" },
+    { id: "inspector", label: "Inspector" },
   ];
 
   // LiTT Chat/Live content — built ONCE per render and reused by whichever
@@ -1489,6 +1493,7 @@ function CommandStudioContent() {
                     type="button"
                     onClick={() => {
                       setDestination("studio");
+                      setWorkspaceTab(t.id);
                       setStudioMode(tabMode);
                       if (t.id === "plan") setWorkSurface("conversation");
                     }}
@@ -1571,6 +1576,23 @@ function CommandStudioContent() {
                       projectId={capabilities.projectId}
                     />
                   </div>
+                ) : isFiles ? (
+                  <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                    <StudioProjectFiles
+                      projectId={capabilities.projectId}
+                      repositoryName={capabilities.repositoryName}
+                      branch={capabilities.activeBranch ?? capabilities.defaultBranch}
+                      workspaceStatus={capabilities.workspaceStatus}
+                      writeAccess={capabilities.writeAccess}
+                      onSaved={() => setWorkspaceRevision((value) => value + 1)}
+                      onMutation={() => setWorkspaceRevision((value) => value + 1)}
+                      onWorkspacePrepared={() => { void refreshCapabilities(); }}
+                    />
+                  </div>
+                ) : isAssets ? (
+                  <div className="min-h-0 min-w-0 flex-1 overflow-auto"><AssetsPanel projectId={capabilities.projectId} /></div>
+                ) : isInspector ? (
+                  <div className="min-h-0 min-w-0 flex-1 overflow-auto"><StudioInspector embedded open onToggle={() => setWorkspaceTab("preview")} activeTab={inspectorTab} onTabChange={setInspectorTab} data={{ capabilities, modelLabel, modelHealth, activeAgentName: AGENT_META[activeAgentId]?.displayName ?? "LiTT", destination, surface: studioMode, messages: conversation.messages, busy: conversation.busy, workspaceRevision, healthRunTrigger }} /></div>
                 ) : WorkspaceComponent ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-auto">
                     {studioCreator ? (
@@ -1611,8 +1633,7 @@ function CommandStudioContent() {
                 />
               </div>
 
-              {/* Render others conditionally since they don't have background workers */}
-              {drawerOpen && drawerTab === "media" && <MediaUtilityDock />}
+              {/* Activity is the only non-terminal utility surface in the dock. */}
               {drawerOpen && drawerTab === "activity" && (
                 <StudioActivityPanel
                   messages={conversation.messages}
@@ -1622,59 +1643,6 @@ function CommandStudioContent() {
                   terminalStatus={capabilities.terminalStatus}
                 />
               )}
-              {drawerOpen && drawerTab === "work" && (
-                <LiTTWorkSummary
-                  busy={conversation.busy}
-                  messages={conversation.messages}
-                  onOpenLiveTab={() => {
-                    setLittActiveTab("live");
-                    setLittCollapsed(false);
-                  }}
-                />
-              )}
-              {drawerOpen && drawerTab === "files" && (
-                <div className="flex h-full flex-col overflow-hidden">
-                  <div className="flex shrink-0 items-center border-b px-2.5 py-2" style={{ borderColor: "var(--studio-border)" }}>
-                    <span className="text-[10px] font-black uppercase tracking-[0.12em]" style={{ color: "var(--text-secondary)" }}>Files / Components</span>
-                  </div>
-                  <div className="min-h-0 flex-1 overflow-y-auto studio-scroll">
-                    <StudioProjectFiles
-                      projectId={capabilities.projectId}
-                      repositoryName={capabilities.repositoryName}
-                      branch={capabilities.activeBranch ?? capabilities.defaultBranch}
-                      workspaceStatus={capabilities.workspaceStatus}
-                      writeAccess={capabilities.writeAccess}
-                      onSaved={() => setWorkspaceRevision((value) => value + 1)}
-                      onMutation={() => setWorkspaceRevision((value) => value + 1)}
-                      onWorkspacePrepared={() => { void refreshCapabilities(); }}
-                    />
-                  </div>
-                </div>
-              )}
-              {drawerOpen && drawerTab === "inspector" && (
-                <StudioInspector
-                  embedded
-                  open={true}
-                  onToggle={() => setDrawerOpen(false)}
-                  activeTab={inspectorTab}
-                  onTabChange={setInspectorTab}
-                  data={{
-                    capabilities,
-                    modelLabel,
-                    modelHealth,
-                    activeAgentName: AGENT_META[activeAgentId]?.displayName ?? "LiTT",
-                    destination,
-                    surface: studioMode,
-                    messages: conversation.messages,
-                    busy: conversation.busy,
-                    workspaceRevision,
-                    healthRunTrigger,
-                    onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
-                    onWorkspacePrepared: () => { void refreshCapabilities(); },
-                  }}
-                />
-              )}
-              {drawerOpen && drawerTab === "assets" && <AssetsPanel projectId={capabilities.projectId} />}
             </StudioDrawer>
             )}
           </main>
@@ -1687,7 +1655,6 @@ function CommandStudioContent() {
               onTabChange={setContextDrawerTab}
               onClose={() => setContextDrawerOpen(false)}
               width={contextResize.width}
-              workContent={littLiveContent}
               filesContent={
                 <div className="flex h-full flex-col overflow-hidden">
                   <div

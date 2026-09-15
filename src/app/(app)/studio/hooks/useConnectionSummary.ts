@@ -32,7 +32,7 @@ export interface ConnectionCapabilities {
   projectName: string | null;
   defaultBranch: string | null;
   activeBranch: string | null;
-  sourceType: "github" | "blank" | "template" | "upload" | null;
+  sourceType: "github" | "managed" | "blank" | "template" | "upload" | null;
   workspaceStatus: string | null;
   githubInstalled: boolean;
   terminalExecution: "available" | "unavailable" | "connecting" | "degraded" | "error" | "idle";

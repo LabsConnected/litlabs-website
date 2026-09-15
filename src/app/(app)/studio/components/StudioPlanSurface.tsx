@@ -238,11 +238,13 @@ export default function StudioPlanSurface({
         <PlanCard title="Project" icon={FolderOpen}>
           <div className="grid min-w-0 grid-cols-1 gap-x-6 min-[560px]:grid-cols-2">
             <PlanRow label="Name" value={capabilities.projectName} />
-            <PlanRow label="Source" value={capabilities.sourceType ?? undefined} />
+            <PlanRow label="Source" value={capabilities.sourceType === "github" ? "GitHub" : capabilities.sourceType ? "LiTT Managed" : undefined} />
             <PlanRow label="Repository" value={capabilities.repositoryName} mono />
             <PlanRow label="Branch" value={capabilities.activeBranch ?? capabilities.defaultBranch} mono />
             <PlanRow label="Workspace" value={capabilities.workspaceStatus ?? undefined} />
             <PlanRow label="Write access" value={capabilities.writeAccess ? "Allowed" : "Requires approval"} />
+            <PlanRow label="Version control" value="Git" />
+            <PlanRow label="GitHub" value={capabilities.sourceType === "github" ? capabilities.repositoryName ?? "Connected" : "Not connected"} />
           </div>
         </PlanCard>
 
@@ -255,7 +257,7 @@ export default function StudioPlanSurface({
                 {phaseCfg.label}
               </div>
               <div className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-                {waitingForApproval ? "Work is paused until you approve this action" : isRunning ? `Step ${toolCalls.length + 1} in progress` : phase === "done" ? "Run finished" : "Not running"}
+                {waitingForApproval ? "Work is paused until you approve this action" : isRunning ? `Step ${toolCalls.length + 1} in progress` : phase === "done" ? "Run finished" : phase === "cancelled" ? "Run stopped" : "Execution unavailable"}
               </div>
             </div>
             {effectiveApproval && (

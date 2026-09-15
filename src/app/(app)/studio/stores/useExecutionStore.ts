@@ -300,7 +300,18 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     });
   },
 
-  setPhase: (phase) => set({ phase }),
+  setPhase: (phase) => set((state) => ({
+    phase,
+    // An execution phase is never presented as active while the canonical
+    // run is stopped. Keep this invariant in the store, not only in views.
+    isRunning: phase === "planning" || phase === "inspecting" || phase === "editing" || phase === "testing" || phase === "verifying"
+      ? true
+      : phase === "awaiting_approval"
+        ? false
+        : phase === "done" || phase === "cancelled" || phase === "idle"
+          ? false
+          : state.isRunning,
+  })),
 
   setPendingApproval: (approval) => {
     set({ pendingApproval: approval, phase: approval ? "awaiting_approval" : get().phase });

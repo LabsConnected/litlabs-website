@@ -20,7 +20,7 @@ export interface WorkspaceShape {
   packageManager: string | null;
   /** owner/repo when a repository is connected. */
   githubFullName: string | null;
-  sourceType: "github" | "blank" | "template" | "upload" | null;
+  sourceType: "github" | "managed" | "blank" | "template" | "upload" | null;
 }
 
 export type Applicability = "applicable" | "not_applicable";

@@ -46,7 +46,7 @@ export interface ProjectRuntimeState {
   repository: string | null;
   branch: string | null;
   /** How the project source was created */
-  sourceType: "github" | "upload" | "template" | "blank" | null;
+  sourceType: "github" | "managed" | "upload" | "template" | "blank" | null;
 
   /** Workspace identity */
   workspaceId: string | null;

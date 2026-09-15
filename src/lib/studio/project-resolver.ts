@@ -5,6 +5,8 @@ interface ProjectRecord {
   id: string;
   user_id: string;
   name: string;
+  source_id: string;
+  source_type: "github" | "managed" | "blank" | "template";
   github_full_name: string | null;
   github_owner: string | null;
   github_repo: string | null;
@@ -35,6 +37,8 @@ export interface ResolvedProject {
   repositoryName: string | null;
   repositoryDefaultBranch: string | null;
   activeBranch: string | null;
+  sourceId?: string;
+  sourceType?: ProjectRecord["source_type"];
   framework: string | null;
   scanStatus: string | null;
   scanSummary: Record<string, unknown> | null;
@@ -55,7 +59,7 @@ export async function resolveProject(
   // Try studio_projects first (newer, more comprehensive)
   const { data: studioProject } = await supabaseAdmin
     .from("studio_projects")
-    .select("id, user_id, name, github_full_name, github_owner, github_repo, github_default_branch, github_branch, framework, scan_status, scan_summary")
+    .select("id, user_id, name, source_id, source_type, github_full_name, github_owner, github_repo, github_default_branch, github_branch, framework, scan_status, scan_summary")
     .eq("id", projectId)
     .eq("user_id", clerkUserId)
     .single() as { data: ProjectRecord | null; error: unknown };
@@ -69,8 +73,10 @@ export async function resolveProject(
       repositoryProvider: repoConnected ? "github" : null,
       repositoryOwner: studioProject.github_owner,
       repositoryName: studioProject.github_repo,
-      repositoryDefaultBranch: studioProject.github_default_branch,
-      activeBranch: studioProject.github_branch,
+      repositoryDefaultBranch: studioProject.github_default_branch ?? (studioProject.source_type === "managed" || studioProject.source_type === "blank" ? "main" : null),
+      activeBranch: studioProject.github_branch ?? (studioProject.source_type === "managed" || studioProject.source_type === "blank" ? "main" : null),
+      sourceId: studioProject.source_id,
+      sourceType: studioProject.source_type,
       framework: studioProject.framework,
       scanStatus: studioProject.scan_status,
       scanSummary: studioProject.scan_summary,
@@ -105,6 +111,8 @@ export async function resolveProject(
       repositoryName: legacyProject.repository,
       repositoryDefaultBranch: legacyProject.default_branch,
       activeBranch: legacyProject.working_branch,
+      sourceId: `legacy-${legacyProject.id}`,
+      sourceType: "github",
       framework: null,
       scanStatus: legacyProject.status,
       scanSummary: null,

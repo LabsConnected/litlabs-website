@@ -46,7 +46,7 @@ export interface CanonicalRuntimeContext {
   executionMode: "plan" | "act" | "auto";
   model: string | null;
   provider: string | null;
-  sourceType: "github" | "blank" | "template" | "upload" | null;
+  sourceType: "github" | "managed" | "blank" | "template" | "upload" | null;
   /** Workspace capability shape — drives not-applicable classification. */
   workspaceShape?: WorkspaceShape | null;
   /**
@@ -145,7 +145,9 @@ export async function buildCanonicalRuntimeContext(
     ctx.workspaceReady = true;
     ctx.workspaceExecutionAvailable = true;
     ctx.projectName = verified.project.name;
-    ctx.branch = verified.project.githubBranch ?? verified.project.githubDefaultBranch ?? null;
+    ctx.branch = verified.project.githubBranch
+      ?? verified.project.githubDefaultBranch
+      ?? (verified.project.sourceType === "managed" || verified.project.sourceType === "blank" ? "main" : null);
     ctx.sourceType = verified.project.sourceType ?? null;
     ctx.repository = verified.project.githubFullName ?? null;
     ctx.githubConnected = !!verified.project.githubFullName;

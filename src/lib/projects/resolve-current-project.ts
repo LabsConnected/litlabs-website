@@ -18,7 +18,7 @@ export interface CurrentProject {
   projectId: string;
   projectName: string;
   source: "studio_projects" | "projects";
-  sourceType: "github" | "blank" | "template";
+  sourceType: "github" | "managed" | "blank" | "template";
   repositoryFullName: string | null;
   repositoryOwner: string | null;
   repositoryName: string | null;
@@ -174,8 +174,8 @@ function normalizeStudioRow(row: StudioProjectRow): CurrentProject {
     repositoryFullName: row.github_full_name ?? null,
     repositoryOwner: row.github_owner ?? null,
     repositoryName: row.github_repo ?? null,
-    defaultBranch: row.github_default_branch ?? row.github_branch ?? null,
-    activeBranch: row.github_branch ?? row.github_default_branch ?? null,
+    defaultBranch: row.github_default_branch ?? row.github_branch ?? (row.source_type === "managed" || row.source_type === "blank" ? "main" : null),
+    activeBranch: row.github_branch ?? row.github_default_branch ?? (row.source_type === "managed" || row.source_type === "blank" ? "main" : null),
     workspaceStatus: row.workspace_status ?? null,
   };
 }

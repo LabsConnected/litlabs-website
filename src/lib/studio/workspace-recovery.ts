@@ -113,7 +113,7 @@ export async function reprepareWorkspace(
 
   // Provision the workspace
   let result;
-  if (project.sourceType === "blank") {
+  if (project.sourceType === "blank" || project.sourceType === "managed") {
     result = await prepareWorkspaceInternal({
       sourceType: "blank",
       userId,
@@ -232,7 +232,7 @@ export async function provisionWorkspaceForProject(
   // We own the lock — provision the workspace.
   try {
     let result;
-    if (project.sourceType === "blank") {
+    if (project.sourceType === "blank" || project.sourceType === "managed") {
       result = await prepareWorkspaceInternal({
         sourceType: "blank",
         userId,

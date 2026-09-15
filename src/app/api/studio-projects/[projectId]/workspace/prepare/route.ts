@@ -133,7 +133,7 @@ export async function POST(
   // We own the lock — proceed with provisioning
   try {
     let result;
-    if (project.sourceType === "blank") {
+    if (project.sourceType === "blank" || project.sourceType === "managed") {
       result = await prepareWorkspaceInternal({
         sourceType: "blank",
         userId,

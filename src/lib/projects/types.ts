@@ -7,7 +7,7 @@
  * to by new code.
  */
 
-export type ProjectSourceType = "github" | "blank" | "template";
+export type ProjectSourceType = "github" | "managed" | "blank" | "template";
 export type ProjectAccessMode = "private" | "shared";
 export type WorkspaceStatus =
   | "not_prepared"
@@ -30,6 +30,7 @@ export interface CanonicalProject {
   sourceType: ProjectSourceType;
   accessMode: ProjectAccessMode;
   templateId: string | null;
+  sourceId: string;
 
   // GitHub fields (nullable for blank/template projects)
   githubInstallationId: number | null;
@@ -79,6 +80,7 @@ export interface StudioProjectRow {
   source_type: ProjectSourceType;
   access_mode: ProjectAccessMode;
   template_id: string | null;
+  source_id?: string | null;
   github_installation_id: number | null;
   github_repository_id: number | null;
   github_owner: string | null;
@@ -142,6 +144,7 @@ export function rowToCanonical(row: StudioProjectRow): CanonicalProject {
     sourceType: row.source_type,
     accessMode: row.access_mode,
     templateId: row.template_id,
+    sourceId: row.source_id ?? row.id,
     githubInstallationId: row.github_installation_id,
     githubRepositoryId: row.github_repository_id,
     githubOwner: row.github_owner,
@@ -181,6 +184,7 @@ export function legacyRowToCanonical(row: LegacyProjectRow): CanonicalProject {
     sourceType: "github",
     accessMode: "private",
     templateId: null,
+    sourceId: `legacy-${row.id}`,
     githubInstallationId: row.github_installation_id,
     githubRepositoryId: row.repository_id,
     githubOwner: row.owner,

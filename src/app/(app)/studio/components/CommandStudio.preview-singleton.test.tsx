@@ -410,16 +410,14 @@ describe("CommandStudio — single active preview", () => {
     });
   });
 
-  it("mounts exactly one preview in the primary workspace with advanced tools open", async () => {
+  it("opens Inspector without mounting a duplicate preview", async () => {
     globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
     const { user } = await renderCommandStudio();
     await openAdvancedTools(user);
     await waitFor(() => expect(screen.getByTestId("studio-center-workspace")).toBeTruthy());
-    // Regression: the center workspace preview used to mount alongside
-    // the permanent right-column preview on desktop split.
-    expect(previewPanels()).toHaveLength(1);
+    expect(previewPanels()).toHaveLength(0);
     expect(screen.queryByTestId("permanent-preview-column")).toBeNull();
-    expect(screen.getByTestId("studio-center-workspace").querySelector("[data-testid='studio-preview-panel']")).toBeTruthy();
+    expect(screen.getByTestId("workspace-tab-inspector")).toBeTruthy();
   });
 
   it("renders exactly one preview in the default layout (advanced tools closed)", async () => {
@@ -456,8 +454,8 @@ describe("CommandStudio — single active preview", () => {
     await openAdvancedTools(user);
     await settle();
     expect(screen.queryByTestId("permanent-preview-column")).toBeNull();
-    expect(previewPanels()).toHaveLength(1);
-    expect(screen.getByTestId("studio-center-workspace").querySelector("[data-testid='studio-preview-panel']")).toBeTruthy();
+    expect(previewPanels()).toHaveLength(0);
+    expect(screen.getByTestId("workspace-tab-inspector")).toBeTruthy();
   });
 
   it("shows the Plan surface in the center without a duplicate preview (Plan tab)", async () => {

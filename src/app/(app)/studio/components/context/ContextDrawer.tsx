@@ -3,12 +3,7 @@
 /**
  * ContextDrawer — right-side contextual panel.
  *
- * Primary tab: Work (LiTT live execution activity)
- * Secondary tabs: Files | Assets | Inspector
- *
- * The Work tab shows what LiTT is doing right now — tool calls, file
- * edits, commands, checks, previews. This gives users a live view of
- * their agent working alongside the center workspace.
+ * Context tabs: Files | Assets | Inspector
  *
  * Reuses existing StudioProjectFiles and StudioInspector content.
  * The Assets tab is backed by the real Asset Lake facade.
@@ -27,9 +22,9 @@
  */
 
 import { type ReactNode } from "react";
-import { Folder, ClipboardList, PanelRightClose, PanelLeftClose, ImageIcon, Activity } from "lucide-react";
+import { Folder, ClipboardList, PanelRightClose, PanelLeftClose, ImageIcon } from "lucide-react";
 
-export type ContextDrawerTab = "work" | "files" | "assets" | "inspector";
+export type ContextDrawerTab = "files" | "assets" | "inspector";
 
 export interface ContextDrawerProps {
   /** Whether the drawer is open */
@@ -40,8 +35,6 @@ export interface ContextDrawerProps {
   onTabChange: (tab: ContextDrawerTab) => void;
   /** Called when the drawer should close */
   onClose: () => void;
-  /** Work tab content — LiTT live execution activity (from parent) */
-  workContent?: ReactNode;
   /** Files tab content — rendered as a slot from the parent */
   filesContent: ReactNode;
   /** Assets tab content — rendered as a slot from the parent */
@@ -58,24 +51,17 @@ export interface ContextDrawerProps {
   position?: "left" | "right";
 }
 
-const PRIMARY_TABS: { id: ContextDrawerTab; label: string; icon: typeof Folder }[] = [
-  { id: "work", label: "Work", icon: Activity },
-];
-
 const SECONDARY_TABS: { id: ContextDrawerTab; label: string; icon: typeof Folder }[] = [
   { id: "files", label: "Files", icon: Folder },
   { id: "assets", label: "Assets", icon: ImageIcon },
   { id: "inspector", label: "Inspector", icon: ClipboardList },
 ];
 
-const ALL_TABS = [...PRIMARY_TABS, ...SECONDARY_TABS];
-
 export default function ContextDrawer({
   open,
   activeTab,
   onTabChange,
   onClose,
-  workContent,
   filesContent,
   assetsContent,
   inspectorContent,
@@ -121,7 +107,7 @@ export default function ContextDrawer({
       >
         {/* Inner content — fixed width so it doesn't reflow while collapsing */}
         <div className="flex h-full flex-col overflow-hidden" style={{ width: pxWidth, maxWidth: "92vw" }}>
-          {/* Tab header — Work (primary) | divider | Files Assets Inspector (secondary) */}
+          {/* Tab header — Files | Assets | Inspector */}
           <div
             className="flex shrink-0 items-center gap-0.5 border-b px-2 py-1.5"
             style={{
@@ -129,35 +115,6 @@ export default function ContextDrawer({
               backgroundColor: "rgba(13,9,22,0.6)",
             }}
           >
-            {PRIMARY_TABS.map((t) => {
-              const TabIcon = t.icon;
-              const isActive = activeTab === t.id;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => onTabChange(t.id)}
-                  className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
-                  style={{
-                    color: isActive ? "var(--litt-primary)" : "var(--text-muted)",
-                    backgroundColor: isActive ? "rgba(139,92,246,0.1)" : "transparent",
-                  }}
-                  aria-pressed={isActive}
-                  aria-label={t.label}
-                  data-testid={`context-tab-${t.id}`}
-                  tabIndex={open ? 0 : -1}
-                >
-                  <TabIcon size={12} className="pointer-events-none" />
-                  {t.label}
-                </button>
-              );
-            })}
-            {/* Visual divider between Work (primary) and context tabs (secondary) */}
-            <div
-              className="mx-1 h-4 w-px"
-              style={{ backgroundColor: "var(--studio-border)" }}
-              aria-hidden
-            />
             {SECONDARY_TABS.map((t) => {
               const TabIcon = t.icon;
               const isActive = activeTab === t.id;
@@ -197,21 +154,9 @@ export default function ContextDrawer({
 
           {/* Tab panels — grid-stacked for state preservation.
               All stay mounted regardless of open/closed or active tab so
-              StudioProjectFiles / StudioInspector / Work never lose scroll
+              StudioProjectFiles / StudioInspector never lose scroll
               position or in-flight state. */}
           <div className="relative min-h-0 flex-1 overflow-hidden">
-            {/* Work tab — LiTT live execution activity */}
-            <div
-              className="absolute inset-0 flex flex-col overflow-hidden"
-              style={{
-                visibility: open && activeTab === "work" ? "visible" : "hidden",
-                pointerEvents: open && activeTab === "work" ? "auto" : "none",
-              }}
-              data-active={open && activeTab === "work"}
-              data-testid="context-work-panel"
-            >
-              {workContent}
-            </div>
             <div
               className="absolute inset-0 flex flex-col overflow-hidden"
               style={{

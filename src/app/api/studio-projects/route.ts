@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    if (sourceType === "blank") {
+    if (sourceType === "blank" || sourceType === "managed") {
       const templateId = body.templateId as ProjectTemplateId;
       if (!templateId || !PROJECT_TEMPLATES[templateId]) {
         return NextResponse.json(
