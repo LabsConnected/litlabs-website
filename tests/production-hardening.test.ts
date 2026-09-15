@@ -188,32 +188,41 @@ describe("Files is not a workspace stage", () => {
     expect(typeMatch![1]).not.toContain('"files"');
   });
 
-  it("CommandStudio has visual divider before Files button", async () => {
+  it("Files lives in the unified dock (not the workspace tab strip)", async () => {
     const fs = await import("fs");
     const path = await import("path");
-    const content = fs.readFileSync(
+    const studio = fs.readFileSync(
       path.resolve("src/app/(app)/studio/components/CommandStudio.tsx"),
       "utf-8",
     );
-    expect(content).toContain("Visual divider");
-    expect(content).toContain("FolderOpen");
+    const dock = fs.readFileSync(
+      path.resolve("src/app/(app)/studio/components/StudioDock.tsx"),
+      "utf-8",
+    );
+    // The old workspace-strip Files button is gone…
+    expect(studio).not.toContain("workspace-tab-files");
+    // …Files is a first-class dock tab wired to the dock…
+    expect(studio).toContain('handleOpenDockTab("files")');
+    expect(dock).toContain('id: "files"');
+    expect(dock).toContain("dock-tab-");
   });
 });
 
 // ─── Resize handle exists ─────────────────────────────────────────
 
 describe("Resize handles are wired", () => {
-  it("CommandStudio imports ResizeHandle and useResizableWidth", async () => {
+  it("dock has its own drag-to-resize grip (unified-dock topology)", async () => {
     const fs = await import("fs");
     const path = await import("path");
-    const content = fs.readFileSync(
-      path.resolve("src/app/(app)/studio/components/CommandStudio.tsx"),
+    const dock = fs.readFileSync(
+      path.resolve("src/app/(app)/studio/components/StudioDock.tsx"),
       "utf-8",
     );
-    expect(content).toContain("ResizeHandle");
-    expect(content).toContain("useResizableWidth");
-    expect(content).toContain("litt-resize-handle");
-    expect(content).toContain("context-resize-handle");
+    // The old ResizeHandle/useResizableWidth pair is gone with the
+    // ContextDrawer/StudioDrawer; the dock resizes via its own grip.
+    expect(dock).toContain("data-resize-grip");
+    expect(dock).toContain("Drag to resize dock");
+    expect(dock).toContain("cursor-row-resize");
   });
 
   it("LiTTPanel accepts expandedWidth prop", async () => {
@@ -319,13 +328,17 @@ describe("Text input bug — resize hooks clean up body styles", () => {
     expect(content).toContain('target.tagName === "TEXTAREA"');
   });
 
-  it("StudioWorkspaceFrame keyboard handler guards input fields", async () => {
+  it("dock keyboard shortcuts guard input fields", async () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/app/(app)/studio/components/StudioWorkspaceFrame.tsx"),
+      path.resolve("src/app/(app)/studio/components/CommandStudio.tsx"),
       "utf-8",
     );
+    // The guard moved with the shortcuts: the deleted StudioDrawer's
+    // handler is gone, but CommandStudio's Cmd/Ctrl+J + Ctrl+Shift+A
+    // handler must still not hijack keys while typing.
     expect(content).toContain('target?.tagName === "INPUT"');
+    expect(content).toContain('target?.tagName === "TEXTAREA"');
   });
 });

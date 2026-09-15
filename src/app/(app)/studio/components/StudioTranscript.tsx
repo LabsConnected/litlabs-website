@@ -12,7 +12,7 @@ import {
   type ChatMessage,
   type AgentId,
 } from "../stores/useStudioAgentStore";
-import type { StudioTool } from "./StudioSidebar";
+import type { StudioTool } from "../lib/studio-destinations";
 import type { MutationSummary, ExecutionEvent, ExecutionPhase } from "../stores/useExecutionStore";
 import { useExecutionStore } from "../stores/useExecutionStore";
 import {

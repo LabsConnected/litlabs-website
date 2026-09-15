@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 
@@ -60,6 +60,12 @@ vi.mock("@/context/MusicPlayerContext", () => ({
 
 vi.mock("./PersistentMusicPlayer", () => ({
   default: () => <div data-testid="music-player" />,
+}));
+
+// The dock's Media tab renders MediaUtilityDock, which requires the
+// MediaHubProvider from the app layout (not present in this test mount).
+vi.mock("@/components/media/MediaUtilityDock", () => ({
+  MediaUtilityDock: () => <div data-testid="media-utility-dock-mock" />,
 }));
 
 vi.mock("./context/AssetsPanel", () => ({
@@ -330,6 +336,9 @@ async function renderCommandStudio() {
 describe("CommandStudio — mounted Work-surface routing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The dock persists open/tab/height in sessionStorage (intentional
+    // product behavior); clear it so each test starts from a closed dock.
+    sessionStorage.clear();
     window.innerHeight = 844;
     Object.defineProperty(window, "visualViewport", {
       value: {
@@ -460,17 +469,20 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       });
     });
 
-    it("Files button toggles Context Drawer", async () => {
+    it("header dock toggle opens and closes the unified dock", async () => {
       const { user } = await renderCommandStudio();
-      const filesBtn = screen.getByTestId("workspace-tab-files");
-      expect(filesBtn).toBeTruthy();
-      // Context drawer stays mounted (state-preserving) but closed by
-      // default — `data-open` reflects the real open state.
-      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "false");
-      // Toggle it on
-      await user.click(filesBtn);
-      expect(filesBtn.className).toContain("glass-active");
-      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
+      const toggle = screen.getByTestId("studio-dock-toggle");
+      // Dock is always mounted (collapsed strip) but closed by default.
+      expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "false");
+      expect(toggle).toHaveAttribute("aria-pressed", "false");
+      // Toggle it on.
+      await user.click(toggle);
+      expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "true");
+      expect(toggle).toHaveAttribute("aria-pressed", "true");
+      // Toggle it off.
+      await user.click(toggle);
+      expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "false");
+      expect(toggle).toHaveAttribute("aria-pressed", "false");
     });
   });
 
@@ -543,85 +555,75 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.getByTestId("workspace-tab-preview")).toBeTruthy();
     });
 
-    it("Context drawer opens and closes", async () => {
-      const { user } = await renderCommandStudio();
-      // Closed by default — width 0, not interactable.
-      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "false");
-      // Open via Files toggle
-      await user.click(screen.getByTestId("workspace-tab-files"));
-      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
-      // Close
-      await user.click(screen.getByTestId("context-drawer-close"));
-      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "false");
-    });
-
-    it("old left Files permanent panel is gone (no studio-files-panel)", async () => {
+    it("unified dock replaces the desktop Context Drawer", async () => {
       await renderCommandStudio();
-      // The old files panel testid should not exist
-      expect(screen.queryByTestId("studio-files-panel")).toBeNull();
+      // The old desktop Context Drawer is gone from the desktop topology;
+      // Activity/Files/Terminal/Inspector/Media live in the bottom dock.
+      expect(screen.queryByTestId("context-drawer")).toBeNull();
     });
 
-    it("no Game placeholder is rendered", async () => {
+    it("dock opens on the Activity tab by default", async () => {
+      const { user } = await renderCommandStudio();
+      await user.click(screen.getByTestId("studio-dock-toggle"));
+      expect(screen.getByTestId("studio-dock")).toBeTruthy();
+      expect(screen.getByTestId("dock-tab-activity")).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByTestId("dock-content-activity")).toBeTruthy();
+    });
+
+    it("clicking the dock Files tab activates the Files panel", async () => {
+      const { user } = await renderCommandStudio();
+      await user.click(screen.getByTestId("studio-dock-toggle"));
+      await user.click(screen.getByTestId("dock-tab-files"));
+      expect(screen.getByTestId("dock-tab-files")).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByTestId("dock-tab-activity")).toHaveAttribute("aria-selected", "false");
+      expect(screen.getByTestId("dock-content-files")).toBeTruthy();
+    });
+
+    it("Ctrl+Shift+A opens the dock on the Activity tab", async () => {
       await renderCommandStudio();
-      expect(screen.queryByText(/coming soon/i)).toBeNull();
-      expect(screen.queryByTestId("game-creator")).toBeNull();
+      expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "false");
+      fireEvent.keyDown(window, { key: "a", ctrlKey: true, shiftKey: true });
+      expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "true");
+      expect(screen.getByTestId("dock-tab-activity")).toHaveAttribute("aria-selected", "true");
     });
 
-    it("Files button opens the drawer on the Files tab", async () => {
-      const { user } = await renderCommandStudio();
-      await user.click(screen.getByTestId("workspace-tab-files"));
-      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
-      expect(screen.getByTestId("context-files-panel")).toHaveAttribute("data-active", "true");
-      expect(screen.getByTestId("context-inspector-panel")).toHaveAttribute("data-active", "false");
+    it("Cmd/Ctrl+J toggles the dock", async () => {
+      await renderCommandStudio();
+      fireEvent.keyDown(window, { key: "j", ctrlKey: true });
+      expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "true");
+      fireEvent.keyDown(window, { key: "j", ctrlKey: true });
+      expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "false");
     });
 
-    it("Inspector header action opens the drawer on the Inspector tab", async () => {
+    it("switching dock tabs reflects the active tab truthfully", async () => {
       const { user } = await renderCommandStudio();
-      await user.click(screen.getByRole("button", { name: /open advanced tools/i }));
-      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
-      expect(screen.getByTestId("context-inspector-panel")).toHaveAttribute("data-active", "true");
-      expect(screen.getByTestId("context-files-panel")).toHaveAttribute("data-active", "false");
-    });
-
-    it("switching tabs inside the drawer updates parent state, not internal state", async () => {
-      const { user } = await renderCommandStudio();
+      await user.click(screen.getByTestId("studio-dock-toggle"));
       // Open on Files
-      await user.click(screen.getByTestId("workspace-tab-files"));
-      expect(screen.getByTestId("context-tab-files")).toHaveAttribute("aria-pressed", "true");
-      // Click Inspector tab inside the drawer
-      await user.click(screen.getByTestId("context-tab-inspector"));
-      expect(screen.getByTestId("context-tab-inspector")).toHaveAttribute("aria-pressed", "true");
-      expect(screen.getByTestId("context-inspector-panel")).toHaveAttribute("data-active", "true");
-      // The Files workspace-tab button must no longer show as active —
-      // it must reflect the REAL active tab, not a stale local one
-      // (Phase C2.1 fix for the controlled-drawer bug).
-      const filesBtn = screen.getByTestId("workspace-tab-files");
-      expect(filesBtn.className).not.toContain("glass-active");
+      await user.click(screen.getByTestId("dock-tab-files"));
+      expect(screen.getByTestId("dock-tab-files")).toHaveAttribute("aria-selected", "true");
+      // Switch to Inspector inside the dock
+      await user.click(screen.getByTestId("dock-tab-inspector"));
+      expect(screen.getByTestId("dock-tab-inspector")).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByTestId("dock-tab-files")).toHaveAttribute("aria-selected", "false");
+      expect(screen.getByTestId("dock-content-inspector")).toBeTruthy();
     });
 
-    it("Files workspace-tab button is inactive while Inspector is showing", async () => {
+    it("clicking a dock tab on the collapsed strip opens the dock on that tab", async () => {
       const { user } = await renderCommandStudio();
-      await user.click(screen.getByRole("button", { name: /open advanced tools/i }));
-      const filesBtn = screen.getByTestId("workspace-tab-files");
-      expect(filesBtn.className).not.toContain("glass-active");
-      expect(filesBtn).toHaveAttribute("aria-pressed", "false");
+      expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "false");
+      // The tab strip is visible even when collapsed — clicking Files opens
+      // the dock directly on the Files tab.
+      await user.click(screen.getByTestId("dock-tab-files"));
+      expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "true");
+      expect(screen.getByTestId("dock-tab-files")).toHaveAttribute("aria-selected", "true");
     });
 
-    it("clicking Files while Inspector is open switches to Files without closing the drawer", async () => {
+    it("dock close button closes the dock", async () => {
       const { user } = await renderCommandStudio();
-      await user.click(screen.getByRole("button", { name: /open advanced tools/i }));
-      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
-      await user.click(screen.getByTestId("workspace-tab-files"));
-      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
-      expect(screen.getByTestId("context-files-panel")).toHaveAttribute("data-active", "true");
-    });
-
-    it("clicking Files again while Files is active closes the drawer", async () => {
-      const { user } = await renderCommandStudio();
-      await user.click(screen.getByTestId("workspace-tab-files"));
-      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
-      await user.click(screen.getByTestId("workspace-tab-files"));
-      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "false");
+      await user.click(screen.getByTestId("studio-dock-toggle"));
+      expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "true");
+      await user.click(screen.getByTestId("dock-close"));
+      expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "false");
     });
 
     it("mic HUD is not shown ON when the microphone is inactive", async () => {
@@ -660,10 +662,10 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       const input = screen.getByRole("textbox", { name: /message input/i });
       input.focus();
 
-      // Sheet geometry is computed from the Visual Viewport API so it
-      // stays above the mobile nav and any on-screen keyboard.
-      expect(sheet.getAttribute("style")).toContain("var(--studio-mobile-bottom-h)");
-      expect(sheet).toHaveStyle({ bottom: "62px" });
+      // The sheet is full-screen on mobile (redesigned LiTTMobileSheet):
+      // pinned to the viewport top with a visual-viewport-derived height,
+      // no bottom-sheet offset anymore.
+      expect(sheet.getAttribute("style")).toContain("top: 0px");
       expect(screen.getByTestId("studio-workspace-context").textContent).toContain("Private LiTT workspace");
       expect(document.activeElement).toBe(input);
       expect(screen.getByRole("button", { name: /send message|cancel response/i })).toBeVisible();
@@ -709,69 +711,49 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     // visible (pressed) state must truthfully reflect whether Live is
     // actually on screen — not merely whether the LiTT rail is expanded.
 
-    it("Activity button is present and is an open action (not a collapse toggle)", async () => {
+    it("Activity lives in the unified dock — no separate activity-toggle", async () => {
       await renderCommandStudio();
-      const activityBtn = screen.getByTestId("activity-toggle");
-      expect(activityBtn).toBeTruthy();
-      // Default desktop state: LiTT expanded on Chat → Live NOT visible.
-      expect(activityBtn).toHaveAttribute("data-active", "false");
-      expect(activityBtn).toHaveAttribute("aria-label", "Open Activity");
+      // The old standalone Activity button is gone; Activity is a dock tab.
+      expect(screen.queryByTestId("activity-toggle")).toBeNull();
     });
 
-    it("Activity opens Live on desktop when LiTT is expanded on Chat", async () => {
+    it("clicking the active dock tab while open keeps the dock open", async () => {
       const { user } = await renderCommandStudio();
-      // Default: Chat is active, Live is not.
-      expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "false");
-      await user.click(screen.getByTestId("activity-toggle"));
-      // Activity must switch the LiTT tab to Live.
-      expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "true");
-      // And the Activity button must now truthfully reflect Live visibility.
-      expect(screen.getByTestId("activity-toggle")).toHaveAttribute("data-active", "true");
+      await user.click(screen.getByTestId("studio-dock-toggle"));
+      expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "true");
+      // Dock tabs select a tab — they don't toggle the dock closed.
+      await user.click(screen.getByTestId("dock-tab-activity"));
+      expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "true");
+      expect(screen.getByTestId("dock-tab-activity")).toHaveAttribute("aria-selected", "true");
     });
 
-    it("Activity expands a collapsed LiTT and activates Live (desktop)", async () => {
-      const { user } = await renderCommandStudio();
-      // Collapse LiTT first.
-      await user.click(screen.getByTestId("litt-panel-collapse"));
-      expect(screen.getByTestId("litt-ambient-hud")).toBeTruthy();
-      // Activity must expand the rail AND switch to Live.
-      await user.click(screen.getByTestId("activity-toggle"));
-      expect(screen.getByTestId("litt-panel-expanded-chrome")).toHaveStyle({ display: "flex" });
-      expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "true");
-      expect(screen.getByTestId("activity-toggle")).toHaveAttribute("data-active", "true");
-    });
-
-    it("Activity visible state is false while LiTT is expanded on Chat (not Live)", async () => {
+    it("Ctrl+Shift+A opens the dock Activity tab on desktop", async () => {
       await renderCommandStudio();
-      // LiTT is expanded (desktop default), but on Chat.
-      expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
-      expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "false");
-      // The old `activityRailOpen = !littCollapsed` would have been TRUE here,
-      // which was a lie. The new `activityVisible` must be FALSE.
-      expect(screen.getByTestId("activity-toggle")).toHaveAttribute("data-active", "false");
+      expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "false");
+      fireEvent.keyDown(window, { key: "a", ctrlKey: true, shiftKey: true });
+      expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "true");
+      expect(screen.getByTestId("dock-tab-activity")).toHaveAttribute("aria-selected", "true");
     });
 
-    it("Activity opens the mobile LiTT sheet and selects Live (mobile)", async () => {
+    it("mobile sheet Live tab shows the activity feed", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
       const { user } = await renderCommandStudio();
       // Mobile: no desktop rail.
       expect(screen.queryByTestId("litt-panel")).toBeNull();
-      // Activity must open the mobile sheet, NOT mutate littCollapsed.
-      await user.click(screen.getByTestId("activity-toggle"));
+      await user.click(screen.getByTestId("litt-mobile-trigger"));
       expect(screen.getByTestId("litt-mobile-sheet")).toBeTruthy();
-      // And Live must be the active tab inside the sheet.
+      // The sheet's Live tab shows activity.
+      await user.click(screen.getByTestId("litt-mobile-tab-live"));
       expect(screen.getByTestId("litt-mobile-live-panel")).toHaveAttribute("data-active", "true");
       expect(screen.getByTestId("litt-mobile-tab-live")).toHaveAttribute("aria-pressed", "true");
-      // Activity button reflects truthful Live visibility on mobile.
-      expect(screen.getByTestId("activity-toggle")).toHaveAttribute("data-active", "true");
     });
 
-    it("Activity does not silently mutate littCollapsed on mobile", async () => {
+    it("opening the mobile sheet does not silently mutate littCollapsed", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
-      // Store the desktop collapse preference before Activity.
+      // Store the desktop collapse preference before opening the sheet.
       localStorage.setItem("littree:studio:litt-collapsed", "false");
       const { user } = await renderCommandStudio();
-      await user.click(screen.getByTestId("activity-toggle"));
+      await user.click(screen.getByTestId("litt-mobile-trigger"));
       // The desktop-specific collapse preference must be untouched.
       expect(localStorage.getItem("littree:studio:litt-collapsed")).toBe("false");
     });
