@@ -43,6 +43,57 @@ export interface WorkspaceGetResponse {
 }
 
 /**
+ * Per-operation timeouts for terminal-server calls (milliseconds).
+ *
+ * Nothing in this chain is allowed to hang forever. A hung terminal server
+ * previously left Studio previews stuck on "Preparing preview…" for hours
+ * with no error and no retry — the browser fetch, the Next.js route, and
+ * these internal calls all waited indefinitely. Now every call fails loudly
+ * with a descriptive error so the UI can show "failed" instead of spinning.
+ *
+ * Budgets: prepare can clone a repo and copy a template (generous);
+ * preview start/restart can npm-install and boot a dev server; everything
+ * else is a quick status check.
+ */
+export const TERMINAL_TIMEOUTS = {
+  prepareWorkspace: 180_000,
+  startPreview: 120_000,
+  restartPreview: 120_000,
+  getWorkspace: 20_000,
+  getPreviewStatus: 20_000,
+  stopPreview: 20_000,
+  getPreviewLogs: 20_000,
+} as const;
+
+/**
+ * fetch() with a hard timeout. On timeout, throws a descriptive Error
+ * naming the operation — never lets the caller hang indefinitely.
+ * Exported for tests.
+ */
+export async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  operationLabel: string,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (controller.signal.aborted) {
+      const method = (init.method ?? "GET").toUpperCase();
+      throw new Error(
+        `Terminal server timed out after ${Math.round(timeoutMs / 1000)}s: ${method} ${operationLabel} — the request never completed.`,
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Prepare a workspace on the terminal server.
  * Returns the workspace descriptor with root path and commit SHA.
  */
@@ -57,14 +108,19 @@ export async function prepareWorkspaceInternal(
   }
 
   const url = `${TERMINAL_BASE()}/internal/workspace/prepare`;
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Internal-Service-Key": key,
+  const resp = await fetchWithTimeout(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Internal-Service-Key": key,
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
+    TERMINAL_TIMEOUTS.prepareWorkspace,
+    "POST /internal/workspace/prepare",
+  );
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => "Unknown error");
@@ -87,12 +143,17 @@ export async function getWorkspaceInternal(
   }
 
   const url = `${TERMINAL_BASE()}/internal/workspace/${encodeURIComponent(workspaceId)}?userId=${encodeURIComponent(userId)}`;
-  const resp = await fetch(url, {
-    method: "GET",
-    headers: {
-      "X-Internal-Service-Key": key,
+  const resp = await fetchWithTimeout(
+    url,
+    {
+      method: "GET",
+      headers: {
+        "X-Internal-Service-Key": key,
+      },
     },
-  });
+    TERMINAL_TIMEOUTS.getWorkspace,
+    "GET /internal/workspace/{id}",
+  );
 
   if (resp.status === 404) return null;
   if (!resp.ok) {
@@ -140,14 +201,19 @@ export async function startPreviewInternal(
   }
 
   const url = `${TERMINAL_BASE()}/internal/workspace/${encodeURIComponent(workspaceId)}/preview/start`;
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Internal-Service-Key": key,
+  const resp = await fetchWithTimeout(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Internal-Service-Key": key,
+      },
+      body: JSON.stringify({ userId, ...options }),
     },
-    body: JSON.stringify({ userId, ...options }),
-  });
+    TERMINAL_TIMEOUTS.startPreview,
+    "POST /internal/workspace/{id}/preview/start",
+  );
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => "Unknown error");
@@ -181,12 +247,17 @@ export async function getPreviewStatusInternal(
   }
 
   const url = `${TERMINAL_BASE()}/internal/workspace/${encodeURIComponent(workspaceId)}/preview/status?userId=${encodeURIComponent(userId)}`;
-  const resp = await fetch(url, {
-    method: "GET",
-    headers: {
-      "X-Internal-Service-Key": key,
+  const resp = await fetchWithTimeout(
+    url,
+    {
+      method: "GET",
+      headers: {
+        "X-Internal-Service-Key": key,
+      },
     },
-  });
+    TERMINAL_TIMEOUTS.getPreviewStatus,
+    "GET /internal/workspace/{id}/preview/status",
+  );
 
   if (resp.status === 404) return null;
   if (!resp.ok) {
@@ -210,14 +281,19 @@ export async function stopPreviewInternal(
   }
 
   const url = `${TERMINAL_BASE()}/internal/workspace/${encodeURIComponent(workspaceId)}/preview/stop`;
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Internal-Service-Key": key,
+  const resp = await fetchWithTimeout(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Internal-Service-Key": key,
+      },
+      body: JSON.stringify({ userId }),
     },
-    body: JSON.stringify({ userId }),
-  });
+    TERMINAL_TIMEOUTS.stopPreview,
+    "POST /internal/workspace/{id}/preview/stop",
+  );
 
   if (!resp.ok && resp.status !== 404) {
     const text = await resp.text().catch(() => "Unknown error");
@@ -238,14 +314,19 @@ export async function restartPreviewInternal(
   }
 
   const url = `${TERMINAL_BASE()}/internal/workspace/${encodeURIComponent(workspaceId)}/preview/restart`;
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Internal-Service-Key": key,
+  const resp = await fetchWithTimeout(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Internal-Service-Key": key,
+      },
+      body: JSON.stringify({ userId }),
     },
-    body: JSON.stringify({ userId }),
-  });
+    TERMINAL_TIMEOUTS.restartPreview,
+    "POST /internal/workspace/{id}/preview/restart",
+  );
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => "Unknown error");
@@ -269,12 +350,17 @@ export async function getPreviewLogsInternal(
   }
 
   const url = `${TERMINAL_BASE()}/internal/workspace/${encodeURIComponent(workspaceId)}/preview/logs?userId=${encodeURIComponent(userId)}&lines=${lines}`;
-  const resp = await fetch(url, {
-    method: "GET",
-    headers: {
-      "X-Internal-Service-Key": key,
+  const resp = await fetchWithTimeout(
+    url,
+    {
+      method: "GET",
+      headers: {
+        "X-Internal-Service-Key": key,
+      },
     },
-  });
+    TERMINAL_TIMEOUTS.getPreviewLogs,
+    "GET /internal/workspace/{id}/preview/logs",
+  );
 
   if (resp.status === 404) return [];
   if (!resp.ok) {
