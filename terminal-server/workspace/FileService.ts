@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, mkdirSync, statSync, existsSync } from "fs";
+import { readdirSync, readFileSync, mkdirSync, statSync, existsSync, rmSync } from "fs";
 import { writeFileAtomic } from "./atomic-write";
 import { join, dirname, relative, basename } from "path";
 import { createHash } from "crypto";
@@ -114,6 +114,21 @@ export function writeFile(
     version,
     size: Buffer.byteLength(content, "utf8"),
   };
+}
+
+/**
+ * Delete an already-resolved path inside a workspace. The caller resolves
+ * the workspace-relative path through WorkspaceSecurity first — this is the
+ * execution step only.
+ *
+ * Truthful: throws "Path not found" when nothing exists at the target.
+ * rmSync's force:true would otherwise report a successful delete for a
+ * path that never existed, letting callers claim a file was removed when
+ * nothing happened.
+ */
+export function deleteResolvedPath(target: string): void {
+  if (!existsSync(target)) throw new Error("Path not found");
+  rmSync(target, { recursive: true });
 }
 
 export interface SearchResult {

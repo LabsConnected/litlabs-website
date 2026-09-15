@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { spawn, type ChildProcess } from "child_process";
 import { createHmac, randomUUID } from "crypto";
-import { mkdtempSync, rmSync, existsSync } from "fs";
+import { mkdtempSync, rmSync, existsSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve } from "path";
 import { io as ioClient, type Socket } from "socket.io-client";
@@ -179,11 +179,13 @@ describe("terminal-server smoke test", () => {
   const userId = `smoke-user-${randomUUID().slice(0, 8)}`;
   const projectId = `smoke-project-${randomUUID().slice(0, 8)}`;
   let workspaceId: string;
+  let workspaceRoot: string;
 
   beforeEach(async () => {
     // Prepare a fresh blank workspace before each test that needs one
     const ws = await prepareBlankWorkspace(userId, projectId);
     workspaceId = ws.workspaceId;
+    workspaceRoot = ws.root;
   });
 
   it("responds on /health/live", async () => {
@@ -326,6 +328,51 @@ describe("terminal-server smoke test", () => {
       body: JSON.stringify({ sourceType: "blank", userId, projectId, templateId: "blank-static" }),
     });
     expect(resp.status).toBe(401);
+  });
+
+  it("ws-files/delete returns 404 for a path that does not exist", async () => {
+    const token = createToken(userId, workspaceId, projectId);
+    const resp = await fetch(`${BASE_URL}/ws-files/delete`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        "X-Workspace-Id": workspaceId,
+      },
+      body: JSON.stringify({ path: "never-existed.txt" }),
+    });
+    expect(resp.status).toBe(404);
+    const body = await resp.json();
+    expect(body.deleted).not.toBe(true);
+  });
+
+  it("ws-files/delete deletes a real file, then reports 404 on a second delete", async () => {
+    const token = createToken(userId, workspaceId, projectId);
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      "X-Workspace-Id": workspaceId,
+    };
+    const target = join(workspaceRoot, "to-delete.txt");
+    writeFileSync(target, "delete me");
+
+    const first = await fetch(`${BASE_URL}/ws-files/delete`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ path: "to-delete.txt" }),
+    });
+    expect(first.status).toBe(200);
+    expect((await first.json()).deleted).toBe(true);
+    expect(existsSync(target)).toBe(false);
+
+    // Deleting the same path again must not claim success — the file is
+    // already gone, so the truthful answer is 404.
+    const second = await fetch(`${BASE_URL}/ws-files/delete`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ path: "to-delete.txt" }),
+    });
+    expect(second.status).toBe(404);
   });
 
   it("returns 404 for a non-existent workspace via internal API", async () => {
