@@ -263,6 +263,28 @@ describe("POST /api/studio/command — browser ownership boundary", () => {
     expect(sent.projectId).toBeUndefined();
   });
 
+  it("accepts `git`, a real registry command the old list omitted", async () => {
+    ownedWorkspace();
+    const res = await POST(body({ command: "git", projectId: "proj-alice" }));
+
+    expect(res.status).toBe(200);
+    const init = fetchSpy.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(init.body as string).command).toBe("git");
+  });
+
+  it.each([["read_file"], ["list_files"], ["log"], ["branch"], ["debug"], ["ship"], ["inspect_package"], ["do"], ["ask"]])(
+    "rejects %s at the boundary because it is not a resolvable browser command",
+    async (command) => {
+      ownedWorkspace();
+      const res = await POST(body({ command, projectId: "proj-alice" }));
+      const json = await res.json();
+
+      expect(res.status).toBe(400);
+      expect(json.error).toBe(`Unsupported command: ${command}`);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    },
+  );
+
   it("never contacts terminal-server when ownership validation fails", async () => {
     vi.mocked(verifyProjectWorkspace).mockRejectedValue(
       new FakeProjectVerificationError("Forbidden", "FORBIDDEN"),
