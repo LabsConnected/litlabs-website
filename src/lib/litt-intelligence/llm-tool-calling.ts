@@ -1020,11 +1020,21 @@ function buildAllFailedMessage(
 // XML tags are normalized to the fence form first so the shared
 // @litt/agent-core stripper covers every shape with one implementation.
 
-/** `<tool_call>…</tool_call>` including an unclosed trailing tag. */
-const XML_TOOL_CALL_RE = /<tool_call\s*>([\s\S]*?)(<\/tool_call>|$)/gi;
+/** `<tool_call …>…</tool_call>` including an unclosed trailing tag and
+ *  attribute-bearing openers. The `(?=[\s/>])` lookahead keeps
+ *  `<tool_calls>` (plural) from matching. */
+const XML_TOOL_CALL_RE = /<tool_call(?=[\s/>])[^>]*>([\s\S]*?)(<\/tool_call[^>]*>|$)/gi;
+/** Orphan `</tool_call>` close tag (truncated markup mid-stream). */
+const XML_TOOL_CALL_CLOSE_RE = /<\/tool_call[^>]*>/gi;
+/** antml-style `<arg_key>…</arg_key>` / `<arg_value>…</arg_value>` tags —
+ *  protocol junk emitted inside tool_call markup; only stripped when the
+ *  text already contained tool_call markers. */
+const XML_ARG_TAG_RE = /<arg_(key|value)\s*>[\s\S]*?<\/arg_\1\s*>/gi;
 
 function normalizeXmlToolCallTags(text: string): string {
-  return text.replace(XML_TOOL_CALL_RE, (_m, inner: string) => `\`\`\`tool_call\n${inner}\n\`\`\``);
+  if (!text.includes("<tool_call") && !text.includes("</tool_call")) return text;
+  const fenced = text.replace(XML_TOOL_CALL_RE, (_m, inner: string) => `\`\`\`tool_call\n${inner}\n\`\`\``);
+  return fenced.replace(XML_TOOL_CALL_CLOSE_RE, "").replace(XML_ARG_TAG_RE, "");
 }
 
 /**
@@ -1035,7 +1045,7 @@ function normalizeXmlToolCallTags(text: string): string {
 function stripInTextToolCallMarkup(resp: LLMToolCallResponse): LLMToolCallResponse {
   const text = resp.text;
   if (!text) return resp;
-  const normalized = text.includes("<tool_call") ? normalizeXmlToolCallTags(text) : text;
+  const normalized = normalizeXmlToolCallTags(text);
   const stripped = stripToolCallBlocks(normalized).trim();
   if (stripped === text.trim()) return resp;
   return { ...resp, text: stripped };

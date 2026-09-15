@@ -279,6 +279,41 @@ describe("callLLMWithTools — in-text tool_call markup never leaks", () => {
     expect(result.toolCalls).toHaveLength(0);
   });
 
+  it("strips antml-style <tool_call>name <arg_key>/<arg_value> markup", async () => {
+    // The exact shape observed leaking into a production transcript:
+    //   <tool_call>terminal <arg_key>command</arg_key> <arg_value>find …</arg_value></tool_call>
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(
+      makeSuccessResponse(
+        "llama-3.3-70b-versatile",
+        'Let me locate the file first. <tool_call>terminal <arg_key>command</arg_key> <arg_value>find /workspace -name "index.html"</arg_value></tool_call>',
+      ),
+    );
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+
+    expect(result.text).toBe("Let me locate the file first.");
+    expect(result.text).not.toContain("arg_key");
+    expect(result.toolCalls).toHaveLength(0);
+  });
+
+  it("strips an orphan </tool_call> close tag and stray arg tags", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(
+      makeSuccessResponse(
+        "llama-3.3-70b-versatile",
+        'Value found: <arg_value>f79fae8d</arg_value></tool_call> — done.',
+      ),
+    );
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+
+    expect(result.text).not.toContain("arg_value");
+    expect(result.text).not.toContain("tool_call");
+    expect(result.text).toContain("Value found:");
+    expect(result.text).toContain("done");
+  });
+
   it("strips an unclosed trailing tool_call fence", async () => {
     vi.stubEnv("GROQ_API_KEY", "test-groq-key");
     mockFetch.mockResolvedValueOnce(
