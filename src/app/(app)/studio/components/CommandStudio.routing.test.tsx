@@ -720,6 +720,135 @@ describe("CommandStudio — mounted Work-surface routing", () => {
         globalThis.__TEST_VIEWPORT_WIDTH__ = 1440;
       }
     });
+
+    it("a param-only URL write without ?tool= does not eject Builder", async () => {
+      setUrl("tool=build&project=proj-123");
+      const view = await renderCommandStudio();
+      await waitFor(() => expect(currentTool()).toBe("build"));
+      expectBuilderSurfaceActive();
+      // Another writer sets ?project= and the resulting URL carries no
+      // ?tool= at all. Absent `tool` is not a surface assertion — the
+      // Builder surface and work mode must be preserved.
+      act(() => {
+        setUrl("project=proj-456");
+        view.rerender(<CommandStudio />);
+      });
+      expectBuilderSurfaceActive();
+      act(() => view.rerender(<CommandStudio />));
+      expectBuilderSurfaceActive();
+    });
+
+    it("conversation/agent param writes without ?tool= do not eject Builder", async () => {
+      setUrl("tool=build");
+      const view = await renderCommandStudio();
+      await waitFor(() => expect(currentTool()).toBe("build"));
+      expectBuilderSurfaceActive();
+      // The conversation sync writer produces URLs like
+      // ?conversation=<id>&agent=litt — a stale or partial write must
+      // not bounce Builder to the conversation surface.
+      act(() => {
+        setUrl("conversation=conv-9&agent=litt&project=proj-1");
+        view.rerender(<CommandStudio />);
+      });
+      expectBuilderSurfaceActive();
+    });
+
+    it("an explicit ?mode= on a tool-less URL applies the LiTT mode (stage follows mode)", async () => {
+      setUrl("tool=build");
+      const view = await renderCommandStudio();
+      await waitFor(() => expect(currentTool()).toBe("build"));
+      expectBuilderSurfaceActive();
+      act(() => {
+        setUrl("mode=image&project=proj-1");
+        view.rerender(<CommandStudio />);
+      });
+      // ?mode=image is an explicit creation-mode assertion — it applies
+      // even without ?tool=, and the LiTT-mode→stage sync opens the
+      // Media stage for the generated artifacts. That stage move is the
+      // authoritative surface change, so Builder exits coherently
+      // (no dormant builder flag under a media stage).
+      const mediaBtn = screen.getByTestId("workspace-tab-media");
+      await waitFor(() => expect(mediaBtn.className).toContain("glass-active"));
+      await waitFor(() => expect(currentMode()).toBe("image"));
+    });
+
+    it("?tool=terminal navigation preserves Builder like the drawer-overlay route", async () => {
+      setUrl("tool=build");
+      const view = await renderCommandStudio();
+      await waitFor(() => expect(currentTool()).toBe("build"));
+      expectBuilderSurfaceActive();
+      // terminal maps to (studio, work) + openDrawer — an overlay, not a
+      // surface change. Same rule as handleRouteTool("terminal").
+      act(() => {
+        setUrl("tool=terminal");
+        view.rerender(<CommandStudio />);
+      });
+      expectBuilderSurfaceActive();
+      act(() => view.rerender(<CommandStudio />));
+      expectBuilderSurfaceActive();
+    });
+
+    it("an explicit ?tool= URL remains authoritative — tool=preview exits Builder", async () => {
+      setUrl("tool=build");
+      const view = await renderCommandStudio();
+      await waitFor(() => expect(currentTool()).toBe("build"));
+      expectBuilderSurfaceActive();
+      act(() => {
+        setUrl("tool=preview");
+        view.rerender(<CommandStudio />);
+      });
+      const previewBtn = screen.getByTestId("workspace-tab-preview");
+      await waitFor(() => expect(previewBtn.className).toContain("glass-active"));
+    });
+
+    it("a bare /studio navigation still means the default Studio surface", async () => {
+      setUrl("tool=build");
+      const view = await renderCommandStudio();
+      await waitFor(() => expect(currentTool()).toBe("build"));
+      expectBuilderSurfaceActive();
+      // A completely param-free /studio is the canonical "default
+      // surface" assertion — e.g. a nav link or browser Back to the
+      // initial landing entry.
+      act(() => {
+        setUrl("");
+        view.rerender(<CommandStudio />);
+      });
+      const previewBtn = screen.getByTestId("workspace-tab-preview");
+      await waitFor(() => expect(previewBtn.className).toContain("glass-active"));
+    });
+  });
+
+  describe("tool-absent URL writes preserve the active surface", () => {
+    it("a param-only write does not bounce the Code stage back to Preview", async () => {
+      setUrl("tool=code");
+      const view = await renderCommandStudio();
+      const codeBtn = screen.getByTestId("workspace-tab-code");
+      await waitFor(() => expect(codeBtn.className).toContain("glass-active"));
+      // A project/conversation/agent write that drops ?tool= carries no
+      // surface assertion — the active Code stage must survive it.
+      act(() => {
+        setUrl("project=proj-7&conversation=conv-1");
+        view.rerender(<CommandStudio />);
+      });
+      expect(codeBtn.className).toContain("glass-active");
+      act(() => view.rerender(<CommandStudio />));
+      expect(codeBtn.className).toContain("glass-active");
+    });
+
+    it("a param-only write does not leave a non-Studio destination", async () => {
+      setUrl("tool=agents");
+      const view = await renderCommandStudio();
+      const previewBtn = screen.getByTestId("workspace-tab-preview");
+      // Agents destination: no workspace stage is active.
+      await waitFor(() => expect(previewBtn.className).not.toContain("glass-active"));
+      act(() => {
+        setUrl("agent=spark");
+        view.rerender(<CommandStudio />);
+      });
+      // Before the fix this fell through the default mapping to
+      // (studio, preview) — leaving the Agents destination entirely.
+      expect(previewBtn.className).not.toContain("glass-active");
+    });
   });
 
   describe("canonical workspace tabs", () => {

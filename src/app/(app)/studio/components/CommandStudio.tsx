@@ -297,6 +297,21 @@ function CommandStudioContent() {
       return;
     }
     const fromUrl = searchParams.get("tool");
+    // A param-carrying URL with no `tool` makes no surface assertion —
+    // it is a param-only write (project / conversation / agent / mission
+    // churn from other writers, or a partial shared link). Mapping it
+    // through the default case would force (studio, preview, conversation)
+    // and eject Builder — or bounce any active stage — for no reason.
+    // Only an explicit `tool` value is an authoritative surface change;
+    // an explicit `?mode=` still applies as a LiTT mode assertion.
+    // A fully bare /studio still means "default Studio surface".
+    if (fromUrl === null && navKey !== "") {
+      const explicitOnly = searchParams.get("mode") as LiTTMode | null;
+      if (explicitOnly && LITT_MODES.includes(explicitOnly)) {
+        setLittMode((cur) => (cur === explicitOnly ? cur : explicitOnly));
+      }
+      return;
+    }
     const mapped = mapLegacyToolToDestination(
       fromUrl === "pipeline" ? "workflows" : fromUrl,
       searchParams.get("mission") ?? undefined,
@@ -312,8 +327,11 @@ function CommandStudioContent() {
       const newMode = (mapped.mode as StudioMode) ?? "preview";
       setStudioMode((cur) => (cur === newMode ? cur : newMode));
       // workSurface is part of the canonical Builder identity —
-      // ?tool=build restores it; any other Studio URL exits it.
-      setWorkSurface(mapped.legacyTool === "build" ? "builder" : "conversation");
+      // ?tool=build restores it; drawer-overlay routes (e.g. terminal)
+      // preserve the active surface — same rule as handleRouteTool;
+      // any other explicit Studio tool exits it.
+      if (mapped.legacyTool === "build") setWorkSurface("builder");
+      else if (!mapped.openDrawer) setWorkSurface("conversation");
     }
     if (mapped.destination === "create") {
       const newMode = (mapped.mode as CreateMode) ?? "image";
@@ -702,17 +720,23 @@ function CommandStudioContent() {
   // workspace to show the relevant surface. The conversation stays
   // primary — this just updates what the workspace panel shows.
   useEffect(() => {
+    // A mode-driven stage change is an authoritative surface change —
+    // leaving the Work stage must also clear the Builder surface so
+    // (studio, work, builder) stays the only Builder identity.
     if (littMode === "code") {
       setDestination("studio");
       setStudioMode("code");
+      setWorkSurface("conversation");
     } else if (littMode === "website") {
       setDestination("studio");
       setStudioMode("files");
+      setWorkSurface("conversation");
     } else if (littMode === "image" || littMode === "video" || littMode === "music") {
       // Creative modes open the Media tab so generated artifacts have
       // somewhere to appear. The conversation is still primary.
       setDestination("studio");
       setStudioMode("media" as StudioMode);
+      setWorkSurface("conversation");
     }
     // auto: don't change the workspace — LiTT decides based on the prompt
   }, [littMode]);
