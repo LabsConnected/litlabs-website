@@ -9,6 +9,7 @@
  * Integrates with the existing YouTubePlayerContext — no new player.
  */
 
+import Image from "next/image";
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Search, Play, Plus, X, Loader2, Music, AlertCircle } from "lucide-react";
 import { useYouTubePlayer } from "@/context/YouTubePlayerContext";
@@ -217,12 +218,12 @@ export function YouTubeSearchPanel({ onClose }: { onClose: () => void }) {
             >
               {/* Thumbnail */}
               <div className="relative h-12 w-20 shrink-0 overflow-hidden rounded">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
+                <Image
                   src={result.thumbnail}
                   alt=""
-                  className="h-full w-full object-cover"
-                  loading="lazy"
+                  fill
+                  sizes="80px"
+                  className="object-cover"
                 />
                 {result.duration && (
                   <span className="absolute bottom-0.5 right-0.5 rounded bg-black/80 px-1 text-[8px] font-bold text-white">

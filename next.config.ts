@@ -43,6 +43,8 @@ const nextConfig: NextConfig = {
       "lucide-react",
       "react-markdown",
       "zustand",
+      "framer-motion",
+      "@phosphor-icons/react",
     ],
     // Server Actions origin validation (CSRF protection).
     //
@@ -138,6 +140,10 @@ const nextConfig: NextConfig = {
       {
         protocol: "https",
         hostname: "avatars.githubusercontent.com",
+      },
+      {
+        protocol: "https",
+        hostname: "thumbnails.libretro.com",
       },
     ],
   },

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useWallet } from "@/context/WalletContext";
@@ -643,8 +644,7 @@ export default function VideoTool() {
               </div>
             ) : uploadedImagePreview && mode === "animate" ? (
               <div className="relative h-full w-full">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={uploadedImagePreview} alt="First frame" className="h-full w-full object-contain" />
+                <Image src={uploadedImagePreview} alt="First frame" fill unoptimized className="object-contain" />
                 <div className="absolute bottom-3 left-3 rounded-lg border px-2.5 py-1 text-[10px] font-bold backdrop-blur-sm" style={{ borderColor: "rgba(255,255,255,0.1)", background: "rgba(0,0,0,0.6)", color: "rgba(255,255,255,0.7)" }}>
                   First frame ready
                 </div>
@@ -773,8 +773,7 @@ export default function VideoTool() {
 
               {uploadedImagePreview ? (
                 <div className="relative mt-3 overflow-hidden rounded-xl">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={uploadedImagePreview} alt="Reference" className="w-full max-h-48 object-contain rounded-lg" />
+                  <Image src={uploadedImagePreview} alt="Reference" width={640} height={192} unoptimized className="rounded-lg object-contain" style={{ width: "100%", height: "auto", maxHeight: "12rem" }} />
                   <button onClick={handleRemoveImage} disabled={isGenerating || isUploading || isAnalyzing} className="absolute right-2 top-2 rounded-lg bg-black/60 p-1.5 text-white transition hover:bg-black/80 disabled:opacity-50">
                     <X size={14} />
                   </button>

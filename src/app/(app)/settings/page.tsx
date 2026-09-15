@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -907,11 +908,11 @@ function AccountSectionClerk({ T }: { T: ReturnType<typeof useTheme>["resolvedCo
         <div className="flex items-center gap-4">
           {/* Profile picture with upload overlay */}
           <div className="relative group shrink-0">
-            {/* Clerk avatar URL — not optimisable by next/image */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+            <Image
               src={imageUrl}
               alt={name}
+              width={64}
+              height={64}
               className="h-16 w-16 rounded-full border border-white/10 object-cover"
             />
             <button

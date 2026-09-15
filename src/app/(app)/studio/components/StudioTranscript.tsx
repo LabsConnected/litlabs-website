@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { UserMessageAvatar } from "@/components/chat/MessageAvatar";
@@ -518,10 +519,11 @@ export default function StudioTranscript({
                     backgroundColor: `${agentColor}10`,
                   }}
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
+                  <Image
                     src={activeAgentId === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt/litt-avatar-64.webp"}
                     alt={agentMeta.displayName}
+                    width={32}
+                    height={32}
                     className="h-full w-full object-contain p-0.5"
                   />
                 </div>
@@ -719,10 +721,11 @@ export default function StudioTranscript({
               className="grid shrink-0 place-items-center overflow-hidden rounded-full border"
               style={{ width: 32, height: 32, borderColor: `${agentColor}30`, backgroundColor: `${agentColor}10` }}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
+              <Image
                 src={activeAgentId === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt/litt-avatar-64.webp"}
                 alt={agentMeta.displayName}
+                width={32}
+                height={32}
                 className="h-full w-full object-cover"
               />
             </div>

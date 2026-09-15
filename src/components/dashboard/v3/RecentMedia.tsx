@@ -11,6 +11,7 @@
  * Source badges: LiTT / Upload / YouTube.
  */
 
+import Image from "next/image";
 import { useState, useMemo, useCallback } from "react";
 import { Music as MusicIcon, Play, Heart, Download, ListPlus, ExternalLink, Film, Image as ImageIcon } from "lucide-react";
 import type { DashboardMediaItem, MediaCategory } from "./types";
@@ -182,13 +183,12 @@ function MediaTile({
     >
       {/* Content */}
       {item.thumbnailUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        <Image
           src={item.thumbnailUrl}
           alt={item.title}
-          className="h-full w-full object-cover transition-transform duration-500"
+          fill
+          className="object-cover transition-transform duration-500"
           style={{ transform: hover ? "scale(1.05)" : "scale(1)" }}
-          loading="lazy"
         />
       ) : (
         <div

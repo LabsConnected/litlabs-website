@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { FormEvent, useEffect, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -425,10 +426,12 @@ export default function CommandComposer({
         <div className="flex flex-wrap gap-1.5 px-1">
           {snapshots.map((src, i) => (
             <div key={i} className="relative">
-              {/* eslint-disable-next-line @next/next/no-img-element -- data URL from camera snapshot */}
-              <img
+              <Image
                 src={src}
                 alt={`Camera snapshot ${i + 1}`}
+                width={48}
+                height={48}
+                unoptimized
                 className="h-12 w-12 rounded-lg border object-cover"
                 style={{ borderColor: "var(--studio-border-strong)" }}
               />
@@ -558,10 +561,12 @@ export default function CommandComposer({
             className="relative grid h-5 w-5 shrink-0 place-items-center rounded-md overflow-hidden text-[10px] font-black"
             style={{ backgroundColor: `${agentAccent}20`, color: agentAccent }}
           >
-            <img
+            <Image
               src={activeAgentId === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt-mascot-avatar.png"}
               alt={agentMeta.displayName}
-              className="h-full w-full object-cover"
+              fill
+              sizes="20px"
+              className="object-cover"
             />
           </span>
           <span className="hidden sm:inline text-[11px] font-bold" style={{ color: "var(--text-secondary)" }}>
@@ -1118,10 +1123,12 @@ function UnifiedSelectorPopover({
                 style={{ backgroundColor: `${accent}20`, color: accent }}
               >
                 {unlocked ? (
-                  <img
+                  <Image
                     src={item.id === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt-mascot-avatar.png"}
                     alt={meta.displayName}
-                    className="h-full w-full object-cover"
+                    fill
+                    sizes="28px"
+                    className="object-cover"
                   />
                 ) : (
                   <Lock size={11} />

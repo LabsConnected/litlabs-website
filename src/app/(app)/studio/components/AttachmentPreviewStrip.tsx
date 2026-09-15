@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import {
   X,
   ChevronLeft,
@@ -110,8 +111,7 @@ function AttachmentCard({
       {/* Preview area */}
       <div className="relative flex h-14 w-full items-center justify-center overflow-hidden" style={{ backgroundColor: "rgba(0,0,0,0.2)" }}>
         {isImage ? (
-          /* eslint-disable-next-line @next/next/no-img-element -- blob/object URLs from user uploads */
-          <img src={previewUrl ?? ""} alt={name} className="h-full w-full object-cover" />
+          <Image src={previewUrl ?? ""} alt={name} fill sizes="88px" unoptimized className="object-cover" />
         ) : isVideo ? (
           <video src={previewUrl ?? ""} className="h-full w-full object-cover" muted />
         ) : (

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
@@ -451,11 +452,12 @@ export default function SocialFeed({
                       />
                     ) : (
                       <>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
+                        <Image
                           src={preview}
                           alt="Preview"
-                          className="w-full h-full object-cover"
+                          fill
+                          unoptimized
+                          className="object-cover"
                         />
                       </>
                     )}

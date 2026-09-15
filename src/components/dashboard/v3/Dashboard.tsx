@@ -322,7 +322,7 @@ function QueuePanel({
                     style={{ background: "rgba(30,30,34,0.8)" }}
                   >
                     {item.artworkUrl && (
-                      // eslint-disable-next-line @next/next/no-img-element
+                      // eslint-disable-next-line @next/next/no-img-element -- remote artwork, mixed hosts
                       <img
                         src={item.artworkUrl}
                         alt=""
@@ -578,8 +578,8 @@ function FocusMode({
                 style={{ background: "rgba(30,30,34,0.8)" }}
               >
                 {dock.artworkUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  // eslint-disable-next-line @next/next/no-img-element -- remote artwork, mixed hosts
+                    <img
                     src={dock.artworkUrl}
                     alt=""
                     className="h-full w-full object-cover"

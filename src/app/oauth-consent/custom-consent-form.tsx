@@ -44,6 +44,7 @@ export function CustomConsentForm() {
       </h1>
 
       {data.oauthApplicationLogoUrl && (
+        // eslint-disable-next-line @next/next/no-img-element -- arbitrary third-party OAuth app logo host
         <img
           src={data.oauthApplicationLogoUrl}
           alt={`${data.oauthApplicationName} logo`}

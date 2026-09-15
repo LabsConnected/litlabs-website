@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
 import { useAppUser } from "@/hooks/useClerkAuth";
 import { useProfile } from "@/context/ProfileContext";
@@ -43,10 +44,11 @@ export function UserMessageAvatar({ size = 30 }: { size?: number }) {
       title={identity}
     >
       {imageUrl && !imageFailed ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        <Image
           src={imageUrl}
           alt=""
+          width={size}
+          height={size}
           className="h-full w-full object-cover"
           onError={() => setImageFailed(true)}
         />
@@ -75,10 +77,11 @@ export function LiTTMessageAvatar({ size = 32 }: { size?: number }) {
       title="LiTT"
     >
       {!imageFailed ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        <Image
           src="/brand/litt-mascot-hero.png"
           alt=""
+          width={size}
+          height={size}
           className="h-full w-full object-cover drop-shadow-[0_0_6px_rgba(103,232,249,.6)]"
           style={{ objectPosition: "50% 13%" }}
           onError={() => setImageFailed(true)}

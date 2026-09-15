@@ -16,6 +16,7 @@
  * and agent selection. No chat composer exists here.
  */
 
+import Image from "next/image";
 import { useState, useEffect, useCallback, useMemo, Suspense, lazy } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
@@ -428,11 +429,11 @@ function AgentCard({
         }}
       >
         {posterUrl ? (
-          /* eslint-disable-next-line @next/next/no-img-element -- agent artwork */
-          <img
+          <Image
             src={posterUrl}
             alt={agent.name}
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+            fill
+            className="object-cover transition-transform duration-500 group-hover:scale-105"
             style={{ objectPosition: "center top" }}
           />
         ) : (
@@ -599,8 +600,7 @@ function AgentDetailView({
         <div className="relative h-32 overflow-hidden"
           style={{ background: `linear-gradient(135deg, ${agent.color}10, #0a0a0f)` }}>
           {artwork?.hero && (
-            /* eslint-disable-next-line @next/next/no-img-element -- agent hero */
-            <img src={artwork.hero} alt="" className="h-full w-full object-cover opacity-50" style={{ objectPosition: "center top" }} />
+            <Image src={artwork.hero} alt="" fill className="object-cover opacity-50" style={{ objectPosition: "center top" }} />
           )}
           <div className="absolute inset-0" style={{ background: `linear-gradient(180deg, transparent, ${T.bgColor}f0)` }} />
         </div>
@@ -613,8 +613,7 @@ function AgentDetailView({
               <div className="h-16 w-16 overflow-hidden rounded-xl border-2 shrink-0"
                 style={{ borderColor: `${agent.color}40`, background: T.bgColor }}>
                 {artwork?.poster && (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img src={artwork.poster} alt={agent.name} className="h-full w-full object-cover" />
+                  <Image src={artwork.poster} alt={agent.name} width={64} height={64} className="h-full w-full object-cover" />
                 )}
               </div>
               <div>

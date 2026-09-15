@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useStudioAgentStore, STUDIO_AGENTS, type AgentId } from "../stores/useStudioAgentStore";
@@ -186,10 +187,12 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
                       style={{ backgroundColor: `${accent}15`, color: accent }}
                     >
                       {unlocked ? (
-                        <img
+                        <Image
                           src={meta.id === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt-mascot-avatar.png"}
                           alt={meta.displayName}
-                          className="h-full w-full object-cover"
+                          fill
+                          sizes="32px"
+                          className="object-cover"
                         />
                       ) : (
                         <Lock size={12} />

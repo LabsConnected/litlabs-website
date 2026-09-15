@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState, useEffect, useMemo } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import {
@@ -582,12 +583,12 @@ export default function GalleryTool() {
               <div className="relative aspect-square overflow-hidden bg-black/40">
                 {item.imageUrl ? (
                   <>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
+                    <Image
                       src={item.imageUrl}
                       alt={item.title}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
+                      fill
+                      sizes="(max-width: 640px) 50vw, 25vw"
+                      className="object-cover"
                     />
                   </>
                 ) : item.videoUrl ? (
@@ -685,11 +686,11 @@ export default function GalleryTool() {
             >
               {selectedItem.imageUrl && !selectedItem.videoUrl ? (
                 <>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
+                  <Image
                     src={selectedItem.imageUrl}
                     alt={selectedItem.title}
-                    className="w-full h-full object-contain"
+                    fill
+                    className="object-contain"
                   />
                 </>
               ) : selectedItem.videoUrl &&
@@ -697,11 +698,14 @@ export default function GalleryTool() {
                 <div className="flex flex-col items-center justify-center gap-4 p-8 text-center">
                   {selectedItem.imageUrl && (
                     <>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
+                      <Image
                         src={selectedItem.imageUrl}
                         alt={selectedItem.title}
-                        className="max-h-48 rounded-lg object-cover"
+                        width={480}
+                        height={192}
+                        unoptimized={selectedItem.imageUrl.startsWith("blob:") || selectedItem.imageUrl.startsWith("data:")}
+                        className="rounded-lg object-cover"
+                        style={{ maxHeight: "12rem", width: "auto", height: "auto" }}
                       />
                     </>
                   )}
