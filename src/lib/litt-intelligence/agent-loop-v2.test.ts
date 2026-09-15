@@ -162,3 +162,137 @@ describe("runAgentLoopV2 — deterministic failure reasons", () => {
     expect(result.events.some((e) => e.type === "finished")).toBe(true);
   });
 });
+
+describe("runAgentLoopV2 — invalid apply_patch never reaches the approval gate", () => {
+  const transportWithFile = {
+    workspaceId: "ws-test",
+    userId: "u-test",
+    workspaceRoot: "/tmp/test",
+    projectId: "p-test",
+    readFile: vi.fn(async () => ({
+      content: "<footer>Ember Roast · 2024 · Handcrafted coffee.</footer>",
+      size: 55,
+    })),
+  } as unknown as WorkspaceTransport;
+
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("a patch with an unresolved placeholder becomes a tool error, not an approval pause", async () => {
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{
+          toolCallId: "tc-1",
+          toolId: "apply_patch",
+          inputs: {
+            path: "index.html",
+            patches: [{
+              search: "<footer>[PERSON_NAME] · 2024 · Handcrafted coffee.</footer>",
+              replace: "<footer>Ember Roast · Freshly roasted.</footer>",
+            }],
+          },
+        }],
+        finishReason: "tool_calls",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "Regenerated the patch with literal text.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      });
+
+    const result = await runAgentLoopV2(
+      "change the footer tagline",
+      transportWithFile,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+      },
+    );
+
+    // No approval gate — the loop continued and the model regenerated.
+    expect(result.pendingApproval).toBeUndefined();
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(2);
+    expect(result.finalText).toBe("Regenerated the patch with literal text.");
+    expect(result.toolCalls.some((t) => t.toolId === "apply_patch" && !t.success)).toBe(true);
+  });
+
+  it("a patch whose search string cannot match becomes a tool error, not an approval pause", async () => {
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{
+          toolCallId: "tc-2",
+          toolId: "apply_patch",
+          inputs: {
+            path: "index.html",
+            patches: [{
+              search: "<footer>Hallucinated content that was never written</footer>",
+              replace: "<footer>new</footer>",
+            }],
+          },
+        }],
+        finishReason: "tool_calls",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "Fixed the patch after re-reading the file.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      });
+
+    const result = await runAgentLoopV2(
+      "change the footer tagline",
+      transportWithFile,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+      },
+    );
+
+    expect(result.pendingApproval).toBeUndefined();
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(2);
+    expect(result.finalText).toContain("Fixed the patch");
+  });
+
+  it("a valid patch still pauses for approval normally", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValueOnce({
+      text: "",
+      toolCalls: [{
+        toolCallId: "tc-3",
+        toolId: "apply_patch",
+        inputs: {
+          path: "index.html",
+          patches: [{
+            search: "Handcrafted coffee.",
+            replace: "Freshly roasted, delivered daily.",
+          }],
+        },
+      }],
+      finishReason: "tool_calls",
+      model: "test-model",
+    });
+
+    const result = await runAgentLoopV2(
+      "change the footer tagline",
+      transportWithFile,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+      },
+    );
+
+    expect(result.pendingApproval?.toolId).toBe("apply_patch");
+    expect(result.pendingApproval?.toolCallId).toBe("tc-3");
+  });
+});
