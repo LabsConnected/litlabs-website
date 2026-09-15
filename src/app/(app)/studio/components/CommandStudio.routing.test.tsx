@@ -6,15 +6,48 @@ import "@testing-library/jest-dom";
 // ── Mocks ────────────────────────────────────────────────────────────
 // We mock the heavy dependencies so CommandStudio can mount in jsdom.
 
-// Stable URLSearchParams — must be the same reference across re-renders
-// so the useEffect([searchParams]) doesn't reset state on every render.
-const stableSearchParams = new URLSearchParams("tool=chat");
+// Mutable URLSearchParams — router.replace/push apply the URL like a
+// real browser navigation so the URL→state effect can re-fire on the
+// next render. Tests drive back/forward/refresh by assigning
+// currentSearchParams and re-rendering.
+let currentSearchParams = new URLSearchParams("tool=chat");
+const applyUrl = (url: string) => {
+  const query = url.includes("?") ? url.slice(url.indexOf("?") + 1) : "";
+  currentSearchParams = new URLSearchParams(query);
+};
+const mockReplace = vi.fn(applyUrl);
+const mockPush = vi.fn(applyUrl);
+// Next's useRouter returns a stable object — mirror that so effect
+// dependencies behave like production.
+const stableRouter = { replace: mockReplace, push: mockPush };
 
 vi.mock("next/navigation", () => ({
-  useSearchParams: () => stableSearchParams,
-  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  useSearchParams: () => currentSearchParams,
+  useRouter: () => stableRouter,
   usePathname: () => "/studio",
 }));
+
+function setUrl(query: string) {
+  currentSearchParams = new URLSearchParams(query);
+}
+
+function currentTool() {
+  return currentSearchParams.get("tool");
+}
+
+function currentMode() {
+  return currentSearchParams.get("mode");
+}
+
+/** No canonical workspace stage tab is active — the signature of the
+    Builder surface (work mode + workSurface "builder"). */
+function expectBuilderSurfaceActive() {
+  for (const id of ["plan", "canvas", "code", "preview", "media"]) {
+    const tab = screen.queryByTestId(`workspace-tab-${id}`);
+    expect(tab, `workspace-tab-${id} should be rendered`).toBeTruthy();
+    expect(tab!.className, `workspace-tab-${id} should be inactive`).not.toContain("glass-active");
+  }
+}
 
 vi.mock("@/context/ThemeContext", () => ({
   useTheme: () => ({
@@ -128,25 +161,35 @@ vi.mock("@/features/voice/store/useVoiceStore", () => ({
     }),
 }));
 
+// Mutable so tests can simulate project-metadata/runtime refreshes:
+// change the object, rerender, and the hook returns the new value —
+// the same mechanism a real refreshCapabilities() produces.
+const defaultCapabilities = () => ({
+  repository: "disconnected",
+  repositoryName: null,
+  repositoryIndexed: false,
+  terminalExecution: "unavailable",
+  writeAccess: false,
+  connectedProviders: ["gemini"],
+  availableTools: [] as string[],
+  connectionSummary: "AI connected",
+  terminalStatus: "disconnected",
+  terminalSessionId: null,
+  terminalError: null,
+  voiceTransportConnected: false,
+  voiceMicrophoneOn: false,
+  voiceHealth: { configured: false, tokenService: "unknown", available: false },
+  projectId: null as string | null,
+});
+let mockCapabilities = defaultCapabilities();
+let mockRuntime: { state: Record<string, unknown>; loading: boolean; error: null; refresh: () => Promise<void> } | undefined;
+
 vi.mock("../hooks/useConnectionSummary", () => ({
   useConnectionSummary: () => ({
-    capabilities: {
-      repository: "disconnected",
-      repositoryName: null,
-      repositoryIndexed: false,
-      terminalExecution: "unavailable",
-      writeAccess: false,
-      connectedProviders: ["gemini"],
-      availableTools: [],
-      connectionSummary: "AI connected",
-      terminalStatus: "disconnected",
-      terminalSessionId: null,
-      terminalError: null,
-      voiceTransportConnected: false,
-      voiceMicrophoneOn: false,
-      voiceHealth: { configured: false, tokenService: "unknown", available: false },
-    },
+    capabilities: mockCapabilities,
+    refresh: vi.fn(async () => undefined),
     loading: false,
+    runtime: mockRuntime,
   }),
 }));
 
@@ -330,6 +373,9 @@ async function renderCommandStudio() {
 describe("CommandStudio — mounted Work-surface routing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    currentSearchParams = new URLSearchParams("tool=chat");
+    mockCapabilities = defaultCapabilities();
+    mockRuntime = undefined;
     window.innerHeight = 844;
     Object.defineProperty(window, "visualViewport", {
       value: {
@@ -353,7 +399,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
   });
 
   it("routes to builder surface when ?tool=build via studio:switch-tool event", async () => {
-    await renderCommandStudio();
+    const view = await renderCommandStudio();
     // Preview tab starts active (default surface)
     const previewBtn = screen.getByTestId("workspace-tab-preview");
     expect(previewBtn.className).toContain("glass-active");
@@ -368,6 +414,14 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     await waitFor(() => {
       expect(previewBtn.className).not.toContain("glass-active");
     });
+    // The canonical Builder URL must be written — and must stay stable
+    // once the browser applies it (no canonicalization ping-pong).
+    await waitFor(() => {
+      expect(currentTool()).toBe("build");
+    });
+    act(() => view.rerender(<CommandStudio />));
+    expectBuilderSurfaceActive();
+    expect(currentTool()).toBe("build");
   });
 
   it("returns to conversation when chat is routed after Build", async () => {
@@ -388,7 +442,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
   });
 
   it("chat → build routes to builder, then build → chat returns to conversation", async () => {
-    await renderCommandStudio();
+    const view = await renderCommandStudio();
     const previewBtn = screen.getByTestId("workspace-tab-preview");
     // Start at preview (default surface)
     expect(previewBtn.className).toContain("glass-active");
@@ -397,12 +451,271 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       window.dispatchEvent(new CustomEvent("studio:switch-tool", { detail: "build" }));
     });
     await waitFor(() => expect(previewBtn.className).not.toContain("glass-active"));
+    await waitFor(() => expect(currentTool()).toBe("build"));
     // Route back to chat
     act(() => {
       window.dispatchEvent(new CustomEvent("studio:switch-tool", { detail: "chat" }));
     });
     await waitFor(() => {
       expect(previewBtn.className).toContain("glass-active");
+    });
+    act(() => view.rerender(<CommandStudio />));
+    expect(currentTool()).toBe("preview");
+  });
+
+  describe("Builder is a stable canonical destination (?tool=build)", () => {
+    it("direct ?tool=build mounts the Builder surface with the workspace chrome", async () => {
+      setUrl("tool=build");
+      await renderCommandStudio();
+      // The workspace tab row must be visible — Builder is reachable,
+      // not hidden behind a closed tools drawer.
+      expect(screen.getByTestId("workspace-tab-plan")).toBeTruthy();
+      expectBuilderSurfaceActive();
+      // The URL must remain the canonical tool=build — not rewritten to
+      // chat/preview/canvas by competing canonicalization effects.
+      await waitFor(() => expect(currentTool()).toBe("build"));
+      expect(currentMode()).toBeNull();
+    });
+
+    it("direct ?tool=build converges — repeated renders produce no URL ping-pong", async () => {
+      setUrl("tool=build");
+      const view = await renderCommandStudio();
+      await waitFor(() => expect(currentTool()).toBe("build"));
+      const replaceCallsAfterSettle = mockReplace.mock.calls.length;
+      // Simulate hydration/project-load/rerender churn: the surface and
+      // the URL must be a fixed point, not a loop.
+      for (let i = 0; i < 3; i += 1) {
+        act(() => view.rerender(<CommandStudio />));
+      }
+      expect(mockReplace.mock.calls.length).toBe(replaceCallsAfterSettle);
+      expectBuilderSurfaceActive();
+      expect(currentTool()).toBe("build");
+    });
+
+    it("direct ?tool=build&project=<id> preserves the project param", async () => {
+      setUrl("tool=build&project=proj-123");
+      const view = await renderCommandStudio();
+      await waitFor(() => expect(currentTool()).toBe("build"));
+      act(() => view.rerender(<CommandStudio />));
+      expectBuilderSurfaceActive();
+      expect(currentSearchParams.get("project")).toBe("proj-123");
+      expect(currentTool()).toBe("build");
+    });
+
+    it("hard refresh on ?tool=build remounts the Builder surface", async () => {
+      setUrl("tool=chat");
+      const view = await renderCommandStudio();
+      act(() => {
+        window.dispatchEvent(new CustomEvent("studio:switch-tool", { detail: "build" }));
+      });
+      await waitFor(() => expect(currentTool()).toBe("build"));
+      // Simulate a full reload: unmount, then mount fresh from the URL.
+      view.unmount();
+      const fresh = render(<CommandStudio />);
+      await waitFor(() => {
+        if (!screen.queryByTestId("studio-command-composer") && !screen.queryByTestId("litt-mobile-trigger")) {
+          throw new Error("Studio surface has not mounted");
+        }
+      });
+      expectBuilderSurfaceActive();
+      act(() => fresh.rerender(<CommandStudio />));
+      expect(currentTool()).toBe("build");
+    });
+
+    it("browser back returns to Builder after navigating to Code", async () => {
+      setUrl("tool=build");
+      const view = await renderCommandStudio();
+      expectBuilderSurfaceActive();
+      // Navigate to Code
+      const codeBtn = screen.getByTestId("workspace-tab-code");
+      const user = userEvent.setup();
+      await user.click(codeBtn);
+      await waitFor(() => expect(codeBtn.className).toContain("glass-active"));
+      await waitFor(() => expect(currentTool()).toBe("code"));
+      // Browser Back → tool=build
+      setUrl("tool=build");
+      act(() => view.rerender(<CommandStudio />));
+      await waitFor(() => expectBuilderSurfaceActive());
+      expect(currentTool()).toBe("build");
+      // Browser Forward → tool=code
+      setUrl("tool=code");
+      act(() => view.rerender(<CommandStudio />));
+      await waitFor(() => expect(codeBtn.className).toContain("glass-active"));
+    });
+
+    it("browser back returns to Builder after navigating to Preview", async () => {
+      setUrl("tool=build");
+      const view = await renderCommandStudio();
+      expectBuilderSurfaceActive();
+      const previewBtn = screen.getByTestId("workspace-tab-preview");
+      const user = userEvent.setup();
+      await user.click(previewBtn);
+      await waitFor(() => expect(previewBtn.className).toContain("glass-active"));
+      await waitFor(() => expect(currentTool()).toBe("preview"));
+      setUrl("tool=build");
+      act(() => view.rerender(<CommandStudio />));
+      await waitFor(() => expectBuilderSurfaceActive());
+    });
+
+    it("opening and closing the Inspector does not leave Builder", async () => {
+      setUrl("tool=build");
+      const view = await renderCommandStudio();
+      expectBuilderSurfaceActive();
+      const user = userEvent.setup();
+      await user.click(screen.getByTestId("workspace-tab-files"));
+      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
+      await user.click(screen.getByTestId("context-tab-inspector"));
+      expect(screen.getByTestId("context-inspector-panel")).toHaveAttribute("data-active", "true");
+      expectBuilderSurfaceActive();
+      await user.click(screen.getByTestId("context-drawer-close"));
+      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "false");
+      act(() => view.rerender(<CommandStudio />));
+      expectBuilderSurfaceActive();
+      expect(currentTool()).toBe("build");
+    });
+
+    it("closing the Tools chrome does not eject the Builder surface", async () => {
+      setUrl("tool=build");
+      const view = await renderCommandStudio();
+      expectBuilderSurfaceActive();
+      const user = userEvent.setup();
+      const toggle = screen.getByTestId("studio-tools-toggle");
+      await user.click(toggle);
+      // Tools chrome closed — the workspace tabs row hides, but the
+      // Builder surface state and canonical URL must be preserved.
+      await user.click(toggle);
+      act(() => view.rerender(<CommandStudio />));
+      expectBuilderSurfaceActive();
+      expect(currentTool()).toBe("build");
+    });
+
+    it("opening the Terminal drawer does not eject the Builder surface", async () => {
+      setUrl("tool=build");
+      const view = await renderCommandStudio();
+      expectBuilderSurfaceActive();
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: "More actions" }));
+      // The overflow menu renders in a portal at body level; its
+      // "Terminal" item shares the accessible name with the drawer's
+      // Terminal tab — the menu item is the full-width row.
+      const menuItem = screen
+        .getAllByRole("button", { name: "Terminal" })
+        .find((el) => el.className.includes("w-full"));
+      expect(menuItem).toBeDefined();
+      await user.click(menuItem!);
+      act(() => view.rerender(<CommandStudio />));
+      expectBuilderSurfaceActive();
+      expect(currentTool()).toBe("build");
+    });
+
+    it("explicit navigation to a workspace stage exits Builder", async () => {
+      setUrl("tool=build");
+      const view = await renderCommandStudio();
+      expectBuilderSurfaceActive();
+      const user = userEvent.setup();
+      const canvasBtn = screen.getByTestId("workspace-tab-canvas");
+      await user.click(canvasBtn);
+      await waitFor(() => expect(canvasBtn.className).toContain("glass-active"));
+      await waitFor(() => expect(currentTool()).toBe("canvas"));
+      act(() => view.rerender(<CommandStudio />));
+      expect(canvasBtn.className).toContain("glass-active");
+    });
+
+    it("browser forward after back leaves Builder again", async () => {
+      setUrl("tool=build");
+      const view = await renderCommandStudio();
+      expectBuilderSurfaceActive();
+      const user = userEvent.setup();
+      const codeBtn = screen.getByTestId("workspace-tab-code");
+      await user.click(codeBtn);
+      await waitFor(() => expect(currentTool()).toBe("code"));
+      // Back → Builder
+      act(() => {
+        setUrl("tool=build");
+        view.rerender(<CommandStudio />);
+      });
+      await waitFor(() => expectBuilderSurfaceActive());
+      // Forward → Code again
+      act(() => {
+        setUrl("tool=code");
+        view.rerender(<CommandStudio />);
+      });
+      await waitFor(() => expect(codeBtn.className).toContain("glass-active"));
+      act(() => view.rerender(<CommandStudio />));
+      expect(currentTool()).toBe("code");
+      expect(codeBtn.className).toContain("glass-active");
+    });
+
+    it("opening and closing the Files drawer does not leave Builder", async () => {
+      setUrl("tool=build");
+      const view = await renderCommandStudio();
+      expectBuilderSurfaceActive();
+      const user = userEvent.setup();
+      // Files is a context-drawer tab — opening it must not change the
+      // active Builder surface or the canonical URL.
+      await user.click(screen.getByTestId("workspace-tab-files"));
+      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
+      act(() => view.rerender(<CommandStudio />));
+      expectBuilderSurfaceActive();
+      expect(currentTool()).toBe("build");
+      // Close the drawer
+      await user.click(screen.getByTestId("workspace-tab-files"));
+      act(() => view.rerender(<CommandStudio />));
+      expectBuilderSurfaceActive();
+      expect(currentTool()).toBe("build");
+    });
+
+    it("project metadata refresh does not eject the Builder surface", async () => {
+      setUrl("tool=build&project=proj-123");
+      const view = await renderCommandStudio();
+      await waitFor(() => expect(currentTool()).toBe("build"));
+      expectBuilderSurfaceActive();
+      // Simulate refreshCapabilities() returning updated project metadata
+      // (e.g. workspace became ready) — a rerender must not change the
+      // active surface or the URL.
+      mockCapabilities = {
+        ...mockCapabilities,
+        projectId: "proj-123",
+        terminalStatus: "connected",
+        writeAccess: true,
+      };
+      act(() => view.rerender(<CommandStudio />));
+      expectBuilderSurfaceActive();
+      expect(currentTool()).toBe("build");
+      expect(currentSearchParams.get("project")).toBe("proj-123");
+    });
+
+    it("runtime state refresh does not eject the Builder surface", async () => {
+      setUrl("tool=build");
+      const view = await renderCommandStudio();
+      await waitFor(() => expect(currentTool()).toBe("build"));
+      expectBuilderSurfaceActive();
+      // Simulate runtime.refresh() landing — e.g. dev server now running.
+      mockRuntime = {
+        state: { projectId: "proj-123", status: "running", previewUrl: "http://localhost:4101" },
+        loading: false,
+        error: null,
+        refresh: vi.fn(async () => undefined),
+      };
+      act(() => view.rerender(<CommandStudio />));
+      expectBuilderSurfaceActive();
+      expect(currentTool()).toBe("build");
+    });
+
+    it("mobile viewport keeps the same canonical Builder routing", async () => {
+      globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
+      try {
+        setUrl("tool=build");
+        const view = await renderCommandStudio();
+        expect(screen.queryByTestId("litt-panel")).toBeNull();
+        expectBuilderSurfaceActive();
+        await waitFor(() => expect(currentTool()).toBe("build"));
+        act(() => view.rerender(<CommandStudio />));
+        expectBuilderSurfaceActive();
+        expect(currentTool()).toBe("build");
+      } finally {
+        globalThis.__TEST_VIEWPORT_WIDTH__ = 1440;
+      }
     });
   });
 

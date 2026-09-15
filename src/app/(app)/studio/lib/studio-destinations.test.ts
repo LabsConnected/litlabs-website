@@ -42,6 +42,16 @@ describe("studio-destinations", () => {
       expect(result.command).toBe("next build");
     });
 
+    it("build maps littMode=auto — Builder is a surface, not a creation mode", () => {
+      // Regression: littMode "website" made the LiTT-mode→stage sync
+      // stomp studioMode to "files" on every ?tool=build load, which
+      // canonicalized the URL to tool=canvas. The Builder must not claim
+      // a creation mode.
+      const result = mapLegacyToolToDestination("build");
+      expect(result.littMode).toBe("auto");
+      expect(result.littMode).not.toBe("website");
+    });
+
     it("maps code to Studio/Code", () => {
       expect(mapLegacyToolToDestination("code").destination).toBe("studio");
       expect(mapLegacyToolToDestination("code").mode).toBe("code");
@@ -136,6 +146,29 @@ describe("studio-destinations", () => {
       expect(destinationToLegacyTool("studio", "code")).toBe("code");
       expect(destinationToLegacyTool("studio", "files")).toBe("canvas");
       expect(destinationToLegacyTool("studio", "preview")).toBe("preview");
+    });
+
+    it("Studio/Work + builder surface writes ?tool=build (not chat)", () => {
+      // Regression: work mode unconditionally canonicalized to
+      // tool=chat, which remaps to mode "preview" — the Builder could
+      // never survive a URL round-trip. The builder surface is part of
+      // the canonical identity.
+      expect(destinationToLegacyTool("studio", "work", "builder")).toBe("build");
+      expect(destinationToLegacyTool("studio", "work", "conversation")).toBe("chat");
+      expect(destinationToLegacyTool("studio", "work")).toBe("chat");
+    });
+
+    it("?tool=build survives a full URL round-trip", () => {
+      // state → URL → state must be a fixed point for Builder.
+      const url = destinationToLegacyTool("studio", "work", "builder");
+      expect(url).toBe("build");
+      const mapped = mapLegacyToolToDestination(url);
+      expect(mapped.mode).toBe("work");
+      expect(mapped.legacyTool).toBe("build");
+      // And back to URL again — still build, not chat/preview/canvas.
+      expect(
+        destinationToLegacyTool(mapped.destination, mapped.mode, "builder"),
+      ).toBe("build");
     });
 
     it("round-trips Create destinations back to legacy tools", () => {

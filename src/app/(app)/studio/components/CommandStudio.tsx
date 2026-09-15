@@ -105,14 +105,9 @@ const LiveVoiceOverlay = dynamic(() => import("./LiveVoiceOverlay"), { ssr: fals
 
 type DockPosition = "bottom-right" | "bottom-left" | "top-right" | "top-left" | "full";
 
-/**
- * Which surface renders inside Studio/Work. The conversation is the
- * default; the Builder adapter renders when the user explicitly routes
- * to `build`. This is dynamic state — not derived from the initial URL
- * — so switching to Work after visiting Build shows the conversation
- * unless Build is requested again.
- */
-type WorkSurface = "conversation" | "builder";
+// Which surface renders inside Studio/Work. Canonical identity lives in
+// studio-destinations.ts: (studio, work, builder) ⟷ ?tool=build.
+type WorkSurface = import("../lib/studio-destinations").WorkSurface;
 
 // Map legacy tool ids to their components. "chat" is NOT here — the
 // conversation is handled by useStudioConversation + StudioTranscript.
@@ -220,6 +215,7 @@ function CommandStudioContent() {
   const [advancedToolsOpen, setAdvancedToolsOpen] = useState(() => (
     initial.destination !== "studio"
       || (initial.mode !== "work" && initial.mode !== "preview")
+      || initial.legacyTool === "build"
   ));
   const [previewSelection, setPreviewSelection] = useState<PreviewSelection | null>(null);
   const [completion, setCompletion] = useState<{ changes: MutationSummary; previewUpdated: boolean; repaired: boolean } | null>(null);
@@ -254,11 +250,24 @@ function CommandStudioContent() {
   const [drawerOpen, setDrawerOpen] = useState<boolean>(!!initial.openDrawer);
   const [drawerTab, setDrawerTab] = useState<DrawerTab>(initial.openDrawer ?? "activity");
 
+  // The query string written by the state→URL effect on its last pass —
+  // used by URL→state to recognize (and skip) our own echoes.
+  const lastWrittenUrlRef = useRef<string | null>(null);
+
   // ── URL → State synchronization (browser back/forward) ───────────
   // When the URL changes (back/forward navigation), update React state
   // to match. Only updates when the canonical value actually changed,
   // preventing update loops with the state→URL effect below.
   useEffect(() => {
+    // Echo guard: if this exact URL was written by the state→URL effect
+    // below, it reflects state we already have — applying it back would
+    // create a one-tick-lagged feedback oscillator (state ↔ URL each
+    // correcting the other toward a stale view, forever).
+    const navKey = searchParams.toString();
+    if (navKey === lastWrittenUrlRef.current) {
+      lastWrittenUrlRef.current = null;
+      return;
+    }
     const fromUrl = searchParams.get("tool");
     const mapped = mapLegacyToolToDestination(
       fromUrl === "pipeline" ? "workflows" : fromUrl,
@@ -274,6 +283,9 @@ function CommandStudioContent() {
     if (mapped.destination === "studio") {
       const newMode = (mapped.mode as StudioMode) ?? "preview";
       setStudioMode((cur) => (cur === newMode ? cur : newMode));
+      // workSurface is part of the canonical Builder identity —
+      // ?tool=build restores it; any other Studio URL exits it.
+      setWorkSurface(mapped.legacyTool === "build" ? "builder" : "conversation");
     }
     if (mapped.destination === "create") {
       const newMode = (mapped.mode as CreateMode) ?? "image";
@@ -490,10 +502,15 @@ function CommandStudioContent() {
   const handleCloseAdvancedTools = useCallback(() => {
     setAdvancedToolsOpen(false);
     setContextDrawerOpen(false);
-    setDestination("studio");
-    setStudioMode("preview");
-    setWorkSurface("conversation");
-  }, []);
+    // Closing the tools drawer is an overlay action — it must not change
+    // the active surface. Only when no advanced surface is mounted do we
+    // fall back to Preview (the pre-tools default).
+    if (!(destination === "studio" && studioMode === "work" && workSurface === "builder")) {
+      setDestination("studio");
+      setStudioMode("preview");
+      setWorkSurface("conversation");
+    }
+  }, [destination, studioMode, workSurface]);
   const handleOpenContextFiles = useCallback(() => {
     setAdvancedToolsOpen(true);
     setContextDrawerTab("files");
@@ -585,8 +602,11 @@ function CommandStudioContent() {
     if (mapped.littMode) setLittMode(mapped.littMode);
     if (mapped.destination === "studio") {
       setStudioMode((mapped.mode as StudioMode) ?? "work");
-      // Explicit Build route → builder surface; anything else → conversation.
-      setWorkSurface(tool === "build" ? "builder" : "conversation");
+      // Explicit Build route → builder surface. Routes that only open a
+      // drawer overlay (e.g. terminal) preserve the active surface —
+      // everything else returns to the conversation.
+      if (tool === "build") setWorkSurface("builder");
+      else if (!mapped.openDrawer) setWorkSurface("conversation");
     }
     if (mapped.destination === "create") setCreateMode((mapped.mode as CreateMode) ?? "image");
     if (mapped.destination === "missions") setMissionMode((mapped.mode as MissionMode) ?? "overview");
@@ -655,7 +675,7 @@ function CommandStudioContent() {
       destination === "create" ? createMode :
       destination === "more" ? moreMode :
       undefined;
-    const legacyTool = destinationToLegacyTool(destination, activeMode);
+    const legacyTool = destinationToLegacyTool(destination, activeMode, workSurface);
     try {
       localStorage.setItem("littree:studio:tool", legacyTool);
     } catch {
@@ -681,10 +701,13 @@ function CommandStudioContent() {
     const target = `${pathname}${params.toString() ? `?${params.toString()}` : ""}`;
     const current = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
     if (target !== current) {
+      // Mark the URL we are about to write so the URL→state effect can
+      // recognize the echo and not re-apply it as a navigation.
+      lastWrittenUrlRef.current = params.toString();
       router.replace(target, { scroll: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [destination, studioMode, createMode, moreMode, littMode, pathname, router]);
+  }, [destination, studioMode, createMode, moreMode, littMode, workSurface, pathname, router]);
 
   // Handle legacy "studio:switch-tool" events emitted from inside tools.
   useEffect(() => {
@@ -1123,13 +1146,16 @@ function CommandStudioContent() {
     }));
   }, []);
   const handleOpenTerminal = useCallback(() => {
+    // Terminal is a drawer over the work surface — it must not eject
+    // the active surface (e.g. Builder). Builder already implies
+    // studio/work; only reset to the conversation when not on Builder.
     setAdvancedToolsOpen(true);
     setDestination("studio");
     setStudioMode("work");
-    setWorkSurface("conversation");
+    if (workSurface !== "builder") setWorkSurface("conversation");
     setDrawerOpen(true);
     setDrawerTab("terminal");
-  }, []);
+  }, [workSurface]);
 
   const handleFirstMissionAction = useCallback((action: FirstMissionActionId) => {
     switch (action) {
@@ -1514,6 +1540,8 @@ function CommandStudioContent() {
         const mapped = workspaceStageToMode(mode);
         setStudioMode(mapped);
         setDestination("studio");
+        // Explicit stage selection exits the Builder surface.
+        setWorkSurface("conversation");
       }}
       onCreatorChange={(c) => {
         if (c === null) {
@@ -1741,7 +1769,8 @@ function CommandStudioContent() {
                     onClick={() => {
                       setDestination("studio");
                       setStudioMode(tabMode);
-                      if (t.id === "plan") setWorkSurface("conversation");
+                      // Any explicit stage selection exits the Builder surface.
+                      setWorkSurface("conversation");
                     }}
                     className={`relative rounded-md px-3 py-1.5 text-[13px] font-bold transition-all ${isActive ? "glass-active" : ""}`}
                     style={{
