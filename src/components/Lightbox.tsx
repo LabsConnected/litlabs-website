@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 
 import { useEffect, useCallback } from "react";
 import { X, ChevronLeft, ChevronRight, Download, Share2 } from "lucide-react";
@@ -94,10 +95,14 @@ export default function Lightbox({
         onClick={(e) => e.stopPropagation()}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <Image
           src={current.src}
           alt={current.alt || "Gallery image"}
-          className="max-w-full max-h-[70vh] object-contain rounded-lg"
+          width={1600}
+          height={900}
+          unoptimized={current.src.startsWith("blob:") || current.src.startsWith("data:")}
+          className="object-contain rounded-lg"
+          style={{ maxWidth: "100%", maxHeight: "70vh", width: "auto", height: "auto" }}
         />
         {current.caption && (
           <p className="mt-3 text-sm text-white/80 text-center max-w-xl">

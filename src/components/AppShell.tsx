@@ -17,6 +17,7 @@
  * Public pages and Studio keep their own layouts (handled by LayoutShell).
  */
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
@@ -176,8 +177,7 @@ function IdentityDock({ collapsed }: { collapsed: boolean }) {
           title={displayName}
         >
           {avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={avatarUrl} alt={displayName} className="h-full w-full object-cover" />
+            <Image src={avatarUrl} alt={displayName} fill sizes="36px" className="object-cover" />
           ) : (
             <div className="grid h-full w-full place-items-center text-xs font-bold" style={{ background: `${T.accentColor}20`, color: T.accentColor }}>
               {displayName.charAt(0).toUpperCase()}
@@ -217,8 +217,7 @@ function IdentityDock({ collapsed }: { collapsed: boolean }) {
         {/* Avatar */}
         <div className="relative h-8 w-8 shrink-0 overflow-hidden rounded-full border" style={{ borderColor: `${T.accentColor}30` }}>
           {avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={avatarUrl} alt={displayName} className="h-full w-full object-cover" />
+            <Image src={avatarUrl} alt={displayName} fill sizes="32px" className="object-cover" />
           ) : (
             <div className="grid h-full w-full place-items-center text-xs font-bold" style={{ background: `${T.accentColor}20`, color: T.accentColor }}>
               {displayName.charAt(0).toUpperCase()}

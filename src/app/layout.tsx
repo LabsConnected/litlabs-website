@@ -1,4 +1,10 @@
 import type { Metadata, Viewport } from "next";
+import {
+  Space_Grotesk,
+  Sora,
+  JetBrains_Mono,
+  Pixelify_Sans,
+} from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { ClerkAuthContextProvider } from "@/context/ClerkAuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
@@ -110,11 +116,24 @@ if (!clerkKey && process.env.NODE_ENV === "production" && !process.env.SKIP_CLER
 }
 const resolvedClerkKey = clerkKey || "pk_test_YnVpbGQtcGxhY2Vob2xkZXIubG9jYWwk";
 
-// Force dynamic rendering so ClerkProvider doesn't throw during static
-// prerendering when the Clerk key is missing (local builds, CI without
-// secrets). The app is inherently dynamic (Clerk auth, user state) so
-// static prerendering provides no benefit here.
-export const dynamic = "force-dynamic";
+// Brand fonts — self-hosted at build time via next/font (no runtime
+// Google Fonts request, zero layout shift). The `variable` classes below
+// emit @font-face rules under hashed family names and define
+// --font-next-ui/display/code/retro on <body>; globals.css consumes those
+// variables (with the literal family names as fallback), so the whole
+// site finally renders in the real brand fonts instead of system fallbacks.
+const fontUi = Space_Grotesk({ subsets: ["latin"], variable: "--font-next-ui" });
+const fontDisplay = Sora({ subsets: ["latin"], variable: "--font-next-display" });
+const fontCode = JetBrains_Mono({ subsets: ["latin"], variable: "--font-next-code" });
+const fontRetro = Pixelify_Sans({ subsets: ["latin"], variable: "--font-next-retro" });
+
+// NOTE: this root layout intentionally declares NO `dynamic` segment
+// config. Marketing/public routes prerender statically (fast TTFB +
+// edge caching). The authenticated app subtree re-opts into dynamic
+// rendering via `export const dynamic = "force-dynamic"` in
+// src/app/(app)/layout.tsx. ClerkProvider is safe during prerendering:
+// a clearly-fake placeholder key is used when the real key is absent
+// (see above), so static builds never throw "Missing publishableKey".
 
 export default function RootLayout({
   children,
@@ -130,7 +149,7 @@ export default function RootLayout({
       <head>{/* Clerk JS loads directly from clerk.litlabs.net (DNS-only in
              Cloudflare, CNAME → Clerk FAPI). No same-origin proxy needed. */}</head>
       <body
-        className="antialiased min-h-dvh"
+        className={`antialiased min-h-dvh ${fontUi.variable} ${fontDisplay.variable} ${fontCode.variable} ${fontRetro.variable}`}
         style={{ backgroundColor: "#03050b" }}
         suppressHydrationWarning
       >

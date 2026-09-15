@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import {
   type BuilderBlock,
   type ChatMessageBlock,
@@ -177,11 +178,15 @@ function MediaBlockView({
     <div className="px-3 py-2">
       <div className="max-w-[720px] rounded-xl border border-white/10 bg-white/5 p-3">
         {block.type === "image" && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <Image
             src={block.url}
             alt={block.alt || "Generated image"}
-            className="max-h-[520px] w-full rounded-xl object-contain"
+            width={1280}
+            height={720}
+            sizes="(max-width: 720px) 100vw, 720px"
+            unoptimized={block.url.startsWith("blob:") || block.url.startsWith("data:")}
+            className="rounded-xl object-contain"
+            style={{ width: "100%", height: "auto", maxHeight: "520px" }}
           />
         )}
         {block.type === "video" && (

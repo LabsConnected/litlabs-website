@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { Trash2, X, Loader2, ImageIcon } from "lucide-react";
 import type { CSSProperties } from "react";
 
@@ -69,7 +70,7 @@ export default function GenerationHistoryCard({
       <button
         type="button"
         onClick={() => onSelect(generation)}
-        className="h-full w-full overflow-hidden rounded-lg border transition hover:scale-[1.02]"
+        className="relative h-full w-full overflow-hidden rounded-lg border transition hover:scale-[1.02]"
         style={{
           borderColor: isSelected ? accentColor : `${borderColor}40`,
           boxShadow: isSelected ? `0 0 8px ${accentColor}40` : "none",
@@ -77,11 +78,13 @@ export default function GenerationHistoryCard({
         aria-label={`Open generation: ${generation.prompt}`}
       >
         {generation.fileUrl ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
+          <Image
             src={generation.fileUrl}
             alt={generation.prompt}
-            className="h-full w-full object-cover"
+            fill
+            sizes="240px"
+            unoptimized={generation.fileUrl.startsWith("blob:") || generation.fileUrl.startsWith("data:")}
+            className="object-cover"
             onError={(e) => {
               (e.currentTarget as HTMLImageElement).style.display = "none";
             }}

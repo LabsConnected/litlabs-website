@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 
@@ -281,9 +282,10 @@ export default function SocialPageContent() {
                   >
                     {profile.avatarUrl ? (
                       <>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
+                        <Image
                           src={profile.avatarUrl}
+                          width={48}
+                          height={48}
                           className="w-full h-full object-cover"
                           alt=""
                         />
@@ -384,9 +386,10 @@ export default function SocialPageContent() {
                   >
                     {profile?.avatarUrl ? (
                       <>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
+                        <Image
                           src={profile.avatarUrl}
+                          width={48}
+                          height={48}
                           className="w-full h-full object-cover"
                           alt=""
                         />
@@ -544,9 +547,10 @@ export default function SocialPageContent() {
                     >
                       {post.author?.avatar_url?.startsWith("http") ? (
                         <>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
+                          <Image
                             src={post.author.avatar_url}
+                            width={40}
+                            height={40}
                             className="w-full h-full object-cover"
                             alt=""
                           />

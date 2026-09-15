@@ -13,6 +13,7 @@
  * All data comes from real authenticated state — no hardcoded values.
  */
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useWallet } from "@/context/WalletContext";
@@ -193,10 +194,11 @@ export function DashboardHeader({ onOpenCommandPalette }: DashboardHeaderProps) 
           aria-label={displayName}
         >
           {avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <Image
               src={avatarUrl}
               alt={displayName}
+              width={32}
+              height={32}
               className="h-full w-full object-cover"
             />
           ) : (

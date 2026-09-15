@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { CSSProperties } from "react";
 import { useTheme } from "@/context/ThemeContext";
@@ -1615,8 +1616,7 @@ export default function ImageTool() {
               />
               {referenceImage ? (
                 <div className="mx-3 mb-3 rounded-md overflow-hidden border" style={{ borderColor: T.borderColor + "40" }}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={referenceImage} alt="Reference" className="w-full h-24 object-cover" />
+                  <Image src={referenceImage} alt="Reference" width={400} height={96} unoptimized={referenceImage.startsWith("blob:") || referenceImage.startsWith("data:")} className="object-cover" style={{ width: "100%", height: "6rem" }} />
                 </div>
               ) : (
                 <button
@@ -1957,11 +1957,14 @@ export default function ImageTool() {
                     className="mx-3 mb-3 rounded-md overflow-hidden border"
                     style={{ borderColor: T.borderColor + "40" }}
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
+                    <Image
                       src={referenceImage}
                       alt="Reference"
-                      className="w-full h-24 object-cover"
+                      width={400}
+                      height={96}
+                      unoptimized={referenceImage.startsWith("blob:") || referenceImage.startsWith("data:")}
+                      className="object-cover"
+                      style={{ width: "100%", height: "6rem" }}
                     />
                   </div>
                 ) : (
@@ -2124,18 +2127,18 @@ export default function ImageTool() {
                         }}
                       >
                         <div className="absolute inset-0" style={{ background: card.fallback }} />
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
+                        <Image
                           src={card.url}
                           alt={card.label}
-                          className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300 opacity-0"
+                          fill
+                          sizes="160px"
+                          className="object-cover transition-opacity duration-300 opacity-0"
                           onLoad={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = "1"; }}
                           onError={(e) => {
                             const img = e.currentTarget as HTMLImageElement;
                             img.style.display = "none";
                             img.parentElement?.classList.add("style-card-error");
                           }}
-                          loading="lazy"
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
                         <span className="absolute bottom-1 left-1.5 text-[8px] font-bold text-white drop-shadow leading-tight">
@@ -3119,12 +3122,14 @@ export default function ImageTool() {
                       onMouseEnter={() => setImageHovered(true)}
                       onMouseLeave={() => setImageHovered(false)}
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
+                      <Image
                         src={currentResult.fileUrl}
                         alt={currentResult.prompt}
-                        className="max-w-full max-h-full object-contain"
-                        style={{ borderRadius: "4px" }}
+                        width={1024}
+                        height={1024}
+                        unoptimized={currentResult.fileUrl.startsWith("blob:") || currentResult.fileUrl.startsWith("data:")}
+                        className="object-contain"
+                        style={{ borderRadius: "4px", maxWidth: "100%", maxHeight: "100%", width: "auto", height: "auto" }}
                         onError={() => setImgError("Image failed to load.")}
                         onLoad={() => setImgError(null)}
                       />

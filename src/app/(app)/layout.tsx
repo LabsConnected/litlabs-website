@@ -15,7 +15,13 @@ import LayoutShell from "@/components/LayoutShell";
  *
  * This layout is intentionally separate from the root layout so that
  * public marketing routes under (marketing) never receive the app shell.
+ *
+ * Force dynamic rendering for the whole app subtree: these routes are
+ * inherently dynamic (Clerk auth, user state, live studio data), so
+ * static prerendering provides no benefit here. Marketing routes outside
+ * this group remain statically prerenderable.
  */
+export const dynamic = "force-dynamic";
 export default function AppLayout({
   children,
 }: {
