@@ -72,6 +72,19 @@ type ErasedListener = (value: never) => void;
 
 const TERMINAL_SERVER_URL = "http://127.0.0.1:4001";
 
+/**
+ * Web-safe base64url encoder (no Node Buffer — Buffer does not exist in
+ * the Tauri webview). Exported for tests.
+ */
+export function encodeBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
 export class DesktopRuntimeClient {
   private socket: Socket | null = null;
   private _state: ConnectionState = "OFFLINE";
@@ -231,11 +244,13 @@ export class DesktopRuntimeClient {
       const token = await invoke<string>("generate_dev_token", { cwd: canonicalCwd });
       return token;
     } catch {
-      // Last-resort dev fallback: unsigned dev token
+      // Last-resort dev fallback: unsigned dev token.
+      // NOTE: Buffer is a Node API and does not exist in the Tauri webview,
+      // so this uses a web-safe base64url encoder instead.
       const userId = "desktop-local-dev";
       const timestamp = Math.floor(Date.now() / 1000);
       const payload = { sub: userId, aud: "littree-terminal", iat: timestamp, exp: timestamp + 3600 };
-      const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
+      const encodedPayload = encodeBase64Url(new TextEncoder().encode(JSON.stringify(payload)));
       return "dev-" + encodedPayload;
     }
   }
