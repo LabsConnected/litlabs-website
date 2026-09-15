@@ -134,10 +134,12 @@ describe("Stripe catalog normalization — single source of truth", () => {
       expect(VERIFIED_STRIPE_PLANS.founder.priceMode).toBe("one_time");
     });
 
-    it("env var name is correct", () => {
-      expect(PLANS.founder.stripePriceIdEnv).toBe(
-        EXPECTED_STRIPE_CATALOG.founder.envVar,
-      );
+    it("is unwired from plans.ts now that it is retired", () => {
+      // The Stripe price object still exists under this env var name, which
+      // is why EXPECTED_STRIPE_CATALOG still records it. plans.ts no longer
+      // references it, so no new checkout can resolve against it.
+      expect(EXPECTED_STRIPE_CATALOG.founder.envVar).toBe("STRIPE_PRICE_FOUNDER");
+      expect(PLANS.founder.stripePriceIdEnv).toBeUndefined();
     });
   });
 

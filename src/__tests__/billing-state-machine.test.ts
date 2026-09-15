@@ -273,31 +273,29 @@ describe("POST /api/billing/checkout — checkout session creation", () => {
     global.fetch = originalFetch;
   });
 
-  it("uses payment mode for one-time Founder plan", async () => {
+  // Was: "uses payment mode for one-time Founder plan". The $149 tier is
+  // retired, so the contract is now the opposite — no Stripe session may be
+  // created for it even with STRIPE_PRICE_FOUNDER present in the environment,
+  // which is exactly the state production was in.
+  it("refuses checkout for the retired Founder plan even when its price ID is set", async () => {
     vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "user_123" } as any);
     process.env.STRIPE_SECRET_KEY = "sk_test_fake_key";
     process.env.STRIPE_PRICE_FOUNDER = "price_test_founder";
 
     const originalFetch = global.fetch;
-    global.fetch = vi.fn(async (url: string, opts: any) => {
-      if (url === "https://api.stripe.com/v1/checkout/sessions") {
-        const body = opts.body as string;
-        expect(body).toContain("mode=payment");
-        expect(body).toContain("price_test_founder");
-        expect(body).toContain("metadata%5Bplan_id%5D=founder");
-        expect(body).toContain("payment_intent_data");
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ id: "cs_test_founder", url: "https://checkout.stripe.com/founder" }),
-        } as any;
-      }
+    const stripeCalls: string[] = [];
+    global.fetch = vi.fn(async (url: string) => {
+      stripeCalls.push(url);
       return new Response("not found", { status: 404 });
     }) as any;
 
     const req = makeNextRequest(JSON.stringify({ planId: "founder" }));
     const res = await checkoutPOST(req);
-    expect(res.status).toBe(200);
+
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    // The important part: Stripe was never contacted, so no charge could occur.
+    expect(stripeCalls.filter((u) => u.includes("api.stripe.com"))).toHaveLength(0);
+
     global.fetch = originalFetch;
   });
 });
@@ -942,12 +940,26 @@ describe("Insufficient credit behavior via wallet-ledger", () => {
 // ═════════════════════════════════════════════════════════════════════
 
 describe("Plan configuration", () => {
-  it("all customer plans are enabled", () => {
+  it("all purchasable plans are enabled; retired Founder is not", () => {
     expect(PLANS.starter.enabled).toBe(true);
     expect(PLANS.creator_beta.enabled).toBe(true);
     expect(PLANS.pro_builder_beta.enabled).toBe(true);
-    expect(PLANS.founder.enabled).toBe(true);
+    expect(PLANS.founder.enabled).toBe(false);
     expect(PLAN_LIST.find((p) => p.id === "owner")).toBeUndefined();
+    expect(PLAN_LIST.find((p) => p.id === "founder")).toBeUndefined();
+  });
+
+  it("retired Founder plan has no Stripe price env, so no session can resolve", () => {
+    process.env.STRIPE_PRICE_FOUNDER = "price_test_founder";
+    expect(PLANS.founder.stripePriceIdEnv).toBeUndefined();
+    expect(getStripePriceId(PLANS.founder)).toBe(null);
+  });
+
+  it("existing Founding Members keep Creator-level entitlements", () => {
+    // Grandfathering contract: the plan definition and rank must survive
+    // retirement, because the subscriptions table stores the literal id.
+    expect(PLANS.founder).toBeDefined();
+    expect(PLAN_RANK.founder).toBe(PLAN_RANK.creator_beta);
   });
 
   it("getStripePriceId returns null when env var is not set", () => {

@@ -12,6 +12,7 @@ export type FeatureFlag =
   | "autonomousAgents"
   | "individualAgentPurchases"
   | "retroGameRuntime"
+  | "hireServices"
   | "experimentalMediaProviders"
   | "communitySocial"
   | "founderCheckout"
@@ -75,9 +76,24 @@ export const FEATURE_FLAGS: Record<FeatureFlag, FeatureFlagDefinition> = {
   },
   retroGameRuntime: {
     flag: "retroGameRuntime",
-    description: "Retro game runtime and emulator",
-    enabled: true,
-    hideFromNav: false,
+    description:
+      "Retro game runtime and emulator — not part of the public V1 product. " +
+      "The implementation is retained (see tests/games-restoration.test.ts, " +
+      "which still asserts the route files and libraries exist); while this " +
+      "is disabled the /games routes return 404 and navigation hides them.",
+    enabled: false,
+    hideFromNav: true,
+  },
+  hireServices: {
+    flag: "hireServices",
+    description:
+      "Productized agency services on /hire (Launch Sprint, Automation " +
+      "Setup, Brand Pack). Not the V1 self-serve product: the offers carry " +
+      "fixed prices, delivery timelines and revision promises that LiTT " +
+      "cannot fulfil automatically. While disabled /hire redirects to " +
+      "/studio; the implementation and the lead-capture API are retained.",
+    enabled: false,
+    hideFromNav: true,
   },
   experimentalMediaProviders: {
     flag: "experimentalMediaProviders",
@@ -93,9 +109,15 @@ export const FEATURE_FLAGS: Record<FeatureFlag, FeatureFlagDefinition> = {
   },
   founderCheckout: {
     flag: "founderCheckout",
-    description: "Founding Member checkout — disabled until approved $149 Stripe Price ID is configured",
+    description:
+      "Founding Member ($149 one-time) checkout. RETIRED — the tier is no " +
+      "longer sold, and the pricing card has been removed rather than shown " +
+      "as unavailable. Previously this flag was decorative: nothing read it, " +
+      "so with STRIPE_PRICE_FOUNDER set the charge path was live. The " +
+      "checkout route now enforces it. Existing Founding Members keep their " +
+      "entitlements via PLANS.founder / FOUNDER_ENTITLEMENTS.",
     enabled: false,
-    hideFromNav: false, // Visible as "Coming soon" on pricing page
+    hideFromNav: true,
   },
   marketplaceAgentInstall: {
     flag: "marketplaceAgentInstall",

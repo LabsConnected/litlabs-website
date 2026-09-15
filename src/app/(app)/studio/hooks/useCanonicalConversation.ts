@@ -9,7 +9,6 @@ import { useConnectionSummary } from "./useConnectionSummary";
 import { useVoiceSession } from "@/app/(app)/studio/context/VoiceSessionContext";
 import {
   useStudioAgentStore,
-  AGENT_META,
   type ChatMessage,
   type AgentId,
   type MessageExecution,
@@ -28,8 +27,26 @@ import {
 } from "../stores/useConversationStore";
 import { useExecutionStore, feedSSEEventToExecutionStore } from "../stores/useExecutionStore";
 import { mobileDiag } from "../lib/mobileDiagnostics";
+import {
+  reconcileRunState,
+  reconciledAssistantStatus,
+  type ReconcileResult,
+} from "../lib/reconcile-run";
 
-export type SendErrorKind = "auth" | "conflict" | "network" | "provider" | "validation";
+export type SendErrorKind = "auth" | "conflict" | "network" | "provider" | "validation" | "cancelled";
+
+/**
+ * Identity of the server-side execution started by send(). Tracked so an
+ * explicit Stop can reach the right run via the cancel endpoint even when
+ * the SSE reader is already gone. Cleared only when canonical state
+ * reaches a terminal outcome — never merely because the fetch ended.
+ */
+interface ActiveRun {
+  conversationId: string;
+  clientRequestId: string;
+  optimisticUserId: string;
+  optimisticAssistantId: string;
+}
 
 export interface SendResult {
   accepted: boolean;
@@ -143,6 +160,13 @@ export function useCanonicalConversation({
   }, []);
   const [requiresReauth, setRequiresReauth] = useState(false);
   const requestAbortRef = useRef<AbortController | null>(null);
+  // Distinguishes an explicit user Stop from an involuntary transport loss —
+  // only the former is a cancellation. Transport loss triggers reconciliation.
+  const explicitCancelRef = useRef(false);
+  // The run currently in flight, so Stop can reach the server-side
+  // execution. Survives the end of the fetch/reader lifecycle — transport
+  // lifetime != execution lifetime on the client side too.
+  const activeRunRef = useRef<ActiveRun | null>(null);
   const { capabilities } = useConnectionSummary();
   const { voiceTransportConnected, voiceInputState, voiceState, voiceOutputState } = useVoiceSession();
   const { userId, getToken, isLoaded, isSignedIn } = useClerkAuth();
@@ -418,6 +442,154 @@ export function useCanonicalConversation({
   useEffect(() => {
     void loadConversations();
   }, [loadConversations]);
+
+  // Reconcile canonical conversation state after an SSE transport loss or
+  // an explicit Stop. The server-side execution keeps running after a
+  // disconnect, so the persisted assistant message — not the broken
+  // stream — is the source of truth for what actually happened.
+  //
+  // Returns the SendResult to surface plus the raw reconcile state so
+  // callers can decide run lifecycle (e.g. whether Stop is still viable).
+  const reconcileAndApply = useCallback(async (
+    run: ActiveRun,
+    opts: {
+      preferCancelled?: boolean;
+      partialText?: string;
+      partialReasoning?: string;
+    },
+  ): Promise<{ sendResult: SendResult; state: ReconcileResult["state"] }> => {
+    mobileDiag("streaming", "reconciliation_started");
+    const result = await reconcileRunState({
+      clientRequestId: run.clientRequestId,
+      fetchSnapshot: async () => {
+        try {
+          const res = await fetch(`/api/studio/conversations/${run.conversationId}/messages`, {
+            cache: "no-store",
+            credentials: "include",
+            headers: await authHeaders(),
+          });
+          if (!res.ok) return null;
+          const data = await res.json() as { messages?: ConversationMessage[]; revision?: number };
+          return { messages: data.messages ?? [], revision: data.revision ?? 1 };
+        } catch {
+          return null;
+        }
+      },
+    });
+    mobileDiag(
+      "streaming",
+      result.state === "unknown" ? "reconciliation_failed" : "reconciliation_completed",
+      { state: result.state },
+    );
+
+    // Terminal canonical states end the tracked run — Stop no longer
+    // targets it. "running"/"unknown" keep the identity so Stop remains
+    // able to reach the (possibly still executing) server-side run.
+    if (
+      result.state !== "running" &&
+      result.state !== "unknown" &&
+      activeRunRef.current?.clientRequestId === run.clientRequestId
+    ) {
+      activeRunRef.current = null;
+    }
+
+    const s = getStore();
+    if (result.userMessage) {
+      s.updateMessage(run.conversationId, run.optimisticUserId, {
+        id: result.userMessage.id,
+        content: result.userMessage.content,
+        createdAt: result.userMessage.createdAt,
+      });
+    }
+    if (result.revision != null) {
+      s.setRevision(result.revision);
+    }
+    const persistedAssistant = result.assistantMessage;
+    const persistedAssistantPatch = persistedAssistant
+      ? { id: persistedAssistant.id, createdAt: persistedAssistant.createdAt }
+      : {};
+    const finish = (sendResult: SendResult) => ({ sendResult, state: result.state });
+
+    switch (result.state) {
+      case "completed": {
+        const content = persistedAssistant?.content || opts.partialText || "";
+        s.updateMessage(run.conversationId, run.optimisticAssistantId, {
+          ...persistedAssistantPatch,
+          content,
+          reasoning: opts.partialReasoning || undefined,
+          status: "completed",
+        });
+        return finish({ accepted: true, persisted: true, reply: content });
+      }
+      case "awaiting_approval": {
+        const pa = persistedAssistant?.pendingApproval ?? null;
+        s.updateMessage(run.conversationId, run.optimisticAssistantId, {
+          ...persistedAssistantPatch,
+          content: persistedAssistant?.content || opts.partialText || "",
+          status: "awaiting_approval",
+          pendingApproval: pa,
+        });
+        return finish({
+          accepted: true,
+          persisted: true,
+          reply: persistedAssistant?.content,
+          pendingApproval: pa,
+        });
+      }
+      case "failed": {
+        const failureText = persistedAssistant?.content || "The run failed on the server.";
+        s.updateMessage(run.conversationId, run.optimisticAssistantId, {
+          ...persistedAssistantPatch,
+          content: failureText,
+          status: "failed",
+        });
+        setSendError(failureText);
+        return finish({ accepted: false, persisted: true, errorKind: "provider" });
+      }
+      case "cancelled": {
+        s.updateMessage(run.conversationId, run.optimisticAssistantId, {
+          ...persistedAssistantPatch,
+          content: persistedAssistant?.content || "Cancelled.",
+          status: "cancelled",
+        });
+        setSendError("Stopped.");
+        return finish({ accepted: false, persisted: true, errorKind: "cancelled" });
+      }
+      case "running": {
+        // The server confirms the run is still alive — keep the bubble in
+        // its honest non-terminal state. A pending Stop shows "Stopping…",
+        // never a premature "Cancelled" the server hasn't confirmed.
+        s.updateMessage(run.conversationId, run.optimisticAssistantId, {
+          ...persistedAssistantPatch,
+          content: persistedAssistant?.content || opts.partialText || "",
+          status: reconciledAssistantStatus(result.state),
+        });
+        setSendError(
+          opts.preferCancelled
+            ? "Stopping… — waiting for the server to confirm."
+            : "Connection lost, but LiTT is still working in the background. Press Stop to cancel it, or reload to see the finished result.",
+        );
+        return finish({ accepted: false, persisted: true, errorKind: "network" });
+      }
+      default: {
+        // "unknown" — canonical state could not be determined. Honest
+        // non-terminal status only: never fake a failure or cancellation
+        // the server hasn't persisted.
+        s.updateMessage(run.conversationId, run.optimisticAssistantId, {
+          ...persistedAssistantPatch,
+          content: opts.partialText
+            || "Connection lost before LiTT's result could be confirmed. LiTT may still be working — reload the page to check.",
+          status: reconciledAssistantStatus(result.state),
+        });
+        setSendError(
+          opts.preferCancelled
+            ? "Stop requested — but the server couldn't be reached to confirm. LiTT may still be working."
+            : "Connection lost — couldn't confirm whether LiTT finished. Reload the page to check the result.",
+        );
+        return finish({ accepted: false, persisted: true, errorKind: "network" });
+      }
+    }
+  }, [getStore, authHeaders, setSendError]);
 
   // The send function — matches useStudioConversation's contract
   const send = useCallback(
@@ -744,6 +916,16 @@ export function useCanonicalConversation({
       // After this point conversationId is guaranteed non-null (either
       // pre-existing or just created). Capture a narrowed const for closures.
       const activeConversationId = conversationId;
+      // Track the run immediately so a Stop pressed before dispatch still
+      // reaches the cancel endpoint — the server records it as a pending
+      // cancellation that pre-aborts the run when it registers.
+      const runInfo: ActiveRun = {
+        conversationId: activeConversationId,
+        clientRequestId,
+        optimisticUserId,
+        optimisticAssistantId,
+      };
+      activeRunRef.current = runInfo;
 
       // Clear any previous send error
       setSendError(null);
@@ -752,6 +934,35 @@ export function useCanonicalConversation({
       getStore().setStreaming(true);
       let requestController: AbortController | null = null;
       let requestTimeoutId: ReturnType<typeof setTimeout> | null = null;
+      // True once the POST has been dispatched — a transport failure after
+      // this point can mean the server accepted the run and is still
+      // executing, so canonical state must be reconciled before any failure
+      // is declared.
+      let requestDispatched = false;
+      let endRunReason: string | undefined;
+      // Streamed content accumulated before any transport loss — preserved
+      // through reconciliation so a dead connection doesn't erase it.
+      let assistantText = "";
+      let reasoningText = "";
+      // Set when canonical reconciliation confirms the server is still
+      // executing — the composer stays in Stop mode, the run stays
+      // tracked, and busy/streaming are NOT released in finally. The
+      // fetch lifecycle is not the execution lifecycle.
+      let runStillActive = false;
+      explicitCancelRef.current = false;
+
+      // Transport loss (or any post-dispatch failure) must not declare a
+      // false failure — reconcile the canonical persisted state instead.
+      const reconcileAfterTransportLoss = async (opts: {
+        preferCancelled?: boolean;
+        partialText?: string;
+        partialReasoning?: string;
+      }): Promise<SendResult> => {
+        const { sendResult, state } = await reconcileAndApply(runInfo, opts);
+        if (state === "running") runStillActive = true;
+        return sendResult;
+      };
+
       try {
         const s = getStore();
         const expectedRevision = s.revision;
@@ -770,27 +981,30 @@ export function useCanonicalConversation({
           requestTimeoutId = setTimeout(() => controller.abort(), 120_000);
         };
         resetStallWatchdog();
-        const makeRequest = async (revision: number) => fetch(`/api/studio/conversations/${activeConversationId}/messages`, {
-          method: "POST",
-          credentials: "include",
-          headers: await authHeaders(true),
-          body: JSON.stringify({
-            message: text,
-            clientRequestId,
-            expectedRevision: revision,
-            requestedAgentSlug: activeAgentId,
-            agentMode: activeAgentMode,
-            executionMode,
-            agentInstanceId: activeAgentInstanceId || undefined,
-            provider: isAutoBest ? undefined : selectedModel.apiProvider || selectedModel.provider,
-            category: isAutoBest ? "auto" : selectedModel.category,
-            model: selectedModel.model,
-            images: attachments,
-            runtimeContext,
-            previewSelection: previewSelectionRef.current ?? undefined,
-          }),
-          signal: controller.signal,
-        });
+        const makeRequest = async (revision: number) => {
+          requestDispatched = true;
+          return fetch(`/api/studio/conversations/${activeConversationId}/messages`, {
+            method: "POST",
+            credentials: "include",
+            headers: await authHeaders(true),
+            body: JSON.stringify({
+              message: text,
+              clientRequestId,
+              expectedRevision: revision,
+              requestedAgentSlug: activeAgentId,
+              agentMode: activeAgentMode,
+              executionMode,
+              agentInstanceId: activeAgentInstanceId || undefined,
+              provider: isAutoBest ? undefined : selectedModel.apiProvider || selectedModel.provider,
+              category: isAutoBest ? "auto" : selectedModel.category,
+              model: selectedModel.model,
+              images: attachments,
+              runtimeContext,
+              previewSelection: previewSelectionRef.current ?? undefined,
+            }),
+            signal: controller.signal,
+          });
+        };
         let response = await makeRequest(expectedRevision);
 
         // Error / conflict paths still return JSON.
@@ -964,10 +1178,8 @@ export function useCanonicalConversation({
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
-        let assistantText = "";
-        let reasoningText = "";
         let donePayload: Record<string, unknown> | null = null;
-        let errorPayload: { message?: string; partialText?: string } | null = null;
+        let errorPayload: { message?: string; code?: string; revision?: number; partialText?: string } | null = null;
         let pendingApprovalState: { toolId: string; reason: string; pausedRunId?: string; inputs?: Record<string, unknown> } | null = null;
         const toolActivity: Array<{ toolId: string; success?: boolean; summary: string }> = [];
 
@@ -998,6 +1210,8 @@ export function useCanonicalConversation({
                 type: string;
                 text?: string;
                 message?: string;
+                code?: string;
+                revision?: number;
                 partialText?: string;
                 detail?: { message?: string; partialText?: string };
                 toolId?: string;
@@ -1049,7 +1263,12 @@ export function useCanonicalConversation({
                 donePayload = evt as unknown as Record<string, unknown>;
               } else if (evt.type === "error") {
                 const src = evt.detail ?? { message: evt.message, partialText: evt.partialText };
-                errorPayload = { message: src.message, partialText: src.partialText };
+                errorPayload = {
+                  message: src.message,
+                  partialText: src.partialText,
+                  code: evt.code,
+                  revision: evt.revision,
+                };
               }
 
               // Feed every event into the execution store for the LiTT Live panel
@@ -1062,12 +1281,19 @@ export function useCanonicalConversation({
 
         if (errorPayload) {
           const partial = errorPayload.partialText;
-          const reply = sanitizeErrorMessage(errorPayload.message || "Provider unavailable");
+          const reply = errorPayload.code === "EMPTY_PROVIDER_RESPONSE"
+            ? "The AI provider returned an empty response. Please try again."
+            : sanitizeErrorMessage(errorPayload.message || "Provider unavailable");
           getStore().updateMessage(activeConversationId, optimisticAssistantId, {
             status: "failed",
             content: partial ? partial : reply,
             reasoning: reasoningText || undefined,
           });
+          // A failed run still bumped the server-side revision — sync it or
+          // the next send posts a stale expectedRevision and gets a 409.
+          if (typeof errorPayload.revision === "number") {
+            getStore().setRevision(errorPayload.revision);
+          }
           setSendError(reply);
           // User message was persisted (server accepted the 200), but the
           // provider failed. Don't restore the draft — show Retry instead.
@@ -1084,6 +1310,23 @@ export function useCanonicalConversation({
             createdAt: userMsg.createdAt,
           });
 
+          // A cancelled run delivered over a live stream (explicit Stop
+          // while still connected) — surface the persisted cancelled state,
+          // never the "empty response" failure below.
+          if (assistantMsg.status === "cancelled") {
+            s3.updateMessage(activeConversationId, optimisticAssistantId, {
+              id: assistantMsg.id,
+              content: assistantMsg.content || "Cancelled.",
+              reasoning: reasoningText || undefined,
+              status: "cancelled",
+              createdAt: assistantMsg.createdAt,
+            });
+            s3.setRevision((donePayload.revision as number) ?? expectedRevision + 1);
+            setSendError("Stopped.");
+            endRunReason = "cancelled";
+            return { accepted: false, persisted: true, errorKind: "cancelled" };
+          }
+
           // Guard against empty assistant response
           if (!assistantMsg.content || !assistantMsg.content.trim()) {
             s3.updateMessage(activeConversationId, optimisticAssistantId, {
@@ -1092,6 +1335,9 @@ export function useCanonicalConversation({
               status: "failed",
               createdAt: assistantMsg.createdAt,
             });
+            // The run failed but the revision was still bumped — keep the
+            // client in sync so a retry doesn't hit a 409 stale revision.
+            s3.setRevision((donePayload.revision as number) ?? expectedRevision + 1);
             setSendError("The AI returned an empty response. Please try again.");
             // User message persisted, provider returned empty — don't restore draft.
             return { accepted: false, persisted: true, errorKind: "provider" };
@@ -1101,7 +1347,9 @@ export function useCanonicalConversation({
             id: assistantMsg.id,
             content: assistantMsg.content,
             reasoning: reasoningText || undefined,
-            status: pendingApprovalState ? "awaiting_approval" : "completed",
+            status: assistantMsg.status === "failed"
+              ? "failed"
+              : pendingApprovalState ? "awaiting_approval" : "completed",
             createdAt: assistantMsg.createdAt,
             agentSlug: assistantMsg.agentSlug ?? activeAgentId as AgentSlug,
             agentMode: assistantMsg.agentMode ?? activeAgentMode,
@@ -1111,6 +1359,15 @@ export function useCanonicalConversation({
           });
 
           s3.setRevision((donePayload.revision as number) ?? expectedRevision + 1);
+
+          // A run the server persisted as failed is NOT an accepted send —
+          // even when it produced truthful failure text. Returning
+          // accepted:false keeps the composer out of the "Done" completion
+          // state and surfaces the failure for retry.
+          if (assistantMsg.status === "failed") {
+            setSendError(assistantMsg.content);
+            return { accepted: false, persisted: true, errorKind: "provider" };
+          }
 
           if (donePayload.usedFallbackModel) {
             setFallbackNotice(`${selectedModel.label} was unavailable. This response used ${donePayload.usedFallbackModel}.`);
@@ -1123,34 +1380,28 @@ export function useCanonicalConversation({
           return { accepted: true, persisted: true, reply: assistantMsg.content };
         }
 
-        // Stream ended without an explicit done/error event — keep whatever
-        // text we accumulated but mark completed so the bubble doesn't hang.
-        const sFinal = getStore();
-        if (assistantText.trim()) {
-          sFinal.updateMessage(activeConversationId, optimisticAssistantId, {
-            content: assistantText,
-            reasoning: reasoningText || undefined,
-            status: "completed",
-          });
-          return { accepted: true, persisted: true, reply: assistantText };
-        }
-        sFinal.updateMessage(activeConversationId, optimisticAssistantId, {
-          status: "failed",
-          content: "The stream ended unexpectedly. Please try again.",
-        });
-        setSendError("The stream ended unexpectedly. Please try again.");
+        // Stream ended without an explicit done/error event. The transport
+        // may have died while the server keeps executing — reconcile the
+        // canonical persisted state instead of guessing an outcome.
         mobileDiag("streaming", "ended_without_done_event");
-        // User message was persisted (200 received), stream just ended early.
-        return { accepted: false, persisted: true, errorKind: "network" };
+        return await reconcileAfterTransportLoss({
+          partialText: assistantText,
+          partialReasoning: reasoningText,
+        });
       } catch (error) {
         const isAbort = error instanceof Error && error.name === "AbortError";
+        if (isAbort && explicitCancelRef.current) {
+          // Explicit Stop — the cancel endpoint was already notified; show
+          // the persisted cancelled state rather than a network error.
+          endRunReason = "cancelled";
+          return await reconcileAfterTransportLoss({ preferCancelled: true });
+        }
         // Remove the empty streaming bubble on failure — it should not
         // remain permanently as an empty or error-filled bubble.
         const s = getStore();
-        if (isAbort) {
-          // Timeout/abort — distinguish from other errors. The user message
-          // may or may not have been persisted; roll back the assistant bubble
-          // but keep the user message (the server may have persisted it).
+        if (isAbort && !requestDispatched) {
+          // Abort before the request was even dispatched — nothing could
+          // have been persisted server-side.
           s.setMessages(
             activeConversationId,
             s.getMessages().filter((m) => m.id !== optimisticAssistantId),
@@ -1159,25 +1410,34 @@ export function useCanonicalConversation({
           mobileDiag("streaming", "aborted_timeout");
           return { accepted: false, persisted: true, errorKind: "network" };
         }
-        const rawMessage = error instanceof Error ? error.message : `${AGENT_META[activeAgentId].displayName} is reconnecting`;
-        const reply = sanitizeErrorMessage(rawMessage);
-        s.updateMessage(activeConversationId, optimisticAssistantId, {
-          status: "failed",
-          content: reply,
+        // Transport failed after the request was dispatched — the server may
+        // have accepted the run and still be executing it (transport loss
+        // does not cancel execution). Reconcile canonical state instead of
+        // declaring a false failure.
+        mobileDiag("streaming", "transport_lost", { errorName: error instanceof Error ? error.name : typeof error });
+        return await reconcileAfterTransportLoss({
+          partialText: assistantText,
+          partialReasoning: reasoningText,
         });
-        setSendError(reply);
-        mobileDiag("streaming", "threw", { errorName: error instanceof Error ? error.name : typeof error });
-        // Network error during streaming — user message was likely persisted.
-        return { accepted: false, persisted: true, errorKind: "network" };
       } finally {
         if (requestTimeoutId) clearTimeout(requestTimeoutId);
         if (requestController && requestAbortRef.current === requestController) requestAbortRef.current = null;
-        getStore().setStreaming(false);
-        setBusy(false);
-        useExecutionStore.getState().endRun();
+        if (!runStillActive) {
+          // Terminal outcome (or the run never reached the server) — the
+          // active-run identity is released so Stop no longer targets it.
+          if (activeRunRef.current?.clientRequestId === clientRequestId) {
+            activeRunRef.current = null;
+          }
+          getStore().setStreaming(false);
+          setBusy(false);
+          useExecutionStore.getState().endRun(endRunReason);
+        }
+        // runStillActive: canonical state confirmed the server is still
+        // executing. busy/streaming/run-identity stay set so the composer
+        // keeps offering Stop and the UI keeps claiming "working".
       }
     },
-    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, selectedModel, activeAgentId, activeAgentMode, activeAgentInstanceId, executionMode, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError],
+    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, selectedModel, activeAgentId, activeAgentMode, activeAgentInstanceId, executionMode, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError, reconcileAndApply],
   );
 
   // Regenerate — calls canonical regenerate API
@@ -1237,9 +1497,53 @@ export function useCanonicalConversation({
     }
   }, [busy, getStore, loadMessages, authHeaders, runtimeContext, setSendError]);
 
+  // Explicit Stop. Ordering:
+  //   1. POST the authenticated server-side cancellation FIRST — transport
+  //      abort alone no longer stops execution.
+  //   2. THEN detach the local reader. If a send() is in flight its abort
+  //      catch reconciles the canonical state.
+  //   3. If the reader already died (post-disconnect Stop), no send() is in
+  //      flight — reconcile here so the transcript reaches the canonical
+  //      cancelled/failed/completed state.
+  // "Cancelled" is only ever displayed after canonical state confirms it;
+  // while the server still reports the run active the UI shows "Stopping…".
   const cancel = useCallback(() => {
-    requestAbortRef.current?.abort();
-  }, []);
+    const run = activeRunRef.current;
+    explicitCancelRef.current = true;
+    if (!run) {
+      // No tracked server-side run — just release the local reader if one
+      // is somehow still open.
+      requestAbortRef.current?.abort();
+      return;
+    }
+    void (async () => {
+      try {
+        await fetch(`/api/studio/conversations/${run.conversationId}/cancel`, {
+          method: "POST",
+          credentials: "include",
+          headers: await authHeaders(true),
+          body: JSON.stringify({ clientRequestId: run.clientRequestId }),
+        });
+      } catch {
+        // Best-effort — reconciliation below surfaces the canonical state.
+      }
+      const hadLiveRequest = requestAbortRef.current != null;
+      requestAbortRef.current?.abort();
+      if (!hadLiveRequest) {
+        const { state } = await reconcileAndApply(run, { preferCancelled: true });
+        if (state !== "running") {
+          if (activeRunRef.current?.clientRequestId === run.clientRequestId) {
+            activeRunRef.current = null;
+          }
+          getStore().setStreaming(false);
+          setBusy(false);
+          useExecutionStore.getState().endRun(state === "cancelled" ? "cancelled" : undefined);
+        }
+        // "running": the server hasn't confirmed the stop yet — keep the
+        // run tracked and the composer in Stop mode ("Stopping…").
+      }
+    })();
+  }, [authHeaders, getStore, reconcileAndApply]);
 
   // Clear — clears visible transcript
   const clear = useCallback(() => {
@@ -1372,6 +1676,7 @@ export function useCanonicalConversation({
     conversations,
     loading: loadingState,
     sendError,
+    reportSendError: setSendError,
     clearSendError: () => setSendError(null),
     requiresReauth,
     clearRequiresReauth: () => setRequiresReauth(false),
@@ -1409,6 +1714,9 @@ function buildIntentResponseMessage(
 }
 
 function sanitizeErrorMessage(raw: string): string {
+  if (/empty responses?|EMPTY_PROVIDER_RESPONSE/i.test(raw)) {
+    return "The AI provider returned an empty response. Please try again.";
+  }
   if (/All LLM .*(failed|providers)/i.test(raw)) {
     return "LiTT couldn't reach the selected AI model. I tried the available backups, but none responded.\n\nTry again, or choose a different model from the selector.";
   }

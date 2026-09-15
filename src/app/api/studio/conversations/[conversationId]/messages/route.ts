@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { streamText, type ModelCategory, type LLMProvider } from "@/lib/llm";
+import { streamText, isEmptyProviderResponse, type ModelCategory, type LLMProvider } from "@/lib/llm";
 import {
   getConversation,
   listMessages,
@@ -30,6 +30,7 @@ import { runLaunchFlow, type LaunchFlowResult } from "@/lib/litt-intelligence/la
 import { ProgressEmitter, type ProgressEvent } from "@/lib/litt-intelligence/progress-events";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { createPausedRun } from "@/lib/litt-intelligence/paused-run-store";
+import { registerExecution, unregisterExecution } from "@/lib/studio/execution-registry";
 import { resolveTurn } from "@/lib/litt-intelligence/turn-resolver";
 import {
   buildCanonicalRuntimeContext,
@@ -558,37 +559,66 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const event = (payload: Record<string, unknown>) =>
     encoder.encode(`data: ${JSON.stringify(payload)}\n\n`);
 
-  // ── Stream lifecycle abort controller ──
-  // Combines req.signal (client disconnect) with stream cancellation
-  // (proxy idle timeout) so the agent loop is aborted in both cases.
-  const streamAbort = new AbortController();
-  const onReqAbort = () => {
-    if (!streamAbort.signal.aborted) {
-      console.error("[messages-route] req.signal aborted (client disconnect)");
-      streamAbort.abort(new Error("Client disconnected"));
-    }
+  // Correlation ID for structured diagnostics — shared across start/cancel
+  const rid = `${conversation.id.slice(0, 8)}-${Date.now().toString(36)}`;
+
+  // ── Transport lifetime ≠ execution lifetime ──
+  //
+  // TRANSPORT state covers the browser request (req.signal) and the SSE
+  // ReadableStream consumer. Losing it only means nobody is reading events
+  // anymore — it must NEVER abort the LiTT run. Mobile browsers routinely
+  // suspend connections mid-build; a dropped socket must not kill the
+  // server-side execution, its tool calls, or its persistence.
+  //
+  // EXECUTION state is governed by a dedicated AbortController registered
+  // in the execution registry. Only explicit, authenticated cancellation
+  // (POST .../cancel), an intentional execution deadline, or controlled
+  // server shutdown may abort it.
+  const executionAbort = new AbortController();
+  let transportOpen = true;
+  const markTransportDetached = (via: string) => {
+    if (!transportOpen) return;
+    transportOpen = false;
+    console.error(`[messages-route:${rid}] transport detached via ${via}; execution continues server-side`);
+    studioLog("message:transport_detached", {
+      requestId: rid,
+      conversationId: conversation.id,
+      projectId: conversation.projectId,
+      userId,
+      clientRequestId,
+    });
   };
+  const onReqAbort = () => markTransportDetached("req_signal");
   if (req.signal) {
     if (req.signal.aborted) {
-      streamAbort.abort(new Error("Client already disconnected"));
+      markTransportDetached("req_signal");
     } else {
       req.signal.addEventListener("abort", onReqAbort, { once: true });
     }
   }
-
-  // Correlation ID for structured diagnostics — shared across start/cancel
-  const rid = `${conversation.id.slice(0, 8)}-${Date.now().toString(36)}`;
   const stream = new ReadableStream({
     async start(controller) {
       console.error(`[messages-route:${rid}] stream opened`);
 
-      // Safe enqueue — catches errors when controller is already closed/errored
+      // Register the execution so an explicit, authenticated Stop can reach
+      // it via the cancel endpoint. Transport loss alone never touches this.
+      const { key: executionKey } = registerExecution({
+        conversationId: conversation.id,
+        userId,
+        clientRequestId,
+        assistantMessageId: assistantMessage.id,
+        controller: executionAbort,
+      });
+
+      // Safe enqueue — no-ops once the transport is detached so a dead
+      // connection doesn't spam enqueue exceptions or abort execution.
       const safeEnqueue = (chunk: Uint8Array): boolean => {
+        if (!transportOpen) return false;
         try {
           controller.enqueue(chunk);
           return true;
-        } catch (e) {
-          console.error(`[messages-route:${rid}] controller.enqueue failed:`, e instanceof Error ? e.message : String(e));
+        } catch {
+          markTransportDetached("enqueue_failed");
           return false;
         }
       };
@@ -598,6 +628,10 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       // Heartbeat — emits SSE comments every 15s to prevent proxy idle timeouts
       // (Cloudflare/Railway close connections after ~100s of inactivity)
       const heartbeatTimer = setInterval(() => {
+        if (!transportOpen) {
+          clearInterval(heartbeatTimer);
+          return;
+        }
         safeEnqueue(encoder.encode(": keepalive\n\n"));
       }, 15_000);
 
@@ -699,7 +733,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             requiresExecution: built.kernelResult.decision.routing.requiresExecution,
             evalMetadata: v2Config.evalMetadata,
             progress: streamProgress,
-            signal: streamAbort.signal,
+            signal: executionAbort.signal,
           });
 
           v2Result = launchFlowResult.agentLoopResult ?? null;
@@ -727,8 +761,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 checkpointId: v2Result.checkpoint?.checkpointId ?? null,
               });
               pausedRunId = pausedRun.id;
-            } catch {
-              // If persistence fails, still send the approval event without a resume ID
+            } catch (pausedErr) {
+              // If persistence fails, still send the approval event without a
+              // resume ID — but log it: without pausedRunId the client's
+              // Approve button cannot resume anything and becomes a dead end.
+              studioLog("message:paused_run_persist_failed", {
+                conversationId: conversation.id,
+                projectId: conversation.projectId,
+                userId,
+                tool: v2Result.pendingApproval.toolId,
+                errorClass: pausedErr instanceof Error ? pausedErr.message : "unknown",
+              });
             }
 
             safeEvent({
@@ -740,11 +783,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             });
           }
 
+          // A run that produced no response text cannot be reported as
+          // completed — empty provider output is a failure, not success.
+          const v2Empty = !launchFlowResult?.cancelled
+            && !v2Result?.pendingApproval
+            && !assistantText.trim();
+
           const finalMessageStatus: MessageStatus = launchFlowResult?.cancelled
             ? "cancelled"
             : launchFlowResult?.pendingApproval
               ? "awaiting_approval"
-              : launchFlowResult?.success
+              : launchFlowResult?.success && !v2Empty
                 ? "completed"
                 : "failed";
 
@@ -757,26 +806,36 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               inputTokens: Math.ceil(finalPrompt.length / 4),
               outputTokens: Math.ceil(assistantText.length / 4),
               actualCredits,
-              status: finalMessageStatus === "completed" ? "completed" : "failed",
+              status: finalMessageStatus === "completed"
+                ? "completed"
+                : finalMessageStatus === "cancelled"
+                  ? "cancelled"
+                  : "failed",
             }, reservedCredits, reservationId).catch(() => {
               // Best-effort settlement — must not leak unhandled rejection
             });
           }
 
-          persistMemory(
-            `User: ${message}\n${agentDisplayName}: ${assistantText}`,
-            userId,
-            conversation.projectId,
-            {
-              agentSlug,
-              agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
-              memoryNamespace: runtimeAgent?.memoryNamespace,
-              conversationId: conversation.id,
-              memoryType: "conversation_summary",
-            },
-          ).catch(() => {
-            // Best-effort memory persistence — must not leak unhandled rejection
-          });
+          // A cancelled run's partial output must not be persisted as a
+          // normal conversation_summary — it would pollute long-term
+          // memory with truncated work. Persist memory only for runs that
+          // reached a non-cancelled terminal state.
+          if (finalMessageStatus !== "cancelled") {
+            persistMemory(
+              `User: ${message}\n${agentDisplayName}: ${assistantText}`,
+              userId,
+              conversation.projectId,
+              {
+                agentSlug,
+                agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
+                memoryNamespace: runtimeAgent?.memoryNamespace,
+                conversationId: conversation.id,
+                memoryType: "conversation_summary",
+              },
+            ).catch(() => {
+              // Best-effort memory persistence — must not leak unhandled rejection
+            });
+          }
 
           const launchLatencyMs = launchFlowResult?.totalDurationMs ?? v2Result?.totalDurationMs ?? 0;
           const launchSteps = v2Result?.stepsUsed ?? 0;
@@ -842,34 +901,70 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             }
           }
 
-          const r = await streamText(
-            finalPrompt,
-            (chunk) => {
-              assistantText += chunk;
-              safeEvent({ type: "text", text: chunk });
-            },
-            {
-              task: "chat",
-              provider: category === "auto" ? undefined : provider,
-              category,
-              maxTokens: 2048,
-              modelOverride,
-              evalMetadata: {
-                agentSlug,
-                agentMode: "v1-conversation",
-                conversationId: conversation.id,
-                userId,
-                projectId: conversation.projectId ?? undefined,
-              },
-            },
-            undefined,
-            (reasoning) => {
-              reasoningText += reasoning;
-              safeEvent({ type: "reasoning", text: reasoning });
-            },
-          );
+          // streamText receives the execution AbortSignal and propagates
+          // it into every provider adapter (fetch signal, SDK request
+          // options, stream readers) — an explicit Stop cancels the real
+          // underlying HTTP request, not just the local wait. Transport
+          // loss never touches this signal.
+          let cancelledV1 = executionAbort.signal.aborted;
+          let r: Awaited<ReturnType<typeof streamText>> | null = null;
+          if (!cancelledV1) {
+            try {
+              r = await streamText(
+                finalPrompt,
+                (chunk) => {
+                  // Suppress late provider callbacks after an abort — a
+                  // cancelled run must not keep mutating the response or
+                  // writing to the (possibly dead) transport.
+                  if (executionAbort.signal.aborted) return;
+                  assistantText += chunk;
+                  safeEvent({ type: "text", text: chunk });
+                },
+                {
+                  task: "chat",
+                  provider: category === "auto" ? undefined : provider,
+                  category,
+                  maxTokens: 2048,
+                  modelOverride,
+                  signal: executionAbort.signal,
+                  evalMetadata: {
+                    agentSlug,
+                    agentMode: "v1-conversation",
+                    conversationId: conversation.id,
+                    userId,
+                    projectId: conversation.projectId ?? undefined,
+                  },
+                },
+                undefined,
+                (reasoning) => {
+                  if (executionAbort.signal.aborted) return;
+                  reasoningText += reasoning;
+                  safeEvent({ type: "reasoning", text: reasoning });
+                },
+              );
+            } catch (streamErr) {
+              // A provider abort surfaces here as an AbortError — treat it
+              // as the cancellation it is. Any other failure is a real
+              // provider error handled by the outer catch.
+              if (executionAbort.signal.aborted) {
+                cancelledV1 = true;
+              } else {
+                throw streamErr;
+              }
+            }
+          }
 
-          await updateMessageStatus(assistantMessage.id, userId, "completed", assistantText);
+          // Defense in depth: streamText now throws on empty provider
+          // payloads, but if a run still resolves with no usable text the
+          // outcome is failed — never a completed empty response.
+          const v1Empty = !cancelledV1 && !assistantText.trim();
+          const v1MessageStatus: MessageStatus = cancelledV1 ? "cancelled" : v1Empty ? "failed" : "completed";
+          await updateMessageStatus(
+            assistantMessage.id,
+            userId,
+            v1MessageStatus,
+            assistantText || undefined,
+          );
           if (agentRunId) {
             const actualCredits = runtimeAgent
               ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
@@ -878,26 +973,31 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               inputTokens: Math.ceil(finalPrompt.length / 4),
               outputTokens: Math.ceil(assistantText.length / 4),
               actualCredits,
-              status: "completed",
+              status: cancelledV1 ? "cancelled" : v1Empty ? "failed" : "completed",
             }, reservedCredits, reservationId).catch(() => {
               // Best-effort settlement — must not leak unhandled rejection
             });
           }
 
-          persistMemory(
-            `User: ${message}\n${agentDisplayName}: ${assistantText}`,
-            userId,
-            conversation.projectId,
-            {
-              agentSlug,
-              agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
-              memoryNamespace: runtimeAgent?.memoryNamespace,
-              conversationId: conversation.id,
-              memoryType: "conversation_summary",
-            },
-          ).catch(() => {
-            // Best-effort memory persistence — must not leak unhandled rejection
-          });
+          // Skip memory persistence for cancelled and empty runs — partial
+          // or absent output must not become a normal conversation_summary
+          // in long-term memory.
+          if (!cancelledV1 && !v1Empty) {
+            persistMemory(
+              `User: ${message}\n${agentDisplayName}: ${assistantText}`,
+              userId,
+              conversation.projectId,
+              {
+                agentSlug,
+                agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
+                memoryNamespace: runtimeAgent?.memoryNamespace,
+                conversationId: conversation.id,
+                memoryType: "conversation_summary",
+              },
+            ).catch(() => {
+              // Best-effort memory persistence — must not leak unhandled rejection
+            });
+          }
 
           studioLog("message:sent", {
             conversationId: conversation.id,
@@ -905,69 +1005,135 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             userId,
             agentSlug,
             agentInstanceId: runtimeAgent?.agentInstanceId || null,
-            provider: r.provider,
-            latencyMs: r.latencyMs,
+            provider: r?.provider,
+            latencyMs: r?.latencyMs ?? 0,
             revisionBefore: conversation.revision,
             revisionAfter: newRevision,
             v2: false,
           });
 
+          if (cancelledV1) {
+            safeEvent({ type: "cancelled", reason: "user_stop" });
+          }
+          if (v1Empty) {
+            // Truthful terminal state for an empty provider payload: an
+            // explicit classified error (with the bumped revision so the
+            // client's next send doesn't 409 on a stale expectedRevision).
+            studioLog("message:empty_provider_response", {
+              conversationId: conversation.id,
+              projectId: conversation.projectId,
+              userId,
+              agentSlug,
+              provider: r?.provider,
+              model: r?.model,
+              latencyMs: r?.latencyMs ?? 0,
+              finishReason: r?.finishReason,
+              failover: r?.failover,
+            });
+            safeEvent({
+              type: "error",
+              code: "EMPTY_PROVIDER_RESPONSE",
+              message: "The AI provider returned an empty response.",
+              revision: newRevision,
+            });
+          } else {
+            safeEvent({
+              type: "done",
+              userMessage,
+              assistantMessage: {
+                ...assistantMessage,
+                content: assistantText,
+                reasoning: reasoningText || undefined,
+                status: v1MessageStatus,
+                // V1 is the read-only fallback: it can inspect but never
+                // mutate. Report the evidence bar and the (read-only) calls so
+                // a build request answered here shows as NOT started, never
+                // as completed work.
+                execution: {
+                  mode: built.kernelResult.decision.routing.mode,
+                  toolCalls: (v1Result?.toolExecutions ?? []).map((exec) => ({
+                    toolId: exec.toolId,
+                    success: exec.success,
+                    mutating: false,
+                  })),
+                  deployment: null,
+                },
+              },
+              revision: newRevision,
+              provider: r?.provider,
+              model: r?.model,
+              latencyMs: r?.latencyMs ?? 0,
+            });
+          }
+        }
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : "LLM provider unavailable";
+        // An explicit execution abort wins over a provider error — a
+        // cancelled run is persisted/reported as "cancelled" and must NOT
+        // also emit a generic "error" event for the same Stop.
+        const cancelledBySignal = executionAbort.signal.aborted;
+        if (!cancelledBySignal) {
+          console.error(`[messages-route:${rid}] Stream failed:`, errorMsg, err instanceof Error ? err.stack : "");
+        }
+        await updateMessageStatus(
+          assistantMessage.id,
+          userId,
+          cancelledBySignal ? "cancelled" : "failed",
+          cancelledBySignal ? assistantText || undefined : undefined,
+        );
+        if (agentRunId) {
+          settleRun(agentRunId, {
+            inputTokens: 0,
+            outputTokens: 0,
+            actualCredits: 0,
+            status: cancelledBySignal ? "cancelled" : "failed",
+            ...(cancelledBySignal ? {} : { error: errorMsg }),
+          }, reservedCredits, reservationId).catch(() => {
+            // Best-effort settlement on failure — must not leak unhandled rejection
+          });
+        }
+        studioLog(cancelledBySignal ? "message:cancelled" : "message:failed", {
+          conversationId: conversation.id,
+          userId,
+          agentSlug,
+          errorClass: cancelledBySignal ? undefined : errorMsg,
+        });
+        if (cancelledBySignal) {
+          safeEvent({ type: "cancelled", reason: "user_stop" });
           safeEvent({
             type: "done",
             userMessage,
             assistantMessage: {
               ...assistantMessage,
               content: assistantText,
-              reasoning: reasoningText || undefined,
-              status: "completed",
-              // V1 is the read-only fallback: it can inspect but never
-              // mutate. Report the evidence bar and the (read-only) calls so
-              // a build request answered here shows as NOT started, never
-              // as completed work.
-              execution: {
-                mode: built.kernelResult.decision.routing.mode,
-                toolCalls: (v1Result?.toolExecutions ?? []).map((exec) => ({
-                  toolId: exec.toolId,
-                  success: exec.success,
-                  mutating: false,
-                })),
-                deployment: null,
-              },
+              status: "cancelled" as MessageStatus,
             },
             revision: newRevision,
-            provider: r.provider,
-            model: r.model,
-            latencyMs: r.latencyMs,
+          });
+        } else {
+          safeEvent({
+            type: "error",
+            message: errorMsg,
+            partialText: assistantText || undefined,
+            // The revision RPC already bumped the conversation — the client
+            // MUST learn the new revision even on failure, or its next send
+            // posts a stale expectedRevision and gets a 409.
+            revision: newRevision,
+            ...(isEmptyProviderResponse(err) ? { code: "EMPTY_PROVIDER_RESPONSE" } : {}),
           });
         }
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : "LLM provider unavailable";
-        console.error(`[messages-route:${rid}] Stream failed:`, errorMsg, err instanceof Error ? err.stack : "");
-        await updateMessageStatus(assistantMessage.id, userId, "failed");
-        if (agentRunId) {
-          settleRun(agentRunId, {
-            inputTokens: 0,
-            outputTokens: 0,
-            actualCredits: 0,
-            status: "failed",
-            error: err instanceof Error ? err.message : "LLM provider unavailable",
-          }, reservedCredits, reservationId).catch(() => {
-            // Best-effort settlement on failure — must not leak unhandled rejection
-          });
-        }
-        studioLog("message:failed", {
-          conversationId: conversation.id,
-          userId,
-          agentSlug,
-          errorClass: errorMsg,
-        });
-        safeEvent({
-          type: "error",
-          message: errorMsg,
-          partialText: assistantText || undefined,
-        });
       } finally {
         clearInterval(heartbeatTimer);
+        unregisterExecution(conversation.id, executionKey);
+        if (!transportOpen) {
+          studioLog("message:execution_finished_after_disconnect", {
+            requestId: rid,
+            conversationId: conversation.id,
+            projectId: conversation.projectId,
+            userId,
+            clientRequestId,
+          });
+        }
         console.error(`[messages-route:${rid}] finally: emitting [DONE]`);
         safeEnqueue(encoder.encode("data: [DONE]\n\n"));
         try {
@@ -982,10 +1148,11 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       }
     },
     cancel(reason) {
+      // Downstream stopped consuming — mark the transport detached so SSE
+      // writes become no-ops. The execution itself keeps running: only the
+      // explicit cancel endpoint may abort it.
       console.error(`[messages-route:${rid}] stream cancelled by downstream:`, reason);
-      if (!streamAbort.signal.aborted) {
-        streamAbort.abort(new Error(`Stream cancelled: ${reason ?? "unknown"}`));
-      }
+      markTransportDetached("downstream_cancel");
     },
   });
 

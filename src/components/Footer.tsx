@@ -5,7 +5,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { ArrowUpRight, Sparkles } from "lucide-react";
 
 const PRODUCT_LINKS = [
-  { href: "/agents", label: "Agents" },
+  { href: "/marketplace", label: "Agents" },
   { href: "/studio", label: "Studio" },
   { href: "/cli", label: "CLI" },
   { href: "/showcase", label: "Showcase" },
@@ -13,10 +13,7 @@ const PRODUCT_LINKS = [
   { href: "/pricing", label: "Pricing" },
 ];
 
-const RESOURCE_LINKS = [
-  { href: "/docs", label: "Docs" },
-  { href: "/showcase", label: "Showcase" },
-];
+const RESOURCE_LINKS = [{ href: "/docs", label: "Docs" }];
 
 const COMPANY_LINKS = [
   { href: "/privacy", label: "Privacy" },
@@ -25,7 +22,7 @@ const COMPANY_LINKS = [
 ];
 
 const CONNECT_LINKS = [
-  { href: "https://github.com", label: "GitHub", external: true },
+  { href: "https://github.com/LabsConnected", label: "GitHub", external: true },
 ];
 
 export default function Footer() {

@@ -36,7 +36,6 @@ const PUBLIC_ROUTES = [
   { path: "/sign-up", name: "Signup", expectedText: /Sign|sign|Create|create|free|Free|Clerk|clerk/i, allowRedirect: true },
   { path: "/discover", name: "Discover", expectedText: /Discover|Community|community|Creator|creator/i },
   { path: "/agents", name: "Agents", expectedText: /Agent|agent|AI/i },
-  { path: "/games", name: "Games", expectedText: /Game|game|Play|play|Arcade|arcade/i },
   { path: "/social", name: "Social", expectedText: /Social|social|Community|community|Discover|discover/i, redirectsTo: "/discover" },
 ];
 
@@ -274,7 +273,10 @@ test.describe("Site Audit — Navigation Links @public", () => {
         !href.startsWith("#") &&
         !href.startsWith("tel:")
       ) {
-        hrefs.add(href);
+        // Strip the fragment: same-document hash links (e.g. /#section)
+        // return a null response from page.goto — the fragment is scroll
+        // position, not part of the route being verified.
+        hrefs.add(href.split("#")[0] || "/");
       }
     }
 

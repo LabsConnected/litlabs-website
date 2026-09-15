@@ -18,11 +18,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "daily",
       priority: 0.8,
     },
-    {
-      url: absoluteUrl("/games"),
-      changeFrequency: "weekly",
-      priority: 0.7,
-    },
+    // /games removed — not part of the public V1 product (retroGameRuntime flag)
     // /gallery removed — obsolete Artifact Museum page retired
     {
       url: absoluteUrl("/pricing"),
@@ -39,6 +35,20 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "weekly",
       priority: 0.6,
     },
+    ...[
+      "/docs/quick-start",
+      "/docs/studio",
+      "/docs/building",
+      "/docs/preview-deploy",
+      "/docs/cli",
+      "/docs/marketplace",
+      "/docs/safety",
+      "/docs/troubleshooting",
+    ].map((path) => ({
+      url: absoluteUrl(path),
+      changeFrequency: "monthly" as const,
+      priority: 0.5,
+    })),
     {
       url: absoluteUrl("/showcase"),
       changeFrequency: "weekly",

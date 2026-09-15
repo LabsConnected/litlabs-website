@@ -11,7 +11,12 @@ const SUPABASE_URL = "https://rokbfvuoqildggnhappy.supabase.co";
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
 test("Hire form creates verified row in Supabase", async ({ page }) => {
-  // Skip if no service key
+  // /hire is retired from the public V1 product: the page now redirects to
+  // /studio while the hireServices feature flag is off, so there is no form
+  // to drive. The spec and the lead-capture API behind it are retained for
+  // when/if the services offering returns — flip hireServices to re-enable
+  // both this test and the page.
+  test.skip(true, "/hire retired from public V1 (hireServices flag disabled)");
   test.skip(!SERVICE_KEY, "SUPABASE_SERVICE_ROLE_KEY not set");
 
   const testEmail = `e2e-hire-test-${Date.now()}@litlabs.net`;

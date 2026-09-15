@@ -8,46 +8,61 @@ function fileExists(rel: string): boolean {
   return existsSync(join(ROOT, rel));
 }
 
-function fileContains(rel: string, needle: string): boolean {
-  if (!fileExists(rel)) return false;
-  const content = readFileSync(join(ROOT, rel), "utf8");
-  return content.includes(needle);
-}
-
-describe("Games Restoration — Navigation & Feature Flags", () => {
-  describe("Feature flag is enabled", () => {
-    it("retroGameRuntime.enabled is true", () => {
+// Games were restored once, then retired from the public V1 surface. The
+// implementation is deliberately KEPT — the "Route Files Exist" block below
+// still guards it against deletion, so it can come back. What changed is the
+// public exposure: the feature flag is off, so nav hides the links and the
+// /games segment layout returns 404.
+describe("Games retired from public V1 — Navigation & Feature Flags", () => {
+  describe("Feature flag is disabled", () => {
+    it("retroGameRuntime.enabled is false", () => {
       const content = readFileSync(join(ROOT, "src/config/feature-flags.ts"), "utf8");
-      const match = content.match(/retroGameRuntime:\s*\{[^}]*enabled:\s*(true|false)/);
-      expect(match).not.toBeNull();
-      expect(match![1]).toBe("true");
-    });
-
-    it("retroGameRuntime.hideFromNav is false", () => {
-      const content = readFileSync(join(ROOT, "src/config/feature-flags.ts"), "utf8");
-      const match = content.match(/retroGameRuntime:\s*\{[^}]*hideFromNav:\s*(true|false)/);
+      const match = content.match(/retroGameRuntime:\s*\{[\s\S]*?enabled:\s*(true|false)/);
       expect(match).not.toBeNull();
       expect(match![1]).toBe("false");
     });
-  });
 
-  describe("Desktop navigation includes Games", () => {
-    it("Navbar has an uncommented Games entry", () => {
-      const content = readFileSync(join(ROOT, "src/components/Navbar.tsx"), "utf8");
-      // The entry should NOT be commented out
-      expect(content).not.toMatch(/\/\/\s*\{\s*href:\s*"\/games"/);
-      // It should be an active entry
-      expect(content).toMatch(/\{\s*href:\s*"\/games",\s*label:\s*"Games",\s*icon:\s*Gamepad2\s*\}/);
+    it("retroGameRuntime.hideFromNav is true", () => {
+      const content = readFileSync(join(ROOT, "src/config/feature-flags.ts"), "utf8");
+      const match = content.match(/retroGameRuntime:\s*\{[\s\S]*?hideFromNav:\s*(true|false)/);
+      expect(match).not.toBeNull();
+      expect(match![1]).toBe("true");
     });
   });
 
-  describe("Mobile navigation includes Games", () => {
-    it("Navbar mobile drawer has a Games group", () => {
+  describe("Navigation is gated on the flag", () => {
+    it("Navbar gates its Games link on retroGameRuntime", () => {
       const content = readFileSync(join(ROOT, "src/components/Navbar.tsx"), "utf8");
-      // The mobile Games group should NOT be commented out
-      expect(content).not.toMatch(/\/\/\s*\{\s*label:\s*"Games"/);
-      // It should be an active entry
-      expect(content).toMatch(/\{\s*label:\s*"Games",\s*links:\s*\[\s*\{\s*href:\s*"\/games"/);
+      expect(content).toContain('isFeatureEnabled("retroGameRuntime")');
+    });
+
+    it("NavbarWrapper gates its Games link on retroGameRuntime", () => {
+      const content = readFileSync(join(ROOT, "src/components/NavbarWrapper.tsx"), "utf8");
+      expect(content).toContain('isFeatureEnabled("retroGameRuntime")');
+    });
+  });
+
+  describe("Routes are closed, not just unlinked", () => {
+    it("the /games segment layout 404s when the flag is off", () => {
+      const content = readFileSync(
+        join(ROOT, "src/app/(app)/games/layout.tsx"),
+        "utf8",
+      );
+      expect(content).toContain('isFeatureEnabled("retroGameRuntime")');
+      expect(content).toContain("notFound()");
+    });
+
+    it("/games is absent from the sitemap", () => {
+      const content = readFileSync(join(ROOT, "src/app/sitemap.ts"), "utf8");
+      expect(content).not.toContain('absoluteUrl("/games")');
+    });
+
+    it("the /games layout is not SEO-indexed", () => {
+      const content = readFileSync(
+        join(ROOT, "src/app/(app)/games/layout.tsx"),
+        "utf8",
+      );
+      expect(content).toMatch(/index:\s*false/);
     });
   });
 

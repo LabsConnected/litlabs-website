@@ -5,23 +5,18 @@ import { ArrowRight, FileCode2, GitBranch, Play, Terminal, Check } from "lucide-
 import { track } from "@/lib/analytics";
 
 /**
- * RealProductProof — Production-ready video section for authentic LiTT recordings.
+ * RealProductProof — Product video section for the LiTT launch trailer.
  *
- * No fake recording exists yet. This component renders an honest placeholder
- * that clearly states what asset needs to be recorded, and makes replacing
- * the placeholder trivial.
+ * Plays the real LiTT product trailer (vertical 9:16, 10s) in a centered
+ * phone-style frame with a poster pulled from the trailer's end card.
  *
- * TO REPLACE WITH A REAL RECORDING:
- * 1. Add a video file to `public/demos/litt-real-session.mp4` (H.264, 1280x720, 20-45s)
- * 2. Add a poster image to `public/demos/litt-real-session-poster.jpg` (1280x720)
- * 3. Add a mobile-optimized version to `public/demos/litt-real-session-mobile.mp4` (640x360)
- * 4. Set `VIDEO_SRC` and `POSTER_SRC` below to the real paths.
- * 5. The component automatically switches to the real <video> element.
+ * Assets live in `public/demos/`:
+ * - litt-trailer.mp4 (H.264, 720x1280)
+ * - litt-trailer-poster.jpg (720x1280)
  */
 
-const VIDEO_SRC = "/demos/litt-real-session.mp4";
-const POSTER_SRC = "/demos/litt-real-session-poster.jpg";
-const VIDEO_MOBILE_SRC = "/demos/litt-real-session-mobile.mp4";
+const VIDEO_SRC = "/demos/litt-trailer.mp4";
+const POSTER_SRC = "/demos/litt-trailer-poster.jpg";
 
 const DEMO_STEPS = [
   { label: "Mission understood", icon: Check },
@@ -33,10 +28,8 @@ const DEMO_STEPS = [
   { label: "Approval ready", icon: GitBranch },
 ];
 
-// Detect whether the real video asset exists at build time.
-// In production with a real file, this will be true.
-// For now, we use a placeholder.
-const HAS_REAL_VIDEO = false;
+// The real LiTT product trailer is live in public/demos/.
+const HAS_REAL_VIDEO = true;
 
 export function RealProductProof() {
   const handleWatchClick = () => {
@@ -61,20 +54,21 @@ export function RealProductProof() {
 
         <div data-reveal className="mt-12">
           {HAS_REAL_VIDEO ? (
-            <div className="litt-demo-shell">
-              <video
-                className="aspect-video w-full rounded-2xl"
-                autoPlay
-                muted
-                loop
-                playsInline
-                poster={POSTER_SRC}
-                controls
-                preload="none"
-              >
-                <source src={VIDEO_MOBILE_SRC} type="video/mp4" media="(max-width: 768px)" />
-                <source src={VIDEO_SRC} type="video/mp4" />
-              </video>
+            <div className="mx-auto max-w-[380px]">
+              <div className="litt-demo-shell overflow-hidden rounded-[2rem] border border-white/10 shadow-[0_30px_80px_rgba(0,0,0,.55)]">
+                <video
+                  className="aspect-[9/16] w-full object-cover"
+                  autoPlay
+                  muted
+                  loop
+                  playsInline
+                  poster={POSTER_SRC}
+                  controls
+                  preload="metadata"
+                >
+                  <source src={VIDEO_SRC} type="video/mp4" />
+                </video>
+              </div>
             </div>
           ) : (
             <div className="litt-video-placeholder">
@@ -84,10 +78,11 @@ export function RealProductProof() {
                     <Play size={28} fill="currentColor" />
                   </div>
                   <div>
-                    <p className="text-lg font-black text-white">Real recording coming soon</p>
+                    <p className="text-lg font-black text-white">A mission, step by step</p>
                     <p className="mt-2 max-w-md text-sm leading-6 text-white/42">
-                      This section is ready for an authentic LiTT session capture.
-                      The placeholder shows the exact flow a real recording should demonstrate.
+                      Every LiTT session follows the same visible path — understand
+                      the brief, plan the work, edit real files, run tools, verify
+                      the result, and hand it back to you.
                     </p>
                   </div>
                 </div>
@@ -111,12 +106,6 @@ export function RealProductProof() {
                     );
                   })}
                 </div>
-
-                <div className="mt-6 rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3 text-center">
-                  <p className="text-[10px] font-bold text-white/30">
-                    Required asset: <span className="text-white/50">/demos/litt-real-session.mp4</span> — H.264, 1280×720, 20–45s, muted, with poster image
-                  </p>
-                </div>
               </div>
             </div>
           )}
@@ -137,6 +126,12 @@ export function RealProductProof() {
           >
             <Play size={13} fill="currentColor" /> See the walkthrough
           </a>
+          <Link
+            href="/showcase/artist-launch-site"
+            className="litt-secondary-button"
+          >
+            See an example session <ArrowRight size={13} />
+          </Link>
         </div>
       </div>
     </section>

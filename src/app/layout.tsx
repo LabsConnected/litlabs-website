@@ -152,6 +152,11 @@ export default function RootLayout({
           signInFallbackRedirectUrl="/studio"
           signUpFallbackRedirectUrl="/studio"
           localization={{
+            // Shared across sign-in and sign-up: the neutral verb is
+            // correct on both ("Sign in with …" on the sign-up page was
+            // the reported papercut). There is no per-flow key for this
+            // string in this Clerk version.
+            socialButtonsBlockButton: "Continue with {{provider}}",
             signIn: { start: { title: "Sign in to LiTT" } },
             signUp: { start: { title: "Create your LiTT account" } },
           }}

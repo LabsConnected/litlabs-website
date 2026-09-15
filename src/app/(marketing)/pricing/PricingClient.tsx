@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import Link from "next/link";
+import SmartLink from "@/components/marketing/SmartLink";
 import styles from "./pricing.module.css";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { track } from "@/lib/analytics";
@@ -122,11 +123,6 @@ const faq = [
     answer:
       "No. Billable AI and runtime actions have a LiTTBit cost. Free navigation, project organization, and local editing do not. Expensive actions show an estimate before they run.",
   },
-  {
-    question: "What is the Founding Member offer?",
-    answer:
-      "A one-time $149 purchase that grants permanent Creator-level feature access and a Founder badge. No recurring subscription charge. Does not include monthly credit grants — purchase credits separately or subscribe to a paid plan for recurring credits. Checkout is currently unavailable pending an approved Stripe price. Limited to 100 supporters.",
-  },
 ];
 
 function CheckIcon() {
@@ -216,10 +212,10 @@ function PlanCard({
       </ul>
 
       {plan.free ? (
-        <Link className={styles.planButton} href="/studio">
+        <SmartLink className={styles.planButton} href="/studio">
           <span>{plan.cta}</span>
           <ArrowIcon />
-        </Link>
+        </SmartLink>
       ) : (
         <button
           type="button"
@@ -235,7 +231,7 @@ function PlanCard({
   );
 }
 
-export default function PricingClient({ founderAvailable }: { founderAvailable: boolean }) {
+export default function PricingClient() {
   const { isSignedIn } = useClerkAuth();
   const [loading, setLoading] = useState<PlanId | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -304,7 +300,8 @@ export default function PricingClient({ founderAvailable }: { founderAvailable: 
         </h1>
 
         <p className={styles.heroCopy}>
-          One workspace with LiTT and Spark. Start free, then unlock research,
+          One workspace with LiTT, your project operator, and Spark, your
+          creative specialist — sharing one runtime and one memory. Start free, then unlock research,
           writing, and marketing skills with Creator Beta — or add coding and
           analytics skills with Pro Builder Beta.
         </p>
@@ -338,43 +335,6 @@ export default function PricingClient({ founderAvailable }: { founderAvailable: 
           ))}
         </div>
 
-        <article className={styles.founderBanner}>
-          <div className={styles.founderMark}>L</div>
-
-          <div className={styles.founderCopy}>
-            <div className={styles.founderTitleRow}>
-              <p>Founding Member</p>
-              {founderAvailable ? (
-                <span>Limited to {PLANS.founder.founderLimit}</span>
-              ) : (
-                <span>Currently Unavailable</span>
-              )}
-            </div>
-            <h2>
-              $149 once. Permanent Creator-level feature access.
-            </h2>
-            <p>
-              Founding Member grants permanent Creator-level feature access and a
-              Founder badge — no recurring subscription charge. Does not include
-              monthly credit grants; purchase credits separately or subscribe to
-              a paid plan for recurring credits.
-              Limited to {PLANS.founder.founderLimit} supporters.
-              {!founderAvailable
-                ? " Checkout is currently unavailable pending an approved Stripe price."
-                : ""}
-            </p>
-          </div>
-
-          <button
-            type="button"
-            className={styles.founderButton}
-            disabled={!founderAvailable}
-            onClick={() => founderAvailable && handleCheckout(PLANS.founder)}
-          >
-            {founderAvailable ? "Become a Founding Member" : "Currently Unavailable"}
-          </button>
-        </article>
-
         {error ? <div className={styles.errorBanner}>{error}</div> : null}
       </section>
 
@@ -391,7 +351,7 @@ export default function PricingClient({ founderAvailable }: { founderAvailable: 
             { title: "Cancel anytime", copy: "Cancellation stops future renewals. Access continues through the paid period." },
             { title: "No surprise charges", copy: "Expensive actions show an estimate before they run. Credits are used predictably." },
             { title: "Your assets stay yours", copy: "Downgrades and cancellations never delete projects, media, or data." },
-            { title: "Support channel", copy: "Need help? Reach out from Settings → Connections → Diagnostics." },
+            { title: "Support channel", copy: "Need help? Open an issue at github.com/LabsConnected — we read every one." },
           ].map((item) => (
             <article key={item.title} className={styles.trustCard}>
               <h3>{item.title}</h3>
@@ -476,10 +436,10 @@ export default function PricingClient({ founderAvailable }: { founderAvailable: 
         </div>
 
         <div className={styles.ctaActions}>
-          <Link className={styles.primaryCta} href="/studio">
+          <SmartLink className={styles.primaryCta} href="/studio">
             Launch Studio
             <ArrowIcon />
-          </Link>
+          </SmartLink>
           <Link className={styles.secondaryCta} href="/marketplace">
             Explore Marketplace
           </Link>

@@ -3,9 +3,21 @@ const fs = require("fs");
 const path = require("path");
 
 const N8N_BASE = "https://n8n.litlabs.net";
-const API_KEY = "n8n_api_c46b589dba487fa7462a05eda1e9986b95d7a77890c6d43a";
-const CF_CLIENT_ID = "5316aebf2779a332dc9079507b853905.access";
-const CF_CLIENT_SECRET = "810cf2820b308fea9b72c148ad91878bbeda480223108a6a110807c3f1ebf2ab";
+const API_KEY = process.env.N8N_API_KEY || "";
+const CF_CLIENT_ID = process.env.CF_ACCESS_CLIENT_ID || "";
+const CF_CLIENT_SECRET = process.env.CF_ACCESS_CLIENT_SECRET || "";
+
+for (const [name, value] of Object.entries({
+  N8N_API_KEY: API_KEY,
+  CF_ACCESS_CLIENT_ID: CF_CLIENT_ID,
+  CF_ACCESS_CLIENT_SECRET: CF_CLIENT_SECRET,
+})) {
+  if (!value) {
+    console.error(`Missing required environment variable: ${name}`);
+    console.error("Set it in your shell or a local untracked .env file. Never commit credentials.");
+    process.exit(1);
+  }
+}
 
 const headers = {
   "X-N8N-API-KEY": API_KEY,

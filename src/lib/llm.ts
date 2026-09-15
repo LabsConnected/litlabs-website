@@ -55,12 +55,58 @@ export type LLMProvider =
 
 export type ModelCategory = "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok" | "litt-alias";
 
+/**
+ * Which account pays for each provider.
+ *
+ * "litt_paid" providers bill LiTT's OWN platform credential (OPENAI_API_KEY).
+ * Everything else is a free-tier managed route or a :free OpenRouter slug, so
+ * it costs LiTT nothing per call. BYOK is not represented here: a user key is
+ * passed per request and billed to that user by their provider.
+ *
+ * This mirrors the cost policy the v2 Basic router already enforces
+ * structurally in provider-registry.ts, where LITT_PAID routes are excluded
+ * outright and `openai/*` resolves to the byok route.
+ */
+export const PROVIDER_COST_CLASS: Record<LLMProvider, "included" | "litt_paid"> = {
+  gemini: "included",
+  groq: "included",
+  "groq-whisper": "included",
+  openai: "litt_paid",
+  "openrouter-free": "included",
+  "openrouter-qwen": "included",
+  "openrouter-deepseek": "included",
+  "openrouter-mistral": "included",
+  "openrouter-llama": "included",
+  "openrouter-trinity": "included",
+  "openrouter-vision": "included",
+};
+
+/** True when calling this provider spends LiTT's own money. */
+export function isLittPaidProvider(provider: LLMProvider): boolean {
+  return PROVIDER_COST_CLASS[provider] === "litt_paid";
+}
+
+/** Free-tier chain used when every candidate would spend LiTT's money. */
+const INCLUDED_FALLBACK_CHAIN: LLMProvider[] = ["gemini", "openrouter-free", "groq"];
+
 export interface LLMOptions {
   task?: LLMTask;
-  /** Force a specific provider (skips the chain). */
+  /** Force a specific provider (skips the chain).
+   *
+   *  SECURITY: this is frequently populated from request input (the Studio
+   *  model picker posts `provider`/`model` straight through). A forced
+   *  provider can therefore never promote a litt_paid route on its own —
+   *  see `allowLittPaidProviders`. */
   provider?: LLMProvider;
   /** User-facing model category for routing. */
   category?: ModelCategory;
+  /** Authorizes providers that spend LiTT's own money for this call.
+   *
+   *  Default-deny. Without it a forced `provider` cannot pin a litt_paid
+   *  route and litt_paid providers are filtered out of the default chain.
+   *  Derive this from the caller's plan/entitlements — NEVER from request
+   *  input, or the protection is void. */
+  allowLittPaidProviders?: boolean;
   /** Hint to prefer free tier even if a paid key is available. */
   preferFree?: boolean;
   maxTokens?: number;
@@ -77,6 +123,13 @@ export interface LLMOptions {
   byokProvider?: "openai" | "anthropic";
   /** Braintrust eval metadata (agent slug, mode, conversation ID, etc.). */
   evalMetadata?: LLMCallMetadata;
+  /**
+   * Optional caller-provided execution signal. When aborted, the in-flight
+   * provider request/stream is cancelled and streamText rejects — the
+   * provider failover chain is NOT used for aborts (an explicit stop is
+   * not a provider failure).
+   */
+  signal?: AbortSignal;
 }
 
 export interface LLMUsage {
@@ -158,7 +211,41 @@ function markModelUnavailable(provider: string): void {
 /* ------------------------------------------------------------------ */
 /*  Default chain per task                                             */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Cost-policy gate around the raw chain.
+ *
+ * A Free user must not be able to make LiTT pay. Two ways that was possible:
+ *
+ *   1. Forging a provider. `defaultChain` honours `opts.provider` by
+ *      returning [provider] and skipping the chain entirely, and the Studio
+ *      message route builds that value from `body.provider` with no plan
+ *      check — so POSTing { provider: "openai", category: "fast" } pinned the
+ *      run to LiTT's own OpenAI key.
+ *   2. The default chain itself. Whenever OPENAI_API_KEY is set, "openai" is
+ *      FIRST for auto / chat / code / creative / precise / json / litt-alias,
+ *      so ordinary Basic traffic on this v1 path led with a paid provider.
+ *
+ * Default-deny fixes both: litt_paid providers are dropped unless the caller
+ * explicitly passes `allowLittPaidProviders`, which must be derived from the
+ * user's plan and never from request input. If filtering empties the chain we
+ * fall back to the included free-tier chain rather than failing the request.
+ *
+ * The v2 agent path (planBasicRoutes) already enforces this structurally;
+ * this brings the v1 chat path in line with it.
+ */
 function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
+  const chain = rawDefaultChain(task, opts);
+  if (opts.allowLittPaidProviders) return chain;
+
+  const included = chain.filter((p) => !isLittPaidProvider(p));
+  if (included.length > 0) return included;
+
+  // Every candidate was litt_paid (e.g. a forged provider: "openai").
+  return INCLUDED_FALLBACK_CHAIN.filter((p) => !isLittPaidProvider(p));
+}
+
+function rawDefaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
   // "litt-alias" models (LiTT Balanced/Reasoning/Code) should use the full
   // fallback chain — the apiProvider is a *preference*, not a hard pin.
   // Without this, a single provider failure bricks the conversation.
@@ -248,17 +335,67 @@ class ProviderError extends Error {
   }
 }
 
+/**
+ * A provider request completed "successfully" but produced no usable
+ * content — a well-formed empty payload is still a provider failure, not
+ * a valid answer. Retryable so the chain fails over to the next provider;
+ * callers classify it via `code` as EMPTY_PROVIDER_RESPONSE.
+ */
+export class EmptyProviderResponseError extends ProviderError {
+  readonly code = "EMPTY_PROVIDER_RESPONSE" as const;
+  constructor(provider: LLMProvider, model: string, detail?: string) {
+    super(
+      provider,
+      null,
+      `${provider} (${model}) returned an empty response${detail ? ` (${detail})` : ""}`,
+    );
+    this.name = "EmptyProviderResponseError";
+  }
+}
+
+/** Every attempted provider returned an empty payload — the classified,
+ *  truthful terminal failure for EMPTY_PROVIDER_RESPONSE. */
+export class AllProvidersEmptyError extends Error {
+  readonly code = "EMPTY_PROVIDER_RESPONSE" as const;
+  constructor(readonly providers: LLMProvider[]) {
+    super(`All LLM providers returned empty responses. Tried: ${providers.join(", ")}`);
+    this.name = "AllProvidersEmptyError";
+  }
+}
+
+/** True when an error carries the EMPTY_PROVIDER_RESPONSE classification —
+ *  an instanceof-independent check so wrapped/rethrown errors still match. */
+export function isEmptyProviderResponse(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { code?: unknown }).code === "EMPTY_PROVIDER_RESPONSE"
+  );
+}
+
 async function fetchWithTimeout(
   url: string,
   init: RequestInit,
   timeoutMs: number,
+  externalSignal?: AbortSignal,
 ): Promise<Response> {
   const ctrl = new AbortController();
   const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+  // An external execution abort wins over the timeout — forward it into
+  // the same controller so the fetch rejects immediately.
+  const onExternalAbort = () => ctrl.abort(externalSignal?.reason);
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      ctrl.abort(externalSignal.reason);
+    } else {
+      externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+    }
+  }
   try {
     return await fetch(url, { ...init, signal: ctrl.signal });
   } finally {
     clearTimeout(tid);
+    externalSignal?.removeEventListener("abort", onExternalAbort);
   }
 }
 
@@ -537,21 +674,30 @@ export async function generateText(
   const timeoutMs = options.timeoutMs ?? 30_000;
   const chain = defaultChain(task, options);
   const failover: LLMProvider[] = [];
+  const emptyProviders: LLMProvider[] = [];
   const t0 = Date.now();
 
   let lastErr: unknown = null;
+  let attempted = 0;
   for (const provider of chain) {
     // Circuit breaker: skip models temporarily marked unavailable
     if (isModelInCooldown(provider)) {
       failover.push(provider);
       continue;
     }
+    attempted++;
     try {
       const r = await dispatchProvider(
         provider,
         { prompt, systemPrompt, task, opts: options },
         timeoutMs,
       );
+      if (!r.text.trim()) {
+        // A well-formed but empty completion is not a usable answer —
+        // classify it as a provider failure so the chain fails over.
+        emptyProviders.push(provider);
+        throw new EmptyProviderResponseError(provider, r.model);
+      }
       const result = {
         text: r.text,
         provider,
@@ -606,6 +752,9 @@ export async function generateText(
       // Retryable: try the next provider
       failover.push(provider);
     }
+  }
+  if (attempted > 0 && emptyProviders.length === attempted) {
+    throw new AllProvidersEmptyError(emptyProviders);
   }
   throw new Error(
     `All LLM providers failed. Tried: ${[...failover].join(", ")}. Last error: ${lastErr instanceof Error ? lastErr.message : String(lastErr)
@@ -667,11 +816,14 @@ export async function streamText(
   model: string;
   latencyMs: number;
   failover: LLMProvider[];
+  /** Provider-reported finish reason, when the stream carried one. */
+  finishReason?: string;
 }> {
   const task = options.task ?? "chat";
   const timeoutMs = options.timeoutMs ?? 60_000;
   const chain = defaultChain(task, options);
   const failover: LLMProvider[] = [];
+  const emptyProviders: LLMProvider[] = [];
   const t0 = Date.now();
 
   // Accumulate streamed chunks for Braintrust logging on stream completion.
@@ -682,14 +834,21 @@ export async function streamText(
   };
 
   let lastErr: unknown = null;
+  let attempted = 0;
   for (const provider of chain) {
+    // An aborted execution signal must not start another provider call.
+    if (options.signal?.aborted) {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    }
     // Circuit breaker: skip models temporarily marked unavailable
     if (isModelInCooldown(provider)) {
       failover.push(provider);
       continue;
     }
+    attempted++;
     try {
-      let result: { provider: LLMProvider; model: string; latencyMs: number; failover: LLMProvider[] };
+      const chunksBefore = _chunks.length;
+      let result: { provider: LLMProvider; model: string; latencyMs: number; failover: LLMProvider[]; finishReason?: string };
       if (provider === "gemini") {
         result = await streamViaGemini(
           { prompt, systemPrompt, task, opts: options },
@@ -727,6 +886,16 @@ export async function streamText(
           onReasoning,
         );
       }
+      // A stream that completed cleanly but produced no usable content is
+      // a provider failure — fail over rather than reporting empty success.
+      if (!_chunks.slice(chunksBefore).join("").trim()) {
+        emptyProviders.push(provider);
+        throw new EmptyProviderResponseError(
+          provider,
+          result.model,
+          result.finishReason ? `finish_reason=${result.finishReason}` : undefined,
+        );
+      }
       logLLMCall({
         prompt,
         systemPrompt,
@@ -747,6 +916,13 @@ export async function streamText(
       });
       return result;
     } catch (err) {
+      // An explicit caller abort is not a provider failure — surface it
+      // immediately instead of failing over to the next provider.
+      if (options.signal?.aborted) {
+        throw err instanceof Error
+          ? err
+          : new DOMException("The operation was aborted.", "AbortError");
+      }
       lastErr = err;
       const isProviderError = err instanceof ProviderError;
       recordLLMCall({
@@ -768,6 +944,9 @@ export async function streamText(
       failover.push(provider);
     }
   }
+  if (attempted > 0 && emptyProviders.length === attempted) {
+    throw new AllProvidersEmptyError(emptyProviders);
+  }
   throw new Error(
     `All LLM streaming providers failed. Tried: ${[...failover].join(", ")}. Last error: ${lastErr instanceof Error ? lastErr.message : String(lastErr)
     }`,
@@ -785,6 +964,7 @@ async function streamViaGemini(
   model: string;
   latencyMs: number;
   failover: LLMProvider[];
+  finishReason?: string;
 }> {
   const genAI = getGenAI();
   if (!genAI) throw new ProviderError("gemini", null, "GEMINI_API_KEY not set");
@@ -794,13 +974,26 @@ async function streamViaGemini(
   const fullPrompt = p.systemPrompt
     ? `${p.systemPrompt}\n\n${p.prompt}`
     : p.prompt;
-  const result = await model.generateContentStream(fullPrompt);
+  const result = await model.generateContentStream(fullPrompt, {
+    signal: p.opts.signal,
+  });
+  let finishReason: string | undefined;
   for await (const chunk of result.stream) {
+    if (p.opts.signal?.aborted) {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    }
     // Gemini 2.5 thinking models emit thought parts separately from text.
     // chunk.text() concatenates only the non-thought text parts, so we also
     // inspect parts for thoughtSignature/thought markers when present.
     const t = chunk.text();
     if (t) onChunk(t);
+    try {
+      const fr = (chunk as { candidates?: Array<{ finishReason?: string }> })
+        .candidates?.[0]?.finishReason;
+      if (fr) finishReason = fr;
+    } catch {
+      // finish-reason extraction is best-effort; ignore shape mismatches
+    }
     if (onReasoning) {
       try {
         const parts = (chunk as { candidates?: Array<{ content?: { parts?: Array<{ thought?: boolean; text?: string }> } }> })
@@ -818,6 +1011,7 @@ async function streamViaGemini(
     model: modelName,
     latencyMs: Date.now() - t0,
     failover,
+    finishReason,
   };
 }
 
@@ -834,6 +1028,7 @@ async function streamViaOpenRouter(
   model: string;
   latencyMs: number;
   failover: LLMProvider[];
+  finishReason?: string;
 }> {
   if (!OPENROUTER_KEY)
     throw new ProviderError(provider, null, "OPENROUTER_API_KEY not set");
@@ -863,6 +1058,7 @@ async function streamViaOpenRouter(
       body: JSON.stringify(body),
     },
     timeoutMs,
+    p.opts.signal,
   );
 
   if (!res.ok || !res.body) {
@@ -876,7 +1072,18 @@ async function streamViaOpenRouter(
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
+  // Cancel the HTTP stream promptly on a caller abort — real cancellation,
+  // not just ignoring the remaining chunks. Check `aborted` first: an
+  // already-aborted signal never re-fires the listener, and skipping this
+  // would leave reader.read() hanging forever.
+  const abortReader = () => { void reader.cancel().catch(() => {}); };
+  if (p.opts.signal?.aborted) {
+    abortReader();
+  } else {
+    p.opts.signal?.addEventListener("abort", abortReader, { once: true });
+  }
   let buffer = "";
+  let finishReason: string | undefined;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -891,8 +1098,10 @@ async function streamViaOpenRouter(
       if (payload === "[DONE]") continue;
       try {
         const json = JSON.parse(payload);
-        const delta = json.choices?.[0]?.delta;
+        const choice = json.choices?.[0];
+        const delta = choice?.delta;
         if (delta?.content) onChunk(delta.content);
+        if (choice?.finish_reason) finishReason = choice.finish_reason;
         // OpenRouter emits `reasoning` on reasoning models (DeepSeek-R1,
         // Qwen3 thinking, etc.). Forward it separately so the UI can show
         // a "Thinking…" trace alongside the final answer.
@@ -902,7 +1111,11 @@ async function streamViaOpenRouter(
       }
     }
   }
-  return { provider, model: modelName, latencyMs: Date.now() - t0, failover };
+  p.opts.signal?.removeEventListener("abort", abortReader);
+  if (p.opts.signal?.aborted) {
+    throw new DOMException("The operation was aborted.", "AbortError");
+  }
+  return { provider, model: modelName, latencyMs: Date.now() - t0, failover, finishReason };
 }
 
 async function streamViaOpenAI(
@@ -916,6 +1129,7 @@ async function streamViaOpenAI(
   model: string;
   latencyMs: number;
   failover: LLMProvider[];
+  finishReason?: string;
 }> {
   if (!OPENAI_KEY) {
     throw new ProviderError("openai", null, "OPENAI_API_KEY not set");
@@ -944,6 +1158,7 @@ async function streamViaOpenAI(
       body: JSON.stringify(body),
     },
     timeoutMs,
+    p.opts.signal,
   );
 
   if (!res.ok || !res.body) {
@@ -957,7 +1172,14 @@ async function streamViaOpenAI(
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
+  const abortReader = () => { void reader.cancel().catch(() => {}); };
+  if (p.opts.signal?.aborted) {
+    abortReader();
+  } else {
+    p.opts.signal?.addEventListener("abort", abortReader, { once: true });
+  }
   let buffer = "";
+  let finishReason: string | undefined;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -971,12 +1193,18 @@ async function streamViaOpenAI(
       if (payload === "[DONE]") continue;
       try {
         const json = JSON.parse(payload);
-        const content = json.choices?.[0]?.delta?.content;
+        const choice = json.choices?.[0];
+        const content = choice?.delta?.content;
         if (content) onChunk(content);
+        if (choice?.finish_reason) finishReason = choice.finish_reason;
       } catch {
         // Ignore malformed chunks and continue consuming the stream.
       }
     }
+  }
+  p.opts.signal?.removeEventListener("abort", abortReader);
+  if (p.opts.signal?.aborted) {
+    throw new DOMException("The operation was aborted.", "AbortError");
   }
 
   return {
@@ -984,6 +1212,7 @@ async function streamViaOpenAI(
     model: modelName,
     latencyMs: Date.now() - t0,
     failover,
+    finishReason,
   };
 }
 
@@ -1000,6 +1229,7 @@ async function streamViaGroq(
   model: string;
   latencyMs: number;
   failover: LLMProvider[];
+  finishReason?: string;
 }> {
   if (!GROQ_KEY)
     throw new ProviderError(provider, null, "GROQ_API_KEY not set");
@@ -1027,6 +1257,7 @@ async function streamViaGroq(
       body: JSON.stringify(body),
     },
     timeoutMs,
+    p.opts.signal,
   );
 
   if (!res.ok || !res.body) {
@@ -1040,7 +1271,14 @@ async function streamViaGroq(
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
+  const abortReader = () => { void reader.cancel().catch(() => {}); };
+  if (p.opts.signal?.aborted) {
+    abortReader();
+  } else {
+    p.opts.signal?.addEventListener("abort", abortReader, { once: true });
+  }
   let buffer = "";
+  let finishReason: string | undefined;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -1054,15 +1292,21 @@ async function streamViaGroq(
       if (payload === "[DONE]") continue;
       try {
         const json = JSON.parse(payload);
-        const delta = json.choices?.[0]?.delta;
+        const choice = json.choices?.[0];
+        const delta = choice?.delta;
         if (delta?.content) onChunk(delta.content);
+        if (choice?.finish_reason) finishReason = choice.finish_reason;
         if (onReasoning && delta?.reasoning) onReasoning(delta.reasoning);
       } catch {
         // ignore malformed chunk
       }
     }
   }
-  return { provider, model: modelName, latencyMs: Date.now() - t0, failover };
+  p.opts.signal?.removeEventListener("abort", abortReader);
+  if (p.opts.signal?.aborted) {
+    throw new DOMException("The operation was aborted.", "AbortError");
+  }
+  return { provider, model: modelName, latencyMs: Date.now() - t0, failover, finishReason };
 }
 
 /* ------------------------------------------------------------------ */

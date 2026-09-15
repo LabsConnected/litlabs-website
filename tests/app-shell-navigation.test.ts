@@ -20,16 +20,24 @@ import {
 
 describe("AppShell Navigation", () => {
   describe("Canonical nav sections", () => {
-    it("has exactly 3 sections: Command, Studio, Explore", () => {
+    it("has exactly 3 sections in order: Command, Studio, Explore", () => {
       const ids = APP_NAV_SECTIONS.map((s) => s.id);
       expect(ids).toEqual(["command", "studio", "explore"]);
     });
 
-    it("keeps Dashboard and Studio as separate primary sections", () => {
+    it("Command section has Dashboard only", () => {
       const command = APP_NAV_SECTIONS.find((s) => s.id === "command");
+      expect(command).toBeDefined();
+      const labels = command!.items.map((i) => i.label);
+      expect(labels).toEqual(["Dashboard"]);
+    });
+
+    it("Studio is its own section (not under Command)", () => {
       const studio = APP_NAV_SECTIONS.find((s) => s.id === "studio");
-      expect(command?.items.map((i) => i.label)).toEqual(["Dashboard"]);
-      expect(studio?.items.map((i) => i.label)).toEqual(["Studio"]);
+      expect(studio).toBeDefined();
+      const labels = studio!.items.map((i) => i.label);
+      expect(labels).toEqual(["Studio"]);
+      expect(studio!.items[0].href).toBe("/studio");
     });
 
     it("does not expose a Create section or Create item", () => {
@@ -42,9 +50,28 @@ describe("AppShell Navigation", () => {
       const explore = APP_NAV_SECTIONS.find((s) => s.id === "explore");
       expect(explore).toBeDefined();
       const labels = explore!.items.map((i) => i.label);
-      expect(labels).toContain("Games");
-      expect(labels).toContain("Discover");
-      expect(labels).toContain("Marketplace");
+      expect(labels).toEqual(["Games", "Discover", "Marketplace"]);
+    });
+
+    // Music and Showcase were removed from the sidebar (routes still
+    // exist). Projects is not a sidebar entry.
+    it("does NOT contain Music, Showcase, or Projects", () => {
+      const labels = APP_NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.label));
+      for (const removed of ["Music", "Showcase", "Projects"]) {
+        expect(labels).not.toContain(removed);
+      }
+      const hrefs = APP_NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.href));
+      for (const removedHref of ["/studio?tool=music", "/showcase", "/projects"]) {
+        expect(hrefs).not.toContain(removedHref);
+      }
+    });
+
+    // Regression: /hire is permanently retired — the page always redirects
+    // to /studio (see tests/hire-redirect.test.ts) — so the signed-in
+    // sidebar must not link to it and strand visitors on a dead-end bounce.
+    it("does NOT link to /hire", () => {
+      const hrefs = APP_NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.href));
+      expect(hrefs).not.toContain("/hire");
     });
   });
 

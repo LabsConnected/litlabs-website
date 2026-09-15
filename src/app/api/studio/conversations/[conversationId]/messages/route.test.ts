@@ -16,7 +16,10 @@ import { NextRequest } from "next/server";
  *   - Multi-step agent runs with provider fallback emit exactly one
  *     terminal event and `[DONE]`
  *   - Mutations are not duplicated across fallback providers
- *   - Stream cancellation aborts the agent loop and emits a terminal event
+ *   - TRANSPORT LIFETIME != EXECUTION LIFETIME: req.signal aborts and
+ *     downstream stream cancellations do NOT abort the run (P0 fix —
+ *     previously a mobile/browser disconnect killed the launch flow)
+ *   - Explicit server-side cancellation DOES abort the run
  *   - Heartbeat comments are emitted to keep the connection alive
  */
 
@@ -84,7 +87,8 @@ vi.mock("@/lib/agent-runtime", () => ({
 
 vi.mock("@/lib/agent-billing", () => ({
   reserveCredits: vi.fn(),
-  settleRun: vi.fn(),
+  // The route calls settleRun(...).catch(...) — must return a promise.
+  settleRun: vi.fn(() => Promise.resolve({ ok: true })),
   estimateCredits: vi.fn(() => 0),
 }));
 
@@ -145,15 +149,33 @@ vi.mock("@/lib/litt-intelligence/tool-executor", () => ({
 
 vi.mock("@/lib/llm", () => ({
   streamText: vi.fn(),
+  // Mirrors the real code-based check — an error classified
+  // EMPTY_PROVIDER_RESPONSE stays classified through the mock boundary.
+  isEmptyProviderResponse: (err: unknown) =>
+    typeof err === "object" &&
+    err !== null &&
+    (err as { code?: unknown }).code === "EMPTY_PROVIDER_RESPONSE",
 }));
 
 import { auth } from "@/lib/auth";
 import { POST } from "./route";
 import { runLaunchFlow } from "@/lib/litt-intelligence/launch-flow";
+import { runAgentLoop } from "@/lib/litt-intelligence/agent-loop";
+import { streamText } from "@/lib/llm";
+import {
+  requestExecutionCancellation,
+  resetExecutionRegistryForTests,
+  getActiveExecution,
+} from "@/lib/studio/execution-registry";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { buildCanonicalRuntimeContext } from "@/lib/litt-intelligence/canonical-runtime-context";
 import { buildStudioContext } from "@/lib/studio/project-resolver";
 import { getConversation, insertMessage, updateMessageStatus } from "@/lib/studio/conversation-service";
+import { createPausedRun } from "@/lib/litt-intelligence/paused-run-store";
+import { persistMemory } from "@/lib/studio/memory-service";
+import { resolveRuntimeAgent } from "@/lib/agent-runtime";
+import { parseAgentSelection } from "@/lib/agent-selection";
+import { reserveCredits, settleRun } from "@/lib/agent-billing";
 
 // ── Helpers ──
 
@@ -204,6 +226,7 @@ async function readSSE(response: Response): Promise<{ events: any[]; done: boole
 describe("POST /api/studio/conversations/[conversationId]/messages — SSE stream lifecycle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetExecutionRegistryForTests();
 
     vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" } as any);
     vi.mocked(getConversation).mockResolvedValue({
@@ -307,57 +330,440 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
     const previewEvents = events.filter((e) => e.type === "preview_result");
     expect(previewEvents.length).toBe(1);
     expect(previewEvents[0].success).toBe(true);
+
+    // Execution unregistered after normal completion — no stale entry.
+    expect(getActiveExecution("conv-123")).toBeNull();
   });
 
-  it("emits `cancelled` terminal event and `[DONE]` on stream cancellation (proxy idle timeout)", async () => {
+  it("does NOT cancel execution when req.signal aborts (browser disconnect) — P0 regression", async () => {
     vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
 
-    const controller = new AbortController();
-    let launchFlowResolve: (val: any) => void;
-    const launchFlowPromise = new Promise((resolve) => { launchFlowResolve = resolve; });
+    const clientDisconnect = new AbortController();
+    let capturedSignal: AbortSignal | undefined;
+    let flowFinished: (val: any) => void;
+    const flowDone = new Promise((resolve) => { flowFinished = resolve; });
 
     vi.mocked(runLaunchFlow).mockImplementation(async (opts: any) => {
+      capturedSignal = opts.signal;
       const progress = opts.progress;
       progress.emit({ type: "phase", phase: "call_llm", step: 1 });
-      progress.emit({ type: "status", summary: "Step 1: reasoning with gemini-3.6-flash" });
-      // Simulate a long LLM call during which the proxy closes the connection
-      // Wait briefly, then abort (simulating stream cancel → streamAbort.abort)
-      await new Promise((r) => setTimeout(r, 50));
-      controller.abort(new Error("Stream cancelled: proxy idle timeout"));
-      // The launch-flow should see the abort via checkSignal and throw LaunchFlowCancelledError
-      // which the route catches and emits a cancelled result
-      try {
-        opts.signal?.throwIfAborted();
-      } catch {
-        return {
-          success: false,
-          status: "cancelled",
-          finalText: "Cancelled: Stream cancelled: proxy idle timeout",
-          agentLoopResult: null,
-          cancelled: true,
-          cancelReason: "Stream cancelled: proxy idle timeout",
-          totalDurationMs: 100,
-        } as any;
-      }
-      return launchFlowPromise.then(launchFlowResolve!);
+      // Simulate a long tool/build phase during which the browser drops the
+      // connection (mobile Chrome suspend, tab close, network handoff).
+      await new Promise((r) => setTimeout(r, 30));
+      clientDisconnect.abort(new Error("Client disconnected"));
+      // The run must NOT see the transport abort — it keeps executing.
+      expect(opts.signal.aborted).toBe(false);
+      await new Promise((r) => setTimeout(r, 30));
+      expect(opts.signal.aborted).toBe(false);
+      const result = {
+        success: true,
+        status: "preview_ready",
+        previewUrl: "https://preview.example.com",
+        productionUrl: null,
+        finalText: "I built your landing page.",
+        agentLoopResult: { stepsUsed: 1, toolCalls: [], cancelled: false, pendingApproval: null } as any,
+        cancelled: false,
+        totalDurationMs: 100,
+      } as any;
+      flowFinished(result);
+      return result;
     });
 
-    const req = makeRequest({}, controller.signal);
+    const req = makeRequest({}, clientDisconnect.signal);
     const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
     expect(res.status).toBe(200);
 
-    const { events, raw } = await readSSE(res);
+    await flowDone;
+    // The execution's AbortController was never aborted by the disconnect.
+    expect(capturedSignal?.aborted).toBe(false);
 
-    // Terminal event: `done` with cancelled status (route maps cancelled → done with status)
+    // Execution finished after disconnect — the FULL finalization path ran:
+    // assistant result persisted, memory persisted, run unregistered.
+    await vi.waitFor(() => {
+      expect(updateMessageStatus).toHaveBeenCalledWith(
+        expect.any(String),
+        "user_123",
+        "completed",
+        "I built your landing page.",
+      );
+    });
+    // And the run was NOT persisted as cancelled.
+    expect(updateMessageStatus).not.toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "cancelled",
+      expect.anything(),
+    );
+    // Memory persistence still happened after the transport died.
+    await vi.waitFor(() => {
+      expect(persistMemory).toHaveBeenCalled();
+    });
+    // Registry entry cleaned up — no stale execution leaks.
+    await vi.waitFor(() => {
+      expect(getActiveExecution("conv-123")).toBeNull();
+    });
+  });
+
+  it("settles billing exactly once as 'completed' when execution finishes after disconnect", async () => {
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    // Marketplace agent → the billing reserve/settle path is active.
+    vi.mocked(parseAgentSelection).mockReturnValue({ kind: "instance", id: "inst-1" } as any);
+    vi.mocked(resolveRuntimeAgent).mockResolvedValue({
+      ok: true,
+      agent: {
+        agentInstanceId: "inst-1",
+        agentId: "agent-1",
+        agentVersionId: "ver-1",
+        model: "test-model",
+        memoryNamespace: "ns-1",
+      },
+    } as any);
+    vi.mocked(reserveCredits).mockResolvedValue({
+      ok: true,
+      runId: "run-1",
+      reservedCredits: 10,
+      reservationId: "res-1",
+    } as any);
+
+    const clientDisconnect = new AbortController();
+    let flowFinished: (val: any) => void;
+    const flowDone = new Promise((resolve) => { flowFinished = resolve; });
+
+    vi.mocked(runLaunchFlow).mockImplementation(async (opts: any) => {
+      await new Promise((r) => setTimeout(r, 30));
+      clientDisconnect.abort(new Error("Client disconnected"));
+      await new Promise((r) => setTimeout(r, 30));
+      expect(opts.signal.aborted).toBe(false);
+      const result = {
+        success: true,
+        status: "preview_ready",
+        previewUrl: "https://preview.example.com",
+        productionUrl: null,
+        finalText: "Built after disconnect.",
+        agentLoopResult: { stepsUsed: 1, toolCalls: [], cancelled: false, pendingApproval: null } as any,
+        cancelled: false,
+        totalDurationMs: 60,
+      } as any;
+      flowFinished(result);
+      return result;
+    });
+
+    const req = makeRequest({ agentInstanceId: "inst-1" }, clientDisconnect.signal);
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    expect(res.status).toBe(200);
+
+    await flowDone;
+
+    // Reserved once (idempotency key = clientRequestId), settled exactly
+    // once as "completed" — a transport loss is not a billing failure.
+    expect(reserveCredits).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(settleRun).toHaveBeenCalledTimes(1);
+    });
+    expect(settleRun).toHaveBeenCalledWith(
+      "run-1",
+      expect.objectContaining({ status: "completed" }),
+      10,
+      "res-1",
+    );
+  });
+
+  it("persists a pending approval when the transport disconnects mid-run", async () => {
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(createPausedRun).mockResolvedValue({ id: "paused-1" } as any);
+
+    const clientDisconnect = new AbortController();
+    let flowFinished: (val: any) => void;
+    const flowDone = new Promise((resolve) => { flowFinished = resolve; });
+
+    vi.mocked(runLaunchFlow).mockImplementation(async (opts: any) => {
+      const progress = opts.progress;
+      progress.emit({ type: "approval_required", toolId: "deploy.production", reason: "Deploy to production" });
+      await new Promise((r) => setTimeout(r, 30));
+      clientDisconnect.abort(new Error("Client disconnected"));
+      const result = {
+        success: true,
+        status: "awaiting_approval",
+        previewUrl: null,
+        productionUrl: null,
+        finalText: "I need approval to deploy to production.",
+        agentLoopResult: {
+          stepsUsed: 1,
+          toolCalls: [],
+          cancelled: false,
+          pendingApproval: {
+            toolId: "deploy.production",
+            toolCallId: "tc-1",
+            inputs: { environment: "production" },
+            reason: "Deploy to production",
+            pausedMessages: [],
+          },
+        } as any,
+        pendingApproval: {
+          toolId: "deploy.production",
+          toolCallId: "tc-1",
+          inputs: { environment: "production" },
+          reason: "Deploy to production",
+          pausedMessages: [],
+        },
+        cancelled: false,
+        totalDurationMs: 60,
+      } as any;
+      flowFinished(result);
+      return result;
+    });
+
+    const req = makeRequest({}, clientDisconnect.signal);
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    expect(res.status).toBe(200);
+
+    await flowDone;
+
+    // The paused run identity persisted for later resume — disconnect did
+    // not auto-approve and did not auto-cancel the gate.
+    await vi.waitFor(() => {
+      expect(createPausedRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: "user_123",
+          conversationId: "conv-123",
+          toolId: "deploy.production",
+          toolCallId: "tc-1",
+        }),
+      );
+    });
+    await vi.waitFor(() => {
+      expect(updateMessageStatus).toHaveBeenCalledWith(
+        expect.any(String),
+        "user_123",
+        "awaiting_approval",
+        expect.anything(),
+      );
+    });
+    expect(updateMessageStatus).not.toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "cancelled",
+      expect.anything(),
+    );
+  });
+
+  it("explicit Stop cancels the V1 fallback path too — not just V2", async () => {
+    // Force V1: no workspace execution available.
+    vi.mocked(buildCanonicalRuntimeContext).mockResolvedValue({
+      workspaceExecutionAvailable: false,
+      executionMode: "auto",
+    } as any);
+    vi.mocked(runAgentLoop).mockResolvedValue({
+      enrichedPrompt: "enriched",
+      ranTools: false,
+      toolExecutions: [],
+    } as any);
+
+    // The execution AbortSignal is passed INTO streamText — a real
+    // provider abort, not a detached Promise.race. Simulate the provider
+    // honouring it by rejecting with AbortError when the signal fires.
+    let capturedSignal: AbortSignal | undefined;
+    vi.mocked(streamText).mockImplementation((_p, _c, opts: any) => {
+      capturedSignal = opts?.signal;
+      return new Promise((_res, rej) => {
+        opts?.signal?.addEventListener(
+          "abort",
+          () => rej(new DOMException("The operation was aborted.", "AbortError")),
+          { once: true },
+        );
+      }) as any;
+    });
+
+    const clientRequestId = "req-v1-stop";
+    const req = makeRequest({ clientRequestId });
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    expect(res.status).toBe(200);
+
+    await vi.waitFor(() => {
+      expect(getActiveExecution("conv-123")).not.toBeNull();
+    });
+    const cancelResult = requestExecutionCancellation("conv-123", "user_123", clientRequestId);
+    expect(cancelResult.status).toBe("aborted");
+    // The same execution signal reached the provider call.
+    expect(capturedSignal?.aborted).toBe(true);
+
+    const { events } = await readSSE(res);
+    const doneEvents = events.filter((e) => e.type === "done");
+    expect(doneEvents.length).toBe(1);
+    expect(doneEvents[0].assistantMessage.status).toBe("cancelled");
+    // Cancellation emits a cancelled event — never a generic error event.
+    expect(events.filter((e) => e.type === "cancelled")).toHaveLength(1);
+    expect(events.filter((e) => e.type === "error")).toHaveLength(0);
+
+    await vi.waitFor(() => {
+      expect(updateMessageStatus).toHaveBeenCalledWith(
+        expect.any(String),
+        "user_123",
+        "cancelled",
+        undefined,
+      );
+    });
+    // Partial cancelled output must not be persisted as conversation memory.
+    expect(persistMemory).not.toHaveBeenCalled();
+  });
+
+  it("does NOT cancel execution when the downstream stream is cancelled — P0 regression", async () => {
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+
+    let capturedSignal: AbortSignal | undefined;
+    let flowFinished: (val: any) => void;
+    const flowDone = new Promise((resolve) => { flowFinished = resolve; });
+
+    vi.mocked(runLaunchFlow).mockImplementation(async (opts: any) => {
+      capturedSignal = opts.signal;
+      const progress = opts.progress;
+      progress.emit({ type: "phase", phase: "call_llm", step: 1 });
+      await new Promise((r) => setTimeout(r, 60));
+      // ReadableStream.cancel() (downstream stopped consuming) must not
+      // propagate into the execution signal.
+      expect(opts.signal.aborted).toBe(false);
+      // Emitting after the downstream cancel must be a harmless no-op —
+      // safeEvent does not throw and does not abort execution.
+      progress.emit({ type: "status", summary: "still working after downstream cancel" });
+      progress.emit({ type: "tool_start", toolId: "files.read", summary: "post-cancel tool" });
+      const result = {
+        success: true,
+        status: "preview_ready",
+        previewUrl: "https://preview.example.com",
+        productionUrl: null,
+        finalText: "Done after downstream cancel.",
+        agentLoopResult: { stepsUsed: 1, toolCalls: [], cancelled: false, pendingApproval: null } as any,
+        cancelled: false,
+        totalDurationMs: 100,
+      } as any;
+      flowFinished(result);
+      return result;
+    });
+
+    const req = makeRequest({});
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    expect(res.status).toBe(200);
+
+    // Give the stream a tick to open, then cancel the downstream consumer.
+    await new Promise((r) => setTimeout(r, 20));
+    await res.body!.cancel();
+
+    await flowDone;
+    expect(capturedSignal?.aborted).toBe(false);
+
+    // Execution still ran to completion and persisted the result.
+    await vi.waitFor(() => {
+      expect(updateMessageStatus).toHaveBeenCalledWith(
+        expect.any(String),
+        "user_123",
+        "completed",
+        "Done after downstream cancel.",
+      );
+    });
+    // And the registry entry was cleaned up exactly once.
+    await vi.waitFor(() => {
+      expect(getActiveExecution("conv-123")).toBeNull();
+    });
+  });
+
+  it("explicit server-side cancellation DOES abort the execution signal", async () => {
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+
+    const clientRequestId = "req-cancel-me";
+    let sawAbort = false;
+    vi.mocked(runLaunchFlow).mockImplementation(async (opts: any) => {
+      const progress = opts.progress;
+      progress.emit({ type: "phase", phase: "call_llm", step: 1 });
+      // Wait for the explicit cancellation to arrive.
+      for (let i = 0; i < 100 && !opts.signal.aborted; i++) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      sawAbort = opts.signal.aborted;
+      return {
+        success: false,
+        status: "cancelled",
+        finalText: "Cancelled: Cancelled by user",
+        agentLoopResult: null,
+        cancelled: true,
+        cancelReason: "Cancelled by user",
+        totalDurationMs: 100,
+      } as any;
+    });
+
+    const req = makeRequest({ clientRequestId });
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    expect(res.status).toBe(200);
+
+    // Wait until the run is registered, then send the explicit cancel.
+    await vi.waitFor(() => {
+      expect(getActiveExecution("conv-123")).not.toBeNull();
+    });
+    const cancelResult = requestExecutionCancellation("conv-123", "user_123", clientRequestId);
+    expect(cancelResult.status).toBe("aborted");
+
+    const { events } = await readSSE(res);
+    expect(sawAbort).toBe(true);
+
     const doneEvents = events.filter((e) => e.type === "done");
     expect(doneEvents.length).toBe(1);
     expect(doneEvents[0].assistantMessage.status).toBe("cancelled");
 
-    // `[DONE]` marker present
-    expect(raw).toContain("data: [DONE]");
+    await vi.waitFor(() => {
+      expect(updateMessageStatus).toHaveBeenCalledWith(
+        expect.any(String),
+        "user_123",
+        "cancelled",
+        expect.anything(),
+      );
+    });
+    // Cancelled executions unregister too — a second Stop is a no-op.
+    await vi.waitFor(() => {
+      expect(getActiveExecution("conv-123")).toBeNull();
+    });
+    expect(requestExecutionCancellation("conv-123", "user_123", clientRequestId).status)
+      .toBe("recorded");
+  });
 
-    // No `error` events (cancellation is not an error)
-    expect(events.filter((e) => e.type === "error")).toHaveLength(0);
+  it("a different user's cancellation request cannot abort the execution", async () => {
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+
+    let capturedSignal: AbortSignal | undefined;
+    let flowFinished: (val: any) => void;
+    const flowDone = new Promise((resolve) => { flowFinished = resolve; });
+
+    vi.mocked(runLaunchFlow).mockImplementation(async (opts: any) => {
+      capturedSignal = opts.signal;
+      const progress = opts.progress;
+      progress.emit({ type: "phase", phase: "call_llm", step: 1 });
+      await new Promise((r) => setTimeout(r, 50));
+      const result = {
+        success: true,
+        status: "preview_ready",
+        previewUrl: "https://preview.example.com",
+        productionUrl: null,
+        finalText: "Still finished.",
+        agentLoopResult: { stepsUsed: 1, toolCalls: [], cancelled: false, pendingApproval: null } as any,
+        cancelled: false,
+        totalDurationMs: 100,
+      } as any;
+      flowFinished(result);
+      return result;
+    });
+
+    const req = makeRequest({ clientRequestId: "req-cross-user" });
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    expect(res.status).toBe(200);
+
+    await vi.waitFor(() => {
+      expect(getActiveExecution("conv-123")).not.toBeNull();
+    });
+    // User B tries to cancel User A's run — must be refused even with the
+    // exact clientRequestId.
+    const result = requestExecutionCancellation("conv-123", "user_456", "req-cross-user");
+    expect(result.status).toBe("forbidden");
+
+    await flowDone;
+    expect(capturedSignal?.aborted).toBe(false);
   });
 
   it("emits `error` terminal event and `[DONE]` when launch flow throws", async () => {
@@ -387,7 +793,126 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
       expect.any(String),
       "user_123",
       "failed",
+      undefined,
     );
+
+    // The failed execution was unregistered — cleanup runs on every path.
+    expect(getActiveExecution("conv-123")).toBeNull();
+  });
+
+  it("a V1 run that resolves with no text emits a classified error with the bumped revision — never an empty done", async () => {
+    // Force V1: no workspace execution available.
+    vi.mocked(buildCanonicalRuntimeContext).mockResolvedValue({
+      workspaceExecutionAvailable: false,
+      executionMode: "auto",
+    } as any);
+    vi.mocked(runAgentLoop).mockResolvedValue({
+      enrichedPrompt: "enriched",
+      ranTools: false,
+      toolExecutions: [],
+    } as any);
+    // Provider stream completes normally but emits no content — the exact
+    // production failure mode behind "The response was empty".
+    vi.mocked(streamText).mockResolvedValue({
+      provider: "groq",
+      model: "openai/gpt-oss-120b",
+      latencyMs: 120,
+      failover: [],
+      finishReason: "stop",
+    } as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    expect(res.status).toBe(200);
+
+    const { events, raw } = await readSSE(res);
+
+    // Truthful terminal state: a classified error, not a done card.
+    const errorEvents = events.filter((e) => e.type === "error");
+    expect(errorEvents.length).toBe(1);
+    expect(errorEvents[0].code).toBe("EMPTY_PROVIDER_RESPONSE");
+    // The client must learn the bumped revision or its next send 409s.
+    expect(errorEvents[0].revision).toBe(2);
+    expect(events.filter((e) => e.type === "done")).toHaveLength(0);
+    expect(raw).toContain("data: [DONE]");
+
+    // Persisted as failed — not completed with empty content.
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      undefined,
+    );
+    expect(getActiveExecution("conv-123")).toBeNull();
+  });
+
+  it("a V2 run that returns empty finalText is persisted and reported as failed, not completed", async () => {
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      previewUrl: "https://preview.example.com",
+      productionUrl: null,
+      finalText: "",
+      agentLoopResult: {
+        stepsUsed: 1,
+        toolCalls: [],
+        cancelled: false,
+        pendingApproval: null,
+      } as any,
+      cancelled: false,
+      totalDurationMs: 100,
+    } as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    const { events } = await readSSE(res);
+
+    // The terminal event exists but must NOT claim completion — an empty
+    // provider outcome is a failure.
+    const doneEvents = events.filter((e) => e.type === "done");
+    expect(doneEvents.length).toBe(1);
+    expect(doneEvents[0].assistantMessage.status).toBe("failed");
+    expect(doneEvents[0].revision).toBe(2);
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      "",
+    );
+    expect(getActiveExecution("conv-123")).toBeNull();
+  });
+
+  it("a failed run releases the conversation — an immediate second send is not rejected", async () => {
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(runLaunchFlow).mockRejectedValue(new Error("Provider connection refused"));
+
+    const first = await POST(makeRequest({}), { params: Promise.resolve({ conversationId: "conv-123" }) });
+    const { events: firstEvents } = await readSSE(first);
+    expect(firstEvents.some((e) => e.type === "error")).toBe(true);
+    expect(getActiveExecution("conv-123")).toBeNull();
+
+    // Same conversation, immediately after — must reach the SSE stream,
+    // not a 409/lock. expectedRevision now matches the bumped value.
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      previewUrl: null,
+      productionUrl: null,
+      finalText: "Recovered answer.",
+      agentLoopResult: { stepsUsed: 1, toolCalls: [], cancelled: false, pendingApproval: null } as any,
+      cancelled: false,
+      totalDurationMs: 50,
+    } as any);
+    const second = await POST(makeRequest({ expectedRevision: 2 }), { params: Promise.resolve({ conversationId: "conv-123" }) });
+    expect(second.status).toBe(200);
+    expect(second.headers.get("Content-Type")).toContain("text/event-stream");
+    const { events: secondEvents } = await readSSE(second);
+    const doneEvents = secondEvents.filter((e) => e.type === "done");
+    expect(doneEvents.length).toBe(1);
+    expect(doneEvents[0].assistantMessage.status).toBe("completed");
+    expect(getActiveExecution("conv-123")).toBeNull();
   });
 
   it("emits heartbeat comments to keep the connection alive during long LLM calls", async () => {

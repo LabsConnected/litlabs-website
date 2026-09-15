@@ -11,7 +11,7 @@
  *
  * The verified manual fix was:
  *   pnpm install --frozen-lockfile
- *   pnpm --filter '@litlabs/litt-cli...' build
+ *   pnpm --filter '@litlabs1/litt-cli...' build
  *
  * scripts/termux/bin/litt-local now runs this automatically on
  * startup via litt_local_bootstrap(), but only when something is
@@ -197,7 +197,7 @@ exit 0
 
     const log = fs.readFileSync(logFile, "utf8").trim().split("\n");
     expect(log[0]).toBe("install --frozen-lockfile");
-    expect(log[1]).toBe("--filter @litlabs/litt-cli... build");
+    expect(log[1]).toBe("--filter @litlabs1/litt-cli... build");
 
     // Bootstrap actually left the worktree ready.
     expect(fs.existsSync(path.join(root, "node_modules/.bin/tsx"))).toBe(true);
@@ -217,7 +217,7 @@ exit 0
     expect(res.stdout).toContain("Building LiTT workspace dependencies");
 
     const log = fs.readFileSync(logFile, "utf8").trim();
-    expect(log).toBe("--filter @litlabs/litt-cli... build");
+    expect(log).toBe("--filter @litlabs1/litt-cli... build");
   });
 
   it("fully bootstrapped worktree: skips install and build entirely, stays silent and fast", () => {
@@ -255,7 +255,7 @@ exit 0
 
     expect(res.status).toBe(1);
     expect(res.stderr).toContain("Workspace build failed");
-    expect(res.stderr).toContain("'@litlabs/litt-cli...' build");
+    expect(res.stderr).toContain("'@litlabs1/litt-cli...' build");
   });
 });
 

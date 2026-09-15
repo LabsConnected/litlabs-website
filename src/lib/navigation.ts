@@ -30,7 +30,6 @@ import {
   Compass,
   Terminal,
   Mic,
-  Rocket,
 } from "lucide-react";
 
 export type NavItem = {
@@ -68,7 +67,10 @@ export const GROUP_ACCENTS: Record<string, string> = {
   More: "#94a3b8",
 };
 
-/* ─── Canonical App Shell navigation (COMMAND / STUDIO / EXPLORE) ── */
+/* ─── Canonical App Shell navigation (COMMAND / STUDIO / EXPLORE) ─── */
+// Studio is its own top-level section — it is the primary product surface
+// and must not sit under Command. Creation routes remain reachable directly
+// through Studio without adding a separate Create sidebar section.
 
 export const APP_NAV_SECTIONS: NavSection[] = [
   {
@@ -92,28 +94,11 @@ export const APP_NAV_SECTIONS: NavSection[] = [
       { label: "Games", href: "/games", icon: GamesIcon },
       { label: "Discover", href: "/discover", icon: Compass },
       { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
+      // /hire is permanently retired (always redirects to /studio — see
+      // src/app/(app)/hire/page.tsx) so it is not a nav destination.
     ],
   },
 ];
-
-/** Navigation shown by the focused Studio shell, intentionally separate from site discovery. */
-export const STUDIO_NAV_ITEMS: NavItem[] = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Studio", href: "/studio", icon: Sparkles },
-  { label: "Projects", href: "/projects", icon: FolderKanban },
-];
-
-export const STUDIO_NAV_BOTTOM: NavItem[] = [
-  { label: "Wallet", href: "/wallet", icon: Wallet },
-  { label: "Settings", href: "/settings", icon: Settings },
-];
-
-export type StudioShellMode = "wide" | "drawer";
-
-/** Keep Studio's full workspace available below the desktop shell breakpoint. */
-export function getStudioShellMode(viewportWidth: number): StudioShellMode {
-  return viewportWidth >= 1024 ? "wide" : "drawer";
-}
 
 /* Bottom-of-sidebar utility items (always visible).
    Profile is NOT here — it lives inside the identity dock's account menu. */

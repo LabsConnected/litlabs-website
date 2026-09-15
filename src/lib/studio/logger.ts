@@ -21,6 +21,9 @@ export interface LogContext {
   v2?: boolean;
   stepsUsed?: number;
   toolCalls?: number;
+  pausedRunId?: string;
+  finishReason?: string;
+  failover?: string[];
 }
 
 export function studioLog(message: string, ctx: LogContext = {}): void {

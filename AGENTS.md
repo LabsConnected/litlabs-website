@@ -2,16 +2,13 @@
 
 ## Canonical Repository Root
 
-E:\LiTT\Worktrees\main
+~/litt-canonical
 
 All LiTT CLI development, verification, builds, relinks, commits, and pushes
-must run from this worktree unless a task explicitly names another worktree.
+must run from the canonical repository unless a task explicitly names another
+worktree. Feature work belongs in dedicated worktrees (e.g. ~/litt-worktrees/...).
 
-Do NOT use:
-- C:\Users\litbi\CascadeProjects\litt-final-integration (retired)
-- C:\Users\litbi\CascadeProjects\litt-shell-phase1 (retired)
-- C:\Users\litbi\CascadeProjects\litt-shell-tui (retired)
-- or other retired C:\ copies as canonical sources.
+Do NOT use retired copies or stale clones as canonical sources.
 
 ## Current Branch
 
@@ -19,18 +16,18 @@ main on LabsConnected/litlabs-website
 
 ## Build and Relink
 
-cd E:\LiTT\Worktrees\main\packages\litt-models && pnpm build
-cd E:\LiTT\Worktrees\main\packages\litt-cli && pnpm build
-cd E:\LiTT\Worktrees\main\packages\litt-cli && pnpm link --global
+cd ~/litt-canonical/packages/litt-models && pnpm build
+cd ~/litt-canonical/packages/litt-cli && pnpm build
+cd ~/litt-canonical/packages/litt-cli && pnpm link --global
 
 Verify:
-where.exe litt
-(Get-Item "C:\Users\litbi\AppData\Local\pnpm\global\5\node_modules\@litlabs\litt-cli").Target
-should resolve to E:\LiTT\Worktrees\main\packages\litt-cli
+which litt
+the global @litlabs1/litt-cli link target should resolve to
+~/litt-canonical/packages/litt-cli
 
 ## Verification Commands
 
-cd E:\LiTT\Worktrees\main\packages\litt-cli
+cd ~/litt-canonical/packages/litt-cli
 pnpm exec tsc --noEmit          # typecheck
 pnpm exec vitest run            # full test suite
 pnpm build                      # build

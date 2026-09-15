@@ -149,7 +149,7 @@ export function resolveLauncherTarget(): string | null {
       const match = content.match(/(?:NODE_PATH|node)\s+"?([A-Z]:\\[^"]+|\/[^\s"]+)/i);
       if (match) return resolve(match[1]);
       // Also try to find the package path
-      const pkgMatch = content.match(/(@litlabs[\\/]litt-cli|litt-cli)/i);
+      const pkgMatch = content.match(/(@litlabs1?[\\/]litt-cli|litt-cli)/i);
       if (pkgMatch) return which;
       return which;
     }

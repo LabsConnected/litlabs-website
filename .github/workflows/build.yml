@@ -91,13 +91,13 @@ jobs:
         env:
           CI: true
 
-      - name: Build @litlabs/litt-cli
-        run: pnpm --filter @litlabs/litt-cli build
+      - name: Build @litlabs1/litt-cli
+        run: pnpm --filter @litlabs1/litt-cli build
         env:
           CI: true
 
-      - name: Test @litlabs/litt-cli
-        run: pnpm --filter @litlabs/litt-cli test
+      - name: Test @litlabs1/litt-cli
+        run: pnpm --filter @litlabs1/litt-cli test
         env:
           CI: true
 
@@ -179,6 +179,30 @@ jobs:
           CLERK_TEST_USER_A_EMAIL: ${{ secrets.CLERK_TEST_USER_A_EMAIL }}
           CLERK_TEST_USER_B_EMAIL: ${{ secrets.CLERK_TEST_USER_B_EMAIL }}
 
+      - name: Playwright mobile viewport tests (non-blocking pending Cloudflare/testing-token investigation — see the real-Clerk-auth step above)
+        # Regression coverage for the marketplace/pricing/homepage mobile
+        # layout (tests/playwright/mobile.spec.ts — horizontal overflow,
+        # touch targets). The mobile-chromium project (Pixel 7 viewport) was
+        # previously never invoked by any workflow, so this suite only ran
+        # when someone happened to run it manually on a Playwright-capable
+        # machine. It depends on the auth-setup project (Playwright resolves
+        # that automatically), which performs a real Clerk sign-in — the
+        # same mechanism the non-blocking production auth step above is
+        # still chasing a Cloudflare/testing-token issue for. Here it signs
+        # in against the local built server (no Cloudflare in front of it),
+        # so it may well be reliable, but keep it non-blocking until that's
+        # proven out over a few runs.
+        run: |
+          pnpm exec playwright test --project=mobile-chromium || true
+        env:
+          CI: true
+          PLAYWRIGHT_TEST: true
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          CLERK_TEST_USER_A_EMAIL: ${{ secrets.CLERK_TEST_USER_A_EMAIL }}
+          CLERK_TEST_USER_B_EMAIL: ${{ secrets.CLERK_TEST_USER_B_EMAIL }}
+        continue-on-error: true
+
       - name: Playwright visual regression (non-blocking)
         run: |
           pnpm exec playwright test --project=visual-regression || true
@@ -210,18 +234,27 @@ jobs:
       - name: Secret scan (blocking)
         run: |
           # Scan for accidentally committed secrets.
-          # Patterns: Groq (gsk_), OpenAI (sk-), Clerk (sk_live_), Stripe (sk_live_/sk_test_),
-          # Supabase service keys (eyJ...sbp), generic high-entropy JWTs.
+          # Covers: Groq (gsk_), OpenAI (sk-proj-), Clerk (sk_live_clerk_),
+          # Stripe (sk_live_/sk_test_), Supabase service keys (eyJ...sbp),
+          # n8n API keys (n8n_api_), and Cloudflare Access service tokens
+          # (<32hex>.access client id + 64-hex client secret).
+          #
+          # NOTE: quantifiers must use ERE form {40,} - NOT \{40,\}. With
+          # `git grep -E`, escaped braces match a literal "{40,}" sequence, so
+          # the pattern can never match a real key and the scan silently passes.
           # Test placeholders (pk_test_* in layout.tsx, test files) are allowed.
           EXIT=0
           for pattern in \
-            "gsk_[A-Za-z0-9]\{40,\}" \
-            "sk-proj-[A-Za-z0-9]\{40,\}" \
-            "sk_live_clerk_[A-Za-z0-9]\{30,\}" \
-            "sk_live_[A-Za-z0-9]\{40,\}" \
-            "sk_test_[A-Za-z0-9]\{40,\}" \
+            "gsk_[A-Za-z0-9]{40,}" \
+            "sk-proj-[A-Za-z0-9]{40,}" \
+            "sk_live_clerk_[A-Za-z0-9]{30,}" \
+            "sk_live_[A-Za-z0-9]{40,}" \
+            "sk_test_[A-Za-z0-9]{40,}" \
+            "n8n_api_[A-Za-z0-9]{32,}" \
+            "[0-9a-f]{32}\.access" \
+            "(CF_CLIENT_SECRET|CF_ACCESS_CLIENT_SECRET)[[:space:]]*[=:][[:space:]]*[\'\"][0-9a-f]{64}" \
             "eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.sbp_[A-Za-z0-9]"; do
-            HITS=$(git grep -nE "$pattern" -- ':!*.test.ts' ':!*.test.tsx' ':!tests/*' ':!**/__tests__/*' ':!docs/*' ':!*.md' 2>/dev/null || true)
+            HITS=$(git grep -nE "$pattern" -- ':!*.test.ts' ':!*.test.tsx' ':!tests/*' ':!**/__tests__/*' ':!docs/*' ':!*.md' ':!.github/workflows/build.yml' 2>/dev/null || true)
             if [ -n "$HITS" ]; then
               echo "❌ Potential secret found matching $pattern:"
               echo "$HITS"
@@ -230,7 +263,7 @@ jobs:
           done
           if [ "$EXIT" = "1" ]; then
             echo ""
-            echo "Secret scan FAILED — rotate the exposed key and remove it from source."
+            echo "Secret scan FAILED — rotate the exposed credential and remove it from source."
             exit 1
           fi
           echo "✅ Secret scan passed — no secrets found in source."

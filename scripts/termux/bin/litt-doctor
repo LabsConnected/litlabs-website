@@ -1,0 +1,284 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# litt-doctor — LiTT Termux environment health check.
+# Prints PASS / WARN / FAIL per check and a summary. Read-only except for
+# refreshing the cached GitHub login (~/.cache/litt/gh-login) used by the
+# startup banner so the banner never needs a network call.
+set -u
+
+PASS=0; WARN=0; FAIL=0
+
+ok()   { PASS=$((PASS+1)); printf 'PASS  %s\n' "$*"; }
+warn() { WARN=$((WARN+1)); printf 'WARN  %s\n' "$*"; }
+bad()  { FAIL=$((FAIL+1)); printf 'FAIL  %s\n' "$*"; }
+info() { printf '  ·   %s\n' "$*"; }
+
+CANON="${LITT_CANONICAL:-$HOME/litt-canonical}"
+PRE="${PREFIX:-/data/data/com.termux/files/usr}"
+
+echo
+echo "◬ LiTT DOCTOR"
+echo "============================================================"
+echo
+echo "── ENVIRONMENT ──"
+
+# Termux runtime
+if [ -n "${PREFIX:-}" ] && [ -d "$PRE/bin" ]; then
+  ok "Termux PREFIX ($PRE)"
+elif [ -d "$PRE/bin" ]; then
+  warn "PREFIX unset but $PRE exists (proot/secondary env?)"
+else
+  bad "Termux PREFIX missing: $PRE"
+fi
+
+# Shell
+case "${SHELL:-}" in
+  */bash|*/zsh) ok "shell $SHELL" ;;
+  "")           warn "SHELL unset" ;;
+  *)            warn "unexpected shell: $SHELL" ;;
+esac
+
+# PATH sanity
+case ":$PATH:" in
+  *":$PRE/bin:"*) ok "PATH has \$PREFIX/bin" ;;
+  *)              bad "PATH missing $PRE/bin" ;;
+esac
+case ":$PATH:" in
+  *":$HOME/.local/bin:"*) ok "PATH has ~/.local/bin" ;;
+  *)                      warn "PATH missing ~/.local/bin" ;;
+esac
+DUPS="$(printf '%s' "$PATH" | tr ':' '\n' | sort | uniq -d | wc -l | tr -d ' ')"
+if [ "$DUPS" -gt 2 ]; then
+  warn "PATH has $DUPS duplicated entries (harmless but sloppy)"
+else
+  ok "PATH duplication minimal ($DUPS)"
+fi
+
+echo
+echo "── TOOLCHAIN ──"
+
+for t in git node pnpm gh jq curl; do
+  if command -v "$t" >/dev/null 2>&1; then
+    ok "$t ($(command -v "$t"))"
+  else
+    case "$t" in
+      gh|jq) warn "$t missing — some LiTT features degraded" ;;
+      *)     bad "$t missing" ;;
+    esac
+  fi
+done
+
+# gh auth — local token check only (no network)
+if command -v gh >/dev/null 2>&1; then
+  if gh auth token >/dev/null 2>&1; then
+    ok "gh authenticated"
+    GHUSER="$(timeout 8 gh api user --jq .login 2>/dev/null || true)"
+    mkdir -p "$HOME/.cache/litt"
+    printf '%s\n' "${GHUSER:-signed-in}" > "$HOME/.cache/litt/gh-login"
+  else
+    warn "gh not authenticated — litt-pr/CI checks degraded"
+    mkdir -p "$HOME/.cache/litt"
+    printf 'signed-out\n' > "$HOME/.cache/litt/gh-login"
+  fi
+fi
+
+echo
+echo "── LITT COMMANDS ──"
+
+for c in litt litt-local litt-dev litt-status litt-sync litt-save litt-pr \
+         litt-work-core litt-works litt-clean-worktrees litt-doctor; do
+  p="$(command -v "$c" 2>/dev/null || true)"
+  if [ -z "$p" ]; then
+    case "$c" in
+      litt|litt-local|litt-work-core) bad "$c not on PATH" ;;
+      *)                              warn "$c not on PATH" ;;
+    esac
+    continue
+  fi
+  if [ -f "$p" ] && ! bash -n "$p" 2>/dev/null; then
+    bad "$c exists but has syntax errors: $p"
+    continue
+  fi
+  ok "$c -> $p"
+done
+
+# Shell functions must be visible in interactive shells
+echo
+echo "── SHELL FUNCTIONS ──"
+
+for sh in bash zsh; do
+  command -v "$sh" >/dev/null 2>&1 || continue
+
+  for fn in litt-work litt-main; do
+    case "$sh" in
+      bash)
+        if probe_out="$(
+          timeout -k 1s 5s bash --noprofile --norc -c \
+            'source "$HOME/.litt-functions"; type -t "$1"' \
+            _ "$fn" 2>/dev/null
+        )"; then
+          if [[ "$probe_out" == "function" ]]; then
+            ok "$fn loadable in bash"
+          else
+            warn "$fn not loadable in bash"
+          fi
+        else
+          warn "$fn bash function probe failed"
+        fi
+        ;;
+
+      zsh)
+        if probe_out="$(
+          timeout -k 1s 5s zsh -f -c \
+            'source "$HOME/.litt-functions"; whence -w "$1"' \
+            _ "$fn" 2>/dev/null
+        )"; then
+          if [[ "$probe_out" == *function* ]]; then
+            ok "$fn loadable in zsh"
+          else
+            warn "$fn not loadable in zsh"
+          fi
+        else
+          warn "$fn zsh function probe failed"
+        fi
+        ;;
+    esac
+  done
+done
+
+echo
+echo "── CANONICAL REPO ──"
+
+if git -C "$CANON" rev-parse --git-dir >/dev/null 2>&1; then
+  ok "canonical repo present: $CANON"
+
+  BR="$(git -C "$CANON" branch --show-current 2>/dev/null || true)"
+  [ "$BR" = "main" ] && ok "canonical on main" || bad "canonical on '$BR' (expected main)"
+
+  if [ -z "$(git -C "$CANON" status --porcelain 2>/dev/null)" ]; then
+    ok "canonical main clean"
+  else
+    bad "canonical main dirty"
+    git -C "$CANON" status --short | sed 's/^/      /'
+  fi
+
+  UP="$(git -C "$CANON" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+  if [ "$UP" = "origin/main" ]; then
+    ok "main tracks origin/main"
+    COUNTS="$(git -C "$CANON" rev-list --left-right --count main...origin/main 2>/dev/null || echo '?')"
+    A="${COUNTS%%[[:space:]]*}"; B="${COUNTS##*[[:space:]]}"
+    if [ "$A" = "0" ] && [ "$B" = "0" ]; then
+      ok "main == origin/main ($(git -C "$CANON" rev-parse --short=8 main))"
+    else
+      warn "main vs origin/main: ahead $A, behind $B (as of last fetch)"
+    fi
+  else
+    warn "main upstream is '${UP:-none}' (expected origin/main)"
+  fi
+else
+  bad "canonical repo missing: $CANON"
+fi
+
+echo
+echo "── WORKTREES ──"
+
+if git -C "$CANON" rev-parse --git-dir >/dev/null 2>&1; then
+  WT_TOTAL=$(git -C "$CANON" worktree list --porcelain | grep -c '^worktree ' || true)
+  WT_STALE=$(git -C "$CANON" worktree list --porcelain | grep -c '^prunable ' || true)
+  info "$WT_TOTAL registered worktree(s)"
+  if [ "$WT_STALE" -gt 0 ]; then
+    warn "$WT_STALE stale worktree metadata entr$(if [ "$WT_STALE" = 1 ]; then echo y; else echo ies; fi) — run litt-clean-worktrees"
+  else
+    ok "no stale worktree metadata"
+  fi
+fi
+
+echo
+echo "── SHELL RC HEALTH ──"
+
+rc_check() {
+  local f="$1" sh="$2"
+  if [ ! -f "$f" ]; then
+    warn "$(basename "$f") missing"
+    return
+  fi
+  if "$sh" -n "$f" 2>/dev/null; then
+    ok "$(basename "$f") syntax"
+  else
+    bad "$(basename "$f") has syntax errors"
+  fi
+}
+
+rc_check "$HOME/.bashrc" bash
+rc_check "$HOME/.zshrc" zsh
+rc_check "$HOME/.litt-functions" bash
+
+# .litt-functions must be sourced by both rc files
+for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+  if [ -f "$rc" ] && grep -q 'litt-functions' "$rc"; then
+    ok "$(basename "$rc") sources .litt-functions"
+  else
+    warn "$(basename "$rc") does not source .litt-functions"
+  fi
+done
+
+# duplicate marker blocks in rc files
+for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+  [ -f "$rc" ] || continue
+  for marker in "LITT COMMAND CORE" "LITT TERMUX WELCOME" "OLLAMA PC BLOCK" "TERMUX RUNTIME GUARD" "LITT TERMUX START"; do
+    n="$(grep -c "$marker" "$rc" 2>/dev/null)"
+    n="${n:-0}"
+    # each block has a begin+end marker line, so count/2 = block count
+    if [ "$n" -gt 2 ]; then
+      warn "$(basename "$rc"): '$marker' appears $n times (duplicate blocks?)"
+    fi
+  done
+done
+
+# malformed lines: 'dev/null' that is not a redirection
+for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.litt-functions"; do
+  [ -f "$rc" ] || continue
+  if grep -n 'dev/null' "$rc" | grep -vq '>/dev/null\|2>&1'; then
+    warn "$(basename "$rc"): suspicious 'dev/null' text (possible wrapped-paste damage)"
+    grep -n 'dev/null' "$rc" | grep -v '>/dev/null\|2>&1' | sed 's/^/      /'
+  fi
+done
+
+echo
+echo "── OLLAMA ROUTE ──"
+
+# pick up route config without leaking into the parent shell
+[ -f "$HOME/.config/litt/termux.env" ] && . "$HOME/.config/litt/termux.env"
+LAN="${LITT_OLLAMA_LAN:-${OLLAMA_LAN_URL:-}}"
+TS_="${LITT_OLLAMA_TAILSCALE:-${OLLAMA_TAILSCALE_URL:-}}"
+
+if [ -n "$LAN" ] && curl --max-time 2 -fsS "$LAN/api/tags" >/dev/null 2>&1; then
+  ok "Ollama via LAN ($LAN)"
+elif [ -n "$TS_" ] && curl --max-time 3 -fsS "$TS_/api/tags" >/dev/null 2>&1; then
+  ok "Ollama via Tailscale ($TS_)"
+else
+  warn "Ollama unreachable on LAN and Tailscale"
+fi
+info "model: ${LITT_LOCAL_MODEL:-${LITT_MODEL:-unset}}"
+
+echo
+echo "── LOCAL TERMINAL SERVER ──"
+
+PIDFILE="$HOME/.litt-local-ai/server.pid"
+if [ -f "$PIDFILE" ]; then
+  SPID="$(cat "$PIDFILE" 2>/dev/null || true)"
+  if [ -n "$SPID" ] && kill -0 "$SPID" 2>/dev/null; then
+    ok "litt-local-ai server running (pid $SPID)"
+  else
+    warn "litt-local-ai server.pid exists but process not running"
+  fi
+else
+  info "no local terminal server configured"
+fi
+
+echo
+echo "============================================================"
+echo "RESULT: $PASS PASS · $WARN WARN · $FAIL FAIL"
+echo "============================================================"
+
+[ "$FAIL" -gt 0 ] && exit 1
+exit 0
