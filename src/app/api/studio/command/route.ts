@@ -8,6 +8,7 @@ import {
   verifyProjectWorkspace,
   ProjectVerificationError,
 } from "@/lib/projects/project-repository";
+import { STUDIO_COMMAND_ALLOWLIST } from "@/lib/studio/command-allowlist";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,10 +45,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing 'command' field" }, { status: 400 });
   }
 
-  const SUPPORTED = [
-    "status", "diff", "check", "test", "build", "debug", "ship",
-    "log", "branch", "list_files", "read_file", "search", "inspect_package",
-  ];
+  // Only commands that actually resolve in terminal-server's registry are
+  // accepted. Anything else is rejected here with a truthful 400 rather
+  // than forwarded to fail downstream.
+  const SUPPORTED: readonly string[] = STUDIO_COMMAND_ALLOWLIST;
   if (!SUPPORTED.includes(body.command)) {
     return NextResponse.json(
       { error: `Unsupported command: ${body.command}` },
