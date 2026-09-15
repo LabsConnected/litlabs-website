@@ -52,6 +52,11 @@ import {
   verifyPreviewHealth,
   type PreviewStatus,
 } from "./preview/PreviewManager";
+import {
+  shouldInjectInspector,
+  injectInspector as injectInspectorScript,
+  INSPECTOR_DROPPED_HEADERS,
+} from "./preview/inspector";
 import { registerWorkspaceRoutes } from "./workspace-routes";
 import { dispatchCommand } from "./command-bridge";
 import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manager";
@@ -1177,6 +1182,11 @@ app.use("/preview/:workspaceId", async (req: AuthenticatedRequest, res: Response
       redirect: "manual",
     });
 
+    // Successful HTML documents get the inspector bridge injected so the
+    // Studio iframe can offer element selection across origins.
+    const contentType = proxyResp.headers.get("content-type") ?? "";
+    const injectInspector = shouldInjectInspector(proxyResp.status, contentType);
+
     // Forward status, headers, and body
     res.status(proxyResp.status);
     proxyResp.headers.forEach((value, key) => {
@@ -1189,10 +1199,19 @@ app.use("/preview/:workspaceId", async (req: AuthenticatedRequest, res: Response
         return;
       }
 
+      // Rewritten bodies have a new length and are no longer encoded.
+      if (injectInspector && INSPECTOR_DROPPED_HEADERS.has(header)) {
+        return;
+      }
+
       res.setHeader(key, value);
     });
 
     const body = await proxyResp.arrayBuffer();
+    if (injectInspector) {
+      res.send(injectInspectorScript(Buffer.from(body).toString("utf8")));
+      return;
+    }
     res.send(Buffer.from(body));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
