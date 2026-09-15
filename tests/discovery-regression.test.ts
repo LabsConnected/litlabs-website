@@ -417,7 +417,7 @@ describe("Discovery regression — Sign-in page", () => {
       "utf-8"
     );
     expect(src).toContain("buildMetadata");
-    expect(src).toContain('title: "Sign In"');
+    expect(src).toContain('title: "Sign in"');
     expect(src).toContain('path: "/sign-in"');
   });
 
