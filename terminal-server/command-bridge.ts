@@ -32,7 +32,8 @@ import {
   type CommandContext,
   type CommandResponse,
 } from "./command-registry";
-import { getWorkspace } from "./workspace/WorkspaceManager";
+import { getWorkspaceRoot } from "./workspace/WorkspaceManager";
+import { resolveOwnedCwd } from "./workspace/owned-cwd";
 import { getRunRegistry } from "./run-registry.js";
 import {
   successResponse,
@@ -71,13 +72,68 @@ export async function dispatchCommand(
     });
   }
 
-  // ─── Resolve cwd: explicit > workspace root > server cwd ─────
-  let cwd = req.cwd ?? process.cwd();
+  // ─── Resolve the workspace under caller ownership ────────────
+  // /internal/command is authenticated by the internal service key, so the
+  // caller asserts `userId` on behalf of an end user. That makes this the
+  // only place workspace ownership can be enforced — and it previously was
+  // not: any workspaceId resolved to its root through the unchecked
+  // getWorkspace(), letting one signed-in user name another tenant's
+  // workspace and run read commands inside it.
+  //
+  // A workspace is now resolved ONLY through the owning user, and a
+  // caller-supplied cwd is honoured ONLY relative to that owned root.
+  let cwd = process.cwd();
+
   if (req.workspaceId) {
-    const ws = getWorkspace(req.workspaceId);
-    if (ws) {
-      cwd = ws.root;
+    // Ownership cannot be established without a user to compare against,
+    // so an unattributed request is refused rather than trusted.
+    if (!req.userId) {
+      return errorResponse({
+        runId,
+        requestId,
+        code: "workspace_unauthorized",
+        message: "Workspace access requires an authenticated user.",
+        timestamp,
+      });
     }
+
+    // Unknown and not-owned are deliberately indistinguishable: telling a
+    // caller which workspace ids exist is itself a disclosure.
+    const ownedRoot = getWorkspaceRoot(req.workspaceId, req.userId);
+    if (!ownedRoot) {
+      return errorResponse({
+        runId,
+        requestId,
+        code: "workspace_unauthorized",
+        message: "Workspace not found or not accessible.",
+        timestamp,
+      });
+    }
+
+    const resolvedCwd = resolveOwnedCwd(ownedRoot, req.cwd);
+    if (!resolvedCwd.ok) {
+      // The message names no path — not the workspace root, not the
+      // rejected target.
+      return errorResponse({
+        runId,
+        requestId,
+        code: "workspace_unauthorized",
+        message: "The requested working directory is outside the workspace.",
+        timestamp,
+      });
+    }
+    cwd = resolvedCwd.cwd;
+  } else if (typeof req.cwd === "string" && req.cwd.trim() !== "") {
+    // A directory cannot be requested without naming the owned workspace it
+    // belongs to; otherwise an absolute cwd would select any path on the
+    // container. Commands that need no workspace still run in the server cwd.
+    return errorResponse({
+      runId,
+      requestId,
+      code: "workspace_required",
+      message: "A workspaceId is required when a working directory is specified.",
+      timestamp,
+    });
   }
 
   // ─── Reject unknown commands with a typed error ──────────────
