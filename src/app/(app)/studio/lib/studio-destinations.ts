@@ -122,7 +122,7 @@ export type MissionMode =
 export type InspectorTab = "plan" | "changes" | "files" | "preview" | "checks" | "approvals" | "browser";
 
 /** Internal tabs inside the bottom drawer. */
-export type DrawerTab = "activity" | "terminal" | "media";
+export type DrawerTab = "activity" | "work" | "files" | "inspector" | "terminal" | "media" | "assets";
 
 /**
  * LiTT Mode — what LiTT is about to create. This is the canonical

@@ -323,7 +323,11 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
         success: decision === "approved",
       });
     }
-    set({ pendingApproval: null, phase: "editing" });
+    set({
+      pendingApproval: null,
+      phase: decision === "approved" ? "editing" : "cancelled",
+      isRunning: decision === "approved",
+    });
   },
 
   setCheckpoint: (checkpoint) => {
@@ -493,6 +497,10 @@ export function feedSSEEventToExecutionStore(
       break;
 
     case "finished":
+      // A paused approval run can emit a transport-level completion marker
+      // for the request that opened the gate. It is not terminal execution;
+      // keep the canonical waiting state until the approval is resolved.
+      if (s.pendingApproval) break;
       s.addEvent({
         type: "finished",
         summary: `Completed in ${evt.totalSteps ?? evt.step ?? 0} steps`,

@@ -156,12 +156,6 @@ export default function StudioPreviewPanel({
   const selectedElementRef = useRef<PreviewSelection | null>(null);
   const selectedNodeRef = useRef<HTMLElement | null>(null);
   const selectedNodeStyleRef = useRef<{ outline: string; outlineOffset: string; boxShadow: string } | null>(null);
-  // Cross-origin inspector bridge state. The preview iframe is served from
-  // the terminal-server host, so iframe.contentDocument is inaccessible;
-  // the proxy injects a postMessage bridge (terminal-server/preview/
-  // inspector.ts) that reports hover/select events instead.
-  const bridgeRef = useRef<{ origin: string; token: string; ready: boolean; target: Window | null } | null>(null);
-  const bridgeTimerRef = useRef<number | null>(null);
   // Single-flight guard: ensures only one preview start is in flight at a
   // time. Mobile rerenders and rapid prop changes cannot launch duplicate
   // runtimes. The guard persists across renders (useRef) and is checked at
@@ -171,18 +165,7 @@ export default function StudioPreviewPanel({
   // every render of the same project (e.g. after it reaches "ready").
   const autoStartedForRef = useRef<string | null>(null);
 
-  const postInspectorCommand = useCallback((type: "enable" | "disable" | "clear") => {
-    const bridge = bridgeRef.current;
-    if (!bridge?.target) return;
-    try {
-      bridge.target.postMessage({ source: "litt-inspector", type, token: bridge.token }, bridge.origin);
-    } catch {
-      // Frame navigated away mid-flight — the next load re-attaches.
-    }
-  }, []);
-
   const clearSelection = useCallback((notify = true) => {
-    postInspectorCommand("clear");
     if (!selectedNodeRef.current && !selectedElementRef.current) return;
     if (selectedNodeRef.current && selectedNodeStyleRef.current) {
       selectedNodeRef.current.style.outline = selectedNodeStyleRef.current.outline;
@@ -194,7 +177,7 @@ export default function StudioPreviewPanel({
     selectedElementRef.current = null;
     setSelectedElement(null);
     if (notify) onSelectionChange?.(null);
-  }, [onSelectionChange, postInspectorCommand]);
+  }, [onSelectionChange]);
 
   const attachSelection = useCallback(() => {
     selectionCleanupRef.current?.();
@@ -204,87 +187,15 @@ export default function StudioPreviewPanel({
     try {
       documentInFrame = iframeRef.current?.contentDocument ?? null;
     } catch {
-      documentInFrame = null;
-    }
-
-    if (!documentInFrame) {
-      // Cross-origin preview (the normal case — previews are served by the
-      // terminal-server host). Try the injected inspector bridge; if the
-      // frame is not instrumented the bridge never answers and we report
-      // selection as unavailable rather than pretending it works.
-      let origin: string;
-      let token: string;
-      try {
-        const parsed = new URL(previewUrl ?? "", window.location.href);
-        origin = parsed.origin;
-        token = parsed.searchParams.get("token") ?? "";
-      } catch {
-        setSelectionError("Element selection is unavailable for this preview.");
-        return;
-      }
-      const target = iframeRef.current?.contentWindow ?? null;
-      if (!target) {
-        setSelectionError("Element selection is unavailable for this preview.");
-        return;
-      }
-      const bridge = { origin, token, ready: false, target };
-      bridgeRef.current = bridge;
-      const onMessage = (event: MessageEvent) => {
-        if (bridgeRef.current !== bridge) return;
-        if (event.source !== bridge.target || event.origin !== bridge.origin) return;
-        const data = event.data as { source?: unknown; type?: unknown; payload?: unknown } | null;
-        if (!data || data.source !== "litt-inspector" || typeof data.type !== "string") return;
-        if (data.type === "ready") {
-          bridge.ready = true;
-          if (bridgeTimerRef.current) {
-            window.clearTimeout(bridgeTimerRef.current);
-            bridgeTimerRef.current = null;
-          }
-          setSelectionError(null);
-          return;
-        }
-        if (data.type === "select") {
-          const p = data.payload as Record<string, unknown> | null;
-          if (p && typeof p.label === "string" && typeof p.selector === "string" && typeof p.tagName === "string") {
-            const nextSelection: PreviewSelection = {
-              label: p.label.slice(0, 120),
-              selector: p.selector.slice(0, 400),
-              tagName: p.tagName.slice(0, 40),
-            };
-            selectedElementRef.current = nextSelection;
-            setSelectedElement(nextSelection);
-            onSelectionChange?.(nextSelection);
-          }
-        }
-      };
-      window.addEventListener("message", onMessage);
-      // "enable" doubles as the handshake: the injected script replies
-      // "ready" on receipt. No reply within the window means the preview
-      // is not instrumented (external URL, CSP block, older terminal
-      // server) — surface that truthfully.
-      try {
-        target.postMessage({ source: "litt-inspector", type: "enable", token }, origin);
-      } catch {
-        // Frame navigated away; the load handler will re-attach.
-      }
-      bridgeTimerRef.current = window.setTimeout(() => {
-        bridgeTimerRef.current = null;
-        if (!bridge.ready) {
-          setSelectionError("Element selection is unavailable for this preview.");
-        }
-      }, 2500);
-      selectionCleanupRef.current = () => {
-        window.removeEventListener("message", onMessage);
-        if (bridgeTimerRef.current) {
-          window.clearTimeout(bridgeTimerRef.current);
-          bridgeTimerRef.current = null;
-        }
-        bridgeRef.current = null;
-      };
+      // Cross-origin previews use the postMessage bridge injected by the
+      // preview proxy. The iframe is still selectable in that case.
       return;
     }
-
-    // Same-origin preview — direct DOM instrumentation.
+    if (!documentInFrame) {
+      // A cross-origin iframe has no readable contentDocument. Its injected
+      // bridge will send selection events to the parent window.
+      return;
+    }
     setSelectionError(null);
     const handleClick = (event: MouseEvent) => {
       const target = event.target;
@@ -313,7 +224,30 @@ export default function StudioPreviewPanel({
     };
     documentInFrame.addEventListener("click", handleClick, true);
     selectionCleanupRef.current = () => documentInFrame.removeEventListener("click", handleClick, true);
-  }, [clearSelection, onSelectionChange, selectionMode, previewUrl]);
+  }, [clearSelection, onSelectionChange, selectionMode]);
+
+  // The production preview normally lives on the terminal-server origin.
+  // Listen for the proxy-injected selection bridge so element selection works
+  // without weakening the browser's same-origin policy.
+  useEffect(() => {
+    const handlePreviewMessage = (event: MessageEvent) => {
+      if (!selectionMode || event.source !== iframeRef.current?.contentWindow) return;
+      const data = event.data as { type?: unknown; label?: unknown; selector?: unknown; tagName?: unknown } | null;
+      if (data?.type !== "litt:preview-selection") return;
+      if (typeof data.label !== "string" || typeof data.selector !== "string" || typeof data.tagName !== "string") return;
+      setSelectionError(null);
+      const nextSelection: PreviewSelection = {
+        label: data.label.slice(0, 80),
+        selector: data.selector.slice(0, 240),
+        tagName: data.tagName.slice(0, 32),
+      };
+      selectedElementRef.current = nextSelection;
+      setSelectedElement(nextSelection);
+      onSelectionChange?.(nextSelection);
+    };
+    window.addEventListener("message", handlePreviewMessage);
+    return () => window.removeEventListener("message", handlePreviewMessage);
+  }, [onSelectionChange, selectionMode]);
 
   const handleIframeLoad = useCallback(() => {
     setIframeFailed(false);
@@ -578,14 +512,10 @@ export default function StudioPreviewPanel({
           <button
             type="button"
             onClick={() => {
-              const next = !selectionMode;
-              setSelectionMode(next);
-              if (!next) {
-                clearSelection();
-                postInspectorCommand("disable");
-              } else {
-                attachSelection();
-              }
+              setSelectionMode((enabled) => {
+                if (enabled) clearSelection();
+                return !enabled;
+              });
             }}
             className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
             style={{

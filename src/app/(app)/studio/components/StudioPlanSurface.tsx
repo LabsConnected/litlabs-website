@@ -24,7 +24,6 @@ import {
   Eye,
   Edit3,
   FolderOpen,
-  GitBranch,
   GitCommit,
   Hammer,
   Layout,
@@ -84,7 +83,7 @@ function PlanCard({
 }) {
   return (
     <div
-      className="glass-panel rounded-xl border p-4"
+      className="glass-panel min-w-0 rounded-xl border p-4"
       style={{
         borderColor: "var(--studio-border)",
         backgroundColor: "var(--studio-card)",
@@ -105,20 +104,22 @@ function PlanCard({
 }
 
 function PlanRow({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
+  const valueText = typeof value === "string" ? value : undefined;
   if (value === null || value === undefined || value === "") {
     return (
-      <div className="flex items-center justify-between py-1">
-        <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>{label}</span>
-        <span className="text-[12px] italic" style={{ color: "var(--text-muted)" }}>—</span>
+      <div className="grid min-w-0 grid-cols-[minmax(96px,0.8fr)_minmax(0,1.2fr)] items-start gap-x-3 py-1.5">
+        <span className="min-w-0 text-[12px] leading-5" style={{ color: "var(--text-muted)" }}>{label}</span>
+        <span className="min-w-0 text-right text-[12px] italic leading-5" style={{ color: "var(--text-muted)" }}>—</span>
       </div>
     );
   }
   return (
-    <div className="flex items-center justify-between py-1">
-      <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>{label}</span>
+    <div className="grid min-w-0 grid-cols-[minmax(96px,0.8fr)_minmax(0,1.2fr)] items-start gap-x-3 py-1.5">
+      <span className="min-w-0 text-[12px] leading-5" style={{ color: "var(--text-muted)" }}>{label}</span>
       <span
-        className={`text-[12px] font-semibold ${mono ? "font-mono" : ""}`}
+        className={`min-w-0 break-words text-right text-[12px] font-semibold leading-5 ${mono ? "font-mono" : ""}`}
         style={{ color: "var(--text-main)" }}
+        title={valueText}
       >
         {value}
       </span>
@@ -182,13 +183,18 @@ export default function StudioPlanSurface({
 
   const conversations = useConversationStore((s) => s.conversations);
   const selectedConversationId = useConversationStore((s) => s.selectedConversationId);
+  const conversationMessages = useConversationStore((s) => s.messagesByConversationId[s.selectedConversationId ?? ""] ?? []);
 
   const agentMeta = AGENT_META[activeAgentId];
-  const phaseCfg = PHASE_CONFIG[phase] ?? PHASE_CONFIG.idle;
-  const PhaseIcon = phaseCfg.icon;
-
   const recentEvents = useMemo(() => events.slice(-6).reverse(), [events]);
   const activeConversation = conversations.find((c) => c.id === selectedConversationId);
+  const latestAssistant = [...conversationMessages].reverse().find((message) => message.role === "assistant");
+  const conversationApproval = latestAssistant?.status === "awaiting_approval" ? latestAssistant.pendingApproval : null;
+  const effectiveApproval = pendingApproval ?? conversationApproval ?? null;
+  const effectivePhase = effectiveApproval ? "awaiting_approval" : phase;
+  const phaseCfg = PHASE_CONFIG[effectivePhase] ?? PHASE_CONFIG.idle;
+  const PhaseIcon = phaseCfg.icon;
+  const waitingForApproval = Boolean(effectiveApproval);
 
   const hasProject = Boolean(capabilities.projectId);
   const hasCheckpoint = Boolean(checkpoint?.gitSha);
@@ -230,7 +236,7 @@ export default function StudioPlanSurface({
 
         {/* ── Project header ──────────────────────────────────── */}
         <PlanCard title="Project" icon={FolderOpen}>
-          <div className="grid grid-cols-2 gap-x-6">
+          <div className="grid min-w-0 grid-cols-1 gap-x-6 min-[560px]:grid-cols-2">
             <PlanRow label="Name" value={capabilities.projectName} />
             <PlanRow label="Source" value={capabilities.sourceType ?? undefined} />
             <PlanRow label="Repository" value={capabilities.repositoryName} mono />
@@ -249,10 +255,10 @@ export default function StudioPlanSurface({
                 {phaseCfg.label}
               </div>
               <div className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-                {isRunning ? `Step ${toolCalls.length + 1} in progress` : "Not running"}
+                {waitingForApproval ? "Work is paused until you approve this action" : isRunning ? `Step ${toolCalls.length + 1} in progress` : phase === "done" ? "Run finished" : "Not running"}
               </div>
             </div>
-            {pendingApproval && (
+            {effectiveApproval && (
               <div
                 className="rounded-lg px-2.5 py-1 text-[11px] font-bold"
                 style={{
@@ -279,7 +285,7 @@ export default function StudioPlanSurface({
 
         {/* ── Agent & execution mode ──────────────────────────── */}
         <PlanCard title="Agent" icon={Zap}>
-          <div className="grid grid-cols-2 gap-x-6">
+          <div className="grid min-w-0 grid-cols-1 gap-x-6 min-[560px]:grid-cols-2">
             <PlanRow label="Active agent" value={agentMeta?.displayName ?? activeAgentId} />
             <PlanRow label="Execution mode" value={executionMode.toUpperCase()} />
             <PlanRow label="Model" value={modelLabel} />

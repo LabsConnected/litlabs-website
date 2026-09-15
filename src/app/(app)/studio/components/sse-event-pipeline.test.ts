@@ -344,6 +344,24 @@ describe("SSE event pipeline — full LiTT task simulation", () => {
     expect(toolResults[0].success).toBe(true);
   });
 
+  it("keeps a paused approval run waiting when a premature finished marker arrives", () => {
+    const feed = feedSSEEventToExecutionStore;
+    useExecutionStore.getState().startRun();
+
+    feed({
+      type: "pending_approval",
+      toolId: "files.write",
+      reason: "Mutation requires approval in ACT mode",
+      pausedRunId: "paused-1",
+    });
+    feed({ type: "finished", totalSteps: 1 });
+
+    const state = useExecutionStore.getState();
+    expect(state.pendingApproval?.pausedRunId).toBe("paused-1");
+    expect(state.phase).toBe("awaiting_approval");
+    expect(state.events.some((event) => event.type === "finished")).toBe(false);
+  });
+
   it("simulates: Stop during active tool operation", () => {
     const feed = feedSSEEventToExecutionStore;
 

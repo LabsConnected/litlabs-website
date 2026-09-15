@@ -55,8 +55,12 @@ const INSPECTOR_TABS: { id: InspectorTab; label: string; icon: typeof ClipboardL
 
 const DRAWER_TABS: { id: DrawerTab; label: string; icon: typeof Activity }[] = [
   { id: "activity", label: "Activity", icon: Activity },
+  { id: "work", label: "Work", icon: Activity },
+  { id: "files", label: "Files", icon: Folder },
+  { id: "inspector", label: "Inspector", icon: ClipboardList },
   { id: "terminal", label: "Terminal", icon: Terminal },
   { id: "media", label: "Media", icon: Music },
+  { id: "assets", label: "Assets", icon: Folder },
 ];
 
 export interface StudioInspectorData {
@@ -513,7 +517,7 @@ export function StudioDrawer({
       : drawerHeight;
 
   const statusColor = activeTab === "terminal" ? "#72f238" : "rgba(255,255,255,0.2)";
-  const statusLabel = activeTab === "terminal" ? "Ready" : activeTab === "media" ? "Media" : "Activity";
+  const statusLabel = activeTab === "terminal" ? "Ready" : activeTab === "media" ? "Media" : activeTab === "work" ? "Live" : "Activity";
 
   return (
     <div
@@ -565,7 +569,18 @@ export function StudioDrawer({
               <button
                 key={t.id}
                 type="button"
-                onClick={() => { onTabChange(t.id); if (view === "collapsed") { setView("normal"); onToggle(); } }}
+                onClick={() => {
+                  if (view !== "collapsed" && activeTab === t.id) {
+                    setView("collapsed");
+                    onToggle();
+                    return;
+                  }
+                  onTabChange(t.id);
+                  if (view === "collapsed") {
+                    setView("normal");
+                    onToggle();
+                  }
+                }}
                 className="flex h-full items-center gap-1.5 px-2.5 text-[11px] font-bold transition"
                 style={{
                   color: isActive ? "var(--litt-primary)" : "var(--text-muted)",
@@ -625,16 +640,19 @@ export function StudioDrawer({
         </div>
       </div>
 
-      {/* Content area — only when expanded */}
-      {view !== "collapsed" && (
-        <div className="min-h-0 flex-1 overflow-hidden">
-          {children ?? (
-            <div className="flex h-full items-center justify-center text-[11px]" style={{ color: "var(--text-muted)" }}>
-              {activeTab === "terminal" ? "Workspace ready · Terminal session not started" : activeTab === "media" ? "Media not loaded" : "No activity yet"}
-            </div>
-          )}
-        </div>
-      )}
+      {/* Keep the tool tree mounted while collapsed so terminal/media/files
+          state survives dock toggles and tab changes. */}
+      <div
+        className="min-h-0 flex-1 overflow-hidden"
+        style={{ display: view === "collapsed" ? "none" : "block" }}
+        aria-hidden={view === "collapsed"}
+      >
+        {children ?? (
+          <div className="flex h-full items-center justify-center text-[11px]" style={{ color: "var(--text-muted)" }}>
+            {activeTab === "terminal" ? "Workspace ready · Terminal session not started" : activeTab === "media" ? "Media not loaded" : activeTab === "files" ? "No files loaded" : activeTab === "assets" ? "No assets loaded" : activeTab === "inspector" ? "No selection yet" : activeTab === "work" ? "No work activity yet" : "No activity yet"}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -949,6 +949,7 @@ export function useCanonicalConversation({
       // tracked, and busy/streaming are NOT released in finally. The
       // fetch lifecycle is not the execution lifecycle.
       let runStillActive = false;
+      let pausedForApproval = false;
       explicitCancelRef.current = false;
 
       // Transport loss (or any post-dispatch failure) must not declare a
@@ -1246,6 +1247,7 @@ export function useCanonicalConversation({
                   pausedRunId: evt.pausedRunId,
                   inputs: evt.inputs,
                 };
+                pausedForApproval = true;
               } else if (evt.type === "checkpoint" && evt.label) {
                 toolActivity.push({
                   toolId: "checkpoint",
@@ -1430,7 +1432,9 @@ export function useCanonicalConversation({
           }
           getStore().setStreaming(false);
           setBusy(false);
-          useExecutionStore.getState().endRun(endRunReason);
+          if (!pausedForApproval) {
+            useExecutionStore.getState().endRun(endRunReason);
+          }
         }
         // runStillActive: canonical state confirmed the server is still
         // executing. busy/streaming/run-identity stay set so the composer

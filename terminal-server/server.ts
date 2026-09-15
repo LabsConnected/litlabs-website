@@ -52,11 +52,6 @@ import {
   verifyPreviewHealth,
   type PreviewStatus,
 } from "./preview/PreviewManager";
-import {
-  shouldInjectInspector,
-  injectInspector as injectInspectorScript,
-  INSPECTOR_DROPPED_HEADERS,
-} from "./preview/inspector";
 import { registerWorkspaceRoutes } from "./workspace-routes";
 import { dispatchCommand } from "./command-bridge";
 import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manager";
@@ -1182,11 +1177,6 @@ app.use("/preview/:workspaceId", async (req: AuthenticatedRequest, res: Response
       redirect: "manual",
     });
 
-    // Successful HTML documents get the inspector bridge injected so the
-    // Studio iframe can offer element selection across origins.
-    const contentType = proxyResp.headers.get("content-type") ?? "";
-    const injectInspector = shouldInjectInspector(proxyResp.status, contentType);
-
     // Forward status, headers, and body
     res.status(proxyResp.status);
     proxyResp.headers.forEach((value, key) => {
@@ -1199,20 +1189,31 @@ app.use("/preview/:workspaceId", async (req: AuthenticatedRequest, res: Response
         return;
       }
 
-      // Rewritten bodies have a new length and are no longer encoded.
-      if (injectInspector && INSPECTOR_DROPPED_HEADERS.has(header)) {
-        return;
-      }
-
       res.setHeader(key, value);
     });
 
-    const body = await proxyResp.arrayBuffer();
-    if (injectInspector) {
-      res.send(injectInspectorScript(Buffer.from(body).toString("utf8")));
+    const body = Buffer.from(await proxyResp.arrayBuffer());
+    const contentType = proxyResp.headers.get("content-type")?.toLowerCase() ?? "";
+    if (contentType.includes("text/html")) {
+      // The Studio preview is cross-origin, so the parent cannot inspect its
+      // DOM. Inject a tiny click bridge that keeps element discovery inside
+      // the preview and reports only derived context via postMessage.
+      const html = body.toString("utf8");
+      const bridge = `<script data-litt-preview-bridge>(function(){function label(e){return e.getAttribute('aria-label')||e.getAttribute('data-testid')||e.getAttribute('role')||({nav:'Navigation',header:'Header',main:'Main content',section:'Section',footer:'Footer',form:'Form',button:'Button',a:'Link',img:'Image',h1:'Heading',h2:'Heading'}[e.tagName.toLowerCase()]||e.textContent||e.tagName.toLowerCase()).replace(/[-_]/g,' ').replace(/\\s+/g,' ').trim().slice(0,80)}function selector(e){if(e.id)return '#'+e.id;var p=[],n=e;while(n&&n.tagName.toLowerCase()!=='body'&&p.length<4){var s=n.parentElement?Array.from(n.parentElement.children).filter(function(x){return x.tagName===n.tagName}):[],i=s.indexOf(n)+1;p.unshift(n.tagName.toLowerCase()+(s.length>1?':nth-of-type('+i+')':''));n=n.parentElement}return p.join(' > ')}document.addEventListener('click',function(ev){var e=ev.target&&ev.target.closest?ev.target.closest('nav,header,main,section,footer,form,button,a,[role]'):ev.target;if(!e)return;ev.preventDefault();ev.stopPropagation();e.style.outline='2px solid #9b4dff';e.style.outlineOffset='2px';e.style.boxShadow='0 0 0 4px rgba(155,77,255,.16)';parent.postMessage({type:'litt:preview-selection',label:label(e),selector:selector(e),tagName:e.tagName.toLowerCase()},'*')},true)})()</script>`;
+      const marker = "</head>";
+      const markerIndex = html.toLowerCase().indexOf(marker);
+      const injected = markerIndex >= 0
+        ? `${html.slice(0, markerIndex)}${bridge}${html.slice(markerIndex)}`
+        : `${bridge}${html}`;
+      // The injected script changes both the byte length and, for compressed
+      // upstream responses, the representation. Do not forward stale entity
+      // headers for the rewritten response.
+      res.removeHeader("content-length");
+      res.removeHeader("content-encoding");
+      res.send(Buffer.from(injected, "utf8"));
       return;
     }
-    res.send(Buffer.from(body));
+    res.send(body);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(502).json({ error: "Preview proxy error", detail: message });
