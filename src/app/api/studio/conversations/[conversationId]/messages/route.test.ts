@@ -93,12 +93,17 @@ vi.mock("@/lib/agent-billing", () => ({
 }));
 
 vi.mock("@/lib/litt-runtime", () => ({
-  buildPrompt: vi.fn(() => ({
+  buildPrompt: vi.fn((_ctx: unknown, input: { message?: string }) => ({
     fullPrompt: "test prompt",
     systemPrompt: "system",
     agentDisplayName: "LiTT",
     kernelResult: {
-      decision: { routing: { requiresExecution: true, mode: "build" } },
+      decision: {
+        routing: {
+          requiresExecution: !input.message?.includes("hello there"),
+          mode: input.message?.includes("hello there") ? "think" : "build",
+        },
+      },
     },
   })),
   buildRunContextFromStudio: vi.fn(() => ({})),
@@ -177,6 +182,7 @@ import { persistMemory } from "@/lib/studio/memory-service";
 import { resolveRuntimeAgent } from "@/lib/agent-runtime";
 import { parseAgentSelection } from "@/lib/agent-selection";
 import { reserveCredits, settleRun } from "@/lib/agent-billing";
+import { buildPrompt } from "@/lib/litt-runtime";
 
 // ── Helpers ──
 
@@ -559,6 +565,12 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
       ranTools: false,
       toolExecutions: [],
     } as any);
+    vi.mocked(buildPrompt).mockReturnValueOnce({
+      fullPrompt: "test prompt",
+      systemPrompt: "system",
+      agentDisplayName: "LiTT",
+      kernelResult: { decision: { routing: { requiresExecution: false, mode: "think" } } },
+    } as any);
 
     // The execution AbortSignal is passed INTO streamText — a real
     // provider abort, not a detached Promise.race. Simulate the provider
@@ -576,7 +588,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
     });
 
     const clientRequestId = "req-v1-stop";
-    const req = makeRequest({ clientRequestId });
+    const req = makeRequest({ clientRequestId, message: "hello there" });
     const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
     expect(res.status).toBe(200);
 
@@ -772,7 +784,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
 
     vi.mocked(runLaunchFlow).mockRejectedValue(new Error("Provider connection refused"));
 
-    const req = makeRequest({});
+    const req = makeRequest({ message: "hello there" });
     const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
     expect(res.status).toBe(200);
 
@@ -812,6 +824,12 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
       ranTools: false,
       toolExecutions: [],
     } as any);
+    vi.mocked(buildPrompt).mockReturnValueOnce({
+      fullPrompt: "test prompt",
+      systemPrompt: "system",
+      agentDisplayName: "LiTT",
+      kernelResult: { decision: { routing: { requiresExecution: false, mode: "think" } } },
+    } as any);
     // Provider stream completes normally but emits no content — the exact
     // production failure mode behind "The response was empty".
     vi.mocked(streamText).mockResolvedValue({
@@ -845,6 +863,24 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
       undefined,
     );
     expect(getActiveExecution("conv-123")).toBeNull();
+  });
+
+  it("does not downgrade an execution request to the text-only V1 path", async () => {
+    vi.mocked(buildCanonicalRuntimeContext).mockResolvedValue({
+      workspaceExecutionAvailable: false,
+      executionMode: "auto",
+    } as any);
+
+    const response = await POST(makeRequest({ message: "Change only the selected button text" }), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "TOOL_EXECUTION_UNAVAILABLE",
+    });
+    expect(runAgentLoop).not.toHaveBeenCalled();
+    expect(streamText).not.toHaveBeenCalled();
   });
 
   it("a V2 run that returns empty finalText is persisted and reported as failed, not completed", async () => {

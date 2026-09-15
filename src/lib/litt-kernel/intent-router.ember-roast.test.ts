@@ -68,4 +68,13 @@ describe("Ember Roast prompt — AUTO classifier routing", () => {
     // Music is not a LiTT kernel mode — it's a Studio LiTTMode.
     // The kernel mode must be build, not create (which lacks requiresExecution).
   });
+
+  it("routes an Inspector selected-button edit into execution", () => {
+    const result = classifyIntent(
+      "Change only the selected button's visible text from Explore Our Menu to Browse The Roast.",
+    );
+    expect(result.mode).toBe("build");
+    expect(result.requiresExecution).toBe(true);
+    expect(result.requiresProject).toBe(true);
+  });
 });

@@ -150,7 +150,8 @@ describe("Launch Flow: no-mutation reprompt", () => {
     const result = await runLaunchFlow(options);
 
     expect(runAgentLoop).toHaveBeenCalledTimes(2);
-    expect(result.status).toBe("preview_ready");
+    expect(result.status).toBe("failed");
+    expect(result.error).toBe("TOOL_EXECUTION_UNAVAILABLE");
   });
 
   it("does not reprompt when the first pass already applied a mutation", async () => {
