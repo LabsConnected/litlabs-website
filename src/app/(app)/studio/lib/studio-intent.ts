@@ -14,7 +14,6 @@ export type StudioIntent =
   | "visual_output"
   | "project_health"
   | "open_approvals"
-  | "deploy"
   | "open_settings"
   | "unknown";
 
@@ -117,15 +116,6 @@ const INTENT_PATTERNS: IntentPattern[] = [
     ],
   },
   {
-    intent: "deploy",
-    patterns: [
-      /\bdeploy\b.*\bproject\b/i,
-      /\bdeploy\b.*\bapp\b/i,
-      /\bdeploy\b.*\bsite\b/i,
-      /^deploy$/i,
-    ],
-  },
-  {
     intent: "run_command",
     patterns: [
       /^run\b\s+\S/i,
@@ -221,8 +211,6 @@ function buildIntentResult(
       };
     case "open_settings":
       return { intent, message: "Opening Settings." };
-    case "deploy":
-      return { intent, message: "Preparing deployment." };
     case "run_command":
       return {
         intent,
