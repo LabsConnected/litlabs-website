@@ -42,6 +42,8 @@ import {
   listWorkspaces,
   type WorkspaceDescriptor,
 } from "./workspace/WorkspaceManager";
+import { resolveWorkspacePath as resolveWorkspacePathSecure } from "./workspace/WorkspaceSecurity";
+import { checkPreviewToken } from "./preview-auth";
 import { evaluateWorkspaceRoot } from "./workspace/durability";
 import {
   startPreview,
@@ -1159,17 +1161,19 @@ app.get("/internal/workspace/:workspaceId/preview/logs", requireInternalServiceA
  * dev server running on localhost:<port>. This is how the browser
  * accesses the running application.
  *
- * Access is protected by a preview token query parameter.
+ * Access is protected by a preview token query parameter (or
+ * X-Preview-Token header). The check is FAIL-CLOSED: when
+ * PREVIEW_ACCESS_TOKEN is not configured, all requests are denied.
  */
 app.use("/preview/:workspaceId", async (req: AuthenticatedRequest, res: Response) => {
   const workspaceId = req.params.workspaceId;
 
-  // Verify preview token
+  // Verify preview token — fail CLOSED when the token is not configured.
+  // (checkPreviewToken denies every request if PREVIEW_ACCESS_TOKEN is unset.)
   const previewToken = String(req.query.token || req.headers["x-preview-token"] || "");
-  const expectedToken = process.env.PREVIEW_ACCESS_TOKEN ?? "";
-
-  if (expectedToken && previewToken !== expectedToken) {
-    res.status(401).json({ error: "Invalid preview token" });
+  const previewAuth = checkPreviewToken(previewToken);
+  if (!previewAuth.ok) {
+    res.status(previewAuth.status).json({ error: previewAuth.error, errorCode: previewAuth.errorCode });
     return;
   }
 
@@ -1242,16 +1246,29 @@ function getUserWorkspace(userId: string) {
 }
 
 function safePath(userId: string, filePath: string) {
-  if (filePath.length > MAX_PATH_LENGTH) {
-    throw new Error("Path too long");
-  }
   const workspace = getUserWorkspace(userId);
-  const target = resolve(workspace, filePath);
-  const pathFromWorkspace = relative(workspace, target);
-  if (pathFromWorkspace.startsWith("..") || isAbsolute(pathFromWorkspace)) {
-    throw new Error("Invalid path");
-  }
-  return target;
+  // Symlink-aware: rejects paths that escape via symlinked components,
+  // including writes of new files through a symlinked parent directory.
+  return resolveWorkspacePathSecure(workspace, filePath);
+}
+
+/** Path-validation failures from the workspace path resolvers → 400, not 500. */
+function isPathValidationError(msg: string): boolean {
+  return (
+    msg === "Invalid path" ||
+    msg === "Path too long" ||
+    msg === "Absolute or parent paths are not allowed" ||
+    msg === "Path escapes workspace root" ||
+    msg === "Symlink escapes workspace root"
+  );
+}
+
+/** Map file-endpoint errors to HTTP status codes. */
+function fileErrorStatus(msg: string): number {
+  if (msg === "Forbidden") return 403;
+  if (msg === "Workspace not found") return 404;
+  if (isPathValidationError(msg)) return 400;
+  return 500;
 }
 
 function requireTerminalAuth(
@@ -1282,7 +1299,8 @@ app.get("/files", (req: AuthenticatedRequest, res) => {
     }));
     res.json({ entries });
   } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to list files" });
+    const msg = err instanceof Error ? err.message : "Failed to list files";
+    res.status(isPathValidationError(msg) ? 400 : 500).json({ error: msg });
   }
 });
 
@@ -1303,7 +1321,8 @@ app.post("/files/read", (req: AuthenticatedRequest, res) => {
     const content = readFileSync(target, "utf-8");
     res.json({ content });
   } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to read file" });
+    const msg = err instanceof Error ? err.message : "Failed to read file";
+    res.status(isPathValidationError(msg) ? 400 : 500).json({ error: msg });
   }
 });
 
@@ -1322,7 +1341,8 @@ app.post("/files/write", (req: AuthenticatedRequest, res) => {
     writeFileSync(target, content, "utf-8");
     res.json({ saved: true });
   } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to write file" });
+    const msg = err instanceof Error ? err.message : "Failed to write file";
+    res.status(isPathValidationError(msg) ? 400 : 500).json({ error: msg });
   }
 });
 
@@ -1337,7 +1357,8 @@ app.post("/files/delete", (req: AuthenticatedRequest, res) => {
     rmSync(target, { recursive: true, force: true });
     res.json({ deleted: true });
   } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to delete file" });
+    const msg = err instanceof Error ? err.message : "Failed to delete file";
+    res.status(isPathValidationError(msg) ? 400 : 500).json({ error: msg });
   }
 });
 
@@ -1352,15 +1373,9 @@ function resolveWorkspacePath(workspaceId: string, userId: string, filePath: str
   if (ws.userId !== userId) throw new Error("Forbidden");
   if (!ws.ready) throw new Error("Workspace not ready");
 
-  if (filePath.length > MAX_PATH_LENGTH) {
-    throw new Error("Path too long");
-  }
-  const target = resolve(ws.root, filePath);
-  const pathFromRoot = relative(ws.root, target);
-  if (pathFromRoot.startsWith("..") || isAbsolute(pathFromRoot)) {
-    throw new Error("Invalid path — escapes workspace root");
-  }
-  return target;
+  // Symlink-aware: rejects paths that escape via symlinked components,
+  // including writes of new files through a symlinked parent directory.
+  return resolveWorkspacePathSecure(ws.root, filePath);
 }
 
 /** Middleware: extract workspaceId from header and verify it belongs to the user. */
@@ -1399,18 +1414,15 @@ app.use("/ws-files", requireWorkspaceAuth);
 app.get("/ws-files", (req: AuthenticatedRequest, res) => {
   const dirPath = String(req.query.path || ".");
   try {
-    const target = resolve(req.workspaceRoot!, dirPath);
-    const rel = relative(req.workspaceRoot!, target);
-    if (rel.startsWith("..") || isAbsolute(rel)) {
-      return res.status(400).json({ error: "Invalid path" });
-    }
+    const target = resolveWorkspacePathSecure(req.workspaceRoot!, dirPath);
     const entries = readdirSync(target, { withFileTypes: true }).map((entry) => ({
       name: entry.name,
       type: entry.isDirectory() ? "folder" : "file",
     }));
     res.json({ entries, workspaceId: req.workspaceId });
   } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to list files" });
+    const msg = err instanceof Error ? err.message : "Failed to list files";
+    res.status(isPathValidationError(msg) ? 400 : 500).json({ error: msg });
   }
 });
 
@@ -1429,7 +1441,7 @@ app.post("/ws-files/read", (req: AuthenticatedRequest, res) => {
     res.json({ content, workspaceId: req.workspaceId });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to read file";
-    const status = msg === "Forbidden" ? 403 : msg === "Workspace not found" ? 404 : 500;
+    const status = fileErrorStatus(msg);
     res.status(status).json({ error: msg });
   }
 });
@@ -1459,7 +1471,7 @@ app.post("/ws-files/write", (req: AuthenticatedRequest, res) => {
     res.json({ saved: true, workspaceId: req.workspaceId });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to write file";
-    const status = msg === "Forbidden" ? 403 : msg === "Workspace not found" ? 404 : 500;
+    const status = fileErrorStatus(msg);
     res.status(status).json({ error: msg });
   }
 });
@@ -1475,7 +1487,7 @@ app.post("/ws-files/delete", (req: AuthenticatedRequest, res) => {
     res.json({ deleted: true, workspaceId: req.workspaceId });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to delete file";
-    const status = msg === "Forbidden" ? 403 : msg === "Workspace not found" ? 404 : 500;
+    const status = fileErrorStatus(msg);
     res.status(status).json({ error: msg });
   }
 });
@@ -1492,7 +1504,7 @@ app.post("/ws-files/mkdir", (req: AuthenticatedRequest, res) => {
     res.json({ created: true, workspaceId: req.workspaceId });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to create folder";
-    const status = msg === "Forbidden" ? 403 : msg === "Workspace not found" ? 404 : 500;
+    const status = fileErrorStatus(msg);
     res.status(status).json({ error: msg });
   }
 });
@@ -1512,7 +1524,7 @@ app.post("/ws-files/rename", (req: AuthenticatedRequest, res) => {
     res.json({ renamed: true, workspaceId: req.workspaceId });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to rename path";
-    const status = msg === "Forbidden" ? 403 : msg === "Workspace not found" ? 404 : 500;
+    const status = fileErrorStatus(msg);
     res.status(status).json({ error: msg });
   }
 });

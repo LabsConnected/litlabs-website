@@ -1,4 +1,4 @@
-import { resolve, relative, isAbsolute, join, normalize, sep } from "path";
+import { resolve, relative, isAbsolute, join, normalize, sep, dirname } from "path";
 import { existsSync, realpathSync, statSync } from "fs";
 
 const MAX_PATH_LENGTH = 4096;
@@ -42,9 +42,27 @@ export function resolveWorkspacePath(
     throw new Error("Path escapes workspace root");
   }
 
-  if (existsSync(target)) {
-    const real = realpathSync(target);
-    const realRel = relative(root, real);
+  // Symlink check: canonicalize the nearest existing ancestor of the target
+  // and verify it stays within the workspace root. The target itself may not
+  // exist yet (e.g. writing a new file), so checking only an existing target
+  // would miss a symlinked parent directory pointing outside the root —
+  // `ln -s /etc link` + write `link/evil` must not escape. The root itself
+  // is canonicalized first so a symlinked root can't smuggle an outside
+  // path past the comparison. The walk never goes above the workspace root:
+  // if the root doesn't exist yet there is nothing to symlink-check against.
+  const realRoot = existsSync(root) ? realpathSync(root) : root;
+  let probe: string = target;
+  for (;;) {
+    if (existsSync(probe)) break;
+    const relProbe = relative(root, probe);
+    if (relProbe === "" || relProbe.startsWith("..") || isAbsolute(relProbe)) break;
+    const parent = dirname(probe);
+    if (parent === probe) break;
+    probe = parent;
+  }
+  if (existsSync(probe)) {
+    const real = realpathSync(probe);
+    const realRel = relative(realRoot, real);
     if (realRel.startsWith("..") || isAbsolute(realRel)) {
       throw new Error("Symlink escapes workspace root");
     }
