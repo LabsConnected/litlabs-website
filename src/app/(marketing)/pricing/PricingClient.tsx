@@ -436,10 +436,10 @@ export default function PricingClient() {
         </div>
 
         <div className={styles.ctaActions}>
-          <SmartLink className={styles.primaryCta} href="/studio">
+          <Link className={styles.primaryCta} href="/studio">
             Launch Studio
             <ArrowIcon />
-          </SmartLink>
+          </Link>
           <Link className={styles.secondaryCta} href="/marketplace">
             Explore Marketplace
           </Link>

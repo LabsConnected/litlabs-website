@@ -47,42 +47,42 @@ export default function PrivacyPage() {
             </p>
             <ul className="list-disc pl-5 space-y-1 opacity-80">
               <li>
-                <strong>Account Data:</strong> Email address, username, and
+                <strong>Account Data:</strong>{" "}Email address, username, and
                 profile information provided during registration via Clerk
                 authentication.
               </li>
               <li>
-                <strong>Usage Data:</strong> Browser type, browser version,
+                <strong>Usage Data:</strong>{" "}Browser type, browser version,
                 pages visited, time spent on pages, and device identifiers
                 collected through standard web protocols.
               </li>
               <li>
-                <strong>Local Storage:</strong> Theme preferences, UI state,
+                <strong>Local Storage:</strong>{" "}Theme preferences, UI state,
                 and cached session metadata stored locally in your browser.
-                AI credit balances are <strong>not</strong> stored in local
+                AI credit balances are <strong>not</strong>{" "}stored in local
                 storage — they are stored server-side in our Supabase credit
                 ledger.
               </li>
               <li>
-                <strong>Conversations &amp; Project Memory:</strong> Messages
+                <strong>Conversations &amp; Project Memory:</strong>{" "}Messages
                 sent to AI agents, conversation history, project context, and
-                agent memories are <strong>durably stored</strong> in our
+                agent memories are <strong>durably stored</strong>{" "}in our
                 Supabase database. Conversations are linked to your account and
                 projects, and persist across sessions.
               </li>
               <li>
-                <strong>AI Credit Ledger:</strong> Your AI credit balance,
+                <strong>AI Credit Ledger:</strong>{" "}Your AI credit balance,
                 transaction history (grants, spending, purchases), and billing
                 records are stored server-side in our Supabase credit ledger.
               </li>
               <li>
-                <strong>Uploaded Media &amp; Attachments:</strong> Files,
+                <strong>Uploaded Media &amp; Attachments:</strong>{" "}Files,
                 images, audio, and other media you upload or generate are
                 stored in Cloudflare R2 object storage and linked to your
                 account.
               </li>
               <li>
-                <strong>Voice Data:</strong> When you use voice features in
+                <strong>Voice Data:</strong>{" "}When you use voice features in
                 Studio, your microphone audio is streamed to Inworld AI for
                 speech-to-text transcription. The transcribed text is processed
                 through the canonical Studio conversation. Generated responses
@@ -90,14 +90,14 @@ export default function PrivacyPage() {
                 playback.
               </li>
               <li>
-                <strong>Camera &amp; Screen Sharing:</strong> When you use
+                <strong>Camera &amp; Screen Sharing:</strong>{" "}When you use
                 camera preview or screen sharing features in Studio, camera
                 output and screen content are processed locally in your browser
                 and may be shared within your active session. These features
                 require explicit browser permission prompts.
               </li>
               <li>
-                <strong>GitHub Connection Data:</strong> When you connect a
+                <strong>GitHub Connection Data:</strong>{" "}When you connect a
                 GitHub repository, we store repository references, branch
                 information, and deployment metadata to enable project
                 synchronization and terminal workspace provisioning.
@@ -156,55 +156,55 @@ export default function PrivacyPage() {
             </p>
             <ul className="list-disc pl-5 space-y-1 opacity-80">
               <li>
-                <strong>Google Gemini:</strong> Primary LLM and image
+                <strong>Google Gemini:</strong>{" "}Primary LLM and image
                 generation (free tier).
               </li>
               <li>
-                <strong>OpenRouter:</strong> Fallback LLM routing with
+                <strong>OpenRouter:</strong>{" "}Fallback LLM routing with
                 multiple models (DeepSeek, Mistral, Llama, Qwen, Trinity).
               </li>
               <li>
-                <strong>Groq:</strong> Fast inference and audio transcription
+                <strong>Groq:</strong>{" "}Fast inference and audio transcription
                 (Whisper).
               </li>
               <li>
-                <strong>Mistral:</strong> LLM routing for text and code tasks.
+                <strong>Mistral:</strong>{" "}LLM routing for text and code tasks.
               </li>
               <li>
-                <strong>Local models (Ollama):</strong> Optional on-device or
+                <strong>Local models (Ollama):</strong>{" "}Optional on-device or
                 self-hosted inference — requests stay on your infrastructure
                 when a local route is selected.
               </li>
               <li>
-                <strong>OpenAI:</strong> Premium LLM and media generation
+                <strong>OpenAI:</strong>{" "}Premium LLM and media generation
                 (BYOK — Bring Your Own Key).
               </li>
               <li>
-                <strong>Anthropic:</strong> Premium LLM (BYOK).
+                <strong>Anthropic:</strong>{" "}Premium LLM (BYOK).
               </li>
               <li>
-                <strong>Together:</strong> FLUX image generation.
+                <strong>Together:</strong>{" "}FLUX image generation.
               </li>
               <li>
-                <strong>Fal:</strong> Image generation.
+                <strong>Fal:</strong>{" "}Image generation.
               </li>
               <li>
-                <strong>MiniMax:</strong> 3D generation (Space model).
+                <strong>MiniMax:</strong>{" "}3D generation (Space model).
               </li>
               <li>
-                <strong>Alibaba:</strong> Image and video generation.
+                <strong>Alibaba:</strong>{" "}Image and video generation.
               </li>
               <li>
-                <strong>Recraft:</strong> Vector and logo image generation.
+                <strong>Recraft:</strong>{" "}Vector and logo image generation.
               </li>
               <li>
-                <strong>Cloudflare:</strong> Image generation.
+                <strong>Cloudflare:</strong>{" "}Image generation.
               </li>
               <li>
-                <strong>ElevenLabs:</strong> Music and audio generation.
+                <strong>ElevenLabs:</strong>{" "}Music and audio generation.
               </li>
               <li>
-                <strong>Inworld AI:</strong> Voice speech-to-text and
+                <strong>Inworld AI:</strong>{" "}Voice speech-to-text and
                 text-to-speech.
               </li>
             </ul>
@@ -230,25 +230,25 @@ export default function PrivacyPage() {
             </p>
             <ul className="list-disc pl-5 space-y-1 opacity-80">
               <li>
-                <strong>Authentication data:</strong> Managed by Clerk (SOC 2
+                <strong>Authentication data:</strong>{" "}Managed by Clerk (SOC 2
                 compliant).
               </li>
               <li>
-                <strong>Database:</strong> Supabase (PostgreSQL) stores user
+                <strong>Database:</strong>{" "}Supabase (PostgreSQL) stores user
                 accounts, conversations, project memory, AI credit
                 ledger, subscriptions, and marketplace data.
               </li>
               <li>
-                <strong>File storage:</strong> Cloudflare R2 stores uploaded
+                <strong>File storage:</strong>{" "}Cloudflare R2 stores uploaded
                 and generated media (images, audio, video, assets).
               </li>
               <li>
-                <strong>Payment data:</strong> Processed by Stripe. We do not
+                <strong>Payment data:</strong>{" "}Processed by Stripe. We do not
                 store full card numbers — Stripe handles PCI-compliant payment
                 data.
               </li>
               <li>
-                <strong>Code &amp; terminal workspaces:</strong> Provisioned on
+                <strong>Code &amp; terminal workspaces:</strong>{" "}Provisioned on
                 Railway infrastructure with per-user isolation.
               </li>
             </ul>
@@ -269,37 +269,37 @@ export default function PrivacyPage() {
             <p className="mb-2">We use the following third-party services:</p>
             <ul className="list-disc pl-5 space-y-1 opacity-80">
               <li>
-                <strong>Clerk:</strong> Authentication and user management.
+                <strong>Clerk:</strong>{" "}Authentication and user management.
               </li>
               <li>
-                <strong>Supabase:</strong> Database, conversations, project
+                <strong>Supabase:</strong>{" "}Database, conversations, project
                 memory, and AI credit ledger.
               </li>
               <li>
-                <strong>Stripe:</strong> Payment processing for subscriptions
+                <strong>Stripe:</strong>{" "}Payment processing for subscriptions
                 and marketplace transactions.
               </li>
               <li>
-                <strong>Cloudflare R2:</strong> Object storage for media and
+                <strong>Cloudflare R2:</strong>{" "}Object storage for media and
                 assets.
               </li>
               <li>
-                <strong>Vercel:</strong> Hosting and deployment infrastructure.
+                <strong>Vercel:</strong>{" "}Hosting and deployment infrastructure.
               </li>
               <li>
-                <strong>Railway:</strong> Terminal workspace provisioning and
+                <strong>Railway:</strong>{" "}Terminal workspace provisioning and
                 voice proxy.
               </li>
               <li>
-                <strong>GitHub:</strong> Repository connections for project
+                <strong>GitHub:</strong>{" "}Repository connections for project
                 synchronization.
               </li>
               <li>
-                <strong>Inworld AI:</strong> Voice speech-to-text and
+                <strong>Inworld AI:</strong>{" "}Voice speech-to-text and
                 text-to-speech.
               </li>
               <li>
-                <strong>AI Model Providers:</strong> Google Gemini, OpenRouter,
+                <strong>AI Model Providers:</strong>{" "}Google Gemini, OpenRouter,
                 Groq, Mistral, OpenAI, Anthropic, Together, Fal, MiniMax,
                 Alibaba, Recraft, Cloudflare, ElevenLabs, Inworld AI — as
                 described in Section 3.
@@ -319,16 +319,16 @@ export default function PrivacyPage() {
             </p>
             <ul className="list-disc pl-5 space-y-1 opacity-80">
               <li>
-                <strong>Authentication cookies:</strong> Set by Clerk to
+                <strong>Authentication cookies:</strong>{" "}Set by Clerk to
                 maintain your signed-in session.
               </li>
               <li>
-                <strong>Local storage:</strong> Theme preferences, UI state,
+                <strong>Local storage:</strong>{" "}Theme preferences, UI state,
                 and cached session metadata. AI credit balances are fetched from
                 the server, not stored locally.
               </li>
               <li>
-                <strong>Analytics:</strong> Vercel Analytics may collect basic
+                <strong>Analytics:</strong>{" "}Vercel Analytics may collect basic
                 usage metrics (page views, performance). No cross-site
                 tracking or advertising cookies are used.
               </li>
@@ -349,25 +349,25 @@ export default function PrivacyPage() {
             </h2>
             <ul className="list-disc pl-5 space-y-1 opacity-80">
               <li>
-                <strong>Conversations &amp; project memory:</strong> Retained
+                <strong>Conversations &amp; project memory:</strong>{" "}Retained
                 for the lifetime of your account unless you delete them.
               </li>
               <li>
-                <strong>AI credit ledger:</strong> Transaction history is
+                <strong>AI credit ledger:</strong>{" "}Transaction history is
                 retained for billing and audit purposes.
               </li>
               <li>
-                <strong>Uploaded media:</strong> Retained until you delete the
+                <strong>Uploaded media:</strong>{" "}Retained until you delete the
                 associated project or asset.
               </li>
               <li>
-                <strong>Voice data:</strong> Audio streams are processed in
+                <strong>Voice data:</strong>{" "}Audio streams are processed in
                 real-time by Inworld AI for transcription and TTS. We do not
                 store raw audio recordings unless explicitly saved as part of a
                 project.
               </li>
               <li>
-                <strong>Audit events:</strong> Security and operational audit
+                <strong>Audit events:</strong>{" "}Security and operational audit
                 logs are retained for <strong>90 days</strong>, then
                 automatically purged. IP addresses and user agents are only
                 recorded for security-critical events (errors, rate limiting,
@@ -375,12 +375,12 @@ export default function PrivacyPage() {
                 IP or device information.
               </li>
               <li>
-                <strong>Rate limit data:</strong> IP-based rate limit counters
+                <strong>Rate limit data:</strong>{" "}IP-based rate limit counters
                 are purged after <strong>1 hour</strong>. These are used solely
                 for abuse prevention and do not constitute a tracking record.
               </li>
               <li>
-                <strong>Account data:</strong> Retained while your account is
+                <strong>Account data:</strong>{" "}Retained while your account is
                 active. You may request deletion at any time.
               </li>
             </ul>
@@ -431,12 +431,12 @@ export default function PrivacyPage() {
             </p>
             <ul className="list-disc pl-5 space-y-1 opacity-80">
               <li>
-                <strong>Self-service:</strong> Use the Export and Delete buttons in{" "}
+                <strong>Self-service:</strong>{" "}Use the Export and Delete buttons in{" "}
                 <a href="/settings" className="underline font-semibold" style={{ color: "var(--link-color)" }}>Settings → Privacy &amp; Security</a>.{" "}
                 These actions take effect immediately on our database.
               </li>
               <li>
-                <strong>Email request:</strong> Email support@litlabs.net with the
+                <strong>Email request:</strong>{" "}Email support@litlabs.net with the
                 subject line &ldquo;Data Request&rdquo;. Include your account email so we
                 can verify your identity.
               </li>
@@ -459,12 +459,12 @@ export default function PrivacyPage() {
             </p>
             <ul className="list-disc pl-5 space-y-1 opacity-80">
               <li>
-                Assess the breach within <strong>24 hours</strong> of discovery to
+                Assess the breach within <strong>24 hours</strong>{" "}of discovery to
                 determine its scope and severity.
               </li>
               <li>
                 Notify the relevant supervisory authority within
-                <strong> 72 hours</strong> of becoming aware of the breach, as
+                <strong> 72 hours</strong>{" "}of becoming aware of the breach, as
                 required by GDPR Article 33.
               </li>
               <li>
@@ -490,26 +490,26 @@ export default function PrivacyPage() {
             </h2>
             <ul className="list-disc pl-5 space-y-1 opacity-80">
               <li>
-                <strong>Voice:</strong> Microphone access requires explicit
+                <strong>Voice:</strong>{" "}Microphone access requires explicit
                 browser permission and can be revoked at any time in your
                 browser settings.
               </li>
               <li>
-                <strong>Camera:</strong> Camera preview requires explicit
+                <strong>Camera:</strong>{" "}Camera preview requires explicit
                 browser permission and is only active when you open the camera
                 tool in Studio.
               </li>
               <li>
-                <strong>Screen sharing:</strong> Screen share requires explicit
+                <strong>Screen sharing:</strong>{" "}Screen share requires explicit
                 browser permission and is only active during an active share
                 session.
               </li>
               <li>
-                <strong>GitHub:</strong> You can disconnect repositories at any
+                <strong>GitHub:</strong>{" "}You can disconnect repositories at any
                 time from your Studio settings.
               </li>
               <li>
-                <strong>AI providers (BYOK):</strong> When you provide your own
+                <strong>AI providers (BYOK):</strong>{" "}When you provide your own
                 API keys (OpenAI, Anthropic), those keys are stored encrypted
                 and used only for your requests.
               </li>

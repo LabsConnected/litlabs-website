@@ -429,3 +429,78 @@ describe("Discovery regression — Sign-in page", () => {
     expect(src).toContain('header: { display: "none" }');
   });
 });
+
+describe("Discovery regression — Round 2 QA fixes", () => {
+  it("marketing footer Studio/Agents links go to the real destinations (not /sign-up)", () => {
+    const src = readFileSync(
+      path.resolve(__dirname, "../src/components/marketing/MarketingFooter.tsx"),
+      "utf-8"
+    );
+    expect(src).toContain('href="/studio"');
+    expect(src).toContain('href="/agents"');
+    expect(src).not.toContain("SmartLink");
+    expect(src).not.toContain("/sign-up");
+  });
+
+  it("'Meet LiTT' and 'See the operator stack' keep their honest destinations for guests", () => {
+    const src = readFileSync(
+      path.resolve(__dirname, "../src/components/landing/AgentCrew.tsx"),
+      "utf-8"
+    );
+    expect(src).toContain('href="/studio?tool=chat" signedOutHref="/studio?tool=chat"');
+    expect(src).toContain('href="/agents" signedOutHref="/agents"');
+    expect(src).not.toContain('signedOutHref="/marketplace"');
+  });
+
+  it("pricing 'Launch Studio' CTA goes to /studio for everyone", () => {
+    const src = readFileSync(
+      path.resolve(
+        __dirname,
+        "../src/app/(marketing)/pricing/PricingClient.tsx"
+      ),
+      "utf-8"
+    );
+    expect(src).toContain("Launch Studio");
+    // The free-plan "Start free" CTA still funnels guests to sign-up; the
+    // destination-labeled "Launch Studio" button must not.
+    expect(src).not.toMatch(/SmartLink[^>]*>\s*Launch Studio/);
+  });
+
+  it("privacy page keeps a space after every bold label (JSX eats trailing spaces)", () => {
+    const src = readFileSync(
+      path.resolve(__dirname, "../src/app/(app)/privacy/page.tsx"),
+      "utf-8"
+    );
+    expect(src).not.toMatch(/<\/strong> [A-Za-z]/);
+    expect(src).toContain('<strong>Voice Data:</strong>{" "}When');
+    expect(src).toContain('<strong>Email request:</strong>{" "}Email');
+  });
+
+  it("terms 'Last updated' keeps a space before the date", () => {
+    const src = readFileSync(
+      path.resolve(__dirname, "../src/app/(app)/terms/page.tsx"),
+      "utf-8"
+    );
+    expect(src).toContain('Last updated:{" "}{UPDATED}');
+  });
+
+  it("demo tabs keep a space after the em dash", () => {
+    const src = readFileSync(
+      path.resolve(
+        __dirname,
+        "../src/components/landing/InteractiveProductDemo.tsx"
+      ),
+      "utf-8"
+    );
+    expect(src).toContain("&mdash;{\" \"}{current.label}");
+  });
+
+  it("games segment serves a 404 title while the feature flag is off", () => {
+    const src = readFileSync(
+      path.resolve(__dirname, "../src/app/(app)/games/layout.tsx"),
+      "utf-8"
+    );
+    expect(src).toContain("generateMetadata");
+    expect(src).toContain('title: "404 — Page Not Found"');
+  });
+});
