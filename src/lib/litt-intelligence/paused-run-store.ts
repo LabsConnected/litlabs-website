@@ -181,6 +181,26 @@ export async function createPausedRun(input: {
   return rowToRecord(data as PausedRunRow);
 }
 
+/**
+ * A pending row past its TTL is dead — flip it to "expired" durably and
+ * return the truthful status. Without this, a never-decided gate reports
+ * "pending" forever (no sweep calls expireStaleRuns), so the GET poll
+ * endpoint and the client watcher never converge and the approval card
+ * stays mounted on a gate that can no longer be actioned.
+ */
+async function expireIfStale(record: PausedRunRecord): Promise<PausedRunRecord> {
+  if (record.status !== "pending" || !supabaseAdmin) return record;
+  if (new Date(record.expiresAt).getTime() >= Date.now()) return record;
+
+  const now = new Date().toISOString();
+  await supabaseAdmin
+    .from(TABLE)
+    .update({ status: "expired", resolved_at: now })
+    .eq("id", record.id)
+    .eq("status", "pending");
+  return { ...record, status: "expired", resolvedAt: now };
+}
+
 export async function getPausedRun(
   pausedRunId: string,
   userId: string,
@@ -196,7 +216,7 @@ export async function getPausedRun(
 
   if (error || !data) return null;
 
-  const record = rowToRecord(data as PausedRunRow);
+  const record = await expireIfStale(rowToRecord(data as PausedRunRow));
 
   // Stale-run recovery: if the run has been "processing" for too long,
   // mark it as failed. This handles process restarts where the detached
@@ -239,6 +259,32 @@ export async function getPendingPausedRunForConversation(
 
   if (error || !data) return null;
   return rowToRecord(data as PausedRunRow);
+}
+
+/**
+ * Newest paused run for a conversation regardless of status — used to
+ * reconcile a transcript message whose gate died without a writeback
+ * (expired TTL, a rejection writeback that missed). Pending-but-expired
+ * rows are normalized to "expired" so callers never mistake a dead gate
+ * for an actionable one.
+ */
+export async function getLatestPausedRunForConversation(
+  conversationId: string,
+  userId: string,
+): Promise<PausedRunRecord | null> {
+  if (!supabaseAdmin) return null;
+
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .select("*")
+    .eq("conversation_id", conversationId)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return expireIfStale(rowToRecord(data as PausedRunRow));
 }
 
 export async function resolvePausedRun(

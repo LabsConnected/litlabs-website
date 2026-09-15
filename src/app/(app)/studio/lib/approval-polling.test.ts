@@ -374,4 +374,93 @@ describe("submitApprovalAndPoll — detached resume", () => {
     expect(settle.failed).toHaveLength(0);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
+
+  it("delivers a nested re-gate's NEW pausedRunId to onCompleted — the second approval must be actionable", async () => {
+    // Multi-gate contract: the resumed run hits ANOTHER approval gate.
+    // The server persists a fresh paused run and reports it on the
+    // completed runResult; the client must receive the NEW pausedRunId
+    // so it can mount a fresh, resumable card — never the dead old gate.
+    const nestedResult: ApprovalRunResult = {
+      finalText: "I need approval for the deploy step too.",
+      stepsUsed: 4,
+      toolCalls: [],
+      cancelled: false,
+      pendingApproval: {
+        toolId: "project.deploy",
+        pausedRunId: "paused-2",
+        reason: "Deploy requires approval",
+      },
+    };
+    const fetchImpl = queueHttp(
+      jsonResp({ resolved: true, decision: "approved", status: "processing", runStatus: "processing" }, 202),
+      jsonResp({ status: "approved", runStatus: "completed", runResult: nestedResult }),
+    );
+    const { settle, cbs } = watch();
+    submitApprovalAndPoll({
+      conversationId: "conv-1",
+      pausedRunId: "run-1",
+      decision: "approved",
+      ...cbs,
+      fetchImpl,
+      sleep: noSleep,
+    });
+
+    const result = await settledClick(settle);
+    expect(result.failed).toHaveLength(0);
+    expect(result.completed).toHaveLength(1);
+    expect(result.completed[0]?.pendingApproval?.pausedRunId).toBe("paused-2");
+    expect(result.completed[0]?.pendingApproval?.pausedRunId).not.toBe("run-1");
+  });
+});
+
+describe("approval lifecycle — card state machine (useExecutionStore)", () => {
+  it("a nested gate re-mounts a fresh card after the old gate settles", async () => {
+    const { useExecutionStore } = await import("../stores/useExecutionStore");
+    const exec = useExecutionStore.getState();
+
+    // Gate 1 mounted.
+    exec.setPendingApproval({
+      toolId: "files.write",
+      reason: "Mutation requires approval",
+      pausedRunId: "run-1",
+    });
+    expect(useExecutionStore.getState().pendingApproval?.pausedRunId).toBe("run-1");
+
+    // Gate 1 approved → resumed run completed but hit a NEW gate.
+    // applyApprovalOutcome clears the old card (endRun) then mounts the
+    // new one — mirroring the real component path.
+    exec.endRun("cancelled");
+    exec.setPendingApproval({
+      toolId: "project.deploy",
+      reason: "Deploy requires approval",
+      pausedRunId: "run-2",
+    });
+
+    const state = useExecutionStore.getState();
+    expect(state.pendingApproval?.pausedRunId).toBe("run-2");
+    expect(state.pendingApproval?.toolId).toBe("project.deploy");
+    expect(state.phase).toBe("awaiting_approval");
+  });
+
+  it("expired/gone gates clear the card without recording a phantom decision", async () => {
+    const { useExecutionStore } = await import("../stores/useExecutionStore");
+    const exec = useExecutionStore.getState();
+
+    exec.setPendingApproval({
+      toolId: "files.write",
+      reason: "Mutation requires approval",
+      pausedRunId: "run-3",
+    });
+    const eventsBefore = useExecutionStore.getState().events.filter(
+      (e) => e.type === "approval_resolved",
+    ).length;
+
+    exec.endRun("cancelled");
+
+    const state = useExecutionStore.getState();
+    expect(state.pendingApproval).toBeNull();
+    // No approval_resolved event — the user never decided.
+    const eventsAfter = state.events.filter((e) => e.type === "approval_resolved").length;
+    expect(eventsAfter).toBe(eventsBefore);
+  });
 });
