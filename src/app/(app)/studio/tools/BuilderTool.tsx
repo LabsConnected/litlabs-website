@@ -6,6 +6,7 @@ import SystemTopologyPanel from "@/components/studio/SystemTopologyPanel";
 import PreviewPanel from "@/components/studio/PreviewPanel";
 import ProjectSourceSelector from "@/components/studio/ProjectSourceSelector";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { isManagedSourceType } from "@/lib/projects/project-source";
 
 interface StudioProject {
   id: string;
@@ -173,7 +174,7 @@ export default function BuilderTool() {
                   >
                     {projects.map((project) => (
                       <option key={project.id} value={project.id}>
-                        {project.name} ({project.sourceType})
+                        {project.name} ({isManagedSourceType(project.sourceType) ? "LiTT Managed" : "GitHub"})
                       </option>
                     ))}
                   </select>

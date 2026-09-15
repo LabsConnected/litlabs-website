@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import type { InspectorTab, DrawerTab } from "../lib/studio-destinations";
 import type { ConnectionCapabilities } from "../hooks/useConnectionSummary";
+import { describeSourceRows } from "../lib/source-rows";
 import type { ChatMessage } from "../stores/useStudioAgentStore";
 import type { ProviderHealth } from "../stores/useStudioModelStore";
 import StudioActivityTimeline from "./StudioActivityTimeline";
@@ -142,8 +143,8 @@ function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspec
           <InspectorRow label="Latest state" value={lastMessage?.status ?? "No messages yet"} tone={lastMessage?.status === "failed" ? "warn" : lastMessage ? "ok" : "muted"} />
         </InspectorSection>
         <InspectorSection title="Repository scope">
-          <InspectorRow label="Repository" value={capabilities.repositoryName ?? "Not connected"} tone={capabilities.repositoryName ? "ok" : "muted"} />
-          <InspectorRow label="Branch" value={capabilities.activeBranch ?? capabilities.defaultBranch ?? "Not available"} />
+          <InspectorRow label="GitHub" value={describeSourceRows(capabilities).github} tone={capabilities.repositoryName ? "ok" : "muted"} />
+          <InspectorRow label="Branch" value={describeSourceRows(capabilities).branch} />
           <InspectorRow label="Index" value={capabilities.repositoryIndexed ? "Indexed" : "Not indexed"} tone={capabilities.repositoryIndexed ? "ok" : "muted"} />
         </InspectorSection>
         <div className="rounded-xl border px-3 py-2.5 text-[10px] leading-4" style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(114,242,56,0.04)", color: "var(--text-muted)" }}>
@@ -170,9 +171,10 @@ function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspec
         <InspectorRow label="Status" value={data.busy ? "Agent working" : messages.length ? "Ready" : "Awaiting prompt"} tone={data.busy ? "ok" : "muted"} />
       </InspectorSection>
       <InspectorSection title="Project context">
-        <InspectorRow label="Source" value={capabilities.sourceType ?? "Not selected"} />
-        <InspectorRow label="Repository" value={capabilities.repositoryName ?? "Not connected"} />
-        <InspectorRow label="Branch" value={capabilities.activeBranch ?? capabilities.defaultBranch ?? "Not available"} />
+        <InspectorRow label="Source" value={describeSourceRows(capabilities).source} />
+        <InspectorRow label="Version control" value={describeSourceRows(capabilities).versionControl} />
+        <InspectorRow label="GitHub" value={describeSourceRows(capabilities).github} />
+        <InspectorRow label="Branch" value={describeSourceRows(capabilities).branch} />
         <InspectorRow label="Permission" value={capabilities.writeAccess ? "Writes allowed" : "Approval required"} tone={capabilities.writeAccess ? "ok" : "warn"} />
       </InspectorSection>
       <div className="rounded-xl border px-3 py-2.5 text-[10px] leading-4" style={{ borderColor: "rgba(114,242,56,0.2)", backgroundColor: "rgba(114,242,56,0.04)", color: "var(--text-secondary)" }}>

@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import type { ComponentType, CSSProperties } from "react";
 import type { ConnectionCapabilities } from "../hooks/useConnectionSummary";
+import { describeSourceRows } from "../lib/source-rows";
 import { useExecutionStore, type ExecutionPhase } from "../stores/useExecutionStore";
 import { useStudioAgentStore, AGENT_META } from "../stores/useStudioAgentStore";
 import { useConversationStore } from "../stores/useConversationStore";
@@ -190,6 +191,7 @@ export default function StudioPlanSurface({
   const recentEvents = useMemo(() => events.slice(-6).reverse(), [events]);
   const activeConversation = conversations.find((c) => c.id === selectedConversationId);
 
+  const sourceRow = describeSourceRows(capabilities);
   const hasProject = Boolean(capabilities.projectId);
   const hasCheckpoint = Boolean(checkpoint?.gitSha);
 
@@ -232,11 +234,12 @@ export default function StudioPlanSurface({
         <PlanCard title="Project" icon={FolderOpen}>
           <div className="grid grid-cols-2 gap-x-6">
             <PlanRow label="Name" value={capabilities.projectName} />
-            <PlanRow label="Source" value={capabilities.sourceType ?? undefined} />
-            <PlanRow label="Repository" value={capabilities.repositoryName} mono />
-            <PlanRow label="Branch" value={capabilities.activeBranch ?? capabilities.defaultBranch} mono />
-            <PlanRow label="Workspace" value={capabilities.workspaceStatus ?? undefined} />
+            <PlanRow label="Source" value={sourceRow.source} />
+            <PlanRow label="Version control" value={sourceRow.versionControl} mono />
+            <PlanRow label="Branch" value={sourceRow.branch} mono />
+            <PlanRow label="Workspace" value={sourceRow.workspace} />
             <PlanRow label="Write access" value={capabilities.writeAccess ? "Allowed" : "Requires approval"} />
+            <PlanRow label="GitHub" value={sourceRow.github} mono />
           </div>
         </PlanCard>
 
