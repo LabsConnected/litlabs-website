@@ -12,6 +12,7 @@ import {
   prepareWorkspaceInternal,
 } from "@/lib/terminal-internal-client";
 import { getInstallationTokenForClone } from "@/lib/github-app";
+import { isManagedSourceType } from "@/lib/projects/project-source";
 import type { CanonicalProject } from "@/lib/projects/types";
 
 /**
@@ -97,11 +98,11 @@ async function autoReprepare(
   projectId: string,
   userId: string,
 ) {
-  // Reset the stale workspace record
+  // Reset ONLY the status. workspaceId and workspaceRoot are the
+  // adoption hints that let re-provisioning reattach to durable
+  // source still on the volume — nulling them strands it.
   await updateProjectWorkspace(projectId, userId, {
-    workspaceId: null,
     workspaceStatus: "not_prepared",
-    workspaceRoot: null,
     workspaceError: null,
   });
 
@@ -142,13 +143,19 @@ async function autoReprepare(
 
   // Provision the workspace
   try {
+    const adoption = {
+      existingRoot: project.workspaceRoot,
+      existingWorkspaceId: project.workspaceId,
+    };
+
     let result;
-    if (project.sourceType === "blank") {
+    if (isManagedSourceType(project.sourceType)) {
       result = await prepareWorkspaceInternal({
-        sourceType: "blank",
+        sourceType: "managed",
         userId,
         projectId,
         templateId: project.templateId ?? "blank-static",
+        ...adoption,
       });
     } else if (
       project.sourceType === "github" &&
@@ -171,6 +178,7 @@ async function autoReprepare(
         branch: project.githubBranch ?? "main",
         commitSha: project.latestCommitSha,
         githubToken,
+        ...adoption,
       });
     } else {
       // No valid source — return not_prepared
@@ -190,6 +198,7 @@ async function autoReprepare(
       workspaceId: result.workspaceId,
       workspaceStatus: "ready",
       workspaceRoot: result.root,
+      workspaceBranch: result.branch ?? null,
       workspaceError: null,
     });
 

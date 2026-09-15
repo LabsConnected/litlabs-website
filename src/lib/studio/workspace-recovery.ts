@@ -11,6 +11,7 @@ import {
   prepareWorkspaceInternal,
 } from "@/lib/terminal-internal-client";
 import { getInstallationTokenForClone } from "@/lib/github-app";
+import { isManagedSourceType } from "@/lib/projects/project-source";
 import type { CanonicalProject } from "@/lib/projects/types";
 
 /**
@@ -72,11 +73,11 @@ export async function reprepareWorkspace(
     throw new Error("Forbidden");
   }
 
-  // Reset the stale workspace record
+  // Reset ONLY the status. workspaceId and workspaceRoot are the
+  // adoption hints that let re-provisioning reattach to durable
+  // source still on the volume — nulling them strands it.
   await updateProjectWorkspace(projectId, userId, {
-    workspaceId: null,
     workspaceStatus: "not_prepared",
-    workspaceRoot: null,
     workspaceError: null,
   });
 
@@ -112,13 +113,19 @@ export async function reprepareWorkspace(
   }
 
   // Provision the workspace
+  const adoption = {
+    existingRoot: project.workspaceRoot,
+    existingWorkspaceId: project.workspaceId,
+  };
+
   let result;
-  if (project.sourceType === "blank") {
+  if (isManagedSourceType(project.sourceType)) {
     result = await prepareWorkspaceInternal({
-      sourceType: "blank",
+      sourceType: "managed",
       userId,
       projectId,
       templateId: project.templateId ?? "blank-static",
+      ...adoption,
     });
   } else if (
     project.sourceType === "github" &&
@@ -141,6 +148,7 @@ export async function reprepareWorkspace(
       branch: project.githubBranch ?? "main",
       commitSha: project.latestCommitSha,
       githubToken,
+      ...adoption,
     });
   } else {
     await updateProjectWorkspace(projectId, userId, {
@@ -155,6 +163,7 @@ export async function reprepareWorkspace(
     workspaceId: result.workspaceId,
     workspaceStatus: "ready",
     workspaceRoot: result.root,
+    workspaceBranch: result.branch ?? null,
     workspacePreparedAt: new Date().toISOString(),
     workspaceError: null,
   });
@@ -190,11 +199,11 @@ export async function provisionWorkspaceForProject(
     if (ws && ws.ready) {
       return project.workspaceId;
     }
-    // Workspace lost on terminal-server — reset stale DB record so we can re-provision
+    // Workspace lost on terminal-server — reset the status only.
+    // workspaceId/workspaceRoot stay as adoption hints so the
+    // durable source on the volume is reattached, not replaced.
     await updateProjectWorkspace(projectId, userId, {
-      workspaceId: null,
       workspaceStatus: "not_prepared",
-      workspaceRoot: null,
       workspaceError: null,
     });
   }
@@ -231,13 +240,19 @@ export async function provisionWorkspaceForProject(
 
   // We own the lock — provision the workspace.
   try {
+    const adoption = {
+      existingRoot: project.workspaceRoot,
+      existingWorkspaceId: project.workspaceId,
+    };
+
     let result;
-    if (project.sourceType === "blank") {
+    if (isManagedSourceType(project.sourceType)) {
       result = await prepareWorkspaceInternal({
-        sourceType: "blank",
+        sourceType: "managed",
         userId,
         projectId,
         templateId: project.templateId ?? "blank-static",
+        ...adoption,
       });
     } else if (
       project.sourceType === "github" &&
@@ -260,6 +275,7 @@ export async function provisionWorkspaceForProject(
         branch: project.githubBranch ?? "main",
         commitSha: project.latestCommitSha,
         githubToken,
+        ...adoption,
       });
     } else {
       await updateProjectWorkspace(projectId, userId, {
@@ -273,6 +289,7 @@ export async function provisionWorkspaceForProject(
       workspaceId: result.workspaceId,
       workspaceStatus: "ready",
       workspaceRoot: result.root,
+      workspaceBranch: result.branch ?? null,
       workspacePreparedAt: new Date().toISOString(),
       workspaceError: null,
     });

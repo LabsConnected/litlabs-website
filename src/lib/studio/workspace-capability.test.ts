@@ -9,13 +9,20 @@ import { describe, it, expect } from "vitest";
  * was missing, tests returned 0 tests, and git was not installed — and
  * proposed installing Git/TypeScript and rewriting the ESLint config.
  *
- * Those tools are absent because the workspace is intentionally static and
- * has no repository, not because the project is broken. Repo-only and
- * toolchain-only checks must be classified NOT APPLICABLE, never FAILED.
+ * Those tools are absent because the workspace is intentionally static,
+ * not because the project is broken. Toolchain-only checks must be
+ * classified NOT APPLICABLE, never FAILED.
+ *
+ * The "No repository · —" half of that report was a SEPARATE defect and
+ * is fixed too: Git is not GitHub. A managed project has its own Git
+ * repository and history, so local Git tooling stays applicable there —
+ * only tools that call the GitHub API need a connected repository.
+ * See tests/managed-project-source.test.ts.
  */
 
 import {
   hasRepository,
+  hasVersionControl,
   isStaticWorkspace,
   checkApplicability,
   notApplicableReason,
@@ -38,13 +45,19 @@ const NEXTJS_WITH_REPO: WorkspaceShape = {
   sourceType: "github",
 };
 
-describe("hasRepository", () => {
-  it("is false for a workspace with no repository", () => {
+describe("hasRepository (GitHub connectivity)", () => {
+  it("is false for a workspace with no GitHub repository", () => {
     expect(hasRepository(STATIC_NO_REPO)).toBe(false);
   });
 
   it("is true for a GitHub-backed workspace", () => {
     expect(hasRepository(NEXTJS_WITH_REPO)).toBe(true);
+  });
+
+  it("does not imply anything about local version control", () => {
+    // The deprecated name read as "has Git", which is what caused
+    // checkpoints and diff to be disabled on managed projects.
+    expect(hasVersionControl(STATIC_NO_REPO)).toBe(true);
   });
 });
 
@@ -76,15 +89,24 @@ describe("B. repo health checks on a static workspace with no repository", () =>
     expect(reason).not.toMatch(/broken|missing|failed|install|rewrite/i);
   });
 
-  it("classifies git-only tooling as not_applicable when there is no repository", () => {
-    for (const tool of ["git_status", "git_diff", "git_log", "commit_changes", "push_branch", "create_pull_request"]) {
+  it("keeps LOCAL git tooling applicable — a managed project has its own Git repo", () => {
+    // Git is not GitHub. A provisioned managed workspace is git init-ed,
+    // so status, diff, log, commits and checkpoints all operate on real
+    // history even with no GitHub repository connected.
+    for (const tool of ["git_status", "git_diff", "git_log", "commit_changes", "create_checkpoint", "restore_checkpoint"]) {
+      expect(repoOnlyToolApplicability(STATIC_NO_REPO, tool)).toBe("applicable");
+    }
+  });
+
+  it("classifies only GitHub-API tooling as not_applicable without a connected repo", () => {
+    for (const tool of ["push_branch", "create_pull_request", "github_read_file"]) {
       expect(repoOnlyToolApplicability(STATIC_NO_REPO, tool)).toBe("not_applicable");
     }
   });
 
   it("does not report a missing git binary as a project failure", () => {
-    const reason = notApplicableReason(STATIC_NO_REPO, "git_status");
-    expect(reason).toMatch(/no repository/i);
+    const reason = notApplicableReason(STATIC_NO_REPO, "push_branch");
+    expect(reason).toMatch(/no GitHub repository/i);
     expect(reason).not.toMatch(/git is not installed|install git/i);
   });
 
@@ -105,7 +127,9 @@ describe("B. repo health checks on a static workspace with no repository", () =>
       sourceType: "template",
     };
     expect(checkApplicability(npmNoRepo, "typecheck")).toBe("applicable");
-    // Git tooling is still N/A — there is no repository.
-    expect(repoOnlyToolApplicability(npmNoRepo, "git_status")).toBe("not_applicable");
+    // Git tooling is applicable too — the workspace has its own Git repo.
+    expect(repoOnlyToolApplicability(npmNoRepo, "git_status")).toBe("applicable");
+    // Only the GitHub remote is missing.
+    expect(repoOnlyToolApplicability(npmNoRepo, "push_branch")).toBe("not_applicable");
   });
 });

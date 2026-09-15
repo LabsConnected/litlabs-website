@@ -32,7 +32,17 @@ export interface ConnectionCapabilities {
   projectName: string | null;
   defaultBranch: string | null;
   activeBranch: string | null;
-  sourceType: "github" | "blank" | "template" | "upload" | null;
+  sourceType: "github" | "blank" | "template" | "managed" | "upload" | null;
+  /** Who owns the durable source: LiTT ("managed") or GitHub. */
+  sourceKind: "managed" | "github" | null;
+  /** "LiTT Managed" or "GitHub" — what the project card should show. */
+  sourceLabel: string | null;
+  /** Provisioning state of the source, separate from agent execution. */
+  sourceStatus: "provisioning" | "ready" | "error" | "needs_setup" | null;
+  /** Whether the workspace has a Git repository. Managed projects do. */
+  versionControl: "git" | "none";
+  /** Whether a GitHub repository is connected. Optional by design. */
+  githubConnected: boolean;
   workspaceStatus: string | null;
   githubInstalled: boolean;
   terminalExecution: "available" | "unavailable" | "connecting" | "degraded" | "error" | "idle";
@@ -66,6 +76,11 @@ const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
   defaultBranch: null,
   activeBranch: null,
   sourceType: null,
+  sourceKind: null,
+  sourceLabel: null,
+  sourceStatus: null,
+  versionControl: "none",
+  githubConnected: false,
   workspaceStatus: null,
   githubInstalled: false,
   terminalExecution: "unavailable",
@@ -271,6 +286,11 @@ export function useConnectionSummary() {
         next.activeBranch = runtimeState.branch ?? next.activeBranch;
         next.defaultBranch = runtimeState.branch ?? next.defaultBranch;
         next.sourceType = runtimeState.sourceType ?? next.sourceType;
+        next.sourceKind = runtimeState.sourceKind ?? next.sourceKind;
+        next.sourceLabel = runtimeState.sourceLabel ?? next.sourceLabel;
+        next.sourceStatus = runtimeState.sourceStatus ?? next.sourceStatus;
+        next.versionControl = runtimeState.versionControl ?? next.versionControl;
+        next.githubConnected = runtimeState.githubConnected ?? next.githubConnected;
         next.workspaceStatus = runtimeState.workspaceStatus ?? next.workspaceStatus;
         // writeAccess = a write surface exists (workspace OR terminal).
         // This does NOT mean approval is waived — approval is separate.
@@ -283,7 +303,7 @@ export function useConnectionSummary() {
     } finally {
       setLoading(false);
     }
-  }, [terminalStatus, terminalSessionId, terminalError, terminalFailureStage, terminalCwd, voiceTransportConnected, voiceInputState, getToken, explicitProjectId, runtimeState.projectId, runtimeState.projectName, runtimeState.repository, runtimeState.branch, runtimeState.workspaceStatus, runtimeState.writeAccess, runtimeState.sourceType]);
+  }, [terminalStatus, terminalSessionId, terminalError, terminalFailureStage, terminalCwd, voiceTransportConnected, voiceInputState, getToken, explicitProjectId, runtimeState.projectId, runtimeState.projectName, runtimeState.repository, runtimeState.branch, runtimeState.workspaceStatus, runtimeState.writeAccess, runtimeState.sourceType, runtimeState.sourceKind, runtimeState.sourceLabel, runtimeState.sourceStatus, runtimeState.versionControl, runtimeState.githubConnected]);
 
   useEffect(() => {
     void refresh();

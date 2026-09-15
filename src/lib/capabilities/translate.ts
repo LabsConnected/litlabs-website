@@ -88,7 +88,11 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
   let githubAction: string;
 
   if (repo === "none" || repo === "not_configured") {
-    githubState = "No repository is connected.";
+    // GitHub, not Git. A managed project has its own Git repository and
+    // history; no GitHub connection is required to edit, run or preview
+    // it. Saying "no repository" here made the model tell users to
+    // connect GitHub before it would touch their files.
+    githubState = "No GitHub repository is connected. This is normal — the project uses LiTT-managed source with its own Git history, and GitHub is optional publishing.";
     // Do NOT instruct the LLM to proactively tell the user about GitHub.
     // Only mention it when the user explicitly asks about code/files/repos.
     githubAction = "";
@@ -107,7 +111,7 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
     githubState = "Repository connection has an error.";
     githubAction = "Tell the user: \"The repository connection needs attention. Try reconnecting or check permissions.\" Offer: [Repair connection].";
   } else {
-    githubState = "No repository is connected.";
+    githubState = "No GitHub repository is connected. This is normal — the project uses LiTT-managed source with its own Git history, and GitHub is optional publishing.";
     githubAction = "";
   }
 

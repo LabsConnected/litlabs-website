@@ -37,7 +37,7 @@ import {
 } from "./runtime";
 import {
   prepareWorkspace,
-  prepareBlankWorkspace,
+  prepareManagedWorkspace,
   getWorkspace,
   listWorkspaces,
   type WorkspaceDescriptor,
@@ -773,13 +773,24 @@ app.post("/internal/workspace/prepare", requireInternalServiceAuth, async (req: 
 
     let descriptor: WorkspaceDescriptor;
 
-    if (sourceType === "blank") {
+    // Adoption hints from studio_projects. When the caller knows the
+    // project's previously-recorded workspace, pass it through so a
+    // legacy random-id directory is reused rather than stranded.
+    const existingRoot = body.existingRoot ? String(body.existingRoot) : null;
+    const existingWorkspaceId = body.existingWorkspaceId ? String(body.existingWorkspaceId) : null;
+
+    // "blank", "template" and "managed" are the same thing: LiTT-owned
+    // durable source. "template" previously fell through to the error
+    // branch below and reported "no valid source" for a legal row.
+    if (sourceType === "blank" || sourceType === "template" || sourceType === "managed") {
       const templateId = String(body.templateId || "blank-static");
-      descriptor = await prepareBlankWorkspace({
+      descriptor = await prepareManagedWorkspace({
         userId,
         projectId,
         workspaceRoot: WORKSPACE_ROOT,
         templateId,
+        existingRoot,
+        existingWorkspaceId,
       });
     } else if (sourceType === "github") {
       const installationId = Number(body.installationId);
@@ -803,9 +814,11 @@ app.post("/internal/workspace/prepare", requireInternalServiceAuth, async (req: 
         commitSha: body.commitSha ? String(body.commitSha) : null,
         workspaceRoot: WORKSPACE_ROOT,
         githubToken,
+        existingRoot,
+        existingWorkspaceId,
       });
     } else {
-      res.status(400).json({ error: `sourceType must be "github" or "blank"` });
+      res.status(400).json({ error: `sourceType must be "github", "blank", "template" or "managed"` });
       return;
     }
 

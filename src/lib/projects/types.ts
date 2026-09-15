@@ -43,6 +43,12 @@ export interface CanonicalProject {
 
   // Workspace fields
   workspaceId: string | null;
+  /**
+   * The workspace's real Git branch — authoritative over the github_*
+   * branch fields. Managed projects have a branch (main) without having
+   * any GitHub branch at all.
+   */
+  workspaceBranch: string | null;
   workspaceStatus: WorkspaceStatus;
   workspaceRoot: string | null;
   workspaceError: string | null;
@@ -88,6 +94,8 @@ export interface StudioProjectRow {
   github_branch: string | null;
   latest_commit_sha: string | null;
   workspace_id: string | null;
+  /** Added by 20260915000000. Optional: a pre-migration DB omits it. */
+  workspace_branch?: string | null;
   workspace_status: WorkspaceStatus;
   workspace_root: string | null;
   workspace_error: string | null;
@@ -151,6 +159,7 @@ export function rowToCanonical(row: StudioProjectRow): CanonicalProject {
     githubBranch: row.github_branch,
     latestCommitSha: row.latest_commit_sha,
     workspaceId: row.workspace_id,
+    workspaceBranch: row.workspace_branch ?? null,
     workspaceStatus: row.workspace_status,
     workspaceRoot: row.workspace_root,
     workspaceError: row.workspace_error,
@@ -190,6 +199,7 @@ export function legacyRowToCanonical(row: LegacyProjectRow): CanonicalProject {
     githubBranch: row.working_branch,
     latestCommitSha: null,
     workspaceId: row.workspace_id,
+    workspaceBranch: null,
     workspaceStatus: "not_prepared",
     workspaceRoot: null,
     workspaceError: null,

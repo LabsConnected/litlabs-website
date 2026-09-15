@@ -22,6 +22,17 @@ const TERMINAL_BASE = () => {
   return raw || "";
 };
 
+/**
+ * The project's previously-recorded workspace, so the terminal server
+ * ADOPTS existing durable source instead of provisioning a new empty
+ * directory beside it. Omitting these is safe but loses the files of a
+ * workspace created under the old random-id scheme.
+ */
+export interface WorkspaceAdoptionHints {
+  existingRoot?: string | null;
+  existingWorkspaceId?: string | null;
+}
+
 export interface WorkspacePrepareResponse {
   workspaceId: string;
   userId: string;
@@ -99,8 +110,8 @@ export async function fetchWithTimeout(
  */
 export async function prepareWorkspaceInternal(
   body:
-    | { sourceType: "github"; userId: string; projectId: string; installationId: number; owner: string; repo: string; branch: string; githubToken?: string | null; commitSha?: string | null }
-    | { sourceType: "blank"; userId: string; projectId: string; templateId: string },
+    | ({ sourceType: "github"; userId: string; projectId: string; installationId: number; owner: string; repo: string; branch: string; githubToken?: string | null; commitSha?: string | null } & WorkspaceAdoptionHints)
+    | ({ sourceType: "managed"; userId: string; projectId: string; templateId: string } & WorkspaceAdoptionHints),
 ): Promise<WorkspacePrepareResponse> {
   const key = INTERNAL_KEY();
   if (key.length < 32) {

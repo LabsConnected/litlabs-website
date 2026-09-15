@@ -267,6 +267,13 @@ export async function updateProjectWorkspace(
     workspaceId?: string | null;
     workspaceStatus?: string;
     workspaceRoot?: string | null;
+    /**
+     * The workspace's real Git branch, as reported by the terminal
+     * server after provisioning. Persisting it is what lets a managed
+     * project render "Branch: main" instead of "—": managed projects
+     * store NULL in github_branch because they have no GitHub branch.
+     */
+    workspaceBranch?: string | null;
     workspaceError?: string | null;
     workspacePreparedAt?: string;
   },
@@ -278,6 +285,7 @@ export async function updateProjectWorkspace(
   if (updates.workspaceId !== undefined) update.workspace_id = updates.workspaceId;
   if (updates.workspaceStatus !== undefined) update.workspace_status = updates.workspaceStatus;
   if (updates.workspaceRoot !== undefined) update.workspace_root = updates.workspaceRoot;
+  if (updates.workspaceBranch !== undefined) update.workspace_branch = updates.workspaceBranch;
   if (updates.workspaceError !== undefined) update.workspace_error = updates.workspaceError;
   if (updates.workspacePreparedAt !== undefined)
     update.workspace_prepared_at = updates.workspacePreparedAt;

@@ -5,6 +5,7 @@ import { AlertCircle, ChevronDown, CircleCheck, Clock3, Loader2, Play, RefreshCw
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useProjectRuntime } from "../hooks/useProjectRuntime";
 import { runtimePhaseLabel, runtimeRecoveryActions } from "@/lib/projects/runtime-state";
+import { formatSourceSummary } from "@/lib/projects/project-source";
 
 type CheckId = "build" | "typecheck" | "lint" | "test" | "security" | "accessibility" | "performance";
 type CheckStatus = "not_run" | "running" | "passed" | "failed" | "unavailable" | "not_configured";
@@ -237,7 +238,13 @@ export default function StudioHealthPanel({
         <div>
           <div className="text-[10px] font-black uppercase tracking-[0.16em]" style={{ color: "var(--text-secondary)" }}>Project health</div>
           <div className="mt-1 text-[9px]" style={{ color: "var(--text-muted)" }}>
-            {runtime.repository ? `${runtime.repository}` : "No repository"} · {runtime.branch ?? "no branch"}
+            {formatSourceSummary({
+              kind: runtime.sourceKind,
+              status: runtime.sourceStatus,
+              versionControl: runtime.versionControl,
+              branch: runtime.branch,
+              githubRepository: runtime.repository,
+            })}
           </div>
         </div>
         <div className="flex items-center gap-1.5">

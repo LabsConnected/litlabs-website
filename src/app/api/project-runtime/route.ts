@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { resolveCurrentProject } from "@/lib/projects/resolve-current-project";
 import { getProject } from "@/lib/projects/project-repository";
 import type { ProjectRuntimeState, RuntimePhase, ProjectRuntimeError } from "@/lib/projects/runtime-state";
+import { describeProjectSource } from "@/lib/projects/project-source";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,8 +70,14 @@ export async function GET(request: NextRequest) {
     } satisfies ProjectRuntimeState);
   }
 
-  const repository = project.githubFullName ?? null;
-  const branch = project.githubBranch ?? project.githubDefaultBranch ?? null;
+  // Source facts come from the canonical source model, which keeps
+  // ownership (managed vs GitHub), version control (Git) and remote
+  // provider (GitHub) apart. Reading `branch` off the github_* columns
+  // alone made every managed project report "—" despite having a real
+  // `main` branch on disk.
+  const source = describeProjectSource(project);
+  const repository = source.githubRepository;
+  const branch = source.branch;
   const workspaceId = project.workspaceId;
   const workspaceStatus = project.workspaceStatus;
   const workspacePath = project.workspaceRoot;
@@ -83,9 +90,8 @@ export async function GET(request: NextRequest) {
     phase = "workspace_not_provisioned";
     error = {
       code: "WORKSPACE_NOT_PROVISIONED",
-      message: `No workspace has been provisioned for "${project.name}". Connect a repository or start a blank project to provision one.`,
+      message: `Source for "${project.name}" has not been provisioned yet. LiTT will prepare it — no GitHub repository is required.`,
       recoveryAction: "provision_workspace",
-      recoveryHref: "/settings",
     };
   } else if (workspaceStatus !== "ready") {
     phase = "workspace_not_ready";
@@ -113,6 +119,11 @@ export async function GET(request: NextRequest) {
     repository,
     branch,
     sourceType: project.sourceType ?? (repository ? "github" : "blank"),
+    sourceKind: source.kind,
+    sourceLabel: source.label,
+    sourceStatus: source.status,
+    versionControl: source.versionControl,
+    githubConnected: source.githubConnected,
     workspaceId,
     workspacePath,
     workspaceStatus,
@@ -152,6 +163,11 @@ function makeState(phase: RuntimePhase, error?: ProjectRuntimeError): Omit<Proje
     repository: null,
     branch: null,
     sourceType: null,
+    sourceKind: null,
+    sourceLabel: null,
+    sourceStatus: null,
+    versionControl: "none",
+    githubConnected: false,
     workspaceId: null,
     workspacePath: null,
     workspaceStatus: null,

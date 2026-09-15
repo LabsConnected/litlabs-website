@@ -1735,6 +1735,9 @@ function CommandStudioContent() {
                     projectName={capabilities.projectName}
                     repositoryName={capabilities.repositoryName}
                     branch={capabilities.activeBranch}
+                    sourceKind={capabilities.sourceKind}
+                    sourceStatus={capabilities.sourceStatus}
+                    versionControl={capabilities.versionControl}
                     workspaceStatus={capabilities.workspaceStatus ?? null}
                     refreshKey={workspaceRevision}
                     onSelectionChange={setPreviewSelection}
@@ -1781,6 +1784,9 @@ function CommandStudioContent() {
                         projectName={capabilities.projectName}
                         repositoryName={capabilities.repositoryName}
                         branch={capabilities.activeBranch}
+                        sourceKind={capabilities.sourceKind}
+                        sourceStatus={capabilities.sourceStatus}
+                        versionControl={capabilities.versionControl}
                         workspaceStatus={capabilities.workspaceStatus ?? null}
                       />
                     ) : (
@@ -1854,6 +1860,9 @@ function CommandStudioContent() {
                       projectName={capabilities.projectName}
                       repositoryName={capabilities.repositoryName}
                       branch={capabilities.activeBranch}
+                      sourceKind={capabilities.sourceKind}
+                      sourceStatus={capabilities.sourceStatus}
+                      versionControl={capabilities.versionControl}
                       workspaceStatus={capabilities.workspaceStatus ?? null}
                       refreshKey={workspaceRevision}
                       onSelectionChange={setPreviewSelection}
@@ -2100,6 +2109,7 @@ function StudioUnavailableSurface({
   capabilities: import("../hooks/useConnectionSummary").ConnectionCapabilities;
   modelLabel: string;
 }) {
+  const sourceRow = describeSourceRows(capabilities);
   return (
     <div className="flex h-full min-h-0 items-center justify-center overflow-y-auto px-4 py-8" aria-live="polite">
       <div className="w-full max-w-lg space-y-4 rounded-2xl border p-5" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
@@ -2128,15 +2138,66 @@ function StudioUnavailableSurface({
             </a>
           ))}
         </div>
-        <div className="grid grid-cols-2 gap-2 text-[10px]">
+        {/*
+          Project facts. Source ownership, version control and GitHub are
+          THREE separate rows because they are three separate things: a
+          managed project has durable source and real Git history while
+          having no GitHub repository, and collapsing them produced the
+          misleading "Repository: Not connected" on a healthy project.
+          grid-cols-1 on narrow widths so the rows are never crushed.
+        */}
+        <div className="grid grid-cols-1 gap-2 text-[10px] sm:grid-cols-2" data-testid="studio-project-facts">
           <div className="rounded-lg border p-2" style={{ borderColor: "var(--studio-border)" }}><span style={{ color: "var(--text-muted)" }}>Project</span><div className="mt-1 truncate font-bold" style={{ color: "var(--text-primary)" }}>{capabilities.projectName ?? "Not selected"}</div></div>
           <div className="rounded-lg border p-2" style={{ borderColor: "var(--studio-border)" }}><span style={{ color: "var(--text-muted)" }}>Model</span><div className="mt-1 truncate font-bold" style={{ color: "var(--text-primary)" }}>{modelLabel}</div></div>
-          <div className="rounded-lg border p-2" style={{ borderColor: "var(--studio-border)" }}><span style={{ color: "var(--text-muted)" }}>Repository</span><div className="mt-1 truncate font-bold" style={{ color: capabilities.repository === "connected" ? "var(--litt-primary)" : "var(--text-primary)" }}>{capabilities.repositoryName ?? "Not connected"}</div></div>
+          <div className="rounded-lg border p-2" style={{ borderColor: "var(--studio-border)" }}><span style={{ color: "var(--text-muted)" }}>Source</span><div className="mt-1 truncate font-bold" style={{ color: capabilities.sourceStatus === "error" ? "var(--text-primary)" : "var(--litt-primary)" }} data-testid="project-fact-source">{sourceRow.source}</div></div>
+          <div className="rounded-lg border p-2" style={{ borderColor: "var(--studio-border)" }}><span style={{ color: "var(--text-muted)" }}>Version control</span><div className="mt-1 truncate font-bold" style={{ color: "var(--text-primary)" }} data-testid="project-fact-vcs">{sourceRow.versionControl}</div></div>
+          <div className="rounded-lg border p-2" style={{ borderColor: "var(--studio-border)" }}><span style={{ color: "var(--text-muted)" }}>Branch</span><div className="mt-1 truncate font-bold" style={{ color: "var(--text-primary)" }} data-testid="project-fact-branch">{sourceRow.branch}</div></div>
+          <div className="rounded-lg border p-2" style={{ borderColor: "var(--studio-border)" }}><span style={{ color: "var(--text-muted)" }}>Workspace</span><div className="mt-1 truncate font-bold" style={{ color: capabilities.workspaceStatus === "ready" ? "var(--litt-primary)" : "var(--text-primary)" }} data-testid="project-fact-workspace">{sourceRow.workspace}</div></div>
+          <div className="rounded-lg border p-2" style={{ borderColor: "var(--studio-border)" }}><span style={{ color: "var(--text-muted)" }}>Write access</span><div className="mt-1 truncate font-bold" style={{ color: capabilities.writeAccess ? "var(--litt-primary)" : "var(--text-primary)" }} data-testid="project-fact-write">{capabilities.writeAccess ? "Allowed" : "Not available"}</div></div>
+          <div className="rounded-lg border p-2" style={{ borderColor: "var(--studio-border)" }}><span style={{ color: "var(--text-muted)" }}>GitHub</span><div className="mt-1 truncate font-bold" style={{ color: capabilities.githubConnected ? "var(--litt-primary)" : "var(--text-primary)" }} data-testid="project-fact-github">{sourceRow.github}</div></div>
           <div className="rounded-lg border p-2" style={{ borderColor: "var(--studio-border)" }}><span style={{ color: "var(--text-muted)" }}>Terminal</span><div className="mt-1 truncate font-bold" style={{ color: capabilities.terminalStatus === "connected" ? "var(--litt-primary)" : "var(--text-primary)" }}>{capabilities.terminalStatus}</div></div>
         </div>
       </div>
     </div>
   );
+}
+
+/**
+ * Project facts for the metadata panel, derived from the canonical
+ * source model.
+ *
+ * Git is NOT GitHub. A managed project reports Source "LiTT Managed",
+ * Version control "Git", Branch "main" and GitHub "Not connected" — all
+ * simultaneously true. The old panel had a single "Repository" row that
+ * read "Not connected" and made a healthy project look broken.
+ */
+export function describeSourceRows(
+  capabilities: Pick<
+    import("../hooks/useConnectionSummary").ConnectionCapabilities,
+    "sourceKind" | "sourceLabel" | "sourceStatus" | "versionControl" | "activeBranch" | "repositoryName" | "githubConnected" | "workspaceStatus"
+  >,
+): { source: string; versionControl: string; branch: string; workspace: string; github: string } {
+  const source =
+    capabilities.sourceStatus === "provisioning" ? "Provisioning…"
+    : capabilities.sourceStatus === "error" ? "Error"
+    : capabilities.sourceStatus === "needs_setup" ? "Needs setup"
+    : capabilities.sourceLabel ?? (capabilities.sourceKind === "github" ? "GitHub" : "LiTT Managed");
+
+  const workspace =
+    capabilities.workspaceStatus === "ready" ? "Ready"
+    : capabilities.workspaceStatus === "provisioning" || capabilities.workspaceStatus === "preparing" ? "Starting…"
+    : capabilities.workspaceStatus === "failed" || capabilities.workspaceStatus === "error" ? "Failed"
+    : "Not prepared";
+
+  return {
+    source,
+    versionControl: capabilities.versionControl === "git" ? "Git" : "Not initialized",
+    // A managed project always has a branch. "—" is only correct when
+    // no source has been provisioned at all.
+    branch: capabilities.activeBranch ?? (capabilities.sourceStatus === "ready" ? "main" : "—"),
+    workspace,
+    github: capabilities.githubConnected ? (capabilities.repositoryName ?? "Connected") : "Not connected",
+  };
 }
 
 /* ── Media workspace panel — generated images, video, music, audio ── */
