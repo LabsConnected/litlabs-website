@@ -231,8 +231,10 @@ describe("callLLMWithTools — deadline/budget contract (real Gemini behavior)",
     expect(result.text).toBe("OR handled it.");
     expect(result.provider).toBe("openrouter");
 
-    // Exactly ONE Gemini attempt — 429 never retries or sleeps in-request.
-    expect(generateContentMock).toHaveBeenCalledTimes(1);
+    // Per-model 429s try the provider's remaining candidates (Gemini free
+    // limits are per-model) — both Gemini models were attempted, then the
+    // provider cooled down and OpenRouter took over. No sleeping either way.
+    expect(generateContentMock).toHaveBeenCalledTimes(2);
     expect(getProviderHealth("gemini").state).toBe("cooldown");
     // No backoff/sleep timer is pending.
     expect(vi.getTimerCount()).toBe(0);
@@ -261,9 +263,11 @@ describe("callLLMWithTools — deadline/budget contract (real Gemini behavior)",
     } catch (err) {
       expect(err).toBeInstanceOf(AllRoutesFailedError);
       const e = err as AllRoutesFailedError;
-      expect(e.failures.map((f) => f.class)).toEqual(["rate_limited", "billing"]);
+      // Both Gemini candidates hit their per-model 429 before the provider
+      // broke to OpenRouter's account-level 402.
+      expect(e.failures.map((f) => f.class)).toEqual(["rate_limited", "rate_limited", "billing"]);
     }
-    expect(generateContentMock).toHaveBeenCalledTimes(1);
+    expect(generateContentMock).toHaveBeenCalledTimes(2);
     // One OpenRouter call only — account-level 402 stops the provider.
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });

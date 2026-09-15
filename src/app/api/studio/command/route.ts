@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import {
+  resolveTerminalCommandBase,
+  TerminalCommandConfigError,
+} from "@/lib/studio/terminal-command-url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,17 +51,27 @@ export async function POST(req: NextRequest) {
   }
 
   // ─── Forward to terminal-server ────────────────────────────────
-  const terminalBase =
-    process.env.TERMINAL_SERVER_INTERNAL_URL ??
-    process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
-    "http://127.0.0.1:4001";
-
   const internalKey = process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
   if (internalKey.length < 32) {
     return NextResponse.json(
       { error: "Terminal server not configured" },
       { status: 503 },
     );
+  }
+
+  // The bridge is server-side fetch — only http(s) is valid. A missing or
+  // websocket (ws/wss) configuration is a loud 503, never a bogus request.
+  let terminalBase: string;
+  try {
+    terminalBase = resolveTerminalCommandBase();
+  } catch (err) {
+    if (err instanceof TerminalCommandConfigError) {
+      return NextResponse.json(
+        { error: err.message, code: "TERMINAL_COMMAND_URL_NOT_CONFIGURED" },
+        { status: 503 },
+      );
+    }
+    throw err;
   }
 
   try {

@@ -28,6 +28,16 @@ describe("Studio intent routing", () => {
     expect(detectIntent("What needs approval?")?.intent).toBe("open_approvals");
   });
 
+  it("lets deploy and publish requests reach the agent loop", () => {
+    // Deployment runs through the real project.deploy tool (approval gate,
+    // resume, verified URL). A deterministic intent would short-circuit to
+    // canned text without ever deploying, so these must NOT match an intent.
+    expect(detectIntent("Deploy this site")).toBeNull();
+    expect(detectIntent("Deploy this project to a live public URL")).toBeNull();
+    expect(detectIntent("Publish this site")).toBeNull();
+    expect(detectIntent("deploy")).toBeNull();
+  });
+
   it("opens Terminal only for explicit shell requests", () => {
     expect(detectIntent("Open the terminal")?.intent).toBe("open_terminal");
     expect(detectIntent("Run pnpm test")?.intent).toBe("run_command");

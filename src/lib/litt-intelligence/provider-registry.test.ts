@@ -113,6 +113,14 @@ describe("provider registry — Basic cost policy", () => {
     expect(plan.providers.map((p) => p.provider)).not.toContain("ollama");
   });
 
+  it("gives OpenRouter a realistic per-route timeout — free models legitimately exceed 30s", () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(TOOL_REQ);
+    const or = plan.providers.find((p) => p.provider === "openrouter");
+    expect(or?.timeoutMs).toBeGreaterThanOrEqual(60_000);
+  });
+
   it("respects preference order: gemini → openrouter → groq → mistral → cloudflare → ollama", () => {
     for (const k of ["GEMINI_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY"]) {
       vi.stubEnv(k, "x");

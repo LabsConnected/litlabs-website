@@ -1247,6 +1247,19 @@ export async function callLLMWithTools(
               ? Date.now() + failure.retryAfterMs
               : undefined,
           });
+
+          // Per-model rate limits (OpenRouter :free daily/RPM caps) must not
+          // poison the provider's other candidates: without a model cooldown
+          // the same limited model would be retried first on every call and
+          // the healthy siblings behind it would never get a chance. Cool
+          // the provider (bounded) AND this model, then try the next
+          // candidate — a later success clears the provider cooldown via
+          // recordProviderSuccess. The last model still breaks normally.
+          const hasMoreModels = route.models.indexOf(model) < route.models.length - 1;
+          if (failure.class === "rate_limited" && hasMoreModels) {
+            recordModelFailure(route.provider, model);
+            continue; // next model within the same provider
+          }
           break; // next provider — no more models behind the same account
         }
 

@@ -21,6 +21,7 @@ import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from ".
 import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, AllRoutesFailedError, AgentBudgetExhaustedError, type ToolDefinition, type ToolCallResult, type LLMMessage } from "./llm-tool-calling";
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
+import { validateApplyPatchInputs } from "./patch-validation";
 import { toolRegistry } from "./tool-registry";
 import type { LiTTToolDefinition } from "./types";
 import {
@@ -529,6 +530,35 @@ export async function runAgentLoopV2(
           reason: permResult.reason ?? "Permission denied",
         });
         continue;
+      }
+
+      // Pre-approval patch sanity: an apply_patch whose inputs are provably
+      // invalid (unresolved template placeholders like [PERSON_NAME] or
+      // {{token}}, or a search string that cannot match the target file)
+      // must never become an Approve/Reject card — the approval freezes the
+      // inputs, so approving a dead patch can only fail on resume. Feed the
+      // error back as a tool result so the model re-reads and regenerates.
+      if (toolCall.toolId === "apply_patch" && permResult.allowed) {
+        const patchError = await validateApplyPatchInputs(toolCall.inputs, transport);
+        if (patchError) {
+          const result: ToolCallResult = {
+            toolCallId: toolCall.toolCallId,
+            toolId: toolCall.toolId,
+            result: null,
+            success: false,
+            error: patchError,
+          };
+          llmMessages.push(buildToolResultMessage(result));
+          toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: "invalid patch — regenerating", mutating: false });
+          localProgress.emit({
+            type: "tool_result",
+            toolId: toolCall.toolId,
+            success: false,
+            summary: "Invalid patch — regenerating with real file content",
+            durationMs: 0,
+          });
+          continue;
+        }
       }
 
       if (permResult.requiresApproval) {

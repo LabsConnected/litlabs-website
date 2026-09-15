@@ -31,7 +31,7 @@ import { runLaunchFlow, type LaunchFlowResult } from "@/lib/litt-intelligence/la
 import { shouldEnableQualityLoop } from "@/lib/litt-intelligence/quality-loop-flow";
 import { ProgressEmitter, type ProgressEvent } from "@/lib/litt-intelligence/progress-events";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
-import { createPausedRun, getPendingPausedRunForConversation } from "@/lib/litt-intelligence/paused-run-store";
+import { createPausedRun, getLatestPausedRunForConversation, getPendingPausedRunForConversation } from "@/lib/litt-intelligence/paused-run-store";
 import { getActiveExecution, registerExecution, unregisterExecution } from "@/lib/studio/execution-registry";
 import { resolveTurn } from "@/lib/litt-intelligence/turn-resolver";
 import {
@@ -1245,6 +1245,32 @@ async function getHandler(req: NextRequest, routeCtx: RouteParams) {
           pausedRunId: pendingRun.id,
           inputs: pendingRun.inputs,
         };
+      } else if (
+        lastAssistant.status === "awaiting_approval" &&
+        !getActiveExecution(conversation.id)
+      ) {
+        // The open turn has no resumable gate — the pause died without a
+        // writeback (TTL expiry, or a decision writeback that missed).
+        // Reconcile the message to a truthful terminal state instead of
+        // leaving "Waiting for your approval" mounted forever.
+        const latestRun = await getLatestPausedRunForConversation(conversation.id, userId);
+        if (latestRun?.status === "expired") {
+          const note = `${lastAssistant.content || "Approval was required."}\n\nThis approval expired before a decision was made — send the request again to continue.`;
+          const persisted = await updateMessageStatus(lastAssistant.id, userId, "cancelled", note);
+          if (persisted !== false) {
+            lastAssistant.status = "cancelled";
+            lastAssistant.content = note;
+          }
+        } else if (latestRun?.status === "rejected") {
+          const note = `${lastAssistant.content || "Approval was required."}\n\nDeclined — the gated action was not performed.`;
+          const persisted = await updateMessageStatus(lastAssistant.id, userId, "completed", note);
+          if (persisted !== false) {
+            lastAssistant.status = "completed";
+            lastAssistant.content = note;
+          }
+        }
+        // approved/processing gates own their writeback — leave the
+        // message alone while the resumed run is in flight.
       } else if (
         lastAssistant.status === "streaming" &&
         lastAssistant.updatedAt &&

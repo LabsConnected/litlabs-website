@@ -303,6 +303,7 @@ describe("callLLMWithTools — failure classification and failover", () => {
     vi.stubEnv("MISTRAL_API_KEY", "test-mistral-key");
     mockFetch
       .mockResolvedValueOnce(makeErrorResponse(429, "Rate limited", { "retry-after": "30" }))
+      .mockResolvedValueOnce(makeErrorResponse(429, "Rate limited", { "retry-after": "30" }))
       .mockResolvedValueOnce(makeSuccessResponse("mistral-small-latest", "Mistral handled it."));
 
     const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
@@ -311,14 +312,51 @@ describe("callLLMWithTools — failure classification and failover", () => {
     const health = getProviderHealth("groq");
     expect(health.state).toBe("cooldown");
     expect(health.cooldownUntil).toBeGreaterThan(Date.now() + 25_000);
-    // Groq was not hammered again.
-    expect(callsTo("groq")).toHaveLength(1);
+    // Both Groq models were tried (per-model limits don't poison siblings),
+    // then the provider stopped — no third call.
+    expect(callsTo("groq")).toHaveLength(2);
+  });
+
+  it("a per-model 429 fails over to the provider's next candidate model", async () => {
+    // OpenRouter :free limits are per-model — a 429 on nemotron must not
+    // poison the other five free candidates behind the same key.
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    mockFetch
+      .mockResolvedValueOnce(makeErrorResponse(429, "Rate limit exceeded: free-models-per-day"))
+      .mockResolvedValueOnce(makeSuccessResponse("nvidia/nemotron-3-super-120b-a12b:free", "Second OR model handled it."));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
+
+    expect(result.provider).toBe("openrouter");
+    expect(callsTo("openrouter")).toHaveLength(2);
+    // The successful sibling clears the provider cooldown.
+    expect(getProviderHealth("openrouter").state).toBe("healthy");
+  });
+
+  it("a rate-limited model is cooled individually so the next call skips it", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    mockFetch
+      // Call 1: first model 429s, second succeeds.
+      .mockResolvedValueOnce(makeErrorResponse(429, "Rate limit exceeded"))
+      .mockResolvedValueOnce(makeSuccessResponse("nvidia/nemotron-3-super-120b-a12b:free", "one"))
+      // Call 2: the cooled first model is skipped — second model serves again.
+      .mockResolvedValueOnce(makeSuccessResponse("nvidia/nemotron-3-super-120b-a12b:free", "two"));
+
+    await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
+    const second = await callLLMWithTools("sys", [{ role: "user", content: "hi again" }], []);
+
+    expect(second.provider).toBe("openrouter");
+    // 2 calls in run 1 (429 + success) + 1 call in run 2 (first model
+    // skipped via model cooldown — NOT retried into the same limit).
+    expect(callsTo("openrouter")).toHaveLength(3);
   });
 
   it("a cooled-down provider is skipped entirely on the next call", async () => {
     vi.stubEnv("GROQ_API_KEY", "test-groq-key");
     vi.stubEnv("MISTRAL_API_KEY", "test-mistral-key");
     mockFetch
+      // Both Groq candidates 429 (account-level limit) → provider cooldown.
+      .mockResolvedValueOnce(makeErrorResponse(429, "Rate limited", { "retry-after": "30" }))
       .mockResolvedValueOnce(makeErrorResponse(429, "Rate limited", { "retry-after": "30" }))
       .mockResolvedValueOnce(makeSuccessResponse("mistral-small-latest", "one"))
       .mockResolvedValueOnce(makeSuccessResponse("mistral-small-latest", "two"));
@@ -327,8 +365,8 @@ describe("callLLMWithTools — failure classification and failover", () => {
     const second = await callLLMWithTools("sys", [{ role: "user", content: "hi again" }], []);
 
     expect(second.provider).toBe("mistral");
-    // Still only one Groq call ever — cooldown persisted across calls.
-    expect(callsTo("groq")).toHaveLength(1);
+    // Still only the two first-call Groq attempts — cooldown persisted.
+    expect(callsTo("groq")).toHaveLength(2);
   });
 
   it("a hanging provider attempt times out and the next provider continues", async () => {

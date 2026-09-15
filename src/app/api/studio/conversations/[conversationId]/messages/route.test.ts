@@ -138,6 +138,7 @@ vi.mock("@/lib/litt-intelligence/workspace-transport", () => ({
 vi.mock("@/lib/litt-intelligence/paused-run-store", () => ({
   createPausedRun: vi.fn(),
   getPendingPausedRunForConversation: vi.fn(),
+  getLatestPausedRunForConversation: vi.fn(),
 }));
 
 vi.mock("@/lib/litt-intelligence/turn-resolver", () => ({
@@ -177,7 +178,7 @@ import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-tran
 import { buildCanonicalRuntimeContext } from "@/lib/litt-intelligence/canonical-runtime-context";
 import { buildStudioContext } from "@/lib/studio/project-resolver";
 import { getConversation, insertMessage, listMessages, updateMessageStatus } from "@/lib/studio/conversation-service";
-import { createPausedRun, getPendingPausedRunForConversation } from "@/lib/litt-intelligence/paused-run-store";
+import { createPausedRun, getPendingPausedRunForConversation, getLatestPausedRunForConversation } from "@/lib/litt-intelligence/paused-run-store";
 import { persistMemory } from "@/lib/studio/memory-service";
 import { resolveRuntimeAgent } from "@/lib/agent-runtime";
 import { parseAgentSelection } from "@/lib/agent-selection";
@@ -1117,5 +1118,85 @@ describe("GET /api/studio/conversations/[conversationId]/messages — approval r
     });
     expect(res.status).toBe(200);
     expect(getPendingPausedRunForConversation).not.toHaveBeenCalled();
+  });
+
+  it("reconciles an awaiting_approval message whose gate expired server-side — no dead 'waiting for approval' card survives reload", async () => {
+    vi.mocked(listMessages).mockResolvedValue([
+      { id: "m-exp", role: "assistant", content: "I need your approval to write files.", status: "awaiting_approval" },
+    ] as any);
+    vi.mocked(getPendingPausedRunForConversation).mockResolvedValue(null);
+    vi.mocked(getLatestPausedRunForConversation).mockResolvedValue({
+      id: "paused-dead",
+      status: "expired",
+      toolId: "files.write",
+      reason: "Mutation requires approval in ACT mode",
+      inputs: {},
+    } as any);
+    vi.mocked(updateMessageStatus).mockResolvedValue(true);
+
+    const res = await GET(new NextRequest("http://localhost/api/studio/conversations/conv-123/messages"), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    const body = await res.json();
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      "m-exp",
+      "user_123",
+      "cancelled",
+      expect.stringContaining("expired"),
+    );
+    expect(body.messages.at(-1).status).toBe("cancelled");
+    expect(body.messages.at(-1).pendingApproval).toBeUndefined();
+  });
+
+  it("reconciles an awaiting_approval message whose gate was rejected but the writeback missed", async () => {
+    vi.mocked(listMessages).mockResolvedValue([
+      { id: "m-rej", role: "assistant", content: "I need your approval.", status: "awaiting_approval" },
+    ] as any);
+    vi.mocked(getPendingPausedRunForConversation).mockResolvedValue(null);
+    vi.mocked(getLatestPausedRunForConversation).mockResolvedValue({
+      id: "paused-rej",
+      status: "rejected",
+      toolId: "files.write",
+      reason: "Mutation requires approval",
+      inputs: {},
+    } as any);
+    vi.mocked(updateMessageStatus).mockResolvedValue(true);
+
+    const res = await GET(new NextRequest("http://localhost/api/studio/conversations/conv-123/messages"), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    const body = await res.json();
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      "m-rej",
+      "user_123",
+      "completed",
+      expect.stringContaining("Declined"),
+    );
+    expect(body.messages.at(-1).status).toBe("completed");
+  });
+
+  it("leaves an awaiting_approval message alone while its approved gate is still resuming", async () => {
+    vi.mocked(listMessages).mockResolvedValue([
+      { id: "m-run", role: "assistant", content: "I need your approval.", status: "awaiting_approval" },
+    ] as any);
+    vi.mocked(getPendingPausedRunForConversation).mockResolvedValue(null);
+    vi.mocked(getLatestPausedRunForConversation).mockResolvedValue({
+      id: "paused-live",
+      status: "approved",
+      runStatus: "processing",
+      toolId: "files.write",
+      reason: "Mutation requires approval",
+      inputs: {},
+    } as any);
+
+    const res = await GET(new NextRequest("http://localhost/api/studio/conversations/conv-123/messages"), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    const body = await res.json();
+
+    expect(updateMessageStatus).not.toHaveBeenCalled();
+    expect(body.messages.at(-1).status).toBe("awaiting_approval");
   });
 });
