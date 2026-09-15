@@ -4,6 +4,10 @@ import {
   resolveTerminalCommandBase,
   TerminalCommandConfigError,
 } from "@/lib/studio/terminal-command-url";
+import {
+  verifyProjectWorkspace,
+  ProjectVerificationError,
+} from "@/lib/projects/project-repository";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +35,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null) as {
     command?: string;
     args?: Record<string, unknown>;
+    projectId?: string;
     workspaceId?: string;
     cwd?: string;
   } | null;
@@ -48,6 +53,77 @@ export async function POST(req: NextRequest) {
       { error: `Unsupported command: ${body.command}` },
       { status: 400 },
     );
+  }
+
+  // ─── Establish the caller's own workspace ──────────────────────
+  // This is the browser boundary. terminal-server accepts a bare cwd with no
+  // workspaceId because the CLI/Termux machine lane needs it — that caller is
+  // addressing their own device. A browser is not, so Studio isolation is
+  // established HERE and never inherited from that compatibility.
+  //
+  // The chain is: authenticated user → owned project → provisioned workspace
+  // → workspaceId. The workspaceId is DERIVED from the owned project and is
+  // never taken from the request, so a caller cannot name a workspace at all.
+  if (body.workspaceId !== undefined) {
+    return NextResponse.json(
+      {
+        error:
+          "workspaceId is not accepted from the client. Send projectId; the " +
+          "workspace is resolved from the project you own.",
+        code: "workspace_id_not_accepted",
+      },
+      { status: 400 },
+    );
+  }
+
+  const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
+  if (!projectId) {
+    return NextResponse.json(
+      { error: "Missing 'projectId' field", code: "project_required" },
+      { status: 400 },
+    );
+  }
+
+  let workspaceId: string;
+  try {
+    const verified = await verifyProjectWorkspace(projectId, session.userId);
+    workspaceId = verified.workspaceId;
+  } catch (err) {
+    // A project owned by someone else and one that does not exist both
+    // surface as PROJECT_NOT_FOUND from getProject(projectId, userId), so the
+    // response cannot be used to discover which project ids exist.
+    const code = err instanceof ProjectVerificationError ? err.code : "PROJECT_NOT_FOUND";
+    const status = code === "FORBIDDEN" ? 403 : code === "PROJECT_NOT_FOUND" ? 404 : 409;
+    return NextResponse.json(
+      {
+        error:
+          code === "PROJECT_NOT_FOUND" || code === "FORBIDDEN"
+            ? "Project not found or not accessible."
+            : "Workspace is not ready for commands.",
+        code,
+      },
+      { status },
+    );
+  }
+
+  // A relative path inside the workspace is the only shape accepted. An
+  // absolute path, a Windows drive path, a UNC path, or any traversal segment
+  // is refused before dispatch. terminal-server re-checks this against the
+  // real root — this is the browser-side half of that contract.
+  const requestedCwd = typeof body.cwd === "string" ? body.cwd.trim() : "";
+  if (requestedCwd) {
+    const isAbsolute = requestedCwd.startsWith("/") || requestedCwd.startsWith("\\");
+    const isWindowsDrive = /^[a-zA-Z]:/.test(requestedCwd);
+    const hasTraversal = requestedCwd.split(/[\\/]+/).some((segment) => segment === "..");
+    if (isAbsolute || isWindowsDrive || hasTraversal) {
+      return NextResponse.json(
+        {
+          error: "The working directory must be a relative path inside the project workspace.",
+          code: "cwd_outside_workspace",
+        },
+        { status: 400 },
+      );
+    }
   }
 
   // ─── Forward to terminal-server ────────────────────────────────
@@ -84,8 +160,10 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         command: body.command,
         args: body.args,
-        workspaceId: body.workspaceId,
-        cwd: body.cwd,
+        // Derived from the project the caller owns — never echoed back from
+        // the request body.
+        workspaceId,
+        cwd: requestedCwd || undefined,
         userId: session.userId,
       }),
       signal: AbortSignal.timeout(240_000),

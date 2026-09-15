@@ -814,6 +814,18 @@ export function useCanonicalConversation({
             const cmd = localCommand.command;
             addLocalMessage(`Running \`/${cmd}\` via canonical CommandRouter…`);
 
+            // The bridge resolves the workspace from the project the caller
+            // owns, so the active project has to be named. Without it the
+            // command ran in terminal-server's own process cwd rather than
+            // against this project's workspace.
+            const commandProjectId = getActiveProjectId(serverProjectId, userId);
+            if (!commandProjectId) {
+              addLocalMessage(
+                `Cannot run \`/${cmd}\` — no active project. Open or create a project first.`,
+              );
+              return { accepted: true, persisted: true };
+            }
+
             try {
               const res = await fetch("/api/studio/command", {
                 method: "POST",
@@ -822,6 +834,7 @@ export function useCanonicalConversation({
                 body: JSON.stringify({
                   command: cmd,
                   args: localCommand.args ? { query: localCommand.args } : undefined,
+                  projectId: commandProjectId,
                 }),
               });
               const payload = await res.json().catch(() => null) as {
