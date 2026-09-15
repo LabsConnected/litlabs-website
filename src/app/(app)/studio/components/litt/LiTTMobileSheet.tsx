@@ -24,6 +24,8 @@ export interface LiTTMobileSheetProps {
   onClose: () => void;
   chatContent: ReactNode;
   liveContent: ReactNode;
+  /** Optional approval UI rendered full-width at the top of the sheet, above the tabs */
+  approvalSlot?: ReactNode;
 }
 
 const MOBILE_BOTTOM_NAV_H = 62;
@@ -34,6 +36,7 @@ export default function LiTTMobileSheet({
   onClose,
   chatContent,
   liveContent,
+  approvalSlot,
 }: LiTTMobileSheetProps) {
   const vv = useVisualViewport();
   const contentRef = useRef<HTMLDivElement>(null);
@@ -54,12 +57,11 @@ export default function LiTTMobileSheet({
 
   const bottomInset = Math.max(0, Math.round(vv.bottomInset));
   const bottomOffset = MOBILE_BOTTOM_NAV_H + safeBottom + bottomInset;
-  const availableHeight = Math.max(
-    200,
-    Math.round(vv.height - MOBILE_BOTTOM_NAV_H - safeBottom),
-  );
   const MIN_SHEET_HEIGHT = 150;
-  const rawSheetHeight = Math.min(Math.round(vv.height * 0.88), availableHeight);
+  // Full-screen sheet: spans from the top of the viewport down to the
+  // bottom offset (mobile nav + safe area + keyboard inset), so it still
+  // stays pinned above the on-screen keyboard.
+  const rawSheetHeight = Math.round(vv.height) + bottomInset - bottomOffset;
   // Never let the sheet render at (near-)0px — a bad viewport reading
   // should degrade to "small but usable", not "invisible/unusable".
   const sheetHeight = Math.max(MIN_SHEET_HEIGHT, rawSheetHeight);
@@ -101,13 +103,12 @@ export default function LiTTMobileSheet({
         aria-hidden
       />
       <div
-        className="fixed inset-x-0 z-[10021] flex min-h-0 min-w-0 flex-col overflow-hidden rounded-t-2xl border-t"
+        className="fixed inset-x-0 top-0 z-[10021] flex min-h-0 min-w-0 flex-col overflow-hidden border-t"
         style={{
-          bottom: `${bottomOffset}px`,
+          top: "0px",
           height: `${sheetHeight}px`,
-          maxHeight: `calc(${vv.height}px - var(--studio-mobile-bottom-h) - env(safe-area-inset-bottom))`,
-          backgroundColor: "var(--studio-surface)",
-          borderColor: "var(--studio-border)",
+          backgroundColor: "#0d0916",
+          borderColor: "rgba(255,255,255,0.07)",
         }}
         data-testid="litt-mobile-sheet"
         role="dialog"
@@ -116,30 +117,36 @@ export default function LiTTMobileSheet({
       >
         <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-white/20" aria-hidden />
 
+        {approvalSlot && (
+          <div className="w-full shrink-0" data-testid="litt-mobile-approval-slot">
+            {approvalSlot}
+          </div>
+        )}
+
         <div
           className="flex shrink-0 items-center gap-0.5 border-b px-2 py-1.5"
           style={{
-            borderColor: "var(--studio-border)",
-            backgroundColor: "rgba(13,9,22,0.6)",
+            borderColor: "rgba(255,255,255,0.07)",
+            backgroundColor: "rgba(24,18,38,0.96)",
           }}
         >
           <div
             className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg"
             style={{
-              background: "linear-gradient(135deg, rgba(139,92,246,0.2), rgba(99,102,241,0.1))",
-              border: "1px solid rgba(139,92,246,0.2)",
+              background: "linear-gradient(135deg, rgba(34,211,238,0.2), rgba(34,211,238,0.08))",
+              border: "1px solid rgba(255,255,255,0.13)",
             }}
             aria-hidden
           >
-            <span className="text-[9px] font-black" style={{ color: "var(--litt-primary)" }}>L</span>
+            <span className="text-[9px] font-black" style={{ color: "#22d3ee" }}>L</span>
           </div>
           <button
             type="button"
             onClick={() => onTabChange("chat")}
             className="flex min-h-10 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
             style={{
-              color: activeTab === "chat" ? "var(--litt-primary)" : "var(--text-muted)",
-              backgroundColor: activeTab === "chat" ? "rgba(139,92,246,0.1)" : "transparent",
+              color: activeTab === "chat" ? "#22d3ee" : "var(--text-muted)",
+              backgroundColor: activeTab === "chat" ? "rgba(34,211,238,0.1)" : "transparent",
             }}
             aria-pressed={activeTab === "chat"}
             data-testid="litt-mobile-tab-chat"
@@ -152,14 +159,14 @@ export default function LiTTMobileSheet({
             onClick={() => onTabChange("live")}
             className="flex min-h-10 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
             style={{
-              color: activeTab === "live" ? "var(--litt-primary)" : "var(--text-muted)",
-              backgroundColor: activeTab === "live" ? "rgba(139,92,246,0.1)" : "transparent",
+              color: activeTab === "live" ? "#22d3ee" : "var(--text-muted)",
+              backgroundColor: activeTab === "live" ? "rgba(34,211,238,0.1)" : "transparent",
             }}
             aria-pressed={activeTab === "live"}
             data-testid="litt-mobile-tab-live"
           >
             <Activity size={12} className="pointer-events-none" />
-            Live
+            Activity
           </button>
           <div className="flex-1" />
           <button

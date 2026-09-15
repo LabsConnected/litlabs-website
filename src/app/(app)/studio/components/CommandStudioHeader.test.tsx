@@ -100,33 +100,36 @@ describe("CommandStudioHeader — truthful status", () => {
     mockProviderHealth = {};
   });
 
-  it("shows mode guidance and keeps branding and advanced tools behind one secondary control", () => {
-    const onOpenTools = vi.fn();
+  it("shows the segmented mode control, branding, and dock toggle", () => {
+    const onToggleDock = vi.fn();
     render(
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
-        onOpenActivityAction={vi.fn()}
-        onOpenToolsAction={onOpenTools}
+        onToggleDockAction={onToggleDock}
         runtime={noProjectRuntime}
         runtimeLoading={false}
         capabilities={mockCapabilities}
+        executionMode="act"
+        onExecutionModeChange={vi.fn()}
       />,
     );
 
-    const guide = screen.getByTestId("execution-mode-guide");
-    expect(guide.textContent).toContain("PLAN: inspect and explain; do not change files");
-    expect(guide.textContent).toContain("ACT: make changes; approvals may be required");
-    expect(guide.textContent).toContain("AUTO: LiTT chooses when to plan and when to act");
+    // Segmented PLAN / ACT / AUTO control replaces the old dropdown + guide strip
+    const segmented = screen.getByTestId("execution-mode-segmented");
+    expect(segmented.textContent).toContain("PLAN");
+    expect(segmented.textContent).toContain("ACT");
+    expect(segmented.textContent).toContain("AUTO");
+    // The permanent mode-description strip is gone (chrome-stacking fix)
+    expect(screen.queryByTestId("execution-mode-guide")).toBeNull();
     expect(screen.getByTestId("studio-brand")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /open advanced tools/i }));
-    expect(onOpenTools).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByTestId("studio-dock-toggle"));
+    expect(onToggleDock).toHaveBeenCalledTimes(1);
   });
 
   it("reports checking while runtime is loading", () => {
     render(
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
-        onOpenActivityAction={vi.fn()}
         runtime={noProjectRuntime}
         runtimeLoading={true}
         capabilities={mockCapabilities}
@@ -140,7 +143,6 @@ describe("CommandStudioHeader — truthful status", () => {
     render(
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
-        onOpenActivityAction={vi.fn()}
         runtime={noProjectRuntime}
         runtimeLoading={false}
         capabilities={mockCapabilities}
@@ -152,11 +154,9 @@ describe("CommandStudioHeader — truthful status", () => {
   it("Preview button calls onPreview when runtime is verified", () => {
     mockProviderHealth = { auto: "available" };
     const onPreview = vi.fn();
-    const onOpenActivity = vi.fn();
     render(
       <CommandStudioHeader
         onPreviewAction={onPreview}
-        onOpenActivityAction={onOpenActivity}
         runtime={readyRuntime}
         runtimeLoading={false}
         capabilities={mockCapabilities}
@@ -166,32 +166,60 @@ describe("CommandStudioHeader — truthful status", () => {
     const previewBtn = screen.getByRole("button", { name: /preview/i });
     fireEvent.click(previewBtn);
     expect(onPreview).toHaveBeenCalledTimes(1);
-    expect(onOpenActivity).not.toHaveBeenCalled();
   });
 
-  it("Activity button calls onOpenActivity", () => {
-    const onOpenActivity = vi.fn();
+  it("switches execution mode from the segmented control", () => {
+    const onModeChange = vi.fn();
     render(
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
-        onOpenActivityAction={onOpenActivity}
+        onToggleDockAction={vi.fn()}
         runtime={noProjectRuntime}
         runtimeLoading={false}
         capabilities={mockCapabilities}
+        executionMode="auto"
+        onExecutionModeChange={onModeChange}
       />,
     );
-    const activityBtn = screen.getByRole("button", { name: /activity/i });
-    activityBtn.click();
-    expect(onOpenActivity).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByTestId("execution-mode-plan"));
+    expect(onModeChange).toHaveBeenCalledWith("plan");
   });
 
-  it("opens the terminal drawer from overflow menu when PTY is disconnected", () => {
-    const onOpenTerminal = vi.fn();
+  it("shows an approval-needed pill when an approval gate is pending", () => {
     render(
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
-        onOpenActivityAction={vi.fn()}
-        onOpenTerminalAction={onOpenTerminal}
+        onToggleDockAction={vi.fn()}
+        runtime={readyRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+        approvalPending={true}
+      />,
+    );
+    expect(screen.getByTestId("agent-status-pill").textContent).toContain("Approval");
+  });
+
+  it("shows a working pill while the agent is busy", () => {
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        onToggleDockAction={vi.fn()}
+        runtime={readyRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+        busy={true}
+      />,
+    );
+    expect(screen.getByTestId("agent-status-pill").textContent).toContain("Working");
+  });
+
+  it("opens the dock terminal tab from overflow menu when PTY is disconnected", () => {
+    const onOpenDockTab = vi.fn();
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        onToggleDockAction={vi.fn()}
+        onOpenDockTabAction={onOpenDockTab}
         runtime={noProjectRuntime}
         runtimeLoading={false}
         capabilities={mockCapabilities}
@@ -200,14 +228,13 @@ describe("CommandStudioHeader — truthful status", () => {
     fireEvent.click(screen.getByRole("button", { name: /more actions/i }));
     const terminalBtn = screen.getByRole("button", { name: /terminal/i });
     fireEvent.click(terminalBtn);
-    expect(onOpenTerminal).toHaveBeenCalledTimes(1);
+    expect(onOpenDockTab).toHaveBeenCalledWith("terminal");
   });
 
   it("does not render a project selector slot", () => {
     const { container } = render(
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
-        onOpenActivityAction={vi.fn()}
         runtime={noProjectRuntime}
         runtimeLoading={false}
         capabilities={mockCapabilities}
@@ -220,7 +247,6 @@ describe("CommandStudioHeader — truthful status", () => {
     render(
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
-        onOpenActivityAction={vi.fn()}
         runtime={{
           ...readyRuntime,
           phase: "workspace_not_ready",
@@ -242,7 +268,6 @@ describe("CommandStudioHeader — truthful status", () => {
     render(
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
-        onOpenActivityAction={vi.fn()}
         runtime={readyRuntime}
         runtimeLoading={false}
         capabilities={mockCapabilities}
@@ -257,7 +282,6 @@ describe("CommandStudioHeader — truthful status", () => {
     render(
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
-        onOpenActivityAction={vi.fn()}
         runtime={readyRuntime}
         runtimeLoading={false}
         capabilities={mockCapabilities}

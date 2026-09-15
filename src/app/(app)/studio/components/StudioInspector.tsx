@@ -24,7 +24,7 @@ import {
   Camera,
   MonitorUp,
 } from "lucide-react";
-import type { StudioTool } from "./StudioSidebar";
+import type { StudioTool } from "../lib/studio-destinations";
 
 /* ── Shared helpers ─────────────────────────────────────────────── */
 function Section({

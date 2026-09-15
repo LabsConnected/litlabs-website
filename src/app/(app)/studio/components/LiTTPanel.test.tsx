@@ -106,4 +106,10 @@ describe("LiTTPanel (real component)", () => {
     expect(screen.getAllByTestId("chat-slot").length).toBe(1);
     expect(screen.getAllByTestId("live-slot").length).toBe(1);
   });
+
+  it("labels the tabs Chat | Activity (tab ids unchanged)", () => {
+    renderPanel();
+    expect(screen.getByTestId("litt-tab-chat")).toHaveTextContent("Chat");
+    expect(screen.getByTestId("litt-tab-live")).toHaveTextContent("Activity");
+  });
 });

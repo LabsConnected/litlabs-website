@@ -2,10 +2,10 @@
 
 /**
  * LiTT panel — left side of the Ultra Vision shell, desktop/laptop tier
- * (lg breakpoint and up). One agent, two views: Chat | Live.
+ * (lg breakpoint and up). One agent, two views: Chat | Activity.
  *
  * Chat: conversation transcript + composer
- * Live: real-time execution telemetry (tool calls, diffs, checks, approvals)
+ * Activity: real-time execution telemetry (tool calls, diffs, checks, approvals)
  *
  * Both tabs share the same conversation/execution state instances
  * (passed in as content from the parent), so switching never drops
@@ -67,8 +67,8 @@ export default function LiTTPanel({
         width: collapsed ? 64 : `clamp(300px, ${expandedWidth}px, min(640px, 26vw))`,
         minWidth: collapsed ? 64 : 280,
         maxWidth: collapsed ? 64 : "36vw",
-        backgroundColor: "var(--studio-surface)",
-        borderRight: "1px solid var(--studio-border)",
+        backgroundColor: "#0d0916",
+        borderRight: "1px solid rgba(255,255,255,0.07)",
         backdropFilter: "blur(12px)",
       }}
       data-testid="litt-panel"
@@ -95,22 +95,22 @@ export default function LiTTPanel({
         <div
           className="flex shrink-0 items-center gap-0.5 border-b px-2 py-1.5"
           style={{
-            borderColor: "var(--studio-border)",
-            backgroundColor: "rgba(13,9,22,0.6)",
+            borderColor: "rgba(255,255,255,0.07)",
+            backgroundColor: "rgba(24,18,38,0.96)",
           }}
         >
           {/* LiTT identity mark */}
           <div
             className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg"
             style={{
-              background: "linear-gradient(135deg, rgba(139,92,246,0.2), rgba(99,102,241,0.1))",
-              border: "1px solid rgba(139,92,246,0.2)",
+              background: "linear-gradient(135deg, rgba(34,211,238,0.2), rgba(34,211,238,0.08))",
+              border: "1px solid rgba(255,255,255,0.13)",
             }}
             aria-hidden
           >
             <span
               className="text-[9px] font-black"
-              style={{ color: "var(--litt-primary)" }}
+              style={{ color: "#22d3ee" }}
             >
               L
             </span>
@@ -120,8 +120,8 @@ export default function LiTTPanel({
             onClick={() => onTabChange("chat")}
             className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
             style={{
-              color: activeTab === "chat" ? "var(--litt-primary)" : "var(--text-muted)",
-              backgroundColor: activeTab === "chat" ? "rgba(139,92,246,0.1)" : "transparent",
+              color: activeTab === "chat" ? "#22d3ee" : "var(--text-muted)",
+              backgroundColor: activeTab === "chat" ? "rgba(34,211,238,0.1)" : "transparent",
             }}
             aria-pressed={activeTab === "chat"}
             data-testid="litt-tab-chat"
@@ -134,14 +134,14 @@ export default function LiTTPanel({
             onClick={() => onTabChange("live")}
             className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
             style={{
-              color: activeTab === "live" ? "var(--litt-primary)" : "var(--text-muted)",
-              backgroundColor: activeTab === "live" ? "rgba(139,92,246,0.1)" : "transparent",
+              color: activeTab === "live" ? "#22d3ee" : "var(--text-muted)",
+              backgroundColor: activeTab === "live" ? "rgba(34,211,238,0.1)" : "transparent",
             }}
             aria-pressed={activeTab === "live"}
             data-testid="litt-tab-live"
           >
             <Activity size={12} className="pointer-events-none" />
-            Live
+            Activity
           </button>
           <div className="flex-1" />
           <button

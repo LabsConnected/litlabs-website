@@ -10,7 +10,6 @@
  * (no React, no side effects) so it can be unit-tested in isolation.
  */
 
-import type { StudioTool } from "../components/StudioSidebar";
 
 /** The six top-level navigation destinations. */
 export type StudioDestination =
@@ -348,3 +347,32 @@ export const DESTINATION_LABELS: Record<StudioDestination, string> = {
   missions: "Missions",
   more: "More",
 };
+
+/**
+ * StudioTool — legacy tool identifiers (moved from StudioSidebar.tsx,
+ * deleted in the P3 dock consolidation). Still referenced by inspector,
+ * transcript, destinations, and intent mapping.
+ */
+export type StudioTool =
+  | "home"
+  | "chat"
+  | "canvas"
+  | "design"
+  | "image"
+  | "video"
+  | "audio"
+  | "music"
+  | "build"
+  | "code"
+  | "agents"
+  | "assets"
+  | "plugins"
+  | "camera"
+  | "screen"
+  | "terminal"
+  | "workflows"
+  | "space"
+  | "clibridge"
+  | "loops"
+  | "preview"
+  | "game";

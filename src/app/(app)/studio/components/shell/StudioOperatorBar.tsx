@@ -27,13 +27,13 @@ import { useExecutionStore, type ExecutionPhase } from "../../stores/useExecutio
 
 const PHASE_META: Record<ExecutionPhase, { label: string; icon: ComponentType<{ size?: number; strokeWidth?: number; className?: string; style?: CSSProperties }>; color: string }> = {
   idle: { label: "Idle", icon: Circle, color: "var(--text-muted)" },
-  planning: { label: "Planning", icon: Activity, color: "var(--spark-primary)" },
-  inspecting: { label: "Inspecting", icon: Eye, color: "var(--spark-primary)" },
-  editing: { label: "Editing", icon: Edit3, color: "var(--litt-primary)" },
+  planning: { label: "Planning", icon: Activity, color: "#3b82f6" },
+  inspecting: { label: "Inspecting", icon: Eye, color: "#3b82f6" },
+  editing: { label: "Editing", icon: Edit3, color: "#22d3ee" },
   testing: { label: "Testing", icon: CheckCircle2, color: "#e3b341" },
-  verifying: { label: "Verifying", icon: Shield, color: "var(--litt-primary)" },
-  done: { label: "Complete", icon: CheckCircle2, color: "var(--litt-primary)" },
-  cancelled: { label: "Cancelled", icon: XCircle, color: "var(--error)" },
+  verifying: { label: "Verifying", icon: Shield, color: "#22d3ee" },
+  done: { label: "Complete", icon: CheckCircle2, color: "#22d3ee" },
+  cancelled: { label: "Cancelled", icon: XCircle, color: "#ef4444" },
   awaiting_approval: { label: "Waiting for approval", icon: AlertTriangle, color: "#e3b341" },
 };
 
@@ -91,8 +91,8 @@ export default function StudioOperatorBar({
     <div
       className="flex h-8 shrink-0 items-center gap-2 border-t px-3 text-[11px] overflow-x-auto"
       style={{
-        backgroundColor: "rgba(8,6,14,0.92)",
-        borderColor: "var(--studio-border)",
+        backgroundColor: "rgba(16,12,26,0.92)",
+        borderColor: "rgba(255,255,255,0.07)",
         color: "var(--text-muted)",
         backdropFilter: "blur(8px)",
       }}
@@ -152,12 +152,12 @@ export default function StudioOperatorBar({
       {isRunning && (
         <span
           className="flex items-center gap-1"
-          style={{ color: "var(--spark-primary)" }}
+          style={{ color: "#22d3ee" }}
           aria-label="Run in progress"
         >
           <span
             className="h-1.5 w-1.5 animate-pulse rounded-full"
-            style={{ backgroundColor: "var(--spark-primary)" }}
+            style={{ backgroundColor: "#22d3ee" }}
             aria-hidden
           />
           <span className="hidden sm:inline">Running</span>
@@ -172,9 +172,9 @@ export default function StudioOperatorBar({
             onClick={() => onResolveApproval("approved")}
             className="rounded px-2 py-0.5 text-[10px] font-bold transition hover:bg-white/10"
             style={{
-              backgroundColor: "rgba(114,242,56,0.1)",
-              color: "var(--litt-primary)",
-              border: "1px solid rgba(114,242,56,0.2)",
+              backgroundColor: "rgba(34,211,238,0.1)",
+              color: "#22d3ee",
+              border: "1px solid rgba(34,211,238,0.2)",
             }}
             aria-label="Approve"
           >
@@ -186,7 +186,7 @@ export default function StudioOperatorBar({
             className="rounded px-2 py-0.5 text-[10px] font-bold transition hover:bg-white/10"
             style={{
               backgroundColor: "rgba(239,68,68,0.1)",
-              color: "var(--error)",
+              color: "#ef4444",
               border: "1px solid rgba(239,68,68,0.2)",
             }}
             aria-label="Reject"

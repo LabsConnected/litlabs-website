@@ -1,4 +1,4 @@
-import type { StudioTool } from "../components/StudioSidebar";
+import type { StudioTool } from "./studio-destinations";
 
 export type StudioIntent =
   | "chat"
