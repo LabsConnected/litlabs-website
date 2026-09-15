@@ -224,7 +224,11 @@ function providerDefs(): ProviderDef[] {
       adapter: "openai-compatible",
       costClass: "FREE_MANAGED",
       capabilities: TOOL_CAPABLE,
-      timeoutMs: DEFAULT_ATTEMPT_TIMEOUT_MS,
+      // Free-tier OpenRouter models legitimately take 40s+ under load — the
+      // shared 30s cap timed them out every attempt and churned the
+      // provider into cooldown. Per-route cap only; the agent's absolute
+      // deadline still bounds every attempt via computeAttemptTimeout.
+      timeoutMs: Number(process.env.OPENROUTER_TIMEOUT_MS) || 60_000,
       credentialState: () => (envPresent("OPENROUTER_API_KEY") ? "available" : "missing"),
       models: openRouterModels,
     },
