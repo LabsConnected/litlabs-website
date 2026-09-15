@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, Folder } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { isManagedSourceType } from "@/lib/projects/project-source";
 
 interface ProjectOption {
   id: string;
@@ -87,7 +88,7 @@ export default function StudioProjectPicker({
               >
                 <Folder size={13} className="shrink-0" />
                 <span className="min-w-0 flex-1 truncate text-[12px] font-bold">{project.name}</span>
-                <span className="shrink-0 text-[11px]" style={{ color: "var(--text-muted)" }}>{project.sourceType ?? "project"}</span>
+                <span className="shrink-0 text-[11px]" style={{ color: "var(--text-muted)" }}>{isManagedSourceType(project.sourceType ?? null) ? "LiTT Managed" : "GitHub"}</span>
               </button>
             ))
           )}
