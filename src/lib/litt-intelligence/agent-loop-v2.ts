@@ -1421,6 +1421,7 @@ export function createAutonomousRepairCallback(
   deadlineMs?: number,
   signal?: AbortSignal,
 ): (attempt: number, errors: string) => Promise<boolean> {
+  const repairPermission = new PermissionEngine();
   return async (attempt: number, errors: string) => {
     // Feed the error output to the LLM and let it repair
     const repairMessages: LLMMessage[] = [
@@ -1451,6 +1452,29 @@ export function createAutonomousRepairCallback(
         for (const toolCall of response.toolCalls) {
           const toolDef = toolRegistry.get(toolCall.toolId);
           if (!toolDef) continue;
+
+          // The repair loop runs unattended after a mutation the human/AUTO
+          // policy already cleared — it must NOT be a blanket approval
+          // bypass. Sensitive actions (files.delete, git.push, deploy.*,
+          // project.deploy) still require real approval and are refused
+          // here rather than silently executed, exactly as they would be
+          // outside the repair loop. Routine reversible edits (write,
+          // patch, mkdir, rename, commit) are allowed to continue — the
+          // pre-mutation checkpoint already makes them reversible.
+          const repairPermInfo = toPermissionInfo(toolDef);
+          const repairPermResult = repairPermission.check(repairPermInfo, toolCall.inputs, "auto");
+
+          if (!repairPermResult.allowed || repairPermResult.requiresApproval) {
+            const result: ToolCallResult = {
+              toolCallId: toolCall.toolCallId,
+              toolId: toolCall.toolId,
+              result: null,
+              success: false,
+              error: repairPermResult.reason ?? "This action requires explicit human approval and cannot run during autonomous repair",
+            };
+            repairMessages.push(buildToolResultMessage(result));
+            continue;
+          }
 
           try {
             const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {

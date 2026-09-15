@@ -161,6 +161,7 @@ const RUN_DEF: ToolDefinition = {
     properties: {
       command: { type: "string", description: "Command to run" },
       args: { type: "array", items: { type: "string" }, description: "Arguments" },
+      stdin: { type: "string", description: "Data to write to the command's stdin before closing it" },
     },
     required: ["command"],
   },

@@ -551,6 +551,7 @@ export class ExecutionGateway {
         toolCallId,
         label: `project.run: ${command}`,
         timeoutMs: request.timeoutMs,
+        stdin: typeof request.inputs.stdin === "string" ? request.inputs.stdin : undefined,
         onStream: request.onStream,
         // Restore stdin plumbing (e.g. `git commit --file=-`): the exec
         // endpoint passes inputs.stdin, but nothing downstream consumed it.

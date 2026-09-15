@@ -52,6 +52,13 @@ export interface ShellExecuteOptions {
   timeoutMs?: number;
   maxOutputBytes?: number;
   env?: Record<string, string>;
+  /**
+   * Optional data to write to the child process's stdin before closing it.
+   * Used for commands like `git commit --file=-` that read input from
+   * stdin instead of a shell-interpolated argument. When omitted, stdin
+   * is closed immediately (no shell metacharacter interpretation either way).
+   */
+  stdin?: string;
   /** Optional streaming callback — invoked for each stdout/stderr chunk */
   onStream?: (chunk: StreamChunk) => void;
   /**

@@ -668,6 +668,8 @@ export interface ExecutionOptions {
   commandLabel?: string;
   /** Skip package.json script inspection (for internal use) */
   skipScriptInspection?: boolean;
+  /** Data to write to the child's stdin before closing it (e.g. commit messages) */
+  stdin?: string;
   /** Optional streaming callback — invoked for each stdout/stderr chunk */
   onStream?: (chunk: StreamChunk) => void;
   /**
@@ -805,6 +807,7 @@ export async function runCommand(
     timeoutMs,
     maxOutputBytes: options?.maxOutputBytes,
     env: filteredEnv,
+    stdin: options?.stdin,
     onStream: options?.onStream,
     stdin: options?.stdin,
   });

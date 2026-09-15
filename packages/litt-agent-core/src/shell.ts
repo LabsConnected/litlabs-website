@@ -224,6 +224,7 @@ export class NodeShellExecutor implements ShellExecutor {
       timeoutMs = DEFAULT_TIMEOUT_MS,
       maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES,
       env,
+      stdin,
       onStream,
       stdin,
     } = options;
@@ -254,15 +255,15 @@ export class NodeShellExecutor implements ShellExecutor {
 
       this._child = child;
 
-      // Pipe explicit stdin to the child, then EOF. Without this, commands
-      // that read stdin (e.g. `git commit --file=-`) block forever.
-      if (stdin !== undefined) {
-        try {
-          child.stdin?.write(stdin);
-          child.stdin?.end();
-        } catch {
-          // If stdin is unavailable the child sees EOF; don't fail the spawn.
+      // Always close stdin: either after writing the caller-supplied input,
+      // or immediately if none was given. Left open, a child that reads
+      // from stdin (e.g. `git commit --file=-`) blocks until it hits the
+      // process timeout instead of running or failing fast.
+      if (child.stdin) {
+        if (typeof stdin === "string") {
+          child.stdin.write(stdin, "utf8");
         }
+        child.stdin.end();
       }
 
       let stdout = "";
