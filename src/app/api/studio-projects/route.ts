@@ -8,6 +8,8 @@ import {
   PROJECT_TEMPLATES,
 } from "@/lib/projects/project-repository";
 import { supabaseAdmin } from "@/lib/supabase";
+import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
+import { getProject } from "@/lib/projects/project-repository";
 import type { ProjectTemplateId } from "@/lib/projects/types";
 
 /**
@@ -34,8 +36,9 @@ export async function GET(request: NextRequest) {
  * POST /api/studio-projects
  * Create a new canonical project.
  *
- * Body for blank project:
- *   { sourceType: "blank", name: string, templateId: "blank-static" | "nextjs" | "react-vite" }
+ * Body for managed (LiTT-owned) project:
+ *   { sourceType: "blank" | "managed", name: string, templateId: "blank-static" | "nextjs" | "react-vite" }
+ *   Managed projects provision their durable workspace at create time.
  *
  * Body for GitHub project:
  *   { sourceType: "github", name: string, slug?: string,
@@ -67,7 +70,9 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    if (sourceType === "blank") {
+    // "managed" is the domain name for LiTT-owned source; the stored
+    // source_type remains "blank" — the domain layer unifies them.
+    if (sourceType === "blank" || sourceType === "managed") {
       const templateId = body.templateId as ProjectTemplateId;
       if (!templateId || !PROJECT_TEMPLATES[templateId]) {
         return NextResponse.json(
@@ -82,7 +87,24 @@ export async function POST(request: NextRequest) {
         templateId,
         accessMode: body.accessMode === "shared" ? "shared" : "private",
       });
-      return NextResponse.json({ project }, { status: 201 });
+
+      // Provision durable source at create time — a managed project must
+      // not wait for Preview auto-start to get its workspace, Git repo
+      // and branch. provisionWorkspaceForProject is idempotent (atomic
+      // provisioning lock + adoption-first prepare), so a concurrent
+      // first-open cannot create a duplicate workspace. A failure leaves
+      // workspace_status=failed on the row and first-open retries it —
+      // the project itself was still created, so return it truthfully.
+      try {
+        await provisionWorkspaceForProject(project.id, userId);
+      } catch (provisionErr) {
+        console.error(
+          `[studio-projects] create-time provisioning failed for ${project.id}:`,
+          provisionErr instanceof Error ? provisionErr.message : provisionErr,
+        );
+      }
+      const refreshed = await getProject(project.id, userId);
+      return NextResponse.json({ project: refreshed ?? project }, { status: 201 });
     }
 
     if (sourceType === "github") {
@@ -150,7 +172,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(
-      { error: `sourceType must be "blank" or "github"` },
+      { error: `sourceType must be "blank", "managed" or "github"` },
       { status: 400 },
     );
   } catch (err) {

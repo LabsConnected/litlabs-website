@@ -42,6 +42,7 @@ import {
   listWorkspaces,
   type WorkspaceDescriptor,
 } from "./workspace/WorkspaceManager";
+import { evaluateWorkspaceRoot } from "./workspace/durability";
 import {
   startPreview,
   stopPreview,
@@ -155,19 +156,21 @@ if (process.env.NODE_ENV === "production" && !USE_DOCKER) {
   );
 }
 
-// Warn if workspace root is the ephemeral default in production — cloned
-// repositories and the workspace registry (.workspaces.json) will be lost
-// on every container restart. Operators should mount a persistent volume
-// and set TERMINAL_WORKSPACE_ROOT to that path.
-if (
-  process.env.NODE_ENV === "production" &&
-  (!process.env.TERMINAL_WORKSPACE_ROOT || WORKSPACE_ROOT.startsWith("/tmp"))
-) {
-  console.warn(
-    "[Terminal] WARNING: TERMINAL_WORKSPACE_ROOT is not set or points to /tmp. " +
-      "Workspaces will be lost on restart. Mount a persistent volume and set " +
-      "TERMINAL_WORKSPACE_ROOT to the mounted path (e.g. /data/littree-workspaces).",
-  );
+// Enforce workspace-root durability. Managed source on ephemeral
+// storage is silently destroyed on every redeploy while the UI reports
+// it as durable — production must fail rather than pretend persistence
+// exists. Outside production a warning is enough.
+const workspaceRootVerdict = evaluateWorkspaceRoot({
+  nodeEnv: process.env.NODE_ENV,
+  configuredRoot: process.env.TERMINAL_WORKSPACE_ROOT,
+  resolvedRoot: WORKSPACE_ROOT,
+});
+if (!workspaceRootVerdict.ok) {
+  console.error(`[Terminal] FATAL: ${workspaceRootVerdict.reason}`);
+  process.exit(1);
+}
+if (workspaceRootVerdict.reason) {
+  console.warn(`[Terminal] WARNING: ${workspaceRootVerdict.reason}`);
 }
 
 mkdirSync(WORKSPACE_ROOT, { recursive: true });

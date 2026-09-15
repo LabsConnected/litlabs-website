@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   createBlankProject: vi.fn(),
   createGithubProject: vi.fn(),
+  getProject: vi.fn(),
+  provisionWorkspaceForProject: vi.fn(),
   getInstallationOctokit: vi.fn(),
   getRepository: vi.fn(),
   supabaseFrom: vi.fn(),
@@ -16,6 +18,9 @@ const mocks = vi.hoisted(() => ({
     data: { installation_id: 123 },
     error: null as { message: string } | null,
   },
+  PROJECT_TEMPLATES: {
+    "blank-static": { name: "Blank Static" },
+  } as Record<string, { name: string }>,
 }));
 
 vi.mock("@/lib/auth", () => ({ auth: mocks.auth }));
@@ -25,8 +30,12 @@ vi.mock("@/lib/github-app", () => ({
 vi.mock("@/lib/projects/project-repository", () => ({
   createBlankProject: mocks.createBlankProject,
   createGithubProject: mocks.createGithubProject,
+  getProject: mocks.getProject,
   listProjects: vi.fn(),
-  PROJECT_TEMPLATES: {},
+  PROJECT_TEMPLATES: mocks.PROJECT_TEMPLATES,
+}));
+vi.mock("@/lib/studio/workspace-recovery", () => ({
+  provisionWorkspaceForProject: mocks.provisionWorkspaceForProject,
 }));
 vi.mock("@/lib/supabase", () => ({
   supabaseAdmin: (() => {
@@ -57,7 +66,7 @@ const githubProject = {
   githubFullName: "acme/private-repo",
 };
 
-function request(body = githubProject) {
+function request(body: Record<string, unknown> = githubProject) {
   return new NextRequest("http://localhost/api/studio-projects", {
     method: "POST",
     body: JSON.stringify(body),
@@ -147,5 +156,73 @@ describe("POST /api/studio-projects GitHub authorization", () => {
         githubBranch: "trunk",
       }),
     );
+  });
+});
+
+describe("POST /api/studio-projects managed create-time provisioning", () => {
+  const managedBody = {
+    sourceType: "managed",
+    name: "Managed Project",
+    templateId: "blank-static",
+  };
+
+  it("provisions durable source as part of project creation", async () => {
+    mocks.createBlankProject.mockResolvedValue({ id: "proj-managed-1" });
+    mocks.provisionWorkspaceForProject.mockResolvedValue("ws-proj-managed-1");
+    mocks.getProject.mockResolvedValue({
+      id: "proj-managed-1",
+      workspaceId: "ws-proj-managed-1",
+      workspaceStatus: "ready",
+      workspaceBranch: "main",
+    });
+
+    const response = await POST(request(managedBody));
+
+    expect(response.status).toBe(201);
+    expect(mocks.createBlankProject).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "user-1", name: "Managed Project" }),
+    );
+    expect(mocks.provisionWorkspaceForProject).toHaveBeenCalledWith(
+      "proj-managed-1",
+      "user-1",
+    );
+    const body = await response.json();
+    expect(body.project.workspaceStatus).toBe("ready");
+    expect(body.project.workspaceBranch).toBe("main");
+  });
+
+  it("still accepts sourceType blank and provisions it", async () => {
+    mocks.createBlankProject.mockResolvedValue({ id: "proj-blank-1" });
+    mocks.provisionWorkspaceForProject.mockResolvedValue("ws-proj-blank-1");
+    mocks.getProject.mockResolvedValue({
+      id: "proj-blank-1",
+      workspaceStatus: "ready",
+    });
+
+    const response = await POST(request({ ...managedBody, sourceType: "blank" }));
+
+    expect(response.status).toBe(201);
+    expect(mocks.provisionWorkspaceForProject).toHaveBeenCalledWith(
+      "proj-blank-1",
+      "user-1",
+    );
+  });
+
+  it("returns the project truthfully when provisioning fails", async () => {
+    mocks.createBlankProject.mockResolvedValue({ id: "proj-fail-1" });
+    mocks.provisionWorkspaceForProject.mockRejectedValue(
+      new Error("terminal-server unreachable"),
+    );
+    mocks.getProject.mockResolvedValue({
+      id: "proj-fail-1",
+      workspaceStatus: "failed",
+      workspaceError: "terminal-server unreachable",
+    });
+
+    const response = await POST(request(managedBody));
+
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body.project.workspaceStatus).toBe("failed");
   });
 });
