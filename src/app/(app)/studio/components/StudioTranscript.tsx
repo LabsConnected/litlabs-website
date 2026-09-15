@@ -54,7 +54,7 @@ function deriveWorkLog(
     const attempted = execution?.toolCalls.length ?? 0;
     const change = execution?.workspaceChange ?? null;
 
-    if (change?.changed) {
+    if (change?.status === "changed") {
       const count = change.files?.length ?? 0;
       const detail = count === 1 ? change.files![0] : count > 1 ? `${count} files` : "changes";
       return {
@@ -65,13 +65,18 @@ function deriveWorkLog(
 
     // Only claim nothing happened when the diff actually says so. Without a
     // diff we report the failure without asserting anything about the files.
-    const verifiedUnchanged = change !== null && change.changed === false;
+    // Only claim nothing happened when the diff actually says so. When the
+    // comparison could not be made we say that plainly rather than guessing.
+    if (change?.status === "unknown" || change === null) {
+      return {
+        label: "Failed — could not verify whether files changed",
+        color: "#ef4444",
+      };
+    }
     return {
       label: attempted > 0
         ? `0 of ${attempted} steps complete — failed`
-        : verifiedUnchanged
-          ? "Failed — no work completed"
-          : "Failed",
+        : "Failed — no work completed",
       color: "#ef4444",
     };
   }

@@ -29,14 +29,14 @@ function evidence(
 }
 
 const changed = (files: string[] = ["index.html"]): WorkspaceChangeEvidence => ({
-  changed: true,
+  status: "changed",
   files,
   checkpointSha: "abc1234",
   rollbackAvailable: true,
 });
 
 const unchanged: WorkspaceChangeEvidence = {
-  changed: false,
+  status: "unchanged",
   files: [],
   checkpointSha: "abc1234",
   rollbackAvailable: true,
@@ -69,7 +69,7 @@ describe("completion verdict vs. actual workspace state", () => {
     );
 
     expect(verdict.state).toBe("failed");
-    expect(verdict.workspaceChanged).toBe(false);
+    expect(verdict.workspaceChange).toBe("unchanged");
     expect(verdict.reason).toContain("failed before making changes");
   });
 
@@ -81,7 +81,7 @@ describe("completion verdict vs. actual workspace state", () => {
     );
 
     expect(verdict.state).toBe("failed");
-    expect(verdict.workspaceChanged).toBe(true);
+    expect(verdict.workspaceChange).toBe("changed");
     expect(verdict.reason).not.toContain("nothing was changed");
     expect(verdict.reason).toContain("failed after making changes");
   });
@@ -99,7 +99,7 @@ describe("completion verdict vs. actual workspace state", () => {
       ),
     );
 
-    expect(verdict.workspaceChanged).toBe(true);
+    expect(verdict.workspaceChange).toBe("changed");
     expect(verdict.changedFiles).toEqual(["index.html"]);
     expect(verdict.reason).toContain("index.html");
   });
@@ -126,7 +126,7 @@ describe("completion verdict vs. actual workspace state", () => {
       evidence([{ toolId: "files.write", mutating: true, success: undefined }], changed()),
     );
 
-    expect(verdict.workspaceChanged).toBe(true);
+    expect(verdict.workspaceChange).toBe("changed");
     expect(verdict.reason).not.toContain("nothing was changed");
   });
 
@@ -136,7 +136,7 @@ describe("completion verdict vs. actual workspace state", () => {
       BUILD,
       evidence([{ toolId: "files.write", mutating: true, success: false }], unchanged),
     );
-    expect(verdict.workspaceChanged).toBe(false);
+    expect(verdict.workspaceChange).toBe("unchanged");
   });
 
   it("checkpoint diff non-empty → changes reported", () => {
@@ -144,7 +144,7 @@ describe("completion verdict vs. actual workspace state", () => {
       BUILD,
       evidence([{ toolId: "files.write", mutating: true, success: false }], changed()),
     );
-    expect(verdict.workspaceChanged).toBe(true);
+    expect(verdict.workspaceChange).toBe("changed");
   });
 
   // 8. the verdict may never contradict the diff
@@ -156,12 +156,12 @@ describe("completion verdict vs. actual workspace state", () => {
           BUILD,
           evidence([{ toolId: "files.write", mutating: true, success }], change),
         );
-        if (change.changed) {
+        if (change.status === "changed") {
           expect(verdict.reason).not.toContain("nothing was changed");
           expect(verdict.reason).not.toContain("before making changes");
-          expect(verdict.workspaceChanged).toBe(true);
+          expect(verdict.workspaceChange).toBe("changed");
         } else {
-          expect(verdict.workspaceChanged).toBe(false);
+          expect(verdict.workspaceChange).toBe("unchanged");
         }
       }
     }
@@ -175,7 +175,7 @@ describe("completion verdict vs. actual workspace state", () => {
     );
 
     expect(verdict.state).toBe("failed");
-    expect(verdict.workspaceChanged).toBeUndefined();
+    expect(verdict.workspaceChange).toBe("unknown");
     expect(verdict.reason).not.toContain("nothing was changed");
     expect(verdict.reason).not.toContain("before making changes");
   });

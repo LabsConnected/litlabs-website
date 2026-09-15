@@ -22,6 +22,8 @@ import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { validateApplyPatchInputs } from "./patch-validation";
+import { computeWorkspaceChange } from "./workspace-change-producer";
+import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { toolRegistry } from "./tool-registry";
 import type { LiTTToolDefinition } from "./types";
 import {
@@ -99,6 +101,13 @@ export interface AgentLoopResult {
   toolCalls: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }>;
   buildFixResult?: BuildFixLoopResult;
   checkpoint?: { checkpointId: string; label: string; gitSha: string };
+  /**
+   * What the run actually did to the workspace, compared against the
+   * pre-mutation checkpoint. Undefined when no mutation was ever reached.
+   * A "unknown" status means the comparison failed — never that the
+   * workspace is untouched.
+   */
+  workspaceChange?: WorkspaceChangeEvidence;
   cancelled: boolean;
   cancelReason?: string;
   events: ProgressEvent[];
@@ -775,6 +784,22 @@ export async function runAgentLoopV2(
     ...(cancelled ? { reason: cancelReason ?? "Unknown" } : { totalSteps: stepsUsed, totalDurationMs: Date.now() - startTime }),
   } as ProgressEvent);
 
+  // What did this run actually do to the files?
+  //
+  // Tool success flags cannot answer that: a tool can write bytes and then
+  // fail, and a cancelled run can be stopped after a write has landed. The
+  // checkpoint above is the baseline, so the workspace is compared against
+  // it whenever a mutation was reached. A failure to compare yields
+  // "unknown" — never a claim that nothing changed.
+  // A checkpoint only exists once a mutation was reached. An attempted
+  // mutation with NO checkpoint (checkpoint creation itself failed) still
+  // needs evidence — it resolves to "unknown", which is the honest answer,
+  // rather than being silently omitted.
+  const attemptedMutation = toolCallLog.some((call) => call.mutating);
+  const workspaceChange = checkpoint || attemptedMutation
+    ? await computeWorkspaceChange(transport, checkpoint ?? null)
+    : undefined;
+
   return {
     finalText: gatedFinalText,
     stepsUsed,
@@ -782,6 +807,7 @@ export async function runAgentLoopV2(
     toolCalls: toolCallLog,
     buildFixResult,
     checkpoint,
+    workspaceChange,
     cancelled,
     cancelReason,
     events,
@@ -1336,6 +1362,22 @@ export async function resumeAgentLoopV2(
     ...(cancelled ? { reason: cancelReason ?? "Unknown" } : { totalSteps: stepsUsed, totalDurationMs: Date.now() - startTime }),
   } as ProgressEvent);
 
+  // What did this run actually do to the files?
+  //
+  // Tool success flags cannot answer that: a tool can write bytes and then
+  // fail, and a cancelled run can be stopped after a write has landed. The
+  // checkpoint above is the baseline, so the workspace is compared against
+  // it whenever a mutation was reached. A failure to compare yields
+  // "unknown" — never a claim that nothing changed.
+  // A checkpoint only exists once a mutation was reached. An attempted
+  // mutation with NO checkpoint (checkpoint creation itself failed) still
+  // needs evidence — it resolves to "unknown", which is the honest answer,
+  // rather than being silently omitted.
+  const attemptedMutation = toolCallLog.some((call) => call.mutating);
+  const workspaceChange = checkpoint || attemptedMutation
+    ? await computeWorkspaceChange(transport, checkpoint ?? null)
+    : undefined;
+
   return {
     finalText: gatedFinalText,
     stepsUsed,
@@ -1343,6 +1385,7 @@ export async function resumeAgentLoopV2(
     toolCalls: toolCallLog,
     buildFixResult,
     checkpoint,
+    workspaceChange,
     cancelled,
     cancelReason,
     events,

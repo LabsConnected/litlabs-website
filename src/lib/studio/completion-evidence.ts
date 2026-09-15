@@ -62,15 +62,29 @@ export interface DeploymentEvidence {
  * returned failure leaves `changed: true` with no successful mutation, and
  * the run must not claim nothing happened.
  */
+export type WorkspaceChangeStatus =
+  /** The diff ran and found differences from the checkpoint. */
+  | "changed"
+  /** The diff ran and found none. */
+  | "unchanged"
+  /**
+   * The comparison could not be made — no checkpoint, unreachable
+   * workspace, or a failed diff. This is NOT "unchanged": claiming the
+   * workspace is untouched because we failed to look is the exact false
+   * negative this evidence exists to prevent.
+   */
+  | "unknown";
+
 export interface WorkspaceChangeEvidence {
-  /** Whether the workspace differs from the pre-mutation checkpoint. */
-  changed: boolean;
+  status: WorkspaceChangeStatus;
   /** Paths that differ, when the diff could enumerate them. */
   files?: string[];
   /** The checkpoint the comparison was made against. */
   checkpointSha?: string;
   /** Whether restoring that checkpoint is still possible. */
   rollbackAvailable?: boolean;
+  /** Why the status is "unknown" — surfaced for support, never a claim. */
+  unknownReason?: string;
 }
 
 export interface ExecutionEvidence {
@@ -95,11 +109,10 @@ export interface CompletionVerdict {
   /** Human-readable justification for the verdict. */
   reason: string;
   /**
-   * True when the workspace differs from the pre-mutation checkpoint, even
-   * if no mutating tool reported success. Undefined when no comparison was
-   * possible — which is not the same as false.
+   * What the workspace itself says. "unknown" when no comparison was
+   * possible — which is never the same as "unchanged".
    */
-  workspaceChanged?: boolean;
+  workspaceChange?: WorkspaceChangeStatus;
   /** Paths that differ, when known. */
   changedFiles?: string[];
   /** Checkpoint the comparison was made against. */
@@ -123,9 +136,9 @@ export function requirementForMode(mode: string): WorkRequirement {
 
 /** Surface workspace-diff facts on the verdict for the UI to render. */
 function changeFields(change: WorkspaceChangeEvidence | null) {
-  if (!change) return {};
+  if (!change) return { workspaceChange: "unknown" as const };
   return {
-    workspaceChanged: change.changed,
+    workspaceChange: change.status,
     changedFiles: change.files,
     checkpointSha: change.checkpointSha,
     rollbackAvailable: change.rollbackAvailable,
@@ -203,7 +216,7 @@ function evaluateCompletionState(
     // so "nothing was changed" is claimed ONLY when the diff confirms it.
     const change = evidence.workspaceChange ?? null;
 
-    if (change?.changed) {
+    if (change?.status === "changed") {
       return {
         ...base,
         ...changeFields(change),
@@ -218,7 +231,7 @@ function evaluateCompletionState(
     // The diff is only evidence of "untouched" when it was actually taken.
     // Without it we say what we know — no successful mutation — and do not
     // assert anything about the workspace.
-    const verifiedUnchanged = change !== null && change.changed === false;
+    const verifiedUnchanged = change?.status === "unchanged";
 
     if (failedMutations > 0) {
       return {
