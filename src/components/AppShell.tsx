@@ -4,7 +4,9 @@
  * AppShell — the ONE canonical authenticated application shell.
  *
  * Replaces NavbarWrapper + MobileBottomNav with a unified system:
- *   - Desktop: glass sidebar (72px collapsed / 256px expanded)
+ *   - Desktop (≥1280px): glass sidebar (72px collapsed / 256px expanded)
+ *   - Narrow desktop/tablet (768–1279px): sidebar is forced to the 72px
+ *     icon rail so it cannot consume a large share of the viewport
  *   - Mobile: slide-out drawer + simplified bottom bar
  *   - Shared navigation data from lib/navigation.ts
  *   - Collapsed state persisted in localStorage
@@ -35,6 +37,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useClerkAuth, useAppUser } from "@/hooks/useClerkAuth";
 import { useLittHealth } from "@/hooks/useLittHealth";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import {
   APP_NAV_SECTIONS,
   APP_NAV_BOTTOM,
@@ -345,6 +348,7 @@ function DesktopSidebar({
 
   return (
     <aside
+      data-collapsed={collapsed}
       className={`sticky top-0 z-20 hidden h-dvh shrink-0 flex-col border-r transition-[width] duration-200 ease-out md:flex ${
         collapsed ? "w-[72px]" : "w-[256px]"
       }`}
@@ -830,6 +834,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  // Force the icon rail on narrow desktop/tablet widths (768–1279px).
+  // Below md the sidebar is hidden entirely in favour of the drawer nav;
+  // at ≥1280px the user's persisted collapse preference applies. This
+  // keeps the sidebar from consuming a large share of narrow viewports
+  // such as Studio at ~1024px.
+  const railOnly = useMediaQuery("(min-width: 768px) and (max-width: 1279px)");
+  const effectiveCollapsed = collapsed || railOnly;
+
   // Load collapsed state from localStorage
   useEffect(() => {
     const stored = localStorage.getItem(COLLAPSED_KEY);
@@ -859,8 +871,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-dvh">
       {/* Desktop sidebar — wrapped in Suspense for useSearchParams SSG safety */}
-      <Suspense fallback={<div className="hidden md:block" style={{ width: collapsed ? 72 : 256 }} />}>
-        <DesktopSidebar collapsed={collapsed} onToggleCollapse={toggleCollapse} />
+      <Suspense fallback={<div className="hidden md:block" style={{ width: effectiveCollapsed ? 72 : 256 }} />}>
+        <DesktopSidebar collapsed={effectiveCollapsed} onToggleCollapse={toggleCollapse} />
       </Suspense>
 
       {/* Mobile drawer (conditional) — wrapped in Suspense for useSearchParams SSG safety.
