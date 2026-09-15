@@ -29,6 +29,7 @@ vi.mock("@/lib/projects/project-repository", () => {
 });
 
 import { POST } from "./route";
+import { auth } from "@/lib/auth";
 import {
   verifyProjectWorkspace,
   ProjectVerificationError as FakeProjectVerificationError,
@@ -282,5 +283,35 @@ describe("POST /api/studio/command — browser ownership boundary", () => {
 
     expect(raw).not.toContain("/data/littree-workspaces");
     expect(raw).not.toContain("user_bob");
+  });
+});
+
+/**
+ * Authentication.
+ *
+ * The suite-wide auth mock resolves to a signed-in user so the transport and
+ * ownership cases can reach the code they test. That left the unauthenticated
+ * path uncovered in the file that owns this contract: nothing here would have
+ * failed if the 401 guard were deleted.
+ */
+describe("POST /api/studio/command — authentication", () => {
+  it("returns 401 and never contacts terminal-server when there is no user", async () => {
+    vi.mocked(auth).mockResolvedValueOnce({ userId: null } as never);
+    process.env.TERMINAL_SERVER_INTERNAL_URL = "https://terminal.litlabs.net";
+
+    const res = await POST(
+      new NextRequest("http://localhost/api/studio/command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: "status", projectId: "proj-owned" }),
+      }),
+    );
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "Unauthorized" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    // Auth precedes ownership: an unauthenticated caller must not cause a
+    // project lookup either.
+    expect(vi.mocked(verifyProjectWorkspace)).not.toHaveBeenCalled();
   });
 });
