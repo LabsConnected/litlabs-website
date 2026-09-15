@@ -94,7 +94,7 @@ export interface StudioProjectRow {
   github_branch: string | null;
   latest_commit_sha: string | null;
   workspace_id: string | null;
-  /** Added by 20260915000000. Optional: a pre-migration DB omits it. */
+  /** Added by 20260915020000. Optional: a pre-migration DB omits it. */
   workspace_branch?: string | null;
   workspace_status: WorkspaceStatus;
   workspace_root: string | null;
