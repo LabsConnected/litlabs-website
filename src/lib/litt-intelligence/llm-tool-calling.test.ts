@@ -358,6 +358,63 @@ describe("callLLMWithTools — failure classification and failover", () => {
   });
 });
 
+describe("callLLMWithTools — empty provider payloads", () => {
+  it("a well-formed empty completion is a bad_response model failure that fails over", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    mockFetch
+      // Both Gemini models return candidates with no text and no calls.
+      .mockResolvedValueOnce(makeGeminiRawResponse([]))
+      .mockResolvedValueOnce(makeGeminiRawResponse([]))
+      .mockResolvedValueOnce(makeSuccessResponse("openrouter/free", "Recovered."));
+
+    const result = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "hi" }],
+      [],
+    );
+
+    expect(result.text).toBe("Recovered.");
+    expect(result.provider).toBe("openrouter");
+    expect(callsTo("generativelanguage")).toHaveLength(2);
+  });
+
+  it("an OpenAI-compatible empty completion (no content, no tool_calls) advances to the next model", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    mockFetch
+      .mockResolvedValueOnce(makeSuccessResponse("openrouter/free", ""))
+      .mockResolvedValueOnce(makeSuccessResponse("openrouter/free", "Second model answered."));
+
+    const result = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "hi" }],
+      [],
+    );
+
+    expect(result.text).toBe("Second model answered.");
+    expect(callsTo("openrouter")).toHaveLength(2);
+  });
+
+  it("when every route returns empty payloads the call throws AllRoutesFailedError classified bad_response", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    // Groq has two candidate models — both return empty completions.
+    mockFetch.mockResolvedValue(makeSuccessResponse("openai/gpt-oss-120b", ""));
+
+    const err = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "hi" }],
+      [],
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(AllRoutesFailedError);
+    expect(err.failures.length).toBeGreaterThan(0);
+    expect(err.failures.every((f: { class: string }) => f.class === "bad_response")).toBe(true);
+    expect(err.userMessage).toMatch(/all currently available AI routes/i);
+    // Nothing reported success — no fake text.
+    expect(err.failures.every((f: { message: string }) => /empty completion/.test(f.message))).toBe(true);
+  });
+});
+
 describe("callLLMWithTools — deadline and abort", () => {
   it("does not start any provider call when the shared deadline is already exhausted", async () => {
     vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");

@@ -6,11 +6,63 @@ import {
   markRunProcessing,
   markRunCompleted,
   markRunFailed,
+  createPausedRun,
   type RunResult,
 } from "@/lib/litt-intelligence/paused-run-store";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { resumeAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
+import {
+  getAwaitingApprovalAssistantMessage,
+  insertMessage,
+  updateMessageStatus,
+} from "@/lib/studio/conversation-service";
+import { studioLog } from "@/lib/studio/logger";
+import type { MessageStatus } from "@/lib/studio/types";
+
+/**
+ * Write a resumed run's outcome back onto the conversation transcript.
+ * The assistant message that paused stays "awaiting_approval" until the
+ * resumed execution finishes — without this writeback a page refresh would
+ * show a run that never resolved. If the original message can't be found
+ * (deleted conversation etc.), the result is appended as a new message so
+ * the work isn't invisible. Best-effort: the authoritative outcome is
+ * already durable on the paused-run row itself.
+ */
+async function writeResumedResultToTranscript(opts: {
+  conversationId: string;
+  userId: string;
+  projectId: string;
+  pausedRunId: string;
+  status: MessageStatus;
+  content?: string;
+}): Promise<void> {
+  try {
+    const awaiting = await getAwaitingApprovalAssistantMessage(opts.conversationId, opts.userId);
+    if (awaiting) {
+      await updateMessageStatus(awaiting.id, opts.userId, opts.status, opts.content);
+      return;
+    }
+    if (opts.content?.trim()) {
+      await insertMessage({
+        conversationId: opts.conversationId,
+        ownerId: opts.userId,
+        projectId: opts.projectId,
+        role: "assistant",
+        content: opts.content,
+        status: opts.status,
+        clientRequestId: `resume:${opts.pausedRunId}`,
+      });
+    }
+  } catch (err) {
+    studioLog("approval:transcript_writeback_failed", {
+      conversationId: opts.conversationId,
+      userId: opts.userId,
+      pausedRunId: opts.pausedRunId,
+      errorClass: err instanceof Error ? err.message : "unknown",
+    });
+  }
+}
 
 /**
  * POST /api/studio/conversations/[conversationId]/approvals/[pausedRunId]
@@ -103,8 +155,19 @@ export async function POST(
     );
   }
 
-  // 4. For REJECTED: no resumed execution needed — return immediately
+  // 4. For REJECTED: no resumed execution needed — return immediately.
+  // Close out the awaiting transcript message so a refresh doesn't show a
+  // gate that was already decided.
   if (body.decision === "rejected") {
+    const awaiting = await getAwaitingApprovalAssistantMessage(conversationId, userId);
+    if (awaiting) {
+      await updateMessageStatus(
+        awaiting.id,
+        userId,
+        "completed",
+        `${awaiting.content || "Approval was required."}\n\nDeclined — the gated action was not performed.`,
+      ).catch(() => undefined);
+    }
     return NextResponse.json({
       resolved: true,
       decision: "rejected",
@@ -198,7 +261,54 @@ export async function POST(
     },
     transport,
   )
-    .then((result) => {
+    .then(async (result) => {
+      // The resumed run can hit a NEW approval gate. Persist it so it is
+      // resumable — otherwise the client would get an approval with no
+      // pausedRunId (a dead button).
+      let nestedPausedRunId: string | undefined;
+      if (result.pendingApproval) {
+        try {
+          const nested = await createPausedRun({
+            userId,
+            conversationId,
+            projectId: resolved.projectId,
+            workspaceId: resolved.workspaceId,
+            toolId: result.pendingApproval.toolId,
+            toolCallId: result.pendingApproval.toolCallId,
+            inputs: result.pendingApproval.inputs,
+            reason: result.pendingApproval.reason,
+            pausedMessages: result.pendingApproval.pausedMessages,
+            executionMode: resolved.executionMode,
+            systemPrompt: resolved.systemPrompt,
+            checkpointId: null,
+          });
+          nestedPausedRunId = nested.id;
+        } catch (nestedErr) {
+          studioLog("approval:nested_paused_run_persist_failed", {
+            conversationId,
+            userId,
+            tool: result.pendingApproval.toolId,
+            errorClass: nestedErr instanceof Error ? nestedErr.message : "unknown",
+          });
+        }
+      }
+
+      // Reflect the outcome on the transcript BEFORE marking the run
+      // completed — a poller that sees "completed" can then loadMessages
+      // and get the real persisted result.
+      await writeResumedResultToTranscript({
+        conversationId,
+        userId,
+        projectId: resolved.projectId,
+        pausedRunId,
+        status: result.cancelled
+          ? "cancelled"
+          : result.pendingApproval
+            ? "awaiting_approval"
+            : "completed",
+        content: result.finalText || undefined,
+      });
+
       const runResult: RunResult = {
         finalText: result.finalText,
         stepsUsed: result.stepsUsed,
@@ -208,15 +318,23 @@ export async function POST(
         pendingApproval: result.pendingApproval
           ? {
               toolId: result.pendingApproval.toolId,
-              pausedRunId: undefined, // Will be set by the next pause cycle
+              pausedRunId: nestedPausedRunId,
               reason: result.pendingApproval.reason,
             }
           : undefined,
       };
       return markRunCompleted(pausedRunId, userId, runResult);
     })
-    .catch((err) => {
+    .catch(async (err) => {
       const message = err instanceof Error ? err.message : "Resume failed";
+      await writeResumedResultToTranscript({
+        conversationId,
+        userId,
+        projectId: resolved.projectId,
+        pausedRunId,
+        status: "failed",
+        content: `The resumed run failed: ${message}`,
+      });
       return markRunFailed(pausedRunId, userId, message);
     });
 

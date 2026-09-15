@@ -619,7 +619,18 @@ async function attemptGemini(
     });
   }
 
-  return toGeminiResponse(result, model, req.toolIdMap);
+  const parsed = toGeminiResponse(result, model, req.toolIdMap);
+  // Candidates present but empty (no text, no function calls) — same
+  // empty-payload failure class as the OpenAI-compatible parser; fail over
+  // rather than returning "" to the agent loop.
+  if (!parsed.text.trim() && parsed.toolCalls.length === 0) {
+    throw new ProviderAttemptError("gemini", model, {
+      class: "bad_response",
+      scope: "model",
+      message: `empty completion (finishReason=${result.candidates[0]?.finishReason ?? "unknown"})`,
+    });
+  }
+  return parsed;
 }
 
 /** Provider-specific connection details for the shared OpenAI-compatible adapter. */
@@ -741,6 +752,18 @@ function parseOpenAiCompatibleResponse(
       inputs,
     };
   });
+
+  // A well-formed completion with neither text nor tool calls is an empty
+  // provider payload — a model failure, not a final answer. Failing over to
+  // the next model/provider beats handing "" to the agent loop as if the
+  // model had concluded.
+  if (!text.trim() && toolCalls.length === 0) {
+    throw new ProviderAttemptError(route.provider, model, {
+      class: "bad_response",
+      scope: "model",
+      message: `empty completion (finish_reason=${finishReason})`,
+    });
+  }
 
   return {
     text,
