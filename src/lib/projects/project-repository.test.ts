@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+vi.mock("@/lib/studio/logger", () => ({
+  studioLog: vi.fn(),
+}));
+
 // Mock supabaseAdmin before importing the repository
 vi.mock("@/lib/supabase", () => {
   const mockChain = {
@@ -9,6 +13,9 @@ vi.mock("@/lib/supabase", () => {
     _selectColumns: "" as string,
     _isMaybeSingle: false,
     _isSingle: false,
+    // When set, the next awaited query resolves with this error — lets
+    // tests simulate a real database failure on any write/read.
+    _injectError: null as { message: string } | null,
 
     from(table: string) {
       this._table = table;
@@ -40,6 +47,14 @@ vi.mock("@/lib/supabase", () => {
       this._filters.push({ column, value });
       return this;
     },
+    in(column: string, _values: unknown[]) {
+      this._filters.push({ column, value: "in" });
+      return this;
+    },
+    lt(column: string, value: unknown) {
+      this._filters.push({ column, value });
+      return this;
+    },
     maybeSingle() {
       this._isMaybeSingle = true;
       return this;
@@ -52,6 +67,14 @@ vi.mock("@/lib/supabase", () => {
       return this;
     },
     then(resolve: (v: unknown) => void) {
+      // Injected database failure takes precedence over all mock data
+      if (this._injectError) {
+        const e = this._injectError;
+        this._injectError = null;
+        resolve({ data: null, error: e });
+        return;
+      }
+
       // Return mock data based on filters
       const userIdFilter = this._filters.find((f) => f.column === "user_id");
       const idFilter = this._filters.find((f) => f.column === "id");
@@ -226,13 +249,21 @@ import {
   updateProjectRuntime,
   updateProjectWorkspaceType,
   createBlankProject,
+  claimProvisioningLock,
   PROJECT_TEMPLATES,
 } from "./project-repository";
 import { rowToCanonical, type StudioProjectRow } from "./types";
+import { supabaseAdmin } from "@/lib/supabase";
+import { studioLog } from "@/lib/studio/logger";
+
+const supabaseMock = supabaseAdmin as unknown as {
+  _injectError: { message: string } | null;
+};
 
 describe("project-repository ownership enforcement", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    supabaseMock._injectError = null;
   });
 
   describe("getProject", () => {
@@ -291,6 +322,60 @@ describe("project-repository ownership enforcement", () => {
         workspaceStatus: "ready",
       });
       expect(result).toBeNull();
+    });
+  });
+
+  describe("workspace DB-write failures are never silent", () => {
+    it("updateProjectWorkspace throws and logs when the update errors — a real DB failure is not collapsed into the no-match path", async () => {
+      supabaseMock._injectError = { message: "connection reset by peer" };
+
+      await expect(
+        updateProjectWorkspace("proj-A", "user-A", {
+          workspaceStatus: "ready",
+          workspaceId: "ws-1",
+        }),
+      ).rejects.toThrow("workspace update failed");
+
+      expect(studioLog).toHaveBeenCalledWith(
+        "updateProjectWorkspace:update_error",
+        expect.objectContaining({ projectId: "proj-A", userId: "user-A" }),
+      );
+    });
+
+    it("updateProjectWorkspace logs when no owned row matches and no legacy project can be migrated", async () => {
+      const result = await updateProjectWorkspace("proj-A", "user-B", {
+        workspaceStatus: "ready",
+      });
+      expect(result).toBeNull();
+      expect(studioLog).toHaveBeenCalledWith(
+        "updateProjectWorkspace:no_match",
+        expect.objectContaining({ projectId: "proj-A", userId: "user-B" }),
+      );
+    });
+
+    it("claimProvisioningLock throws and logs on a database error instead of masquerading as a held lock", async () => {
+      supabaseMock._injectError = { message: "deadlock detected" };
+
+      await expect(claimProvisioningLock("proj-A", "user-A")).rejects.toThrow(
+        "provisioning lock",
+      );
+
+      expect(studioLog).toHaveBeenCalledWith(
+        "claimProvisioningLock:update_error",
+        expect.objectContaining({ projectId: "proj-A", userId: "user-A" }),
+      );
+    });
+
+    it("claimProvisioningLock still returns null when the lock is genuinely held (no error)", async () => {
+      // user-B owns nothing — the conditional update matches 0 rows.
+      const claimed = await claimProvisioningLock("proj-A", "user-B");
+      expect(claimed).toBeNull();
+    });
+
+    it("claimProvisioningLock returns the claimed project on success", async () => {
+      const claimed = await claimProvisioningLock("proj-A", "user-A");
+      expect(claimed).not.toBeNull();
+      expect(claimed?.id).toBe("proj-A");
     });
   });
 

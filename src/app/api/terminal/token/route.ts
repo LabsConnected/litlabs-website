@@ -42,22 +42,9 @@ export async function GET(request: NextRequest) {
         // Verify before issuing the token — if the terminal server lost the
         // workspace (restart, ephemeral /tmp storage), reset Supabase so the
         // client's self-heal flow can re-provision.
+        let ws;
         try {
-          const ws = await getWorkspaceInternal(workspaceId, userId);
-          if (!ws) {
-            await updateProjectWorkspace(projectId, userId, {
-              workspaceStatus: "not_prepared",
-              workspaceError: "Workspace lost on terminal server — needs re-provisioning",
-            });
-            return NextResponse.json(
-              {
-                code: "WORKSPACE_NOT_READY",
-                error: "Workspace was lost on the terminal server. Re-preparing...",
-                detail: "Workspace not found on terminal server",
-              },
-              { status: 409, headers: { "Cache-Control": "no-store" } },
-            );
-          }
+          ws = await getWorkspaceInternal(workspaceId, userId);
         } catch {
           // Terminal server unreachable — fail soft with WORKSPACE_NOT_READY
           // so the client can retry. Don't issue a token we can't validate.
@@ -66,6 +53,22 @@ export async function GET(request: NextRequest) {
               code: "WORKSPACE_NOT_READY",
               error: "Terminal server unreachable. Retrying...",
               detail: "Could not verify workspace on terminal server",
+            },
+            { status: 409, headers: { "Cache-Control": "no-store" } },
+          );
+        }
+        if (!ws) {
+          // A failed reset write must surface (outer catch → 409 with the
+          // real error), not be misreported as a terminal-server failure.
+          await updateProjectWorkspace(projectId, userId, {
+            workspaceStatus: "not_prepared",
+            workspaceError: "Workspace lost on terminal server — needs re-provisioning",
+          });
+          return NextResponse.json(
+            {
+              code: "WORKSPACE_NOT_READY",
+              error: "Workspace was lost on the terminal server. Re-preparing...",
+              detail: "Workspace not found on terminal server",
             },
             { status: 409, headers: { "Cache-Control": "no-store" } },
           );

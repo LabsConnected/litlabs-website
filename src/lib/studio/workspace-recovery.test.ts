@@ -64,7 +64,7 @@ describe("workspace-recovery", () => {
       vi.mocked(getWorkspaceInternal).mockRejectedValueOnce(new Error("Workspace not found"));
       // After re-prepare, getProject returns new workspace
       vi.mocked(getProject).mockResolvedValue(fakeProject({ workspaceId: "ws-new", workspaceStatus: "ready" }));
-      vi.mocked(updateProjectWorkspace).mockResolvedValue(null);
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
       vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
       vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
       vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
@@ -80,7 +80,7 @@ describe("workspace-recovery", () => {
     it("throws when recovery fails and no workspace ID is available", async () => {
       vi.mocked(getWorkspaceInternal).mockRejectedValue(new Error("Workspace not found"));
       vi.mocked(getProject).mockResolvedValue(fakeProject({ workspaceId: null, workspaceStatus: "not_prepared" }));
-      vi.mocked(updateProjectWorkspace).mockResolvedValue(null);
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
       vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
       vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
       vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
@@ -153,7 +153,7 @@ describe("workspace-recovery", () => {
       // After reset, ensureCanonicalStudioProject returns not_prepared
       vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
       vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
-      vi.mocked(updateProjectWorkspace).mockResolvedValue(null);
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
       vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
         ({ workspaceId: "ws-new", root: "/data/ws-new" }) as unknown as WorkspacePrepareResponse,
       );
@@ -168,7 +168,7 @@ describe("workspace-recovery", () => {
       vi.mocked(getProject).mockResolvedValue(fakeProject({ sourceType: "blank", templateId: "blank-static", workspaceId: null, workspaceStatus: "not_prepared" }));
       vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
       vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
-      vi.mocked(updateProjectWorkspace).mockResolvedValue(null);
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
       vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
         ({ workspaceId: "ws-blank", root: "/data/ws-blank" }) as unknown as WorkspacePrepareResponse,
       );
@@ -191,7 +191,7 @@ describe("workspace-recovery", () => {
       vi.mocked(getProject).mockResolvedValue(fakeProject({ sourceType: "template" as unknown as "blank", templateId: "nextjs", workspaceId: null, workspaceStatus: "not_prepared" }));
       vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
       vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
-      vi.mocked(updateProjectWorkspace).mockResolvedValue(null);
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
       vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
         ({ workspaceId: "ws-tmpl", root: "/data/ws-tmpl", branch: "main" }) as unknown as WorkspacePrepareResponse,
       );
@@ -209,16 +209,34 @@ describe("workspace-recovery", () => {
       vi.mocked(getProject).mockResolvedValue(fakeProject({ sourceType: "github", githubInstallationId: null, githubOwner: null, githubRepo: null, workspaceId: null, workspaceStatus: "not_prepared" }));
       vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
       vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
-      vi.mocked(updateProjectWorkspace).mockResolvedValue(null);
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
 
       await expect(provisionWorkspaceForProject("proj-bad", "user-1")).rejects.toThrow("no valid source");
+    });
+
+    it("throws when the workspace provisioned but the DB write did not persist", async () => {
+      // Regression: updateProjectWorkspace returning null used to be
+      // ignored — the caller returned the new workspaceId while the row
+      // still said "provisioning", stranding the workspace (the lock only
+      // matches not_prepared/failed) and 409ing the next token request.
+      vi.mocked(getProject).mockResolvedValue(fakeProject({ workspaceId: null, workspaceStatus: "not_prepared" }));
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(null);
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-new", root: "/data/ws-new" }) as unknown as WorkspacePrepareResponse,
+      );
+
+      await expect(provisionWorkspaceForProject("proj-1", "user-1")).rejects.toThrow(
+        "could not be persisted",
+      );
     });
 
     it("marks workspace as failed on provisioning error", async () => {
       vi.mocked(getProject).mockResolvedValue(fakeProject({ sourceType: "blank", workspaceId: null, workspaceStatus: "not_prepared" }));
       vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
       vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject());
-      vi.mocked(updateProjectWorkspace).mockResolvedValue(null);
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
       vi.mocked(prepareWorkspaceInternal).mockRejectedValue(new Error("Disk full"));
 
       await expect(provisionWorkspaceForProject("proj-fail", "user-1")).rejects.toThrow("Disk full");

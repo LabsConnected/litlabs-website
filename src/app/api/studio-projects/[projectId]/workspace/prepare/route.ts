@@ -190,7 +190,10 @@ export async function POST(
     // Persist the branch the workspace actually reports. Without this
     // a managed project has a real `main` branch on disk but renders
     // "—", because github_branch is NULL for a project with no GitHub.
-    await updateProjectWorkspace(projectId, userId, {
+    // A failed write must surface as an error — reporting "ready" while the
+    // row still says provisioning strands the workspace (the lock only
+    // matches not_prepared/failed) and the next token request 409s.
+    const persisted = await updateProjectWorkspace(projectId, userId, {
       workspaceId: result.workspaceId,
       workspaceStatus: "ready",
       workspaceRoot: result.root,
@@ -198,6 +201,9 @@ export async function POST(
       workspacePreparedAt: new Date().toISOString(),
       workspaceError: null,
     });
+    if (!persisted) {
+      throw new Error("Workspace provisioned but the project record could not be persisted");
+    }
 
     return NextResponse.json({
       workspaceId: result.workspaceId,
@@ -209,10 +215,15 @@ export async function POST(
   } catch (err) {
     // Transition provisioning → failed, releasing the lock
     const message = err instanceof Error ? err.message : "Workspace provisioning failed";
-    await updateProjectWorkspace(projectId, userId, {
-      workspaceStatus: "failed",
-      workspaceError: message,
-    });
+    try {
+      await updateProjectWorkspace(projectId, userId, {
+        workspaceStatus: "failed",
+        workspaceError: message,
+      });
+    } catch {
+      // The write failure is already logged inside updateProjectWorkspace —
+      // don't let it mask the provisioning error the user needs to see.
+    }
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
