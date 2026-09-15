@@ -17,7 +17,7 @@ import http from "http";
 import cors from "cors";
 import { Server } from "socket.io";
 import { isAbsolute, relative, resolve } from "path";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync, renameSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, renameSync } from "fs";
 import type { NextFunction, Request, Response } from "express";
 import { isBlockedCommand, auditCommand, getAuditLog } from "./security";
 import { handleLiTTCodeCommand, streamLiTTMessages, type LiTTEvent } from "./litt-code";
@@ -43,6 +43,7 @@ import {
   type WorkspaceDescriptor,
 } from "./workspace/WorkspaceManager";
 import { resolveWorkspacePath as resolveWorkspacePathSecure } from "./workspace/WorkspaceSecurity";
+import { deleteResolvedPath } from "./workspace/FileService";
 import { checkPreviewToken } from "./preview-auth";
 import { evaluateWorkspaceRoot } from "./workspace/durability";
 import {
@@ -1266,7 +1267,7 @@ function isPathValidationError(msg: string): boolean {
 /** Map file-endpoint errors to HTTP status codes. */
 function fileErrorStatus(msg: string): number {
   if (msg === "Forbidden") return 403;
-  if (msg === "Workspace not found") return 404;
+  if (msg === "Workspace not found" || msg === "Path not found") return 404;
   if (isPathValidationError(msg)) return 400;
   return 500;
 }
@@ -1354,11 +1355,11 @@ app.post("/files/delete", (req: AuthenticatedRequest, res) => {
   }
   try {
     const target = safePath(userId, filePath);
-    rmSync(target, { recursive: true, force: true });
+    deleteResolvedPath(target);
     res.json({ deleted: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to delete file";
-    res.status(isPathValidationError(msg) ? 400 : 500).json({ error: msg });
+    res.status(fileErrorStatus(msg)).json({ error: msg });
   }
 });
 
@@ -1483,7 +1484,7 @@ app.post("/ws-files/delete", (req: AuthenticatedRequest, res) => {
   }
   try {
     const target = resolveWorkspacePath(req.workspaceId!, req.terminalUserId!, filePath);
-    rmSync(target, { recursive: true, force: true });
+    deleteResolvedPath(target);
     res.json({ deleted: true, workspaceId: req.workspaceId });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to delete file";
