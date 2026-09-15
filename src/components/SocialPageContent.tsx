@@ -261,7 +261,7 @@ export default function SocialPageContent() {
             className="mb-4 w-full rounded-lg px-4 py-2 text-center text-[10px]"
             style={{ backgroundColor: C.accentColor + "20", color: C.accentColor, borderBottom: `1px solid ${C.accentColor}40` }}
           >
-            ✨ Sample feed — sign up to see real community posts.
+            ✨ Sample feed — community posts coming soon.
           </div>
         )}
 

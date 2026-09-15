@@ -198,7 +198,7 @@ export default function TermsPage() {
             keep the community fair and your work yours.
           </p>
           <p className="mt-6 text-xs font-bold uppercase tracking-[.22em] text-white/40">
-            Last updated {UPDATED}
+            Last updated: {UPDATED}
           </p>
         </div>
       </section>

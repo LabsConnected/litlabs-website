@@ -300,8 +300,9 @@ export default function PrivacyPage() {
               </li>
               <li>
                 <strong>AI Model Providers:</strong> Google Gemini, OpenRouter,
-                Groq, OpenAI, Anthropic, Together, Fal, MiniMax, Alibaba,
-                Recraft, Cloudflare, ElevenLabs — as described in Section 3.
+                Groq, Mistral, OpenAI, Anthropic, Together, Fal, MiniMax,
+                Alibaba, Recraft, Cloudflare, ElevenLabs, Inworld AI — as
+                described in Section 3.
               </li>
             </ul>
           </section>

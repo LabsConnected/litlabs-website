@@ -215,7 +215,6 @@ function withBotProtection(inner: (...args: never[]) => unknown) {
 //   /login         — legacy redirect → /sign-in
 //   /gallery/*     — public gallery viewing
 //   /games/*       — public games
-//   /hire          — public hiring page
 //   /resources/*   — public resources
 //   /discover      — public discover
 //   /showcase/*    — public showcase
@@ -260,6 +259,11 @@ const isProtectedRoute = createRouteMatcher([
   "/litt-terminal(.*)",
   "/runtime-test(.*)",
   "/order(.*)",
+  // /hire is retired from the public V1 surface and redirects to /studio.
+  // Guests hitting it directly are sent to /sign-in with redirect_url=/hire
+  // preserved, so they land back on /hire (which forwards to /studio) after
+  // sign-in instead of losing the original destination.
+  "/hire(.*)",
   // OAuth consent — must be authenticated; signed-out users redirect
   // to /sign-in with the full OAuth consent URL preserved as redirect_url
   "/oauth-consent",
