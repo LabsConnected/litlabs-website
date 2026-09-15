@@ -272,6 +272,25 @@ export function useCanonicalConversation({
       const s = getStore();
       s.setMessages(conversationId, chatMsgs);
       s.setRevision(data.revision ?? 1);
+      // Rehydrate a paused approval gate: when the latest assistant message
+      // is awaiting_approval with a resumable pausedRunId, the Approve/Reject
+      // card must remount after reload. Live runs manage this via SSE — only
+      // restore when no run is active locally.
+      const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant");
+      const exec = useExecutionStore.getState();
+      if (
+        lastAssistant?.status === "awaiting_approval"
+        && lastAssistant.pendingApproval?.pausedRunId
+        && !exec.isRunning
+        && !exec.pendingApproval
+      ) {
+        exec.setPendingApproval({
+          toolId: lastAssistant.pendingApproval.toolId,
+          reason: lastAssistant.pendingApproval.reason,
+          pausedRunId: lastAssistant.pendingApproval.pausedRunId,
+          inputs: lastAssistant.pendingApproval.inputs,
+        });
+      }
     } catch {
       // Non-fatal
     }

@@ -132,6 +132,7 @@ vi.mock("@/lib/litt-intelligence/workspace-transport", () => ({
 
 vi.mock("@/lib/litt-intelligence/paused-run-store", () => ({
   createPausedRun: vi.fn(),
+  getPendingPausedRunForConversation: vi.fn(),
 }));
 
 vi.mock("@/lib/litt-intelligence/turn-resolver", () => ({
@@ -158,7 +159,7 @@ vi.mock("@/lib/llm", () => ({
 }));
 
 import { auth } from "@/lib/auth";
-import { POST } from "./route";
+import { POST, GET } from "./route";
 import { runLaunchFlow } from "@/lib/litt-intelligence/launch-flow";
 import { runAgentLoop } from "@/lib/litt-intelligence/agent-loop";
 import { streamText } from "@/lib/llm";
@@ -170,8 +171,8 @@ import {
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { buildCanonicalRuntimeContext } from "@/lib/litt-intelligence/canonical-runtime-context";
 import { buildStudioContext } from "@/lib/studio/project-resolver";
-import { getConversation, insertMessage, updateMessageStatus } from "@/lib/studio/conversation-service";
-import { createPausedRun } from "@/lib/litt-intelligence/paused-run-store";
+import { getConversation, insertMessage, listMessages, updateMessageStatus } from "@/lib/studio/conversation-service";
+import { createPausedRun, getPendingPausedRunForConversation } from "@/lib/litt-intelligence/paused-run-store";
 import { persistMemory } from "@/lib/studio/memory-service";
 import { resolveRuntimeAgent } from "@/lib/agent-runtime";
 import { parseAgentSelection } from "@/lib/agent-selection";
@@ -946,5 +947,71 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
     // Heartbeat fires every 15s; with a 100ms run we may not see one,
     // but the timer must be set up. Verify no crash and [DONE] present.
     expect(raw).toContain("data: [DONE]");
+  });
+});
+
+describe("GET /api/studio/conversations/[conversationId]/messages — approval rehydration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" } as any);
+    vi.mocked(getConversation).mockResolvedValue({
+      id: "conv-123",
+      projectId: "proj-123",
+      revision: 4,
+      activeAgentSlug: "litt",
+      ownerId: "user_123",
+    } as any);
+  });
+
+  it("attaches pendingApproval to an awaiting_approval message when a resumable paused run exists", async () => {
+    vi.mocked(listMessages).mockResolvedValue([
+      { id: "m1", role: "user", content: "add footer", status: "completed" },
+      { id: "m2", role: "assistant", content: "I need your approval to continue:", status: "awaiting_approval" },
+    ] as any);
+    vi.mocked(getPendingPausedRunForConversation).mockResolvedValue({
+      id: "paused-9",
+      toolId: "files.write",
+      reason: "Mutation requires approval in ACT mode",
+      inputs: { path: "index.html" },
+    } as any);
+
+    const res = await GET(new NextRequest("http://localhost/api/studio/conversations/conv-123/messages"), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const last = body.messages.at(-1);
+    expect(last.status).toBe("awaiting_approval");
+    expect(last.pendingApproval).toEqual({
+      toolId: "files.write",
+      reason: "Mutation requires approval in ACT mode",
+      pausedRunId: "paused-9",
+      inputs: { path: "index.html" },
+    });
+  });
+
+  it("leaves the message untouched when no resumable paused run exists", async () => {
+    vi.mocked(listMessages).mockResolvedValue([
+      { id: "m2", role: "assistant", content: "I need your approval", status: "awaiting_approval" },
+    ] as any);
+    vi.mocked(getPendingPausedRunForConversation).mockResolvedValue(null);
+
+    const res = await GET(new NextRequest("http://localhost/api/studio/conversations/conv-123/messages"), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    const body = await res.json();
+    expect(body.messages.at(-1).pendingApproval).toBeUndefined();
+  });
+
+  it("does not query paused runs when the last assistant message is not awaiting approval", async () => {
+    vi.mocked(listMessages).mockResolvedValue([
+      { id: "m2", role: "assistant", content: "done", status: "completed" },
+    ] as any);
+
+    const res = await GET(new NextRequest("http://localhost/api/studio/conversations/conv-123/messages"), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    expect(res.status).toBe(200);
+    expect(getPendingPausedRunForConversation).not.toHaveBeenCalled();
   });
 });

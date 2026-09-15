@@ -205,6 +205,33 @@ export async function getPausedRun(
   return record;
 }
 
+/**
+ * Latest still-pending paused run for a conversation — used to rehydrate
+ * the approval card after a page reload (the in-memory execution store is
+ * gone, but the paused run row survives). Returns null when nothing is
+ * resumable.
+ */
+export async function getPendingPausedRunForConversation(
+  conversationId: string,
+  userId: string,
+): Promise<PausedRunRecord | null> {
+  if (!supabaseAdmin) return null;
+
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .select("*")
+    .eq("conversation_id", conversationId)
+    .eq("user_id", userId)
+    .eq("status", "pending")
+    .gt("expires_at", new Date().toISOString())
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return rowToRecord(data as PausedRunRow);
+}
+
 export async function resolvePausedRun(
   pausedRunId: string,
   userId: string,
