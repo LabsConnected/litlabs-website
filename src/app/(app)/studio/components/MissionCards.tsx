@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * MissionCards — compact pinned intelligence above the Studio chat column.
+ * MissionCards — compact operational state at the top of the Activity panel.
  *
  * Folds the "Plan" workspace tab into three collapsible cards:
  *   1. Mission     — live plan summary (agent, mode, model, phase, changes)

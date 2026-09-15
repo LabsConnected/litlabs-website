@@ -1379,23 +1379,6 @@ function CommandStudioContent() {
   // never a second CommandComposer / LiTTLiveActivity instance (Phase C2.1).
   const littChatContent = (
     <>
-      {/* Mission cards — compact pinned intelligence above the chat.
-          The Plan workspace tab's live summary, folded into collapsible
-          cards: mission · checkpoints · next actions. All data comes from
-          the same stores as the plan surface; no fabricated content. */}
-      <div className="shrink-0 px-3 pt-2">
-        <MissionCards
-          capabilities={capabilities}
-          modelLabel={modelLabel}
-          onOpenCode={() => { setDestination("studio"); setStudioMode("code"); }}
-          onOpenCanvas={() => { setDestination("studio"); setStudioMode("files"); }}
-          onOpenPreview={handlePreview}
-          onOpenTerminal={handleOpenTerminal}
-          onOpenActivity={() => handleOpenDockTab("activity")}
-          onOpenFiles={() => handleOpenDockTab("files")}
-          onRollback={handleRollback}
-        />
-      </div>
       <StudioWorkSurface
         messages={conversation.messages}
         busy={conversation.busy}
@@ -1884,6 +1867,19 @@ function CommandStudioContent() {
                   modelLabel={modelLabel}
                   projectName={capabilities.projectName}
                   terminalStatus={capabilities.terminalStatus}
+                  missionContent={
+                    <MissionCards
+                      capabilities={capabilities}
+                      modelLabel={modelLabel}
+                      onOpenCode={() => { setDestination("studio"); setStudioMode("code"); }}
+                      onOpenCanvas={() => { setDestination("studio"); setStudioMode("files"); }}
+                      onOpenPreview={handlePreview}
+                      onOpenTerminal={handleOpenTerminal}
+                      onOpenActivity={() => handleOpenDockTab("activity")}
+                      onOpenFiles={() => handleOpenDockTab("files")}
+                      onRollback={handleRollback}
+                    />
+                  }
                 />
               }
               filesContent={

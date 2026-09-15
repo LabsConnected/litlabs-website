@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 
@@ -185,12 +185,19 @@ vi.mock("@/features/voice/store/useVoiceStore", () => ({
     }),
 }));
 
+const capState = vi.hoisted(() => ({
+  projectId: null as string | null,
+  projectName: null as string | null,
+}));
+
 vi.mock("../hooks/useConnectionSummary", () => ({
   useConnectionSummary: () => ({
     capabilities: {
       repository: "disconnected",
       repositoryName: null,
       repositoryIndexed: false,
+      projectId: capState.projectId,
+      projectName: capState.projectName,
       terminalExecution: "unavailable",
       writeAccess: false,
       connectedProviders: ["gemini"],
@@ -376,6 +383,12 @@ vi.mock("@/components/chat/MessageAvatar", () => ({ UserMessageAvatar: () => <di
 
 vi.mock("./shell/StudioOperatorBar", () => ({
   default: () => <div data-testid="studio-operator-bar" />,
+}));
+
+// The dock's Media tab renders MediaUtilityDock, which requires the
+// MediaHubProvider from the app layout (not present in this test mount).
+vi.mock("@/components/media/MediaUtilityDock", () => ({
+  MediaUtilityDock: () => <div data-testid="media-utility-dock-mock" />,
 }));
 
 // jsdom polyfill
@@ -720,5 +733,74 @@ describe("CodeWorkspace — app-preview guard", () => {
     await settle();
     expect(previewPanels()).toHaveLength(1);
     expect(screen.queryByTestId("app-preview-external-notice")).toBeNull();
+  });
+});
+
+describe("CommandStudio — mission panels live in the Activity dock", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sendMock.mockResolvedValue({ accepted: true });
+    capState.projectId = "project-1";
+    capState.projectName = "Roast Site";
+    sessionStorage.clear();
+    window.innerHeight = 844;
+    Object.defineProperty(window, "visualViewport", {
+      value: {
+        width: 390,
+        height: 844,
+        offsetTop: 0,
+        offsetLeft: 0,
+        scale: 1,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+      configurable: true,
+    });
+  });
+
+  it("renders Mission/Checkpoints/Next actions in Activity — not in the chat panel", async () => {
+    globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+    const { user } = await renderCommandStudio();
+    await settle();
+
+    // Chat is conversation-only — the mission panels were relocated.
+    const chatPanel = screen.getByTestId("litt-chat-panel");
+    expect(chatPanel.querySelector("[data-testid='mission-cards']")).toBeNull();
+
+    // Open the Activity dock tab (collapsed strip → click opens it).
+    await user.click(screen.getByTestId("dock-tab-activity"));
+    const activity = screen.getByTestId("dock-content-activity");
+    const cards = within(activity).getByTestId("mission-cards");
+    expect(within(activity).getByTestId("mission-card-mission")).toBeTruthy();
+    expect(within(activity).getByTestId("mission-card-checkpoints")).toBeTruthy();
+    expect(within(activity).getByTestId("mission-card-actions")).toBeTruthy();
+
+    // Exactly one mounted instance — nothing duplicated into chat.
+    expect(screen.getAllByTestId("mission-cards")).toHaveLength(1);
+
+    // Ordering: Workspace/Model header → mission cards → activity feed.
+    // (StudioActivityTimeline renders null when it has no entries, so the
+    // always-present feed empty-state marks the feed position instead.)
+    const feedEmpty = within(activity).getByText("No conversation activity yet.");
+    expect(
+      cards.compareDocumentPosition(feedEmpty) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(activity.textContent).toContain("Roast Site");
+  });
+
+  it("keeps mission card collapse state across dock tab switches", async () => {
+    globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+    const { user } = await renderCommandStudio();
+    await user.click(screen.getByTestId("dock-tab-activity"));
+
+    // Collapse the Mission section.
+    await user.click(screen.getByRole("button", { name: "Collapse Mission" }));
+    expect(screen.queryByTestId("mission-card-body-mission")).toBeNull();
+
+    // Switch to Files and back — all dock tab content stays mounted.
+    await user.click(screen.getByTestId("dock-tab-files"));
+    await user.click(screen.getByTestId("dock-tab-activity"));
+    expect(screen.queryByTestId("mission-card-body-mission")).toBeNull();
+    expect(screen.getByRole("button", { name: "Expand Mission" })).toBeTruthy();
   });
 });

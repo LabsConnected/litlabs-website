@@ -402,12 +402,16 @@ export function StudioActivityPanel({
   modelLabel,
   projectName,
   terminalStatus,
+  missionContent,
 }: {
   messages: ChatMessage[];
   busy: boolean;
   modelLabel: string;
   projectName: string | null;
   terminalStatus: string;
+  /** Operational project state (Mission / Checkpoints / Next actions)
+      rendered between the workspace header and the activity feed. */
+  missionContent?: React.ReactNode;
 }) {
   const recent = messages.slice(-8).reverse();
   const activityRef = useRef<HTMLDivElement>(null);
@@ -428,6 +432,7 @@ export function StudioActivityPanel({
           <div className="mt-1 truncate text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>{modelLabel}</div>
         </div>
       </div>
+      {missionContent}
       {busy && (
         <div className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-[10px]" style={{ borderColor: "rgba(167,139,250,0.25)", backgroundColor: "rgba(167,139,250,0.06)", color: "#c4b5fd" }}>
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400" aria-hidden />
