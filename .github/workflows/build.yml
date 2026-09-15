@@ -267,3 +267,43 @@ jobs:
             exit 1
           fi
           echo "✅ Secret scan passed — no secrets found in source."
+
+  litt-shell:
+    name: LiTT Shell Type Check and Frontend Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI: true
+
+      - name: Build shared workspace packages
+        run: pnpm build:workspace-deps
+        env:
+          CI: true
+
+      - name: Type check LiTT Shell
+        run: pnpm --filter @litlabs/litt-shell typecheck
+        env:
+          CI: true
+
+      - name: Test LiTT Shell
+        run: npx vitest run --dir packages/litt-shell --root packages/litt-shell
+        env:
+          CI: true
+
+      - name: Build LiTT Shell frontend
+        run: pnpm --filter @litlabs/litt-shell build:dev
+        env:
+          CI: true
