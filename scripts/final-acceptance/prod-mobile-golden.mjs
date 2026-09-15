@@ -529,10 +529,22 @@ async function main() {
     }
 
     // ── Step 8: post-build mobile usability re-check ──
-    await page.getByTestId("studio-command-input").focus().catch(() => {});
+    // An approval resolved out-of-band (this script approves via the API, not
+    // the in-page button) converges through the client's read-only approval
+    // watcher, which polls the paused-run status on an interval. Assert the
+    // composer becomes usable within a bounded settle window — still fails if
+    // the surface never returns to Chat — rather than requiring the flip to
+    // land before this script's own status poll.
     await page.setViewportSize(KEYBOARD_VIEWPORT);
-    await page.waitForTimeout(600);
-    const stillUsable = await page.getByTestId("studio-command-input").isVisible().catch(() => false);
+    const commandInput = page.getByTestId("studio-command-input");
+    let stillUsable = false;
+    const usableDeadline = Date.now() + 15_000;
+    while (Date.now() < usableDeadline) {
+      await commandInput.focus().catch(() => {});
+      stillUsable = await commandInput.isVisible().catch(() => false);
+      if (stillUsable) break;
+      await page.waitForTimeout(500);
+    }
     const sheetUp = await page.getByTestId("litt-mobile-sheet").isVisible().catch(() => false);
     step("post_build_keyboard_usable", stillUsable && sheetUp, `input=${stillUsable} sheet=${sheetUp}`);
     await shot(page, "08-post-build-keyboard");
