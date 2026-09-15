@@ -3,7 +3,6 @@ import { runLaunchFlow, type LaunchFlowOptions } from "@/lib/litt-intelligence/l
 import { registerInternalTools, toolRegistry } from "@/lib/litt-intelligence/tool-registry";
 import type { WorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import type { AgentLoopResult } from "@/lib/litt-intelligence/agent-loop-v2";
-import type { DeployResult } from "@/lib/litt-intelligence/deploy";
 import type { BuildFixLoopResult } from "@/lib/litt-intelligence/build-fix-loop";
 
 // ─── Mocks ──────────────────────────────────────────────────────────
@@ -75,18 +74,6 @@ function successAgentResult(overrides: Partial<AgentLoopResult> = {}): AgentLoop
   };
 }
 
-function successDeployResult(overrides: Partial<DeployResult> = {}): DeployResult {
-  return {
-    success: true,
-    provider: "railway",
-    deploymentId: "dep-123",
-    status: "SUCCESS",
-    productionUrl: "https://example.litlabs.net",
-    verification: { url: "https://example.litlabs.net", success: true, detail: "HTTP 200" },
-    ...overrides,
-  };
-}
-
 function makeOptions(overrides: Partial<LaunchFlowOptions> = {}): LaunchFlowOptions {
   const transport = createMockTransport();
   return {
@@ -99,11 +86,6 @@ function makeOptions(overrides: Partial<LaunchFlowOptions> = {}): LaunchFlowOpti
     enableDeploy: false,
     buildPreviewUrl: () => "https://preview.litlabs.net/preview/ws-test",
     runAgentLoop: vi.fn().mockResolvedValue(successAgentResult()),
-    runDeployFlow: vi.fn().mockResolvedValue(successDeployResult()),
-    resolveDeployConfig: vi.fn().mockReturnValue({
-      ok: true,
-      config: { provider: "railway" as const, token: "test-token", projectId: "svc-123", productionUrl: "https://example.litlabs.net" },
-    }),
     ...overrides,
   };
 }
@@ -262,8 +244,7 @@ describe("Launch Flow: model failure", () => {
       buildFixResult: undefined,
       stepsUsed: 1,
     }));
-    const runDeployFlow = vi.fn().mockResolvedValue(successDeployResult());
-    const options = makeOptions({ enableDeploy: true, runAgentLoop, runDeployFlow });
+    const options = makeOptions({ enableDeploy: true, runAgentLoop });
 
     const result = await runLaunchFlow(options);
 
@@ -272,7 +253,8 @@ describe("Launch Flow: model failure", () => {
     expect(result.finalText).toContain("http_402");
     expect(result.error).toContain("http_402");
     expect(options.transport.startPreview).not.toHaveBeenCalled();
-    expect(runDeployFlow).not.toHaveBeenCalled();
+    // A model failure must not reach the deploy gate either.
+    expect(result.pendingApproval).toBeUndefined();
   });
 
   it("fails when the runtime-repair loop's model fails, instead of masking it as a preview error", async () => {
@@ -399,62 +381,55 @@ describe("Launch Flow: preview timeout", () => {
   });
 });
 
-// ─── Tests: deploy success ─────────────────────────────────────────
+// ─── Tests: deploy approval gate ─────────────────────────────────
+// Ship-mode deploys must NEVER run inline — the flow pauses for explicit
+// approval on `project.deploy`, and the approvals endpoint resumes it via
+// the real tool pipeline (deployUserProject → verified /sites/<id> URL).
+// An inline deploy would bypass the sensitive-action gate entirely.
 
-describe("Launch Flow: deploy success", () => {
-  it("deploys and verifies the production URL after a successful preview", async () => {
-    const runDeployFlow = vi.fn().mockResolvedValue(successDeployResult({ productionUrl: "https://example.litlabs.net" }));
-    const options = makeOptions({ enableDeploy: true, runDeployFlow });
+describe("Launch Flow: deploy approval gate", () => {
+  it("pauses for project.deploy approval instead of deploying inline", async () => {
+    const progressEvents: Array<{ type: string; toolId?: string }> = [];
+    const progress = { emit: (e: { type: string; toolId?: string }) => progressEvents.push(e) };
+    const options = makeOptions({ enableDeploy: true, progress: progress as never });
+
+    const result = await runLaunchFlow(options);
+
+    expect(result.status).toBe("preview_ready");
+    expect(result.previewUrl).toBe("https://preview.litlabs.net/preview/ws-test");
+    expect(result.pendingApproval?.toolId).toBe("project.deploy");
+    expect(result.pendingApproval?.reason).toContain("approval");
+    expect(result.pendingApproval?.toolCallId).toBeTruthy();
+    expect(result.pendingApproval?.inputs).toEqual({});
+    // The messages route persists the paused run off agentLoopResult —
+    // without it the approval card would have no pausedRunId to resume.
+    expect(result.agentLoopResult?.pendingApproval?.toolId).toBe("project.deploy");
+    // Resume context carries the original request so the continued loop
+    // can report the deploy result truthfully.
+    expect(result.pendingApproval?.pausedMessages).toEqual([
+      { role: "user", content: "Build a simple site" },
+    ]);
+    expect(progressEvents.some((e) => e.type === "approval_required" && e.toolId === "project.deploy")).toBe(true);
+  });
+
+  it("never reports a production URL before approval", async () => {
+    const options = makeOptions({ enableDeploy: true });
+
+    const result = await runLaunchFlow(options);
+
+    expect(result.productionUrl).toBeFalsy();
+    expect(result.finalText).toContain("approval");
+    expect(result.finalText).not.toContain("Deployed and verified");
+  });
+
+  it("does not pause for deploy when enableDeploy is off", async () => {
+    const options = makeOptions({ enableDeploy: false });
 
     const result = await runLaunchFlow(options);
 
     expect(result.success).toBe(true);
-    expect(result.status).toBe("deployed");
-    expect(result.productionUrl).toBe("https://example.litlabs.net");
-    expect(result.finalText).toContain("Deployed and verified");
-    expect(runDeployFlow).toHaveBeenCalledWith(expect.objectContaining({
-      config: expect.objectContaining({ provider: "railway", projectId: "svc-123" }),
-    }));
-  });
-});
-
-// ─── Tests: deploy failure with truthful error ──────────────────────
-
-describe("Launch Flow: deploy failure with truthful error", () => {
-  it("returns a failed status with the real deploy error", async () => {
-    const runDeployFlow = vi.fn().mockResolvedValue({
-      success: false,
-      provider: "railway",
-      error: "RAILWAY_API_TOKEN is invalid",
-    } as DeployResult);
-
-    const options = makeOptions({ enableDeploy: true, runDeployFlow });
-    const result = await runLaunchFlow(options);
-
-    expect(result.success).toBe(false);
-    expect(result.status).toBe("failed");
-    expect(result.error).toBe("RAILWAY_API_TOKEN is invalid");
-    expect(result.finalText).toContain("RAILWAY_API_TOKEN is invalid");
-    expect(result.previewUrl).toBe("https://preview.litlabs.net/preview/ws-test");
-  });
-});
-
-// ─── Tests: production URL verification ─────────────────────────────
-
-describe("Launch Flow: production URL verification", () => {
-  it("fails when deploy succeeds but verification fails", async () => {
-    const runDeployFlow = vi.fn().mockResolvedValue(successDeployResult({
-      productionUrl: "https://down.litlabs.net",
-      verification: { url: "https://down.litlabs.net", success: false, detail: "Connection refused" },
-    }));
-
-    const options = makeOptions({ enableDeploy: true, runDeployFlow });
-    const result = await runLaunchFlow(options);
-
-    expect(result.success).toBe(false);
-    expect(result.status).toBe("failed");
-    expect(result.error).toContain("Connection refused");
-    expect(result.finalText).toContain("could not be verified");
+    expect(result.status).toBe("preview_ready");
+    expect(result.pendingApproval).toBeUndefined();
   });
 });
 
@@ -513,17 +488,14 @@ describe("Launch Flow: no false completion", () => {
     expect(result.finalText).toContain("did not pass");
   });
 
-  it("does not claim success when deploy verification fails", async () => {
-    const runDeployFlow = vi.fn().mockResolvedValue(successDeployResult({
-      productionUrl: "https://bad.litlabs.net",
-      verification: { url: "https://bad.litlabs.net", success: false, detail: "HTTP 500" },
-    }));
-    const options = makeOptions({ enableDeploy: true, runDeployFlow });
+  it("does not claim a deploy succeeded before it has run — ship mode pauses for approval", async () => {
+    const options = makeOptions({ enableDeploy: true });
     const result = await runLaunchFlow(options);
 
     expect(result.success).toBe(false);
-    expect(result.status).toBe("failed");
-    expect(result.finalText).toContain("could not be verified");
+    expect(result.status).not.toBe("deployed");
+    expect(result.productionUrl).toBeFalsy();
+    expect(result.pendingApproval?.toolId).toBe("project.deploy");
   });
 });
 
