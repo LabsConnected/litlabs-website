@@ -229,6 +229,23 @@ describe("callLLMWithTools — provider selection", () => {
   });
 });
 
+describe("callLLMWithTools — pseudo-tool text is never executable", () => {
+  it("keeps inline function-looking text as text and produces no tool call", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(
+      makeSuccessResponse(
+        "llama-3.3-70b-versatile",
+        '##[1/1] inspect_project_files(project_id="project-1")',
+      ),
+    );
+
+    const result = await callLLMWithTools("system", [{ role: "user", content: "inspect the project" }], [WRITE_TOOL]);
+
+    expect(result.text).toContain("inspect_project_files");
+    expect(result.toolCalls).toHaveLength(0);
+  });
+});
+
 describe("callLLMWithTools — failure classification and failover", () => {
   it("402 on OpenRouter disables the provider — no second OR model is attempted", async () => {
     // This is the golden-run-34720866763 regression: an account-level 402

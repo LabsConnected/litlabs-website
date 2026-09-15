@@ -443,6 +443,26 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     }
   }
 
+  // Execution-required turns must never fall through to the read-only V1
+  // inspection + text-only stream. That path cannot execute mutations and
+  // would expose model pseudo-tool markup as if it were an answer.
+  if (built.kernelResult.decision.routing.requiresExecution && !(useV2 && v2Transport)) {
+    studioLog("message:tool_execution_unavailable", {
+      conversationId: conversation.id,
+      projectId: conversation.projectId,
+    });
+    return NextResponse.json(
+      {
+        error: "Tool execution unavailable for this task",
+        code: "TOOL_EXECUTION_UNAVAILABLE",
+        detail: "No verified workspace execution path is available. The request was not sent to a text-only model.",
+        projectId: conversation.projectId ?? null,
+        workspaceId: canonicalCtx.workspaceId ?? null,
+      },
+      { status: 409 },
+    );
+  }
+
   if (useV2 && v2Transport) {
     v2Config = {
       systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,

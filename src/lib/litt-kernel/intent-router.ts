@@ -55,6 +55,11 @@ const MODE_PATTERNS: ModePattern[] = [
   {
     mode: "build",
     patterns: [
+      // Inspector-originated edits often name the UI target rather than a
+      // source file. They are still real mutations and must enter the V2
+      // structured-tool lane.
+      /\b(change|edit|update|modify|rename|replace|delete)\b.*\b(selected|button|element|cta|label|visible text|text)\b/i,
+      /\b(selected|button|element|cta)\b.*\b(change|edit|update|modify|rename|replace|delete)\b/i,
       /\b(implement|build|write|create|edit|update|fix|refactor|add|remove|delete|change)\b.*\b(file|component|function|code|api|route|page|endpoint|class|module|test|config|readme|package)\b/i,
       // Site/app artifacts. Without these, "build me a website" fell through
       // to `think` mode with requiresExecution:false, so the request reached

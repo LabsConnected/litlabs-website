@@ -44,8 +44,14 @@ export type QuotaState = "available" | "limited" | "exhausted" | "unknown";
 
 export interface ProviderCapabilities {
   tools: boolean;
+  /** Explicit names for the capability contract used by agent routing. */
+  supportsTools?: boolean;
+  supportsNativeToolCalls?: boolean;
   vision: boolean;
+  supportsVision?: boolean;
   structuredOutput: boolean;
+  supportsStructuredOutput?: boolean;
+  supportsStreaming?: boolean;
   coding: boolean;
 }
 
@@ -161,8 +167,13 @@ const OPENROUTER_FREE_MODELS = [
 
 const TOOL_CAPABLE: ProviderCapabilities = {
   tools: true,
+  supportsTools: true,
+  supportsNativeToolCalls: true,
   vision: false,
+  supportsVision: false,
   structuredOutput: true,
+  supportsStructuredOutput: true,
+  supportsStreaming: true,
   coding: true,
 };
 
@@ -612,8 +623,12 @@ export function planBasicRoutes(
     }
 
     const caps = def.capabilities;
-    if (requirements.tools && !caps.tools) {
+    if (requirements.tools && !(caps.supportsTools ?? caps.tools)) {
       excluded.push({ provider: def.provider, reason: "missing_capability_tools" });
+      continue;
+    }
+    if (requirements.tools && !(caps.supportsNativeToolCalls ?? caps.tools)) {
+      excluded.push({ provider: def.provider, reason: "missing_capability_native_tool_calls" });
       continue;
     }
     if (requirements.vision && !caps.vision) {
