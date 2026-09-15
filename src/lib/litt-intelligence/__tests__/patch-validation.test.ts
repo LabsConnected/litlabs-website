@@ -60,6 +60,20 @@ describe("validateApplyPatchInputs — placeholder tokens", () => {
     expect(err).toContain("{{company_name}}");
   });
 
+  it("rejects single-word canonical redaction tokens in replace content", async () => {
+    // Canonical PII/redaction slots are single words without an underscore —
+    // [EMAIL], [PHONE], [ADDRESS] — so the SCREAMING_SNAKE rule alone misses
+    // them. They are enumerated explicitly so arbitrary single-word brackets
+    // like [TODO]/[OK]/[WIP] stay legitimate.
+    for (const token of ["[EMAIL]", "[PHONE]", "[ADDRESS]"]) {
+      const err = await validateApplyPatchInputs(
+        { path: "index.html", patches: [{ search: FILE_CONTENT, replace: `Contact: ${token}` }] },
+        fakeTransport(),
+      );
+      expect(err).toContain(token);
+    }
+  });
+
   it("does NOT flag legitimate bracket syntax", async () => {
     const legit = [
       "// [TODO] tighten spacing later",
@@ -133,6 +147,16 @@ describe("validateFilesWriteInputs — placeholder tokens in written content", (
       content: "<footer>By {{company_name}}</footer>",
     });
     expect(err).toContain("{{company_name}}");
+  });
+
+  it("rejects single-word canonical redaction tokens in content", () => {
+    for (const token of ["[EMAIL]", "[PHONE]", "[ADDRESS]"]) {
+      const err = validateFilesWriteInputs({
+        path: "index.html",
+        content: `<p>Contact ${token} for details</p>`,
+      });
+      expect(err).toContain(token);
+    }
   });
 
   it("accepts real file content, including legitimate bracket syntax", () => {
