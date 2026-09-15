@@ -940,7 +940,13 @@ function CommandStudioContent() {
       });
     } else {
       useExecutionStore.getState().resolveApproval(decision);
-      if (decision === "approved") {
+      // pending === null means the gate already settled — the detached
+      // resumed run completed (the watcher pulled its outcome), the
+      // decision was recorded on another session, or this click is a
+      // duplicate of one already submitted. That is a stale card, not a
+      // failed resume: converge quietly. The banner below stays honest —
+      // it only fires when a gate is mounted but has no resume identity.
+      if (pending && decision === "approved") {
         conversation.reportSendError?.(
           "This approval could not be resumed — the paused run expired or was not saved. Please resend your request.",
         );

@@ -68,16 +68,33 @@ export function submitApprovalAndPoll(opts: {
   onCompleted?: (result: ApprovalRunResult) => void;
   onFailed?: (error: string) => void;
   onPolling?: () => void;
+  /** Test hooks — production callers use the real fetch/timers. */
+  fetchImpl?: typeof fetch;
+  sleep?: (ms: number) => Promise<void>;
+  pollIntervalMs?: number;
 }): () => void {
   let cancelled = false;
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
-  const { conversationId, pausedRunId, decision, onAccepted, onCompleted, onFailed, onPolling } = opts;
+  const {
+    conversationId,
+    pausedRunId,
+    decision,
+    onAccepted,
+    onCompleted,
+    onFailed,
+    onPolling,
+    pollIntervalMs = POLL_INTERVAL_MS,
+  } = opts;
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => {
+    timeoutHandle = setTimeout(() => resolve(), ms);
+  }));
 
   async function run() {
     try {
       // 1. POST the approval
-      const postResp = await fetch(
+      const postResp = await fetchImpl(
         `/api/studio/conversations/${conversationId}/approvals/${pausedRunId}`,
         {
           method: "POST",
@@ -102,22 +119,20 @@ export function submitApprovalAndPoll(opts: {
         runResult?: ApprovalRunResult;
       } | null;
 
-      // For rejected approvals, no polling needed
-      if (decision === "rejected" || postBody?.status === "completed") {
+      // For rejected approvals nothing runs server-side — settle now.
+      // (An APPROVED decision that lands on an already-completed detached
+      // run must NOT return here: the POST carries no runResult, so the
+      // outcome still has to be pulled via GET below.)
+      if (decision === "rejected") {
         onAccepted?.();
-        if (postBody?.runResult) {
-          onCompleted?.(postBody.runResult as ApprovalRunResult);
-        }
         return;
       }
 
       // Approval accepted — notify caller
       onAccepted?.();
 
-      // Check if already completed/failed in the POST response
-      if (postBody?.runStatus === "completed" && postBody) {
-        // Need to GET the full result
-      } else if (postBody?.runStatus === "failed") {
+      // A failure already recorded on the paused run is terminal.
+      if (postBody?.runStatus === "failed") {
         onFailed?.(postBody.runError ?? "Execution failed");
         return;
       }
@@ -127,12 +142,10 @@ export function submitApprovalAndPoll(opts: {
       const deadline = Date.now() + POLL_TIMEOUT_MS;
 
       while (!cancelled && Date.now() < deadline) {
-        await new Promise<void>((resolve) => {
-          timeoutHandle = setTimeout(() => resolve(), POLL_INTERVAL_MS);
-        });
+        await sleep(pollIntervalMs);
         if (cancelled) return;
 
-        const getResp = await fetch(
+        const getResp = await fetchImpl(
           `/api/studio/conversations/${conversationId}/approvals/${pausedRunId}`,
         ).catch(() => null);
 
@@ -148,6 +161,17 @@ export function submitApprovalAndPoll(opts: {
 
         if (status.runStatus === "failed") {
           onFailed?.(status.runError ?? "Execution failed");
+          return;
+        }
+
+        // The gate itself settled without producing a run — surface the
+        // honest state instead of polling into a timeout.
+        if (status.status === "expired") {
+          onFailed?.("This approval expired before it could be resumed. Please resend your request.");
+          return;
+        }
+        if (status.status === "rejected") {
+          onFailed?.("This approval was already declined in another session.");
           return;
         }
         // Still processing — continue polling
