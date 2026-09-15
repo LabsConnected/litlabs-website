@@ -20,52 +20,42 @@ import {
 
 describe("AppShell Navigation", () => {
   describe("Canonical nav sections", () => {
-    it("has exactly 3 sections: Command, Create, Explore", () => {
+    it("has a single Command section", () => {
       const ids = APP_NAV_SECTIONS.map((s) => s.id);
-      expect(ids).toEqual(["command", "create", "explore"]);
+      expect(ids).toEqual(["command"]);
     });
 
-    it("Command section has Dashboard and Studio", () => {
+    it("Command section has Dashboard, Studio, and Projects", () => {
       const command = APP_NAV_SECTIONS.find((s) => s.id === "command");
       expect(command).toBeDefined();
       const labels = command!.items.map((i) => i.label);
-      expect(labels).toContain("Dashboard");
-      expect(labels).toContain("Studio");
+      expect(labels).toEqual(["Dashboard", "Studio", "Projects"]);
     });
 
-    it("Create section has Create, Music, and Showcase", () => {
-      const create = APP_NAV_SECTIONS.find((s) => s.id === "create");
-      expect(create).toBeDefined();
-      const labels = create!.items.map((i) => i.label);
-      expect(labels).toContain("Create");
-      expect(labels).toContain("Music");
-      expect(labels).toContain("Showcase");
+    it("Projects links to the real /projects route", () => {
+      const allHrefs = APP_NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.href));
+      expect(allHrefs).toContain("/projects");
     });
 
-    it("Create nav item links to /studio?tool=image (not chat)", () => {
-      const create = APP_NAV_SECTIONS.find((s) => s.id === "create");
-      expect(create).toBeDefined();
-      const createItem = create!.items.find((i) => i.label === "Create");
-      expect(createItem).toBeDefined();
-      expect(createItem!.href).toBe("/studio?tool=image");
-    });
-
-    it("Explore section has Games, Discover, Marketplace", () => {
-      const explore = APP_NAV_SECTIONS.find((s) => s.id === "explore");
-      expect(explore).toBeDefined();
-      const labels = explore!.items.map((i) => i.label);
-      expect(labels).toContain("Games");
-      expect(labels).toContain("Discover");
-      expect(labels).toContain("Marketplace");
+    // The sidebar only exposes core product surfaces. Social/marketing
+    // destinations and tool shortcuts were removed so the shell stays
+    // narrow and Studio-focused.
+    it("does NOT contain Create, Music, Showcase, Games, Discover, or Marketplace", () => {
+      const labels = APP_NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.label));
+      for (const removed of ["Create", "Music", "Showcase", "Games", "Discover", "Marketplace"]) {
+        expect(labels).not.toContain(removed);
+      }
+      const hrefs = APP_NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.href));
+      for (const removedHref of ["/showcase", "/games", "/discover", "/marketplace"]) {
+        expect(hrefs).not.toContain(removedHref);
+      }
     });
 
     // Regression: /hire is permanently retired — the page always redirects
     // to /studio (see tests/hire-redirect.test.ts) — so the signed-in
     // sidebar must not link to it and strand visitors on a dead-end bounce.
     it("does NOT link to /hire", () => {
-      const explore = APP_NAV_SECTIONS.find((s) => s.id === "explore");
-      expect(explore).toBeDefined();
-      const hrefs = explore!.items.map((i) => i.href);
+      const hrefs = APP_NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.href));
       expect(hrefs).not.toContain("/hire");
     });
   });
@@ -148,9 +138,9 @@ describe("AppShell Navigation", () => {
       expect(labels).toContain("Studio");
     });
 
-    it("includes Discover and Me", () => {
+    it("includes Projects and Me", () => {
       const labels = APP_MOBILE_BOTTOM_ITEMS.map((i) => i.label);
-      expect(labels).toContain("Discover");
+      expect(labels).toContain("Projects");
       expect(labels).toContain("Me");
     });
 

@@ -26,8 +26,6 @@ import {
   Workflow,
   FolderKanban,
   Bell,
-  Gamepad2 as GamesIcon,
-  Compass,
   Terminal,
   Mic,
 } from "lucide-react";
@@ -67,7 +65,11 @@ export const GROUP_ACCENTS: Record<string, string> = {
   More: "#94a3b8",
 };
 
-/* ─── Canonical App Shell navigation (COMMAND / CREATE / EXPLORE) ─── */
+/* ─── Canonical App Shell navigation ─── */
+// The sidebar only exposes core product surfaces. Social/marketing
+// destinations (Showcase, Discover, Marketplace, Games) and tool
+// shortcuts (Create, Music) are reachable via their routes but do not
+// get dedicated sidebar entries.
 
 export const APP_NAV_SECTIONS: NavSection[] = [
   {
@@ -76,24 +78,7 @@ export const APP_NAV_SECTIONS: NavSection[] = [
     items: [
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, shortcut: "⌘D" },
       { label: "Studio", href: "/studio", icon: Sparkles, shortcut: "⌘S" },
-    ],
-  },
-  {
-    id: "create",
-    label: "Create",
-    items: [
-      { label: "Create", href: "/studio?tool=image", icon: Sparkles },
-      { label: "Music", href: "/studio?tool=music", icon: Music },
-      { label: "Showcase", href: "/showcase", icon: Image },
-    ],
-  },
-  {
-    id: "explore",
-    label: "Explore",
-    items: [
-      { label: "Games", href: "/games", icon: GamesIcon },
-      { label: "Discover", href: "/discover", icon: Compass },
-      { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
+      { label: "Projects", href: "/projects", icon: FolderKanban },
       // /hire is permanently retired (always redirects to /studio — see
       // src/app/(app)/hire/page.tsx) so it is not a nav destination.
     ],
@@ -111,7 +96,7 @@ export const APP_NAV_BOTTOM: NavItem[] = [
 export const APP_MOBILE_BOTTOM_ITEMS: MobileNavItem[] = [
   { label: "Home", href: "/dashboard", icon: LayoutDashboard },
   { label: "Studio", href: "/studio", icon: Sparkles },
-  { label: "Discover", href: "/discover", icon: Compass },
+  { label: "Projects", href: "/projects", icon: FolderKanban },
   { label: "Me", href: "/profile", icon: User },
 ];
 
