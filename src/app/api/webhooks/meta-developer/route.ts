@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import crypto from "crypto";
+import crypto, { timingSafeEqual } from "crypto";
+
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
 
 // GET — Meta webhook verification
 export async function GET(request: NextRequest) {
@@ -14,7 +21,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Webhook verify token not configured" }, { status: 500 });
   }
 
-  if (mode === "subscribe" && token === verifyToken) {
+  if (mode === "subscribe" && token && safeEqual(token, verifyToken)) {
     return NextResponse.json(parseInt(challenge || "0", 10));
   }
 
@@ -33,7 +40,7 @@ export async function POST(request: NextRequest) {
   }
 
   const expectedSignature = "sha256=" + crypto.createHmac("sha256", appSecret).update(body).digest("hex");
-  if (signature !== expectedSignature) {
+  if (!signature || !safeEqual(signature, expectedSignature)) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
