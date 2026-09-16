@@ -105,10 +105,10 @@ export default function QuickStartClient() {
             title: "Inspect the files",
             body: (
               <>
-                Open the <strong>Files</strong> panel to see what LiTT
+                Open the <strong>Files</strong>{" "}panel to see what LiTT
                 created — real files like <InlineCode>index.html</InlineCode>,
                 stylesheets, and scripts. Switch to the{" "}
-                <strong>Code</strong> tab to read and review them. Nothing is
+                <strong>Code</strong>{" "}tab to read and review them. Nothing is
                 hidden: every edit LiTT makes is visible in your project.
               </>
             ),
@@ -117,7 +117,7 @@ export default function QuickStartClient() {
             title: "Preview the project",
             body: (
               <>
-                Switch to the <strong>Preview</strong> tab. LiTT starts a live
+                Switch to the <strong>Preview</strong>{" "}tab. LiTT starts a live
                 preview of your project automatically — this is your actual
                 project running, not a mockup. Click through it the way a
                 visitor would.
@@ -143,7 +143,7 @@ export default function QuickStartClient() {
             title: "Use the terminal when you need it",
             body: (
               <>
-                Open the <strong>Terminal</strong> panel any time you want to
+                Open the <strong>Terminal</strong>{" "}panel any time you want to
                 run a command yourself — installing a package, checking a
                 build, or inspecting files. LiTT uses the same terminal for
                 its own work, so you always see what ran.
@@ -154,7 +154,7 @@ export default function QuickStartClient() {
             title: "Deploy it",
             body: (
               <>
-                Happy with the preview? Use the <strong>Deploy</strong> action
+                Happy with the preview? Use the <strong>Deploy</strong>{" "}action
                 in Studio to prepare the project to go live. Deployment is a
                 deliberate step and may ask for your approval first — nothing
                 ships without you saying so.

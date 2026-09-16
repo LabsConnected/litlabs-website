@@ -141,7 +141,7 @@ export default function TroubleshootingClient() {
             term: "Remote commands fail",
             definition: (
               <>
-                <InlineCode>--remote</InlineCode> work needs the terminal
+                <InlineCode>--remote</InlineCode>{" "}work needs the terminal
                 server to be reachable. Confirm you&apos;re signed in (
                 <InlineCode>litt whoami</InlineCode>) and not forcing{" "}
                 <InlineCode>LITT_LOCAL_ONLY=1</InlineCode>.
@@ -152,7 +152,7 @@ export default function TroubleshootingClient() {
             term: "Wrong workspace",
             definition: (
               <>
-                <InlineCode>litt workspace current</InlineCode> shows the
+                <InlineCode>litt workspace current</InlineCode>{" "}shows the
                 selected workspace; <InlineCode>litt workspace select</InlineCode>{" "}
                 switches it.
               </>
