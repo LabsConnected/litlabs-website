@@ -208,3 +208,258 @@ export function stripToolCallMarkupText(text: string): string {
   if (!text) return text;
   return stripToolCallBlocks(normalizeXmlToolCallTags(text)).trim();
 }
+
+// ─── Canonical normalization boundary ─────────────────────────────
+//
+// Detection says WHETHER text carries invocation intent; recovery says
+// WHAT the model meant. A markup block is only recoverable when it
+// parses deterministically into a registered tool id plus schema-valid
+// arguments — anything short of that is an incompatible protocol
+// emission, and the caller fails over instead of executing a guess.
+
+export interface RecoveredToolCall {
+  toolId: string;
+  inputs: Record<string, unknown>;
+}
+
+export interface TextToolCallRecovery {
+  /** Canonical calls recovered from the text, in document order. */
+  calls: RecoveredToolCall[];
+  /** The text with every consumed markup span removed. */
+  residualText: string;
+  /** True when markup intent was detected but could not be fully
+   *  normalized — the caller must treat the response as a protocol
+   *  failure rather than executing a partial guess. */
+  malformed: boolean;
+}
+
+const EMPTY_RECOVERY: TextToolCallRecovery = { calls: [], residualText: "", malformed: false };
+
+/** Resolve a recovered name to a registered tool id: exact, the
+ *  underscore-sanitized form (`files_read` → `files.read`), or a unique
+ *  prefix (`terminal` → `terminal.execute`) when exactly one tool owns it. */
+function resolveToolId(name: string, knownToolIds: ReadonlySet<string>): string | undefined {
+  const n = name.trim();
+  if (knownToolIds.has(n)) return n;
+  const lower = n.toLowerCase();
+  if (knownToolIds.has(lower)) return lower;
+  const undotted = lower.replace(/_/g, ".");
+  if (knownToolIds.has(undotted)) return undotted;
+  const prefixMatches = [...knownToolIds].filter((id) => id.split(".")[0] === lower);
+  if (prefixMatches.length === 1) return prefixMatches[0];
+  return undefined;
+}
+
+/** antml-style pairs: `<arg_key>k</arg_key><arg_value>v</arg_value>` or
+ *  `<parameter name="k">v</parameter>` (invoke form). */
+const ARG_PAIR_RE = /<arg_key>\s*([\s\S]*?)\s*<\/arg_key>\s*<arg_value>([\s\S]*?)<\/arg_value>/gi;
+const PARAMETER_RE = /<parameter\s+name=["']([^"']+)["']\s*>([\s\S]*?)<\/parameter>/gi;
+
+function parseArgPairs(payload: string): Record<string, unknown> | null {
+  const inputs: Record<string, unknown> = {};
+  let matched = false;
+  for (const m of payload.matchAll(new RegExp(ARG_PAIR_RE.source, "gi"))) {
+    inputs[m[1].trim()] = m[2].trim();
+    matched = true;
+  }
+  for (const m of payload.matchAll(new RegExp(PARAMETER_RE.source, "gi"))) {
+    inputs[m[1].trim()] = m[2].trim();
+    matched = true;
+  }
+  return matched ? inputs : null;
+}
+
+/** JSON envelope shapes: {name,arguments}, {tool,inputs},
+ *  {function:{name,arguments}}, {action, ...rest→inputs}. */
+function parseJsonEnvelope(raw: string): { name: string; inputs: Record<string, unknown> } | null {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw.trim());
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+
+  const fn = parsed.function as Record<string, unknown> | undefined;
+  if (fn && typeof fn.name === "string") {
+    let args: unknown = fn.arguments ?? fn.parameters;
+    if (typeof args === "string") {
+      try { args = JSON.parse(args); } catch { return null; }
+    }
+    return { name: fn.name, inputs: args && typeof args === "object" ? (args as Record<string, unknown>) : {} };
+  }
+
+  const direct = parsed.name ?? parsed.tool ?? parsed.action ?? parsed.tool_name;
+  if (typeof direct !== "string" || !direct) return null;
+  const named = parsed.arguments ?? parsed.parameters ?? parsed.inputs;
+  if (named && typeof named === "object") {
+    return { name: direct, inputs: named as Record<string, unknown> };
+  }
+  // `name` alone is not a protocol carrier — `{"name": "Jared"}` is data.
+  // Only a carrier field (tool/action/tool_name/…) or name+args makes
+  // the remaining keys inputs.
+  if (!jsonHasProtocolFields(parsed)) return null;
+  const rest = Object.fromEntries(
+    Object.entries(parsed).filter(
+      ([k]) => !["name", "tool", "action", "tool_call", "tool_name", "function", "function_call"].includes(k),
+    ),
+  );
+  return { name: direct, inputs: rest };
+}
+
+/** Parse one envelope payload into a name + inputs, or null. */
+function parseEnvelopePayload(tagAttrs: string, payload: string): { name: string; inputs: Record<string, unknown> } | null {
+  // <invoke name="files.read"><parameter …> — name lives on the tag.
+  const attrName = tagAttrs.match(/name\s*=\s*["']([^"']+)["']/i)?.[1];
+  const trimmed = payload.trim();
+
+  if (trimmed.startsWith("{")) {
+    const env = parseJsonEnvelope(trimmed);
+    if (env) return { name: attrName ?? env.name, inputs: env.inputs };
+  }
+
+  if (attrName) {
+    const inputs = parseArgPairs(payload);
+    if (inputs) return { name: attrName, inputs };
+  }
+
+  // antml form: first line is the tool name, the rest is arg pairs.
+  const firstBreak = trimmed.search(/[\n<]/);
+  if (firstBreak > 0) {
+    const name = trimmed.slice(0, firstBreak).trim();
+    const inputs = parseArgPairs(trimmed.slice(firstBreak));
+    if (name && inputs) return { name, inputs };
+  }
+
+  return null;
+}
+
+interface PendingSpan {
+  start: number;
+  end: number;
+  parsed?: { name: string; inputs: Record<string, unknown> };
+  intent: boolean; // markup-like; if unparseable the whole response is malformed
+}
+
+/**
+ * Recover every safely-parseable tool call from model text. Spans are
+ * consumed only when they carry invocation intent; quoted examples and
+ * intent-free envelopes stay in the residual text.
+ */
+export function recoverTextToolCalls(
+  text: string,
+  knownToolIds: ReadonlySet<string>,
+): TextToolCallRecovery {
+  if (!text || !text.trim()) return { ...EMPTY_RECOVERY, residualText: text };
+  const candidates = toolIdCandidates(knownToolIds);
+  const spans: PendingSpan[] = [];
+
+  // 1. XML envelopes — closed or truncated.
+  for (const m of text.matchAll(new RegExp(ENVELOPE_RE.source, "gi"))) {
+    const start = m.index ?? 0;
+    const whole = m[0];
+    // Skip markup quoted inside inline code — `like <tool_call>x</tool_call>`.
+    if (text[start - 1] === "`" && text[start + whole.length] === "`") continue;
+    const truncated = !new RegExp(`<\\/(?:${ENVELOPE_TAGS.join("|")})>\\s*$`, "i").test(whole);
+    const parsed = truncated ? null : parseEnvelopePayload(m[2] ?? "", m[3] ?? "");
+    const payload = `${m[2] ?? ""}\n${m[3] ?? ""}`;
+    const intent =
+      !!parsed ||
+      payloadMentionsTool(payload, candidates) !== undefined ||
+      ARG_STRUCTURE_RE.test(payload);
+    if (!intent) continue;
+    spans.push({ start, end: start + whole.length, parsed: parsed ?? undefined, intent: true });
+  }
+
+  // 2. Fenced blocks — a fence labeled tool_call/function_call is protocol
+  //    markup regardless of payload validity; other fences only count when
+  //    the payload parses as an envelope or names a known tool.
+  for (const m of text.matchAll(new RegExp(FENCED_BLOCK_RE.source, "g"))) {
+    const start = m.index ?? 0;
+    const payload = (m[1] ?? "").trim();
+    const isToolFence = /```\s*(tool_call|function_call)/i.test(m[0].slice(0, 30));
+    const parsed = parseJsonEnvelope(payload);
+    const intent = isToolFence || !!parsed || payloadMentionsTool(payload, candidates) !== undefined;
+    if (!intent) continue;
+    spans.push({ start, end: start + m[0].length, parsed: parsed ?? undefined, intent: true });
+  }
+
+  // 3. Bare JSON — the whole payload, or a balanced span mid-text that
+  //    carries an envelope. Skip spans already covered by earlier markup.
+  const covered = (i: number) => spans.some((s) => i >= s.start && i < s.end);
+  const tryBare = (raw: string, start: number, end: number) => {
+    const parsed = parseJsonEnvelope(raw);
+    const hasIntentFields = (() => {
+      try {
+        const p = JSON.parse(raw) as Record<string, unknown>;
+        return !!p && typeof p === "object" && !Array.isArray(p) && jsonHasProtocolFields(p);
+      } catch { return false; }
+    })();
+    if (parsed || hasIntentFields) {
+      spans.push({ start, end, parsed: parsed ?? undefined, intent: true });
+    }
+  };
+  const trimmed = text.trim();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}") && !covered(text.indexOf(trimmed))) {
+    tryBare(trimmed, text.indexOf(trimmed), text.indexOf(trimmed) + trimmed.length);
+  }
+  if (spans.length === 0) {
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] !== "{") continue;
+      const span = balancedBraceSpan(text, i);
+      if (!span) continue;
+      const parsed = parseJsonEnvelope(span);
+      if (parsed && resolveToolId(parsed.name, knownToolIds)) {
+        spans.push({ start: i, end: i + span.length, parsed, intent: true });
+        i += span.length;
+      }
+    }
+  }
+
+  if (spans.length === 0) return { ...EMPTY_RECOVERY, residualText: text };
+
+  spans.sort((a, b) => a.start - b.start);
+  const malformed = spans.some((s) => s.intent && !s.parsed);
+  const calls: RecoveredToolCall[] = [];
+  const seen = new Set<string>();
+  for (const s of spans) {
+    if (!s.parsed) continue;
+    const toolId = resolveToolId(s.parsed.name, knownToolIds);
+    if (!toolId) { s.intent = true; s.parsed = undefined; continue; }
+    const key = `${toolId}::${JSON.stringify(s.parsed.inputs)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    calls.push({ toolId, inputs: s.parsed.inputs });
+  }
+
+  // Unknown-tool envelopes count as malformed intent — recomputed after
+  // resolution so a recognized-but-unregistered name still fails over.
+  const unresolved = spans.some((s) => s.intent && !s.parsed);
+
+  let residual = "";
+  let cursor = 0;
+  for (const s of spans) {
+    residual += text.slice(cursor, s.start);
+    cursor = s.end;
+  }
+  residual += text.slice(cursor);
+
+  return {
+    calls,
+    residualText: residual.trim(),
+    malformed: malformed || unresolved,
+  };
+}
+
+/** Balanced `{…}` span starting at `openIdx`, or null when unbalanced. */
+function balancedBraceSpan(content: string, openIdx: number): string | null {
+  let depth = 0;
+  for (let i = openIdx; i < content.length; i++) {
+    if (content[i] === "{") depth++;
+    else if (content[i] === "}") {
+      depth--;
+      if (depth === 0) return content.slice(openIdx, i + 1);
+    }
+  }
+  return null;
+}
