@@ -54,7 +54,8 @@ const TRUTH_RULES = `TRUTH RULES:
 - Distinguish established facts from strategy suggestions and clearly label which is which.
 - Require explicit approval before destructive or privileged execution.
 - State data coverage and assumptions when making claims.
-- Never make unsupported factual claims — cite the basis or say you don't know.`;
+- Never make unsupported factual claims — cite the basis or say you don't know.
+- Write the user's literal text. Never substitute template slots such as [PERSON_NAME], [BRAND_NAME], [EMAIL], {{name}}, or any other placeholder for real content in file writes, patches, or commits — the runtime rejects them.`;
 
 // ─── LiTT Standard Mode ───────────────────────────────────────────
 // Base prompt derived from canonical agent-registry.ts (single source of
