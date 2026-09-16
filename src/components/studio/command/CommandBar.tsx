@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useStudioStore } from "@/stores/useStudioStore";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   MagnifyingGlassIcon,
   CommandIcon,
@@ -113,25 +113,14 @@ export function CommandBar() {
     }
   };
 
-  return (
-    <AnimatePresence>
-      {commandBarOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
-          className="fixed inset-0 z-[100] flex items-start justify-center pt-[15vh] bg-black/40 backdrop-blur-sm"
-          onClick={() => setCommandBarOpen(false)}
-        >
-          <motion.div
-            initial={{ scale: 0.98, y: -10 }}
-            animate={{ scale: 1, y: 0 }}
-            exit={{ scale: 0.98, y: -10 }}
-            transition={{ duration: 0.15 }}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-xl overflow-hidden rounded-2xl border border-white/10 bg-[#13101a] shadow-2xl"
-          >
+  const reduce = useReducedMotion();
+  const overlayClassName =
+    "fixed inset-0 z-[100] flex items-start justify-center pt-[15vh] bg-black/40 backdrop-blur-sm";
+  const panelClassName =
+    "w-full max-w-xl overflow-hidden rounded-2xl border border-white/10 bg-[#13101a] shadow-2xl";
+  const panelContent = (
+    <>
+
             {/* Input */}
             <div className="flex items-center gap-3 border-b border-white/5 px-4 py-3">
               <MagnifyingGlassIcon size={18} className="text-white/30" weight="regular" />
@@ -197,9 +186,40 @@ export function CommandBar() {
               </div>
               <span className="text-[10px] text-white/20">LiTT Command Bar</span>
             </div>
+    </>
+  );
+
+  return (
+    <AnimatePresence>
+      {commandBarOpen &&
+        (reduce ? (
+          // Reduced motion: mount instantly, no animation (same pattern as AudioTool/VideoTool)
+          <div className={overlayClassName} onClick={() => setCommandBarOpen(false)}>
+            <div className={panelClassName} onClick={(e) => e.stopPropagation()}>
+              {panelContent}
+            </div>
+          </div>
+        ) : (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className={overlayClassName}
+            onClick={() => setCommandBarOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.98, y: -10 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.98, y: -10 }}
+              transition={{ duration: 0.15 }}
+              onClick={(e) => e.stopPropagation()}
+              className={panelClassName}
+            >
+              {panelContent}
+            </motion.div>
           </motion.div>
-        </motion.div>
-      )}
+        ))}
     </AnimatePresence>
   );
 }
