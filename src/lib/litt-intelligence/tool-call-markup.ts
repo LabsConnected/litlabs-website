@@ -1,5 +1,5 @@
 /**
- * Text-format tool-call markup detection.
+ * Text-format tool-call markup detection and hygiene.
  *
  * The agent loop only executes NATIVE structured tool calls — text-parsed
  * tool invocations are deliberately unsupported. Some models (notably
@@ -22,6 +22,8 @@
  * markup (inside backticks, or with a non-tool payload) returns null: it
  * can never execute anyway, so it must not poison the route pool.
  */
+
+import { stripToolCallBlocks } from "@litt/agent-core";
 
 /** Envelope formats we recognize as tool-call protocol attempts. */
 const ENVELOPE_TAGS = [
@@ -133,4 +135,40 @@ export function findToolCallMarkup(
   }
 
   return null;
+}
+
+// ─── Hygiene: strip non-executable markup from visible text ──────────
+//
+// Models that regress from native function calling emit tool calls as
+// text markup — ```tool_call fences (closed or truncated), <tool_call>
+// XML tags, or bare JSON tool objects mid-prose. They are NEVER
+// executed — but they must not leak verbatim into the user-facing
+// transcript either. XML tags are normalized to the fence form first so
+// the shared @litt/agent-core stripper covers every shape with one
+// implementation.
+
+/** `<tool_call …>…</tool_call>` including an unclosed trailing tag and
+ *  attribute-bearing openers. The `(?=[\s/>])` lookahead keeps
+ *  `<tool_calls>` (plural) from matching. */
+const XML_TOOL_CALL_RE = /<tool_call(?=[\s/>])[^>]*>([\s\S]*?)(<\/tool_call[^>]*>|$)/gi;
+/** Orphan `</tool_call>` close tag (truncated markup mid-stream). */
+const XML_TOOL_CALL_CLOSE_RE = /<\/tool_call[^>]*>/gi;
+/** antml-style `<arg_key>…</arg_key>` / `<arg_value>…</arg_value>` tags —
+ *  protocol junk emitted inside tool_call markup; only stripped when the
+ *  text already contained tool_call markers. */
+const XML_ARG_TAG_RE = /<arg_(key|value)\s*>[\s\S]*?<\/arg_\1\s*>/gi;
+
+function normalizeXmlToolCallTags(text: string): string {
+  if (!text.includes("<tool_call") && !text.includes("</tool_call")) return text;
+  const fenced = text.replace(XML_TOOL_CALL_RE, (_m, inner: string) => `\`\`\`tool_call\n${inner}\n\`\`\``);
+  return fenced.replace(XML_TOOL_CALL_CLOSE_RE, "").replace(XML_ARG_TAG_RE, "");
+}
+
+/**
+ * Strip tool-call markup from visible text. Returns the input trimmed,
+ * minus any recognizable markup. No markup → the trimmed input.
+ */
+export function stripToolCallMarkupText(text: string): string {
+  if (!text) return text;
+  return stripToolCallBlocks(normalizeXmlToolCallTags(text)).trim();
 }
