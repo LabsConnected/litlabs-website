@@ -133,74 +133,40 @@ export default function SettingsPage() {
       {/* Light veil for text contrast — lets the wallpaper show through */}
       <div className="pointer-events-none absolute inset-0" style={{ backgroundColor: "rgba(5,6,10,0.45)" }} />
 
-      {/* ── Desktop: 260px nav + content, wide shell ─────────────────── */}
-      <div className="relative mx-auto flex w-full max-w-375 flex-col lg:flex-row">
-        {/* Desktop sidebar */}
-        <aside
-          className="sticky top-0 z-30 hidden h-screen w-65 shrink-0 border-r lg:block 2xl:w-67.5"
-          style={{
-            borderColor: "rgba(255,255,255,0.06)",
-            backgroundColor: "rgba(9,11,18,0.9)",
-            backdropFilter: "blur(20px)",
-          }}
-        >
-          <SettingsNav
-            sections={filteredSections}
-            allSections={SETTINGS_SECTIONS}
-            controlMode={controlMode}
-            activeSection={activeSection}
-            onSectionClick={handleSectionClick}
-            onModeChange={setControlMode}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            T={T}
-            returnTo={returnTo}
-          />
-        </aside>
+      {/* ── Section tab strip — sticky under the AppShell top bar ────────
+          Replaces the old 260px desktop sidebar: section tabs, search, and
+          the control-mode selector live here on every viewport. The strip
+          sticks below the AppShell header (56px bar + 48px mobile nav strip
+          on small screens, 56px bar alone on md+). */}
+      <div className="relative">
+        <SettingsTabStrip
+          sections={filteredSections}
+          allSections={SETTINGS_SECTIONS}
+          controlMode={controlMode}
+          activeSection={activeSection}
+          onSectionClick={handleSectionClick}
+          onModeChange={setControlMode}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          T={T}
+          returnTo={returnTo}
+        />
+      </div>
 
-        {/* Mobile header */}
-        <div className="sticky top-0 z-40 flex items-center justify-between border-b px-4 py-3 lg:hidden"
-          style={{
-            backgroundColor: "rgba(10,12,18,0.9)",
-            borderColor: "rgba(255,255,255,0.06)",
-            backdropFilter: "blur(14px)",
-          }}
-        >
-          <div className="flex items-center gap-3">
-            {isMobileSectionActive ? (
-              <button
-                type="button"
-                onClick={() => setMobileSection(null)}
-                className="grid h-9 w-9 place-items-center rounded-lg border"
-                style={{ borderColor: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.6)" }}
-                aria-label="Back to settings list"
-              >
-                <ArrowLeft size={16} className="pointer-events-none" />
-              </button>
-            ) : (
-              <Link
-                href={returnTo}
-                className="grid h-9 w-9 place-items-center rounded-lg border"
-                style={{ borderColor: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.6)" }}
-                aria-label="Back to Studio"
-              >
-                <ArrowLeft size={16} className="pointer-events-none" />
-              </Link>
-            )}
-            <span className="text-sm font-black" style={{ color: "rgba(255,255,255,0.9)" }}>
-              {isMobileSectionActive ? activeSectionMeta?.label : "Settings"}
-            </span>
-          </div>
-          <ModeSelector
-            controlMode={controlMode}
-            onModeChange={setControlMode}
-            T={T}
-          />
-        </div>
-
+      {/* ── Content — full width below the tab strip ───────────────────── */}
+      <div className="relative mx-auto w-full max-w-375">
         {/* Mobile: section list or active section */}
         {isMobileSectionActive ? (
-          <main className="min-w-0 flex-1 px-4 py-4 pb-24 lg:hidden">
+          <div className="min-w-0 px-4 py-4 pb-24 lg:hidden">
+            <button
+              type="button"
+              onClick={() => setMobileSection(null)}
+              className="mb-3 flex items-center gap-2 text-xs font-bold text-white/50 transition-colors hover:text-white/80"
+              aria-label="Back to settings list"
+            >
+              <ArrowLeft size={14} className="pointer-events-none" />
+              All settings
+            </button>
             {activeSectionMeta && (
               <>
                 <SectionHeader
@@ -210,9 +176,9 @@ export default function SettingsPage() {
                 <SettingsContent section={activeSectionMeta.id} T={T} controlMode={controlMode} />
               </>
             )}
-          </main>
+          </div>
         ) : (
-          <main className="min-w-0 flex-1 px-4 py-4 pb-24 lg:hidden">
+          <div className="min-w-0 px-4 py-4 pb-24 lg:hidden">
             <MobileSectionList
               sections={filteredSections}
               allSections={SETTINGS_SECTIONS}
@@ -220,30 +186,23 @@ export default function SettingsPage() {
               onSectionClick={handleSectionClick}
               onModeChange={setControlMode}
               searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
               T={T}
             />
-          </main>
+          </div>
         )}
 
-        {/* Desktop main content */}
-        <main className="hidden min-w-0 flex-1 px-6 py-8 pb-24 pr-16 xl:pr-20 lg:block lg:px-8 xl:px-10">
-          {/* Header with mode selector */}
-          <div className="mb-6 flex items-start justify-between gap-4">
+        {/* Desktop: active section content */}
+        <div className="hidden min-w-0 px-6 py-8 pb-24 pr-16 lg:block lg:px-8 xl:px-10 xl:pr-20">
+          <div className="mb-6">
             <SectionHeader
               title={activeSectionMeta?.label ?? "Settings"}
               description={activeSectionMeta?.description}
-            />
-            <ModeSelector
-              controlMode={controlMode}
-              onModeChange={setControlMode}
-              T={T}
             />
           </div>
           {activeSectionMeta && (
             <SettingsContent section={activeSectionMeta.id} T={T} controlMode={controlMode} />
           )}
-        </main>
+        </div>
       </div>
 
       {/* ── Sticky save bar ──────────────────────────────────────── */}
@@ -257,9 +216,16 @@ export default function SettingsPage() {
   );
 }
 
-/* ── Settings navigation (desktop sidebar) ─────────────────────────── */
+/* ── Settings section tabs (horizontal strip under the AppShell top bar) ──
+ * Replaces the old 260px desktop sidebar. Sticky on every viewport:
+ * sticks below the AppShell header — 56px bar + 48px mobile nav strip on
+ * small screens (top-[104px]), 56px bar alone on md+ (md:top-14).
+ * Tabs show icon + label; the active section is highlighted; locked
+ * sections stay greyed out and switch the control mode on click, exactly
+ * like the old sidebar did. Search + ModeSelector live in the strip so
+ * they are always in reach. */
 
-function SettingsNav({
+function SettingsTabStrip({
   sections,
   allSections,
   controlMode,
@@ -287,27 +253,34 @@ function SettingsNav({
   const displaySections = hasSearch ? sections : allSections;
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Back link */}
-      <div className="border-b px-4 py-3" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
+    <div
+      className="sticky top-[104px] z-30 border-b md:top-14"
+      style={{
+        borderColor: "rgba(255,255,255,0.06)",
+        backgroundColor: "rgba(9,11,18,0.92)",
+        backdropFilter: "blur(20px)",
+      }}
+    >
+      {/* Row 1: back + title + search + mode */}
+      <div className="flex items-center gap-2 px-3 pt-2.5 md:gap-3 md:px-4">
         <Link
           href={returnTo}
-          className="flex items-center gap-2 text-xs font-bold text-white/50 hover:text-white/80"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border transition-colors hover:bg-white/5"
+          style={{ borderColor: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.6)" }}
+          aria-label="Back to Studio"
         >
-          <ArrowLeft size={14} className="pointer-events-none" />
-          Back to Studio
+          <ArrowLeft size={16} className="pointer-events-none" />
         </Link>
-      </div>
-
-      {/* Search */}
-      <div className="border-b px-4 py-3" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
-        <div className="relative">
+        <span className="shrink-0 text-sm font-black" style={{ color: "rgba(255,255,255,0.9)" }}>
+          Settings
+        </span>
+        <div className="relative min-w-0 flex-1 md:max-w-64">
           <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/30" />
           <input
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search settings…"
-            className="w-full rounded-xl border py-2.5 pl-9 pr-3 text-sm outline-none transition-all focus:ring-2"
+            className="w-full rounded-xl border py-2 pl-9 pr-3 text-sm outline-none transition-all focus:ring-2"
             style={{
               backgroundColor: "rgba(10,12,18,0.6)",
               borderColor: "rgba(255,255,255,0.08)",
@@ -316,10 +289,19 @@ function SettingsNav({
             aria-label="Search settings"
           />
         </div>
+        <ModeSelector
+          controlMode={controlMode}
+          onModeChange={onModeChange}
+          T={T}
+        />
       </div>
 
-      {/* Section list — shows ALL sections, locked ones greyed out */}
-      <nav className="flex-1 overflow-y-auto px-2 py-2">
+      {/* Row 2: horizontally scrollable section tabs */}
+      <nav
+        className="flex items-center gap-1 overflow-x-auto px-3 py-2.5 md:px-4"
+        aria-label="Settings sections"
+        style={{ scrollbarWidth: "none" }}
+      >
         {displaySections.map((section) => {
           const Icon = ICONS[section.icon] ?? LayoutGrid;
           const isActive = activeSection === section.id;
@@ -333,34 +315,14 @@ function SettingsNav({
                 key={section.id}
                 type="button"
                 onClick={() => onModeChange(section.minMode)}
-                className="flex min-h-13 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-all hover:bg-white/3"
-                style={{ opacity: 0.5 }}
+                className="flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-[13px] font-bold transition-all hover:bg-white/5"
+                style={{ opacity: 0.55, color: "rgba(255,255,255,0.5)" }}
                 aria-label={`${section.label} — switch to ${lockedMode.label} mode to unlock`}
+                title={`${section.label} — ${lockedMode.label} mode`}
               >
-                <span
-                  className="grid h-8 w-8 shrink-0 place-items-center rounded-lg"
-                  style={{
-                    backgroundColor: `${lockedMode.color}10`,
-                    color: `${lockedMode.color}80`,
-                  }}
-                >
-                  <Icon size={14} className="pointer-events-none" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[13px] font-bold text-white/50">{section.label}</span>
-                    <span className="text-[10px] text-white/30">🔒</span>
-                  </div>
-                  <div className="truncate text-[10px] text-white/25">
-                    {section.description}
-                  </div>
-                </div>
-                <span
-                  className="shrink-0 rounded px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider"
-                  style={{ color: lockedMode.color, backgroundColor: `${lockedMode.color}15` }}
-                >
-                  {lockedMode.label}
-                </span>
+                <Icon size={14} className="pointer-events-none" style={{ color: `${lockedMode.color}80` }} />
+                <span className="whitespace-nowrap">{section.label}</span>
+                <span className="text-[10px]" aria-hidden>🔒</span>
               </button>
             );
           }
@@ -370,33 +332,17 @@ function SettingsNav({
               key={section.id}
               type="button"
               onClick={() => onSectionClick(section.id)}
-              className="flex min-h-13 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-all hover:bg-white/5"
+              className="flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-[13px] font-bold transition-all"
               style={{
-                backgroundColor: isActive ? `${T.accentColor}10` : "transparent",
+                backgroundColor: isActive ? `${T.accentColor}14` : "transparent",
+                color: isActive ? T.accentColor : "rgba(255,255,255,0.55)",
+                boxShadow: isActive ? `inset 0 -2px 0 ${T.accentColor}` : "none",
               }}
               aria-current={isActive ? "page" : undefined}
+              title={section.description}
             >
-              <span
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-lg"
-                style={{
-                  backgroundColor: isActive ? `${T.accentColor}15` : "rgba(255,255,255,0.04)",
-                  color: isActive ? T.accentColor : "rgba(255,255,255,0.4)",
-                }}
-              >
-                <Icon size={14} className="pointer-events-none" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div
-                  className="text-[13px] font-bold"
-                  style={{ color: isActive ? T.accentColor : "rgba(255,255,255,0.7)" }}
-                >
-                  {section.label}
-                </div>
-                <div className="truncate text-[10px] text-white/35">
-                  {section.description}
-                </div>
-              </div>
-              <ChevronRight size={12} className="pointer-events-none text-white/20" />
+              <Icon size={14} className="pointer-events-none" />
+              <span className="whitespace-nowrap">{section.label}</span>
             </button>
           );
         })}
@@ -477,7 +423,9 @@ function ModeSelector({
   );
 }
 
-/* ── Mobile section list ───────────────────────────────────────────── */
+/* ── Mobile section list ─────────────────────────────────────────────
+ * Section cards only — search and the control-mode selector live in the
+ * sticky SettingsTabStrip above, so they are not duplicated here. */
 
 function MobileSectionList({
   sections,
@@ -486,7 +434,6 @@ function MobileSectionList({
   onSectionClick,
   onModeChange,
   searchQuery,
-  onSearchChange,
   T: _T,
 }: {
   sections: SettingsSection[];
@@ -495,7 +442,6 @@ function MobileSectionList({
   onSectionClick: (id: string) => void;
   onModeChange: (m: ControlMode) => void;
   searchQuery: string;
-  onSearchChange: (q: string) => void;
   T: ReturnType<typeof useTheme>["resolvedColors"];
 }) {
   const modeIdx = MODE_ORDER.indexOf(controlMode);
@@ -507,46 +453,6 @@ function MobileSectionList({
 
   return (
     <div className="space-y-3">
-      <div className="relative">
-        <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/30" />
-        <input
-          value={searchQuery}
-          onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Search settings…"
-          className="w-full rounded-xl border py-3 pl-10 pr-3 text-sm outline-none"
-          style={{
-            backgroundColor: "rgba(10,12,18,0.6)",
-            borderColor: "rgba(255,255,255,0.08)",
-            color: "rgba(255,255,255,0.88)",
-          }}
-          aria-label="Search settings"
-        />
-      </div>
-
-      {/* Mode banner — shows current mode and lets user switch */}
-      {!hasSearch && (
-        <div
-          className="flex items-center justify-between rounded-xl border px-3 py-2.5"
-          style={{
-            borderColor: `${MODE_META[controlMode].color}30`,
-            backgroundColor: `${MODE_META[controlMode].color}08`,
-          }}
-        >
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: MODE_META[controlMode].color }} />
-            <span className="text-xs font-bold" style={{ color: MODE_META[controlMode].color }}>
-              {MODE_META[controlMode].label}
-            </span>
-            <span className="text-[10px] text-white/40">{MODE_META[controlMode].description}</span>
-          </div>
-          <ModeSelector
-            controlMode={controlMode}
-            onModeChange={onModeChange}
-            T={_T}
-          />
-        </div>
-      )}
-
       <div className="space-y-1">
         {displaySections.map((section) => {
           const Icon = ICONS[section.icon] ?? LayoutGrid;
