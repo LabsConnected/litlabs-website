@@ -1,221 +1,209 @@
-// Social Feed API — GET (feed) / POST (create post)
+// Social feed API — GET (paginated feed) / POST (create post)
+// DB-backed only. No mocks: honest 503 when the backend isn't connected.
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import {
-  getAdminSupabase,
-  isAdminSupabaseConfigured,
-} from "@/lib/supabase-admin";
+import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
 import { withRateLimit } from "@/lib/rate-limiter";
+import {
+  FeedTab,
+  getPostDTO,
+  listPosts,
+  requireAuthDbUser,
+  resolveDbUser,
+} from "@/lib/social-feed";
+import { auth } from "@/lib/auth";
 
-// Mock feed data when DB is not configured
-const MOCK_FEED = [
-  {
-    id: "mock_1",
-    user_id: "mock_user_1",
-    content:
-      "Just deployed my first dual-agent setup — Director handles planning, Executor handles the code. Cut my dev workflow time by 60%. The orchestration features on LiTTree-LabStudios are no joke 🚀",
-    media_urls: [],
-    likes_count: 24,
-    comments_count: 3,
-    is_ai_post: false,
-    created_at: new Date(Date.now() - 7200000).toISOString(),
-    author: { name: "Alex Chen", username: "alexchen", avatar_url: "💻" },
-    comments: [
-      {
-        id: "mock_comment_1",
-        content:
-          "Excellent execution. Task delegation parameters are within peak efficiency.",
-        created_at: new Date(Date.now() - 3600000).toISOString(),
-        author: { name: "Director", username: "director", avatar_url: "🎯" },
-      },
-    ],
-  },
-  {
-    id: "mock_2",
-    user_id: "mock_user_2",
-    content:
-      "Pixel Forge just generated the perfect album art for my new EP. The AI understood my vision instantly 🎵",
-    media_urls: [
-      "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=1600&h=1600&fit=crop&q=80",
-    ],
-    likes_count: 56,
-    comments_count: 12,
-    is_ai_post: false,
-    created_at: new Date(Date.now() - 14400000).toISOString(),
-    author: { name: "Sarah Kim", username: "sarahk", avatar_url: "🎨" },
-    comments: [],
-  },
-  {
-    id: "mock_3",
-    user_id: "mock_user_3",
-    content:
-      "The Code Champion agent just refactored my entire Rust backend — memory safety, zero-cost abstractions, the works. Didn't break a single test. I'm genuinely impressed.",
-    media_urls: [],
-    likes_count: 42,
-    comments_count: 1,
-    is_ai_post: false,
-    created_at: new Date(Date.now() - 21600000).toISOString(),
-    author: { name: "Mike Dev", username: "mikedev", avatar_url: "⚡" },
-    comments: [],
-  },
-  {
-    id: "mock_4",
-    user_id: "mock_user_4",
-    content:
-      "Pro tip: Connect your LiTTree-LabStudios agents to Discord for real-time notifications. Set up takes 5 min and now my deployment alerts go straight to our team server. Game changer!",
-    media_urls: [],
-    likes_count: 18,
-    comments_count: 2,
-    is_ai_post: false,
-    created_at: new Date(Date.now() - 28800000).toISOString(),
-    author: { name: "Jordan Taylor", username: "jtaylor", avatar_url: "🚀" },
-    comments: [],
-  },
-];
+const POST_TYPES = ["text", "image", "video", "link", "project", "music", "poll"] as const;
+const VISIBILITIES = ["public", "followers", "crew", "private"] as const;
 
-async function getHandler(req: NextRequest) {
+function isHttpsUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
   try {
-    if (!isAdminSupabaseConfigured()) {
-      return NextResponse.json({ posts: MOCK_FEED, mock: true });
-    }
-    const sb = getAdminSupabase();
-    const { searchParams } = new URL(req.url);
-    const filter = searchParams.get("filter"); // "all" | "following"
-
-    let query = sb
-      .from("posts")
-      .select(
-        `
-        id, user_id, content, media_urls, likes_count, comments_count, is_ai_post, created_at,
-        users:user_id (name, username, avatar_url)
-      `,
-      )
-      .order("created_at", { ascending: false })
-      .limit(50);
-
-    if (filter === "following") {
-      const { userId } = await auth(req);
-      if (userId) {
-        const { data: user } = await sb
-          .from("users")
-          .select("id")
-          .eq("clerk_id", userId)
-          .single();
-        if (user) {
-          const { data: follows } = await sb
-            .from("follows")
-            .select("followee_id")
-            .eq("follower_id", user.id);
-          const followeeIds = (follows || []).map((f) => f.followee_id);
-          if (followeeIds.length > 0) {
-            query = query.in("user_id", followeeIds);
-          } else {
-            // No follows yet — return empty so UI can show "Discover people" prompt
-            return NextResponse.json({ posts: [], empty_following: true });
-          }
-        }
-      }
-    }
-
-    const { data: posts, error } = await query;
-    if (error) throw error;
-    return NextResponse.json({ posts: posts || [] });
+    const u = new URL(value);
+    return u.protocol === "https:";
   } catch {
-    return NextResponse.json({ posts: MOCK_FEED, mock: true });
+    return false;
   }
 }
 
-async function postHandler(req: NextRequest) {
-  const { userId } = await auth(req);
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const body = await req.json().catch(() => null);
-  const hasContent = body?.content?.trim();
-  const hasMedia = body?.media_urls?.length > 0;
-
-  if (!body || (!hasContent && !hasMedia)) {
-    return NextResponse.json(
-      { error: "Content or media is required" },
-      { status: 400 },
-    );
-  }
-
+async function getHandler(req: NextRequest) {
+  // Honest 503 when the backend isn't connected (CI, unconfigured envs) —
+  // never fake posts, never a 500 that looks like an app error.
   if (!isAdminSupabaseConfigured()) {
     return NextResponse.json(
-      { error: "Posting is unavailable — the community feed isn’t connected yet." },
+      { error: "The community feed isn't connected yet." },
       { status: 503 },
     );
   }
 
-  try {
-    const sb = getAdminSupabase();
-    // Ensure user exists - create if not found
-    let { data: user } = await sb
-      .from("users")
-      .select("id")
-      .eq("clerk_id", userId)
-      .single();
+  const { searchParams } = new URL(req.url);
+  const rawTab = searchParams.get("tab") ?? "for-you";
+  const tab: FeedTab = rawTab === "following" || rawTab === "trending" ? rawTab : "for-you";
+  const authorId = searchParams.get("authorId");
+  const cursor = searchParams.get("cursor");
+  const limitRaw = Number.parseInt(searchParams.get("limit") ?? "10", 10);
+  const limit = Number.isFinite(limitRaw) ? limitRaw : 10;
 
-    if (!user) {
-      // Auto-create user from Clerk data
-      const shortId = userId.slice(-8);
-      const { data: newUser, error: createError } = await sb
-        .from("users")
-        .insert({
-          clerk_id: userId,
-          username: `user_${shortId}`,
-          display_name: `LiTBit User ${shortId}`,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .select()
-        .single();
+  let viewerDbId: string | null = null;
+  const { userId } = await auth(req);
+  if (userId) {
+    const dbUser = await resolveDbUser(userId);
+    viewerDbId = dbUser?.id ?? null;
+  }
 
-      if (createError) {
-        return NextResponse.json(
-          { error: "Failed to create user" },
-          { status: 500 },
-        );
-      }
+  const result = await listPosts({ viewerDbId, tab, authorId, cursor, limit });
+  return NextResponse.json(result);
+}
 
-      user = newUser;
-      if (!user) {
-        return NextResponse.json(
-          { error: "Failed to create user" },
-          { status: 500 },
-        );
-      }
+async function postHandler(req: NextRequest) {
+  const { dbUser, response } = await requireAuthDbUser(req);
+  if (!dbUser) return response;
 
-      // Create initial wallet
-      await sb.from("wallets").insert({
-        user_id: user!.id,
-        balance: 500,
-        lifetime_earned: 500,
-      });
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== "object") {
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+  }
+
+  const content = typeof body.content === "string" ? body.content.trim() : "";
+  const postType = typeof body.postType === "string" ? body.postType : "text";
+  const visibility = typeof body.visibility === "string" ? body.visibility : "public";
+
+  if (!(POST_TYPES as readonly string[]).includes(postType)) {
+    return NextResponse.json({ error: "Invalid postType" }, { status: 400 });
+  }
+  if (!(VISIBILITIES as readonly string[]).includes(visibility)) {
+    return NextResponse.json({ error: "Invalid visibility" }, { status: 400 });
+  }
+  if (content.length > 5000) {
+    return NextResponse.json({ error: "Content exceeds 5000 characters" }, { status: 400 });
+  }
+
+  const mediaUrls = Array.isArray(body.mediaUrls) ? body.mediaUrls : [];
+  if (mediaUrls.length > 4) {
+    return NextResponse.json({ error: "At most 4 media URLs are allowed" }, { status: 400 });
+  }
+  for (const url of mediaUrls) {
+    if (!isHttpsUrl(url)) {
+      return NextResponse.json({ error: "Media URLs must be valid https URLs" }, { status: 400 });
     }
+  }
 
-    const { data: post, error } = await sb
-      .from("posts")
-      .insert({
-        user_id: user!.id,
-        content: body.content.trim(),
-        media_urls: body.media_urls || [],
-      })
-      .select()
-      .single();
+  const link = body.link && typeof body.link === "object" ? body.link : null;
+  let linkFields: Record<string, string | null> = {};
+  if (postType === "link") {
+    if (!isHttpsUrl(link?.url)) {
+      return NextResponse.json({ error: "link.url must be a valid https URL" }, { status: 400 });
+    }
+    linkFields = {
+      link_url: link.url,
+      link_title: typeof link.title === "string" ? link.title.slice(0, 300) : null,
+      link_description: typeof link.description === "string" ? link.description.slice(0, 1000) : null,
+      link_image_url: isHttpsUrl(link.imageUrl) ? link.imageUrl : null,
+    };
+  }
 
-    if (error) throw error;
-    return NextResponse.json({ success: true, post });
-  } catch {
-    // POST posts error:
+  const poll = body.poll && typeof body.poll === "object" ? body.poll : null;
+  let pollOptions: string[] | null = null;
+  let pollEndsAt: string | null = null;
+  if (postType === "poll") {
+    const question = typeof poll?.question === "string" ? poll.question.trim() : "";
+    const options = Array.isArray(poll?.options) ? poll.options : [];
+    if (!question || question.length > 300) {
+      return NextResponse.json({ error: "Poll question must be 1..300 characters" }, { status: 400 });
+    }
+    if (options.length < 2 || options.length > 4) {
+      return NextResponse.json({ error: "Poll requires 2..4 options" }, { status: 400 });
+    }
+    pollOptions = [];
+    for (const opt of options) {
+      if (typeof opt !== "string" || !opt.trim() || opt.trim().length > 100) {
+        return NextResponse.json({ error: "Poll options must be 1..100 characters" }, { status: 400 });
+      }
+      pollOptions.push(opt.trim());
+    }
+    if (poll?.endsAt != null) {
+      const ends = new Date(poll.endsAt);
+      if (Number.isNaN(ends.getTime()) || ends.getTime() <= Date.now()) {
+        return NextResponse.json({ error: "Poll endsAt must be a future timestamp" }, { status: 400 });
+      }
+      pollEndsAt = ends.toISOString();
+    }
+  }
+
+  const projectRef = typeof body.projectRef === "string" && body.projectRef.trim() ? body.projectRef.trim().slice(0, 200) : null;
+  const music = body.music && typeof body.music === "object" ? body.music : null;
+  const musicTitle = typeof music?.title === "string" ? music.title.trim().slice(0, 200) : "";
+  if (postType === "music" && !musicTitle) {
+    return NextResponse.json({ error: "music.title is required for music posts" }, { status: 400 });
+  }
+  const musicFields =
+    postType === "music"
+      ? {
+          music_title: musicTitle,
+          music_artist: typeof music?.artist === "string" ? music.artist.trim().slice(0, 200) || null : null,
+          music_url: isHttpsUrl(music?.url) ? music.url : null,
+        }
+      : {};
+
+  if (!content && mediaUrls.length === 0 && postType !== "poll" && postType !== "link" && !musicTitle && !projectRef) {
+    return NextResponse.json({ error: "Content or media is required" }, { status: 400 });
+  }
+
+  // Honest 503 when the backend isn't connected (CI, unconfigured envs) —
+  // checked after auth + validation so 401/400 semantics stay intact, and an
+  // unconfigured backend never 500s.
+  if (!isAdminSupabaseConfigured()) {
     return NextResponse.json(
-      { error: "Failed to create post" },
-      { status: 500 },
+      { error: "Posting is unavailable — the community feed isn't connected yet." },
+      { status: 503 },
     );
   }
+
+  const sb = getAdminSupabase();
+  const { data: post, error } = await sb
+    .from("posts")
+    .insert({
+      user_id: dbUser.id,
+      content,
+      media_urls: mediaUrls,
+      post_type: postType,
+      visibility,
+      project_ref: postType === "project" ? projectRef : null,
+      ...linkFields,
+      ...musicFields,
+    })
+    .select("id")
+    .single();
+
+  if (error || !post) {
+    return NextResponse.json({ error: "Failed to create post" }, { status: 500 });
+  }
+
+  if (postType === "poll" && pollOptions) {
+    const question = poll.question.trim();
+    const { data: pollRow, error: pollError } = await sb
+      .from("post_polls")
+      .insert({ post_id: post.id, question, ends_at: pollEndsAt })
+      .select("id")
+      .single();
+    if (pollError || !pollRow) {
+      await sb.from("posts").delete().eq("id", post.id);
+      return NextResponse.json({ error: "Failed to create poll" }, { status: 500 });
+    }
+    const { error: optsError } = await sb.from("poll_options").insert(
+      pollOptions.map((text, position) => ({ poll_id: pollRow.id, text, position })),
+    );
+    if (optsError) {
+      await sb.from("posts").delete().eq("id", post.id);
+      return NextResponse.json({ error: "Failed to create poll" }, { status: 500 });
+    }
+  }
+
+  const dto = await getPostDTO(post.id, dbUser.id);
+  if (!dto) {
+    return NextResponse.json({ error: "Failed to create post" }, { status: 500 });
+  }
+  return NextResponse.json({ post: dto }, { status: 201 });
 }
 
 export const GET = withRateLimit(getHandler, 100, 60);
-export const POST = withRateLimit(postHandler, 20, 60);
+export const POST = withRateLimit(postHandler, 30, 60);

@@ -30,8 +30,13 @@ vi.mock("@/context/ThemeContext", () => ({
     },
   })),
 }));
-vi.mock("@/components/SocialPageContent", () => ({
-  default: () => <div data-testid="social-page-content">feed</div>,
+vi.mock("@/components/feed/Feed", () => ({
+  Feed: React.forwardRef(function MockFeed() {
+    return <div data-testid="discover-feed">feed</div>;
+  }),
+}));
+vi.mock("@/components/feed/Composer", () => ({
+  Composer: () => <div data-testid="discover-composer">composer</div>,
 }));
 
 function setAuth(state: { isLoaded: boolean; isSignedIn?: boolean }) {
@@ -56,13 +61,18 @@ describe("Discover auth-loading bound", () => {
 
   it("renders the discover feed once auth is loaded (signed in)", () => {
     render(<DiscoverPage />);
-    expect(screen.getByTestId("social-page-content")).toBeTruthy();
+    expect(screen.getByTestId("discover-feed")).toBeTruthy();
+    expect(screen.getByTestId("discover-composer")).toBeTruthy();
   });
 
   it("renders the discover feed when signed out", () => {
     setAuth({ isLoaded: true, isSignedIn: false });
     render(<DiscoverPage />);
-    expect(screen.getByTestId("social-page-content")).toBeTruthy();
+    expect(screen.getByTestId("discover-feed")).toBeTruthy();
+    expect(screen.queryByTestId("discover-composer")).toBeNull();
+    expect(
+      screen.getByRole("link", { name: /sign in/i }),
+    ).toBeTruthy();
   });
 
   it("shows the loading UI while auth is initializing", () => {
@@ -126,7 +136,7 @@ describe("Discover auth-loading bound", () => {
       rerender(<DiscoverPage />);
     });
 
-    expect(screen.getByTestId("social-page-content")).toBeTruthy();
+    expect(screen.getByTestId("discover-feed")).toBeTruthy();
     expect(screen.queryByText(/taking longer than expected/i)).toBeNull();
   });
 });
