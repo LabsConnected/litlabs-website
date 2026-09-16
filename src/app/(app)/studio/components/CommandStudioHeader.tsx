@@ -217,7 +217,7 @@ export default function CommandStudioHeader({
 
   return (
     <header
-      className="flex h-[52px] shrink-0 items-center gap-1.5 overflow-hidden whitespace-nowrap border-b px-3 sm:gap-2 sm:px-4"
+      className="no-scrollbar flex h-[52px] shrink-0 items-center gap-1.5 overflow-x-auto overflow-y-hidden whitespace-nowrap border-b px-3 sm:gap-2 sm:px-4 sm:overflow-hidden"
       style={{
         backgroundColor: "#0d0916",
         borderColor: "rgba(255,255,255,0.07)",

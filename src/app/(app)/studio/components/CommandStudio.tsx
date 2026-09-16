@@ -1469,7 +1469,12 @@ function CommandStudioContent() {
         busy={conversation.busy || creatingProject}
         disabled={conversation.requiresReauth}
         onToggleCamera={() => setCameraDock((v) => ({ ...v, open: !v.open }))}
-        onToggleLive={() => setLivePanelOpen((v) => !v)}
+        onToggleLive={() => {
+          // The live voice overlay (z-[10020]) renders under the mobile sheet
+          // (z-[10021]) — close the sheet so the voice session is visible.
+          setMobileLittOpen(false);
+          setLivePanelOpen((v) => !v);
+        }}
         liveActive={livePanelOpen && liveSession.isLive}
         contextLine={contextLine}
         onClearSelectedElement={() => setPreviewSelection(null)}
@@ -1555,6 +1560,7 @@ function CommandStudioContent() {
       <div
         className="studio-shell flex h-full w-full flex-col overflow-hidden"
         data-layout={theme.layoutStyle}
+        data-studio-chrome
         style={{
           backgroundColor: "var(--bg-main)",
           color: "var(--text-main)",
@@ -1777,7 +1783,7 @@ function CommandStudioContent() {
                     )}
                   </div>
                 ) : isMedia ? (
-                  <div className="min-h-0 min-w-0 flex-1 overflow-auto">
+                  <div className="min-h-0 min-w-0 flex-1 overflow-auto pb-28 lg:pb-0">
                     <MediaWorkspacePanel
                       littMode={littMode}
                       projectId={capabilities.projectId}
@@ -1793,7 +1799,7 @@ function CommandStudioContent() {
                     />
                   </div>
                 ) : WorkspaceComponent ? (
-                  <div className="min-h-0 min-w-0 flex-1 overflow-auto">
+                  <div className="min-h-0 min-w-0 flex-1 overflow-auto pb-28 lg:pb-0">
                     {studioCreator ? (
                       <StudioCreatorHost>
                         <WorkspaceComponent projectId={capabilities.projectId} />
@@ -2046,8 +2052,11 @@ function CommandStudioContent() {
             The desktop/laptop rail above is not rendered on this tier at
             all, so this trigger + sheet is the ONLY way to reach LiTT on
             mobile. The sheet reuses the exact same littChatContent /
-            littLiveContent used by the desktop rail — never both at once. */}
-        {isMobileLitt && !mobileLittOpen && (
+            littLiveContent used by the desktop rail — never both at once.
+            Hidden while the dock, context drawer, canvas overlay, or live
+            voice overlay is open: at z-[10015] the FAB would float over
+            their scrims and cover tool action buttons. */}
+        {isMobileLitt && !mobileLittOpen && !dockOpen && !contextDrawerOpen && !canvasOpen && !livePanelOpen && (
           <button
             type="button"
             onClick={() => setMobileLittOpen(true)}
