@@ -66,16 +66,17 @@ describe("Games enabled — Navigation & Feature Flags", () => {
     });
   });
 
-  describe("Mission Control dashboard quick launch", () => {
-    it("MissionControlDashboard has the four primary actions", () => {
+  describe("Dashboard quick launch (v3)", () => {
+    // The v2 MissionControlDashboard was retired; QuickStart is the live
+    // creation-tile surface on the dashboard.
+    it("QuickStart has a Game creation tile linked to a real surface", () => {
       const content = readFileSync(
-        join(ROOT, "src/components/dashboard/v2/MissionControlDashboard.tsx"),
+        join(ROOT, "src/components/dashboard/v3/QuickStart.tsx"),
         "utf8",
       );
-      expect(content).toContain("Ask LiTT");
-      expect(content).toContain(">Build<");
-      expect(content).toContain(">Create<");
-      expect(content).toContain(">Deploy<");
+      expect(content).toContain('"Game"');
+      expect(content).toContain("Gamepad2");
+      expect(content).toContain("/studio");
     });
   });
 });
@@ -116,11 +117,13 @@ describe("Games Restoration — Route Files Exist", () => {
 });
 
 describe("Games Restoration — Icon Support", () => {
-  it("Mission Control Icon component supports 'gamepad'", () => {
+  it("the v3 QuickStart renders a gamepad icon for the Game tile", () => {
+    // dashboard-v2-utils (v2 Icon component) was retired with the v2
+    // dashboard; lucide's Gamepad2 is the live game icon.
     const content = readFileSync(
-      join(ROOT, "src/components/dashboard/v2/dashboard-v2-utils.tsx"),
+      join(ROOT, "src/components/dashboard/v3/QuickStart.tsx"),
       "utf8",
     );
-    expect(content).toContain("gamepad:");
+    expect(content).toContain("Gamepad2");
   });
 });

@@ -4,7 +4,7 @@ import { resolveSystemHealth } from "@/lib/system-health";
 import type { HealthState } from "@/lib/system-health";
 
 /* ------------------------------------------------------------------ */
-/*  Types — matches the MissionControlDashboard scaffold contract       */
+/*  Types — the mission-control API contract consumed by dashboard v3   */
 /* ------------------------------------------------------------------ */
 
 export type MissionControlState =

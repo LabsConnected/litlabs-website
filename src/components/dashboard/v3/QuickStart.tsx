@@ -19,12 +19,12 @@ interface QuickStartItem {
 }
 
 const ITEMS: QuickStartItem[] = [
-  { label: "Website", icon: Globe, href: "/studio?tool=build&template=website", accent: "#a78bfa" },
-  { label: "App", icon: Smartphone, href: "/studio?tool=build&template=app", accent: "#34d399" },
-  { label: "Game", icon: Gamepad2, href: "/studio?tool=build&template=game", accent: "#f59e0b" },
-  { label: "Image", icon: ImageIcon, href: "/studio?tool=image", accent: "#06b6d4" },
-  { label: "Video", icon: Film, href: "/studio?tool=video", accent: "#ec4899" },
-  { label: "Music", icon: Music, href: "/studio?tool=music", accent: "#8b5cf6" },
+  { label: "Website", icon: Globe, href: "/studio?tool=chat&mode=website", accent: "#a78bfa" },
+  { label: "App", icon: Smartphone, href: "/studio?tool=build", accent: "#34d399" },
+  { label: "Game", icon: Gamepad2, href: "/studio?tool=game", accent: "#f59e0b" },
+  { label: "Image", icon: ImageIcon, href: "/studio?tool=chat&mode=image", accent: "#06b6d4" },
+  { label: "Video", icon: Film, href: "/studio?tool=chat&mode=video", accent: "#ec4899" },
+  { label: "Music", icon: Music, href: "/studio?tool=chat&mode=music", accent: "#8b5cf6" },
 ];
 
 export function QuickStart() {

@@ -95,12 +95,12 @@ export function CommandPalette({
 
     // Actions
     const actions: { label: string; href: string; keywords: string }[] = [
-      { label: "Create Website", href: "/studio?tool=build&template=website", keywords: "create new website build" },
-      { label: "Create App", href: "/studio?tool=build&template=app", keywords: "create new app build" },
-      { label: "Create Game", href: "/studio?tool=build&template=game", keywords: "create new game build" },
-      { label: "Generate Image", href: "/studio?tool=image", keywords: "create generate image art" },
-      { label: "Generate Video", href: "/studio?tool=video", keywords: "create generate video" },
-      { label: "Create Music", href: "/studio?tool=music", keywords: "create generate music audio" },
+      { label: "Create Website", href: "/studio?tool=chat&mode=website", keywords: "create new website build" },
+      { label: "Create App", href: "/studio?tool=build", keywords: "create new app build" },
+      { label: "Create Game", href: "/studio?tool=game", keywords: "create new game build" },
+      { label: "Generate Image", href: "/studio?tool=chat&mode=image", keywords: "create generate image art" },
+      { label: "Generate Video", href: "/studio?tool=chat&mode=video", keywords: "create generate video" },
+      { label: "Create Music", href: "/studio?tool=chat&mode=music", keywords: "create generate music audio" },
     ];
     for (const a of actions) {
       items.push({
@@ -189,7 +189,7 @@ export function CommandPalette({
     // Navigation
     const navItems: { label: string; href: string }[] = [
       { label: "Dashboard", href: "/dashboard" },
-      { label: "Create", href: "/studio?tool=image" },
+      { label: "Create", href: "/studio?tool=chat" },
       { label: "Work", href: "/projects" },
       { label: "Showcase", href: "/showcase" },
       { label: "Explore", href: "/discover" },
