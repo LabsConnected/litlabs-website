@@ -26,12 +26,11 @@ export default function GamesLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // Games are not part of the public V1 product. Guarding the segment layout
-  // covers every nested route in one place — /games, /games/retro,
-  // /games/retro/play/[gameId], /games/retro/test, /games/cloud, /games/dos —
-  // all of which currently answer 200 in production, including the internal
-  // test route. Navbar and NavbarWrapper already hide the links behind the
-  // same flag, so this closes the direct-URL path they left open.
+  // The games segment is flag-gated: flipping retroGameRuntime back off
+  // makes every nested route in this segment 404 again — /games,
+  // /games/retro, /games/retro/play/[gameId], /games/cloud, /games/dos.
+  // Navbar, NavbarWrapper and the app-shell nav all hide/show the links
+  // behind the same flag, so no surface ever links to a 404.
   if (!isFeatureEnabled("retroGameRuntime")) {
     notFound();
   }
