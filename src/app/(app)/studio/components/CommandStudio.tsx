@@ -2200,6 +2200,10 @@ function CommandStudioContent() {
               onOpenFiles={openMobileTool(() => handleOpenDockTab("files"))}
               onOpenTerminal={openMobileTool(handleOpenTerminal)}
               onOpenActivity={openMobileTool(() => handleOpenDockTab("activity"))}
+              onOpenImage={openMobileTool(() => { setCreateMode("image"); setDestination("create"); })}
+              onOpenVideo={openMobileTool(() => { setCreateMode("video"); setDestination("create"); })}
+              onOpenAudio={openMobileTool(() => { setCreateMode("audio"); setDestination("create"); })}
+              onOpenMusic={openMobileTool(() => { setCreateMode("music"); setDestination("create"); })}
             />
           </MobileBottomSheet>
         )}
