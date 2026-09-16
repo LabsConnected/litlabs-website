@@ -51,6 +51,11 @@ describe("self-hosted games", () => {
       "utf8",
     );
     expect(hextrisHtml).not.toMatch(/adsbygoogle|googlesyndication/);
+    // No analytics/tracking beacons phoning home to the original authors.
+    for (const f of ["index.html", "js/initialization.js"]) {
+      const src = readFileSync(join(REPO_ROOT, "public/games/play/hextris", f), "utf8");
+      expect(src).not.toMatch(/google-analytics|GoogleAnalyticsObject|googletagmanager/);
+    }
     expect(hextrisMain).not.toMatch(/hextris\.io\/a\.js/);
   });
 
