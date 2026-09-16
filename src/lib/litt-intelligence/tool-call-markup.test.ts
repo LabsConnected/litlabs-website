@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { findToolCallMarkup, hasToolCallEnvelope, recoverTextToolCalls } from "./tool-call-markup";
+import { findToolCallMarkup, hasToolCallEnvelope, recoverTextToolCalls, stripEnvelopeMarkup } from "./tool-call-markup";
 
 /**
  * The agent loop executes native structured tool calls only — a model that
@@ -314,5 +314,40 @@ describe("recoverTextToolCalls — canonical normalization", () => {
     );
     expect(r.calls).toHaveLength(1);
     expect(r.residualText).toBe("Before.\n\nAfter.");
+  });
+});
+
+
+describe("stripEnvelopeMarkup", () => {
+  it("removes closed dots_function_call envelopes", () => {
+    expect(
+      stripEnvelopeMarkup(
+        "Let me check.\n<dots_function_call>find ./src -type d</dots_function_call>\nDone.",
+      ),
+    ).toBe("Let me check.\n\nDone.");
+  });
+
+  it("removes closed invoke envelopes", () => {
+    expect(
+      stripEnvelopeMarkup("Working.\n<invoke>files.read path=a</invoke>\nAfter."),
+    ).toBe("Working.\n\nAfter.");
+  });
+
+  it("removes truncated envelopes at end of text", () => {
+    expect(stripEnvelopeMarkup("Creating it now:\n<dots_function_call>")).toBe(
+      "Creating it now:",
+    );
+  });
+
+  it("preserves markup quoted inside inline code", () => {
+    const text =
+      "Models sometimes emit `<dots_function_call>find ./src</dots_function_call>` instead.";
+    expect(stripEnvelopeMarkup(text)).toBe(text);
+  });
+
+  it("leaves plain prose untouched", () => {
+    expect(stripEnvelopeMarkup("The footer reads Ember Roast.")).toBe(
+      "The footer reads Ember Roast.",
+    );
   });
 });

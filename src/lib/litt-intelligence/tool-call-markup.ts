@@ -233,6 +233,49 @@ export function stripToolCallMarkupText(text: string): string {
   return stripToolCallBlocks(normalizeXmlToolCallTags(text)).trim();
 }
 
+/**
+ * Strip tool-call ENVELOPE markup — <tool_call>, <invoke>,
+ * <dots_function_call>, <function_call>, <function_calls>, closed or
+ * truncated — from text. stripToolCallMarkupText only covers <tool_call>
+ * plus fenced/JSON blocks; the other XML envelope tags pass straight
+ * through it.
+ *
+ * Markup quoted inside inline code (backticks) is prose, not protocol,
+ * and is preserved. Used to keep replayed assistant history (including
+ * across approval resumes) from re-priming the model to emit the
+ * envelope again instead of using structured calls.
+ */
+export function stripEnvelopeMarkup(text: string): string {
+  if (!text) return text;
+  // Inline `code` spans are prose examples, not protocol: shield them before
+  // any stripping pass. The envelope loop below only skips backtick-adjacent
+  // markup, and the trailing stripToolCallBlocks() has no backtick awareness
+  // at all — without shielding it would remove quoted examples too.
+  // Fenced ``` blocks are left in place: the hygiene pass handles those.
+  const codeSpans: string[] = [];
+  const shielded = text.replace(/```[\s\S]*?```|(`[^`\n]*`)/g, (m, code) => {
+    if (code === undefined) return m;
+    const idx = codeSpans.length;
+    codeSpans.push(code);
+    return `__LITT_CODE_${idx}__`;
+  });
+  const re = new RegExp(ENVELOPE_RE.source, "gi");
+  let out = "";
+  let last = 0;
+  for (const m of shielded.matchAll(re)) {
+    const idx = m.index ?? 0;
+    const whole = m[0];
+    // Backticks are shielded above; keep the adjacency guard for unbalanced
+    // backtick cases the shield regex leaves alone.
+    if (shielded[idx - 1] === "`" && shielded[idx + whole.length] === "`") continue;
+    out += shielded.slice(last, idx);
+    last = idx + whole.length;
+  }
+  out += shielded.slice(last);
+  const cleaned = stripToolCallBlocks(out).trim();
+  return cleaned.replace(/__LITT_CODE_(\d+)__/g, (_, n) => codeSpans[Number(n)] ?? "");
+}
+
 // ─── Canonical normalization boundary ─────────────────────────────
 //
 // Detection says WHETHER text carries invocation intent; recovery says

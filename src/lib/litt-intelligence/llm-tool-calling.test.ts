@@ -1401,3 +1401,35 @@ describe("buildToolResultMessage", () => {
     ]);
   });
 });
+
+describe("buildAssistantToolCallMessage — envelope hygiene", () => {
+  it("strips tool-call envelope markup from replayed raw text parts", () => {
+    const msg = buildAssistantToolCallMessage(
+      [{ toolId: "files.mkdir", toolCallId: "tc-1", inputs: { path: "x" } }],
+      "Creating the directory.",
+      [
+        { text: "Let me check.\n<dots_function_call>find ./src -type d</dots_function_call>\nDone." },
+        { functionCall: { name: "files_mkdir", args: { path: "x" } } },
+      ],
+    );
+    const parts = msg.parts ?? [];
+    expect(parts).toHaveLength(2);
+    // The envelope is gone from the replayed text…
+    expect((parts[0] as { text: string }).text).not.toContain("dots_function_call");
+    expect((parts[0] as { text: string }).text).toContain("Let me check.");
+    // …native functionCall parts pass through untouched.
+    expect(parts[1]).toEqual({ functionCall: { name: "files_mkdir", args: { path: "x" } } });
+  });
+
+  it("leaves text parts without envelopes byte-identical", () => {
+    const raw = "Just a normal explanation with trailing space. ";
+    const msg = buildAssistantToolCallMessage([], raw, [{ text: raw }]);
+    expect((msg.parts?.[0] as { text: string }).text).toBe(raw);
+  });
+
+  it("handles missing rawParts", () => {
+    const msg = buildAssistantToolCallMessage([], "hi", undefined);
+    expect(msg.parts).toBeUndefined();
+    expect(msg.content).toBe("hi");
+  });
+});

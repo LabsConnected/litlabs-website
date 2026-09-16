@@ -27,7 +27,7 @@
 import "server-only";
 
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
-import { findToolCallMarkup, hasToolCallEnvelope, recoverTextToolCalls, stripToolCallMarkupText } from "./tool-call-markup";
+import { findToolCallMarkup, hasToolCallEnvelope, recoverTextToolCalls, stripEnvelopeMarkup, stripToolCallMarkupText } from "./tool-call-markup";
 import { validateToolCallArgs } from "@litt/agent-core";
 import { SITE_URL } from "@/lib/siteConfig";
 import { logLLMCall, type LLMCallMetadata } from "@/lib/evals/braintrust";
@@ -1476,7 +1476,18 @@ export function buildAssistantToolCallMessage(
   return {
     role: "assistant",
     content: text,
-    parts: rawParts,
+    // The raw provider parts are replayed into future turns (including
+    // across an approval resume via pausedMessages). If the model emitted
+    // tool-call envelope markup (<tool_call>, <dots_function_call>, …),
+    // replaying it verbatim primes the model to emit the envelope again
+    // instead of using structured calls. Strip the markup from text parts
+    // so history carries the cleaned content; native functionCall parts
+    // pass through untouched.
+    parts: rawParts?.map((p) =>
+      typeof p.text === "string" && hasToolCallEnvelope(p.text)
+        ? { ...p, text: stripEnvelopeMarkup(p.text) }
+        : p,
+    ),
     tool_calls: toolCalls.map((tc) => ({
       id: tc.toolCallId,
       type: "function" as const,
