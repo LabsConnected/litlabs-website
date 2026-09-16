@@ -35,6 +35,7 @@ import {
   type ArtifactFile,
   type DeploymentStatus,
 } from "./user-deployment";
+import { runPublishGates } from "../publish/publish-gates";
 
 /** The only deployment target in V1. Never caller-selectable. */
 export const DEPLOY_TARGET = "litt-static" as const;
@@ -307,6 +308,28 @@ export async function deployUserProject(
   if (!validation.ok) {
     // Nothing is created or published for an invalid artifact.
     return failure(null, new Error(validation.error));
+  }
+
+  // ── Publish gates: the single pre-publish choke point ──
+  // Fabricated content, and any future checks other workers register,
+  // fail the deploy here — before any snapshot is created or published.
+  const gateResult = await runPublishGates({
+    files: validation.files,
+    projectId,
+    userId,
+  });
+  if (!gateResult.ok) {
+    return {
+      ok: false,
+      deploymentId: null,
+      status: "failed",
+      publicUrl: null,
+      errorClass: "validation",
+      // gateResult.message is written for the user, not the engineer:
+      // non-technical, and it names the section to fix.
+      message: gateResult.message || "A pre-publish check failed. Please review your site content and try again.",
+      retryable: false,
+    };
   }
 
   const contentHash = hashArtifact(validation.files);

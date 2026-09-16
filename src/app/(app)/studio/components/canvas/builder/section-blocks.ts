@@ -161,8 +161,8 @@ export const HERO_CENTERED: SectionTemplate = {
   build: () => {
     const badge = createNode("badge");
     badge.props = { text: "✨ New", badgeVariant: "default" };
-    const title = h("Build Something Amazing", 1, 52);
-    const subtitle = txt("Your vision, powered by LiTTree. Start building your dream project today.", 18);
+    const title = h("Your Headline Goes Here", 1, 52);
+    const subtitle = txt("One clear sentence about what your business does and who it's for.", 18);
     subtitle.styles.maxWidth = "560px";
     const ctaRow = createNode("container");
     ctaRow.styles = { display: "flex", flexDirection: "row", gap: 12, alignItems: "center" };
@@ -183,9 +183,9 @@ export const HERO_SPLIT: SectionTemplate = {
   label: "Hero Split",
   icon: "Columns2",
   build: () => {
-    const title = h("Launch Faster with LiTT", 1, 44);
+    const title = h("Your Headline Goes Here", 1, 44);
     title.styles.textAlign = "left";
-    const subtitle = txt("The AI-native builder that turns ideas into production-ready apps.", 16);
+    const subtitle = txt("One clear sentence about what your business does and who it's for.", 16);
     subtitle.styles.textAlign = "left";
     subtitle.styles.maxWidth = "400px";
     const cta = btn("Start Building");
@@ -195,7 +195,7 @@ export const HERO_SPLIT: SectionTemplate = {
     left.children = [title.id, subtitle.id, cta.id];
     [title, subtitle, cta].forEach((n) => { n.parentId = left.id; });
     const img = createNode("image");
-    img.props = { src: "", alt: "Hero visual" };
+    img.props = { src: "", alt: "Your hero image" };
     img.styles = { borderRadius: 16, width: "100%", height: "320px", backgroundColor: "rgba(255,255,255,0.05)" };
     const right = createNode("container");
     right.styles = { display: "flex", flexDirection: "column", flex: "1" };
@@ -293,11 +293,12 @@ export const STATS_ROW: SectionTemplate = {
   icon: "BarChart3",
   build: () => {
     const cols = columns(4, 24);
+    // Empty metric slots — never ship invented numbers as social proof.
     const stats = [
-      { num: "10K+", label: "Active Users" },
-      { num: "99.9%", label: "Uptime" },
-      { num: "150+", label: "Integrations" },
-      { num: "4.9★", label: "User Rating" },
+      { num: "—", label: "Your metric" },
+      { num: "—", label: "Your metric" },
+      { num: "—", label: "Your metric" },
+      { num: "—", label: "Your metric" },
     ];
     const allChildren: CanvasNode[] = [];
     const cardNodes: CanvasNode[] = [];
@@ -325,14 +326,20 @@ export const LOGO_CLOUD: SectionTemplate = {
   label: "Logo Cloud",
   icon: "Building2",
   build: () => {
-    const title = txt("Trusted by teams at", 13, "var(--text-muted)");
+    const title = txt("Your clients or partners", 13, "var(--text-muted)");
     const cols = columns(5, 32);
-    const logos = ["Acme", "Globex", "Initech", "Umbrella", "Hooli"];
+    // Empty logo slots — never ship invented company names.
+    const logos = ["Your Logo", "Your Logo", "Your Logo", "Your Logo", "Your Logo"];
     const allChildren: CanvasNode[] = [];
     const logoNodes: CanvasNode[] = [];
     for (const name of logos) {
       const l = h(name, 3, 18, "var(--text-muted)");
       l.styles.fontWeight = "600";
+      l.styles.borderWidth = 2;
+      l.styles.borderColor = "var(--glass-border)";
+      l.styles.borderStyle = "dashed";
+      l.styles.borderRadius = 12;
+      l.styles.padding = "16px 24px";
       logoNodes.push(l);
       allChildren.push(l);
     }
@@ -350,18 +357,21 @@ export const TESTIMONIALS: SectionTemplate = {
   label: "Testimonials",
   icon: "Quote",
   build: () => {
-    const title = h("Loved by Builders", 2, 36);
+    const title = h("What Your Customers Say", 2, 36);
     const cols = columns(3, 24);
+    // Empty slots — the user fills these with REAL testimonials.
+    // Never ship invented names/quotes as default content.
     const testimonials = [
-      { quote: "LiTT changed how we build. What took weeks now takes hours.", name: "Sarah Chen", role: "CTO, TechFlow" },
-      { quote: "The AI copilot is like having a senior dev pair-programming 24/7.", name: "Marcus Reid", role: "Founder, StartupX" },
-      { quote: "We shipped our product in 3 days. Unreal.", name: "Aisha Patel", role: "PM, BigCorp" },
+      { quote: "Add a real review from one of your customers here — click to edit.", name: "Customer Name", role: "Title, Company" },
+      { quote: "Add a real review from one of your customers here — click to edit.", name: "Customer Name", role: "Title, Company" },
+      { quote: "Add a real review from one of your customers here — click to edit.", name: "Customer Name", role: "Title, Company" },
     ];
     const allChildren: CanvasNode[] = [];
     const cardNodes: CanvasNode[] = [];
     for (const t of testimonials) {
       const c = createNode("card");
-      c.styles = { padding: "28px", borderRadius: 16, backgroundColor: "rgba(255,255,255,0.05)", display: "flex", flexDirection: "column", gap: 16, flex: "1" };
+      // Dashed border marks this as an unfilled slot, not real content.
+      c.styles = { padding: "28px", borderRadius: 16, backgroundColor: "rgba(255,255,255,0.05)", display: "flex", flexDirection: "column", gap: 16, flex: "1", borderWidth: 2, borderColor: "var(--glass-border)", borderStyle: "dashed" };
       const quote = txt(t.quote, 14);
       quote.styles.textAlign = "left";
       const avatar = createNode("avatar");
@@ -398,18 +408,21 @@ export const PRICING_TIERS: SectionTemplate = {
   build: () => {
     const title = h("Simple, Transparent Pricing", 2, 36);
     const cols = columns(3, 24);
+    // Empty plan slots — the user sets real names and prices.
+    // Never ship invented prices as default content.
     const plans = [
-      { name: "Starter", price: "$0", desc: "Perfect for trying out", featured: false },
-      { name: "Pro", price: "$29", desc: "For growing projects", featured: true },
-      { name: "Enterprise", price: "$99", desc: "Unlimited everything", featured: false },
+      { name: "Plan One", price: "Your Price", desc: "A short description of what's included.", featured: false },
+      { name: "Plan Two", price: "Your Price", desc: "A short description of what's included.", featured: true },
+      { name: "Plan Three", price: "Your Price", desc: "A short description of what's included.", featured: false },
     ];
     const allChildren: CanvasNode[] = [];
     const cardNodes: CanvasNode[] = [];
     for (const plan of plans) {
       const c = createNode("card");
       const bg = plan.featured ? "rgba(139,92,246,0.1)" : "rgba(255,255,255,0.05)";
-      const border = plan.featured ? "var(--glass-purple)" : "var(--studio-border-strong)";
-      c.styles = { padding: "32px", borderRadius: 16, backgroundColor: bg, display: "flex", flexDirection: "column", gap: 16, borderWidth: plan.featured ? 2 : 1, borderColor: border, borderStyle: "solid", flex: "1" };
+      const border = plan.featured ? "var(--glass-purple)" : "var(--glass-border)";
+      // Dashed border marks this as an unfilled slot, not real pricing.
+      c.styles = { padding: "32px", borderRadius: 16, backgroundColor: bg, display: "flex", flexDirection: "column", gap: 16, borderWidth: plan.featured ? 2 : 1, borderColor: border, borderStyle: "dashed", flex: "1" };
       const name = h(plan.name, 3, 20);
       name.styles.textAlign = "left";
       const price = h(plan.price, 3, 40, "var(--glass-purple)");
@@ -437,8 +450,8 @@ export const CTA_SECTION: SectionTemplate = {
   label: "CTA Section",
   icon: "Megaphone",
   build: () => {
-    const title = h("Ready to Build Something Great?", 2, 36);
-    const subtitle = txt("Join thousands of builders using LiTTree to ship faster.", 16);
+    const title = h("Your Call to Action", 2, 36);
+    const subtitle = txt("Tell visitors what to do next, in one sentence.", 16);
     const b = btn("Get Started Free");
     return makeSection(
       { display: "flex", flexDirection: "column", gap: 20, alignItems: "center", padding: "80px 48px", backgroundColor: "rgba(139,92,246,0.08)", borderRadius: 16 },
@@ -477,11 +490,11 @@ export const FAQ_SECTION: SectionTemplate = {
     const title = h("Frequently Asked Questions", 2, 32);
     const acc = createNode("accordion");
     acc.props = {
+      // Empty slots — answer the questions YOUR customers actually ask.
       accordionItems: [
-        { title: "How does LiTT work?", content: "LiTT uses AI to understand your intent and builds the UI for you." },
-        { title: "Is there a free plan?", content: "Yes! The Starter plan is free forever with generous limits." },
-        { title: "Can I export my code?", content: "Absolutely. You own everything you build and can export at any time." },
-        { title: "Do you support team collaboration?", content: "Yes, real-time collaboration is available on Pro and Enterprise plans." },
+        { title: "Your question here?", content: "Write your answer here. Add the questions your customers actually ask." },
+        { title: "Another common question?", content: "Write your answer here." },
+        { title: "One more question?", content: "Write your answer here." },
       ],
     };
     acc.styles = { display: "flex", flexDirection: "column", gap: 8, maxWidth: "640px", width: "100%" };
@@ -525,11 +538,12 @@ export const TEAM_GRID: SectionTemplate = {
   build: () => {
     const title = h("Meet the Team", 2, 32);
     const cols = columns(4, 20);
+    // Empty slots — never ship invented people.
     const members = [
-      { name: "Alex Rivera", role: "CEO" },
-      { name: "Sam Park", role: "CTO" },
-      { name: "Jordan Lee", role: "Design" },
-      { name: "Casey Wu", role: "Engineering" },
+      { name: "Team Member", role: "Role" },
+      { name: "Team Member", role: "Role" },
+      { name: "Team Member", role: "Role" },
+      { name: "Team Member", role: "Role" },
     ];
     const allChildren: CanvasNode[] = [];
     const cardNodes: CanvasNode[] = [];
@@ -704,10 +718,11 @@ export const PRODUCT_GRID: SectionTemplate = {
   build: () => {
     const title = h("Featured Products", 2, 32);
     const cols = columns(3, 20);
+    // Empty price slots — never ship invented prices as default content.
     const products = [
-      { name: "Product One", price: "$49" },
-      { name: "Product Two", price: "$79" },
-      { name: "Product Three", price: "$99" },
+      { name: "Product One", price: "Your Price" },
+      { name: "Product Two", price: "Your Price" },
+      { name: "Product Three", price: "Your Price" },
     ];
     const allChildren: CanvasNode[] = [];
     const cardNodes: CanvasNode[] = [];

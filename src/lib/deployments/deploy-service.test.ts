@@ -645,3 +645,56 @@ describe("J. a duplicate deploy of identical content does not republish", () => 
     expect(store.rows).toHaveLength(2);
   });
 });
+
+/* ── Publish gates: fabrication blocks the deploy ───────────────── */
+
+describe("publish gates", () => {
+  it("fails the deploy when the artifact still has fabricated template content", async () => {
+    const store = fakeStore();
+    const transport = fakeTransport({
+      async listFiles(path: string) {
+        if (path === "." || path === "") {
+          return { entries: [{ name: "index.html", type: "file" }] };
+        }
+        return { entries: [] };
+      },
+      async readFile(path: string) {
+        if (path !== "index.html") throw new Error(`no such file: ${path}`);
+        const content = `<!doctype html><h1>Build Something Amazing</h1><p>"Loved it" — Sarah Chen, CTO, TechFlow</p>`;
+        return { content, size: content.length };
+      },
+    });
+
+    const result = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport,
+      publicBaseUrl: BASE,
+    }, { store, fetchImpl: reachableFetch });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.status).toBe("failed");
+    expect(result.publicUrl).toBe(null);
+    expect(result.errorClass).toBe("validation");
+    expect(result.retryable).toBe(false);
+    // User-facing: names the sections to fix, no jargon.
+    expect(result.message).toContain("Hero section");
+    expect(result.message).toContain("Testimonials");
+    expect(result.message).not.toMatch(/stack|TypeError|undefined/i);
+    // Nothing was published.
+    expect(store.rows).toHaveLength(0);
+  });
+
+  it("lets a clean artifact through the gates", async () => {
+    const store = fakeStore();
+    const result = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport: fakeTransport(),
+      publicBaseUrl: BASE,
+    }, { store, fetchImpl: reachableFetch });
+
+    expect(result.ok).toBe(true);
+  });
+});
