@@ -1,30 +1,36 @@
 /**
  * Owner mode regression test.
  *
- * Verifies that MissionControlDashboard uses data.ownerMode from the
- * API response instead of the previous hardcoded `const ownerMode = false`.
+ * The v2 MissionControlDashboard (which consumed ownerMode client-side)
+ * was retired with the canonical-nav dashboard consolidation. The live
+ * contract is now server-side: /api/dashboard/mission-control resolves
+ * owner identity via isOwnerClerkId/getRole — never a hardcoded false.
  */
 
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 
-describe("Owner mode from server (not hardcoded)", () => {
-  const dashboardPath = path.resolve(
+describe("Owner mode resolved server-side (not hardcoded)", () => {
+  const routePath = path.resolve(
     __dirname,
-    "../src/components/dashboard/v2/MissionControlDashboard.tsx",
+    "../src/app/api/dashboard/mission-control/route.ts",
   );
-  const source = fs.readFileSync(dashboardPath, "utf-8");
+  const source = fs.readFileSync(routePath, "utf-8");
 
-  it("does NOT contain the hardcoded `const ownerMode = false`", () => {
-    expect(source).not.toContain("const ownerMode = false");
+  it("resolves owner identity via isOwnerClerkId", () => {
+    expect(source).toContain("isOwnerClerkId(userId)");
   });
 
-  it("uses data?.ownerMode from the API response", () => {
-    expect(source).toContain("data?.ownerMode");
+  it("derives ownerMode from the server-resolved role", () => {
+    expect(source).toContain('ownerMode = role === "owner"');
   });
 
-  it("passes ownerMode to DraggableWidgetGrid", () => {
-    expect(source).toContain("ownerMode={ownerMode}");
+  it("returns ownerMode in the response payload", () => {
+    expect(source).toContain("ownerMode,");
+  });
+
+  it("gates owner-only growth data on ownerMode", () => {
+    expect(source).toContain("ownerMode ? await resolveGrowth(client) : null");
   });
 });

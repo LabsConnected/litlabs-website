@@ -5,8 +5,8 @@
  *
  * Composition:
  *   - AnimatedBackground (subtle WebGL shader)
- *   - DashboardHeader (brand, nav, search → command palette, BITS, profile)
- *   - ProjectPulseBar (real deployment/build/test/branch/terminal status)
+ *   - ProjectPulseBar (real deployment/build/test/branch/terminal status
+ *     + command-palette search trigger; global nav lives in AppShell)
  *   - Main content grid:
  *       Left:  ContinueWorking (hero) + QuickStart
  *       Right: RecentWork + RecentMedia
@@ -25,7 +25,6 @@ import { useRouter } from "next/navigation";
 import { X, Terminal, GitBranch, Rocket, ChevronRight } from "lucide-react";
 
 import { AnimatedBackground } from "./AnimatedBackground";
-import { DashboardHeader } from "./DashboardHeader";
 import { ProjectPulseBar } from "./ProjectPulseBar";
 import { ContinueWorking } from "./ContinueWorking";
 import { QuickStart } from "./QuickStart";
@@ -126,14 +125,13 @@ export function Dashboard() {
       {/* Animated background */}
       <AnimatedBackground />
 
-      {/* Header */}
-      <DashboardHeader onOpenCommandPalette={() => setCommandPaletteOpen(true)} />
-
-      {/* Project pulse bar */}
+      {/* Project pulse bar — status + command-palette trigger. Global nav
+          lives in AppShell; the dashboard does not render a second nav. */}
       <ProjectPulseBar
         items={pulseItems}
         loading={missionControl.loading}
         onItemClick={handlePulseItemClick}
+        onOpenCommandPalette={() => setCommandPaletteOpen(true)}
       />
 
       {/* Main content */}

@@ -49,8 +49,14 @@ describe("Dashboard v3 — composition", () => {
     expect(dashboardSrc).toContain("ProjectPulseBar");
   });
 
-  it("renders DashboardHeader", () => {
-    expect(dashboardSrc).toContain("DashboardHeader");
+  it("does NOT render a duplicate nav header (global nav lives in AppShell)", () => {
+    expect(dashboardSrc).not.toContain("DashboardHeader");
+  });
+
+  it("ProjectPulseBar carries the command-palette search trigger", () => {
+    const pulseSrc = readSrc("ProjectPulseBar.tsx");
+    expect(pulseSrc).toContain("onOpenCommandPalette");
+    expect(dashboardSrc).toContain("onOpenCommandPalette={");
   });
 
   it("renders AnimatedBackground", () => {
