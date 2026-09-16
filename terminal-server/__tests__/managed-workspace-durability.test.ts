@@ -16,7 +16,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 // Each prepare runs real `git init` + commit, which takes ~2s on Windows.
 const GIT_TIMEOUT_MS = 30_000;
-import { mkdtempSync, rmSync, existsSync, writeFileSync, readFileSync, mkdirSync } from "fs";
+import { mkdtempSync, rmSync, existsSync, writeFileSync, readFileSync, mkdirSync, readdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { simpleGit } from "simple-git";
@@ -61,6 +61,18 @@ describe("durable managed source", { timeout: GIT_TIMEOUT_MS }, () => {
     // And no remote is configured: Git without GitHub.
     const remotes = await simpleGit(ws.root).getRemotes();
     expect(remotes).toHaveLength(0);
+  });
+
+  it("supports an explicit zero-file managed workspace", async () => {
+    const ws = await prepareManagedWorkspace({
+      userId: USER, projectId: "proj-empty", workspaceRoot: ROOT, templateId: "empty-static",
+    });
+
+    const userFiles = readdirSync(ws.root).filter((entry) => entry !== ".git");
+    expect(userFiles).toEqual([]);
+    expect(existsSync(join(ws.root, ".git"))).toBe(true);
+    expect(ws.branch).toBe("main");
+    expect((await simpleGit(ws.root).log()).total).toBeGreaterThanOrEqual(1);
   });
 
   it("derives the root from the project, not from a random id", async () => {

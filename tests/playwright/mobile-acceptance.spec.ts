@@ -164,6 +164,24 @@ test.describe("LiTT Studio mobile acceptance", () => {
     await expect(input).toHaveValue(TYPED_TEXT);
     await page.getByTestId("litt-mobile-sheet-close").click();
     await expect(page.getByTestId("litt-mobile-sheet")).toBeHidden();
+
+    // The developer drawer intentionally takes ownership of the mobile
+    // surface while open, so the LiTT trigger is hidden until the user closes
+    // it. Keep this explicit user sequence covered instead of weakening the
+    // product's progressive-disclosure behavior.
+    const collapsedDeveloperTools = page.getByTestId("dock-collapsed-toggle");
+    if (await collapsedDeveloperTools.count() > 0 && await collapsedDeveloperTools.isVisible()) {
+      await collapsedDeveloperTools.click();
+      await expect(page.getByTestId("dock-close")).toBeVisible();
+      await expect(page.getByTestId("litt-mobile-trigger")).toBeHidden();
+      await page.getByTestId("dock-close").click();
+      await expect(page.getByTestId("litt-mobile-trigger")).toBeVisible();
+      await page.getByTestId("litt-mobile-trigger").click();
+      await expect(page.getByTestId("litt-mobile-sheet")).toBeVisible();
+      await page.getByTestId("litt-mobile-sheet-close").click();
+      await expect(page.getByTestId("litt-mobile-sheet")).toBeHidden();
+    }
+
     const mobileNav = page.locator('nav[aria-label="Studio navigation"]:visible');
     await expect(mobileNav).toBeVisible();
     const assetsButton = mobileNav.getByRole("button", { name: "Assets" });
