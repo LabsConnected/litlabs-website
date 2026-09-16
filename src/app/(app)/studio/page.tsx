@@ -125,6 +125,11 @@ function StudioHub() {
   const { isLoaded, isSignedIn } = useClerkAuth();
   const router = useRouter();
   const [retryKey, setRetryKey] = useState(0);
+  // Clerk's injected session state can make isLoaded resolve true before
+  // hydration while SSR always renders the loading branch — gate the first
+  // client render on mounted so server and client markup match (React #418).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   const handleRetry = useCallback(() => {
     // Retry restarts the failed initialization by forcing a full
@@ -146,7 +151,7 @@ function StudioHub() {
     }
   }, [isLoaded, isSignedIn, router]);
 
-  if (!isLoaded) {
+  if (!mounted || !isLoaded) {
     return <StudioLoadingState key={retryKey} onRetry={handleRetry} />;
   }
 
