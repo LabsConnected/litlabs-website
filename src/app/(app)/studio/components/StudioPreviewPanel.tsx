@@ -701,8 +701,11 @@ export default function StudioPreviewPanel({
 
   return (
     <div className={`flex h-full min-h-0 flex-col ${maximized ? "fixed inset-0 z-[300] p-3" : ""}`} data-testid="studio-preview-panel">
-      {/* Compact header — optimized for permanent side column */}
-      <div className="flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
+      {/* Compact header — optimized for permanent side column.
+          Horizontally scrollable: on narrow phones the action buttons
+          (refresh/restart/stop/copy/maximize) would otherwise be cut off
+          with no way to reach them. */}
+      <div className="no-scrollbar flex shrink-0 items-center gap-1.5 overflow-x-auto border-b px-2 py-1.5" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }} data-testid="preview-toolbar">
         {/* Runtime status dot */}
         <div
           className="h-2 w-2 shrink-0 rounded-full"
@@ -713,7 +716,7 @@ export default function StudioPreviewPanel({
           aria-label={`Runtime status: ${label}`}
           data-testid="preview-status-dot"
         />
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[96px] flex-1">
           <div className="flex items-center gap-1">
             <span className="truncate text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>{projectName ?? "Project preview"}</span>
             {/*

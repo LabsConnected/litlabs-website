@@ -273,4 +273,21 @@ describe("StudioPreviewPanel", () => {
       expect(screen.getByText(/publishable key/)).toBeTruthy();
     });
   });
+
+  it("header toolbar scrolls horizontally so action buttons stay reachable on narrow phones", async () => {
+    mockFetch(() => jsonResponse({ runtimeStatus: "ready", previewUrl: "/api/studio-projects/project-1/preview/proxy", runtimeError: null }));
+    render(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName={null} branch="main" workspaceStatus="ready" />);
+
+    const toolbar = await screen.findByTestId("preview-toolbar");
+    // The row holds the runtime badge, device-mode buttons, refresh,
+    // restart, stop, copy-URL and maximize — on a 390px phone these
+    // overflow, so the toolbar must scroll instead of clipping them.
+    expect(toolbar.className).toContain("overflow-x-auto");
+    // The action buttons must not shrink away when the row overflows.
+    for (const testid of ["preview-refresh", "preview-restart", "preview-stop", "preview-copy-url", "preview-maximize"]) {
+      const btn = toolbar.querySelector(`[data-testid="${testid}"]`);
+      expect(btn, testid).toBeTruthy();
+      expect(btn!.className).toContain("shrink-0");
+    }
+  });
 });
