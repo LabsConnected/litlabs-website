@@ -452,10 +452,14 @@
   box-sizing: border-box;
 }
 
-/* Mobile safety: prevent horizontal scroll */
+/* Mobile safety: prevent horizontal scroll.
+   overflow-x: clip (not hidden): `hidden` forces overflow-y to compute as
+   `auto`, turning <body> into a scroll container and breaking
+   position:sticky descendants (the app top bar). `clip` forbids scrolling
+   without creating a scroll container, so sticky keeps working. */
 html,
 body {
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 /* Rendering quality — prevent synthetic bold/italic and optimize legibility */
@@ -1992,11 +1996,11 @@ html {
   }
 }
 
-/* No horizontal overflow anywhere */
+/* No horizontal overflow anywhere (clip keeps position:sticky working) */
 body,
 #__next,
 main {
-  overflow-x: hidden;
+  overflow-x: clip;
   max-width: 100vw;
 }
 
@@ -2451,11 +2455,11 @@ main {
    RESPONSIVE POLISH (added 2026-06-23)
    ============================================================ */
 
-/* Prevent any page from overflowing horizontally */
+/* Prevent any page from overflowing horizontally (clip keeps position:sticky working) */
 html,
 body,
 #__next {
-  overflow-x: hidden;
+  overflow-x: clip;
   max-width: 100vw;
 }
 

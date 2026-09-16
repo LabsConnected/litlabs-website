@@ -10,7 +10,7 @@ import LayoutShell from "@/components/LayoutShell";
  * App layout — authenticated application routes.
  *
  * Wraps all dashboard/studio/app routes in the app-specific providers
- * and the LayoutShell (which renders the AppShell sidebar, footer,
+ * and the LayoutShell (which renders the AppShell top bar, footer,
  * companion, etc. based on the current pathname).
  *
  * This layout is intentionally separate from the root layout so that
