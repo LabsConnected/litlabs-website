@@ -351,6 +351,67 @@ const JSON_FENCE_RE = /```json[ \t]*\r?\n?([\s\S]*?)```/i;
  *  (e.g. `{"name": "Alice"}`) is NOT mistaken for a tool call. */
 const BARE_TOOL_JSON_RE = /^[ \t]*\{[^\n]*?("(tool"[ \t]*:|"name"[ \t]*:[ \t]*"[a-z][a-z0-9_-]*\.[a-z][a-z0-9_-]*"))/m;
 
+/** XML-style tool-call envelopes emitted by models trained on non-OpenAI
+ *  tool protocols — `<tool_call>`, `<invoke>`, `<dots_function_call>`,
+ *  `<function_call(s)>`. Closed or truncated (no close tag → to EOS). */
+const XML_ENVELOPE_TAGS = "tool_call|invoke|dots_function_call|function_call|function_calls";
+const XML_ENVELOPE_RE = new RegExp(
+  `<(${XML_ENVELOPE_TAGS})(\\s[^>]*)?>([\\s\\S]*?)(?:<\\/(?:${XML_ENVELOPE_TAGS})>|$)`,
+  "gi",
+);
+
+/** antml-style arg pairs and invoke-style parameters. */
+const XML_ARG_PAIR_RE = /<arg_key>\s*([\s\S]*?)\s*<\/arg_key>\s*<arg_value>([\s\S]*?)<\/arg_value>/gi;
+const XML_PARAMETER_RE = /<parameter\s+name=["']([^"']+)["']\s*>([\s\S]*?)<\/parameter>/gi;
+
+/** Parse `<arg_key>k</arg_key><arg_value>v</arg_value>` and
+ *  `<parameter name="k">v</parameter>` pairs out of an envelope payload. */
+function parseXmlArgPairs(payload: string): Record<string, unknown> | null {
+  const inputs: Record<string, unknown> = {};
+  let matched = false;
+  for (const m of payload.matchAll(new RegExp(XML_ARG_PAIR_RE.source, "gi"))) {
+    inputs[m[1].trim()] = m[2].trim();
+    matched = true;
+  }
+  for (const m of payload.matchAll(new RegExp(XML_PARAMETER_RE.source, "gi"))) {
+    inputs[m[1].trim()] = m[2].trim();
+    matched = true;
+  }
+  return matched ? inputs : null;
+}
+
+/**
+ * Parse one XML envelope into a ParsedToolCall, or null. Supported
+ * payload shapes:
+ *   <tool_call>{"name":"t.x","arguments":{...}}</tool_call>     (JSON)
+ *   <tool_call>t.x<arg_key>k</arg_key><arg_value>v</arg_value>  (antml)
+ *   <invoke name="t.x"><parameter name="k">v</parameter></invoke>
+ */
+function parseXmlEnvelope(attrs: string, payload: string): ParsedToolCall | null {
+  const attrName = attrs.match(/name\s*=\s*["']([^"']+)["']/i)?.[1];
+  const trimmed = payload.trim();
+
+  if (trimmed.startsWith("{")) {
+    const parsed = parseToolJson(trimmed);
+    if (parsed) return { toolId: attrName ?? parsed.toolId, inputs: parsed.inputs };
+  }
+
+  if (attrName) {
+    const inputs = parseXmlArgPairs(payload);
+    if (inputs) return { toolId: attrName, inputs };
+  }
+
+  // antml form: first line is the tool name, the rest is arg pairs.
+  const firstBreak = trimmed.search(/[\n<]/);
+  if (firstBreak > 0) {
+    const name = trimmed.slice(0, firstBreak).trim();
+    const inputs = parseXmlArgPairs(trimmed.slice(firstBreak));
+    if (name && inputs) return { toolId: name, inputs };
+  }
+
+  return null;
+}
+
 /**
  * Check whether a string looks like a plausible LiTT tool ID.
  * LiTT canonical IDs are dotted (project.read_file, web.fetch, etc.).
@@ -438,6 +499,14 @@ function spanLooksLikeToolCall(span: string): boolean {
 }
 
 export function parseToolCall(content: string): ParsedToolCall | null {
+  // 0. XML-style envelopes — <tool_call>, <invoke>, <dots_function_call>.
+  //    The most explicit protocol markup; checked before fences.
+  const xmlMatch = new RegExp(XML_ENVELOPE_RE.source, "gi").exec(content);
+  if (xmlMatch) {
+    const parsed = parseXmlEnvelope(xmlMatch[2] ?? "", xmlMatch[3] ?? "");
+    if (parsed) return parsed;
+  }
+
   // 1. Fenced ```tool_call ... ``` block.
   const match = content.match(TOOL_CALL_FENCE_RE);
   if (match) {
@@ -513,6 +582,11 @@ export function parseToolCalls(content: string): ParsedToolCall[] {
     calls.push(parsed);
   };
 
+  // 0. ALL XML-style envelopes (<tool_call>, <invoke>, <dots_function_call>).
+  for (const xm of content.matchAll(new RegExp(XML_ENVELOPE_RE.source, "gi"))) {
+    add(parseXmlEnvelope(xm[2] ?? "", xm[3] ?? ""));
+  }
+
   // 1. ALL fenced ```tool_call ... ``` blocks (global regex).
   const fenceRe = /```tool_call[ \t]*\r?\n?([\s\S]*?)```/gi;
   let m: RegExpExecArray | null;
@@ -571,8 +645,20 @@ export function parseToolCalls(content: string): ParsedToolCall[] {
  * JSON tool objects anywhere in the text.
  */
 export function stripToolCallBlocks(content: string): string {
+  // Strip XML-style envelopes — only when the payload parses as a call or
+  // carries arg structure, so prose quoting `<tool_call>example</tool_call>`
+  // survives. Then orphan close tags and stray arg tags.
+  let stripped = content.replace(new RegExp(XML_ENVELOPE_RE.source, "gi"), (whole, _tag, attrs, payload) => {
+    if (parseXmlEnvelope(attrs ?? "", payload ?? "") || /<arg_key>|<arg_value>|<parameter/i.test(payload ?? "")) {
+      return "";
+    }
+    return whole;
+  });
+  stripped = stripped.replace(/<\/(?:tool_call|invoke|dots_function_call|function_call|function_calls)[^>]*>/gi, "");
+  stripped = stripped.replace(/<arg_(?:key|value)\s*>[\s\S]*?<\/arg_(?:key|value)\s*>/gi, "");
+
   // Strip fenced tool_call blocks (with closing fence).
-  let stripped = content.replace(/```tool_call[ \t]*\r?\n?[\s\S]*?```/gi, "");
+  stripped = stripped.replace(/```tool_call[ \t]*\r?\n?[\s\S]*?```/gi, "");
   // Also strip UNCLOSED tool_call fences — smaller/free models sometimes
   // emit ` ```tool_call ` without a closing fence because they don't
   // properly support function calling. Without this, the raw fence
@@ -629,7 +715,7 @@ const PLACEHOLDER_RE = /^[A-Z_][A-Z0-9_]*(\.[A-Z_][A-Z0-9_]*)*$/;
 export function validateToolCallArgs(
   toolId: string,
   inputs: Record<string, unknown>,
-  toolDefs: ToolDefinition[],
+  toolDefs: ReadonlyArray<Pick<ToolDefinition, "id" | "inputSchema">>,
 ): string | null {
   const def = toolDefs.find((t) => t.id === toolId);
   if (!def) return null; // unknown tool — handled separately
