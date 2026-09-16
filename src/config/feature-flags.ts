@@ -77,12 +77,12 @@ export const FEATURE_FLAGS: Record<FeatureFlag, FeatureFlagDefinition> = {
   retroGameRuntime: {
     flag: "retroGameRuntime",
     description:
-      "Retro game runtime and emulator — not part of the public V1 product. " +
-      "The implementation is retained (see tests/games-restoration.test.ts, " +
-      "which still asserts the route files and libraries exist); while this " +
-      "is disabled the /games routes return 404 and navigation hides them.",
-    enabled: false,
-    hideFromNav: true,
+      "Retro game runtime and emulator. Enabled at the owner's request " +
+      "(2026-09-16): the /games routes are live and navigation shows them. " +
+      "The segment layout still 404-guards on this flag, so flipping it " +
+      "back off closes the routes again.",
+    enabled: true,
+    hideFromNav: false,
   },
   hireServices: {
     flag: "hireServices",

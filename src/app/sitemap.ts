@@ -18,7 +18,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "daily",
       priority: 0.8,
     },
-    // /games removed — not part of the public V1 product (retroGameRuntime flag)
+    // /games is live again (retroGameRuntime flag on) but intentionally kept
+    // out of the sitemap and noindex for now — soft launch, not an SEO push.
     // /gallery removed — obsolete Artifact Museum page retired
     {
       url: absoluteUrl("/pricing"),

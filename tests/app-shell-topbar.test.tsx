@@ -110,7 +110,7 @@ describe("AppShell top bar", () => {
     }
   });
 
-  it("renders none of the removed entries; Games stays flag-gated", () => {
+  it("renders none of the removed entries; Games shows now that the flag is on", () => {
     render(
       <AppShell>
         <div>content</div>
@@ -118,11 +118,12 @@ describe("AppShell top bar", () => {
     );
     const scope = within(getHeader());
     // Create lived in the old mobile bottom bar; Music/Showcase
-    // were removed from nav earlier. Games 404s while retroGameRuntime
-    // is off, so it must not appear.
-    for (const removed of ["Create", "Music", "Showcase", "Games"]) {
+    // were removed from nav earlier. Games is back on (retroGameRuntime
+    // enabled), so it must appear.
+    for (const removed of ["Create", "Music", "Showcase"]) {
       expect(scope.queryByText(removed)).toBeNull();
     }
+    expect(scope.getAllByText("Games").length).toBeGreaterThanOrEqual(1);
   });
 
   it("marks the current page with aria-current on every nav surface", () => {
