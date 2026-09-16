@@ -529,6 +529,117 @@ export const CONTACT_FORM: SectionTemplate = {
   },
 };
 
+// ─── Roofing Vertical Sections ───────────────────────────────────────
+// Honest, tokenized sections for the roofing vertical slice.
+// {{businessName}}, {{phone}}, {{email}}, {{serviceArea}} are filled from
+// the owner's business profile by the roofing vertical preset
+// (src/lib/verticals/roofing.ts); anything unmapped renders as a
+// clearly-empty [Your …] slot — never fabricated.
+
+export const ROOFING_HERO: SectionTemplate = {
+  id: "roofing-hero",
+  label: "Roofing Hero",
+  icon: "House",
+  build: () => {
+    const badge = createNode("badge");
+    badge.props = { text: "Roofing Contractor", badgeVariant: "default" };
+    const title = h("{{businessName}}", 1, 48);
+    const subtitle = txt("Roof replacement, repairs & inspections — serving {{serviceArea}}.", 18);
+    subtitle.styles.maxWidth = "560px";
+    const ctaRow = createNode("container");
+    ctaRow.styles = { display: "flex", flexDirection: "row", gap: 12, alignItems: "center" };
+    const b1 = btn("Get a Free Quote");
+    b1.props = { ...b1.props, href: "#quote" };
+    const b2 = btn("Our Services", "transparent", "var(--glass-text-2)");
+    b2.props = { ...b2.props, href: "#services" };
+    b2.styles.borderWidth = 1; b2.styles.borderColor = "var(--glass-border)"; b2.styles.borderStyle = "solid";
+    ctaRow.children = [b1.id, b2.id];
+    b1.parentId = ctaRow.id; b2.parentId = ctaRow.id;
+    return makeSection(
+      { display: "flex", flexDirection: "column", gap: 24, alignItems: "center", justifyContent: "center", padding: "100px 48px", minHeight: "480px", backgroundColor: "rgba(139,92,246,0.05)" },
+      [badge, title, subtitle, ctaRow],
+    );
+  },
+};
+
+export const ROOFING_SERVICES: SectionTemplate = {
+  id: "roofing-services",
+  label: "Roofing Services",
+  icon: "Grid3x3",
+  build: () => {
+    const title = h("Our Roofing Services", 2, 36);
+    const cols = columns(3, 24);
+    // Example defaults — the vertical preset replaces these titles with the
+    // owner's real services when provided; unmapped cards keep the honest
+    // "Example" framing so nothing reads as a claim the owner didn't make.
+    const services = [
+      { t: "Roof Replacement", d: "Example — describe your replacement service, materials, and warranty here." },
+      { t: "Roof Repair", d: "Example — describe your repair service and response time here." },
+      { t: "Inspections & Maintenance", d: "Example — describe your inspection offering here." },
+    ];
+    const allChildren: CanvasNode[] = [];
+    const cardNodes: CanvasNode[] = [];
+    services.forEach((f, i) => {
+      const { card: c, children } = card(f.t, f.d);
+      c.metadata = { ...c.metadata, roofingServiceSlot: i };
+      cardNodes.push(c);
+      allChildren.push(c, ...children);
+    });
+    cols.children = cardNodes.map((c) => c.id);
+    cardNodes.forEach((c) => { c.parentId = cols.id; });
+    return makeSection(
+      { display: "flex", flexDirection: "column", gap: 32, padding: "80px 48px" },
+      [title, cols, ...allChildren],
+    );
+  },
+};
+
+export const ROOFING_QUOTE_FORM: SectionTemplate = {
+  id: "roofing-quote-form",
+  label: "Roofing Quote Form",
+  icon: "Mail",
+  build: () => {
+    const title = h("Get a Free Roofing Quote", 2, 32);
+    const sub = txt("Tell us about your project and {{businessName}} will be in touch.", 16);
+    const nameInput = createNode("input");
+    nameInput.props = { placeholder: "Your name", inputType: "text", inputName: "name" };
+    const phoneInput = createNode("input");
+    phoneInput.props = { placeholder: "Phone number", inputType: "tel", inputName: "phone" };
+    const emailInput = createNode("input");
+    emailInput.props = { placeholder: "Email address", inputType: "email", inputName: "email" };
+    const msgInput = createNode("textarea");
+    msgInput.props = { placeholder: "Tell us about your roof: address, roof age, what you need…", rows: 5, inputName: "message" };
+    const submit = btn("Request My Free Quote");
+    const form = createNode("form");
+    form.metadata = { ...form.metadata, name: "Roofing Quote" };
+    form.styles = { display: "flex", flexDirection: "column", gap: 12, maxWidth: "480px", width: "100%", padding: "32px", borderRadius: 16, backgroundColor: "rgba(255,255,255,0.03)" };
+    form.children = [nameInput.id, phoneInput.id, emailInput.id, msgInput.id, submit.id];
+    [nameInput, emailInput, phoneInput, msgInput, submit].forEach((n) => { n.parentId = form.id; });
+    return makeSection(
+      { display: "flex", flexDirection: "column", gap: 24, alignItems: "center", padding: "80px 48px" },
+      [title, sub, form, nameInput, phoneInput, emailInput, msgInput, submit],
+    );
+  },
+};
+
+export const ROOFING_FOOTER: SectionTemplate = {
+  id: "roofing-footer",
+  label: "Roofing Footer",
+  icon: "PanelBottom",
+  build: () => {
+    const brand = h("{{businessName}}", 3, 18);
+    brand.styles.textAlign = "left";
+    const contact = txt("{{phone}} · {{serviceArea}}", 13, "var(--text-muted)");
+    contact.styles.textAlign = "left";
+    const copyright = txt("© {{businessName}}. All rights reserved.", 12, "var(--text-muted)");
+    copyright.styles.textAlign = "left";
+    return makeSection(
+      { display: "flex", flexDirection: "column", gap: 12, padding: "48px 32px", backgroundColor: "rgba(0,0,0,0.2)" },
+      [brand, contact, copyright],
+    );
+  },
+};
+
 // ─── Social Sections ───────────────────────────────────────────────
 
 export const TEAM_GRID: SectionTemplate = {
@@ -780,6 +891,11 @@ export const SECTION_BLOCKS: SectionTemplate[] = [
   NEWSLETTER,
   FAQ_SECTION,
   CONTACT_FORM,
+  // Roofing vertical
+  ROOFING_HERO,
+  ROOFING_SERVICES,
+  ROOFING_QUOTE_FORM,
+  ROOFING_FOOTER,
   // Social
   TEAM_GRID,
   GALLERY_GRID,
@@ -796,7 +912,7 @@ export const BLOCK_CATEGORIES: { id: string; label: string; blocks: SectionTempl
   { id: "navigation", label: "Navigation", blocks: [NAVBAR_MINIMAL, FOOTER_SIMPLE, ANNOUNCEMENT_BAR] },
   { id: "hero", label: "Hero", blocks: [HERO_CENTERED, HERO_SPLIT, HERO_VIDEO] },
   { id: "content", label: "Content", blocks: [FEATURES_GRID, BENTO_GRID, STATS_ROW, LOGO_CLOUD, TESTIMONIALS] },
-  { id: "conversion", label: "Conversion", blocks: [PRICING_TIERS, CTA_SECTION, NEWSLETTER, FAQ_SECTION, CONTACT_FORM] },
+  { id: "conversion", label: "Conversion", blocks: [PRICING_TIERS, CTA_SECTION, NEWSLETTER, FAQ_SECTION, CONTACT_FORM, ROOFING_QUOTE_FORM] },
   { id: "social", label: "Social", blocks: [TEAM_GRID, GALLERY_GRID] },
   { id: "app-ui", label: "App UI", blocks: [DASHBOARD_STATS, DATA_TABLE, LOGIN_FORM, SIGNUP_FORM] },
   { id: "commerce", label: "Commerce", blocks: [PRODUCT_GRID] },
