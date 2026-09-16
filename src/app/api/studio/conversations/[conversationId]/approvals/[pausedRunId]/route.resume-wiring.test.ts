@@ -36,6 +36,9 @@ vi.mock("@/lib/litt-intelligence/workspace-transport", () => ({
         mkdirCalls.push(path);
         return { created: true };
       }),
+      listFiles: vi.fn(async () => ({ entries: [{ name: "index.html", type: "file" }] })),
+      startPreview: vi.fn(async () => ({ status: "ready" })),
+      getPreviewStatus: vi.fn(async () => ({ status: "ready" })),
       createCheckpointBeforeMutation: vi.fn(async () => null),
       discoverPackageInfo: vi.fn(async () => ({ packageManager: "npm", hasBuild: false })),
       runCheck: vi.fn(async () => ({ exitCode: 0, stdout: "", stderr: "", timedOut: false })),
