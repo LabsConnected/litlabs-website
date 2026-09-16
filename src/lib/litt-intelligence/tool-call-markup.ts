@@ -80,12 +80,37 @@ function jsonPayloadToolId(payload: string, candidates: ReadonlySet<string>): st
       (typeof (parsed?.function as Record<string, unknown> | undefined)?.name === "string" &&
         ((parsed.function as Record<string, unknown>).name as string)) ||
       (typeof parsed?.tool === "string" && parsed.tool) ||
+      (typeof parsed?.action === "string" && parsed.action) ||
       "";
     if (!name) return undefined;
     return candidates.has(name.toLowerCase()) ? name : undefined;
   } catch {
     return undefined;
   }
+}
+
+/** Fields that mark a whole-payload JSON object as a call envelope rather
+ *  than data — `action`/`command`/`tool`/`function` carriers or raw
+ *  arg_structure keys. `name` alone is too generic to count; it only
+ *  signals intent paired with `arguments`/`parameters`. */
+const JSON_PROTOCOL_FIELDS = [
+  "action",
+  "command",
+  "tool",
+  "tool_call",
+  "tool_name",
+  "function",
+  "function_call",
+  "arg_key",
+  "arg_value",
+] as const;
+
+function jsonHasProtocolFields(parsed: Record<string, unknown>): boolean {
+  if (JSON_PROTOCOL_FIELDS.some((k) => k in parsed)) return true;
+  return (
+    typeof parsed.name === "string" &&
+    ("arguments" in parsed || "parameters" in parsed)
+  );
 }
 
 /**
@@ -132,6 +157,17 @@ export function findToolCallMarkup(
   if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
     const toolId = jsonPayloadToolId(trimmed, candidates);
     if (toolId) return { kind: "bare_json", toolId };
+    // A response that is entirely an action envelope is an attempted
+    // invocation even when its action names no registered tool — it can
+    // never execute, and it is never user-facing prose.
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && jsonHasProtocolFields(parsed)) {
+        return { kind: "bare_json" };
+      }
+    } catch {
+      // Not JSON — not markup.
+    }
   }
 
   return null;
