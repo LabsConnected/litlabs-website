@@ -55,15 +55,6 @@ async function getHandler(req: NextRequest) {
 }
 
 async function postHandler(req: NextRequest) {
-  // Honest 503 when the backend isn't connected (CI, unconfigured envs) —
-  // checked before auth so an unconfigured backend never 500s.
-  if (!isAdminSupabaseConfigured()) {
-    return NextResponse.json(
-      { error: "Posting is unavailable — the community feed isn't connected yet." },
-      { status: 503 },
-    );
-  }
-
   const { dbUser, response } = await requireAuthDbUser(req);
   if (!dbUser) return response;
 
@@ -155,6 +146,15 @@ async function postHandler(req: NextRequest) {
 
   if (!content && mediaUrls.length === 0 && postType !== "poll" && postType !== "link" && !musicTitle && !projectRef) {
     return NextResponse.json({ error: "Content or media is required" }, { status: 400 });
+  }
+
+  // Honest 503 when the backend isn't connected (CI, unconfigured envs).
+  // Placed after auth + validation so client errors (401/400) surface first.
+  if (!isAdminSupabaseConfigured()) {
+    return NextResponse.json(
+      { error: "Posting is unavailable — the community feed isn't connected yet." },
+      { status: 503 },
+    );
   }
 
   const sb = getAdminSupabase();

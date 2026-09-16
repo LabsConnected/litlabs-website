@@ -116,7 +116,6 @@ test.describe("Site Audit — Public Routes @public", () => {
           !url.includes("/api/gallery") &&
           !url.includes("/api/discover") &&
           !url.includes("/api/social") &&
-          !url.includes("/api/posts") &&
           response.status() >= 500
         ) {
           errors.push(`HTTP ${response.status()}: ${url}`);

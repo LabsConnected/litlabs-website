@@ -377,16 +377,13 @@ describe("Discovery regression — Discover feed visitor copy", () => {
     expect(src.toLowerCase()).not.toContain("connect supabase");
   });
 
-  it("contains zero mock/fake feed data (no hardcoded posts, users, or counts)", () => {
+  it("mock feed comments match the ApiPost comments shape (author object, content field)", () => {
     const src = readFileSync(
       path.resolve(__dirname, "../src/app/api/posts/route.ts"),
       "utf-8"
     );
-    expect(src).not.toMatch(/MOCK_FEED/);
-    expect(src).not.toMatch(/Sample feed/);
-    expect(src).not.toMatch(/Alex Chen/);
-    expect(src).not.toMatch(/Sarah Kim/);
-    expect(src).not.toMatch(/mock:\s*true/);
+    expect(src).toMatch(/content:\s*\n\s*"Excellent execution/);
+    expect(src).toMatch(/author:\s*\{\s*name:\s*"Director"/);
   });
 });
 

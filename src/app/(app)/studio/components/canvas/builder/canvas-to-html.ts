@@ -9,6 +9,25 @@
 
 import type { CanvasDocument, CanvasNode, NodeStyles } from "./types";
 
+/**
+ * Options for the static export.
+ *
+ * `deploymentId` is injected by the publish pipeline for a real
+ * deployment. It wires forms to the platform form backend
+ * (/api/forms/submit). When omitted (builder preview), forms render a
+ * graceful "connects on publish" state instead of posting anywhere.
+ */
+export interface CanvasExportOptions {
+  deploymentId?: string;
+}
+
+interface ExportContext {
+  deploymentId?: string;
+  /** true while rendering children of a <form> node */
+  inForm: boolean;
+  sawForm: boolean;
+}
+
 function stylesToCSSString(styles: NodeStyles): string {
   const parts: string[] = [];
   if (styles.width) parts.push(`width: ${styles.width}`);
@@ -66,17 +85,24 @@ function escapeHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function nodeToHtml(node: CanvasNode, doc: CanvasDocument, depth = 0): string {
+function nodeToHtml(node: CanvasNode, doc: CanvasDocument, depth = 0, ex?: ExportContext): string {
   if (node.metadata?.hidden) return "";
+
+  const ctx: ExportContext = ex ?? { inForm: false, sawForm: false };
 
   const styleStr = stylesToCSSString(node.styles);
   const styleAttr = styleStr ? ` style="${styleStr}"` : "";
 
+  // Children inherit "inside a form"; the sawForm flag is shared
+  // by reference so the document root learns which scripts to inject.
+  const prevInForm = ctx.inForm;
+  if (node.type === "form") ctx.inForm = true;
   const children = node.children
     .map((childId) => doc.nodes[childId])
     .filter(Boolean)
-    .map((child) => nodeToHtml(child, doc, depth + 1))
+    .map((child) => nodeToHtml(child, doc, depth + 1, ctx))
     .join("\n");
+  ctx.inForm = prevInForm;
 
   switch (node.type) {
     case "section":
@@ -95,6 +121,10 @@ function nodeToHtml(node: CanvasNode, doc: CanvasDocument, depth = 0): string {
       return `<p${styleAttr}>${escapeHtml(node.props.text || "")}</p>`;
 
     case "button":
+      // Inside a form the button submits it; elsewhere it stays a link.
+      if (ctx.inForm) {
+        return `<button type="submit"${styleAttr}>${escapeHtml(node.props.text || "")}</button>`;
+      }
       return `<a href="${escapeHtml(node.props.href || "#")}"${styleAttr}>${escapeHtml(node.props.text || "")}</a>`;
 
     case "image": {
@@ -113,10 +143,22 @@ function nodeToHtml(node: CanvasNode, doc: CanvasDocument, depth = 0): string {
       return `<input type="${escapeHtml(node.props.inputType || "text")}" placeholder="${escapeHtml(node.props.placeholder || "")}" name="${escapeHtml(node.props.inputName || "")}"${styleAttr} />`;
 
     case "textarea":
-      return `<textarea rows="${node.props.rows || 4}" placeholder="${escapeHtml(node.props.placeholder || "")}"${styleAttr}></textarea>`;
+      return `<textarea rows="${node.props.rows || 4}" name="${escapeHtml(node.props.inputName || "")}" placeholder="${escapeHtml(node.props.placeholder || "")}"${styleAttr}></textarea>`;
 
-    case "form":
-      return `<form${styleAttr}>\n${children}\n</form>`;
+    case "form": {
+      // Platform form backend: submissions POST to /api/forms/submit and
+      // land in the site owner's lead inbox. The hidden deploymentId ties
+      // the submission to the published site; a honeypot field ("website")
+      // silently drops bot submissions. An inline script (injected once per
+      // document below) upgrades the submit to a JSON fetch with an inline
+      // thank-you, so visitors never leave the page; without JS the plain
+      // form POST still works.
+      ctx.sawForm = true;
+      const deploymentId = ctx.deploymentId ? escapeHtml(ctx.deploymentId) : "";
+      const formName = escapeHtml(node.metadata?.name || "contact");
+      const honeypot = `<input type="text" name="website" value="" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px;opacity:0;height:0" aria-hidden="true" />`;
+      return `<form action="/api/forms/submit" method="post" data-litt-form="1" data-litt-form-name="${formName}"${styleAttr}>\n<input type="hidden" name="deploymentId" value="${deploymentId}" />\n${honeypot}\n${children}\n</form>`;
+    }
 
     case "spacer":
       return `<div${styleAttr}></div>`;
@@ -187,12 +229,28 @@ function nodeToHtml(node: CanvasNode, doc: CanvasDocument, depth = 0): string {
   }
 }
 
-export function canvasToHtml(doc: CanvasDocument): string {
+export function canvasToHtml(doc: CanvasDocument, opts?: CanvasExportOptions): string {
+  const ctx: ExportContext = {
+    deploymentId: opts?.deploymentId,
+    inForm: false,
+    sawForm: false,
+  };
+
   const bodyContent = doc.rootNodeIds
     .map((rootId) => {
       const root = doc.nodes[rootId];
-      return root ? nodeToHtml(root, doc) : "";
+      return root ? nodeToHtml(root, doc, 0, ctx) : "";
     })
+    .join("\n");
+
+  // Inline behavior scripts — injected once per document, only when the
+  // document actually contains the matching nodes. The functions are
+  // serialized via .toString(), so they must stay self-contained (no
+  // outer-scope references) and ES2017-safe.
+  const scripts = [
+    ctx.sawForm ? `<script>(${littFormInlineScript.toString()})();</script>` : "",
+  ]
+    .filter(Boolean)
     .join("\n");
 
   return `<!DOCTYPE html>
@@ -228,6 +286,80 @@ export function canvasToHtml(doc: CanvasDocument): string {
 </head>
 <body>
 ${bodyContent}
+${scripts}
 </body>
 </html>`;
+}
+
+/**
+ * Upgrades exported platform forms: intercepts submit, POSTs JSON to
+ * /api/forms/submit, and shows an inline thank-you without navigating.
+ * Serialized into the HTML — keep self-contained, no outer references.
+ */
+function littFormInlineScript(): void {
+  function showStatus(form: HTMLFormElement, msg: string): void {
+    let el = form.querySelector("[data-litt-form-status]") as HTMLElement | null;
+    if (!el) {
+      el = document.createElement("p");
+      el.setAttribute("data-litt-form-status", "1");
+      el.setAttribute("style", "font-size:13px;opacity:0.75;margin-top:6px;");
+      form.appendChild(el);
+    }
+    el.textContent = msg;
+  }
+
+  const forms = document.querySelectorAll("form[data-litt-form]");
+  for (let i = 0; i < forms.length; i++) {
+    const form = forms[i] as HTMLFormElement;
+    form.addEventListener("submit", function (e: Event) {
+      e.preventDefault();
+      const idInput = form.querySelector('input[name="deploymentId"]') as HTMLInputElement | null;
+      const deploymentId = (idInput && idInput.value) || "";
+      if (!deploymentId) {
+        showStatus(form, "This form connects automatically when the site is published.");
+        return;
+      }
+      const data = new FormData(form);
+      const fields: Record<string, string> = {};
+      data.forEach(function (v, k) {
+        if (k === "deploymentId") return;
+        fields[k] = String(v);
+      });
+      const payload = {
+        deploymentId: deploymentId,
+        formName: form.getAttribute("data-litt-form-name") || null,
+        page: window.location.pathname || null,
+        fields: fields,
+        website: fields["website"] || "",
+      };
+      const btn = form.querySelector('[type="submit"]') as HTMLElement | null;
+      if (btn) btn.setAttribute("disabled", "disabled");
+      showStatus(form, "Sending…");
+      fetch(form.action, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+        .then(function (r) {
+          return r.json().then(function (j) {
+            return { httpOk: r.ok, body: j as { ok?: boolean } | null };
+          });
+        })
+        .then(function (res) {
+          if (res.httpOk && res.body && res.body.ok === true) {
+            form.innerHTML =
+              '<div style="padding:24px;text-align:center">' +
+              '<p style="font-size:18px;font-weight:700;margin-bottom:8px">Thanks — message received.</p>' +
+              '<p style="opacity:0.7">We\'ll be in touch shortly.</p></div>';
+          } else {
+            showStatus(form, "Something went wrong — please try again.");
+            if (btn) btn.removeAttribute("disabled");
+          }
+        })
+        .catch(function () {
+          showStatus(form, "Something went wrong — please try again.");
+          if (btn) btn.removeAttribute("disabled");
+        });
+    });
+  }
 }

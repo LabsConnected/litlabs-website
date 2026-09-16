@@ -217,11 +217,6 @@ function withBotProtection(inner: (...args: never[]) => unknown) {
 //   /games/*       — public games
 //   /resources/*   — public resources
 //   /discover      — public discover
-//   /u/*           — public user profiles
-//   /post/*        — public post thread pages
-//   /api/posts     — public feed API (signed-out sees public posts only)
-//   /api/link-preview — public link-preview API
-//   /api/users/by-username/* — public profile lookup (GET only)
 //   /showcase/*    — public showcase
 //   /marketplace/* — public marketplace browsing (install/checkout are protected APIs)
 //   /voice         — public voice playground
@@ -240,7 +235,7 @@ function withBotProtection(inner: (...args: never[]) => unknown) {
 //   /ai-builder, /builder, /chat, /generate,
 //   /litt, /litt-terminal, /runtime-test, /order/*
 
-const isProtectedRouteInner = createRouteMatcher([
+const isProtectedRoute = createRouteMatcher([
   // Protected page routes
   "/studio(.*)",
   "/dashboard(.*)",
@@ -305,22 +300,6 @@ const isProtectedRouteInner = createRouteMatcher([
   "/api/marketplace/agents/(.*)/checkout(.*)",
   "/api/marketplace/installations(.*)",
 ]);
-
-/**
- * Public-read exemption for the profile lookup backing the public
- * /u/[handle] pages. Signed-out visitors' server fetches carry no session
- * cookie, so without this exemption the profile page would 401 for guests.
- * The route is GET-only and returns public profile fields + counts.
- */
-const isProtectedRoute = (req: NextRequest) => {
-  if (
-    req.method === "GET" &&
-    req.nextUrl.pathname.startsWith("/api/users/by-username/")
-  ) {
-    return false;
-  }
-  return isProtectedRouteInner(req);
-};
 
 const clerkConfigured = isClerkConfigured();
 const clerkAuthorizedParties = (process.env.CLERK_AUTHORIZED_PARTIES ?? "")
