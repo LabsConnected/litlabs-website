@@ -176,3 +176,110 @@ describe("validateFilesWriteInputs — placeholder tokens in written content", (
     expect(validateFilesWriteInputs({})).toContain("target path");
   });
 });
+
+// ─── Handler-level enforcement floor ─────────────────────────────
+//
+// The loop's pre-approval gate is not the only route into a mutation:
+// /api/litt/tools/execute calls the registry handlers directly, and a
+// paused run persisted before the loop guard shipped resumes into the
+// same handlers. The handlers themselves must refuse placeholder content
+// so no entry point can persist it.
+
+describe("mutation handlers — enforcement floor", () => {
+  async function loadHandlers() {
+    return import("../tool-handlers-v2");
+  }
+
+  function spyTransport() {
+    return {
+      workspaceId: "ws-1",
+      writeFile: vi.fn(async () => {}),
+      applyPatch: vi.fn(async () => {}),
+      deleteFile: vi.fn(async () => {}),
+      mkdir: vi.fn(async () => {}),
+      rename: vi.fn(async () => {}),
+      gitCommit: vi.fn(async () => ({ committed: true })),
+    } as unknown as WorkspaceTransport & {
+      writeFile: ReturnType<typeof vi.fn>;
+      applyPatch: ReturnType<typeof vi.fn>;
+      deleteFile: ReturnType<typeof vi.fn>;
+      mkdir: ReturnType<typeof vi.fn>;
+      rename: ReturnType<typeof vi.fn>;
+      gitCommit: ReturnType<typeof vi.fn>;
+    };
+  }
+
+  it("files.write rejects [PERSON_NAME] content without touching the transport", async () => {
+    const { handleFilesWrite } = await loadHandlers();
+    const t = spyTransport();
+    const res = await handleFilesWrite(
+      { path: "index.html", content: "<title>[PERSON_NAME] — Premium Coffee Roasters</title>" },
+      t,
+    );
+    expect(res.success).toBe(false);
+    expect(res.error).toContain("[PERSON_NAME]");
+    expect(t.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("files.write round-trips the literal brand name unchanged", async () => {
+    const { handleFilesWrite } = await loadHandlers();
+    const t = spyTransport();
+    const res = await handleFilesWrite(
+      { path: "index.html", content: "<title>Ember Roast — Premium Coffee Roasters</title>" },
+      t,
+    );
+    expect(res.success).toBe(true);
+    expect(t.writeFile).toHaveBeenCalledWith("index.html", "<title>Ember Roast — Premium Coffee Roasters</title>");
+  });
+
+  it("apply_patch rejects a placeholder in replace before executing", async () => {
+    const { handleApplyPatch } = await loadHandlers();
+    const t = spyTransport();
+    const res = await handleApplyPatch(
+      {
+        path: "index.html",
+        patches: [{ search: "<title>Ember Roast</title>", replace: "<title>[BRAND_NAME]</title>" }],
+      },
+      t,
+    );
+    expect(res.success).toBe(false);
+    expect(res.error).toContain("[BRAND_NAME]");
+    expect(t.applyPatch).not.toHaveBeenCalled();
+  });
+
+  it("apply_patch rejects a placeholder in search", async () => {
+    const { handleApplyPatch } = await loadHandlers();
+    const t = spyTransport();
+    const res = await handleApplyPatch(
+      { path: "index.html", patches: [{ search: "[PERSON_NAME]", replace: "Ember Roast" }] },
+      t,
+    );
+    expect(res.success).toBe(false);
+    expect(t.applyPatch).not.toHaveBeenCalled();
+  });
+
+  it("files.rename rejects placeholder paths", async () => {
+    const { handleFilesRename } = await loadHandlers();
+    const t = spyTransport();
+    const res = await handleFilesRename({ path: "a.html", newPath: "[PERSON_NAME].html" }, t);
+    expect(res.success).toBe(false);
+    expect(t.rename).not.toHaveBeenCalled();
+  });
+
+  it("files.mkdir and files.delete reject placeholder paths", async () => {
+    const { handleFilesMkdir, handleFilesDelete } = await loadHandlers();
+    const t = spyTransport();
+    expect((await handleFilesMkdir({ path: "[NEW_DIR]" }, t)).success).toBe(false);
+    expect((await handleFilesDelete({ path: "[EMAIL].txt" }, t)).success).toBe(false);
+    expect(t.mkdir).not.toHaveBeenCalled();
+    expect(t.deleteFile).not.toHaveBeenCalled();
+  });
+
+  it("git.commit rejects a placeholder message", async () => {
+    const { handleGitCommit } = await loadHandlers();
+    const t = spyTransport();
+    const res = await handleGitCommit({ message: "Update [BRAND_NAME] landing" }, t);
+    expect(res.success).toBe(false);
+    expect(t.gitCommit).not.toHaveBeenCalled();
+  });
+});
