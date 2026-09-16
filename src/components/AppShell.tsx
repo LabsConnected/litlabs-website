@@ -282,7 +282,11 @@ function TopBar() {
 
   return (
     <header
-      className="sticky top-0 z-40 shrink-0"
+      // Studio owns a viewport-locked, overflow-hidden layout. A sticky
+      // top bar inside that scroll context can retain a clipped offset after
+      // navigation/refresh, hiding the top of the global nav. Keep it in the
+      // normal flex flow there; other app routes still benefit from stickiness.
+      className={`${isStudio ? "relative" : "sticky top-0"} z-40 shrink-0`}
       style={{
         background: `${T.bgColor}e6`,
         backdropFilter: "blur(14px)",
