@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { useCanvasBuilderStore } from "./store";
 import { STARTER_BUILDS, buildStarterPage } from "./starter-builds";
+import { DescribeBusinessBox } from "@/components/studio/DescribeBusinessBox";
 
 const CATEGORIES = [
   { id: "Website", label: "Website", icon: Globe, desc: "Landing pages, business sites" },
@@ -51,6 +52,7 @@ export function EmptyCanvasGreeter() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const setDocument = useCanvasBuilderStore((s) => s.setDocument);
   const setRightPanelTab = useCanvasBuilderStore((s) => s.setRightPanelTab);
+  const projectId = useCanvasBuilderStore((s) => s.document.projectId);
 
   const isEmpty = useCanvasBuilderStore((s) => {
     const root = s.document.nodes[s.document.rootNodeIds[0]];
@@ -106,6 +108,26 @@ export function EmptyCanvasGreeter() {
             <p className="text-sm text-center" style={{ color: "var(--text-muted)" }}>
               Choose a category and LiTT will help you build it.
             </p>
+          </div>
+
+          {/* Guided start: describe-once intake. Persists the Business
+              Profile to the active project; everything below (category
+              grid, quick builds) keeps working untouched. */}
+          <div className="w-full">
+            <DescribeBusinessBox
+              variant="greeter"
+              projectId={projectId}
+              onConfirmed={() => setRightPanelTab("litt")}
+            />
+          </div>
+
+          {/* Divider */}
+          <div className="flex items-center gap-3 w-full">
+            <div style={{ flex: 1, height: 1, backgroundColor: "var(--glass-border)" }} />
+            <span className="text-[10px] font-bold uppercase tracking-[0.1em]" style={{ color: "var(--text-muted)" }}>
+              or pick a category
+            </span>
+            <div style={{ flex: 1, height: 1, backgroundColor: "var(--glass-border)" }} />
           </div>
 
           {/* Category grid */}

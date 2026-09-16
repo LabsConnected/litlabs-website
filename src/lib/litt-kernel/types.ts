@@ -16,6 +16,8 @@
 
 // ─── Modes ──────────────────────────────────────────────────────
 
+import type { BusinessProfileDownstream } from "../business-profile";
+
 /**
  * Canonical LiTT modes. Mode describes the OPERATION.
  * Domain (separate) describes the EXPERTISE.
@@ -167,6 +169,14 @@ export type LiTTControlDecision = {
     missionId?: string;
     canvasId?: string;
     connectorIds: string[];
+    /**
+     * The user's persisted Business Profile (describe-once intake).
+     * Optional; when present the prompt composer includes it as context
+     * so the model reads the business brief instead of re-asking.
+     * Callers populate it via getBusinessProfile() — wiring every
+     * call site is follow-up work.
+     */
+    businessProfile?: BusinessProfileDownstream;
   };
 
   execution: {

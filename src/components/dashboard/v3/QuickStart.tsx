@@ -10,6 +10,7 @@
 import Link from "next/link";
 import { Globe, Smartphone, Gamepad2, Image as ImageIcon, Film, Music } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { DescribeBusinessBox } from "@/components/studio/DescribeBusinessBox";
 
 interface QuickStartItem {
   label: string;
@@ -29,7 +30,14 @@ const ITEMS: QuickStartItem[] = [
 
 export function QuickStart() {
   return (
-    <section>
+    <>
+      {/* Guided start: describe-once intake. Project-less here, so a
+          confirmed description is stashed as a pending intake and adopted
+          into the active project when the user reaches Studio. */}
+      <div className="mb-6">
+        <DescribeBusinessBox variant="dashboard" />
+      </div>
+      <section>
       <h3 className="mb-4 pl-1 text-sm font-medium uppercase tracking-widest" style={{ color: "#71717a" }}>
         Quick Start
       </h3>
@@ -75,6 +83,7 @@ export function QuickStart() {
           );
         })}
       </div>
-    </section>
+      </section>
+    </>
   );
 }
