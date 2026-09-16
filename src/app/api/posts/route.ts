@@ -148,8 +148,9 @@ async function postHandler(req: NextRequest) {
     return NextResponse.json({ error: "Content or media is required" }, { status: 400 });
   }
 
-  // Honest 503 when the backend isn't connected (CI, unconfigured envs).
-  // Placed after auth + validation so client errors (401/400) surface first.
+  // Honest 503 when the backend isn't connected (CI, unconfigured envs) —
+  // checked after auth + validation so 401/400 semantics stay intact, and an
+  // unconfigured backend never 500s.
   if (!isAdminSupabaseConfigured()) {
     return NextResponse.json(
       { error: "Posting is unavailable — the community feed isn't connected yet." },

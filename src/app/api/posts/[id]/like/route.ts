@@ -1,142 +1,86 @@
-// Post Like / Unlike API
+// Post Like / Unlike API — DB-backed only. Honest 503 when the backend
+// isn't connected (CI, unconfigured envs); errors never masquerade as success.
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import {
   getAdminSupabase,
   isAdminSupabaseConfigured,
 } from "@/lib/supabase-admin";
-import { rateLimit } from "@/lib/rate-limiter";
+import { withRateLimit } from "@/lib/rate-limiter";
+import { requireAuthDbUser } from "@/lib/social-feed";
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { success, remaining, resetTime } = await rateLimit(req, 50, 60);
-  if (!success) {
-    return new NextResponse(JSON.stringify({ error: "Rate limit exceeded" }), {
-      status: 429,
-      headers: {
-        "Retry-After": String(resetTime),
-        "X-RateLimit-Limit": "50",
-        "X-RateLimit-Remaining": "0",
-        "X-RateLimit-Reset": String(resetTime),
-      },
-    });
-  }
-
-  const { userId } = await auth(req);
-  if (!userId)
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
+async function postHandler(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: postId } = await params;
+  const { dbUser, response } = await requireAuthDbUser(req);
+  if (!dbUser) return response;
+
+  // Honest 503 when the backend isn't connected — checked after auth so
+  // unauthenticated callers still get 401 and an unconfigured backend never 500s.
   if (!isAdminSupabaseConfigured()) {
     return NextResponse.json(
-      { error: "Likes are unavailable — the community feed isn’t connected yet." },
+      { error: "Likes are unavailable — the community feed isn't connected yet." },
       { status: 503 },
     );
   }
 
-  try {
-    const sb = getAdminSupabase();
-    const { data: user } = await sb
-      .from("users")
-      .select("id")
-      .eq("clerk_id", userId)
-      .single();
-    if (!user)
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
+  const sb = getAdminSupabase();
+  const { data: post } = await sb.from("posts").select("user_id").eq("id", postId).single();
+  if (!post) {
+    return NextResponse.json({ error: "Post not found" }, { status: 404 });
+  }
 
-    // Get post owner for notification
-    const { data: post } = await sb
-      .from("posts")
-      .select("user_id")
-      .eq("id", postId)
-      .single();
-
-    await sb
-      .from("post_likes")
-      .insert({ post_id: postId, user_id: user.id })
-      .select();
-    await sb.rpc("increment_post_likes", { post_id: postId });
-
-    // Notify post owner (skip if liking own post)
-    if (post && post.user_id !== user.id) {
-      await sb.from("notifications").insert({
-        recipient_id: post.user_id,
-        actor_id: user.id,
-        type: "like",
-        entity_type: "post",
-        entity_id: postId,
-        content: "liked your post",
-      });
+  const { error } = await sb.from("post_likes").insert({ post_id: postId, user_id: dbUser.id });
+  if (error) {
+    if (error.code === "23505") {
+      return NextResponse.json({ error: "Already liked" }, { status: 409 });
     }
-
-    const response = NextResponse.json({ success: true });
-    response.headers.set("X-RateLimit-Limit", "50");
-    response.headers.set("X-RateLimit-Remaining", String(remaining));
-    response.headers.set("X-RateLimit-Reset", String(resetTime));
-    return response;
-  } catch {
-    return NextResponse.json(
-      { error: "Likes are unavailable — the community feed isn’t connected yet." },
-      { status: 503 },
-    );
+    return NextResponse.json({ error: "Failed to like post" }, { status: 500 });
   }
-}
+  await sb.rpc("increment_post_likes", { post_id: postId });
 
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { success, remaining, resetTime } = await rateLimit(req, 50, 60);
-  if (!success) {
-    return new NextResponse(JSON.stringify({ error: "Rate limit exceeded" }), {
-      status: 429,
-      headers: {
-        "Retry-After": String(resetTime),
-        "X-RateLimit-Limit": "50",
-        "X-RateLimit-Remaining": "0",
-        "X-RateLimit-Reset": String(resetTime),
-      },
+  // Notify post owner (skip if liking own post)
+  if (post.user_id !== dbUser.id) {
+    await sb.from("notifications").insert({
+      recipient_id: post.user_id,
+      actor_id: dbUser.id,
+      type: "like",
+      entity_type: "post",
+      entity_id: postId,
+      content: "liked your post",
     });
   }
 
-  const { userId } = await auth(req);
-  if (!userId)
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  return NextResponse.json({ liked: true });
+}
 
+async function deleteHandler(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: postId } = await params;
+  const { dbUser, response } = await requireAuthDbUser(req);
+  if (!dbUser) return response;
+
   if (!isAdminSupabaseConfigured()) {
     return NextResponse.json(
-      { error: "Likes are unavailable — the community feed isn’t connected yet." },
+      { error: "Likes are unavailable — the community feed isn't connected yet." },
       { status: 503 },
     );
   }
 
-  try {
-    const sb = getAdminSupabase();
-    const { data: user } = await sb
-      .from("users")
-      .select("id")
-      .eq("clerk_id", userId)
-      .single();
-    if (!user)
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-
-    await sb
-      .from("post_likes")
-      .delete()
-      .match({ post_id: postId, user_id: user.id });
-    await sb.rpc("decrement_post_likes", { post_id: postId });
-    const response = NextResponse.json({ success: true });
-    response.headers.set("X-RateLimit-Limit", "50");
-    response.headers.set("X-RateLimit-Remaining", String(remaining));
-    response.headers.set("X-RateLimit-Reset", String(resetTime));
-    return response;
-  } catch {
-    return NextResponse.json(
-      { error: "Likes are unavailable — the community feed isn’t connected yet." },
-      { status: 503 },
-    );
+  const sb = getAdminSupabase();
+  const { data: existing } = await sb
+    .from("post_likes")
+    .select("id")
+    .match({ post_id: postId, user_id: dbUser.id })
+    .maybeSingle();
+  if (!existing) {
+    return NextResponse.json({ liked: false });
   }
+
+  const { error } = await sb.from("post_likes").delete().match({ post_id: postId, user_id: dbUser.id });
+  if (error) {
+    return NextResponse.json({ error: "Failed to unlike post" }, { status: 500 });
+  }
+  await sb.rpc("decrement_post_likes", { post_id: postId });
+  return NextResponse.json({ liked: false });
 }
+
+export const POST = withRateLimit(postHandler, 50, 60);
+export const DELETE = withRateLimit(deleteHandler, 50, 60);
