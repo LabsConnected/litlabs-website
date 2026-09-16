@@ -5,7 +5,7 @@
  *   - Correct active navigation detection
  *   - Collapsed sidebar persistence key
  *   - Mobile drawer items match desktop sections
- *   - No duplicate navigation (Navbar.tsx is dead code)
+ *   - No duplicate navigation (dashboard must not mount a second global header)
  *   - Route accessibility for authenticated routes
  */
 
@@ -170,6 +170,13 @@ describe("AppShell Navigation", () => {
   });
 
   describe("No duplicate navigation", () => {
+    it("dashboard composition does not mount a second global header", async () => {
+      const fs = await import("fs");
+      const path = await import("path");
+      const dashboardPath = path.resolve(process.cwd(), "src/components/dashboard/v3/Dashboard.tsx");
+      expect(fs.readFileSync(dashboardPath, "utf8")).not.toContain("DashboardHeader");
+    });
+
     it("all section items have unique hrefs", () => {
       const allHrefs = APP_NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.href));
       const unique = new Set(allHrefs);

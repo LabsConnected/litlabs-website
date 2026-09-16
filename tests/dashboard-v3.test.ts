@@ -49,8 +49,8 @@ describe("Dashboard v3 — composition", () => {
     expect(dashboardSrc).toContain("ProjectPulseBar");
   });
 
-  it("renders DashboardHeader", () => {
-    expect(dashboardSrc).toContain("DashboardHeader");
+  it("does not render a second global header inside AppShell", () => {
+    expect(dashboardSrc).not.toContain("DashboardHeader");
   });
 
   it("renders AnimatedBackground", () => {

@@ -5,7 +5,7 @@
  *
  * Composition:
  *   - AnimatedBackground (subtle WebGL shader)
- *   - DashboardHeader (brand, nav, search → command palette, BITS, profile)
+ *   - AppShell provides the single global navigation and account chrome.
  *   - ProjectPulseBar (real deployment/build/test/branch/terminal status)
  *   - Main content grid:
  *       Left:  ContinueWorking (hero) + QuickStart
@@ -25,7 +25,6 @@ import { useRouter } from "next/navigation";
 import { X, Terminal, GitBranch, Rocket, ChevronRight } from "lucide-react";
 
 import { AnimatedBackground } from "./AnimatedBackground";
-import { DashboardHeader } from "./DashboardHeader";
 import { ProjectPulseBar } from "./ProjectPulseBar";
 import { ContinueWorking } from "./ContinueWorking";
 import { QuickStart } from "./QuickStart";
@@ -125,9 +124,6 @@ export function Dashboard() {
     >
       {/* Animated background */}
       <AnimatedBackground />
-
-      {/* Header */}
-      <DashboardHeader onOpenCommandPalette={() => setCommandPaletteOpen(true)} />
 
       {/* Project pulse bar */}
       <ProjectPulseBar
