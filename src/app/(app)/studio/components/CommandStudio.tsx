@@ -43,7 +43,6 @@ import { StudioContextProvider } from "../context/StudioContext";
 import { deriveCreator, deriveWorkspaceStage } from "../context/derive-studio-context";
 import { StudioCreatorHost } from "./creators/StudioCreatorHost";
 import { useViewportTier, useDesktopSplit } from "../hooks/useViewportTier";
-import StudioOperatorBar from "./shell/StudioOperatorBar";
 import ResizeHandle from "./shell/ResizeHandle";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { useExecutionStore, type MutationSummary } from "../stores/useExecutionStore";
@@ -231,11 +230,9 @@ function CommandStudioContent() {
   const [littMode, setLittMode] = useState<LiTTMode>(initial.littMode ?? "auto");
   const [, setPendingCommand] = useState<string>(initial.command ?? "");
   const [composerValue, setComposerValue] = useState("");
-  const [advancedToolsOpen, setAdvancedToolsOpen] = useState(() => (
-    initial.destination !== "studio"
-      || (initial.mode !== "work" && initial.mode !== "preview")
-      || initial.legacyTool === "build"
-  ));
+  // Split preview is an explicit, user-triggered layout. Studio never
+  // reserves a second preview column just because the viewport is wide.
+  const [splitPreviewOpen, setSplitPreviewOpen] = useState(false);
   const [previewSelection, setPreviewSelection] = useState<PreviewSelection | null>(null);
   const [completion, setCompletion] = useState<{ changes: MutationSummary; previewUpdated: boolean; repaired: boolean } | null>(null);
 
@@ -600,24 +597,11 @@ function CommandStudioContent() {
 
   const handleSelectDestination = useCallback((dest: StudioDestination) => {
     setDestination(dest);
-    // Mirror the `hasAdvancedSurface` rule (below) for the destination being
-    // navigated TO. Without this, tapping a mobile bottom-nav destination
-    // (Create/Assets/Agents/Missions/More) only updated `destination` state —
-    // `advancedToolsOpen` stayed whatever it was before the tap, so
-    // `showAdvancedWorkspace` never flipped and the center workspace kept
-    // rendering the default chat/preview surface. Every nav button appeared
-    // to do nothing on a fresh /studio visit (advancedToolsOpen starts false).
-    setAdvancedToolsOpen(
-      dest !== "studio"
-        || (studioMode !== "work" && studioMode !== "preview")
-        || workSurface === "builder",
-    );
-  }, [studioMode, workSurface]);
+  }, []);
 
   // handleRouteTool must be declared before useStudioConversation so the
   // conversation controller can reference it without a TDZ error.
   const handleRouteTool = useCallback((tool: StudioTool, command = "") => {
-    setAdvancedToolsOpen(true);
     if (tool === "camera") {
       setCameraDock((v) => ({ ...v, open: true }));
       return;
@@ -889,7 +873,6 @@ function CommandStudioContent() {
           }
         } else {
           setCompletion({ changes, previewUpdated: previewReady, repaired });
-          setAdvancedToolsOpen(false);
           setContextDrawerOpen(false);
           setLittActiveTab("chat");
         }
@@ -1403,29 +1386,21 @@ function CommandStudioContent() {
   const isCode = destination === "studio" && studioMode === "code";
   const isPreview = destination === "studio" && studioMode === "preview";
   const isMedia = destination === "studio" && studioMode === "media";
-  const hasAdvancedSurface = destination !== "studio"
-    || (studioMode !== "work" && studioMode !== "preview")
-    || workSurface === "builder";
-  const showAdvancedWorkspace = advancedToolsOpen && hasAdvancedSurface;
-  const showDefaultChatPreview = !showAdvancedWorkspace;
-  // Single source of truth for the permanent right-column preview
-  // (desktop split >=1280px with advanced tools open). When it is
-  // mounted, every other preview surface must yield so exactly one
-  // StudioPreviewPanel exists at a time.
-  const permanentPreviewVisible = viewportTier !== null && advancedToolsOpen && isDesktopSplit;
+  // The second preview is opt-in. The normal Studio layout always has one
+  // primary workspace, even on large displays.
+  const permanentPreviewVisible = splitPreviewOpen && isDesktopSplit;
 
-  // Primary workspace tabs — canonical Ultra Vision stages.
-  // Plan | Canvas | Code | Preview | Media
+  // Primary workspace tabs. Plan and Media remain available through their
+  // existing routes/drawers, but Design / Code / Preview are the only
+  // persistent workspace modes competing for the main workspace.
   // These map through workspaceStageToMode() to legacy StudioMode internals.
   // Chat lives inside the LiTT left panel (Chat | Live tabs).
   // Files/Components live in the contextual right drawer.
   // Media shows generated images, video, music, and audio artifacts.
   const workspaceTabs: { id: WorkspaceStage; label: string }[] = [
-    { id: "plan", label: "Plan" },
-    { id: "canvas", label: "Canvas" },
+    { id: "canvas", label: "Design" },
     { id: "code", label: "Code" },
     { id: "preview", label: "Preview" },
-    { id: "media", label: "Media" },
   ];
 
   // LiTT Chat/Live content — built ONCE per render and reused by whichever
@@ -1736,13 +1711,11 @@ function CommandStudioContent() {
           )}
 
           <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden overflow-x-hidden">
-            {/* Persistent primary workspace switcher: Plan | Canvas | Code | Preview | Media
-                Preview tab is kept for mobile compatibility — on desktop the
-                Preview is always visible as a permanent right column, so
-                selecting "Preview" shows the Plan surface (conversation) in
-                the center while the live Preview remains on the right. */}
+            {/* Persistent primary workspace switcher. The main workspace has
+                one mode at a time; Preview is not mounted beside it unless
+                the user explicitly enables split preview. */}
             <div
-              className={`glass-shell ${advancedToolsOpen ? "flex" : "hidden"} shrink-0 items-center gap-0.5 border-b px-2`}
+              className="glass-shell flex shrink-0 items-center gap-0.5 border-b px-2"
               style={{
                 height: 36,
                 backgroundColor: "rgba(13,9,22,0.85)",
@@ -1789,28 +1762,14 @@ function CommandStudioContent() {
                   toggled from the top command bar. */}
             </div>
 
-            {/* Workspace content + permanent Preview (desktop split).
-                On desktop: [workspace-content flex-1] [ResizeHandle] [Preview fixed-width]
-                On mobile: [workspace-content flex-1] only — Preview is a workspace tab. */}
+            {/* Workspace content. Optional split preview adds a second pane
+                only after the user explicitly requests it. */}
             <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
               <div
                 className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
                 data-testid="studio-center-workspace"
               >
-                {showDefaultChatPreview && !permanentPreviewVisible ? (
-                  <StudioPreviewPanel
-                    projectId={capabilities.projectId}
-                    projectName={capabilities.projectName}
-                    repositoryName={capabilities.repositoryName}
-                    branch={capabilities.activeBranch}
-                    sourceKind={capabilities.sourceKind}
-                    sourceStatus={capabilities.sourceStatus}
-                    versionControl={capabilities.versionControl}
-                    workspaceStatus={capabilities.workspaceStatus ?? null}
-                    refreshKey={workspaceRevision}
-                    onSelectionChange={setPreviewSelection}
-                  />
-                ) : isPlan ? (
+                {isPlan ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
                     <StudioPlanSurface
                       capabilities={capabilities}
@@ -1840,13 +1799,11 @@ function CommandStudioContent() {
                     />
                   </div>
                 ) : isPreview ? (
-                  /* On desktop split (>=1280px), the Preview tab shows the Plan surface
-                     (conversation) in the center — the actual live Preview is
-                     permanently rendered in the right column below. Below 1280px
-                     (compact laptop/tablet/mobile), the Preview tab shows StudioPreviewPanel
-                     in the center workspace. */
+                  /* Preview is the primary workspace by default. When the
+                     user explicitly enables split preview, the conversation
+                     remains in the main pane and Preview moves to the side. */
                   <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-                    {!isDesktopSplit ? (
+                    {!permanentPreviewVisible ? (
                       <StudioPreviewPanel
                         projectId={capabilities.projectId}
                         projectName={capabilities.projectName}
@@ -1856,6 +1813,8 @@ function CommandStudioContent() {
                         sourceStatus={capabilities.sourceStatus}
                         versionControl={capabilities.versionControl}
                         workspaceStatus={capabilities.workspaceStatus ?? null}
+                        onToggleSplitPreview={() => setSplitPreviewOpen((value) => !value)}
+                        splitPreviewOpen={false}
                       />
                     ) : (
                       <StudioPlanSurface
@@ -1906,11 +1865,9 @@ function CommandStudioContent() {
                 )}
               </div>
 
-              {/* Permanent Live Preview — RIGHT column (desktop split >=1280px only).
-                  Promoted from a center workspace tab to a permanent right-side column
-                  on large displays (>=1280px). Always rendered on desktop split regardless
-                  of which workspace tab is selected. Below 1280px, Preview is accessed
-                  via the workspace tab to give the center workspace maximum room. */}
+              {/* Optional Live Preview — RIGHT column. It is never mounted
+                  by viewport size alone; only the explicit split-preview
+                  action can open it. */}
               {permanentPreviewVisible && (
                 <>
                   <ResizeHandle
@@ -1943,6 +1900,8 @@ function CommandStudioContent() {
                       workspaceStatus={capabilities.workspaceStatus ?? null}
                       refreshKey={workspaceRevision}
                       onSelectionChange={setPreviewSelection}
+                      onToggleSplitPreview={() => setSplitPreviewOpen(false)}
+                      splitPreviewOpen
                     />
                   </div>
                 </>
@@ -2116,20 +2075,6 @@ function CommandStudioContent() {
             />
           )}
         </div>
-
-        {/* Operator status bar — bottom. Uses real execution state. */}
-        <StudioOperatorBar
-          onOpenTerminal={handleOpenTerminal}
-          onOpenActivity={() => handleOpenDockTab("activity")}
-          onRollback={handleRollback}
-          onStop={() => {
-            conversation.cancel();
-            useExecutionStore.getState().endRun("cancelled");
-          }}
-          onResolveApproval={handleResolveApproval}
-          terminalStatus={capabilities.terminalStatus}
-          modelLabel={modelLabel}
-        />
 
         {/* Persistent music player — survives tool switches while audio plays */}
         <PersistentMusicPlayer />
