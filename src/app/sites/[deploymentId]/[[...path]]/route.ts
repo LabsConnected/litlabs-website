@@ -65,7 +65,27 @@ export async function GET(
     return new NextResponse("Not found", { status: 404 });
   }
 
-  return new NextResponse(file.content, {
+  let content = file.content;
+  // LiTT form wiring: static exports render forms with an empty
+  // `deploymentId` hidden input (the id doesn't exist until the deploy
+  // is created). At serve time the id is known from the URL, so fill it
+  // in for any page that carries a LiTT form — the form backend resolves
+  // the site owner from this id. Without this, a published form can
+  // never submit. The id was validated against a strict pattern above,
+  // so it is safe to interpolate.
+  if (
+    file.contentType.includes("text/html") &&
+    typeof content === "string" &&
+    content.includes('data-litt-form="1"') &&
+    content.includes('name="deploymentId" value=""')
+  ) {
+    content = content.replaceAll(
+      'name="deploymentId" value=""',
+      `name="deploymentId" value="${deploymentId}"`,
+    );
+  }
+
+  return new NextResponse(content, {
     status: 200,
     headers: {
       "Content-Type": file.contentType,
