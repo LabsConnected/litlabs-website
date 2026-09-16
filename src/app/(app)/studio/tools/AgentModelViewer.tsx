@@ -181,7 +181,7 @@ export function AgentModelViewer({
       <div className="shrink-0 px-5 py-3 text-center text-[10px]" style={{ color: T.textMuted }}>
         {modelUrl && !error && !loading
           ? "Drag to rotate · Scroll to zoom · Touch to orbit"
-          : "Premium artwork shown — 3D model coming soon"}
+          : "Premium artwork shown"}
       </div>
     </div>
   );

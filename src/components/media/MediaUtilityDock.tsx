@@ -17,8 +17,17 @@ import { MediaExpandedDrawer } from "./MediaExpandedDrawer";
 export function MediaUtilityDock() {
   const { dockMode } = useMediaHub();
 
-  if (dockMode === "hidden") return null;
   if (dockMode === "collapsed") return <MediaCollapsedBar />;
   if (dockMode === "expanded") return <MediaExpandedDrawer />;
-  return null;
+  // "hidden" (default): the Media tab still exists in the Studio dock —
+  // render a truthful empty state instead of a blank panel.
+  return (
+    <div
+      className="flex h-full items-center justify-center text-[12px] font-medium"
+      style={{ color: "var(--text-muted)" }}
+      data-testid="media-empty-state"
+    >
+      Nothing playing — media you generate or play shows up here
+    </div>
+  );
 }

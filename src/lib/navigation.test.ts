@@ -8,12 +8,12 @@ afterEach(() => {
 describe("getVisibleNavSections — flag-gated nav items", () => {
   it("hides /games while retroGameRuntime is disabled (default)", async () => {
     const { getVisibleNavSections } = await import("./navigation");
-    const explore = getVisibleNavSections().find((s) => s.id === "explore");
-    expect(explore).toBeDefined();
-    expect(explore!.items.map((i) => i.href)).not.toContain("/games");
-    // The rest of Explore stays intact
-    expect(explore!.items.map((i) => i.href)).toEqual(
-      expect.arrayContaining(["/discover", "/marketplace"]),
+    const main = getVisibleNavSections().find((s) => s.id === "main");
+    expect(main).toBeDefined();
+    expect(main!.items.map((i) => i.href)).not.toContain("/games");
+    // The rest of Main stays intact
+    expect(main!.items.map((i) => i.href)).toEqual(
+      expect.arrayContaining(["/dashboard", "/studio", "/projects", "/discover", "/marketplace"]),
     );
   });
 
@@ -22,14 +22,14 @@ describe("getVisibleNavSections — flag-gated nav items", () => {
       isFeatureEnabled: (flag: string) => flag === "retroGameRuntime",
     }));
     const { getVisibleNavSections } = await import("./navigation");
-    const explore = getVisibleNavSections().find((s) => s.id === "explore");
-    expect(explore!.items.map((i) => i.href)).toContain("/games");
+    const main = getVisibleNavSections().find((s) => s.id === "main");
+    expect(main!.items.map((i) => i.href)).toContain("/games");
   });
 
   it("never mutates the canonical APP_NAV_SECTIONS", async () => {
     const { getVisibleNavSections, APP_NAV_SECTIONS } = await import("./navigation");
     getVisibleNavSections();
-    const explore = APP_NAV_SECTIONS.find((s) => s.id === "explore");
-    expect(explore!.items.map((i) => i.href)).toContain("/games");
+    const main = APP_NAV_SECTIONS.find((s) => s.id === "main");
+    expect(main!.items.map((i) => i.href)).toContain("/games");
   });
 });

@@ -259,12 +259,12 @@ function MediaTile({
           </>
         )}
         {item.type === "video" && (
-          <ActionButton onClick={() => {}} label="Play">
+          <ActionButton onClick={() => window.open(item.url, "_blank", "noopener")} label="Play">
             <Play size={16} fill="currentColor" />
           </ActionButton>
         )}
         {item.type === "image" && (
-          <ActionButton onClick={() => {}} label="View">
+          <ActionButton onClick={() => window.open(item.url, "_blank", "noopener")} label="View">
             <ExternalLink size={14} />
           </ActionButton>
         )}

@@ -136,6 +136,7 @@ function MarketplaceInner() {
   const searchParams = useSearchParams();
   const [items, setItems] = useState<MarketplaceItem[]>([]);
   const [installations, setInstallations] = useState<Map<string, Installation>>(new Map());
+  const [connectedProviders, setConnectedProviders] = useState<Set<string>>(new Set());
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedType, setSelectedType] = useState<string>("all");
   const [sortBy, setSortBy] = useState<SortOption>("featured");
@@ -214,6 +215,27 @@ function MarketplaceInner() {
     }
   }, [isSignedIn]);
 
+  // Real connection status — required_connections on an item lists what it
+  // needs; a missing dep only exists when the provider isn't connected.
+  const loadConnections = useCallback(async () => {
+    if (!isSignedIn) return;
+    try {
+      const res = await fetch("/api/connections");
+      const data = await res.json();
+      if (Array.isArray(data.overview)) {
+        setConnectedProviders(
+          new Set(
+            data.overview
+              .filter((c: { isConnected?: boolean }) => c.isConnected)
+              .map((c: { provider: string }) => c.provider),
+          ),
+        );
+      }
+    } catch {
+      // silent — missing status means every requirement shows its setup CTA
+    }
+  }, [isSignedIn]);
+
   // Root cause of the first-load stall: browsers pause
   // requestAnimationFrame entirely while a tab is backgrounded/hidden (a
   // link opened in a new background tab, a quick tab-switch during
@@ -224,8 +246,11 @@ function MarketplaceInner() {
   // ever had anything in flight to time out. Fire the load directly.
   useEffect(() => {
     loadItems();
-    if (isSignedIn) loadInstalled();
-  }, [loadItems, loadInstalled, isSignedIn]);
+    if (isSignedIn) {
+      loadInstalled();
+      loadConnections();
+    }
+  }, [loadItems, loadInstalled, loadConnections, isSignedIn]);
 
   const installItem = useCallback(async (item: MarketplaceItem) => {
     if (!isSignedIn) {
@@ -565,6 +590,7 @@ function MarketplaceInner() {
                       onUninstall={() => uninstallItem(item)}
                       onToggleEnabled={() => toggleEnabled(item)}
                       isSignedIn={isSignedIn}
+                      connectedProviders={connectedProviders}
                       accentColor={T.accentColor}
                       borderColor={T.borderColor}
                       boxBg={T.boxBg}
@@ -633,6 +659,7 @@ function MarketplaceInner() {
                       onUninstall={() => uninstallItem(item)}
                       onToggleEnabled={() => toggleEnabled(item)}
                       isSignedIn={isSignedIn}
+                      connectedProviders={connectedProviders}
                       accentColor={T.accentColor}
                       borderColor={T.borderColor}
                       boxBg={T.boxBg}
@@ -785,6 +812,7 @@ const MarketplaceCard = memo(function MarketplaceCard({
   onUninstall,
   onToggleEnabled,
   isSignedIn,
+  connectedProviders,
   accentColor,
   borderColor,
   boxBg,
@@ -797,6 +825,7 @@ const MarketplaceCard = memo(function MarketplaceCard({
   onUninstall: () => void;
   onToggleEnabled: () => void;
   isSignedIn: boolean;
+  connectedProviders: Set<string>;
   accentColor: string;
   borderColor: string;
   boxBg: string;
@@ -808,7 +837,10 @@ const MarketplaceCard = memo(function MarketplaceCard({
   const isInstalled = !!installation;
   const isEnabled = installation?.enabled ?? false;
   const isComingSoon = item.status === "coming_soon";
-  const needsSetup = item.required_connections.length > 0;
+  const missingConnections = item.required_connections.filter(
+    (c) => !connectedProviders.has(c),
+  );
+  const needsSetup = isInstalled && missingConnections.length > 0;
 
   return (
     <article
@@ -866,14 +898,21 @@ const MarketplaceCard = memo(function MarketplaceCard({
           )}
         </div>
 
-        {/* Requirements */}
-        {needsSetup && (
-          <div className="mt-2 flex items-center gap-1.5 text-[10px]" style={{ color: textMuted }}>
+        {/* Requirements — always listed; links to the connections settings
+            where the dependency can actually be connected. When the item is
+            installed and a dep is missing, the missing dep is highlighted. */}
+        {item.required_connections.length > 0 && (
+          <Link
+            href="/settings/connections"
+            className="mt-2 flex items-center gap-1.5 text-[10px] transition hover:opacity-80"
+            style={{ color: textMuted }}
+          >
             <span>Requires:</span>
-            <span className="font-medium" style={{ color: isInstalled && !isEnabled ? "#fbbf24" : textMuted }}>
+            <span className="font-medium underline decoration-dotted" style={{ color: needsSetup ? "#fbbf24" : textMuted }}>
               {item.required_connections.map((c) => CONNECTION_LABELS[c] || c).join(", ")}
             </span>
-          </div>
+            <ArrowRight size={10} />
+          </Link>
         )}
 
         {/* Status badge + price */}
@@ -930,15 +969,18 @@ const MarketplaceCard = memo(function MarketplaceCard({
             </Link>
           ) : isInstalled ? (
             <div className="flex gap-2">
-              {isEnabled ? (
+              {needsSetup ? (
+                // Capability needs a connected service before it can run —
+                // send the user to the real setup surface instead of a
+                // dead ?capability= studio link.
                 <Link
-                  href={`/studio?tool=chat&capability=${item.capability_key}`}
+                  href="/settings/connections"
                   className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition hover:scale-[1.02]"
                   style={{ background: categoryColor + "20", color: categoryColor }}
                 >
-                  <ArrowRight size={12} /> Use in Studio
+                  <ArrowRight size={12} /> Set up connection
                 </Link>
-              ) : (
+              ) : !isEnabled ? (
                 <button
                   onClick={onToggleEnabled}
                   className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold"
@@ -946,6 +988,17 @@ const MarketplaceCard = memo(function MarketplaceCard({
                 >
                   Enable
                 </button>
+              ) : (
+                // Installed + enabled, no missing connections. Installed
+                // capabilities do not yet have a Studio activation surface —
+                // show the truthful state rather than a dead "Use in Studio"
+                // link whose ?capability= param nothing consumes.
+                <span
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold"
+                  style={{ background: borderColor + "10", color: textMuted }}
+                >
+                  <Check size={12} /> Active
+                </span>
               )}
               <button
                 onClick={onToggleEnabled}

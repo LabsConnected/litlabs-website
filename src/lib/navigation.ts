@@ -68,35 +68,56 @@ export const GROUP_ACCENTS: Record<string, string> = {
   More: "#94a3b8",
 };
 
-/* ─── Canonical App Shell navigation (COMMAND / STUDIO / EXPLORE) ─── */
-// Studio is its own top-level section — it is the primary product surface
-// and must not sit under Command. Creation routes remain reachable directly
-// through Studio without adding a separate Create sidebar section.
+/* ─── Canonical App Shell navigation ───────────────────────────────────
+ * Main: Dashboard · Studio · Projects · Explore · Marketplace
+ * Secondary: Library · Wallet · Developer Tools · Settings · Profile
+ *   (Wallet/Settings live in APP_NAV_BOTTOM; Profile lives in the
+ *   identity dock's account menu.)
+ * Legacy creation routes (/builder, /ai-builder, /chat, /generate, …)
+ * all redirect into Studio, so they are not separate destinations.
+ */
 
 export const APP_NAV_SECTIONS: NavSection[] = [
   {
-    id: "command",
-    label: "Command",
+    id: "main",
+    label: "Main",
     items: [
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, shortcut: "⌘D" },
-    ],
-  },
-  {
-    id: "studio",
-    label: "Studio",
-    items: [
       { label: "Studio", href: "/studio", icon: Sparkles, shortcut: "⌘S" },
-    ],
-  },
-  {
-    id: "explore",
-    label: "Explore",
-    items: [
-      { label: "Games", href: "/games", icon: GamesIcon },
-      { label: "Discover", href: "/discover", icon: Compass },
+      { label: "Projects", href: "/projects", icon: FolderKanban },
+      { label: "Explore", href: "/discover", icon: Compass },
       { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
+      { label: "Games", href: "/games", icon: GamesIcon },
       // /hire is permanently retired (always redirects to /studio — see
       // src/app/(app)/hire/page.tsx) so it is not a nav destination.
+    ],
+  },
+];
+
+/* ─── Secondary navigation ─────────────────────────────────────────────
+ * Library + Developer Tools destinations. Rendered inside the identity
+ * dock's account menu (AppShell) — the top bar only carries Main pills,
+ * so secondary surfaces live one click away without flooding the bar.
+ * Wallet/Settings are APP_NAV_BOTTOM; Profile stays in the account menu.
+ */
+export const APP_NAV_SECONDARY: NavSection[] = [
+  {
+    id: "library",
+    label: "Library",
+    items: [
+      { label: "Files", href: "/library/files", icon: FileText },
+      { label: "Saved", href: "/library/saved", icon: Bookmark },
+      { label: "Code Workspace", href: "/code", icon: Code2 },
+    ],
+  },
+  {
+    id: "devtools",
+    label: "Developer Tools",
+    items: [
+      { label: "CLI", href: "/cli", icon: Terminal },
+      { label: "Terminal", href: "/studio?tool=terminal", icon: Terminal },
+      { label: "Connections", href: "/settings/connections", icon: Layers },
+      { label: "Docs", href: "/docs", icon: FileText },
     ],
   },
 ];
@@ -123,11 +144,13 @@ export const APP_NAV_BOTTOM: NavItem[] = [
   { label: "Settings", href: "/settings", icon: Settings },
 ];
 
-/* Mobile bottom bar — uses same canonical data, simplified to 5 slots */
+/* Mobile bottom-bar data — currently unused by the top-bar AppShell
+   (mobile uses the scrollable section strip + account menu), kept for
+   the mobile bottom-bar surface if it returns. */
 export const APP_MOBILE_BOTTOM_ITEMS: MobileNavItem[] = [
   { label: "Home", href: "/dashboard", icon: LayoutDashboard },
   { label: "Studio", href: "/studio", icon: Sparkles },
-  { label: "Discover", href: "/discover", icon: Compass },
+  { label: "Explore", href: "/discover", icon: Compass },
   { label: "Me", href: "/profile", icon: User },
 ];
 

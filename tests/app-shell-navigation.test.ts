@@ -12,6 +12,7 @@
 import { describe, it, expect } from "vitest";
 import {
   APP_NAV_SECTIONS,
+  APP_NAV_SECONDARY,
   APP_NAV_BOTTOM,
   APP_MOBILE_BOTTOM_ITEMS,
   isAppNavActive,
@@ -20,24 +21,18 @@ import {
 
 describe("AppShell Navigation", () => {
   describe("Canonical nav sections", () => {
-    it("has exactly 3 sections in order: Command, Studio, Explore", () => {
+    it("has a single Main section with the canonical destinations", () => {
       const ids = APP_NAV_SECTIONS.map((s) => s.id);
-      expect(ids).toEqual(["command", "studio", "explore"]);
-    });
-
-    it("Command section has Dashboard only", () => {
-      const command = APP_NAV_SECTIONS.find((s) => s.id === "command");
-      expect(command).toBeDefined();
-      const labels = command!.items.map((i) => i.label);
-      expect(labels).toEqual(["Dashboard"]);
-    });
-
-    it("Studio is its own section (not under Command)", () => {
-      const studio = APP_NAV_SECTIONS.find((s) => s.id === "studio");
-      expect(studio).toBeDefined();
-      const labels = studio!.items.map((i) => i.label);
-      expect(labels).toEqual(["Studio"]);
-      expect(studio!.items[0].href).toBe("/studio");
+      expect(ids).toEqual(["main"]);
+      const labels = APP_NAV_SECTIONS[0].items.map((i) => i.label);
+      expect(labels).toEqual([
+        "Dashboard",
+        "Studio",
+        "Projects",
+        "Explore",
+        "Marketplace",
+        "Games",
+      ]);
     });
 
     it("does not expose a Create section or Create item", () => {
@@ -46,24 +41,32 @@ describe("AppShell Navigation", () => {
       expect(labels).not.toContain("Create");
     });
 
-    it("Explore section has Games, Discover, Marketplace", () => {
-      const explore = APP_NAV_SECTIONS.find((s) => s.id === "explore");
-      expect(explore).toBeDefined();
-      const labels = explore!.items.map((i) => i.label);
-      expect(labels).toEqual(["Games", "Discover", "Marketplace"]);
-    });
-
-    // Music and Showcase were removed from the sidebar (routes still
-    // exist). Projects is not a sidebar entry.
-    it("does NOT contain Music, Showcase, or Projects", () => {
+    // Music and Showcase were removed from nav (routes still exist).
+    it("does NOT contain Music or Showcase", () => {
       const labels = APP_NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.label));
-      for (const removed of ["Music", "Showcase", "Projects"]) {
+      for (const removed of ["Music", "Showcase"]) {
         expect(labels).not.toContain(removed);
       }
       const hrefs = APP_NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.href));
-      for (const removedHref of ["/studio?tool=music", "/showcase", "/projects"]) {
+      for (const removedHref of ["/studio?tool=music", "/showcase"]) {
         expect(hrefs).not.toContain(removedHref);
       }
+    });
+
+    it("Secondary sections expose Library and Developer Tools", () => {
+      const ids = APP_NAV_SECONDARY.map((s) => s.id);
+      expect(ids).toEqual(["library", "devtools"]);
+      const hrefs = APP_NAV_SECONDARY.flatMap((s) => s.items.map((i) => i.href));
+      expect(hrefs).toEqual(
+        expect.arrayContaining([
+          "/library/files",
+          "/library/saved",
+          "/code",
+          "/cli",
+          "/settings/connections",
+          "/docs",
+        ]),
+      );
     });
 
     // Regression: /hire is permanently retired — the page always redirects
@@ -153,9 +156,9 @@ describe("AppShell Navigation", () => {
       expect(labels).toContain("Studio");
     });
 
-    it("includes Discover and Me", () => {
+    it("includes Explore and Me", () => {
       const labels = APP_MOBILE_BOTTOM_ITEMS.map((i) => i.label);
-      expect(labels).toContain("Discover");
+      expect(labels).toContain("Explore");
       expect(labels).toContain("Me");
     });
 

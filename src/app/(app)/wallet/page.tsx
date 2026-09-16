@@ -228,7 +228,7 @@ function WalletContent() {
             </div>
             <p className="text-sm opacity-60">
               {isSignedIn
-                ? "Full transaction history is coming soon. Check Settings → Billing for recent orders."
+                ? "Your full order and billing history lives in Settings → Billing."
                 : "Sign in to view your transaction history."}
             </p>
             {isSignedIn && (
