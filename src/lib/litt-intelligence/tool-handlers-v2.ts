@@ -222,6 +222,11 @@ export const handleGitCommit: ToolHandler = async (inputs, transport) => {
 export const handleTerminalExecute: ToolHandler = async (inputs, transport) => {
   const command = inputs.command as string;
   if (!command) return { success: false, error: "command is required" };
+  // Enforcement floor: a shell command can write files too (heredoc,
+  // `cat >`, `tee`), so placeholder tokens are rejected here as well —
+  // the files.write guard alone does not close that bypass.
+  const badCommand = placeholderViolation(command, "command");
+  if (badCommand) return { success: false, error: badCommand };
 
   try {
     const result = await transport.exec(command, 30_000);

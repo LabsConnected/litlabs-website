@@ -199,6 +199,7 @@ describe("mutation handlers — enforcement floor", () => {
       mkdir: vi.fn(async () => {}),
       rename: vi.fn(async () => {}),
       gitCommit: vi.fn(async () => ({ committed: true })),
+      exec: vi.fn(async () => ({ exitCode: 0, stdout: "", stderr: "" })),
     } as unknown as WorkspaceTransport & {
       writeFile: ReturnType<typeof vi.fn>;
       applyPatch: ReturnType<typeof vi.fn>;
@@ -206,6 +207,7 @@ describe("mutation handlers — enforcement floor", () => {
       mkdir: ReturnType<typeof vi.fn>;
       rename: ReturnType<typeof vi.fn>;
       gitCommit: ReturnType<typeof vi.fn>;
+      exec: ReturnType<typeof vi.fn>;
     };
   }
 
@@ -281,5 +283,17 @@ describe("mutation handlers — enforcement floor", () => {
     const res = await handleGitCommit({ message: "Update [BRAND_NAME] landing" }, t);
     expect(res.success).toBe(false);
     expect(t.gitCommit).not.toHaveBeenCalled();
+  });
+
+  it("terminal.execute rejects a placeholder smuggled through a shell write", async () => {
+    const { handleTerminalExecute } = await loadHandlers();
+    const t = spyTransport();
+    const res = await handleTerminalExecute(
+      { command: "cat > index.html <<'EOF'\n<title>[PERSON_NAME]</title>\nEOF" },
+      t,
+    );
+    expect(res.success).toBe(false);
+    expect(res.error).toContain("[PERSON_NAME]");
+    expect(t.exec).not.toHaveBeenCalled();
   });
 });
