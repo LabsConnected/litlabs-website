@@ -87,16 +87,16 @@ export default function StudioGuideClient() {
             not sure which specialist to pick.
           </>,
           <>
-            <strong>Specialists</strong>{" "}— <InlineCode>LiTT</InlineCode> (your
-            main operator), <InlineCode>Spark</InlineCode> (creative companion
-            and designer), <InlineCode>Coder</InlineCode> (engineering and
-            implementation), <InlineCode>Writer</InlineCode> (content and
-            copy), <InlineCode>Researcher</InlineCode> (research and
-            synthesis), <InlineCode>Marketer</InlineCode> (marketing and
-            growth), <InlineCode>Analyst</InlineCode> (data and analytics),{" "}
-            <InlineCode>Nova</InlineCode> (business partner),{" "}
-            <InlineCode>Forge</InlineCode> (technical partner),{" "}
-            <InlineCode>Echo</InlineCode> (creative partner).
+            <strong>Specialists</strong>{" "}— <InlineCode>LiTT</InlineCode>{" "}(your
+            main operator), <InlineCode>Spark</InlineCode>{" "}(creative companion
+            and designer), <InlineCode>Coder</InlineCode>{" "}(engineering and
+            implementation), <InlineCode>Writer</InlineCode>{" "}(content and
+            copy), <InlineCode>Researcher</InlineCode>{" "}(research and
+            synthesis), <InlineCode>Marketer</InlineCode>{" "}(marketing and
+            growth), <InlineCode>Analyst</InlineCode>{" "}(data and analytics),{" "}
+            <InlineCode>Nova</InlineCode>{" "}(business partner),{" "}
+            <InlineCode>Forge</InlineCode>{" "}(technical partner),{" "}
+            <InlineCode>Echo</InlineCode>{" "}(creative partner).
           </>,
           <>
             <strong>Models</strong>{" "}— pick the underlying model for the

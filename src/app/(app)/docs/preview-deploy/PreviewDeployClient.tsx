@@ -151,9 +151,9 @@ export default function PreviewDeployClient() {
 
       <DocH2 id="cli-deploy">Deploying from the CLI</DocH2>
       <DocP>
-        From the terminal, <InlineCode>litt deploy verify</InlineCode> watches
+        From the terminal, <InlineCode>litt deploy verify</InlineCode>{" "}watches
         a deployment and verifies production health, and{" "}
-        <InlineCode>litt production finish</InlineCode> runs the remaining
+        <InlineCode>litt production finish</InlineCode>{" "}runs the remaining
         production gates before a release. See{" "}
         <Link
           href="/docs/cli"
