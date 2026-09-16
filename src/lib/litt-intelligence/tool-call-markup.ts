@@ -173,6 +173,30 @@ export function findToolCallMarkup(
   return null;
 }
 
+/**
+ * True when the text contains a recognizable tool-call envelope
+ * (<tool_call>, <invoke>, <dots_function_call>, …) — closed or truncated —
+ * that is not quoted inside inline code.
+ *
+ * Unlike findToolCallMarkup this does NOT require invocation intent: an
+ * envelope whose payload names no tool and carries no arg structure is
+ * still a text-format tool attempt. The execution lane uses this to fail
+ * over instead of accepting such a response as a final answer — otherwise
+ * the run silently completes with "nothing was executed".
+ */
+export function hasToolCallEnvelope(text: string): boolean {
+  if (!text || !text.trim()) return false;
+  for (const m of text.matchAll(new RegExp(ENVELOPE_RE.source, "gi"))) {
+    const idx = m.index ?? 0;
+    const whole = m[0];
+    // Skip markup quoted inside inline code — `like <tool_call>x</tool_call>`
+    // — those are examples, not invocations.
+    if (text[idx - 1] === "`" && text[idx + whole.length] === "`") continue;
+    return true;
+  }
+  return false;
+}
+
 // ─── Hygiene: strip non-executable markup from visible text ──────────
 //
 // Models that regress from native function calling emit tool calls as

@@ -27,7 +27,7 @@
 import "server-only";
 
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
-import { findToolCallMarkup, recoverTextToolCalls, stripToolCallMarkupText } from "./tool-call-markup";
+import { findToolCallMarkup, hasToolCallEnvelope, recoverTextToolCalls, stripToolCallMarkupText } from "./tool-call-markup";
 import { validateToolCallArgs } from "@litt/agent-core";
 import { SITE_URL } from "@/lib/siteConfig";
 import { logLLMCall, type LLMCallMetadata } from "@/lib/evals/braintrust";
@@ -701,7 +701,27 @@ function normalizeTextToolCalls<T extends { text: string; toolCalls: ToolCallReq
 ): T {
   const knownIds = new Set(toolIdMap.values());
   const hit = findToolCallMarkup(parsed.text, knownIds);
-  if (!hit) return parsed;
+  if (!hit) {
+    // A response that carries tool-call envelope markup but no detectable
+    // invocation is still a text-format tool attempt — the model reached
+    // for the tool protocol instead of the structured channel (e.g.
+    // `<dots_function_call>find ./src</dots_function_call>` amid prose).
+    // Accepting it as a final answer silently drops the request: the run
+    // completes with zero tool calls ("nothing was executed") and the
+    // launch flow burns its one reprompt on the same dead end. Fail over
+    // to a sibling model instead; when every route does this the run fails
+    // truthfully via AllRoutesFailedError. Responses that already carry
+    // native structured calls are unaffected — the envelope is stripped
+    // from the text by the hygiene pass below.
+    if (parsed.toolCalls.length === 0 && hasToolCallEnvelope(parsed.text)) {
+      throw new ProviderAttemptError(provider, model, {
+        class: "tool_call_parse_failed",
+        scope: "model",
+        message: "model emitted tool-call envelope markup with no parseable invocation",
+      });
+    }
+    return parsed;
+  }
 
   const recovery = recoverTextToolCalls(parsed.text, knownIds);
 
