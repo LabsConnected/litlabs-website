@@ -48,7 +48,10 @@ async function postHandler(req: NextRequest) {
   }
 
   if (!isAdminSupabaseConfigured()) {
-    return NextResponse.json({ success: true, mock: true });
+    return NextResponse.json(
+      { error: "Following is unavailable — the community feed isn’t connected yet." },
+      { status: 503 },
+    );
   }
 
   try {
@@ -69,7 +72,10 @@ async function postHandler(req: NextRequest) {
     }
     return NextResponse.json({ success: true, follow: data });
   } catch {
-    return NextResponse.json({ success: true, mock: true });
+    return NextResponse.json(
+      { error: "Following is unavailable — the community feed isn’t connected yet." },
+      { status: 503 },
+    );
   }
 }
 
@@ -82,7 +88,10 @@ async function deleteHandler(req: NextRequest) {
   if (!followeeId) return NextResponse.json({ error: "followee_id is required" }, { status: 400 });
 
   if (!isAdminSupabaseConfigured()) {
-    return NextResponse.json({ success: true, mock: true });
+    return NextResponse.json(
+      { error: "Following is unavailable — the community feed isn’t connected yet." },
+      { status: 503 },
+    );
   }
 
   try {
@@ -94,7 +103,10 @@ async function deleteHandler(req: NextRequest) {
     if (error) throw error;
     return NextResponse.json({ success: true });
   } catch {
-    return NextResponse.json({ success: true, mock: true });
+    return NextResponse.json(
+      { error: "Following is unavailable — the community feed isn’t connected yet." },
+      { status: 503 },
+    );
   }
 }
 

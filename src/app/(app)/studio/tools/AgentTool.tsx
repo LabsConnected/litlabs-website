@@ -1007,7 +1007,7 @@ function DetailMemory({ agent }: { agent: AgentDefinition }) {
         <div className="flex justify-between mb-1"><span>Storage</span><span style={{ color: agent.color }}>Project-scoped</span></div>
         <div className="flex justify-between"><span>Scope</span><span style={{ color: T.accentColor }}>Per-conversation</span></div>
       </div>
-      <Link href="/settings/memory"
+      <Link href="/settings?section=litt-knows"
         className="block text-center text-[11px] py-2.5 rounded-lg border transition hover:opacity-80"
         style={{ borderColor: `${T.borderColor}20`, color: T.textMuted }}>
         <Brain size={11} className="inline mr-1" /> Memory Settings
@@ -1060,7 +1060,7 @@ function DetailModel({
       <div className="text-[10px]" style={{ color: T.textMuted }}>
         Default task: <span className="font-bold" style={{ color: agent.color }}>{agent.defaultModelTask}</span>
       </div>
-      <Link href="/settings/models"
+      <Link href="/settings?section=ai-models"
         className="block text-center text-[11px] py-2.5 rounded-lg border transition hover:opacity-80"
         style={{ borderColor: `${T.borderColor}20`, color: T.textMuted }}>
         <Cpu size={11} className="inline mr-1" /> Model Settings
@@ -1117,7 +1117,7 @@ function DetailSettings({ agent }: { agent: AgentDefinition }) {
           </div>
         </div>
       </div>
-      <Link href="/settings/agents"
+      <Link href="/settings?section=agents"
         className="block text-center text-[11px] py-2.5 rounded-lg border transition hover:opacity-80"
         style={{ borderColor: `${T.borderColor}20`, color: T.textMuted }}>
         <SettingsIcon size={11} className="inline mr-1" /> Agent Settings

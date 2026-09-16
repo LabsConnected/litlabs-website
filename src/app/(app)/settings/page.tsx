@@ -2436,7 +2436,7 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
 
 /* ── Privacy & Security ────────────────────────────────────────────── */
 
-function PrivacySection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
+function PrivacySection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -2511,8 +2511,7 @@ function PrivacySection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
       </SettingsCard>
 
       <SettingsCard title="Active sessions" description="Devices logged into your account">
-        <p className="text-xs text-white/40">Manage your active sessions across devices. Sign out remotely from the Clerk account page.</p>
-        <Link href="/account" className="mt-2 inline-block text-xs font-bold" style={{ color: T.accentColor }}>Manage sessions →</Link>
+        <p className="text-xs text-white/40">Session management is coming soon — for now, sign out directly on each device.</p>
       </SettingsCard>
 
       <SettingsCard title="Data management" description="Export or delete your data (GDPR)">
