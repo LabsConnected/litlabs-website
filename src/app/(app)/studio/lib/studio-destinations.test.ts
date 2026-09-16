@@ -105,11 +105,11 @@ describe("studio-destinations", () => {
       expect(result.mode).toBe("work");
     });
 
-    it("maps game to Studio / Work (routing slot, no visible tab yet)", () => {
+    it("maps game to the canonical Create / Game surface", () => {
       const result = mapLegacyToolToDestination("game");
-      expect(result.destination).toBe("studio");
-      expect(result.legacyTool).toBe("chat");
-      expect(result.mode).toBe("work");
+      expect(result.destination).toBe("create");
+      expect(result.legacyTool).toBe("game");
+      expect(result.mode).toBe("game");
     });
 
     it("maps more tools to More with correct modes", () => {

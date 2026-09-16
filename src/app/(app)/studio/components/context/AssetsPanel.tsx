@@ -18,7 +18,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useStudioContext } from "@/app/(app)/studio/context/StudioContext";
 import { useAssetsRefreshTrigger } from "@/app/(app)/studio/hooks/useAssetsRefresh";
 import type { StudioAsset } from "@/lib/assets/types";
-import { FileImage, FileVideo, FileAudio, FileMusic, FileCode, FileBox, Loader2, FolderInput, Check, AlertCircle, Edit3, Send } from "lucide-react";
+import { FileImage, FileVideo, FileAudio, FileMusic, FileCode, FileBox, Loader2, FolderInput, Check, AlertCircle, Edit3, Send, Download } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 const KIND_ICON: Partial<Record<StudioAsset["kind"], LucideIcon>> = {
@@ -56,6 +56,7 @@ function inferFilename(asset: StudioAsset): string {
 }
 
 type InsertState = "idle" | "inserting" | "inserted" | "failed";
+type AssetFilter = "all" | StudioAsset["kind"];
 
 export default function AssetsPanel({ projectId }: { projectId?: string | null }) {
   const { activeAssetId, setActiveAssetId } = useStudioContext();
@@ -69,6 +70,7 @@ export default function AssetsPanel({ projectId }: { projectId?: string | null }
   const [editPrompt, setEditPrompt] = useState("");
   const [editState, setEditState] = useState<InsertState>("idle");
   const [editResult, setEditResult] = useState<string | null>(null);
+  const [filter, setFilter] = useState<AssetFilter>("all");
 
   const fetchAssets = useCallback(async () => {
     setLoading(true);
@@ -184,6 +186,8 @@ export default function AssetsPanel({ projectId }: { projectId?: string | null }
     );
   }
 
+  const visibleAssets = filter === "all" ? assets : assets.filter((asset) => asset.kind === filter);
+
   if (assets.length === 0) {
     return (
       <div
@@ -217,8 +221,15 @@ export default function AssetsPanel({ projectId }: { projectId?: string | null }
           <span className="truncate">Saved to {insertedPath}</span>
         </div>
       )}
+      <div className="mb-2 flex gap-1 overflow-x-auto pb-1" role="toolbar" aria-label="Asset filters">
+        {(["all", "image", "video", "music", "audio"] as const).map((value) => (
+          <button key={value} type="button" onClick={() => setFilter(value)} className="shrink-0 rounded-full border px-2 py-1 text-[10px] capitalize" style={{ borderColor: filter === value ? "var(--litt-primary)" : "var(--studio-border)", color: filter === value ? "var(--litt-primary)" : "var(--text-muted)" }} aria-pressed={filter === value}>
+            {value === "all" ? "All" : `${value}s`}
+          </button>
+        ))}
+      </div>
       <div className="flex flex-col gap-1">
-        {assets.map((asset) => {
+        {visibleAssets.map((asset) => {
           const Icon = KIND_ICON[asset.kind] ?? FileBox;
           const isActive = activeAssetId === asset.id;
           const insertState = insertStates[asset.id] ?? "idle";
@@ -328,6 +339,9 @@ export default function AssetsPanel({ projectId }: { projectId?: string | null }
                     <Edit3 size={13} />
                   </button>
                 )}
+                <a href={asset.url} download={asset.name} target="_blank" rel="noreferrer" className="shrink-0 rounded p-1" aria-label="Download asset" title="Download asset">
+                  <Download size={13} />
+                </a>
               </div>
 
               {/* Image edit panel — shown when editing this specific asset */}

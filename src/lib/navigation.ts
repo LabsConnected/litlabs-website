@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   Users,
   Sparkles,
+  Shapes as ShapesIcon,
   ShoppingBag,
   Gamepad2,
   BarChart3,
@@ -72,131 +73,55 @@ export const GROUP_ACCENTS: Record<string, string> = {
 // and must not sit under Command. Creation routes remain reachable directly
 // through Studio without adding a separate Create sidebar section.
 
+export const CANONICAL_MORE_ITEMS: NavItem[] = [
+  { label: "Projects", href: "/projects", icon: FolderKanban },
+  { label: "Games", href: "/games", icon: GamesIcon },
+  { label: "Discover", href: "/discover", icon: Compass },
+  { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
+  { label: "Showcase", href: "/showcase", icon: Star },
+  { label: "Wallet", href: "/wallet", icon: Wallet },
+  { label: "Docs", href: "/docs", icon: FileText },
+  { label: "Settings", href: "/settings", icon: Settings },
+];
+
+/** One global navigation contract shared by desktop and mobile shells. */
+export const CANONICAL_GLOBAL_NAV: NavItem[] = [
+  { label: "Home", href: "/dashboard", icon: LayoutDashboard, shortcut: "⌘H" },
+  { label: "Studio", href: "/studio", icon: Sparkles, shortcut: "⌘S" },
+  { label: "Create", href: "/studio?tool=chat", icon: ShapesIcon, shortcut: "⌘N" },
+  { label: "Assets", href: "/gallery", icon: Image },
+  { label: "Agents", href: "/agents", icon: Bot },
+  { label: "Missions", href: "/studio?tool=workflows", icon: Workflow },
+  { label: "More", href: "/projects", icon: Menu, children: CANONICAL_MORE_ITEMS },
+];
+
+/** Compatibility wrapper consumed by older shell code during migration. */
 export const APP_NAV_SECTIONS: NavSection[] = [
-  {
-    id: "command",
-    label: "Command",
-    items: [
-      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, shortcut: "⌘D" },
-    ],
-  },
-  {
-    id: "studio",
-    label: "Studio",
-    items: [
-      { label: "Studio", href: "/studio", icon: Sparkles, shortcut: "⌘S" },
-    ],
-  },
-  {
-    id: "explore",
-    label: "Explore",
-    items: [
-      { label: "Games", href: "/games", icon: GamesIcon },
-      { label: "Discover", href: "/discover", icon: Compass },
-      { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
-      // /hire is permanently retired (always redirects to /studio — see
-      // src/app/(app)/hire/page.tsx) so it is not a nav destination.
-    ],
-  },
+  { id: "global", label: "LiTT", items: CANONICAL_GLOBAL_NAV },
 ];
 
 /* Bottom-of-sidebar utility items (always visible).
    Profile is NOT here — it lives inside the identity dock's account menu. */
-export const APP_NAV_BOTTOM: NavItem[] = [
-  { label: "Wallet", href: "/wallet", icon: Wallet },
-  { label: "Settings", href: "/settings", icon: Settings },
-];
+export const APP_NAV_BOTTOM: NavItem[] = [];
 
 /* Mobile bottom bar — uses same canonical data, simplified to 5 slots */
 export const APP_MOBILE_BOTTOM_ITEMS: MobileNavItem[] = [
   { label: "Home", href: "/dashboard", icon: LayoutDashboard },
   { label: "Studio", href: "/studio", icon: Sparkles },
-  { label: "Discover", href: "/discover", icon: Compass },
-  { label: "Me", href: "/profile", icon: User },
+  { label: "Assets", href: "/gallery", icon: Image },
+  { label: "Agents", href: "/agents", icon: Bot },
 ];
 
-/* Legacy compat — still used by dead Sidebar.tsx, keep for safety */
+/* Compatibility projection for older consumers. It is derived from the
+   canonical contract so legacy shells cannot introduce a second nav model. */
 export const NAV_GROUPS: NavGroup[] = [
-  {
-    label: "Dashboard",
-    href: "/dashboard",
-    icon: LayoutDashboard,
-    accent: GROUP_ACCENTS.Dashboard,
-    items: [
-      { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
-      { label: "LiTT Assistant", href: "/litt", icon: Brain },
-    ],
-  },
-  {
-    label: "Studio",
-    href: "/studio?tool=chat",
-    icon: Sparkles,
-    accent: GROUP_ACCENTS.Studio,
-    items: [
-      { label: "Create", href: "/studio?tool=chat", icon: Sparkles },
-      { label: "Image", href: "/studio?tool=image", icon: Image },
-      { label: "Video", href: "/studio?tool=video", icon: Video },
-      { label: "Music", href: "/studio?tool=music", icon: Music },
-      { label: "Workflow Forge", href: "/studio?tool=pipeline", icon: Workflow },
-    ],
-  },
-  {
-    label: "Projects",
-    href: "/projects",
-    icon: FolderKanban,
-    accent: GROUP_ACCENTS.Projects,
-    items: [
-      { label: "All Projects", href: "/projects", icon: FolderKanban },
-      { label: "Code Workspace", href: "/code", icon: Code2 },
-      { label: "Files", href: "/library/files", icon: FileText },
-      { label: "Saved", href: "/library/saved", icon: Bookmark },
-    ],
-  },
-  {
-    label: "Gallery",
-    href: "/gallery",
-    icon: Image,
-    accent: GROUP_ACCENTS.Gallery,
-    items: [
-      { label: "Overview", href: "/gallery", icon: Image },
-      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-      { label: "Showcase", href: "/showcase", icon: Star },
-    ],
-  },
-  {
-    label: "Marketplace",
-    href: "/marketplace",
-    icon: ShoppingBag,
-    accent: GROUP_ACCENTS.Marketplace,
-    items: [
-      { label: "Browse Agents", href: "/marketplace", icon: Store },
-      { label: "AI Credits", href: "/marketplace?tab=littbits", icon: Wallet },
-      { label: "Purchases", href: "/wallet?tab=history", icon: Receipt },
-      { label: "Creator Hub", href: "/creator", icon: BarChart3 },
-    ],
-  },
-  {
-    label: "Discover",
-    href: "/discover",
-    icon: Users,
-    accent: GROUP_ACCENTS.Social,
-    items: [
-      { label: "Feed", href: "/discover", icon: Users },
-      { label: "Gallery", href: "/gallery", icon: Image },
-    ],
-  },
-  {
-    label: "More",
-    href: "/wallet",
-    icon: Menu,
-    accent: GROUP_ACCENTS.More,
-    items: [
-      { label: "Wallet", href: "/wallet", icon: Wallet },
-      { label: "Docs", href: "/docs", icon: FileText },
-      { label: "Settings", href: "/settings", icon: Settings },
-      { label: "Profile", href: "/profile", icon: User },
-    ],
-  },
+  ...CANONICAL_GLOBAL_NAV.map((item) => ({
+    label: item.label,
+    href: item.href ?? "/dashboard",
+    icon: item.icon,
+    accent: GROUP_ACCENTS[item.label] ?? GROUP_ACCENTS.More,
+    items: item.children ?? [],
+  })),
 ];
 
 type MobileNavItem = {
@@ -207,10 +132,7 @@ type MobileNavItem = {
 };
 
 export const MOBILE_BOTTOM_ITEMS: MobileNavItem[] = [
-  { label: "Studio", href: "/studio?tool=chat", icon: Sparkles },
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Discover", href: "/discover", icon: MessagesSquare },
-  { label: "Gallery", href: "/gallery", icon: Image },
+  ...APP_MOBILE_BOTTOM_ITEMS,
 ];
 
 export const AI_SUGGESTIONS = [

@@ -266,7 +266,7 @@ export function mapLegacyToolToDestination(
     case "music":
       return { destination: "studio", legacyTool: "chat", mode: "work", littMode: "music" };
     case "game":
-      return { destination: "studio", legacyTool: "chat", mode: "work", littMode: "auto" };
+      return { destination: "create", legacyTool: "game", mode: "game", littMode: "auto" };
 
     // Assets
     case "assets":

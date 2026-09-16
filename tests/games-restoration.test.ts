@@ -8,25 +8,20 @@ function fileExists(rel: string): boolean {
   return existsSync(join(ROOT, rel));
 }
 
-// Games were restored once, then retired from the public V1 surface. The
-// implementation is deliberately KEPT — the "Route Files Exist" block below
-// still guards it against deletion, so it can come back. What changed is the
-// public exposure: the feature flag is off, so nav hides the links and the
-// /games segment layout returns 404.
-describe("Games retired from public V1 — Navigation & Feature Flags", () => {
-  describe("Feature flag is disabled", () => {
-    it("retroGameRuntime.enabled is false", () => {
+describe("Games restored — Navigation & Feature Flags", () => {
+  describe("Feature flag is enabled", () => {
+    it("retroGameRuntime.enabled is true", () => {
       const content = readFileSync(join(ROOT, "src/config/feature-flags.ts"), "utf8");
       const match = content.match(/retroGameRuntime:\s*\{[\s\S]*?enabled:\s*(true|false)/);
       expect(match).not.toBeNull();
-      expect(match![1]).toBe("false");
+      expect(match![1]).toBe("true");
     });
 
-    it("retroGameRuntime.hideFromNav is true", () => {
+    it("retroGameRuntime.hideFromNav is false", () => {
       const content = readFileSync(join(ROOT, "src/config/feature-flags.ts"), "utf8");
       const match = content.match(/retroGameRuntime:\s*\{[\s\S]*?hideFromNav:\s*(true|false)/);
       expect(match).not.toBeNull();
-      expect(match![1]).toBe("true");
+      expect(match![1]).toBe("false");
     });
   });
 
@@ -42,14 +37,14 @@ describe("Games retired from public V1 — Navigation & Feature Flags", () => {
     });
   });
 
-  describe("Routes are closed, not just unlinked", () => {
-    it("the /games segment layout 404s when the flag is off", () => {
+  describe("Routes are available when enabled", () => {
+    it("the /games segment keeps an operational kill switch", () => {
       const content = readFileSync(
         join(ROOT, "src/app/(app)/games/layout.tsx"),
         "utf8",
       );
       expect(content).toContain('isFeatureEnabled("retroGameRuntime")');
-      expect(content).toContain("notFound()");
+      expect(content).toContain("return children");
     });
 
     it("/games is absent from the sitemap", () => {

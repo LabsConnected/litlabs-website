@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, Folder } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { classifyProject } from "@/lib/projects/types";
 
 interface ProjectOption {
   id: string;
@@ -25,6 +26,7 @@ export default function StudioProjectPicker({
   const [loading, setLoading] = useState(false);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [showTestRuns, setShowTestRuns] = useState(false);
 
   useEffect(() => {
     if (!open || projects.length > 0) return;
@@ -75,7 +77,8 @@ export default function StudioProjectPicker({
           ) : projects.length === 0 ? (
             <div className="px-2.5 py-3 text-[12px]" style={{ color: "var(--text-muted)" }}>No projects available.</div>
           ) : (
-            projects.map((project) => (
+            <>
+            {projects.filter((project) => showTestRuns || classifyProject(project) !== "test-runs").map((project) => (
               <button
                 key={project.id}
                 type="button"
@@ -89,7 +92,13 @@ export default function StudioProjectPicker({
                 <span className="min-w-0 flex-1 truncate text-[12px] font-bold">{project.name}</span>
                 <span className="shrink-0 text-[11px]" style={{ color: "var(--text-muted)" }}>{project.sourceType ?? "project"}</span>
               </button>
-            ))
+            ))}
+            {projects.some((project) => classifyProject(project) === "test-runs") && (
+              <button type="button" onClick={() => setShowTestRuns((value) => !value)} className="mt-1 w-full rounded-lg border px-2.5 py-2 text-left text-[11px]" style={{ borderColor: "var(--studio-border)", color: "var(--text-muted)" }}>
+                {showTestRuns ? "Hide test runs" : "Show test runs"}
+              </button>
+            )}
+            </>
           )}
         </div>
       )}

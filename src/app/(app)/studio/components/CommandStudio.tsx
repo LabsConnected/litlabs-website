@@ -98,6 +98,7 @@ const MissionForge = dynamic(() => import("../tools/MissionForge"), { ssr: false
 const CLIBridgeTool = dynamic(() => import("../tools/CLIBridgeTool"), { ssr: false });
 const SpaceTool = dynamic(() => import("../tools/SpaceTool"), { ssr: false });
 const PluginsTool = dynamic(() => import("../tools/PluginsTool"), { ssr: false });
+const GameCreatorTool = dynamic(() => import("../tools/GameCreatorTool"), { ssr: false });
 const CameraTool = dynamic(() => import("../tools/CameraTool"), { ssr: false });
 const ScreenTool = dynamic(() => import("../tools/ScreenTool"), { ssr: false });
 const LiveVoiceOverlay = dynamic(() => import("./LiveVoiceOverlay"), { ssr: false });
@@ -126,6 +127,7 @@ const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType<Record<str
   agents: AgentTool,
   assets: GalleryTool,
   plugins: PluginsTool,
+  game: GameCreatorTool,
   camera: CameraTool,
   screen: ScreenTool,
   workflows: MissionForge,
@@ -461,6 +463,8 @@ function CommandStudioContent() {
     return () => window.removeEventListener("studio:ask-litt", handler);
   }, [isMobileLitt]);
 
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceStage>(() => modeToWorkspaceStage(studioMode) ?? "plan");
+
   // Mobile keeps its existing contextual sheet; desktop uses the canonical
   // primary workspace tabs for Files and Inspector.
   const handleOpenAdvancedTools = useCallback(() => {
@@ -471,7 +475,7 @@ function CommandStudioContent() {
     } else {
       setWorkspaceTab("inspector");
     }
-  }, [isMobileLitt]);
+  }, [isMobileLitt, setWorkspaceTab]);
   const handleCloseAdvancedTools = useCallback(() => {
     setAdvancedToolsOpen(false);
     setContextDrawerOpen(false);
@@ -480,7 +484,7 @@ function CommandStudioContent() {
     setStudioMode("preview");
     setWorkspaceTab("preview");
     setWorkSurface("conversation");
-  }, []);
+  }, [setWorkspaceTab]);
   const handleOpenContextFiles = useCallback(() => {
     setAdvancedToolsOpen(true);
     if (isMobileLitt) {
@@ -489,7 +493,7 @@ function CommandStudioContent() {
     } else {
       setWorkspaceTab("files");
     }
-  }, [isMobileLitt]);
+  }, [isMobileLitt, setWorkspaceTab]);
   const handleOpenContextInspector = useCallback(() => {
     setAdvancedToolsOpen(true);
     if (isMobileLitt) {
@@ -498,7 +502,7 @@ function CommandStudioContent() {
     } else {
       setWorkspaceTab("inspector");
     }
-  }, [isMobileLitt]);
+  }, [isMobileLitt, setWorkspaceTab]);
   // Keyboard shortcut: Ctrl+Shift+A opens LiTT Activity (Live).
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -522,7 +526,6 @@ function CommandStudioContent() {
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [pendingCanvasAction, setPendingCanvasAction] = useState<ArtifactAction | null>(null);
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
-  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceStage>(() => modeToWorkspaceStage(studioMode) ?? "plan");
   const [healthRunTrigger, setHealthRunTrigger] = useState(0);
 
   // Files panel state is now managed by the Context Drawer (Phase C2).
@@ -570,7 +573,7 @@ function CommandStudioContent() {
       setInspectorTab(mapped.openInspector);
     }
     setPendingCommand(command);
-  }, [capabilities.terminalStatus, handleOpenContextInspector]);
+  }, [capabilities.terminalStatus, handleOpenContextInspector, setWorkspaceTab]);
 
   // The single conversation controller — calls canonical V12 API.
   const conversation = useCanonicalConversation({
@@ -1196,6 +1199,7 @@ function CommandStudioContent() {
       if (createMode === "audio") return "audio";
       if (createMode === "music") return "music";
       if (createMode === "environment") return "space";
+      if (createMode === "game") return "game";
       return "image";
     }
     if (destination === "assets") return "assets";
@@ -1861,6 +1865,7 @@ function StudioUnavailableSurface({
           {[
             { label: "Chat", desc: "Talk to LiTT", dest: "studio" as const, mode: "work" as const },
             { label: "Create", desc: "Image, video, audio", dest: "create" as const, mode: "image" as const },
+            { label: "Game", desc: "Build and publish a game", dest: "create" as const, mode: "game" as const },
             { label: "Code", desc: "Edit project files", dest: "studio" as const, mode: "code" as const },
             { label: "Preview", desc: "Live preview", dest: "studio" as const, mode: "preview" as const },
           ].map((tool) => (

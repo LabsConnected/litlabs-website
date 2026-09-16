@@ -20,50 +20,26 @@ import {
 
 describe("AppShell Navigation", () => {
   describe("Canonical nav sections", () => {
-    it("has exactly 3 sections in order: Command, Studio, Explore", () => {
+    it("has one canonical global section", () => {
       const ids = APP_NAV_SECTIONS.map((s) => s.id);
-      expect(ids).toEqual(["command", "studio", "explore"]);
+      expect(ids).toEqual(["global"]);
     });
 
-    it("Command section has Dashboard only", () => {
-      const command = APP_NAV_SECTIONS.find((s) => s.id === "command");
-      expect(command).toBeDefined();
-      const labels = command!.items.map((i) => i.label);
-      expect(labels).toEqual(["Dashboard"]);
+    it("global section has the canonical seven entries", () => {
+      const labels = APP_NAV_SECTIONS[0].items.map((i) => i.label);
+      expect(labels).toEqual(["Home", "Studio", "Create", "Assets", "Agents", "Missions", "More"]);
     });
 
-    it("Studio is its own section (not under Command)", () => {
-      const studio = APP_NAV_SECTIONS.find((s) => s.id === "studio");
-      expect(studio).toBeDefined();
-      const labels = studio!.items.map((i) => i.label);
-      expect(labels).toEqual(["Studio"]);
-      expect(studio!.items[0].href).toBe("/studio");
+    it("More contains the secondary destinations", () => {
+      const more = APP_NAV_SECTIONS[0].items.find((i) => i.label === "More");
+      expect(more?.children?.map((i) => i.label)).toEqual(["Projects", "Games", "Discover", "Marketplace", "Showcase", "Wallet", "Docs", "Settings"]);
     });
 
-    it("does not expose a Create section or Create item", () => {
-      const labels = APP_NAV_SECTIONS.flatMap((section) => section.items.map((item) => item.label));
-      expect(APP_NAV_SECTIONS.some((section) => section.id === "create")).toBe(false);
-      expect(labels).not.toContain("Create");
-    });
-
-    it("Explore section has Games, Discover, Marketplace", () => {
-      const explore = APP_NAV_SECTIONS.find((s) => s.id === "explore");
-      expect(explore).toBeDefined();
-      const labels = explore!.items.map((i) => i.label);
-      expect(labels).toEqual(["Games", "Discover", "Marketplace"]);
-    });
-
-    // Music and Showcase were removed from the sidebar (routes still
-    // exist). Projects is not a sidebar entry.
-    it("does NOT contain Music, Showcase, or Projects", () => {
+    it("keeps secondary destinations under More rather than duplicating them", () => {
       const labels = APP_NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.label));
-      for (const removed of ["Music", "Showcase", "Projects"]) {
-        expect(labels).not.toContain(removed);
-      }
-      const hrefs = APP_NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.href));
-      for (const removedHref of ["/studio?tool=music", "/showcase", "/projects"]) {
-        expect(hrefs).not.toContain(removedHref);
-      }
+      expect(labels).not.toContain("Dashboard");
+      expect(labels).not.toContain("Discover");
+      expect(labels).not.toContain("Marketplace");
     });
 
     // Regression: /hire is permanently retired — the page always redirects
@@ -76,9 +52,9 @@ describe("AppShell Navigation", () => {
   });
 
   describe("Bottom utility items", () => {
-    it("has Wallet and Settings (Profile lives in identity dock)", () => {
+    it("has no duplicate bottom navigation items", () => {
       const labels = APP_NAV_BOTTOM.map((i) => i.label);
-      expect(labels).toEqual(["Wallet", "Settings"]);
+      expect(labels).toEqual([]);
     });
 
     it("all bottom items have hrefs", () => {
@@ -153,10 +129,10 @@ describe("AppShell Navigation", () => {
       expect(labels).toContain("Studio");
     });
 
-    it("includes Discover and Me", () => {
+    it("includes Assets and Agents", () => {
       const labels = APP_MOBILE_BOTTOM_ITEMS.map((i) => i.label);
-      expect(labels).toContain("Discover");
-      expect(labels).toContain("Me");
+      expect(labels).toContain("Assets");
+      expect(labels).toContain("Agents");
     });
 
     it("all items have valid hrefs", () => {

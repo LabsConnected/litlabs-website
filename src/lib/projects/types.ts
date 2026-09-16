@@ -18,6 +18,15 @@ export type WorkspaceStatus =
   | "error"
   | "stopped";
 export type RuntimeStatus = "stopped" | "starting" | "ready" | "failed";
+export type ProjectCategory = "active" | "test-runs" | "archived";
+
+/** User-facing organization policy. Test fixtures never pollute normal work. */
+export function classifyProject(project: Pick<CanonicalProject, "name">): ProjectCategory {
+  const name = project.name.trim().toLowerCase();
+  if (name.startsWith("ember roast v1 acceptance")) return "test-runs";
+  if (name.includes("golden acceptance")) return "active";
+  return "active";
+}
 
 /** Template identifiers for blank project creation. */
 export type ProjectTemplateId = "blank-static" | "nextjs" | "react-vite" | "expo-react-native";

@@ -260,8 +260,8 @@ export default function GamesPage() {
               <h2 className="mt-2 text-xl font-black sm:text-2xl">Make your own game in Studio</h2>
               <p className="mt-2 max-w-md text-sm text-white/65">Use AI agents to design, code, and ship original mini-games — no engine setup required.</p>
             </div>
-            <Link href="/studio?tool=image" className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-violet-500 px-5 py-3 text-sm font-black text-white transition hover:bg-violet-400">
-              <Wand2 size={16} /> Open Studio
+            <Link href="/studio?tool=game" className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-violet-500 px-5 py-3 text-sm font-black text-white transition hover:bg-violet-400">
+              <Wand2 size={16} /> Create a game
             </Link>
           </div>
         </section>

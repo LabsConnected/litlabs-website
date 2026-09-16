@@ -481,6 +481,46 @@ function DesktopNavItem({
   T: ReturnType<typeof useTheme>["resolvedColors"];
 }) {
   const Icon = item.icon;
+  const [moreOpen, setMoreOpen] = useState(false);
+  const hasChildren = Boolean(item.children?.length);
+  if (hasChildren) {
+    return (
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setMoreOpen((value) => !value)}
+          title={collapsed ? item.label : undefined}
+          aria-expanded={moreOpen}
+          className={`group relative flex w-full items-center rounded-xl border transition-all duration-200 ${
+            collapsed ? "mx-auto h-10 w-10 justify-center" : "h-10 gap-3 px-3"
+          }`}
+          style={{
+            background: moreOpen ? `linear-gradient(90deg, ${T.accentColor}1a, ${T.accentColor}06, transparent)` : "transparent",
+            borderColor: moreOpen ? `${T.accentColor}30` : "transparent",
+            color: moreOpen ? T.textColor : T.textMuted,
+          }}
+          aria-label={item.label}
+        >
+          <Icon size={17} className="shrink-0" style={{ color: moreOpen ? T.accentColor : undefined }} />
+          {!collapsed && <span className="min-w-0 flex-1 truncate text-left text-[12px] font-bold">{item.label}</span>}
+          {!collapsed && <ChevronUp size={14} className={moreOpen ? "" : "rotate-180"} />}
+        </button>
+        {moreOpen && (
+          <div className={`mt-1 space-y-0.5 rounded-xl border p-1 ${collapsed ? "absolute left-full top-0 z-50 ml-2 w-52" : "ml-2"}`} style={{ borderColor: `${T.borderColor}25`, background: `${T.bgColor}f8`, backdropFilter: "blur(16px)" }}>
+            {item.children!.map((child) => {
+              const ChildIcon = child.icon;
+              return (
+                <Link key={child.label} href={child.href ?? "/projects"} className="flex h-9 items-center gap-2 rounded-lg px-2.5 text-xs font-bold transition hover:bg-white/5" style={{ color: T.textMuted }}>
+                  <ChildIcon size={14} />
+                  {child.label}
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
     <Link
       href={item.href ?? "#"}
@@ -603,6 +643,23 @@ function MobileDrawer({
                 {section.items.map((item) => {
                   const active = checkActive(item.href ?? "");
                   const Icon = item.icon;
+                  if (item.children?.length) {
+                    return (
+                      <details key={item.label} className="group" open>
+                        <summary className="flex h-11 cursor-pointer list-none items-center gap-3 rounded-xl border px-3 text-sm font-bold" style={{ borderColor: `${T.borderColor}20`, color: T.textMuted }}>
+                          <Icon size={18} />
+                          <span className="flex-1">{item.label}</span>
+                          <span className="text-xs">⌄</span>
+                        </summary>
+                        <div className="ml-4 mt-1 space-y-0.5 border-l pl-2" style={{ borderColor: `${T.borderColor}20` }}>
+                          {item.children.map((child) => {
+                            const ChildIcon = child.icon;
+                            return <Link key={child.label} href={child.href ?? "/projects"} onClick={onClose} className="flex h-10 items-center gap-2 rounded-lg px-2 text-xs font-bold" style={{ color: T.textMuted }}><ChildIcon size={15} />{child.label}</Link>;
+                          })}
+                        </div>
+                      </details>
+                    );
+                  }
                   return (
                     <Link
                       key={item.label}
