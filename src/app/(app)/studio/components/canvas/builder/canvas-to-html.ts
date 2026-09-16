@@ -97,8 +97,17 @@ function nodeToHtml(node: CanvasNode, doc: CanvasDocument, depth = 0): string {
     case "button":
       return `<a href="${escapeHtml(node.props.href || "#")}"${styleAttr}>${escapeHtml(node.props.text || "")}</a>`;
 
-    case "image":
-      return `<img src="${escapeHtml(node.props.src || "")}" alt="${escapeHtml(node.props.alt || "")}"${styleAttr} />`;
+    case "image": {
+      const src = node.props.src || "";
+      if (!src) {
+        // Empty slot: render a clean, clearly-labeled placeholder instead of
+        // a broken <img src=""> frame. This is what the user sees in the
+        // preview and in the published page until they add an image.
+        const alt = escapeHtml(node.props.alt || "Image");
+        return `<div${styleAttr} style="display:flex;align-items:center;justify-content:center;border:2px dashed #6b7280;border-radius:12px;min-height:120px;color:#9ca3af;font-size:13px;font-family:system-ui,sans-serif">Add image — ${alt}</div>`;
+      }
+      return `<img src="${escapeHtml(src)}" alt="${escapeHtml(node.props.alt || "")}"${styleAttr} />`;
+    }
 
     case "input":
       return `<input type="${escapeHtml(node.props.inputType || "text")}" placeholder="${escapeHtml(node.props.placeholder || "")}" name="${escapeHtml(node.props.inputName || "")}"${styleAttr} />`;

@@ -1,7 +1,7 @@
 // Social feed API — GET (paginated feed) / POST (create post)
 // DB-backed only. No mocks: errors return 500.
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminSupabase } from "@/lib/supabase-admin";
+import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
 import { withRateLimit } from "@/lib/rate-limiter";
 import {
   FeedTab,
@@ -26,6 +26,15 @@ function isHttpsUrl(value: unknown): value is string {
 }
 
 async function getHandler(req: NextRequest) {
+  // Honest 503 when the backend isn't connected (CI, unconfigured envs) —
+  // never fake posts, never a 500 that looks like an app error.
+  if (!isAdminSupabaseConfigured()) {
+    return NextResponse.json(
+      { error: "The community feed isn't connected yet." },
+      { status: 503 },
+    );
+  }
+
   const { searchParams } = new URL(req.url);
   const rawTab = searchParams.get("tab") ?? "for-you";
   const tab: FeedTab = rawTab === "following" || rawTab === "trending" ? rawTab : "for-you";

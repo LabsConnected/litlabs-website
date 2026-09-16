@@ -7,9 +7,10 @@ vi.mock("@/lib/auth", () => ({ auth: mockAuth }));
 
 let handlerFn: MockHandler = () => ({ data: [] });
 const mockClient = createMockSupabase((table, ops) => handlerFn(table, ops));
+let supabaseConfigured = true;
 vi.mock("@/lib/supabase-admin", () => ({
   getAdminSupabase: () => mockClient,
-  isAdminSupabaseConfigured: () => true,
+  isAdminSupabaseConfigured: () => supabaseConfigured,
 }));
 
 const { GET } = await import("./route");
@@ -23,6 +24,7 @@ describe("GET /api/posts", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ userId: null, clerkId: null });
     handlerFn = () => ({ data: [] });
+    supabaseConfigured = true;
   });
 
   it("returns the listPosts shape with posts array and nextCursor for signed-out viewers", async () => {
@@ -38,6 +40,16 @@ describe("GET /api/posts", () => {
     const body = await res.json();
     expect(body.mock).toBeUndefined();
     expect(JSON.stringify(body)).not.toContain("mock_1");
+  });
+
+  it("returns an honest 503 (not fake posts, not a 500) when the backend isn't connected", async () => {
+    supabaseConfigured = false;
+    const res = await GET(req("http://localhost:3000/api/posts?tab=for-you&limit=20"));
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error).toMatch(/isn't connected yet/);
+    expect(body.posts).toBeUndefined();
+    expect(body.mock).toBeUndefined();
   });
 });
 

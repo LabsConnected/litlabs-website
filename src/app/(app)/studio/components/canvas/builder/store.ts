@@ -12,6 +12,7 @@ import {
   type SectionTemplate,
   createNode,
   createEmptyDocument,
+  collectCreatedNodes,
   PALETTE_ITEMS,
 } from "./types";
 import {
@@ -554,13 +555,17 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
   setRightPanelTab: (tab) => set({ rightPanelTab: tab }),
 
   addSectionTemplate: (template, parentId) => {
-    const { node: section, children } = template.build();
+    // Collect every node the template creates — build() returns only
+    // top-level children, and nested nodes would otherwise be silently
+    // dropped from the document.
+    const created: CanvasNode[] = [];
+    const section = collectCreatedNodes(created, () => template.build().node);
     const doc = get().document;
     const parent = doc.nodes[parentId];
     if (!parent) return;
-    const allNewNodes: Record<string, CanvasNode> = { [section.id]: section };
-    for (const child of children) {
-      allNewNodes[child.id] = child;
+    const allNewNodes: Record<string, CanvasNode> = {};
+    for (const node of created) {
+      allNewNodes[node.id] = node;
     }
     const updatedParent: CanvasNode = {
       ...parent,
