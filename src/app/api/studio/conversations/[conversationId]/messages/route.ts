@@ -27,6 +27,7 @@ import {
 } from "@/lib/litt-runtime";
 import { runAgentLoop } from "@/lib/litt-intelligence/agent-loop";
 import { runAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
+import { findToolCallMarkup, stripToolCallMarkupText } from "@/lib/litt-intelligence/tool-call-markup";
 import { runLaunchFlow, type LaunchFlowResult } from "@/lib/litt-intelligence/launch-flow";
 import { shouldEnableQualityLoop } from "@/lib/litt-intelligence/quality-loop-flow";
 import { ProgressEmitter, type ProgressEvent } from "@/lib/litt-intelligence/progress-events";
@@ -996,16 +997,36 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             }
           }
 
+          // Tool-protocol boundary for the text-only path: markup carrying
+          // invocation intent (a recognized tool id or call-arg structure)
+          // means the model tried to invoke a tool that can never execute
+          // on this path. Persisting it as a completed answer was the
+          // production defect — fail the run truthfully instead. Markup
+          // without intent (quoted examples, orphan tags) is stripped so
+          // it never reaches the transcript verbatim.
+          const v1ToolIds = new Set(
+            (await import("@/lib/litt-intelligence/tool-registry")).toolRegistry.list().map((t) => t.id),
+          );
+          const v1MarkupHit = !cancelledV1 && assistantText
+            ? findToolCallMarkup(assistantText, v1ToolIds)
+            : null;
+          if (!cancelledV1 && !v1MarkupHit) {
+            assistantText = stripToolCallMarkupText(assistantText);
+          }
+
           // Defense in depth: streamText now throws on empty provider
           // payloads, but if a run still resolves with no usable text the
           // outcome is failed — never a completed empty response.
           const v1Empty = !cancelledV1 && !assistantText.trim();
-          const v1MessageStatus: MessageStatus = cancelledV1 ? "cancelled" : v1Empty ? "failed" : "completed";
+          const v1Failed = !cancelledV1 && (v1Empty || v1MarkupHit !== null);
+          const v1MessageStatus: MessageStatus = cancelledV1 ? "cancelled" : v1Failed ? "failed" : "completed";
           await updateMessageStatus(
             assistantMessage.id,
             userId,
             v1MessageStatus,
-            assistantText || undefined,
+            v1MarkupHit
+              ? "The model produced a tool call in a format this run cannot execute, so nothing was executed."
+              : assistantText || undefined,
           );
           if (agentRunId) {
             const actualCredits = runtimeAgent
@@ -1015,16 +1036,16 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               inputTokens: Math.ceil(finalPrompt.length / 4),
               outputTokens: Math.ceil(assistantText.length / 4),
               actualCredits,
-              status: cancelledV1 ? "cancelled" : v1Empty ? "failed" : "completed",
+              status: cancelledV1 ? "cancelled" : v1Failed ? "failed" : "completed",
             }, reservedCredits, reservationId).catch(() => {
               // Best-effort settlement — must not leak unhandled rejection
             });
           }
 
-          // Skip memory persistence for cancelled and empty runs — partial
-          // or absent output must not become a normal conversation_summary
-          // in long-term memory.
-          if (!cancelledV1 && !v1Empty) {
+          // Skip memory persistence for cancelled, empty, and markup-failed
+          // runs — partial or protocol-broken output must not become a
+          // normal conversation_summary in long-term memory.
+          if (!cancelledV1 && !v1Failed) {
             persistMemory(
               `User: ${message}\n${agentDisplayName}: ${assistantText}`,
               userId,
@@ -1057,7 +1078,27 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           if (cancelledV1) {
             safeEvent({ type: "cancelled", reason: "user_stop" });
           }
-          if (v1Empty) {
+          if (v1MarkupHit) {
+            // Same contract as V2's tool_call_parse_failed — the run could
+            // not execute the model's intended call, so it is a classified
+            // failure, not a done card.
+            studioLog("message:tool_call_markup_in_text", {
+              requestId: rid,
+              conversationId: conversation.id,
+              projectId: conversation.projectId,
+              userId,
+              provider: r?.provider,
+              model: r?.model,
+              errorClass: `tool_call_markup_${v1MarkupHit.kind}`,
+              tool: v1MarkupHit.toolId,
+            });
+            safeEvent({
+              type: "error",
+              code: "TOOL_CALL_PARSE_FAILED",
+              message: "The model produced a tool call in a format this run cannot execute. Nothing was executed.",
+              revision: newRevision,
+            });
+          } else if (v1Empty) {
             // Truthful terminal state for an empty provider payload: an
             // explicit classified error (with the bumped revision so the
             // client's next send doesn't 409 on a stale expectedRevision).

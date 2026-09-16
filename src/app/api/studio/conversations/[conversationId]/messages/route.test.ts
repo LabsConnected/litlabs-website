@@ -866,6 +866,104 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
     expect(getActiveExecution("conv-123")).toBeNull();
   });
 
+  it("fails the V1 run truthfully when streamText emits tool-call markup (P0-B boundary)", async () => {
+    // Exact production shape: the text-only path streamed literal
+    // <tool_call> markup into assistantText and persisted it as
+    // `completed` even though no tool executed.
+    vi.mocked(buildCanonicalRuntimeContext).mockResolvedValue({
+      workspaceExecutionAvailable: false,
+      executionMode: "auto",
+    } as any);
+    vi.mocked(runAgentLoop).mockResolvedValue({
+      enrichedPrompt: "enriched",
+      ranTools: false,
+      toolExecutions: [],
+    } as any);
+    vi.mocked(buildPrompt).mockReturnValueOnce({
+      fullPrompt: "test prompt",
+      systemPrompt: "system",
+      agentDisplayName: "LiTT",
+      kernelResult: { decision: { routing: { requiresExecution: false, mode: "think" } } },
+    } as any);
+    vi.mocked(streamText).mockImplementation(async (_p, onChunk: any) => {
+      onChunk("Let me find the `index.html` first.\n");
+      onChunk(
+        "<tool_call>terminal\n<arg_key>command</arg_key>\n" +
+          '<arg_value>find /workspace -name "index.html" -type f</arg_value>\n</tool_call>',
+      );
+      return {
+        provider: "groq",
+        model: "openai/gpt-oss-120b",
+        latencyMs: 120,
+        failover: [],
+        finishReason: "stop",
+      } as any;
+    });
+
+    const res = await POST(makeRequest({ message: "hello there" }), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    expect(res.status).toBe(200);
+    const { events } = await readSSE(res);
+
+    // Truthful terminal state: classified error, no done card.
+    const errorEvents = events.filter((e) => e.type === "error");
+    expect(errorEvents.length).toBe(1);
+    expect(events.filter((e) => e.type === "done" && e.assistantMessage?.status === "completed")).toHaveLength(0);
+
+    // Persisted as failed — and the raw markup must NOT be stored.
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      expect.not.stringContaining("<tool_call>"),
+    );
+    // Raw markup never lands in memory either.
+    expect(persistMemory).not.toHaveBeenCalled();
+  });
+
+  it("strips non-intent markup but keeps prose on the V1 path", async () => {
+    vi.mocked(buildCanonicalRuntimeContext).mockResolvedValue({
+      workspaceExecutionAvailable: false,
+      executionMode: "auto",
+    } as any);
+    vi.mocked(runAgentLoop).mockResolvedValue({
+      enrichedPrompt: "enriched",
+      ranTools: false,
+      toolExecutions: [],
+    } as any);
+    vi.mocked(buildPrompt).mockReturnValueOnce({
+      fullPrompt: "test prompt",
+      systemPrompt: "system",
+      agentDisplayName: "LiTT",
+      kernelResult: { decision: { routing: { requiresExecution: false, mode: "think" } } },
+    } as any);
+    vi.mocked(streamText).mockImplementation(async (_p, onChunk: any) => {
+      onChunk("Here is the answer. </tool_call>");
+      return { provider: "groq", model: "m", latencyMs: 5, failover: [], finishReason: "stop" } as any;
+    });
+
+    const res = await POST(makeRequest({ message: "hello there" }), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    expect(res.status).toBe(200);
+    const { events } = await readSSE(res);
+
+    expect(events.filter((e) => e.type === "done")).toHaveLength(1);
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "completed",
+      expect.stringContaining("Here is the answer."),
+    );
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "completed",
+      expect.not.stringContaining("</tool_call>"),
+    );
+  });
+
   it("does not downgrade an execution request to the text-only V1 path", async () => {
     vi.mocked(buildCanonicalRuntimeContext).mockResolvedValue({
       workspaceExecutionAvailable: false,
@@ -1197,6 +1295,7 @@ describe("GET /api/studio/conversations/[conversationId]/messages — approval r
     const body = await res.json();
 
     expect(updateMessageStatus).not.toHaveBeenCalled();
+
     expect(body.messages.at(-1).status).toBe("awaiting_approval");
   });
 });
