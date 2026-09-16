@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, Folder, Plus, Trash2 } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { isManagedSourceType } from "@/lib/projects/project-source";
@@ -43,6 +44,20 @@ export default function StudioProjectPicker({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+
+  useEffect(() => {
+    if (!open || !triggerRef.current) return;
+    const updatePosition = () => setAnchorRect(triggerRef.current?.getBoundingClientRect() ?? null);
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open || projects.length > 0) return;
@@ -109,8 +124,12 @@ export default function StudioProjectPicker({
   return (
     <div className="relative min-w-0 shrink-0">
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => {
+          if (!open && triggerRef.current) setAnchorRect(triggerRef.current.getBoundingClientRect());
+          setOpen((value) => !value);
+        }}
         className="flex w-full min-w-0 max-w-[200px] items-center gap-1.5 whitespace-nowrap rounded-md border px-2 py-1 text-[12px] font-bold transition hover:bg-white/5 sm:max-w-[240px]"
         style={{ borderColor: "var(--studio-border)", color: "var(--text-secondary)", backgroundColor: "var(--studio-surface)" }}
         aria-expanded={open}
@@ -121,7 +140,7 @@ export default function StudioProjectPicker({
         <span className="min-w-0 flex-1 truncate">{projectName ?? "Select project"}</span>
         <ChevronDown size={11} className="shrink-0" style={{ color: "var(--text-muted)" }} />
       </button>
-      {open && (
+      {open && anchorRect && createPortal(
         <>
           {/* Outside-click dismiss — the dropdown must not trap mobile users. */}
           <button
@@ -132,8 +151,13 @@ export default function StudioProjectPicker({
             onClick={() => setOpen(false)}
           />
           <div
-            className="absolute left-0 top-full z-50 mt-1 max-h-[min(60vh,320px)] w-[min(90vw,256px)] overflow-y-auto rounded-xl border p-1.5 shadow-2xl"
-            style={{ borderColor: "var(--studio-border-strong)", backgroundColor: "var(--studio-elevated)" }}
+            className="fixed z-50 mt-1 max-h-[min(60vh,320px)] w-[min(90vw,256px)] overflow-y-auto rounded-xl border p-1.5 shadow-2xl"
+            style={{
+              top: anchorRect.bottom,
+              left: Math.min(anchorRect.left, Math.max(8, window.innerWidth - 264)),
+              borderColor: "var(--studio-border-strong)",
+              backgroundColor: "var(--studio-elevated)",
+            }}
             role="listbox"
             aria-label="Projects"
           >
@@ -234,7 +258,7 @@ export default function StudioProjectPicker({
             )}
           </div>
         </>
-      )}
+      , document.body)}
     </div>
   );
 }
