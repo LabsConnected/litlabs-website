@@ -292,3 +292,21 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
     expect(screen.getByTestId("camera-preview")).toBeTruthy();
   });
 });
+
+describe("CommandComposer — mobile input sizing (Phase 1 #8)", () => {
+  it("uses the studio-command-input class instead of an inline 14px font size", () => {
+    render(
+      <CommandComposer
+        value=""
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        busy={false}
+      />,
+    );
+    const input = screen.getByTestId("studio-command-input") as HTMLTextAreaElement;
+    // The class carries 14px desktop / 16px mobile via CSS; an inline
+    // fontSize would beat the global mobile 16px rule and trigger iOS zoom.
+    expect(input.className).toContain("studio-command-input");
+    expect(input.style.fontSize).toBe("");
+  });
+});
