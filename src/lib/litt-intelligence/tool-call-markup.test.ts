@@ -76,6 +76,34 @@ describe("findToolCallMarkup — invocation intent", () => {
     );
     expect(hit).toMatchObject({ kind: "bare_json", toolId: "files.write" });
   });
+
+  it("flags a bare JSON action envelope naming a known tool", () => {
+    const hit = findToolCallMarkup(
+      '{"action": "files.read", "project_id": "p1", "path": "index.html"}',
+      TOOLS,
+    );
+    expect(hit).toMatchObject({ kind: "bare_json", toolId: "files.read" });
+  });
+
+  it("flags a bare JSON action envelope even when the action is not a registered tool — the exact production shape", () => {
+    // Observed in production: the V1 text-only path persisted
+    //   {"action": "inspect_project_files", "project_id": "…", "path": "index.html"}
+    // as a completed answer. A whole-response action envelope is an
+    // attempted invocation — never user-facing prose.
+    const hit = findToolCallMarkup(
+      '{"action": "inspect_project_files", "project_id": "f79fae8d-62f5-405d-b933-3d49a58acc61", "path": "index.html"}',
+      TOOLS,
+    );
+    expect(hit).toMatchObject({ kind: "bare_json" });
+  });
+
+  it("flags a bare JSON name+arguments call shape with an unregistered tool name", () => {
+    const hit = findToolCallMarkup(
+      '{"name": "makeItPretty", "arguments": {"path": "index.html"}}',
+      TOOLS,
+    );
+    expect(hit).toMatchObject({ kind: "bare_json" });
+  });
 });
 
 describe("findToolCallMarkup — prose that must not be flagged", () => {
@@ -100,6 +128,16 @@ describe("findToolCallMarkup — prose that must not be flagged", () => {
 
   it("ignores JSON prose that is not a tool call", () => {
     expect(findToolCallMarkup('{"summary": "all good", "changed": true}', TOOLS)).toBeNull();
+    expect(findToolCallMarkup('{"name": "Ember Roast", "style": "dark"}', TOOLS)).toBeNull();
+  });
+
+  it("ignores an action envelope quoted mid-prose — only a whole-payload envelope is intent", () => {
+    expect(
+      findToolCallMarkup(
+        'A broken model might answer with {"action": "inspect_project_files", "path": "index.html"} instead of prose.',
+        TOOLS,
+      ),
+    ).toBeNull();
   });
 
   it("does not match tool names as substrings of other words", () => {
