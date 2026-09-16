@@ -246,6 +246,42 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
     expect(screen.getByRole("button", { name: /send message/i })).toBeVisible();
   });
 
+  it("hides the workspace context line when hideContextLine is set (mobile)", () => {
+    render(
+      <CommandComposer
+        value=""
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        contextLine={{ workspace: "Michigan Music Venue" }}
+        hideContextLine
+        busy={false}
+      />,
+    );
+
+    expect(screen.queryByTestId("studio-workspace-context")).toBeNull();
+    // Input and send control stay reachable.
+    expect(screen.getByRole("textbox", { name: /message input/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /send message/i })).toBeVisible();
+  });
+
+  it("compact mode shrinks composer chrome while keeping 44px action targets", () => {
+    render(
+      <CommandComposer
+        value=""
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        contextLine={{ workspace: "Michigan Music Venue" }}
+        compact
+        busy={false}
+      />,
+    );
+
+    const input = screen.getByRole("textbox", { name: /message input/i });
+    expect(input.style.minHeight).toBe("40px");
+    // 44px action buttons are untouched in compact mode.
+    expect(screen.getByRole("button", { name: /send message/i }).className).toContain("h-11");
+  });
+
   it("shows the active model picker without an execution-mode dropdown", () => {
     const onSend = vi.fn();
     render(

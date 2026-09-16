@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { MessageSquare, Activity, X } from "lucide-react";
+import { MessageSquare, Activity, Wrench, X } from "lucide-react";
 import { useVisualViewport } from "../../hooks/useVisualViewport";
 import { mobileDiag } from "../../lib/mobileDiagnostics";
 import type { LiTTTab } from "../LiTTPanel";
@@ -26,6 +26,11 @@ export interface LiTTMobileSheetProps {
   liveContent: ReactNode;
   /** Optional approval UI rendered full-width at the top of the sheet, above the tabs */
   approvalSlot?: ReactNode;
+  /** Project context for the slim second header row (mobile density redesign) */
+  projectName?: string | null;
+  branch?: string | null;
+  /** Opens the Tools sheet; when omitted, no tools button renders */
+  onOpenTools?: () => void;
 }
 
 const MOBILE_BOTTOM_NAV_H = 62;
@@ -37,6 +42,9 @@ export default function LiTTMobileSheet({
   chatContent,
   liveContent,
   approvalSlot,
+  projectName,
+  branch,
+  onOpenTools,
 }: LiTTMobileSheetProps) {
   const vv = useVisualViewport();
   const contentRef = useRef<HTMLDivElement>(null);
@@ -180,6 +188,18 @@ export default function LiTTMobileSheet({
             Activity
           </button>
           <div className="flex-1" />
+          {onOpenTools && (
+            <button
+              type="button"
+              onClick={onOpenTools}
+              className="grid h-9 w-9 place-items-center rounded-md transition hover:bg-white/10"
+              style={{ color: "var(--text-muted)" }}
+              aria-label="Open tools"
+              data-testid="litt-mobile-tools-button"
+            >
+              <Wrench size={16} className="pointer-events-none" />
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -191,6 +211,23 @@ export default function LiTTMobileSheet({
             <X size={16} className="pointer-events-none" />
           </button>
         </div>
+
+        {(projectName || branch) && (
+          <div
+            className="flex shrink-0 items-center border-b px-3 py-1"
+            style={{ borderColor: "rgba(255,255,255,0.07)" }}
+            data-testid="litt-mobile-context"
+          >
+            <span
+              className="min-w-0 truncate text-[10px] font-medium"
+              style={{ color: "var(--text-muted)" }}
+            >
+              {projectName}
+              {projectName && branch ? " · " : null}
+              {branch}
+            </span>
+          </div>
+        )}
 
         <div
           ref={contentRef}

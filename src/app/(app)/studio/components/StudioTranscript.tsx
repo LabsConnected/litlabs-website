@@ -416,6 +416,7 @@ export default function StudioTranscript({
   onDismissCompletion,
   onUndoCompletion,
   onContinueCompletion,
+  overflowDownloads = false,
 }: {
   messages: ChatMessage[];
   busy: boolean;
@@ -426,6 +427,12 @@ export default function StudioTranscript({
   onDismissCompletion?: () => void;
   onUndoCompletion?: () => void;
   onContinueCompletion?: () => void;
+  /**
+   * When true, the Download .txt / .md pills collapse into a single "⋯"
+   * overflow button that opens a small popover. Used on mobile to save
+   * vertical space. Desktop keeps the two pills.
+   */
+  overflowDownloads?: boolean;
 }) {
   const { speakText } = useVoiceSession();
   const ptyUsable = useTerminalStore((s) => s.isUsable());
@@ -436,6 +443,7 @@ export default function StudioTranscript({
   const [copiedKind, setCopiedKind] = useState<"text" | "markdown" | null>(null);
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
   const [replyTarget, setReplyTarget] = useState<ChatMessage | null>(null);
+  const [overflowOpen, setOverflowOpen] = useState(false);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -512,6 +520,7 @@ export default function StudioTranscript({
   return (
     <div
       ref={scrollRef}
+      data-testid="studio-transcript"
       className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-4"
       style={{ color: "var(--text-main)" }}
     >
@@ -805,6 +814,71 @@ export default function StudioTranscript({
           </div>
         )}
         {hasDownloadableMessages && !busy && (
+          overflowDownloads ? (
+            <div
+              className="relative flex items-center justify-center pt-2"
+              onKeyDown={(e) => { if (e.key === "Escape") setOverflowOpen(false); }}
+            >
+              {overflowOpen && (
+                <button
+                  type="button"
+                  className="fixed inset-0 z-10 cursor-default"
+                  style={{ background: "transparent" }}
+                  onClick={() => setOverflowOpen(false)}
+                  aria-label="Close conversation options"
+                  tabIndex={-1}
+                />
+              )}
+              <button
+                type="button"
+                onClick={() => setOverflowOpen((v) => !v)}
+                className="rounded-lg border px-2.5 py-1 text-[9px] font-bold transition hover:opacity-80"
+                style={{ borderColor: "var(--studio-border)", color: "var(--text-muted)" }}
+                aria-label="Conversation options"
+                aria-expanded={overflowOpen}
+                aria-haspopup="menu"
+                data-testid="transcript-overflow"
+              >
+                ⋯
+              </button>
+              {overflowOpen && (
+                <div
+                  role="menu"
+                  aria-label="Conversation options"
+                  className="absolute bottom-full z-20 mb-1 flex min-w-36 flex-col overflow-hidden rounded-2xl border"
+                  style={{
+                    backgroundColor: "var(--studio-elevated)",
+                    borderColor: "var(--studio-border-strong)",
+                  }}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => { setOverflowOpen(false); handleDownloadTxt(); }}
+                    className="px-3 py-2 text-left text-[11px] font-bold hover:bg-white/5"
+                    style={{ color: "var(--text-main)" }}
+                    aria-label="Download conversation as text"
+                    title="Download as .txt"
+                    data-testid="download-txt"
+                  >
+                    Download .txt
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => { setOverflowOpen(false); handleDownloadMd(); }}
+                    className="px-3 py-2 text-left text-[11px] font-bold hover:bg-white/5"
+                    style={{ color: "var(--text-main)" }}
+                    aria-label="Download conversation as Markdown"
+                    title="Download as .md"
+                    data-testid="download-md"
+                  >
+                    Download .md
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
           <div className="flex items-center justify-center gap-3 pt-2">
             <button
               type="button"
@@ -829,6 +903,7 @@ export default function StudioTranscript({
               Download .md
             </button>
           </div>
+          )
         )}
       </div>
     </div>

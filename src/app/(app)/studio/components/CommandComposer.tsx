@@ -87,6 +87,10 @@ interface CommandComposerProps {
   /** LiTT creation mode — what LiTT is about to create (image, video, music, code, website, auto) */
   littMode?: import("../lib/studio-destinations").LiTTMode;
   onLittModeChange?: (mode: import("../lib/studio-destinations").LiTTMode) => void;
+  /** Hide the workspace/repo/branch context line (mobile: it moves into the sheet header) */
+  hideContextLine?: boolean;
+  /** Slimmer composer chrome for mobile: tighter padding, smaller min-height */
+  compact?: boolean;
 }
 
 export default function CommandComposer({
@@ -106,6 +110,8 @@ export default function CommandComposer({
   onExecutionModeChange,
   littMode = "auto",
   onLittModeChange,
+  hideContextLine = false,
+  compact = false,
 }: CommandComposerProps) {
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
   const setActiveAgent = useStudioAgentStore((s) => s.setActiveAgent);
@@ -331,14 +337,16 @@ export default function CommandComposer({
   return (
     <div
       data-testid="studio-command-composer"
-      className="glass-shell relative flex w-full min-w-0 shrink-0 flex-col gap-1.5 border-t px-2.5 py-2 pb-[calc(.5rem+env(safe-area-inset-bottom))] sm:pb-2"
+      className={`glass-shell relative flex w-full min-w-0 shrink-0 flex-col gap-1.5 border-t px-2.5 ${compact ? "py-1.5" : "py-2"} pb-[calc(.5rem+env(safe-area-inset-bottom))] sm:pb-2`}
       style={{
         backgroundColor: "rgba(13,9,22,0.88)",
         borderColor: "rgba(155,77,255,0.12)",
         boxShadow: "0 -8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(155,77,255,0.06)",
       }}
     >
-      {/* Context line: workspace · repository · branch */}
+      {/* Context line: workspace · repository · branch.
+          Hidden on mobile (hideContextLine) — it moves into the sheet header. */}
+      {!hideContextLine && (
       <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[10px] font-medium" style={{ color: "var(--text-muted)" }} data-testid="studio-workspace-context">
         {contextLine?.workspace && <span className="min-w-0 max-w-full truncate">{contextLine.workspace}</span>}
         {(contextLine?.repo || contextLine?.branch) && (
@@ -351,6 +359,7 @@ export default function CommandComposer({
           </span>
         )}
       </div>
+      )}
 
       {contextLine?.selectedElement && (
         <div
@@ -395,7 +404,7 @@ export default function CommandComposer({
                 key={id}
                 type="button"
                 onClick={() => onLittModeChange(id)}
-                className={`flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-bold transition-all ${isActive ? "" : "hover:bg-white/5"}`}
+                className={`flex shrink-0 items-center gap-1 rounded-lg px-2.5 ${compact ? "py-0.5" : "py-1"} text-[11px] font-bold transition-all ${isActive ? "" : "hover:bg-white/5"}`}
                 style={{
                   backgroundColor: isActive ? "rgba(168,85,247,0.15)" : "rgba(255,255,255,0.03)",
                   color: isActive ? "#c4b5fd" : "var(--text-muted)",
@@ -622,11 +631,11 @@ export default function CommandComposer({
                         ? "Tell LiTT what website or app to build…"
                         : agentMeta.placeholder
           }
-          className="studio-command-input order-first w-full flex-none resize-none bg-transparent px-1 py-2.5 outline-none"
+          className={`studio-command-input order-first w-full flex-none resize-none bg-transparent px-1 ${compact ? "py-2" : "py-2.5"} outline-none`}
           style={{
             color: "var(--text-primary)",
             lineHeight: "1.5",
-            minHeight: "44px",
+            minHeight: compact ? "40px" : "44px",
             maxHeight: "160px",
           }}
           rows={1}
