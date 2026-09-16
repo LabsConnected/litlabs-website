@@ -47,6 +47,8 @@ export function ProjectTypeSelector() {
 
   const current = PROJECT_TYPES.find((p) => p.id === projectType) ?? PROJECT_TYPES[0];
   const CurrentIcon = ICONS[current.icon] ?? Globe;
+  // Game builders are Phase 2 — not selectable until the editor exists.
+  const selectableTypes = PROJECT_TYPES.filter((p) => p.available !== false);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -122,7 +124,7 @@ export function ProjectTypeSelector() {
           <div className="px-3 py-2 text-[9px] font-black uppercase tracking-[0.1em]" style={{ color: "var(--glass-text-3)" }}>
             Create Type
           </div>
-          {PROJECT_TYPES.map((meta) => {
+          {selectableTypes.map((meta) => {
             const Icon = ICONS[meta.icon] ?? Globe;
             const isActive = meta.id === projectType;
             return (

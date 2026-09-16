@@ -1781,6 +1781,15 @@ function CommandStudioContent() {
                     <MediaWorkspacePanel
                       littMode={littMode}
                       projectId={capabilities.projectId}
+                      onOpenCreate={() => {
+                        setDestination("create");
+                        setCreateMode(
+                          littMode === "image" ? "image"
+                          : littMode === "video" ? "video"
+                          : littMode === "music" ? "music"
+                          : "image",
+                        );
+                      }}
                     />
                   </div>
                 ) : WorkspaceComponent ? (
@@ -2207,9 +2216,11 @@ export { describeSourceRows };
 function MediaWorkspacePanel({
   littMode,
   projectId,
+  onOpenCreate,
 }: {
   littMode: LiTTMode;
   projectId: string | null;
+  onOpenCreate: () => void;
 }) {
   const modeLabel =
     littMode === "image" ? "Image" :
@@ -2231,7 +2242,7 @@ function MediaWorkspacePanel({
             {modeLabel}
           </span>
           <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-            Generated artifacts appear here
+            Your creations, in one place
           </span>
         </div>
       </div>
@@ -2250,8 +2261,20 @@ function MediaWorkspacePanel({
             No {modeLabel.toLowerCase()} artifacts yet
           </p>
           <p className="mt-1 text-xs">
-            Ask LiTT to create something — results will appear here.
+            Generate in Create — your image, video, and audio tools live there.
           </p>
+          <button
+            type="button"
+            onClick={onOpenCreate}
+            className="mt-4 rounded-xl px-4 py-2 text-xs font-bold transition hover:opacity-80"
+            style={{
+              backgroundColor: "rgba(77,255,98,0.12)",
+              color: "var(--litt-primary)",
+              border: "1px solid rgba(77,255,98,0.3)",
+            }}
+          >
+            Open Create
+          </button>
         </div>
       </div>
     </div>

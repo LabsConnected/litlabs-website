@@ -25,6 +25,12 @@ export interface ProjectTypeMeta {
   description: string;
   /** Whether this type uses the visual CanvasDocument or a custom editor */
   editor: "canvas" | "html" | "game";
+  /**
+   * Whether the type is selectable in the picker. Game builders are
+   * Phase 2 — selecting them renders a dead-end placeholder, so they
+   * stay hidden until the editor exists.
+   */
+  available?: boolean;
 }
 
 export const PROJECT_TYPES: ProjectTypeMeta[] = [
@@ -48,6 +54,7 @@ export const PROJECT_TYPES: ProjectTypeMeta[] = [
     icon: "Gamepad2",
     description: "HTML Canvas or Phaser games with Quick Build",
     editor: "game",
+    available: false,
   },
   {
     id: "game3d",
@@ -55,6 +62,7 @@ export const PROJECT_TYPES: ProjectTypeMeta[] = [
     icon: "Box",
     description: "Three.js or Babylon.js 3D games",
     editor: "game",
+    available: false,
   },
   {
     id: "app",
