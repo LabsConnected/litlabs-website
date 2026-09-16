@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, Folder, Plus, Trash2 } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { isManagedSourceType } from "@/lib/projects/project-source";
@@ -43,6 +44,37 @@ export default function StudioProjectPicker({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [triggerRect, setTriggerRect] = useState<DOMRect | null>(null);
+
+  const toggleOpen = () => {
+    if (!open) {
+      // Capture the trigger rect on open so the portaled menu can anchor
+      // to the button. The menu is rendered via portal (below) because the
+      // studio header scrolls horizontally on mobile (overflow-x: auto),
+      // which clips any absolutely-positioned dropdown inside it.
+      setTriggerRect(triggerRef.current?.getBoundingClientRect() ?? null);
+    }
+    setOpen((value) => !value);
+  };
+
+  // Dismiss the open menu on Escape, scroll, or resize — the anchored rect
+  // goes stale otherwise, and mobile users must never be trapped.
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [open ]);
 
   useEffect(() => {
     if (!open || projects.length > 0) return;
@@ -107,10 +139,11 @@ export default function StudioProjectPicker({
   };
 
   return (
-    <div className="relative min-w-0 shrink-0">
+    <div className="min-w-0 shrink-0">
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => setOpen((value) => !value)}
+        onClick={toggleOpen}
         className="flex w-full min-w-0 max-w-[200px] items-center gap-1.5 whitespace-nowrap rounded-md border px-2 py-1 text-[12px] font-bold transition hover:bg-white/5 sm:max-w-[240px]"
         style={{ borderColor: "var(--studio-border)", color: "var(--text-secondary)", backgroundColor: "var(--studio-surface)" }}
         aria-expanded={open}
@@ -131,108 +164,181 @@ export default function StudioProjectPicker({
             style={{ background: "transparent" }}
             onClick={() => setOpen(false)}
           />
-          <div
-            className="absolute left-0 top-full z-50 mt-1 max-h-[min(60vh,320px)] w-[min(90vw,256px)] overflow-y-auto rounded-xl border p-1.5 shadow-2xl"
-            style={{ borderColor: "var(--studio-border-strong)", backgroundColor: "var(--studio-elevated)" }}
-            role="listbox"
-            aria-label="Projects"
-          >
-            {loading ? (
-              <div className="px-2.5 py-3 text-[12px]" style={{ color: "var(--text-muted)" }}>Loading projects…</div>
-            ) : error ? (
-              <div className="px-2.5 py-3 text-[12px]" style={{ color: "#fca5a5" }}>{error}</div>
-            ) : projects.length === 0 ? (
-              <div className="px-2.5 py-3 text-[12px]" style={{ color: "var(--text-muted)" }}>No projects available.</div>
-            ) : (
-              projects.map((project) => (
-                confirmDeleteId === project.id ? (
-                  <div
-                    key={project.id}
-                    className="rounded-lg border p-2.5"
-                    style={{ borderColor: "#ef444440", backgroundColor: "#ef444408" }}
-                    role="alertdialog"
-                    aria-label={`Confirm deletion of ${project.name}`}
-                  >
-                    <div className="text-[12px] font-black" style={{ color: "var(--text-primary)" }}>
-                      Delete &ldquo;{project.name}&rdquo;?
-                    </div>
-                    <div className="mt-0.5 text-[11px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
-                      This permanently deletes the project and its files. This can&rsquo;t be undone.
-                    </div>
-                    {deleteError && deletingId === null && (
-                      <div className="mt-1.5 text-[11px] font-bold" style={{ color: "#fca5a5" }}>
-                        {deleteError}
-                      </div>
-                    )}
-                    <div className="mt-2 flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => { setConfirmDeleteId(null); setDeleteError(null); }}
-                        disabled={deletingId === project.id}
-                        className="rounded-lg border px-2.5 py-1 text-[11px] font-bold transition hover:bg-white/8 disabled:opacity-50"
-                        style={{ borderColor: "var(--studio-border)", color: "var(--text-secondary)" }}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { void handleDeleteProject(project); }}
-                        disabled={deletingId === project.id}
-                        className="rounded-lg px-2.5 py-1 text-[11px] font-black text-white transition hover:opacity-90 disabled:opacity-50"
-                        style={{ backgroundColor: "#dc2626" }}
-                      >
-                        {deletingId === project.id ? "Deleting…" : "Delete project"}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    key={project.id}
-                    role="option"
-                    aria-selected={project.id === projectId}
-                    className="group flex w-full items-center gap-1 rounded-lg transition hover:bg-white/8"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => { onSelect(project.id); setOpen(false); }}
-                      className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 text-left"
-                      style={{ color: project.id === projectId ? "var(--litt-primary)" : "var(--text-secondary)" }}
-                    >
-                      <Folder size={13} className="shrink-0" />
-                      <span className="min-w-0 flex-1 truncate text-[12px] font-bold">{project.name}</span>
-                      <span className="shrink-0 text-[11px]" style={{ color: "var(--text-muted)" }}>{isManagedSourceType(project.sourceType ?? null) ? "LiTT Managed" : "GitHub"}</span>
-                    </button>
-                    {!project.legacy && (
-                      <button
-                        type="button"
-                        onClick={() => { setConfirmDeleteId(project.id); setDeleteError(null); }}
-                        aria-label={`Delete project ${project.name}`}
-                        title={`Delete project ${project.name}`}
-                        className="mr-1 shrink-0 rounded-md p-1.5 opacity-60 transition hover:bg-white/10 hover:opacity-100 focus-visible:opacity-100"
-                        style={{ color: "#fca5a5" }}
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    )}
-                  </div>
-                )
-              ))
-            )}
-            {onCreateProject && !loading && !error && (
-              <>
-                <div className="mx-1 my-1 h-px" style={{ backgroundColor: "var(--studio-border)" }} />
+          {createPortal(
+            <ProjectPickerMenu
+              rect={triggerRect}
+              loading={loading}
+              error={error}
+              projects={projects}
+              projectId={projectId}
+              confirmDeleteId={confirmDeleteId}
+              deletingId={deletingId}
+              deleteError={deleteError}
+              onSelect={(id) => { onSelect(id); setOpen(false); }}
+              onRequestDelete={(project) => { setConfirmDeleteId(project.id); setDeleteError(null); }}
+              onCancelDelete={() => { setConfirmDeleteId(null); setDeleteError(null); }}
+              onConfirmDelete={(project) => { void handleDeleteProject(project); }}
+              onCreateProject={onCreateProject ? () => { setOpen(false); onCreateProject(); } : undefined}
+            />,
+            document.body,
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The project list menu, rendered via portal with fixed positioning.
+ *
+ * It must NOT be an absolutely-positioned child of the trigger: the studio
+ * header scrolls horizontally on mobile (overflow-x: auto), and any overflow
+ * other than visible on an ancestor clips absolute descendants — which is
+ * why the dropdown was invisible on phones. Anchored to the trigger rect and
+ * clamped to the viewport; dismissed on Escape/scroll/resize by the parent.
+ */
+function ProjectPickerMenu({
+  rect,
+  loading,
+  error,
+  projects,
+  projectId,
+  confirmDeleteId,
+  deletingId,
+  deleteError,
+  onSelect,
+  onRequestDelete,
+  onCancelDelete,
+  onConfirmDelete,
+  onCreateProject,
+}: {
+  rect: DOMRect | null;
+  loading: boolean;
+  error: string | null;
+  projects: ProjectOption[];
+  projectId: string | null;
+  confirmDeleteId: string | null;
+  deletingId: string | null;
+  deleteError: string | null;
+  onSelect: (projectId: string) => void;
+  onRequestDelete: (project: ProjectOption) => void;
+  onCancelDelete: () => void;
+  onConfirmDelete: (project: ProjectOption) => void;
+  onCreateProject?: () => void;
+}) {
+  const menuWidth = 256;
+  const left = rect
+    ? Math.max(8, Math.min(rect.left, window.innerWidth - menuWidth - 8))
+    : 8;
+  const top = rect
+    ? Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 348))
+    : 8;
+  return (
+    <div
+      className="fixed z-[200] max-h-[min(60vh,320px)] w-[min(90vw,256px)] overflow-y-auto rounded-xl border p-1.5 shadow-2xl"
+      style={{
+        left,
+        top,
+        borderColor: "var(--studio-border-strong)",
+        backgroundColor: "var(--studio-elevated)",
+      }}
+      role="listbox"
+      aria-label="Projects"
+      data-testid="project-picker-menu"
+    >
+      {loading ? (
+        <div className="px-2.5 py-3 text-[12px]" style={{ color: "var(--text-muted)" }}>Loading projects…</div>
+      ) : error ? (
+        <div className="px-2.5 py-3 text-[12px]" style={{ color: "#fca5a5" }}>{error}</div>
+      ) : projects.length === 0 ? (
+        <div className="px-2.5 py-3 text-[12px]" style={{ color: "var(--text-muted)" }}>No projects available.</div>
+      ) : (
+        projects.map((project) => (
+          confirmDeleteId === project.id ? (
+            <div
+              key={project.id}
+              className="rounded-lg border p-2.5"
+              style={{ borderColor: "#ef444440", backgroundColor: "#ef444408" }}
+              role="alertdialog"
+              aria-label={`Confirm deletion of ${project.name}`}
+            >
+              <div className="text-[12px] font-black" style={{ color: "var(--text-primary)" }}>
+                Delete &ldquo;{project.name}&rdquo;?
+              </div>
+              <div className="mt-0.5 text-[11px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
+                This permanently deletes the project and its files. This can&rsquo;t be undone.
+              </div>
+              {deleteError && deletingId === null && (
+                <div className="mt-1.5 text-[11px] font-bold" style={{ color: "#fca5a5" }}>
+                  {deleteError}
+                </div>
+              )}
+              <div className="mt-2 flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => { setOpen(false); onCreateProject(); }}
-                  className="flex min-h-11 w-full items-center gap-2 rounded-lg px-2.5 text-left transition hover:bg-white/8"
-                  style={{ color: "var(--litt-primary)" }}
+                  onClick={onCancelDelete}
+                  disabled={deletingId === project.id}
+                  className="rounded-lg border px-2.5 py-1 text-[11px] font-bold transition hover:bg-white/8 disabled:opacity-50"
+                  style={{ borderColor: "var(--studio-border)", color: "var(--text-secondary)" }}
                 >
-                  <Plus size={13} className="shrink-0" />
-                  <span className="text-[12px] font-bold">New project</span>
+                  Cancel
                 </button>
-              </>
-            )}
-          </div>
+                <button
+                  type="button"
+                  onClick={() => onConfirmDelete(project)}
+                  disabled={deletingId === project.id}
+                  className="rounded-lg px-2.5 py-1 text-[11px] font-black text-white transition hover:opacity-90 disabled:opacity-50"
+                  style={{ backgroundColor: "#dc2626" }}
+                >
+                  {deletingId === project.id ? "Deleting…" : "Delete project"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div
+              key={project.id}
+              role="option"
+              aria-selected={project.id === projectId}
+              className="group flex w-full items-center gap-1 rounded-lg transition hover:bg-white/8"
+            >
+              <button
+                type="button"
+                onClick={() => onSelect(project.id)}
+                className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 text-left"
+                style={{ color: project.id === projectId ? "var(--litt-primary)" : "var(--text-secondary)" }}
+              >
+                <Folder size={13} className="shrink-0" />
+                <span className="min-w-0 flex-1 truncate text-[12px] font-bold">{project.name}</span>
+                <span className="shrink-0 text-[11px]" style={{ color: "var(--text-muted)" }}>{isManagedSourceType(project.sourceType ?? null) ? "LiTT Managed" : "GitHub"}</span>
+              </button>
+              {!project.legacy && (
+                <button
+                  type="button"
+                  onClick={() => onRequestDelete(project)}
+                  aria-label={`Delete project ${project.name}`}
+                  title={`Delete project ${project.name}`}
+                  className="mr-1 shrink-0 rounded-md p-1.5 opacity-60 transition hover:bg-white/10 hover:opacity-100 focus-visible:opacity-100"
+                  style={{ color: "#fca5a5" }}
+                >
+                  <Trash2 size={13} />
+                </button>
+              )}
+            </div>
+          )
+        ))
+      )}
+      {onCreateProject && !loading && !error && (
+        <>
+          <div className="mx-1 my-1 h-px" style={{ backgroundColor: "var(--studio-border)" }} />
+          <button
+            type="button"
+            onClick={onCreateProject}
+            className="flex min-h-11 w-full items-center gap-2 rounded-lg px-2.5 text-left transition hover:bg-white/8"
+            style={{ color: "var(--litt-primary)" }}
+          >
+            <Plus size={13} className="shrink-0" />
+            <span className="text-[12px] font-bold">New project</span>
+          </button>
         </>
       )}
     </div>
