@@ -406,7 +406,7 @@ export default function GamesPage() {
         {/* === GAME PLAYER OVERLAY === */}
         {selectedGame && (
           <div
-            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 p-2 backdrop-blur-md sm:p-4"
+            className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/95 p-2 backdrop-blur-md sm:p-4"
             onClick={(e) => { if (e.target === e.currentTarget) closeGame(); }}
           >
             <div
@@ -416,16 +416,16 @@ export default function GamesPage() {
               {/* Header bar — hidden in fullscreen */}
               {!isFullscreen && (
                 <div className="mb-2 flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <button onClick={closeGame} className="rounded-lg border border-white/10 p-2 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Close game" title="Close">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <button onClick={closeGame} className="shrink-0 rounded-lg border border-white/10 p-2 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Close game" title="Close">
                       <X size={16} />
                     </button>
-                    <div>
-                      <div className="font-black">{selectedGame.title}</div>
-                      <div className="text-[10px] text-white/55">{selectedGame.platform.toUpperCase()} · {selectedGame.licenseLabel}</div>
+                    <div className="min-w-0">
+                      <div className="truncate font-black">{selectedGame.title}</div>
+                      <div className="truncate text-[10px] text-white/55">{selectedGame.platform.toUpperCase()} · {selectedGame.licenseLabel}</div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex shrink-0 items-center gap-2">
                     <Link href="/dashboard" className="rounded-lg border border-white/10 px-3 py-2 text-[11px] font-bold text-white/60 transition hover:bg-white/10 hover:text-white" title="Back to Dashboard">
                       ← Dashboard
                     </Link>
@@ -457,10 +457,10 @@ export default function GamesPage() {
                 </div>
               )}
 
-              {/* Game viewport — flexible height instead of fixed aspect-video */}
+              {/* Game viewport — explicit height so the iframe never collapses */}
               <div
                 className={`relative overflow-hidden rounded-2xl border border-white/10 bg-black ${isFullscreen ? "h-full rounded-none border-0" : ""}`}
-                style={isFullscreen ? undefined : { minHeight: "500px", maxHeight: "80vh" }}
+                style={isFullscreen ? undefined : { height: "min(78vh, 860px)", minHeight: 420 }}
               >
                 {selectedGame.html5Url ? (
                   <>
@@ -528,9 +528,12 @@ export default function GamesPage() {
 
               {/* Footer bar — hidden in fullscreen */}
               {!isFullscreen && (
-                <div className="mt-2 flex flex-wrap items-center gap-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-[10px] text-white/55">
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-[10px] text-white/55">
                   <span>👤 {selectedGame.players}P</span>
                   <span>🛡️ {selectedGame.licenseLabel}</span>
+                  {selectedGame.controlsHint && (
+                    <span className="font-bold text-white/75">🎮 {selectedGame.controlsHint}</span>
+                  )}
                   {selectedGame.sourceUrl && (
                     <a href={selectedGame.sourceUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 hover:text-white/70" aria-label={`View ${selectedGame.title} source`}>
                       <Code2 size={11} /> Source
