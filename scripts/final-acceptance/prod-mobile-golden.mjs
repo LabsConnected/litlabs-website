@@ -60,6 +60,7 @@ const STAMP = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
 const GOLDEN_PROJECT_ID = process.env.LITT_GOLDEN_PROJECT_ID?.trim() || null;
 const IS_CI = process.env.GITHUB_ACTIONS === "true";
 const GOLDEN_PROJECT_NAME = "Golden Acceptance — Ember Roast";
+const FRESH_PROJECT_TEMPLATE = process.env.LITT_ACCEPTANCE_TEMPLATE_ID?.trim() || "empty-static";
 
 // The exact literal the run asks the model to write. The stamp makes every
 // run's mutation verifiably fresh on the permanent project — a no-op answer
@@ -108,6 +109,7 @@ const verdict = {
   screenshots: [],
   verdict: "INCOMPLETE",
   notes: [],
+  freshAccount: process.env.LITT_ACCEPTANCE_FRESH_ACCOUNT === "1",
 };
 
 function step(name, ok, detail) {
@@ -139,6 +141,14 @@ async function dismissCookieConsent(page) {
 async function openMobileSheet(page) {
   const sheet = page.getByTestId("litt-mobile-sheet");
   if (await sheet.isVisible().catch(() => false)) return;
+  // The Developer Tools drawer intentionally owns the mobile surface while
+  // open. Close it through the same visible control a user would use before
+  // reopening LiTT; do not change product visibility rules for this harness.
+  const dockClose = page.getByTestId("dock-close");
+  if (await dockClose.isVisible().catch(() => false)) {
+    await dockClose.click();
+    await page.waitForTimeout(250);
+  }
   const trigger = page
     .getByRole("button", { name: "Ask LiTT to build" })
     .first();
@@ -305,7 +315,7 @@ async function main() {
       step("golden_project_resolved", false, "LITT_GOLDEN_PROJECT_ID is not configured — CI runs must target the permanent golden project");
     } else {
       const projResp = await page.request.post(`${BASE}/api/studio-projects`, {
-        data: { sourceType: "blank", name: GOLDEN_PROJECT_NAME, templateId: "blank-static" },
+        data: { sourceType: "blank", name: GOLDEN_PROJECT_NAME, templateId: FRESH_PROJECT_TEMPLATE },
         timeout: 60_000,
       });
       const projBody = await projResp.json().catch(() => null);
@@ -331,6 +341,21 @@ async function main() {
         if (pj?.project?.workspaceStatus === "ready" || pj?.workspaceStatus === "ready") workspaceReady = true;
       }
       step("workspace_ready", workspaceReady, `projectId=${projectId}`);
+
+      // The explicit empty-static contract is stronger than merely having a
+      // blank-looking preview: before the first request the managed workspace
+      // must contain no user application files. Git metadata is not a user
+      // project file and is intentionally excluded from this proof.
+      const filesResp = await page.request.get(
+        `${BASE}/api/studio-projects/${projectId}/files?path=${encodeURIComponent(".")}`,
+        { timeout: 60_000 },
+      ).catch(() => null);
+      const filesBody = filesResp ? await filesResp.json().catch(() => null) : null;
+      const entries = Array.isArray(filesBody?.entries) ? filesBody.entries : [];
+      const userEntries = entries.filter((entry) => entry?.name !== ".git");
+      step("fresh_project_zero_user_files",
+        !GOLDEN_PROJECT_ID && FRESH_PROJECT_TEMPLATE === "empty-static" && filesResp?.status() === 200 && userEntries.length === 0,
+        `template=${FRESH_PROJECT_TEMPLATE} HTTP ${filesResp?.status() ?? "unreachable"} userFiles=${userEntries.length}`);
     }
 
     // ── Step 2: Studio loads on mobile with the project selected ──
@@ -725,6 +750,39 @@ async function main() {
     }
     step("post_build_keyboard_usable", stillUsable && sheetUp, `input=${stillUsable} sheet=${sheetUp}`);
     await shot(page, "08-post-build-keyboard");
+
+    // Finish the mobile acceptance contract with an actual follow-up sent
+    // through the reopened composer, not just a visibility assertion.
+    if (stillUsable && sheetUp) {
+      const followUp = "Confirm the site is ready and summarize the files you created.";
+      await commandInput.fill(followUp);
+      const followUpResponse = page.waitForResponse((response) =>
+        /\/api\/studio\/conversations\/[^/]+\/messages/.test(response.url()) &&
+        response.request().method() === "POST",
+        { timeout: 60_000 },
+      ).catch(() => null);
+      await page.getByTestId("studio-send-button").click().catch(() => {});
+      const followUpResult = await followUpResponse;
+      step("post_build_follow_up_submitted", !!followUpResult && followUpResult.status() === 200,
+        followUpResult ? `POST follow-up → ${followUpResult.status()}` : "follow-up messages POST not observed");
+    } else {
+      step("post_build_follow_up_submitted", false, "composer was not usable after the drawer was closed and LiTT was reopened");
+    }
+
+    // Verify the generated site from a real desktop viewport as well. This
+    // is deliberately a separate browser page so the mobile composer proof
+    // remains independent of responsive reflow.
+    if (verdict.liveDeploymentUrl) {
+      const desktopPage = await context.newPage();
+      await desktopPage.setViewportSize({ width: 1440, height: 900 });
+      const desktopResp = await desktopPage.goto(verdict.liveDeploymentUrl, { waitUntil: "domcontentloaded", timeout: 60_000 }).catch(() => null);
+      const desktopBody = await desktopPage.locator("body").innerText().catch(() => "");
+      step("desktop_generated_site", desktopResp?.status() === 200 && /ember roast/i.test(desktopBody),
+        `HTTP ${desktopResp?.status() ?? "unreachable"} body=${desktopBody.length}b`);
+      await desktopPage.close().catch(() => {});
+    } else {
+      step("desktop_generated_site", false, "no live deployment URL to verify");
+    }
 
   } catch (err) {
     step("fatal", false, err instanceof Error ? err.message : String(err));

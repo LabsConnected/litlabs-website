@@ -54,6 +54,16 @@ export const PROJECT_TEMPLATES: Record<
     buildCommand: "",
     testCommand: "",
   },
+  "empty-static": {
+    label: "Empty Static Site",
+    description: "An empty managed workspace. LiTT creates the application files from your request.",
+    framework: "static",
+    packageManager: "none",
+    installCommand: "",
+    developmentCommand: "",
+    buildCommand: "",
+    testCommand: "",
+  },
   nextjs: {
     label: "Next.js Application",
     description: "Next.js 16 with React 19, Tailwind CSS, TypeScript.",
