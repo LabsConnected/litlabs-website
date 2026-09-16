@@ -99,6 +99,7 @@ function IdentityDock() {
       <div
         className="h-9 w-9 animate-pulse rounded-full"
         style={{ background: `${T.borderColor}20` }}
+        role="status"
         aria-label="Loading account"
       />
     );

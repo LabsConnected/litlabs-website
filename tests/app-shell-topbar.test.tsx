@@ -19,6 +19,7 @@ import * as React from "react";
 import { AppShell } from "@/components/AppShell";
 
 let mockPathname = "/dashboard";
+let mockAuthLoaded = true;
 vi.mock("next/navigation", () => ({
   usePathname: () => mockPathname,
   useSearchParams: () => new URLSearchParams(),
@@ -45,7 +46,7 @@ vi.mock("@/context/WalletContext", () => ({
 vi.mock("@/hooks/useClerkAuth", () => ({
   useClerkAuth: () => ({
     isSignedIn: true,
-    isLoaded: true,
+    isLoaded: mockAuthLoaded,
     userId: "u1",
     signOut: vi.fn(),
   }),
@@ -78,6 +79,7 @@ describe("AppShell top bar", () => {
     cleanup();
     localStorage.clear();
     mockPathname = "/dashboard";
+    mockAuthLoaded = true;
   });
 
   it("renders no left sidebar — navigation lives in a sticky top bar", () => {
@@ -167,5 +169,24 @@ describe("AppShell top bar", () => {
     expect(main).not.toBeNull();
     expect(main!.className).toContain("min-w-0");
     expect(main!.className).toContain("overflow-x-hidden");
+  });
+
+  it("gives the account loading placeholder an accessible role (axe aria-prohibited-attr regression)", () => {
+    // The identity dock renders a pulsing placeholder while auth loads.
+    // An aria-label on a role-less element is an axe critical/serious
+    // violation (aria-prohibited-attr) — CI's site-audit scan failed on
+    // /voice and /agents because of it. role="status" keeps the accessible
+    // name legal.
+    mockAuthLoaded = false;
+    render(
+      <AppShell>
+        <div>content</div>
+      </AppShell>,
+    );
+    const placeholder = getHeader().querySelector(
+      '[aria-label="Loading account"]',
+    );
+    expect(placeholder).not.toBeNull();
+    expect(placeholder!.getAttribute("role")).toBe("status");
   });
 });
