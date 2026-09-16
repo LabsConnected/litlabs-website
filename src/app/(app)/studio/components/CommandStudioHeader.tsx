@@ -295,39 +295,6 @@ export default function CommandStudioHeader({
           document.body,
         )}
 
-      {/* Execution mode — segmented PLAN / ACT / AUTO. Always visible. */}
-      {onExecutionModeChange && (
-        <div
-          className="flex shrink-0 items-center gap-0.5 rounded-lg border p-0.5"
-          style={{ borderColor: "rgba(255,255,255,0.07)", backgroundColor: "rgba(255,255,255,0.02)" }}
-          role="group"
-          aria-label="Execution mode"
-          data-testid="execution-mode-segmented"
-        >
-          {MODE_META.map((m) => {
-            const isActive = m.id === executionMode;
-            return (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => onExecutionModeChange(m.id)}
-                className="rounded-md px-2 py-1 text-[11px] font-bold transition-all active:scale-95"
-                style={{
-                  color: isActive ? m.color : "var(--text-muted)",
-                  backgroundColor: isActive ? m.tint : "transparent",
-                  boxShadow: isActive ? `inset 0 0 0 1px ${m.border}` : "none",
-                }}
-                aria-pressed={isActive}
-                title={`${m.label} — ${m.desc}`}
-                data-testid={`execution-mode-${m.id}`}
-              >
-                {m.label}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
       <div className="flex-1" />
 
       {/* Preview quick action — only when the runtime is actually verified. */}
@@ -432,6 +399,8 @@ export default function CommandStudioHeader({
             onRenameChatAction={onRenameChatAction}
             onExportChatAction={onExportChatAction}
             onOpenDockTabAction={onOpenDockTabAction}
+            executionMode={executionMode}
+            onExecutionModeChange={onExecutionModeChange}
             hasConversation={Boolean(hasConversation)}
             previewDisabled={!runtimeReady}
             busy={busy}
@@ -648,6 +617,8 @@ function OverflowMenu({
   onRenameChatAction,
   onExportChatAction,
   onOpenDockTabAction,
+  executionMode,
+  onExecutionModeChange,
   hasConversation,
   previewDisabled,
   busy,
@@ -663,6 +634,8 @@ function OverflowMenu({
   onRenameChatAction?: () => void;
   onExportChatAction?: () => void;
   onOpenDockTabAction?: (tab: StudioTopBarDockTab) => void;
+  executionMode: StudioTopBarMode;
+  onExecutionModeChange?: (mode: StudioTopBarMode) => void;
   hasConversation: boolean;
   previewDisabled: boolean;
   busy: boolean;
@@ -801,6 +774,37 @@ function OverflowMenu({
           <Terminal size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
           Terminal
         </button>
+      )}
+      {onExecutionModeChange && (
+        <>
+          <div className="h-px" style={{ backgroundColor: "rgba(255,255,255,0.07)" }} />
+          <div className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--text-muted)" }}>
+            Run mode
+          </div>
+          <div className="flex gap-1 px-3 pb-2" role="group" aria-label="Execution mode" data-testid="execution-mode-segmented">
+            {MODE_META.map((m) => {
+              const isActive = m.id === executionMode;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => { onClose(); onExecutionModeChange(m.id); }}
+                  className="flex-1 rounded-md px-1.5 py-1.5 text-[10px] font-bold transition-all"
+                  style={{
+                    color: isActive ? m.color : "var(--text-muted)",
+                    backgroundColor: isActive ? m.tint : "transparent",
+                    boxShadow: isActive ? `inset 0 0 0 1px ${m.border}` : "none",
+                  }}
+                  aria-pressed={isActive}
+                  title={`${m.label} — ${m.desc}`}
+                  data-testid={`execution-mode-${m.id}`}
+                >
+                  {m.label}
+                </button>
+              );
+            })}
+          </div>
+        </>
       )}
       <div className="h-px" style={{ backgroundColor: "rgba(255,255,255,0.07)" }} />
       <Link

@@ -21,6 +21,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { delimiter as PATH_DELIMITER, dirname, join } from "path";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "fs";
 import { tmpdir } from "os";
+import { createServer } from "http";
 
 const IS_WIN = process.platform === "win32";
 
@@ -66,7 +67,28 @@ function overrideExecPath(cleanDir: string): () => void {
 
 // ─── PATH construction ─────────────────────────────────────────────
 
-import { buildChildPath, resolvePackageManager } from "../preview/PreviewManager";
+import { buildChildPath, probeHealth, resolvePackageManager } from "../preview/PreviewManager";
+
+describe("PreviewManager — root route health", () => {
+  it("does not call a running server ready when GET / returns Cannot GET /", async () => {
+    const server = createServer((_req, res) => {
+      res.statusCode = 404;
+      res.end("Cannot GET /");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Test server did not bind");
+    try {
+      const result = await probeHealth(address.port, 100);
+      expect(result.healthy).toBe(false);
+      expect(result.rootRouteMissing).toBe(true);
+      expect(result.status).toBe(404);
+      expect(result.bodySnippet).toContain("entry route");
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+});
 
 describe("PreviewManager — buildChildPath", () => {
   let origEnv: NodeJS.ProcessEnv;

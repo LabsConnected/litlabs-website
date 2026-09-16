@@ -28,6 +28,7 @@ import {
   FolderOpen,
   Maximize2,
   Minimize2,
+  PanelBottom,
   ScanSearch,
   SquareTerminal,
   X,
@@ -287,57 +288,55 @@ export default function StudioDock({
         </div>
       )}
 
-      {/* Tab strip header — always visible */}
+      {/* Collapsed state is intentionally one quiet entry point. The
+          contextual tabs appear only after the developer drawer opens. */}
       <div
         className="flex shrink-0 items-center justify-between"
         style={{ height: COLLAPSED_HEIGHT, backgroundColor: "#0d0916" }}
       >
-        {/* Left: tabs — scrolls horizontally on phones so all tabs are
-            reachable at 390px; desktop keeps the static strip. */}
-        <div className="no-scrollbar flex h-full min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overflow-y-hidden pl-2 sm:overflow-visible" role="tablist" aria-label="Studio dock tabs">
-          {DOCK_TABS.map((t) => {
-            const Icon = t.icon;
-            const isActive = activeTab === t.id;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                role="tab"
-                data-testid={`dock-tab-${t.id}`}
-                aria-label={t.label}
-                aria-selected={isActive}
-                onClick={() => handleTabClick(t.id)}
-                className="flex h-full items-center gap-1.5 px-2.5 text-[11px] font-bold transition"
-                style={{
-                  color: isActive ? CYAN : "var(--text-muted)",
-                  borderBottom:
-                    isActive && view !== "collapsed"
-                      ? `2px solid ${CYAN}`
-                      : "2px solid transparent",
-                }}
-              >
-                <Icon size={13} className="pointer-events-none" />
-                {t.label}
-                {t.id === "activity" && activityPulse && (
-                  <span
-                    data-testid="dock-activity-pulse"
-                    className="h-1.5 w-1.5 animate-pulse rounded-full"
-                    style={{ backgroundColor: CYAN }}
-                    aria-label="Activity in progress"
-                  />
-                )}
-                {t.id === "terminal" && terminalBadge && (
-                  <span
-                    data-testid="dock-terminal-badge"
-                    className="h-1.5 w-1.5 rounded-full"
-                    style={{ backgroundColor: AMBER }}
-                    aria-label="Terminal command failed"
-                  />
-                )}
-              </button>
-            );
-          })}
-        </div>
+        {view === "collapsed" ? (
+          <button
+            type="button"
+            onClick={() => { setView("normal"); onToggle(); }}
+            className="flex h-full items-center gap-2 px-3 text-[11px] font-bold transition hover:bg-white/5"
+            style={{ color: "var(--text-muted)" }}
+            aria-label="Open developer tools"
+            data-testid="dock-collapsed-toggle"
+          >
+            <PanelBottom size={13} className="pointer-events-none" style={{ color: CYAN }} />
+            Developer tools
+            {activityPulse && <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: CYAN }} aria-label="Activity in progress" />}
+            {terminalBadge && <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: AMBER }} aria-label="Terminal command failed" />}
+          </button>
+        ) : (
+          <div className="no-scrollbar flex h-full min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overflow-y-hidden pl-2 sm:overflow-visible" role="tablist" aria-label="Studio dock tabs">
+            {DOCK_TABS.map((t) => {
+              const Icon = t.icon;
+              const isActive = activeTab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  data-testid={`dock-tab-${t.id}`}
+                  aria-label={t.label}
+                  aria-selected={isActive}
+                  onClick={() => handleTabClick(t.id)}
+                  className="flex h-full items-center gap-1.5 px-2.5 text-[11px] font-bold transition"
+                  style={{
+                    color: isActive ? CYAN : "var(--text-muted)",
+                    borderBottom: isActive ? `2px solid ${CYAN}` : "2px solid transparent",
+                  }}
+                >
+                  <Icon size={13} className="pointer-events-none" />
+                  {t.label}
+                  {t.id === "activity" && activityPulse && <span data-testid="dock-activity-pulse" className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: CYAN }} aria-label="Activity in progress" />}
+                  {t.id === "terminal" && terminalBadge && <span data-testid="dock-terminal-badge" className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: AMBER }} aria-label="Terminal command failed" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Right: controls — only when expanded */}
         {view !== "collapsed" && (

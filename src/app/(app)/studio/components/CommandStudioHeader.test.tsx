@@ -100,7 +100,7 @@ describe("CommandStudioHeader — truthful status", () => {
     mockProviderHealth = {};
   });
 
-  it("shows the segmented mode control, branding, and dock toggle", () => {
+  it("keeps execution mode contextual while showing branding and dock toggle", () => {
     const onToggleDock = vi.fn();
     render(
       <CommandStudioHeader
@@ -114,7 +114,8 @@ describe("CommandStudioHeader — truthful status", () => {
       />,
     );
 
-    // Segmented PLAN / ACT / AUTO control replaces the old dropdown + guide strip
+    fireEvent.click(screen.getByRole("button", { name: /more actions/i }));
+    // PLAN / ACT / AUTO stays available in the contextual menu, not the permanent toolbar.
     const segmented = screen.getByTestId("execution-mode-segmented");
     expect(segmented.textContent).toContain("PLAN");
     expect(segmented.textContent).toContain("ACT");
@@ -168,7 +169,7 @@ describe("CommandStudioHeader — truthful status", () => {
     expect(onPreview).toHaveBeenCalledTimes(1);
   });
 
-  it("switches execution mode from the segmented control", () => {
+  it("switches execution mode from the contextual menu", () => {
     const onModeChange = vi.fn();
     render(
       <CommandStudioHeader
@@ -181,6 +182,7 @@ describe("CommandStudioHeader — truthful status", () => {
         onExecutionModeChange={onModeChange}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /more actions/i }));
     fireEvent.click(screen.getByTestId("execution-mode-plan"));
     expect(onModeChange).toHaveBeenCalledWith("plan");
   });

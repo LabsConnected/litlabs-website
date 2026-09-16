@@ -48,7 +48,13 @@ vi.mock("next/dynamic", async () => {
 // StudioPreviewPanel is the unit under observation — stub it with a
 // stable testid so mounted instances can be counted.
 vi.mock("./StudioPreviewPanel", () => ({
-  default: () => <div data-testid="studio-preview-panel" />,
+  default: ({ onToggleSplitPreview }: { onToggleSplitPreview?: () => void }) => (
+    <div data-testid="studio-preview-panel">
+      {onToggleSplitPreview && (
+        <button type="button" data-testid="preview-split-toggle" onClick={onToggleSplitPreview} />
+      )}
+    </div>
+  ),
 }));
 
 // Other dynamic children that would be pulled in by the lazy passthrough
@@ -413,12 +419,13 @@ async function renderCommandStudio() {
 }
 
 async function openAdvancedTools(_user: ReturnType<typeof userEvent.setup>) {
-  // The old "Open advanced tools" button is gone (unified dock topology);
-  // advanced-tools state is now route-driven. Routing to "chat" opens the
-  // advanced workspace while keeping the center on the Plan surface.
-  act(() => {
-    window.dispatchEvent(new CustomEvent("studio:switch-tool", { detail: "chat" }));
-  });
+  // Split preview is now explicit. The default desktop layout has no
+  // reserved preview column; this helper opts into it for the tests that
+  // verify the optional split behavior.
+  await settle();
+  const toggle = screen.queryByTestId("preview-split-toggle");
+  if (!toggle) throw new Error("Preview split action did not mount");
+  await _user.click(toggle);
 }
 
 function previewPanels() {
@@ -451,7 +458,7 @@ describe("CommandStudio — single active preview", () => {
     });
   });
 
-  it("mounts exactly one preview on desktop split with advanced tools open", async () => {
+  it("mounts exactly one preview when desktop split is explicitly enabled", async () => {
     globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
     const { user } = await renderCommandStudio();
     await openAdvancedTools(user);
@@ -476,7 +483,7 @@ describe("CommandStudio — single active preview", () => {
     expect(screen.getByTestId("studio-center-workspace").querySelector("[data-testid='studio-preview-panel']")).toBeTruthy();
   });
 
-  it("keeps exactly one preview across Preview → Code → Preview navigation", async () => {
+  it("keeps exactly one preview across split Preview → Code → Preview navigation", async () => {
     globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
     const { user } = await renderCommandStudio();
     await openAdvancedTools(user);
@@ -504,12 +511,11 @@ describe("CommandStudio — single active preview", () => {
     expect(screen.getByTestId("studio-center-workspace").querySelector("[data-testid='studio-preview-panel']")).toBeTruthy();
   });
 
-  it("shows the Plan surface in the center while the permanent preview stays mounted (Plan tab)", async () => {
+  it("keeps the conversation surface in the center while split preview stays mounted", async () => {
     globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
     const { user } = await renderCommandStudio();
     await openAdvancedTools(user);
     await waitFor(() => expect(screen.getByTestId("permanent-preview-column")).toBeTruthy());
-    await user.click(screen.getByTestId("workspace-tab-plan"));
     await settle();
     expect(previewPanels()).toHaveLength(1);
     expect(screen.getByTestId("studio-center-workspace").querySelector("[data-testid='studio-plan-surface']")).toBeTruthy();
@@ -767,7 +773,8 @@ describe("CommandStudio — mission panels live in the Activity dock", () => {
     const chatPanel = screen.getByTestId("litt-chat-panel");
     expect(chatPanel.querySelector("[data-testid='mission-cards']")).toBeNull();
 
-    // Open the Activity dock tab (collapsed strip → click opens it).
+    // Open the collapsed developer drawer, then select Activity.
+    await user.click(screen.getByTestId("dock-collapsed-toggle"));
     await user.click(screen.getByTestId("dock-tab-activity"));
     const activity = screen.getByTestId("dock-content-activity");
     const cards = within(activity).getByTestId("mission-cards");
@@ -791,6 +798,7 @@ describe("CommandStudio — mission panels live in the Activity dock", () => {
   it("keeps mission card collapse state across dock tab switches", async () => {
     globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
     const { user } = await renderCommandStudio();
+    await user.click(screen.getByTestId("dock-collapsed-toggle"));
     await user.click(screen.getByTestId("dock-tab-activity"));
 
     // Collapse the Mission section.
