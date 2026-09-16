@@ -774,6 +774,11 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             qualityLoop: v2Config.qualityLoop,
             enableDeploy: built.kernelResult.decision.routing.mode === "ship",
             requiresExecution: built.kernelResult.decision.routing.requiresExecution,
+            // A production execution request is not complete until the
+            // agent-created website entry file is physically present in the
+            // verified workspace. This is enforced again after approval
+            // resume by the approvals route.
+            requireProjectArtifacts: built.kernelResult.decision.routing.requiresExecution,
             evalMetadata: v2Config.evalMetadata,
             progress: streamProgress,
             signal: executionAbort.signal,

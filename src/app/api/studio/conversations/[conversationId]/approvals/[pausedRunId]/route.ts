@@ -12,6 +12,7 @@ import {
 } from "@/lib/litt-intelligence/paused-run-store";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { resumeAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
+import { ensureProjectPreviewReady } from "@/lib/litt-intelligence/launch-flow";
 import { shouldEnableQualityLoop } from "@/lib/litt-intelligence/quality-loop-flow";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import {
@@ -279,6 +280,44 @@ export async function POST(
     transport,
   )
     .then(async (result) => {
+      // Approval resume is a separate execution path from the initial
+      // launch. Prove that an approved mutation really landed in the bound
+      // workspace and restart/verify preview before marking the resumed run
+      // complete. This closes the empty-project false-success gap where the
+      // model's continuation text was persisted even though no runnable site
+      // existed on disk.
+      const successfulMutation = result.toolCalls.some((call) => call.mutating && call.success);
+      const failedMutation = result.toolCalls.some((call) => call.mutating && !call.success);
+      let resumeArtifactError: string | undefined;
+      if (!result.pendingApproval && !result.cancelled) {
+        if (failedMutation && !successfulMutation) {
+          resumeArtifactError = "The approved workspace operation failed, so the project was not completed.";
+        } else if (successfulMutation) {
+          const preview = await ensureProjectPreviewReady(transport);
+          if (!preview.ok) {
+            resumeArtifactError = preview.error ?? "The project files were not runnable after approval.";
+          }
+        }
+      } else if (result.pendingApproval && successfulMutation) {
+        // A nested approval is allowed to continue, but preview can already
+        // be useful once the first file mutation has landed. Do not fail the
+        // nested gate merely because a later file has not been written yet.
+        await ensureProjectPreviewReady(transport).catch(() => undefined);
+      }
+
+      if (resumeArtifactError) {
+        await writeResumedResultToTranscript({
+          conversationId,
+          userId,
+          projectId: resolved.projectId,
+          pausedRunId,
+          status: "failed",
+          content: resumeArtifactError,
+        });
+        await markRunFailed(pausedRunId, userId, resumeArtifactError);
+        return;
+      }
+
       // The resumed run can hit a NEW approval gate. Persist it so it is
       // resumable — otherwise the client would get an approval with no
       // pausedRunId (a dead button).
