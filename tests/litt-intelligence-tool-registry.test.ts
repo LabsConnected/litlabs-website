@@ -44,6 +44,17 @@ describe("LiTT Intelligence — Tool Registry", () => {
     expect(tool!.approvalPolicy.neverAllow).toBe(true);
   });
 
+  it("deploy.execute requires the LITT_ENABLE_INFRA_DEPLOY opt-in", () => {
+    // Regression (golden run 35056919596): deploy.execute redeploys the
+    // configured Railway/Vercel service — the LiTT app itself. With the
+    // app's own deploy creds present in prod env, the model picked it over
+    // project.deploy and paused for approval of the WRONG action. The tool
+    // is now disabled unless LITT_ENABLE_INFRA_DEPLOY=1 is set explicitly.
+    const tool = toolRegistry.get("deploy.execute");
+    expect(tool).toBeDefined();
+    expect(tool!.enabled).toBe(false);
+  });
+
   // ─── Enable / Disable ─────────────────────────────────────────
 
   it("enable activates a tool", () => {

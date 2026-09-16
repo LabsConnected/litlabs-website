@@ -17,7 +17,7 @@ import {
   GitBranch,
 } from "lucide-react";
 import {
-  MEDIA_PROVIDERS,
+  WIRED_PROVIDERS,
   MediaFormat,
   MediaProviderId,
   getProvider,
@@ -419,7 +419,9 @@ export default function FlowTool() {
                       color: T.textColor,
                     }}
                   >
-                    {MEDIA_PROVIDERS.filter((p) =>
+                    {/* Unwired providers (wired: false) are excluded — never
+                        render an option that throws at request time. */}
+                    {WIRED_PROVIDERS.filter((p) =>
                       p.supportedFormats.includes(cell.format),
                     ).map((p) => (
                       <option key={p.id} value={p.id}>

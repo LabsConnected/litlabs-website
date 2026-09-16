@@ -16,6 +16,7 @@ import { useTerminalStore } from "@/stores/useTerminalStore";
 import { Maximize2, Minimize2, Plug, RotateCcw, Trash2, AlertCircle, Copy, Check, Download, ExternalLink } from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
 import { copyToClipboard } from "@/lib/studio/message-copy";
+import { useVisualViewport } from "../../app/(app)/studio/hooks/useVisualViewport";
 
 const HEARTBEAT_INTERVAL_MS = 10_000;
 
@@ -60,6 +61,30 @@ export const TerminalPanel = forwardRef<
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const CONNECTION_TIMEOUT_MS = 10_000;
+
+  // Mobile keyboard avoidance (Phase 1 #5): the visual viewport shrinks when
+  // the soft keyboard opens, but window resize often does not fire — refit
+  // the terminal off the visualViewport signal so the prompt stays visible.
+  const vv = useVisualViewport();
+  const lastBottomInsetRef = useRef(0);
+  useEffect(() => {
+    const inset = Math.round(vv.bottomInset);
+    if (inset === lastBottomInsetRef.current) return;
+    lastBottomInsetRef.current = inset;
+    const term = termRef.current;
+    const fit = fitAddonRef.current;
+    if (!term || !fit) return;
+    try {
+      fit.fit();
+      socketRef.current?.emit("terminal:resize", {
+        cols: term.cols,
+        rows: term.rows,
+      });
+      if (inset > 0) term.scrollToBottom();
+    } catch {
+      /* noop — terminal not ready */
+    }
+  }, [vv.bottomInset]);
 
   // Refs for callback props — updated every render but NOT included in the
   // connection useEffect's dependency array. This prevents inline arrow

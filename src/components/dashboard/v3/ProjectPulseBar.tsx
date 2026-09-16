@@ -5,14 +5,17 @@
  *
  * Shows real deployment/build/test/branch/commit/terminal status.
  * Clickable items open the developer drawer. Never fakes green checks.
+ * Right side carries the command-palette search trigger (⌘K).
  */
 
+import { Search } from "lucide-react";
 import type { PulseItem } from "./types";
 
 interface ProjectPulseBarProps {
   items: PulseItem[];
   loading: boolean;
   onItemClick: (item: PulseItem) => void;
+  onOpenCommandPalette: () => void;
 }
 
 const STATE_COLORS: Record<PulseItem["state"], string> = {
@@ -24,7 +27,7 @@ const STATE_COLORS: Record<PulseItem["state"], string> = {
   idle: "#a1a1aa",
 };
 
-export function ProjectPulseBar({ items, loading, onItemClick }: ProjectPulseBarProps) {
+export function ProjectPulseBar({ items, loading, onItemClick, onOpenCommandPalette }: ProjectPulseBarProps) {
   return (
     <div
       className="flex h-8 w-full items-center gap-3 overflow-x-auto border-b px-4 text-xs font-mono md:gap-6 md:px-6"
@@ -93,6 +96,21 @@ export function ProjectPulseBar({ items, loading, onItemClick }: ProjectPulseBar
           </div>
         ))
       )}
+      <button
+        type="button"
+        onClick={onOpenCommandPalette}
+        className="ml-auto flex shrink-0 items-center gap-1.5 transition-opacity hover:opacity-80"
+        style={{ color: "#52525b" }}
+        aria-label="Search (Ctrl+K)"
+      >
+        <Search size={12} />
+        <kbd
+          className="hidden rounded border px-1 py-px font-mono text-[10px] md:inline"
+          style={{ borderColor: "rgba(255,255,255,0.08)" }}
+        >
+          ⌘K
+        </kbd>
+      </button>
     </div>
   );
 }

@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Plug,
   ArrowRight,
+  X,
 } from "lucide-react";
 import ProjectSourceSelector from "@/components/studio/ProjectSourceSelector";
 import { useCapabilities } from "@/app/(app)/studio/hooks/useCapabilities";
@@ -49,6 +50,25 @@ const AUTH_LABELS: Record<string, string> = {
   endpoint: "Endpoint",
   none: "No auth",
 };
+
+/**
+ * Where the "Connect" button for a plugin should take the user.
+ *
+ * The settings page reads `?section=` from the query string (it never
+ * reads `location.hash`), and the Connections section holds the AI/API
+ * key entry UI — so plugins without their own connect URL deep-link
+ * to `/settings?section=connections`, where the user can actually
+ * enter a key. Returns null when there is no in-app connect flow.
+ */
+export function settingsDeepLinkForPlugin(
+  plugin: Pick<PluginDefinition, "connectUrl" | "authMethod">,
+): string | null {
+  if (plugin.connectUrl) return plugin.connectUrl;
+  if (plugin.authMethod === "api-key" || plugin.authMethod === "endpoint") {
+    return "/settings?section=connections";
+  }
+  return null;
+}
 
 export default function PluginsTool() {
   const { resolvedColors: T } = useTheme();
@@ -130,24 +150,14 @@ export default function PluginsTool() {
   const handleConnect = useCallback(
     async (plugin: PluginDefinition) => {
       // Use real connectUrl from API if available
-      const realUrl = plugin.connectUrl;
-      if (realUrl) {
-        window.location.href = realUrl;
+      const target = settingsDeepLinkForPlugin(plugin);
+      if (target) {
+        window.location.href = target;
+        setConnecting(null);
         return;
       }
       setConnecting(plugin.id);
-      // For API key providers, route to settings
-      if (plugin.authMethod === "api-key") {
-        window.location.href = `/settings#keys`;
-        setConnecting(null);
-        return;
-      }
-      // For endpoint providers, route to settings
-      if (plugin.authMethod === "endpoint") {
-        window.location.href = `/settings#connections`;
-        setConnecting(null);
-        return;
-      }
+      // No in-app connect flow for this auth method — nothing to navigate to.
       setConnecting(null);
     },
     [],
@@ -155,7 +165,13 @@ export default function PluginsTool() {
 
   const handleDisconnect = useCallback(async (pluginId: string) => {
     try {
-      await fetch(`/api/connections/${pluginId}/disconnect`, { method: "POST" });
+      const res = await fetch(`/api/connections/${pluginId}/disconnect`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || "Disconnect failed");
+        return;
+      }
+      setError(null);
       setPlugins((prev) =>
         prev.map((p) =>
           p.id === pluginId
@@ -164,16 +180,22 @@ export default function PluginsTool() {
         ),
       );
     } catch {
-      // ignore
+      setError("Disconnect failed — please try again.");
     }
   }, []);
 
   const handleSync = useCallback(async (pluginId: string) => {
     try {
-      await fetch(`/api/connections/${pluginId}/sync`, { method: "POST" });
+      const res = await fetch(`/api/connections/${pluginId}/sync`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || "Sync failed");
+        return;
+      }
+      setError(null);
       void refreshConnections();
     } catch {
-      // ignore
+      setError("Sync failed — please try again.");
     }
   }, [refreshConnections]);
 
@@ -260,6 +282,28 @@ export default function PluginsTool() {
         )}
       </div>
 
+      {/* Error banner — top of the tool, visible on every tab (was buried
+          inside the Installed-tab empty state, so Sync/Disconnect failures
+          on the default Discover tab showed zero feedback). Dismissible. */}
+      {error && (
+        <div
+          className="flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-xs"
+          style={{ borderColor: "#ef444430", background: "#ef444408", color: "#ef4444" }}
+          role="alert"
+          data-testid="plugins-error-banner"
+        >
+          <span className="min-w-0 flex-1">{error}</span>
+          <button
+            type="button"
+            onClick={() => setError(null)}
+            aria-label="Dismiss error"
+            className="grid h-6 w-6 shrink-0 place-items-center rounded-lg transition hover:bg-white/10"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
       {/* Search */}
       <div className="relative shrink-0">
         <Search
@@ -345,34 +389,7 @@ export default function PluginsTool() {
             </p>
           </div>
           <ProjectSourceSelector
-            onSelected={(src) => {
-              if (src.type === "upload") {
-                // Trigger file upload flow
-                const input = document.createElement("input");
-                input.type = "file";
-                input.accept = ".zip,.tar,.tgz";
-                input.onchange = async () => {
-                  const file = input.files?.[0];
-                  if (!file) return;
-                  const formData = new FormData();
-                  formData.append("file", file);
-                  try {
-                    const res = await fetch("/api/project-sources/upload", {
-                      method: "POST",
-                      body: formData,
-                    });
-                    if (!res.ok) {
-                      const data = await res.json().catch(() => ({}));
-                      throw new Error(data.error || "Upload failed");
-                    }
-                    void refreshConnections();
-                  } catch (err) {
-                    setError(err instanceof Error ? err.message : "Upload failed");
-                  }
-                };
-                input.click();
-                return;
-              }
+            onSelected={() => {
               void refreshConnections();
             }}
           />
@@ -385,11 +402,6 @@ export default function PluginsTool() {
               Browse providers
             </button>
           </div>
-          {error && (
-            <div className="mt-3 rounded-xl border px-3 py-2 text-xs" style={{ borderColor: "#ef444430", color: "#ef4444" }}>
-              {error}
-            </div>
-          )}
         </div>
       )}
 
@@ -436,6 +448,11 @@ function PluginCard({
 }) {
   const statusColor = STATUS_COLORS[plugin.status];
   const isInstalled = plugin.installed;
+  // Only GitHub has real server-side sync/disconnect backends
+  // (/api/connections/[id]/sync, /api/connections/[id]/disconnect).
+  // Other providers derive their status or store keys in settings —
+  // showing the buttons for them would 501, so they stay hidden.
+  const supportsSyncDisconnect = plugin.id === "github";
 
   return (
     <div
@@ -534,7 +551,7 @@ function PluginCard({
             )}
             Connect
           </button>
-        ) : (
+        ) : supportsSyncDisconnect ? (
           <>
             <button
               onClick={onSync}
@@ -551,7 +568,7 @@ function PluginCard({
               Disconnect
             </button>
           </>
-        )}
+        ) : null}
       </div>
     </div>
   );

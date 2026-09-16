@@ -74,6 +74,7 @@ async function postHandler(req: NextRequest) {
       "fileWrite",
       "githubAccess",
       "deployApproval",
+      "hiddenAgents",
     ]);
 
     const cleanSettings: Record<string, unknown> = {};

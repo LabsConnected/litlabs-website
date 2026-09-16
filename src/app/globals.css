@@ -452,10 +452,14 @@
   box-sizing: border-box;
 }
 
-/* Mobile safety: prevent horizontal scroll */
+/* Mobile safety: prevent horizontal scroll.
+   overflow-x: clip (not hidden): `hidden` forces overflow-y to compute as
+   `auto`, turning <body> into a scroll container and breaking
+   position:sticky descendants (the app top bar). `clip` forbids scrolling
+   without creating a scroll container, so sticky keeps working. */
 html,
 body {
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 /* Rendering quality — prevent synthetic bold/italic and optimize legibility */
@@ -467,6 +471,8 @@ html {
 body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Phase 1 #24: kill the grey tap flash on mobile */
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* Ensure main content never overflows sidebar/topbar */
@@ -1992,11 +1998,11 @@ html {
   }
 }
 
-/* No horizontal overflow anywhere */
+/* No horizontal overflow anywhere (clip keeps position:sticky working) */
 body,
 #__next,
 main {
-  overflow-x: hidden;
+  overflow-x: clip;
   max-width: 100vw;
 }
 
@@ -2104,20 +2110,31 @@ main {
   }
 }
 
-/* Safe area insets for notched phones */
+/* Safe area insets for notched phones.
+   Studio is exempt: it locks its shell to h-dvh and owns its insets
+   per-component (MobileCommandNav, LiTT sheet, composer, tools). The
+   blanket body padding shifts the h-dvh shell down and clips the bottom
+   nav (~80px slop on notched phones). Phase 1 #6. */
 @supports (padding-top: env(safe-area-inset-top)) {
   body {
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
   }
+  body:has(.studio-shell) {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
 }
 
-/* Touch-friendly tap targets (min 44px) */
+/* Touch-friendly tap targets (min 44px) — site chrome only.
+   Studio owns its touch targets per-component: the blanket rule distorts
+   the PLAN/ACT/AUTO segmented control, the agent status pill, and the
+   compact Approve/Reject buttons. Phase 1 #2. */
 @media (pointer: coarse) {
-  .btn,
-  a,
-  button,
-  [role="button"] {
+  .btn:not([data-studio-chrome] *),
+  a:not([data-studio-chrome] *),
+  button:not([data-studio-chrome] *),
+  [role="button"]:not([data-studio-chrome] *) {
     min-height: 44px;
     min-width: 44px;
   }
@@ -2125,6 +2142,15 @@ main {
   .card,
   .glass-card {
     padding: 16px;
+  }
+
+  /* Studio chrome — intentional compact targets on coarse pointers.
+     36px keeps the 52px header and the operator bar tappable without the
+     44px distortion. min-width is left alone (dot-only status pill). */
+  [data-studio-chrome] [data-testid="execution-mode-segmented"] button,
+  [data-studio-chrome] [data-testid="agent-status-pill"],
+  [data-studio-chrome] [data-testid="studio-operator-bar"] button {
+    min-height: 36px;
   }
 }
 
@@ -2168,6 +2194,18 @@ main {
   input,
   textarea,
   select {
+    font-size: 16px;
+  }
+}
+
+/* Studio command composer input — 14px on desktop, 16px on mobile so iOS
+   does not zoom on focus. Applied via class (not inline style) so the
+   global mobile input rule can win. Phase 1 #8. */
+.studio-command-input {
+  font-size: 14px;
+}
+@media (max-width: 768px) {
+  .studio-command-input {
     font-size: 16px;
   }
 }
@@ -2451,11 +2489,11 @@ main {
    RESPONSIVE POLISH (added 2026-06-23)
    ============================================================ */
 
-/* Prevent any page from overflowing horizontally */
+/* Prevent any page from overflowing horizontally (clip keeps position:sticky working) */
 html,
 body,
 #__next {
-  overflow-x: hidden;
+  overflow-x: clip;
   max-width: 100vw;
 }
 

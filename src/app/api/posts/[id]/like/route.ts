@@ -30,7 +30,10 @@ export async function POST(
 
   const { id: postId } = await params;
   if (!isAdminSupabaseConfigured()) {
-    return NextResponse.json({ success: true, mock: true });
+    return NextResponse.json(
+      { error: "Likes are unavailable — the community feed isn’t connected yet." },
+      { status: 503 },
+    );
   }
 
   try {
@@ -74,7 +77,10 @@ export async function POST(
     response.headers.set("X-RateLimit-Reset", String(resetTime));
     return response;
   } catch {
-    return NextResponse.json({ success: true, mock: true });
+    return NextResponse.json(
+      { error: "Likes are unavailable — the community feed isn’t connected yet." },
+      { status: 503 },
+    );
   }
 }
 
@@ -101,7 +107,10 @@ export async function DELETE(
 
   const { id: postId } = await params;
   if (!isAdminSupabaseConfigured()) {
-    return NextResponse.json({ success: true, mock: true });
+    return NextResponse.json(
+      { error: "Likes are unavailable — the community feed isn’t connected yet." },
+      { status: 503 },
+    );
   }
 
   try {
@@ -125,6 +134,9 @@ export async function DELETE(
     response.headers.set("X-RateLimit-Reset", String(resetTime));
     return response;
   } catch {
-    return NextResponse.json({ success: true, mock: true });
+    return NextResponse.json(
+      { error: "Likes are unavailable — the community feed isn’t connected yet." },
+      { status: 503 },
+    );
   }
 }

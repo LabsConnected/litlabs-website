@@ -245,7 +245,7 @@ export default function PricingClient() {
       if (plan.billingType === "free") return;
       if (!isSignedIn) {
         track("signup_started", { source: "pricing", plan: plan.id });
-        window.location.href = "/sign-in?redirect=/pricing";
+        window.location.href = "/sign-in?redirect_url=/pricing";
         return;
       }
       track("checkout_started", { plan: plan.id });

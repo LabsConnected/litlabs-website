@@ -442,7 +442,7 @@ export function createNode(type: NodeType, projectId?: string): CanvasNode {
   const palette = PALETTE_ITEMS.find((p) => p.type === type);
   if (!palette) throw new Error(`Unknown node type: ${type}`);
   const now = Date.now();
-  return {
+  const node: CanvasNode = {
     id: `node-${now}-${Math.random().toString(36).slice(2, 9)}`,
     type,
     parentId: null,
@@ -451,6 +451,30 @@ export function createNode(type: NodeType, projectId?: string): CanvasNode {
     styles: { ...palette.defaultStyles },
     metadata: { createdAt: now, updatedAt: now },
   };
+  createdNodeSink?.push(node);
+  return node;
+}
+
+/**
+ * Creation hook for builders that need every node a template creates —
+ * not just the top-level children its `build()` returns.
+ *
+ * Section templates return only their direct children from `build()`, so
+ * assembling a document from those return values silently drops deeply
+ * nested nodes (navbar links, hero copy, hero images…). Wrapping
+ * `template.build()` in `collectCreatedNodes` captures the full transitive
+ * set, so starter pages render — and publish — complete.
+ */
+let createdNodeSink: CanvasNode[] | null = null;
+
+export function collectCreatedNodes<T>(sink: CanvasNode[], fn: () => T): T {
+  const prev = createdNodeSink;
+  createdNodeSink = sink;
+  try {
+    return fn();
+  } finally {
+    createdNodeSink = prev;
+  }
 }
 
 export function createEmptyDocument(projectId?: string | null, conversationId?: string | null): CanvasDocument {
@@ -502,10 +526,10 @@ export const SECTION_TEMPLATES: SectionTemplate[] = [
       const section = createNode("section");
       section.styles = { ...section.styles, padding: "80px 48px", display: "flex", flexDirection: "column", gap: 24, alignItems: "center", justifyContent: "center", minHeight: "400px", backgroundColor: "rgba(139,92,246,0.05)" };
       const heading = createNode("heading");
-      heading.props = { text: "Build Something Amazing", level: 1 };
+      heading.props = { text: "Your Headline Goes Here", level: 1 };
       heading.styles = { fontSize: 48, fontWeight: "800", textAlign: "center", color: "var(--text-primary)" };
       const text = createNode("text");
-      text.props = { text: "Your vision, powered by LiTTree. Start building your dream project today." };
+      text.props = { text: "One clear sentence about what your business does and who it's for." };
       text.styles = { fontSize: 16, textAlign: "center", color: "var(--text-secondary)", maxWidth: "500px" };
       const btn = createNode("button");
       btn.props = { text: "Get Started", href: "#" };
@@ -532,14 +556,15 @@ export const SECTION_TEMPLATES: SectionTemplate[] = [
       columns.props = { columns: 3 };
       columns.styles = { display: "flex", flexDirection: "row", gap: 24 };
       const cards: CanvasNode[] = [];
+      // Empty feature slots — never ship invented claims as default content.
       for (let i = 0; i < 3; i++) {
         const card = createNode("card");
         card.styles = { padding: "24px", borderRadius: 16, backgroundColor: "rgba(255,255,255,0.05)", display: "flex", flexDirection: "column", gap: 12, borderWidth: 1, borderColor: "var(--studio-border-strong)", borderStyle: "solid", flex: "1" };
         const cardHeading = createNode("heading");
-        cardHeading.props = { text: ["Fast", "Secure", "Scalable"][i], level: 3 };
+        cardHeading.props = { text: ["Feature One", "Feature Two", "Feature Three"][i], level: 3 };
         cardHeading.styles = { fontSize: 18, fontWeight: "700", color: "var(--text-primary)" };
         const cardText = createNode("text");
-        cardText.props = { text: ["Lightning quick performance", "Enterprise-grade security", "Grows with your needs"][i] };
+        cardText.props = { text: "A short description of this feature — click to edit." };
         cardText.styles = { fontSize: 13, color: "var(--text-secondary)" };
         card.children = [cardHeading.id, cardText.id];
         cardHeading.parentId = card.id;
@@ -563,10 +588,10 @@ export const SECTION_TEMPLATES: SectionTemplate[] = [
       const section = createNode("section");
       section.styles = { ...section.styles, padding: "64px 48px", display: "flex", flexDirection: "column", gap: 24, alignItems: "center", backgroundColor: "rgba(139,92,246,0.08)", borderRadius: 16 };
       const heading = createNode("heading");
-      heading.props = { text: "Ready to Start?", level: 2 };
+      heading.props = { text: "Your Call to Action", level: 2 };
       heading.styles = { fontSize: 32, fontWeight: "700", textAlign: "center", color: "var(--text-primary)" };
       const btn = createNode("button");
-      btn.props = { text: "Launch Project", href: "#" };
+      btn.props = { text: "Get Started", href: "#" };
       btn.styles = { padding: "14px 36px", borderRadius: 10, backgroundColor: "#9b4dff", color: "#fff", fontSize: 16, fontWeight: "700" };
       section.children = [heading.id, btn.id];
       heading.parentId = section.id;
@@ -588,10 +613,11 @@ export const SECTION_TEMPLATES: SectionTemplate[] = [
       columns.props = { columns: 3 };
       columns.styles = { display: "flex", flexDirection: "row", gap: 24 };
       const allChildren: CanvasNode[] = [heading, columns];
+      // Empty plan slots — never ship invented prices as default content.
       const plans = [
-        { name: "Starter", price: "$0", desc: "Perfect for trying out" },
-        { name: "Pro", price: "$29", desc: "For growing projects" },
-        { name: "Enterprise", price: "$99", desc: "Unlimited everything" },
+        { name: "Plan One", price: "Your Price", desc: "A short description of what's included." },
+        { name: "Plan Two", price: "Your Price", desc: "A short description of what's included." },
+        { name: "Plan Three", price: "Your Price", desc: "A short description of what's included." },
       ];
       const cardNodes: CanvasNode[] = [];
       for (const plan of plans) {

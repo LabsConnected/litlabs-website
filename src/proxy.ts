@@ -229,7 +229,7 @@ function withBotProtection(inner: (...args: never[]) => unknown) {
 //   /ai-builder    — public AI builder
 //
 // Protected page routes (require authentication):
-//   /dashboard, /studio/*, /projects, /wallet,
+//   /dashboard, /studio/*, /create, /projects, /wallet,
 //   /deployments, /settings/*, /profile/*, /admin/*, /owner,
 //   /library/*, /memories, /flow, /code, /agent-chat,
 //   /ai-builder, /builder, /chat, /generate,
@@ -239,6 +239,7 @@ const isProtectedRoute = createRouteMatcher([
   // Protected page routes
   "/studio(.*)",
   "/dashboard(.*)",
+  "/create(.*)",
   "/projects(.*)",
   "/wallet(.*)",
   "/deployments(.*)",

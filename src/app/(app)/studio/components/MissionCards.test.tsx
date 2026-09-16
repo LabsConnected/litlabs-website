@@ -194,4 +194,38 @@ describe("MissionCards", () => {
       screen.getByText("Approval waiting — review the request before work continues.")
     ).toBeInTheDocument();
   });
+
+  describe("showActions={false} (mobile Build status sheet)", () => {
+    it("hides the Next Actions card but keeps Mission and Checkpoints", () => {
+      render(<MissionCards {...makeProps({ showActions: false })} />);
+
+      expect(screen.getByTestId("mission-cards")).toBeInTheDocument();
+      expect(screen.getByTestId("mission-card-mission")).toBeInTheDocument();
+      expect(screen.getByTestId("mission-card-checkpoints")).toBeInTheDocument();
+      expect(screen.queryByTestId("mission-card-actions")).toBeNull();
+    });
+
+    it("surfaces contextual hints above the mission card", () => {
+      act(() => {
+        useExecutionStore.getState().startRun();
+        useExecutionStore.getState().setPendingApproval({
+          toolId: "edit_file",
+          reason: "File modification requires approval",
+        });
+      });
+
+      render(<MissionCards {...makeProps({ showActions: false })} />);
+
+      // The hint text renders outside the actions card (which is hidden).
+      expect(
+        screen.getByText("Approval waiting — review the request before work continues.")
+      ).toBeInTheDocument();
+      expect(screen.queryByTestId("mission-card-actions")).toBeNull();
+    });
+
+    it("defaults to showing actions (desktop unchanged)", () => {
+      render(<MissionCards {...makeProps()} />);
+      expect(screen.getByTestId("mission-card-actions")).toBeInTheDocument();
+    });
+  });
 });

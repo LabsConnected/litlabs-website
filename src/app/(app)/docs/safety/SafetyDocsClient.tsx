@@ -80,21 +80,21 @@ litt --mode auto    # proceed autonomously`}
       <DocList
         items={[
           <>
-            <InlineCode>plan</InlineCode> is the most cautious: LiTT lays
+            <InlineCode>plan</InlineCode>{" "}is the most cautious: LiTT lays
             out what it would do and waits.
           </>,
           <>
-            <InlineCode>act</InlineCode> (the default) does the work but
+            <InlineCode>act</InlineCode>{" "}(the default) does the work but
             still asks before consequential steps.
           </>,
           <>
-            <InlineCode>auto</InlineCode> proceeds without pausing —
+            <InlineCode>auto</InlineCode>{" "}proceeds without pausing —
             useful for trusted, repeatable workflows.
           </>,
         ]}
       />
       <DocP>
-        Separately, <InlineCode>LITT_LOCAL_ONLY=1</InlineCode> blocks all
+        Separately, <InlineCode>LITT_LOCAL_ONLY=1</InlineCode>{" "}blocks all
         remote and model use, forcing the CLI to stay fully local.
       </DocP>
 
@@ -135,7 +135,7 @@ litt --mode auto    # proceed autonomously`}
           <>Review the plan before big missions — steering early is cheaper than reverting late.</>,
           <>Check the preview before approving a deploy. “Done” means LiTT finished its steps; the preview is the source of truth.</>,
           <>Use the activity timeline to audit what changed and what ran, especially before publishing.</>,
-          <>Keep <InlineCode>--mode auto</InlineCode> for workflows you&apos;ve already watched succeed, not for first-time experiments.</>,
+          <>Keep <InlineCode>--mode auto</InlineCode>{" "}for workflows you&apos;ve already watched succeed, not for first-time experiments.</>,
         ]}
       />
     </>

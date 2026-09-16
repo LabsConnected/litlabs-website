@@ -1,7 +1,6 @@
 import { buildMetadata } from "@/lib/seo";
 import { ArrowRight, Bot, Code2, Globe, Heart, Shield, Sparkles, Zap, Check } from "lucide-react";
 import Link from "next/link";
-import Image from "next/image";
 
 export const metadata = buildMetadata({
   title: "About",
@@ -12,31 +11,8 @@ export const metadata = buildMetadata({
 export default function AboutPage() {
   return (
     <main className="min-h-screen bg-[#03050a] text-white selection:bg-[#a970ff]">
-      {/* ── Header ── */}
-      <header className="fixed inset-x-0 top-0 z-50 border-b border-white/8 bg-[#03050a]/80 backdrop-blur-2xl">
-        <div className="mx-auto flex h-16 max-w-screen-2xl items-center justify-between px-5 lg:px-10">
-          <Link href="/" className="flex items-center gap-2.5 font-black tracking-tight text-white">
-            <span className="relative h-9 w-9 overflow-hidden rounded-xl border border-[#a8ff2f]/30 shadow-[0_0_25px_rgba(168,255,47,.18)]">
-              <Image src="/brand/litt-mascot-avatar.png" alt="LiTT" fill sizes="36px" className="object-cover" />
-            </span>
-            <span className="hidden sm:inline">LiTTree LabStudios</span>
-            <span className="sm:hidden">LiTTree</span>
-          </Link>
-          <nav className="hidden items-center gap-7 text-sm font-semibold text-white/60 md:flex">
-            <Link href="/" className="transition hover:text-[#a8ff2f]">Home</Link>
-            <Link href="/studio" className="transition hover:text-[#a8ff2f]">Studio</Link>
-            <Link href="/pricing" className="transition hover:text-[#a8ff2f]">Pricing</Link>
-          </nav>
-          <div className="flex items-center gap-4">
-             <Link href="/sign-up" className="rounded-full bg-linear-to-r from-[#a8ff2f] to-[#62f6c4] px-4 py-2 text-sm font-black text-[#03050a] transition hover:scale-[1.03]">
-              Start building
-            </Link>
-          </div>
-        </div>
-      </header>
-
       {/* ── Hero Section ── */}
-      <section className="relative pt-32 pb-20 border-b border-white/8">
+      <section className="relative pt-16 pb-20 border-b border-white/8">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(168,112,255,0.08),transparent_50%)]" />
         <div className="relative mx-auto max-w-screen-xl px-5 lg:px-10">
           <div className="max-w-3xl">

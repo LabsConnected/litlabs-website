@@ -105,25 +105,36 @@ describe("AppShell top bar", () => {
     );
     const header = getHeader();
     const scope = within(header);
-    for (const label of ["Dashboard", "Studio", "Projects", "Explore", "Marketplace", "Wallet", "Settings"]) {
+    // Canonical main pills + the More overflow button.
+    for (const label of ["Home", "Studio", "Create", "Assets", "Agents", "Missions"]) {
       expect(scope.getAllByText(label).length).toBeGreaterThanOrEqual(1);
     }
+    expect(scope.getAllByTestId("nav-more").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("renders none of the removed entries; Games shows now that the flag is on", () => {
+  it("keeps secondary destinations behind More; Games shows when the flag is on", async () => {
     render(
       <AppShell>
         <div>content</div>
       </AppShell>,
     );
-    const scope = within(getHeader());
-    // Create lived in the old mobile bottom bar; Music/Showcase
-    // were removed from nav earlier. Games is back on (retroGameRuntime
-    // enabled), so it must appear.
-    for (const removed of ["Create", "Music", "Showcase"]) {
-      expect(scope.queryByText(removed)).toBeNull();
+    const header = getHeader();
+    // Secondary routes are not inline — they live in the More dropdown.
+    for (const secondary of ["Projects", "Games", "Marketplace", "Wallet", "Settings", "Showcase", "Music"]) {
+      expect(within(header).queryByText(secondary)).toBeNull();
     }
-    expect(scope.getAllByText("Games").length).toBeGreaterThanOrEqual(1);
+    // Open More — flag-gated Games must appear (retroGameRuntime enabled).
+    const { fireEvent } = await import("@testing-library/react");
+    fireEvent.click(within(header).getAllByTestId("nav-more")[0]);
+    const menu = document.querySelector('[role="menu"]');
+    expect(menu).not.toBeNull();
+    for (const label of ["Projects", "Marketplace", "Wallet", "Settings", "CLI", "Docs", "Deployments", "Profile"]) {
+      expect(within(menu as HTMLElement).getByText(label)).toBeTruthy();
+    }
+    // Games + Discover appear only when their flags are on; assert on the
+    // canonical data rather than the mocked flags (feature-flags module is
+    // not mocked here, so real flag state applies — games is enabled).
+    expect(within(menu as HTMLElement).queryByText("Games")).toBeTruthy();
   });
 
   it("marks the current page with aria-current on every nav surface", () => {
@@ -133,14 +144,12 @@ describe("AppShell top bar", () => {
         <div>content</div>
       </AppShell>,
     );
-    const current = Array.from(
-      getHeader().querySelectorAll('[aria-current="page"]'),
+    // /discover is a More destination — both More buttons (desktop inline
+    // nav + mobile strip) carry aria-current when a child is active.
+    const moreButtons = Array.from(
+      getHeader().querySelectorAll('[data-testid="nav-more"][aria-current="page"]'),
     );
-    // Desktop inline nav + mobile scroll strip both mark Discover
-    expect(current.length).toBeGreaterThanOrEqual(2);
-    for (const el of current) {
-      expect(el.textContent).toContain("Explore");
-    }
+    expect(moreButtons.length).toBeGreaterThanOrEqual(2);
   });
 
   it("keeps a single-row bar on Studio (its own mobile chrome, no strip)", () => {

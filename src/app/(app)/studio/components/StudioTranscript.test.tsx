@@ -1,5 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
+import "@testing-library/jest-dom";
+
+// Capture downloads without touching the DOM download machinery.
+const { downloadTextFileMock } = vi.hoisted(() => ({
+  downloadTextFileMock: vi.fn(),
+}));
+vi.mock("@/lib/studio/message-copy", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/lib/studio/message-copy")>();
+  return { ...actual, downloadTextFile: downloadTextFileMock };
+});
 
 // jsdom does not implement scrollTo — polyfill it for the transcript's
 // auto-scroll useEffect.
@@ -408,5 +419,70 @@ describe("StudioTranscript — truthful work log", () => {
     } as Partial<ChatMessage>)]);
     const log = screen.getByTestId("studio-work-log");
     expect(log.textContent).toMatch(/deployment missing/i);
+  });
+});
+
+describe("StudioTranscript — overflowDownloads (mobile density redesign)", () => {
+  const downloadable: ChatMessage[] = [
+    { role: "user", content: "Hello", createdAt: Date.now() },
+    { role: "assistant", content: "Hi there.", createdAt: Date.now() },
+  ];
+
+  function renderTranscript(overflowDownloads?: boolean) {
+    return render(
+      <StudioTranscript
+        messages={downloadable}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteToolAction={vi.fn()}
+        overflowDownloads={overflowDownloads}
+      />,
+    );
+  }
+
+  beforeEach(() => {
+    downloadTextFileMock.mockClear();
+  });
+
+  it("collapses the download pills into a single overflow button when enabled", () => {
+    renderTranscript(true);
+    const overflow = screen.getByTestId("transcript-overflow");
+    expect(overflow).toBeInTheDocument();
+    expect(overflow).toHaveAttribute("aria-expanded", "false");
+    // The pills stay hidden until the overflow menu opens.
+    expect(screen.queryByTestId("download-txt")).toBeNull();
+    expect(screen.queryByTestId("download-md")).toBeNull();
+  });
+
+  it("opens the overflow menu with both downloads and wires the original handlers", () => {
+    renderTranscript(true);
+    fireEvent.click(screen.getByTestId("transcript-overflow"));
+
+    expect(screen.getByTestId("transcript-overflow")).toHaveAttribute("aria-expanded", "true");
+    const txt = screen.getByTestId("download-txt");
+    const md = screen.getByTestId("download-md");
+    expect(txt).toBeInTheDocument();
+    expect(md).toBeInTheDocument();
+
+    fireEvent.click(txt);
+    expect(downloadTextFileMock).toHaveBeenCalledTimes(1);
+    expect(downloadTextFileMock.mock.calls[0][0]).toMatch(/\.txt$/);
+    // Choosing an option closes the menu.
+    expect(screen.queryByTestId("download-txt")).toBeNull();
+    expect(screen.queryByTestId("download-md")).toBeNull();
+  });
+
+  it("keeps the two download pills directly visible on desktop (default)", () => {
+    renderTranscript();
+    expect(screen.queryByTestId("transcript-overflow")).toBeNull();
+
+    const txt = screen.getByTestId("download-txt");
+    const md = screen.getByTestId("download-md");
+    expect(txt).toBeInTheDocument();
+    expect(md).toBeInTheDocument();
+
+    fireEvent.click(md);
+    expect(downloadTextFileMock).toHaveBeenCalledTimes(1);
+    expect(downloadTextFileMock.mock.calls[0][0]).toMatch(/\.md$/);
   });
 });

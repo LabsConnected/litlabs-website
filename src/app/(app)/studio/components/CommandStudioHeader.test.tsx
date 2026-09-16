@@ -292,3 +292,35 @@ describe("CommandStudioHeader — truthful status", () => {
     expect(screen.queryByLabelText("Runtime verified")).toBeNull();
   });
 });
+
+describe("CommandStudioHeader — mobile scroll affordance (Phase 1 #1)", () => {
+  it("scrolls horizontally on small screens so right-end actions stay reachable", () => {
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={noProjectRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+    const header = screen.getByTestId("studio-header");
+    // Mobile: horizontal scroll with a hidden scrollbar; desktop keeps the
+    // old clipped layout.
+    expect(header.className).toContain("overflow-x-auto");
+    expect(header.className).toContain("no-scrollbar");
+    expect(header.className).toContain("sm:overflow-hidden");
+  });
+
+  it("keeps the dock toggle and overflow menu mounted in the header", () => {
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={noProjectRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+    expect(screen.getByTestId("studio-dock-toggle")).toBeTruthy();
+    expect(screen.getByLabelText("More actions")).toBeTruthy();
+  });
+});

@@ -1407,14 +1407,20 @@ export function registerInternalTools(): void {
         idempotent: false,
         readOnly: false,
         permissionLevel: 'production',
-        // Only offer when an infra deploy provider is actually configured.
-        // Without RAILWAY_API_TOKEN/VERCEL_TOKEN the handler can never
-        // succeed, and the model may pick it over project.deploy — pausing
-        // the run for approval of a tool guaranteed to fail.
-        enabled: Boolean(
-          (process.env.RAILWAY_API_TOKEN && process.env.RAILWAY_SERVICE_ID && process.env.RAILWAY_ENVIRONMENT_ID)
-          || (process.env.VERCEL_TOKEN && process.env.VERCEL_PROJECT_ID),
-        ),
+        // Only offer when an infra deploy provider is actually configured
+        // AND infra deploys are explicitly opted in. This tool redeploys
+        // the configured Railway/Vercel service — the LiTT app itself, not
+        // the user's project (that's project.deploy). The app service's own
+        // deploy creds are present in production, so without the opt-in the
+        // model can pick this over project.deploy: pausing the run for an
+        // approval that, once granted, redeploys LiTT instead of publishing
+        // the user's site (observed in golden run 35056919596).
+        enabled:
+          process.env.LITT_ENABLE_INFRA_DEPLOY === "1"
+          && Boolean(
+            (process.env.RAILWAY_API_TOKEN && process.env.RAILWAY_SERVICE_ID && process.env.RAILWAY_ENVIRONMENT_ID)
+            || (process.env.VERCEL_TOKEN && process.env.VERCEL_PROJECT_ID),
+          ),
       },
       handler: lazyHandlers["deploy.execute"],
     },

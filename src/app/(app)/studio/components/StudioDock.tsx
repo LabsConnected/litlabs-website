@@ -292,8 +292,9 @@ export default function StudioDock({
         className="flex shrink-0 items-center justify-between"
         style={{ height: COLLAPSED_HEIGHT, backgroundColor: "#0d0916" }}
       >
-        {/* Left: tabs */}
-        <div className="flex h-full items-center gap-0.5 pl-2" role="tablist" aria-label="Studio dock tabs">
+        {/* Left: tabs — scrolls horizontally on phones so all tabs are
+            reachable at 390px; desktop keeps the static strip. */}
+        <div className="no-scrollbar flex h-full min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overflow-y-hidden pl-2 sm:overflow-visible" role="tablist" aria-label="Studio dock tabs">
           {DOCK_TABS.map((t) => {
             const Icon = t.icon;
             const isActive = activeTab === t.id;
@@ -340,7 +341,7 @@ export default function StudioDock({
 
         {/* Right: controls — only when expanded */}
         {view !== "collapsed" && (
-          <div className="flex h-full items-center gap-1 pr-2">
+          <div className="flex h-full shrink-0 items-center gap-1 pr-2">
             <button
               type="button"
               onClick={handleMaximize}

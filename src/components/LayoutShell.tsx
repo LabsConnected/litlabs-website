@@ -35,11 +35,6 @@ const HYBRID_PUBLIC_PATHS = ["/hire", "/marketplace", "/discover", "/showcase"];
 // Routes that render their own custom interactive chrome (e.g. cloud emulator)
 const SELF_CONTAINED_CHROME = ["/games/cloud"];
 
-// Routes that have their own full-page navigation/sidebar and should NOT
-// be wrapped in the AppShell (which would create a double-sidebar).
-// These pages still require auth but manage their own chrome.
-const OWN_SHELL_PATHS = ["/settings"];
-
 function isBarePublicPath(path: string) {
   return BARE_PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
 }
@@ -50,12 +45,6 @@ function isHybridPublicPath(path: string) {
 
 function hasOwnChrome(path: string) {
   return SELF_CONTAINED_CHROME.some(
-    (p) => path === p || path.startsWith(`${p}/`),
-  );
-}
-
-function hasOwnShell(path: string) {
-  return OWN_SHELL_PATHS.some(
     (p) => path === p || path.startsWith(`${p}/`),
   );
 }
@@ -71,7 +60,6 @@ export default function LayoutShell({
   const hybridPublic = isHybridPublicPath(pathname);
   const isStudio = pathname.startsWith("/studio");
   const ownChrome = hasOwnChrome(pathname);
-  const ownShell = hasOwnShell(pathname);
 
   // Hybrid pages: bare public for signed-out, AppShell for signed-in.
   // Signed-out visitors previously got zero site chrome here — no logo,
@@ -113,25 +101,8 @@ export default function LayoutShell({
     );
   }
 
-  // Authenticated pages that manage their own full-page shell (e.g. Settings
-  // has its own 260px nav sidebar). Skip AppShell to avoid a double sidebar.
-  if (ownShell) {
-    return (
-      <>
-        <AnimatedBackgroundWrapper />
-        <div className="relative z-10">
-          {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-          <main id="main-content" className="min-h-dvh">{children}</main>
-          <GlobalCompanion />
-          <CookieConsent />
-          <ServiceWorkerRegistration />
-        </div>
-      </>
-    );
-  }
-
-  // Authenticated routes — use the unified AppShell.
-  // Studio flows through AppShell too (shared sidebar) but skips footer,
+  // Authenticated routes — use the unified AppShell with the sticky top bar.
+  // Studio flows through AppShell too but skips footer,
   // global companion, and YouTube shell since it manages its own full-height chrome.
   return (
     <>

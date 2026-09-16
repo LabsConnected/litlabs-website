@@ -41,6 +41,7 @@ import {
   Loader2,
   Boxes,
   Eye,
+  EyeOff,
   RotateCcw,
 } from "lucide-react";
 import {
@@ -50,6 +51,7 @@ import {
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
 import { useStudioModelStore } from "../stores/useStudioModelStore";
 import { useConversationStore } from "../stores/useConversationStore";
+import { useHiddenAgents, visibleAgents } from "@/lib/agent-visibility";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
@@ -117,6 +119,9 @@ export default function AgentTool() {
   // Installed marketplace capabilities
   const [installedCaps, setInstalledCaps] = useState<InstalledCapability[]>([]);
   const [installedLoading, setInstalledLoading] = useState(false);
+
+  // Per-user hidden agents (e.g. hide the built-in Spark card)
+  const { hiddenAgents, hideAgent } = useHiddenAgents();
 
   // Detail view
   const [detailAgent, setDetailAgent] = useState<AgentDefinition | null>(null);
@@ -194,19 +199,40 @@ export default function AgentTool() {
     [searchParams, router, pathname, selectedConversationId],
   );
 
+  /* ─── Hide a built-in agent (Spark) from Studio surfaces ───────────── */
+
+  const handleHideAgent = useCallback(
+    (agentId: string) => {
+      hideAgent(agentId);
+      // If the user was chatting with the hidden agent, fall back to LiTT.
+      if (activeAgentSlug === agentId) {
+        const params = new URLSearchParams(searchParams.toString());
+        params.set("tool", "chat");
+        params.set("agent", "litt");
+        if (selectedConversationId) {
+          params.set("conversation", selectedConversationId);
+        }
+        router.push(`${pathname}?${params.toString()}`);
+      }
+    },
+    [hideAgent, activeAgentSlug, searchParams, router, pathname, selectedConversationId],
+  );
+
   /* ─── Filter agents by search ──────────────────────────────────────── */
 
   const filteredAgents = useMemo(() => {
-    if (!searchQuery.trim()) return CORE_PERSONALITIES;
-    const q = searchQuery.toLowerCase();
-    return CORE_PERSONALITIES.filter(
-      (a) =>
-        a.name.toLowerCase().includes(q) ||
-        a.role.toLowerCase().includes(q) ||
-        a.description.toLowerCase().includes(q) ||
-        a.domains.some((d) => d.includes(q)),
-    );
-  }, [searchQuery]);
+    const base = !searchQuery.trim()
+      ? CORE_PERSONALITIES
+      : CORE_PERSONALITIES.filter(
+          (a) =>
+            a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            a.role.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            a.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            a.domains.some((d) => d.includes(searchQuery.toLowerCase())),
+        );
+    // Built-in agents the user hid (e.g. Spark) stay out of My AI Crew.
+    return visibleAgents(base, hiddenAgents);
+  }, [searchQuery, hiddenAgents]);
 
   /* ─── Get capabilities for a specific agent ────────────────────────── */
 
@@ -360,6 +386,8 @@ export default function AgentTool() {
                 onChat={() => chatWithAgent(agent.slug)}
                 onConfigure={() => { setDetailAgent(agent); setDetailTab("overview"); }}
                 onView3D={() => setViewer3DAgent(agent)}
+                onHide={() => handleHideAgent(agent.id)}
+                canHide={agent.id === "spark"}
               />
             );
           })}
@@ -393,6 +421,8 @@ function AgentCard({
   onChat,
   onConfigure,
   onView3D,
+  onHide,
+  canHide,
 }: {
   agent: AgentDefinition;
   status: AgentStatus;
@@ -407,6 +437,8 @@ function AgentCard({
   onChat: () => void;
   onConfigure: () => void;
   onView3D: () => void;
+  onHide?: () => void;
+  canHide?: boolean;
 }) {
   const { resolvedColors: T } = useTheme();
 
@@ -532,11 +564,23 @@ function AgentCard({
           </button>
           <button
             onClick={onConfigure}
+            title="Configure"
             className="flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-[11px] font-bold transition hover:opacity-80"
             style={{ borderColor: `${T.borderColor}30`, color: T.textMuted }}
           >
             <SettingsIcon size={13} />
           </button>
+          {canHide && onHide && (
+            <button
+              onClick={onHide}
+              title={`Hide ${agent.name}`}
+              aria-label={`Hide ${agent.name}`}
+              className="flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-[11px] font-bold transition hover:opacity-80"
+              style={{ borderColor: `${T.borderColor}30`, color: T.textMuted }}
+            >
+              <EyeOff size={13} />
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -963,7 +1007,7 @@ function DetailMemory({ agent }: { agent: AgentDefinition }) {
         <div className="flex justify-between mb-1"><span>Storage</span><span style={{ color: agent.color }}>Project-scoped</span></div>
         <div className="flex justify-between"><span>Scope</span><span style={{ color: T.accentColor }}>Per-conversation</span></div>
       </div>
-      <Link href="/settings/memory"
+      <Link href="/settings?section=litt-knows"
         className="block text-center text-[11px] py-2.5 rounded-lg border transition hover:opacity-80"
         style={{ borderColor: `${T.borderColor}20`, color: T.textMuted }}>
         <Brain size={11} className="inline mr-1" /> Memory Settings
@@ -1016,7 +1060,7 @@ function DetailModel({
       <div className="text-[10px]" style={{ color: T.textMuted }}>
         Default task: <span className="font-bold" style={{ color: agent.color }}>{agent.defaultModelTask}</span>
       </div>
-      <Link href="/settings/models"
+      <Link href="/settings?section=ai-models"
         className="block text-center text-[11px] py-2.5 rounded-lg border transition hover:opacity-80"
         style={{ borderColor: `${T.borderColor}20`, color: T.textMuted }}>
         <Cpu size={11} className="inline mr-1" /> Model Settings
@@ -1073,7 +1117,7 @@ function DetailSettings({ agent }: { agent: AgentDefinition }) {
           </div>
         </div>
       </div>
-      <Link href="/settings/agents"
+      <Link href="/settings?section=agents"
         className="block text-center text-[11px] py-2.5 rounded-lg border transition hover:opacity-80"
         style={{ borderColor: `${T.borderColor}20`, color: T.textMuted }}>
         <SettingsIcon size={11} className="inline mr-1" /> Agent Settings

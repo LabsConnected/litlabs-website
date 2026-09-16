@@ -568,7 +568,8 @@ export default function MissionForge() {
       log("[WRN] No output node detected. Results may not be saved.");
     }
     setRunning(true);
-    log("[EXEC] Starting mission execution...");
+    log("[SIM] Dry run — simulation only, no real execution. Connect an executor to run for real.");
+    log("[EXEC] Starting mission simulation...");
     setNodes((prev) => prev.map((n) => ({ ...n, status: "pending" as NodeRunStatus })));
 
     /* Topological-ish execution: process nodes in order */
@@ -582,15 +583,15 @@ export default function MissionForge() {
         log(`[WAIT] Approval required: ${node.title}`);
         /* In real implementation, this would pause and wait for user action */
         await new Promise((r) => setTimeout(r, 800));
-        log(`[OK] Auto-approved in draft mode (real runs require user action)`);
+        log(`[OK] Auto-approved (simulation — real runs require user action)`);
       }
 
       await new Promise((r) => setTimeout(r, 400));
       setNodes((prev) => prev.map((n) => (n.id === node.id ? { ...n, status: "completed" as NodeRunStatus } : n)));
-      log(`[OK] ${node.title} completed`);
+      log(`[OK] ${node.title} simulated`);
     }
 
-    log("[SYS] Mission execution completed.");
+    log("[SYS] Mission simulation finished.");
     setRunning(false);
   };
 
@@ -867,8 +868,12 @@ export default function MissionForge() {
               className="flex items-center gap-1 text-[9px] px-3 py-1 rounded font-bold transition-all disabled:opacity-40"
               style={{ backgroundColor: "#a8ff2f", color: "#03050a" }}
             >
-              {running ? <Loader2 size={10} className="animate-spin" /> : <Play size={10} fill="currentColor" />} Run
+              {running ? <Loader2 size={10} className="animate-spin" /> : <Play size={10} fill="currentColor" />} Simulate
             </button>
+            {/* NOTE: runWorkflow is a dry-run simulation — no executor backend
+                exists yet. The button is labeled Simulate (not Run) and the
+                log marks the session as a simulation so the flow can never
+                be mistaken for real execution. */}
             <button
               onClick={() => setShowYaml(true)}
               className="flex items-center gap-1 text-[9px] px-2 py-1 rounded border transition-all hover:opacity-80"

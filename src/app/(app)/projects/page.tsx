@@ -18,6 +18,8 @@ import {
   RefreshCw,
   Search,
   Sparkles,
+  Trash2,
+  X,
 } from "lucide-react";
 
 const QUICK_ACTIONS = [
@@ -80,6 +82,14 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  // Project deletion (multi-select + confirm). Deletion itself is performed
+  // by the existing DELETE /api/studio-projects/[projectId] endpoint, which
+  // verifies ownership; related rows cascade in the database.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmTargets, setConfirmTargets] = useState<Project[] | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const fetchProjects = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -115,6 +125,49 @@ export default function ProjectsPage() {
       return name.includes(q) || repo.includes(q);
     });
   }, [projects, query]);
+
+  // Heuristic for acceptance-test duplicates: a timestamp suffix like
+  // "Ember Roast V1 Acceptance 08-17-25". Used only to pre-select
+  // candidates for bulk delete — the user always confirms.
+  const isTestDuplicate = useCallback((p: Project) => {
+    return /acceptance/i.test(p.name) && /\d{2}-\d{2}-\d{2}/.test(p.name);
+  }, []);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const exitSelectMode = useCallback(() => {
+    setSelectMode(false);
+    setSelected(new Set());
+  }, []);
+
+  const runDelete = useCallback(async (targets: Project[]) => {
+    setDeleting(true);
+    setNotice(null);
+    const results = await Promise.allSettled(
+      targets.map(async (p) => {
+        const res = await fetch(`/api/studio-projects/${encodeURIComponent(p.id)}`, { method: "DELETE" });
+        if (!res.ok) throw new Error(`delete failed for ${p.name || p.id}`);
+      }),
+    );
+    const okCount = results.filter((r) => r.status === "fulfilled").length;
+    const failCount = results.length - okCount;
+    setDeleting(false);
+    setConfirmTargets(null);
+    exitSelectMode();
+    await fetchProjects();
+    setNotice(
+      failCount === 0
+        ? `Deleted ${okCount} project${okCount === 1 ? "" : "s"}.`
+        : `Deleted ${okCount} of ${results.length} projects — ${failCount} failed. Try again for the rest.`,
+    );
+  }, [exitSelectMode, fetchProjects]);
 
   return (
     <PageShell
@@ -235,8 +288,61 @@ export default function ProjectsPage() {
               >
                 <RefreshCw size={14} /> Refresh
               </button>
+              {!selectMode ? (
+                <button
+                  type="button"
+                  onClick={() => { setSelectMode(true); setNotice(null); }}
+                  className="inline-flex h-9 items-center gap-2 rounded-xl border px-3 text-xs font-bold"
+                  style={{ borderColor: `${T.borderColor}55`, color: T.textColor }}
+                >
+                  Select
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setSelected(new Set(filtered.map((p) => p.id)))}
+                    className="inline-flex h-9 items-center rounded-xl border px-3 text-xs font-bold"
+                    style={{ borderColor: `${T.borderColor}55`, color: T.textColor }}
+                  >
+                    All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelected(new Set(filtered.filter(isTestDuplicate).map((p) => p.id)))}
+                    className="inline-flex h-9 items-center rounded-xl border px-3 text-xs font-bold"
+                    style={{ borderColor: `${T.borderColor}55`, color: T.textColor }}
+                    title="Select acceptance-test duplicates (timestamped names)"
+                  >
+                    Duplicates
+                  </button>
+                  <button
+                    type="button"
+                    disabled={selected.size === 0}
+                    onClick={() => setConfirmTargets(filtered.filter((p) => selected.has(p.id)))}
+                    className="inline-flex h-9 items-center gap-2 rounded-xl border border-red-400/40 px-3 text-xs font-black text-red-300 disabled:opacity-40"
+                  >
+                    <Trash2 size={14} /> Delete{selected.size > 0 ? ` (${selected.size})` : ""}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={exitSelectMode}
+                    aria-label="Done selecting"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl border"
+                    style={{ borderColor: `${T.borderColor}55`, color: T.textColor }}
+                  >
+                    <X size={14} />
+                  </button>
+                </>
+              )}
             </div>
           </div>
+
+          {notice && (
+            <div className="mt-3 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-2.5 text-xs font-bold text-emerald-100" role="status">
+              {notice}
+            </div>
+          )}
 
           {loading ? (
             <div className="flex items-center justify-center py-20 text-sm opacity-70" role="status">Loading projects…</div>
@@ -269,14 +375,30 @@ export default function ProjectsPage() {
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {filtered.map((project) => {
                 const status = projectStatus(project);
+                const isSelected = selected.has(project.id);
                 return (
                   <Link
                     key={project.id}
-                    href={`/studio?project=${encodeURIComponent(project.id)}`}
-                    className="group flex flex-col gap-3 rounded-2xl border p-4 transition-transform hover:-translate-y-0.5"
+                    href={selectMode ? "#" : `/studio?project=${encodeURIComponent(project.id)}`}
+                    onClick={selectMode ? (e) => { e.preventDefault(); toggleSelect(project.id); } : undefined}
+                    aria-pressed={selectMode ? isSelected : undefined}
+                    className={`group relative flex flex-col gap-3 rounded-2xl border p-4 transition-transform hover:-translate-y-0.5 ${selectMode && isSelected ? "ring-2 ring-cyan-300/60" : ""}`}
                     style={{ backgroundColor: `${T.boxBg}b8`, borderColor: `${T.borderColor}45` }}
                   >
-                    <div className="flex items-start justify-between gap-3">
+                    {selectMode && (
+                      <span
+                        aria-hidden="true"
+                        className="absolute left-3 top-3 inline-flex h-6 w-6 items-center justify-center rounded-lg border text-transparent"
+                        style={{
+                          borderColor: `${T.borderColor}88`,
+                          backgroundColor: isSelected ? T.accentColor : "transparent",
+                          color: isSelected ? T.bgColor : "transparent",
+                        }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6 9 17l-5-5" /></svg>
+                      </span>
+                    )}
+                    <div className={`flex items-start justify-between gap-3 ${selectMode ? "pl-8" : ""}`}>
                       <div className="min-w-0">
                         <div className="truncate text-sm font-black" style={{ color: T.headerColor }}>{project.name || "Untitled project"}</div>
                         <div className="mt-1 truncate text-[11px]" style={{ color: T.textMuted }}>
@@ -287,7 +409,24 @@ export default function ProjectsPage() {
                     </div>
                     <div className="flex items-center justify-between gap-3 text-[11px]" style={{ color: T.textMuted }}>
                       <span className="truncate">{project.githubBranch ? `Branch: ${project.githubBranch}` : `Updated ${new Date(project.updatedAt).toLocaleDateString()}`}</span>
-                      <span className="inline-flex shrink-0 items-center gap-1 font-bold" style={{ color: T.accentColor }}>Open <ArrowRight size={12} /></span>
+                      {selectMode ? (
+                        <span className="inline-flex shrink-0 items-center gap-1 font-bold" style={{ color: T.accentColor }}>
+                          {isSelected ? "Selected" : "Tap to select"}
+                        </span>
+                      ) : (
+                        <span className="inline-flex shrink-0 items-center gap-2">
+                          <button
+                            type="button"
+                            aria-label={`Delete ${project.name || "Untitled project"}`}
+                            title="Delete project"
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmTargets([project]); }}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-red-400/30 text-red-300/80 opacity-70 transition-opacity hover:opacity-100"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                          <span className="inline-flex items-center gap-1 font-bold" style={{ color: T.accentColor }}>Open <ArrowRight size={12} /></span>
+                        </span>
+                      )}
                     </div>
                   </Link>
                 );
@@ -313,6 +452,62 @@ export default function ProjectsPage() {
           })}
         </section>
       </div>
+
+      {confirmTargets && (
+        <div
+          className="fixed inset-0 z-[200] flex items-end justify-center bg-black/70 p-4 sm:items-center"
+          onClick={() => { if (!deleting) setConfirmTargets(null); }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-projects-title"
+            aria-describedby="delete-projects-desc"
+            className="w-full max-w-md rounded-3xl border p-6"
+            style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}55` }}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => { if (e.key === "Escape" && !deleting) setConfirmTargets(null); }}
+          >
+            <div className="flex items-center gap-3">
+              <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-red-500/15 text-red-300">
+                <Trash2 size={18} />
+              </span>
+              <h2 id="delete-projects-title" className="text-base font-black" style={{ color: T.headerColor }}>
+                Delete {confirmTargets.length} project{confirmTargets.length === 1 ? "" : "s"}?
+              </h2>
+            </div>
+            <p id="delete-projects-desc" className="mt-3 text-sm" style={{ color: T.textMuted }}>
+              This permanently removes {confirmTargets.length === 1 ? "this project" : "these projects"} and can’t be undone.
+            </p>
+            <ul className="mt-3 max-h-40 space-y-1 overflow-y-auto text-sm font-bold" style={{ color: T.textColor }}>
+              {confirmTargets.slice(0, 6).map((p) => (
+                <li key={p.id} className="truncate">• {p.name || "Untitled project"}</li>
+              ))}
+              {confirmTargets.length > 6 && <li style={{ color: T.textMuted }}>…and {confirmTargets.length - 6} more</li>}
+            </ul>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                autoFocus
+                disabled={deleting}
+                onClick={() => setConfirmTargets(null)}
+                className="min-h-11 flex-1 rounded-xl border px-4 font-bold disabled:opacity-50"
+                style={{ borderColor: `${T.borderColor}55`, color: T.textColor }}
+              >
+                Keep
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => void runDelete(confirmTargets)}
+                className="min-h-11 flex-1 rounded-xl bg-red-500 px-4 font-black text-white disabled:opacity-50"
+              >
+                {deleting ? "Deleting…" : `Delete ${confirmTargets.length === 1 ? "project" : `${confirmTargets.length} projects`}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </PageShell>
   );
 }

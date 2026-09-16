@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useStudioAgentStore, STUDIO_AGENTS, type AgentId } from "../stores/useStudioAgentStore";
+import { useHiddenAgents, visibleAgents } from "@/lib/agent-visibility";
 import { useUserPlan } from "../hooks/useUserPlan";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useAuthedFetch } from "@/lib/fetch-auth";
@@ -34,6 +35,8 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const authedFetch = useAuthedFetch();
+  // Built-in agents the user hid (e.g. Spark) stay out of this list.
+  const { hiddenAgents } = useHiddenAgents();
 
   const hasAccess = useCallback(
     (minimumPlan: string) => {
@@ -156,7 +159,7 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
           </div>
         ) : (
           <div className="space-y-1.5">
-            {STUDIO_AGENTS.map((meta) => {
+            {visibleAgents(STUDIO_AGENTS, hiddenAgents).map((meta) => {
               const accent = meta.color;
               const installedAgent = installed.find((a) => a.slug === meta.id);
               const isActive = installedAgent

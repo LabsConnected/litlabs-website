@@ -34,6 +34,14 @@ export interface MediaProvider {
   free: boolean;
   /** Provider quality tag for UI sorting. */
   tier: "free" | "cheap" | "pro" | "premium";
+  /**
+   * Whether the provider has a working handler in
+   * src/app/api/media/generate/route.ts. Unwired providers must never be
+   * rendered as selectable options — picking one throws at request time.
+   * Defaults to true; set false for providers that are not wired yet.
+   * When a provider gets wired, flip this to true (or remove the flag).
+   */
+  wired?: boolean;
 }
 
 export const MEDIA_PROVIDERS: MediaProvider[] = [
@@ -129,35 +137,43 @@ export const MEDIA_PROVIDERS: MediaProvider[] = [
   },
   {
     id: "luma",
-    label: "Luma Ray 3 (Coming Soon)",
+    label: "Luma Ray 3",
     description: "Best quality/cost for cinematic short clips. ~$0.32/sec.",
     supportedFormats: ["image", "video"],
     cost: (f) => (f === "video" ? 80 : 20),
     requiresKey: true,
     free: false,
     tier: "pro",
+    wired: false,
   },
   {
     id: "veo",
-    label: "Google Veo 3 (Coming Soon)",
+    label: "Google Veo 3",
     description: "Cinematic + native audio + Ingredients. Via Gemini API.",
     supportedFormats: ["image", "video"],
     cost: (f) => (f === "video" ? 200 : 40),
     requiresKey: true,
     free: false,
     tier: "premium",
+    wired: false,
   },
   {
     id: "runway",
-    label: "Runway Gen-4.5 (Coming Soon)",
+    label: "Runway Gen-4.5",
     description: "Style transfer, inpainting, object insertion.",
     supportedFormats: ["video"],
     cost: () => 120,
     requiresKey: true,
     free: false,
     tier: "premium",
+    wired: false,
   },
 ];
+
+/** Providers that can actually fulfill a generation request — never render the unwired ones as options. */
+export const WIRED_PROVIDERS: MediaProvider[] = MEDIA_PROVIDERS.filter(
+  (p) => p.wired !== false,
+);
 
 export const getProvider = (id: MediaProviderId) =>
   MEDIA_PROVIDERS.find(p => p.id === id);

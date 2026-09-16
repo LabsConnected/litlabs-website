@@ -60,6 +60,11 @@ describe("proxy.ts exists and protects Studio routes", () => {
     expect(content).toContain('"/projects');
   });
 
+  it("protects /create at the server level (authenticated intent hub)", () => {
+    const content = readFileSync(PROXY_PATH, "utf-8");
+    expect(content).toContain('"/create');
+  });
+
   it("protects /settings at the server level", () => {
     const content = readFileSync(PROXY_PATH, "utf-8");
     expect(content).toContain('"/settings');

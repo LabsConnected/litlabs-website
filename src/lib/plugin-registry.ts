@@ -41,7 +41,9 @@ export const PLUGIN_REGISTRY: PluginDefinition[] = [
     description: "Connect repositories, manage issues and PRs.",
     category: "Development",
     authMethod: "oauth",
-    connectUrl: "/api/github/connect",
+    // The real GitHub App OAuth entry point. (Was "/api/github/connect",
+    // a route that never existed — Connect 404'd.)
+    connectUrl: "/api/github/install",
     status: "available",
     installed: false,
     enabled: false,

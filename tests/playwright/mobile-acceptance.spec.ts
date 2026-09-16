@@ -124,8 +124,13 @@ test.describe("LiTT Studio mobile acceptance", () => {
     await expect(page.getByTestId("litt-mobile-sheet")).toBeVisible();
     await expect(page.getByTestId("litt-mobile-tab-chat")).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByTestId("litt-mobile-chat-panel")).toHaveAttribute("data-active", "true");
-    await expect(page.getByTestId("studio-workspace-context")).toBeVisible();
-    await expect(page.getByTestId("studio-workspace-context")).not.toBeEmpty();
+    // Mobile density redesign: the composer context line moved into the slim
+    // sheet header row; the old persistent context line is hidden on mobile.
+    await expect(page.getByTestId("studio-workspace-context")).toBeHidden();
+    if (await page.getByTestId("litt-mobile-context").count() > 0) {
+      await expect(page.getByTestId("litt-mobile-context")).toBeVisible();
+      await expect(page.getByTestId("litt-mobile-context")).not.toBeEmpty();
+    }
     await expect(page.getByTestId("studio-command-input")).toBeVisible();
     await expect(page.getByTestId("studio-send-button")).toHaveAttribute("aria-label", /^(Send message|Cancel response)$/);
     const initialGeometry = await measureOpenSheet(page);
@@ -166,4 +171,87 @@ test.describe("LiTT Studio mobile acceptance", () => {
     await expect(assetsButton).toHaveAttribute("aria-current", "page");
     await screenshot(page, testInfo, "F-sheet-closed-bottom-nav-usable");
   });
+});
+
+test.describe("LiTT Studio mobile density redesign", () => {
+  for (const width of [390, 670]) {
+    test(`density geometry at ${width}px — chat dominates, cards collapsed`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 844 });
+
+      const response = await page.goto("/studio", { waitUntil: "domcontentloaded", timeout: 90_000 });
+      expect(response?.status(), "authenticated Studio navigation should return 200").toBe(200);
+      await expect(page).toHaveURL(/\/studio(?:[/?#]|$)/);
+      await expect(page.locator(".studio-shell")).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId("litt-mobile-trigger")).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId("studio-loading")).not.toBeVisible();
+
+      await page.getByRole("button", { name: "Ask LiTT to build" }).click();
+      await expect(page.getByTestId("litt-mobile-sheet")).toBeVisible();
+      await page.getByTestId("litt-mobile-tab-chat").click();
+      await expect(page.getByTestId("litt-mobile-chat-panel")).toHaveAttribute("data-active", "true");
+
+      // 1. Mission / Checkpoints / Next Actions cards must NOT dominate the
+      // primary mobile flow anymore.
+      for (const card of ["mission-card-mission", "mission-card-checkpoints", "mission-card-actions"]) {
+        expect(
+          await page.getByTestId(card).count(),
+          `${card} should not render in the mobile chat primary flow`,
+        ).toBe(0);
+      }
+
+      // 2. One compact Build status bar replaces the stack; ≤48px tall.
+      const statusBar = page.getByTestId("mobile-build-status");
+      await expect(statusBar, "Build status bar should be visible").toBeVisible();
+      const statusRect = await visibleRect(statusBar, "Build status bar");
+      expect(statusRect.height, "Build status bar should be compact (≤48px)").toBeLessThanOrEqual(48);
+
+      // 3. Conversation + composer are the dominant surfaces.
+      const transcript = page.getByTestId("studio-transcript");
+      await expect(transcript, "transcript should be visible").toBeVisible();
+      const transcriptRect = await visibleRect(transcript, "transcript");
+      const viewportHeight = 844;
+      expect(
+        transcriptRect.height,
+        "transcript should occupy the majority of the first viewport",
+      ).toBeGreaterThan(viewportHeight / 2);
+
+      const composer = page.getByTestId("studio-command-composer");
+      await expect(composer, "composer should be visible").toBeVisible();
+      const composerRect = await visibleRect(composer, "composer");
+      expect(
+        composerRect.height,
+        "composer should be slim in its empty state (<200px)",
+      ).toBeLessThan(200);
+
+      // 4. Download pills live in an overflow menu, not the primary flow.
+      // (Only present when the conversation has downloadable messages.)
+      if ((await page.getByTestId("transcript-overflow").count()) > 0) {
+        expect(
+          await page.getByTestId("download-txt").count(),
+          "Download .txt pill should be hidden until the overflow opens",
+        ).toBe(0);
+        expect(
+          await page.getByTestId("download-md").count(),
+          "Download .md pill should be hidden until the overflow opens",
+        ).toBe(0);
+        await page.getByTestId("transcript-overflow").click();
+        await expect(page.getByTestId("download-txt"), "Download .txt should appear in the overflow menu").toBeVisible();
+        await expect(page.getByTestId("download-md"), "Download .md should appear in the overflow menu").toBeVisible();
+      }
+
+      // 5. Tools sheet entry point is reachable from the sheet header.
+      await expect(page.getByTestId("litt-mobile-tools-button"), "Tools button should be visible").toBeVisible();
+      await page.getByTestId("litt-mobile-tools-button").click();
+      await expect(page.getByTestId("mobile-tools-dialog"), "Tools sheet should open").toBeVisible();
+      for (const tool of ["code", "canvas", "preview", "files", "terminal", "activity"]) {
+        await expect(page.getByTestId(`mobile-tool-${tool}`), `tool row ${tool} should be visible`).toBeVisible();
+      }
+      await screenshot(page, testInfo, `density-tools-sheet-${width}px`);
+      // Close the Tools sheet via its backdrop to return to chat.
+      await page.getByTestId("mobile-tools-dialog").press("Escape");
+      await expect(page.getByTestId("mobile-tools-dialog")).toBeHidden();
+
+      await screenshot(page, testInfo, `density-chat-sheet-${width}px`);
+    });
+  }
 });

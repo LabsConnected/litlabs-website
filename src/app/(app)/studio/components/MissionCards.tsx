@@ -44,6 +44,12 @@ export interface MissionCardsProps {
   onOpenActivity: () => void;
   onOpenFiles: () => void;
   onRollback: () => void;
+  /**
+   * When false, the "Next actions" card is omitted and the contextual hints
+   * render above the mission card instead. Used on mobile where the actions
+   * live in the Tools sheet. Defaults to true (desktop unchanged).
+   */
+  showActions?: boolean;
 }
 
 type IconType = ComponentType<{ size?: number; strokeWidth?: number; className?: string; style?: CSSProperties }>;
@@ -56,8 +62,9 @@ const CYAN = "#22d3ee";
 const AMBER = "#e3b341";
 
 /* ── Phase meta (mirrors StudioPlanSurface) ─────────────────────── */
+/* Exported for MobileBuildStatusBar (mobile Build status control). */
 
-const PHASE_META: Record<ExecutionPhase, { label: string; color: string }> = {
+export const PHASE_META: Record<ExecutionPhase, { label: string; color: string }> = {
   idle: { label: "Idle", color: "var(--text-muted)" },
   planning: { label: "Planning", color: CYAN },
   inspecting: { label: "Inspecting", color: CYAN },
@@ -193,6 +200,23 @@ function QuickAction({
 
 /* ── Main component ────────────────────────────────────────────── */
 
+function HintsList({ hints, style }: { hints: string[]; style?: CSSProperties }) {
+  if (hints.length === 0) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, ...style }}>
+      {hints.map((hint) => (
+        <div
+          key={hint}
+          style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, color: "var(--text-secondary)" }}
+        >
+          <span style={{ color: CYAN, lineHeight: 1.4 }}>•</span>
+          <span>{hint}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function MissionCards({
   capabilities,
   modelLabel,
@@ -203,6 +227,7 @@ export default function MissionCards({
   onOpenActivity,
   onOpenFiles,
   onRollback,
+  showActions = true,
 }: MissionCardsProps) {
   const phase = useExecutionStore((s) => s.phase);
   const isRunning = useExecutionStore((s) => s.isRunning);
@@ -249,6 +274,9 @@ export default function MissionCards({
 
   return (
     <div data-testid="mission-cards" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {/* Mobile (showActions=false): hints surface above the mission card —
+          the actions themselves live in the Tools sheet. */}
+      {!showActions && <HintsList hints={hints} />}
       {/* ── Mission summary ─────────────────────────────────────── */}
       <CardShell id="mission" label="Mission" icon={Rocket} defaultOpen>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
@@ -388,20 +416,9 @@ export default function MissionCards({
       </CardShell>
 
       {/* ── Next actions ────────────────────────────────────────── */}
+      {showActions && (
       <CardShell id="actions" label="Next actions" icon={FolderOpen} defaultOpen>
-        {hints.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
-            {hints.map((hint) => (
-              <div
-                key={hint}
-                style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, color: "var(--text-secondary)" }}
-              >
-                <span style={{ color: CYAN, lineHeight: 1.4 }}>•</span>
-                <span>{hint}</span>
-              </div>
-            ))}
-          </div>
-        )}
+        <HintsList hints={hints} style={{ marginBottom: 8 }} />
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           <QuickAction label="Open Code" icon={Hammer} onClick={onOpenCode} />
           <QuickAction label="Open Canvas" icon={Layout} onClick={onOpenCanvas} />
@@ -411,6 +428,7 @@ export default function MissionCards({
           <QuickAction label="View Activity" icon={Activity} onClick={onOpenActivity} />
         </div>
       </CardShell>
+      )}
     </div>
   );
 }

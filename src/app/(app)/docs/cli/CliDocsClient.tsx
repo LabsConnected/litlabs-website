@@ -75,10 +75,10 @@ litt whoami      # show the signed-in user (never prints tokens)
 litt logout      # sign out`}
       </CodeBlock>
       <Callout kind="note" title="Local-first by default">
-        LiTT starts in local mode. Use <InlineCode>--remote</InlineCode> to
-        connect to the LiTT cloud, or <InlineCode>--local</InlineCode> to
+        LiTT starts in local mode. Use <InlineCode>--remote</InlineCode>{" "}to
+        connect to the LiTT cloud, or <InlineCode>--local</InlineCode>{" "}to
         force local-only operation. Setting{" "}
-        <InlineCode>LITT_LOCAL_ONLY=1</InlineCode> blocks remote and model
+        <InlineCode>LITT_LOCAL_ONLY=1</InlineCode>{" "}blocks remote and model
         use entirely.
       </Callout>
 
@@ -87,7 +87,7 @@ litt logout      # sign out`}
         {`litt doctor      # diagnose environment, dependencies, auth, providers`}
       </CodeBlock>
       <DocP>
-        <InlineCode>litt doctor</InlineCode> checks your Node version, Git,
+        <InlineCode>litt doctor</InlineCode>{" "}checks your Node version, Git,
         pnpm, network, project setup, authentication, and model provider
         availability — run it first whenever something seems off. Then open
         the interactive cockpit:
@@ -95,8 +95,8 @@ litt logout      # sign out`}
       <CodeBlock label="Cockpit">{`litt            # launch the interactive operator cockpit`}</CodeBlock>
       <DocP>
         <InlineCode>litt shell</InlineCode>, <InlineCode>litt cockpit</InlineCode>,
-        and <InlineCode>litt tui</InlineCode> are aliases.{" "}
-        <InlineCode>litt desktop</InlineCode> launches the desktop GUI app
+        and <InlineCode>litt tui</InlineCode>{" "}are aliases.{" "}
+        <InlineCode>litt desktop</InlineCode>{" "}launches the desktop GUI app
         instead.
       </DocP>
 
@@ -189,37 +189,37 @@ litt deploy verify`}
           {
             term: "“Not signed in” on protected commands",
             definition: (
-              <>Run <InlineCode>litt login</InlineCode> again. If the browser didn&apos;t open, use <InlineCode>litt login --force</InlineCode> to go through the sign-in screen fresh.</>
+              <>Run <InlineCode>litt login</InlineCode>{" "}again. If the browser didn&apos;t open, use <InlineCode>litt login --force</InlineCode>{" "}to go through the sign-in screen fresh.</>
             ),
           },
           {
             term: "Remote commands fail to connect",
             definition: (
-              <>The CLI needs the terminal server to be reachable for <InlineCode>--remote</InlineCode> work. Run <InlineCode>litt doctor</InlineCode> to check network and auth, and confirm you&apos;re not forcing <InlineCode>LITT_LOCAL_ONLY=1</InlineCode>.</>
+              <>The CLI needs the terminal server to be reachable for <InlineCode>--remote</InlineCode>{" "}work. Run <InlineCode>litt doctor</InlineCode>{" "}to check network and auth, and confirm you&apos;re not forcing <InlineCode>LITT_LOCAL_ONLY=1</InlineCode>.</>
             ),
           },
           {
             term: "Wrong workspace",
             definition: (
-              <>Use <InlineCode>litt workspace current</InlineCode> to see which workspace is selected, then <InlineCode>litt workspace select</InlineCode> to switch.</>
+              <>Use <InlineCode>litt workspace current</InlineCode>{" "}to see which workspace is selected, then <InlineCode>litt workspace select</InlineCode>{" "}to switch.</>
             ),
           },
           {
             term: "Model/provider errors",
             definition: (
-              <><InlineCode>litt doctor</InlineCode> reports model provider availability. If a provider is down, pick a different model — the same health states you see in Studio&apos;s model selector apply here.</>
+              <><InlineCode>litt doctor</InlineCode>{" "}reports model provider availability. If a provider is down, pick a different model — the same health states you see in Studio&apos;s model selector apply here.</>
             ),
           },
           {
             term: "Termux / Android",
             definition: (
-              <>The CLI is supported on Termux. Tokens fall back to file storage when the OS keychain isn&apos;t available, and <InlineCode>litt doctor</InlineCode> validates the full environment there too.</>
+              <>The CLI is supported on Termux. Tokens fall back to file storage when the OS keychain isn&apos;t available, and <InlineCode>litt doctor</InlineCode>{" "}validates the full environment there too.</>
             ),
           },
         ]}
       />
       <Callout kind="tip" title="Start with doctor">
-        <InlineCode>litt doctor</InlineCode> is the fastest path to an
+        <InlineCode>litt doctor</InlineCode>{" "}is the fastest path to an
         answer for almost every CLI problem — environment, auth,
         connectivity, and providers in one report.
       </Callout>
