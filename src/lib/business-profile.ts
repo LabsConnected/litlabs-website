@@ -507,6 +507,8 @@ export function isBusinessProfile(value: unknown): value is BusinessProfile {
 const QUOTED_NAME_RE = /["“”]([^"“”]{2,60})["“”]/;
 /** ... called X / ... named X (up to 4 capitalized words). */
 const CALLED_NAME_RE = /\b(?:called|named)\s+([A-Z][\w&'’.-]*(?:\s+[A-Z][\w&'’.-]*){0,3})/;
+/** I run X / I own X / I operate X — the most natural self-introduction. */
+const RUN_NAME_RE = /\b[Ii]\s+(?:run|own|operate)\s+([A-Z][\w&'’.-]*(?:\s+[A-Z][\w&'’.-]*){0,3})/;
 /** A capitalized phrase right before "in <Place>". */
 const LEADING_NAME_RE =
   /^([A-Z][\w&'’.-]*(?:\s+[A-Z][\w&'’.-]*){0,3})\s+(?:in|near|at|around|serving)\s+[A-Z]/;
@@ -514,6 +516,26 @@ const LEADING_NAME_RE =
 /** in Muskegon / near Grand Rapids / at the corner of ... */
 const LOCATION_RE =
   /\b(?:in|near|at|around|from|serving)\s+(?:the\s+)?([A-Z][a-zA-Z.'-]*(?:\s+[A-Z][a-zA-Z.'-]*){0,2})(?:\s+area\b)?/;
+
+/** Abbreviations that legitimately contain a period inside a place name. */
+const LOCATION_ABBREVS = new Set(["st", "mt", "ft"]);
+
+/**
+ * Clean a raw location capture: a sentence boundary (". We do…") must not
+ * leak into the place name, but abbreviations ("St. Louis") survive.
+ */
+function cleanLocation(raw: string): string {
+  const noTrailingDots = raw.trim().replace(/[.]+$/, "").replace(/\s+area$/, "");
+  const sentenceSplit = noTrailingDots.split(/\.\s+/);
+  if (sentenceSplit.length === 1) return noTrailingDots;
+  const first = sentenceSplit[0] ?? "";
+  // "St. Louis" → the fragment before the period is an abbreviation.
+  const lastWord = first.split(/\s+/).pop()?.toLowerCase() ?? "";
+  if (LOCATION_ABBREVS.has(lastWord) && sentenceSplit.length >= 2) {
+    return `${first}. ${sentenceSplit[1]}`.replace(/[.]+$/, "");
+  }
+  return first;
+}
 
 const PHONE_EXTRACT_RE = /(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/;
 const EMAIL_EXTRACT_RE = /[\w.+-]+@[\w-]+\.[\w.]+/;
@@ -534,11 +556,12 @@ export function extractBusinessProfile(description: string): BusinessProfileDown
 
   profile.description = text.length > MAX.description ? text.slice(0, MAX.description) : text;
 
-  // Name: quoted > called/named > leading capitalized phrase before location.
+  // Name: quoted > called/named > "I run X" > leading capitalized phrase.
   const quoted = text.match(QUOTED_NAME_RE)?.[1]?.trim();
   const called = text.match(CALLED_NAME_RE)?.[1]?.trim();
+  const run = text.match(RUN_NAME_RE)?.[1]?.trim();
   const leading = text.match(LEADING_NAME_RE)?.[1]?.trim();
-  const businessName = quoted || called || leading;
+  const businessName = quoted || called || run || leading;
   if (businessName && businessName.length >= 2 && businessName.length <= MAX.businessName) {
     // Guard against capturing a sentence fragment as a "name"
     // ("I run ...", "The best ..."). Quoted names are trusted as-is.
@@ -549,11 +572,7 @@ export function extractBusinessProfile(description: string): BusinessProfileDown
     }
   }
 
-  const location = text
-    .match(LOCATION_RE)?.[1]
-    ?.trim()
-    .replace(/[.]+$/, "")
-    .replace(/\s+area$/, "");
+  const location = cleanLocation(text.match(LOCATION_RE)?.[1] ?? "");
   if (location && location.length >= 2 && location.length <= MAX.location) {
     // Guard against common false positives ("in minutes", "in stock").
     const lower = location.toLowerCase();
@@ -566,7 +585,10 @@ export function extractBusinessProfile(description: string): BusinessProfileDown
   const phone = text.match(PHONE_EXTRACT_RE)?.[1]?.trim();
   if (phone && PHONE_RE.test(phone)) profile.phone = phone;
 
-  const email = text.match(EMAIL_EXTRACT_RE)?.[0]?.trim();
+  const email = text
+    .match(EMAIL_EXTRACT_RE)?.[0]
+    ?.trim()
+    .replace(/[.]+$/, "");
   if (email && EMAIL_RE.test(email)) profile.email = email;
 
   const servicesRaw = text.match(SERVICES_LEAD_RE)?.[1];
