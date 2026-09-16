@@ -35,13 +35,13 @@ describe("step 3.3 — stranger acceptance (scripted)", () => {
   });
 
   it("2. builds an honest site with the stranger's real facts", () => {
-    const { profile, build } = intakeRoofingBusiness(STRANGER_SAYS);
+    const { profile } = intakeRoofingBusiness(STRANGER_SAYS);
     expect(profile.businessName).toContain("Mike");
     expect(profile.phone).toContain("231-555-0147");
     expect(profile.email).toContain("mike@mikesroofing.example");
     expect(profile.location).toContain("Muskegon");
 
-    const doc = buildRoofingSite(profile, build);
+    const doc = buildRoofingSite(profile);
     const html = canvasToHtml(doc, { deploymentId: "dep_acceptance" });
 
     // Real facts are on the page…
@@ -53,21 +53,21 @@ describe("step 3.3 — stranger acceptance (scripted)", () => {
     expect(html).not.toMatch(/\b4\.\d\s*stars?\b/i);
     expect(html).not.toMatch(/\$\d+\s*(per|for|starting)/i);
     // Empty slots are clearly empty, not silently blank or invented.
-    const emptyBuild = buildRoofingSite({ businessName: "Mike's Roofing" }, build);
+    const emptyBuild = buildRoofingSite({ businessName: "Mike's Roofing" });
     const emptyHtml = canvasToHtml(emptyBuild);
     expect(emptyHtml).toContain("[Your phone number]");
   });
 
   it("3. the built site passes the publish fabrication gate", () => {
-    const { profile, build } = intakeRoofingBusiness(STRANGER_SAYS);
-    const html = canvasToHtml(buildRoofingSite(profile, build), { deploymentId: "dep_acceptance" });
+    const { profile } = intakeRoofingBusiness(STRANGER_SAYS);
+    const html = canvasToHtml(buildRoofingSite(profile), { deploymentId: "dep_acceptance" });
     const result = validateNoFabricatedContent({ files: [{ path: "index.html", content: html }] });
     expect(result.violations).toEqual([]);
   });
 
   it("4. the quote form is wired to the platform form backend", () => {
-    const { profile, build } = intakeRoofingBusiness(STRANGER_SAYS);
-    const html = canvasToHtml(buildRoofingSite(profile, build), { deploymentId: "dep_acceptance" });
+    const { profile } = intakeRoofingBusiness(STRANGER_SAYS);
+    const html = canvasToHtml(buildRoofingSite(profile), { deploymentId: "dep_acceptance" });
 
     // Posts to the platform backend with the deployment id…
     expect(html).toContain('action="/api/forms/submit"');
@@ -79,7 +79,7 @@ describe("step 3.3 — stranger acceptance (scripted)", () => {
     expect(html).toContain('name="email"');
     expect(html).toContain('name="message"');
     // …and degrades honestly without JS / without a deployment id.
-    const previewHtml = canvasToHtml(buildRoofingSite(profile, build));
+    const previewHtml = canvasToHtml(buildRoofingSite(profile));
     expect(previewHtml).toContain('name="deploymentId" value=""');
     expect(previewHtml).toContain("connects automatically when the site is published");
   });
