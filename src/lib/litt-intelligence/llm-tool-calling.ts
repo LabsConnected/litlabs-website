@@ -27,7 +27,8 @@
 import "server-only";
 
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
-import { findToolCallMarkup, stripToolCallMarkupText } from "./tool-call-markup";
+import { findToolCallMarkup, recoverTextToolCalls, stripToolCallMarkupText } from "./tool-call-markup";
+import { validateToolCallArgs } from "@litt/agent-core";
 import { SITE_URL } from "@/lib/siteConfig";
 import { logLLMCall, type LLMCallMetadata } from "@/lib/evals/braintrust";
 import {
@@ -664,32 +665,116 @@ async function attemptGemini(
       message: `empty completion (finishReason=${result.candidates[0]?.finishReason ?? "unknown"})`,
     });
   }
-  assertNoTextToolCallMarkup(parsed, req.toolIdMap, "gemini", model);
-  return parsed;
+  return normalizeTextToolCalls(parsed, req.tools, req.toolIdMap, "gemini", model);
 }
 
 /**
- * Canonical tool-call normalization boundary: a response with no structured
- * tool calls whose text shows invocation-intent markup is a model-level
- * protocol failure, never assistant prose. Throwing a model-scope attempt
- * error makes the router fail over to a sibling model/provider; if every
- * route does this the run fails truthfully instead of completing with the
- * raw markup persisted to the transcript.
+ * Canonical tool-call normalization boundary.
+ *
+ * A response whose text carries invocation-intent markup is handled in
+ * exactly one of two ways:
+ *
+ *  1. RECOVERED — every markup span parses deterministically into a
+ *     registered tool id plus schema-valid args. The calls are normalized
+ *     into the canonical ToolCallRequest shape and appended to the
+ *     response's toolCalls, so they execute through the same permission /
+ *     approval / execution gateway as native structured calls. The markup
+ *     is removed from the text so raw protocol never reaches the
+ *     transcript. A recovered call that duplicates a native call in the
+ *     same response is dropped — each call executes exactly once.
+ *
+ *  2. FAILED — the text shows invocation intent that cannot be fully
+ *     normalized (malformed JSON, truncated envelope, unknown tool,
+ *     schema-invalid args). That is a model-level protocol failure:
+ *     throwing a model-scope attempt error fails the route over to a
+ *     sibling model/provider, and if every route does this the run fails
+ *     truthfully instead of completing with the raw markup persisted.
+ *
+ * Returns the (possibly augmented) parsed response, or throws.
  */
-function assertNoTextToolCallMarkup(
-  parsed: { text: string; toolCalls: unknown[] },
+function normalizeTextToolCalls<T extends { text: string; toolCalls: ToolCallRequest[]; finishReason?: string }>(
+  parsed: T,
+  tools: ToolDefinition[],
   toolIdMap: Map<string, string>,
   provider: string,
   model: string,
-): void {
-  if (parsed.toolCalls.length > 0) return;
-  const hit = findToolCallMarkup(parsed.text, new Set(toolIdMap.values()));
-  if (!hit) return;
-  throw new ProviderAttemptError(provider, model, {
-    class: "tool_call_parse_failed",
-    scope: "model",
-    message: `model emitted text-format tool markup (${hit.kind}${hit.toolId ? ` for ${hit.toolId}` : ""}) instead of a structured tool call`,
-  });
+): T {
+  const knownIds = new Set(toolIdMap.values());
+  const hit = findToolCallMarkup(parsed.text, knownIds);
+  if (!hit) return parsed;
+
+  const recovery = recoverTextToolCalls(parsed.text, knownIds);
+
+  // Intent detected but not fully recoverable — incompatible protocol.
+  if (recovery.malformed || recovery.calls.length === 0) {
+    throw new ProviderAttemptError(provider, model, {
+      class: "tool_call_parse_failed",
+      scope: "model",
+      message: `model emitted text-format tool markup (${hit.kind}${hit.toolId ? ` for ${hit.toolId}` : ""}) that could not be safely normalized`,
+    });
+  }
+
+  // Dedupe against native structured calls already on the response —
+  // a model that emits both must not execute twice. Dedupe runs before
+  // validation so a mangled text echo of a healthy native call cannot
+  // sink the response.
+  const nativeKeys = new Set(
+    parsed.toolCalls.map((c) => `${c.toolId}::${JSON.stringify(c.inputs)}`),
+  );
+  const recoveredCalls = recovery.calls.filter(
+    (c) => !nativeKeys.has(`${c.toolId}::${JSON.stringify(c.inputs)}`),
+  );
+
+  // Schema-validate each recovered call before it becomes executable.
+  // An invalid-args call is still a protocol failure, not a guess.
+  for (const call of recoveredCalls) {
+    call.inputs = normalizeRecoveredInputs(call.inputs, tools.find((t) => t.id === call.toolId));
+    const argError = validateToolCallArgs(call.toolId, call.inputs, tools);
+    if (argError) {
+      throw new ProviderAttemptError(provider, model, {
+        class: "tool_call_parse_failed",
+        scope: "model",
+        message: `recovered text call for ${call.toolId} has invalid arguments: ${argError}`,
+      });
+    }
+  }
+
+  const recovered = recoveredCalls.map((c, i) => ({
+    toolCallId: `text-recovered-${i}`,
+    toolId: c.toolId,
+    inputs: c.inputs,
+  }));
+
+  return {
+    ...parsed,
+    text: recovery.residualText,
+    toolCalls: [...parsed.toolCalls, ...recovered],
+    finishReason: parsed.toolCalls.length + recovered.length > 0 ? "tool_calls" : parsed.finishReason,
+  };
+}
+
+/**
+ * Canonicalize recovered input keys against the tool's declared schema:
+ * an undeclared `snake_case` key maps to its declared `camelCase`
+ * property (`project_id` → `projectId`). Renames happen only when the
+ * camelCase target exists in the schema and is not already set — no
+ * guessing, no overwriting real values.
+ */
+function normalizeRecoveredInputs(
+  inputs: Record<string, unknown>,
+  def: ToolDefinition | undefined,
+): Record<string, unknown> {
+  const props = (def?.inputSchema?.properties ?? {}) as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...inputs };
+  for (const key of Object.keys(inputs)) {
+    if (key in props || !key.includes("_")) continue;
+    const camel = key.replace(/_([a-z])/g, (_m, c: string) => c.toUpperCase());
+    if (camel !== key && camel in props && !(camel in out)) {
+      out[camel] = out[key];
+      delete out[key];
+    }
+  }
+  return out;
 }
 
 /** Provider-specific connection details for the shared OpenAI-compatible adapter. */
@@ -780,6 +865,7 @@ function parseOpenAiCompatibleResponse(
   model: string,
   route: PlannedProvider,
   toolIdMap: Map<string, string>,
+  tools: ToolDefinition[],
 ): LLMToolCallResponse {
   const choice = (data.choices as Array<Record<string, unknown>> | undefined)?.[0];
   if (!choice) {
@@ -824,12 +910,10 @@ function parseOpenAiCompatibleResponse(
     });
   }
 
-  assertNoTextToolCallMarkup({ text, toolCalls }, toolIdMap, route.provider, model);
+  const normalized = normalizeTextToolCalls({ text, toolCalls, finishReason }, tools, toolIdMap, route.provider, model);
 
   return {
-    text,
-    toolCalls,
-    finishReason,
+    ...normalized,
     model: (data.model as string) ?? model,
     provider: route.provider,
   };
@@ -886,7 +970,7 @@ async function attemptOpenAiCompatible(
   }
 
   const data = (await res.json()) as Record<string, unknown>;
-  return parseOpenAiCompatibleResponse(data, model, route, req.toolIdMap);
+  return parseOpenAiCompatibleResponse(data, model, route, req.toolIdMap, req.tools);
 }
 
 // ─── Ollama ───────────────────────────────────────────────────────

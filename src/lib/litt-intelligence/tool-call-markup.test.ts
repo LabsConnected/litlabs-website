@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { findToolCallMarkup } from "./tool-call-markup";
+import { findToolCallMarkup, recoverTextToolCalls } from "./tool-call-markup";
 
 /**
  * The agent loop executes native structured tool calls only — a model that
@@ -145,5 +145,135 @@ describe("findToolCallMarkup — prose that must not be flagged", () => {
       findToolCallMarkup("<tool_call>terminality\n<arg_key>x</arg_key><arg_value>y</arg_value></tool_call>", TOOLS),
     ).not.toBeNull(); // arg structure still signals intent
     expect(findToolCallMarkup("terminality is not a tool call", TOOLS)).toBeNull();
+  });
+});
+
+describe("recoverTextToolCalls — canonical normalization", () => {
+  it("recovers the production antml <tool_call> payload", () => {
+    const r = recoverTextToolCalls(PRODUCTION_PAYLOAD, TOOLS);
+    expect(r.malformed).toBe(false);
+    expect(r.calls).toEqual([
+      {
+        toolId: "terminal.execute",
+        inputs: { command: "cat -n index.html", project_id: "f79fae8d-62f5-405d-b933-3d49a58acc61" },
+      },
+    ]);
+    expect(r.residualText).not.toContain("tool_call");
+    expect(r.residualText).toContain("Let me inspect the file first.");
+  });
+
+  it("recovers <invoke name>…<parameter> envelopes", () => {
+    const r = recoverTextToolCalls(
+      'Working. <invoke name="files.read"><parameter name="path">index.html</parameter></invoke>',
+      TOOLS,
+    );
+    expect(r.malformed).toBe(false);
+    expect(r.calls).toEqual([{ toolId: "files.read", inputs: { path: "index.html" } }]);
+    expect(r.residualText).toBe("Working.");
+  });
+
+  it("recovers <dots_function_call> envelopes carrying call JSON", () => {
+    const r = recoverTextToolCalls(
+      '<dots_function_call>{"name":"files.read","arguments":{"path":"a.txt"}}</dots_function_call>',
+      TOOLS,
+    );
+    expect(r.malformed).toBe(false);
+    expect(r.calls).toEqual([{ toolId: "files.read", inputs: { path: "a.txt" } }]);
+  });
+
+  it("recovers antml pairs inside <dots_function_call>", () => {
+    const r = recoverTextToolCalls(
+      '<dots_function_call>terminal.execute<arg_key>command</arg_key><arg_value>ls</arg_value></dots_function_call>',
+      TOOLS,
+    );
+    expect(r.malformed).toBe(false);
+    expect(r.calls).toEqual([{ toolId: "terminal.execute", inputs: { command: "ls" } }]);
+  });
+
+  it("recovers fenced ```tool_call and ```json envelopes", () => {
+    const r = recoverTextToolCalls(
+      '```tool_call\n{"tool":"files.write","inputs":{"path":"a","content":"b"}}\n```\n' +
+        '```json\n{"name":"files.read","arguments":{"path":"a"}}\n```',
+      TOOLS,
+    );
+    expect(r.malformed).toBe(false);
+    expect(r.calls).toEqual([
+      { toolId: "files.write", inputs: { path: "a", content: "b" } },
+      { toolId: "files.read", inputs: { path: "a" } },
+    ]);
+  });
+
+  it("recovers a bare JSON envelope as the whole payload", () => {
+    const r = recoverTextToolCalls('{"name":"apply_patch","arguments":{"path":"i","patches":[]}}', TOOLS);
+    expect(r.malformed).toBe(false);
+    expect(r.calls).toEqual([{ toolId: "apply_patch", inputs: { path: "i", patches: [] } }]);
+  });
+
+  it("maps the underscore-sanitized name files_read → files.read", () => {
+    const r = recoverTextToolCalls(
+      '<tool_call>{"name":"files_read","arguments":{"path":"a.txt"}}</tool_call>',
+      TOOLS,
+    );
+    expect(r.malformed).toBe(false);
+    expect(r.calls[0]?.toolId).toBe("files.read");
+  });
+
+  it("collapses repeated identical calls to one", () => {
+    const r = recoverTextToolCalls(
+      '<tool_call>{"name":"files.read","arguments":{"path":"a"}}</tool_call>' +
+        '<tool_call>{"name":"files.read","arguments":{"path":"a"}}</tool_call>',
+      TOOLS,
+    );
+    expect(r.calls).toHaveLength(1);
+  });
+
+  it("marks truncated envelopes malformed — intent but unparseable", () => {
+    const r = recoverTextToolCalls(
+      "Reading. <tool_call>files.read\n<arg_key>path</arg_key>",
+      TOOLS,
+    );
+    expect(r.malformed).toBe(true);
+    expect(r.calls).toHaveLength(0);
+  });
+
+  it("marks envelopes naming unregistered tools malformed", () => {
+    const r = recoverTextToolCalls(
+      '<tool_call>{"name":"system.wipe","arguments":{"target":"all"}}</tool_call>',
+      TOOLS,
+    );
+    expect(r.malformed).toBe(true);
+    expect(r.calls).toHaveLength(0);
+  });
+
+  it("marks malformed tool_call fence JSON as intent", () => {
+    const r = recoverTextToolCalls(
+      '```tool_call\n{"tool":"files.write","inputs":{"path":\n```',
+      TOOLS,
+    );
+    expect(r.malformed).toBe(true);
+    expect(r.calls).toHaveLength(0);
+  });
+
+  it("does not touch prose, quoted markup, or non-tool JSON", () => {
+    for (const text of [
+      "Models emit `<tool_call>x</tool_call>` sometimes.",
+      '{"name": "Alice", "age": 3}',
+      "```json\n{\"name\": \"Alice\"}\n```",
+      "The footer reads Ember Roast.",
+    ]) {
+      const r = recoverTextToolCalls(text, TOOLS);
+      expect(r.calls).toHaveLength(0);
+      expect(r.malformed).toBe(false);
+      expect(r.residualText).toBe(text);
+    }
+  });
+
+  it("strips consumed markup but keeps surrounding prose", () => {
+    const r = recoverTextToolCalls(
+      'Before.\n<tool_call>{"name":"files.read","arguments":{"path":"a"}}</tool_call>\nAfter.',
+      TOOLS,
+    );
+    expect(r.calls).toHaveLength(1);
+    expect(r.residualText).toBe("Before.\n\nAfter.");
   });
 });

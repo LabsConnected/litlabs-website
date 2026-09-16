@@ -247,7 +247,7 @@ describe("callLLMWithTools — pseudo-tool text is never executable", () => {
 });
 
 describe("callLLMWithTools — in-text tool_call markup never leaks", () => {
-  it("fails over on a fenced ```tool_call block naming a declared tool", async () => {
+  it("recovers a fenced ```tool_call block naming a declared tool into a canonical call", async () => {
     vi.stubEnv("GROQ_API_KEY", "test-groq-key");
     mockFetch.mockResolvedValueOnce(
       makeSuccessResponse(
@@ -256,35 +256,35 @@ describe("callLLMWithTools — in-text tool_call markup never leaks", () => {
       ),
     );
 
-    // Invocation-intent markup (payload names a declared tool) is a
-    // model-scope protocol failure — the router fails over to the sibling
-    // model instead of persisting the markup or completing without the
-    // intended call.
-    mockFetch.mockResolvedValueOnce(makeSuccessResponse("llama-3.1-8b-instant", "Done — clean answer."));
-
+    // Safely-parseable invocation markup is normalized into the canonical
+    // toolCalls array — executed through the same gateway as a native
+    // structured call — and the raw markup is removed from the text.
     const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
 
-    expect(result.text).toBe("Done — clean answer.");
-    expect(result.toolCalls).toHaveLength(0);
-    expect(callsTo("groq").length).toBe(2);
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].toolId).toBe("write_file");
+    expect(result.toolCalls[0].inputs).toEqual({ path: "index.html" });
+    expect(result.text).toBe("Let me write that file.");
+    expect(result.text).not.toContain("tool_call");
+    expect(callsTo("groq").length).toBe(1);
   });
 
-  it("fails over on <tool_call> XML markup carrying call JSON", async () => {
+  it("recovers <tool_call> XML markup carrying call JSON", async () => {
     vi.stubEnv("GROQ_API_KEY", "test-groq-key");
-    mockFetch
-      .mockResolvedValueOnce(
-        makeSuccessResponse(
-          "llama-3.3-70b-versatile",
-          'Done.\n<tool_call>{"name":"write_file","arguments":{"path":"a.txt"}}</tool_call>',
-        ),
-      )
-      .mockResolvedValueOnce(makeSuccessResponse("llama-3.1-8b-instant", "Done."));
+    mockFetch.mockResolvedValueOnce(
+      makeSuccessResponse(
+        "llama-3.3-70b-versatile",
+        'Done.\n<tool_call>{"name":"write_file","arguments":{"path":"a.txt"}}</tool_call>',
+      ),
+    );
 
     const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
 
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].toolId).toBe("write_file");
+    expect(result.toolCalls[0].inputs).toEqual({ path: "a.txt" });
     expect(result.text).toBe("Done.");
-    expect(result.toolCalls).toHaveLength(0);
-    expect(callsTo("groq").length).toBe(2);
+    expect(callsTo("groq").length).toBe(1);
   });
 
   it("fails over on antml-style <tool_call>name <arg_key>/<arg_value> markup", async () => {
@@ -358,25 +358,22 @@ describe("callLLMWithTools — in-text tool_call markup never leaks", () => {
     expect(result.toolCalls).toHaveLength(0);
   });
 
-  it("a completion that is only tool-call markup is a model failure — fails over", async () => {
+  it("a completion that is only tool-call markup recovers into the canonical call", async () => {
     vi.stubEnv("GROQ_API_KEY", "test-groq-key");
-    vi.stubEnv("MISTRAL_API_KEY", "test-mistral-key");
-    const markupOnly = () =>
+    mockFetch.mockResolvedValueOnce(
       makeSuccessResponse(
         "llama-3.3-70b-versatile",
         '```tool_call\n{"tool":"write_file","inputs":{"path":"a.txt"}}\n```',
-      );
-    // Groq's Basic route has two candidate models — a model-scoped
-    // bad_response must exhaust both before the router moves to Mistral.
-    mockFetch
-      .mockResolvedValueOnce(markupOnly())
-      .mockResolvedValueOnce(markupOnly())
-      .mockResolvedValueOnce(makeSuccessResponse("mistral-small-latest", "Mistral answered cleanly."));
+      ),
+    );
 
+    // A markup-only completion that normalizes cleanly produces the call —
+    // no failover, no leaked markup, no fake prose.
     const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
 
-    expect(result.provider).toBe("mistral");
-    expect(result.text).toBe("Mistral answered cleanly.");
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].toolId).toBe("write_file");
+    expect(result.text).toBe("");
   });
 
   it("leaves ordinary prose containing JSON untouched", async () => {
@@ -619,18 +616,16 @@ describe("callLLMWithTools — empty provider payloads", () => {
   });
 });
 
+// Production evidence: a model answered with literal
+//   <tool_call>terminal<arg_key>command</arg_key>…</tool_call>
+// which was persisted as assistant prose while the run reported
+// `completed` — no tool executed.
+const PRODUCTION_MARKUP =
+  "I need to read the current `index.html` to find the exact `</title>` line. Let me inspect the file first.\n" +
+  "<tool_call>terminal\n<arg_key>command</arg_key>\n<arg_value>cat -n index.html</arg_value>" +
+  "<arg_key>project_id</arg_key>\n<arg_value>f79fae8d-62f5-405d-b933-3d49a58acc61</arg_value>\n</tool_call>";
+
 describe("callLLMWithTools — text-format tool-call markup (P0-B)", () => {
-  // Production evidence: a model answered with literal
-  //   <tool_call>terminal<arg_key>command</arg_key>…</tool_call>
-  // which was persisted as assistant prose while the run reported
-  // `completed` — no tool executed. Invocation-intent markup is a
-  // model-level protocol failure: fail over, or fail truthfully.
-
-  const PRODUCTION_MARKUP =
-    "I need to read the current `index.html` to find the exact `</title>` line. Let me inspect the file first.\n" +
-    "<tool_call>terminal\n<arg_key>command</arg_key>\n<arg_value>cat -n index.html</arg_value>" +
-    "<arg_key>project_id</arg_key>\n<arg_value>f79fae8d-62f5-405d-b933-3d49a58acc61</arg_value>\n</tool_call>";
-
   it("fails over to a sibling model when the first model emits <tool_call> markup", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
     // First OpenRouter model returns text-format markup; the sibling model
@@ -705,6 +700,230 @@ describe("callLLMWithTools — text-format tool-call markup (P0-B)", () => {
     expect(result.toolCalls).toHaveLength(0);
     expect(result.text).toContain("yours is fine");
     expect(callsTo("groq").length).toBe(1); // no failover — single call
+  });
+});
+
+describe("callLLMWithTools — canonical text-call recovery (P0-B)", () => {
+  // A toolset that includes terminal.execute so the production payload's
+  // bare `terminal` name resolves to a real registered tool.
+  const TERMINAL_TOOL = {
+    id: "terminal.execute",
+    description: "Execute a terminal command",
+    inputSchema: {
+      type: "object",
+      properties: { command: { type: "string" }, projectId: { type: "string" } },
+      required: ["command", "projectId"],
+    },
+  };
+  const STRICT_WRITE = {
+    id: "files.write",
+    description: "Write a file",
+    inputSchema: {
+      type: "object",
+      properties: { projectId: { type: "string" }, path: { type: "string" }, content: { type: "string" } },
+      required: ["projectId", "path", "content"],
+    },
+  };
+
+  it("recovers the exact production <tool_call> antml payload into terminal.execute", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(makeSuccessResponse("m1", PRODUCTION_MARKUP));
+
+    const result = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "read the file" }],
+      [TERMINAL_TOOL],
+    );
+
+    // `terminal` resolves to terminal.execute; `project_id` normalizes to
+    // the declared `projectId`; the markup is gone from the text and the
+    // call enters the canonical toolCalls array for gateway execution.
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].toolId).toBe("terminal.execute");
+    expect(result.toolCalls[0].inputs).toEqual({
+      command: "cat -n index.html",
+      projectId: "f79fae8d-62f5-405d-b933-3d49a58acc61",
+    });
+    expect(result.text).not.toContain("<tool_call>");
+    expect(result.text).not.toContain("arg_key");
+    expect(result.text).toContain("Let me inspect the file first.");
+    expect(result.finishReason).toBe("tool_calls");
+    expect(callsTo("groq").length).toBe(1); // no failover — recovered in place
+  });
+
+  it("recovers <invoke name>…<parameter> envelopes", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(
+      makeSuccessResponse(
+        "m1",
+        'Writing it now. <invoke name="files.write"><parameter name="projectId">p1</parameter><parameter name="path">a.txt</parameter><parameter name="content">hello</parameter></invoke>',
+      ),
+    );
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [STRICT_WRITE]);
+
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].toolId).toBe("files.write");
+    expect(result.toolCalls[0].inputs).toEqual({ projectId: "p1", path: "a.txt", content: "hello" });
+    expect(result.text).toBe("Writing it now.");
+  });
+
+  it("recovers <dots_function_call> envelopes", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(
+      makeSuccessResponse(
+        "m1",
+        '<dots_function_call>{"name":"terminal.execute","arguments":{"command":"ls","projectId":"p1"}}</dots_function_call>',
+      ),
+    );
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [TERMINAL_TOOL]);
+
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].toolId).toBe("terminal.execute");
+    expect(result.toolCalls[0].inputs.command).toBe("ls");
+  });
+
+  it("recovers a bare JSON envelope as the whole completion", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(
+      makeSuccessResponse("m1", '{"tool":"files.write","inputs":{"projectId":"p1","path":"b.txt","content":"x"}}'),
+    );
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [STRICT_WRITE]);
+
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].toolId).toBe("files.write");
+    expect(result.text).toBe("");
+  });
+
+  it("a native call plus an identical text duplicate executes exactly once", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(
+      makeSuccessResponse(
+        "m1",
+        '```tool_call\n{"tool":"files.write","inputs":{"projectId":"p1","path":"a.txt","content":"x"}}\n```',
+        [
+          {
+            id: "call_1",
+            type: "function",
+            function: {
+              name: "files.write",
+              arguments: '{"projectId":"p1","path":"a.txt","content":"x"}',
+            },
+          },
+        ],
+      ),
+    );
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [STRICT_WRITE]);
+
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.text).not.toContain("tool_call");
+  });
+
+  it("repeated identical text calls collapse to one execution", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(
+      makeSuccessResponse(
+        "m1",
+        '<tool_call>{"name":"files.write","arguments":{"projectId":"p1","path":"a.txt","content":"x"}}</tool_call>\n' +
+          '<tool_call>{"name":"files.write","arguments":{"projectId":"p1","path":"a.txt","content":"x"}}</tool_call>',
+      ),
+    );
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [STRICT_WRITE]);
+
+    expect(result.toolCalls).toHaveLength(1);
+  });
+
+  it("fails over on a ```tool_call fence whose JSON is malformed", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch
+      .mockResolvedValueOnce(
+        makeSuccessResponse("m1", '```tool_call\n{"tool":"files.write","inputs":{"path":\n```'),
+      )
+      .mockResolvedValueOnce(makeSuccessResponse("m2", "Clean answer."));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [STRICT_WRITE]);
+
+    expect(result.text).toBe("Clean answer.");
+    expect(result.toolCalls).toHaveLength(0);
+    expect(callsTo("groq").length).toBe(2);
+  });
+
+  it("fails over on a truncated envelope", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch
+      .mockResolvedValueOnce(
+        makeSuccessResponse("m1", 'Reading it. <tool_call>files.read\n<arg_key>path</arg_key>'),
+      )
+      .mockResolvedValueOnce(makeSuccessResponse("m2", "Read it directly."));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [STRICT_WRITE]);
+
+    expect(result.text).toBe("Read it directly.");
+    expect(result.toolCalls).toHaveLength(0);
+    expect(callsTo("groq").length).toBe(2);
+  });
+
+  it("fails over on an envelope naming an unregistered tool", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch
+      .mockResolvedValueOnce(
+        makeSuccessResponse("m1", '<tool_call>{"name":"system.wipe","arguments":{"target":"all"}}</tool_call>'),
+      )
+      .mockResolvedValueOnce(makeSuccessResponse("m2", "Cannot do that."));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [STRICT_WRITE]);
+
+    expect(result.text).toBe("Cannot do that.");
+    expect(result.toolCalls).toHaveLength(0);
+    expect(callsTo("groq").length).toBe(2);
+  });
+
+  it("fails over when a recovered call is missing required arguments", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch
+      .mockResolvedValueOnce(
+        makeSuccessResponse("m1", '<tool_call>{"name":"files.write","arguments":{"projectId":"p1","path":"a.txt"}}</tool_call>'),
+      )
+      .mockResolvedValueOnce(makeSuccessResponse("m2", "Need more detail."));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [STRICT_WRITE]);
+
+    // `content` is required — the partial call never executes.
+    expect(result.text).toBe("Need more detail.");
+    expect(result.toolCalls).toHaveLength(0);
+  });
+
+  it("fails over when a recovered argument is an unresolved template", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch
+      .mockResolvedValueOnce(
+        makeSuccessResponse(
+          "m1",
+          '<tool_call>{"name":"files.write","arguments":{"projectId":"p1","path":"<path>","content":"x"}}</tool_call>',
+        ),
+      )
+      .mockResolvedValueOnce(makeSuccessResponse("m2", "Used a real path instead."));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [STRICT_WRITE]);
+
+    expect(result.text).toBe("Used a real path instead.");
+    expect(result.toolCalls).toHaveLength(0);
+  });
+
+  it("leaves ordinary non-tool JSON untouched", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(
+      makeSuccessResponse("m1", '{"name": "Alice", "age": 3}'),
+    );
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [STRICT_WRITE]);
+
+    expect(result.text).toBe('{"name": "Alice", "age": 3}');
+    expect(result.toolCalls).toHaveLength(0);
   });
 });
 
