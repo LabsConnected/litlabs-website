@@ -40,7 +40,7 @@ const SNAKE_BRACKET_TOKEN = /\[[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\]/;
  */
 const SINGLE_WORD_REDACTION_TOKEN = /\[(?:EMAIL|PHONE|ADDRESS)\]/;
 
-function findPlaceholderToken(text: string): string | null {
+export function findPlaceholderToken(text: string): string | null {
   const moustache = text.match(MOUSTACHE_TOKEN);
   if (moustache) return moustache[0];
   const bracket = text.match(SNAKE_BRACKET_TOKEN);
@@ -48,6 +48,21 @@ function findPlaceholderToken(text: string): string | null {
   const single = text.match(SINGLE_WORD_REDACTION_TOKEN);
   if (single) return single[0];
   return null;
+}
+
+/**
+ * Enforcement-floor guard for mutation handlers. Returns an error string
+ * when `value` carries an unresolved placeholder, else null. Handler-level
+ * checks matter because the agent-loop gate is not the only path into a
+ * mutation — /api/litt/tools/execute and resumed approvals reach the same
+ * handlers without re-running the loop's pre-approval validation.
+ */
+export function placeholderViolation(value: unknown, field: string): string | null {
+  if (typeof value !== "string") return null;
+  const token = findPlaceholderToken(value);
+  if (!token) return null;
+  return `rejected: ${field} contains an unresolved placeholder ${JSON.stringify(token)}. ` +
+    `Template slots never belong in mutations — use the literal text.`;
 }
 
 export interface ApplyPatchInputs {

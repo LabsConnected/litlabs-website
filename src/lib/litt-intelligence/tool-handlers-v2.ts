@@ -14,6 +14,7 @@
 
 import "server-only";
 
+import { placeholderViolation } from "./patch-validation";
 import type { WorkspaceTransport } from "./workspace-transport";
 
 // ─── Tool Handler Signature ───────────────────────────────────────
@@ -73,6 +74,11 @@ export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
     return { success: false, error: "path and content are required" };
   }
 
+  // Enforcement floor: unresolved template placeholders must never reach
+  // the filesystem, no matter which entry point invoked the handler.
+  const badField = placeholderViolation(path, "path") ?? placeholderViolation(content, "content");
+  if (badField) return { success: false, error: badField };
+
   try {
     await transport.writeFile(path, content);
     return {
@@ -88,6 +94,8 @@ export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
 export const handleFilesDelete: ToolHandler = async (inputs, transport) => {
   const path = inputs.path as string;
   if (!path) return { success: false, error: "path is required" };
+  const badPath = placeholderViolation(path, "path");
+  if (badPath) return { success: false, error: badPath };
 
   try {
     await transport.deleteFile(path);
@@ -100,6 +108,8 @@ export const handleFilesDelete: ToolHandler = async (inputs, transport) => {
 export const handleFilesMkdir: ToolHandler = async (inputs, transport) => {
   const path = inputs.path as string;
   if (!path) return { success: false, error: "path is required" };
+  const badPath = placeholderViolation(path, "path");
+  if (badPath) return { success: false, error: badPath };
 
   try {
     await transport.mkdir(path);
@@ -115,6 +125,8 @@ export const handleFilesRename: ToolHandler = async (inputs, transport) => {
   if (!path || !newPath) {
     return { success: false, error: "path and newPath are required" };
   }
+  const badPath = placeholderViolation(path, "path") ?? placeholderViolation(newPath, "newPath");
+  if (badPath) return { success: false, error: badPath };
 
   try {
     await transport.rename(path, newPath);
@@ -194,6 +206,8 @@ export const handleGitLog: ToolHandler = async (inputs, transport) => {
 export const handleGitCommit: ToolHandler = async (inputs, transport) => {
   const message = inputs.message as string;
   if (!message) return { success: false, error: "message is required" };
+  const badMessage = placeholderViolation(message, "message");
+  if (badMessage) return { success: false, error: badMessage };
 
   try {
     const result = await transport.gitCommit(message, inputs.files as string[] | undefined);
@@ -208,6 +222,11 @@ export const handleGitCommit: ToolHandler = async (inputs, transport) => {
 export const handleTerminalExecute: ToolHandler = async (inputs, transport) => {
   const command = inputs.command as string;
   if (!command) return { success: false, error: "command is required" };
+  // Enforcement floor: a shell command can write files too (heredoc,
+  // `cat >`, `tee`), so placeholder tokens are rejected here as well —
+  // the files.write guard alone does not close that bypass.
+  const badCommand = placeholderViolation(command, "command");
+  if (badCommand) return { success: false, error: badCommand };
 
   try {
     const result = await transport.exec(command, 30_000);
@@ -373,6 +392,19 @@ export const handleApplyPatch: ToolHandler = async (inputs, transport) => {
   const rawPatches = inputs.patches as Array<{ search: string; replace: string }>;
   if (!path || !rawPatches || !Array.isArray(rawPatches)) {
     return { success: false, error: "path and patches[] are required" };
+  }
+
+  // Enforcement floor: placeholders in either direction are corruption —
+  // a search token can never match, and a replace token would persist the
+  // slot verbatim into the file.
+  const badPath = placeholderViolation(path, "path");
+  if (badPath) return { success: false, error: badPath };
+  for (let i = 0; i < rawPatches.length; i++) {
+    const p = rawPatches[i];
+    const bad =
+      placeholderViolation(p?.search, `patch ${i + 1} search`) ??
+      placeholderViolation(p?.replace, `patch ${i + 1} replace`);
+    if (bad) return { success: false, error: bad };
   }
 
   const patches = rawPatches.map((p) => ({ type: "search_replace" as const, search: p.search, replace: p.replace }));
