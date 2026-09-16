@@ -41,7 +41,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
           "w-full min-h-[44px] rounded-xl bg-white/5 px-4 text-base text-white placeholder:text-white/35",
           "border border-white/12 transition-colors duration-200 motion-reduce:transition-none",
           "hover:border-white/20",
-          "focus-visible:outline-none focus-visible:border-cyan-300/60 focus-visible:ring-2 focus-visible:ring-cyan-300/40",
+          "focus-visible:outline-none focus-visible:border-lime-300/60 focus-visible:ring-2 focus-visible:ring-[rgba(168,255,47,0.4)]",
           error && "border-red-400/60 focus-visible:border-red-300/70 focus-visible:ring-red-300/40",
           "disabled:opacity-50 disabled:cursor-not-allowed",
         )}
