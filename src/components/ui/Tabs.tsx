@@ -91,7 +91,7 @@ export function Tabs({ tabs, defaultValue, value, onChange, className }: TabsPro
             className={cn(
               "flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-lg px-4 text-sm font-medium",
               "transition-colors duration-200 motion-reduce:transition-none",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(168,255,47,0.55)]",
               isSelected
                 ? "bg-cyan-400/15 text-cyan-100 shadow-[inset_0_0_0_1px_rgba(34,211,238,0.35)]"
                 : "text-white/60 hover:bg-white/10 hover:text-white",
