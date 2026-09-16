@@ -74,7 +74,10 @@ async function patchHandler(req: NextRequest) {
   const markAll = body?.mark_all === true;
 
   if (!isAdminSupabaseConfigured()) {
-    return NextResponse.json({ success: true, mock: true });
+    return NextResponse.json(
+      { error: "Notifications are unavailable — the notification service isn’t connected yet." },
+      { status: 503 },
+    );
   }
 
   try {
@@ -112,7 +115,10 @@ async function patchHandler(req: NextRequest) {
     if (error) throw error;
     return NextResponse.json({ success: true });
   } catch {
-    return NextResponse.json({ success: true, mock: true });
+    return NextResponse.json(
+      { error: "Notifications are unavailable — the notification service isn’t connected yet." },
+      { status: 503 },
+    );
   }
 }
 

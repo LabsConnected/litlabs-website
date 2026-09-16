@@ -143,7 +143,10 @@ async function postHandler(req: NextRequest) {
   }
 
   if (!isAdminSupabaseConfigured()) {
-    return NextResponse.json({ success: true, id: "mock_new", mock: true });
+    return NextResponse.json(
+      { error: "Posting is unavailable — the community feed isn’t connected yet." },
+      { status: 503 },
+    );
   }
 
   try {
