@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { findToolCallMarkup, recoverTextToolCalls } from "./tool-call-markup";
+import { findToolCallMarkup, hasToolCallEnvelope, recoverTextToolCalls } from "./tool-call-markup";
 
 /**
  * The agent loop executes native structured tool calls only — a model that
@@ -145,6 +145,45 @@ describe("findToolCallMarkup — prose that must not be flagged", () => {
       findToolCallMarkup("<tool_call>terminality\n<arg_key>x</arg_key><arg_value>y</arg_value></tool_call>", TOOLS),
     ).not.toBeNull(); // arg structure still signals intent
     expect(findToolCallMarkup("terminality is not a tool call", TOOLS)).toBeNull();
+  });
+});
+
+describe("hasToolCallEnvelope — intent-free envelopes are still tool attempts", () => {
+  // Production 2026-09-16: the model emitted
+  // `<dots_function_call>find ./src -type f</dots_function_call>` amid
+  // prose — no tool id, no arg structure, so findToolCallMarkup returns
+  // null. The execution lane must still treat it as a text-format tool
+  // attempt (fail over) rather than a final answer with zero tool calls.
+  it("detects an intent-free <dots_function_call> envelope", () => {
+    expect(hasToolCallEnvelope("<dots_function_call>find ./src -type f</dots_function_call>")).toBe(true);
+  });
+
+  it("detects an intent-free envelope surrounded by prose", () => {
+    expect(
+      hasToolCallEnvelope(
+        "I'll search the workspace now.\n<dots_function_call>find ./src -type f</dots_function_call>\nLet me check the results.",
+      ),
+    ).toBe(true);
+  });
+
+  it("detects a truncated envelope at end of text", () => {
+    expect(hasToolCallEnvelope("Creating the directory now:\n<dots_function_call>")).toBe(true);
+  });
+
+  it("detects intent-free <tool_call> envelopes too", () => {
+    expect(hasToolCallEnvelope("<tool_call>makeItPretty</tool_call>")).toBe(true);
+  });
+
+  it("ignores envelopes quoted inside inline code", () => {
+    expect(
+      hasToolCallEnvelope("Models sometimes emit `<dots_function_call>find ./src</dots_function_call>` instead of structured calls."),
+    ).toBe(false);
+  });
+
+  it("ignores ordinary prose and empty input", () => {
+    expect(hasToolCallEnvelope("The footer now reads Ember Roast.")).toBe(false);
+    expect(hasToolCallEnvelope("")).toBe(false);
+    expect(hasToolCallEnvelope("   ")).toBe(false);
   });
 });
 
