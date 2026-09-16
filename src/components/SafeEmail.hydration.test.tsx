@@ -7,23 +7,17 @@ import "@testing-library/jest-dom";
 import { SafeEmailText, SafeEmailLink } from "./SafeEmail";
 
 /**
- * Cloudflare's edge email obfuscation rewrites plain-text emails and
- * mailto: hrefs in the served HTML. Simulate that rewrite on the SSR
- * output, then hydrate: without suppressHydrationWarning React reports
- * error #418 (recoverable error → whole tree client-rendered).
+ * SafeEmail v2: the email address is assembled client-side in a useEffect,
+ * so the server HTML contains no email pattern for Cloudflare to obfuscate.
+ * These tests verify:
+ * 1. SSR output contains NO raw email (Cloudflare has nothing to rewrite).
+ * 2. Hydration is clean (server placeholder === client initial render).
+ * 3. After effects run, the real email + mailto link appear.
  */
-function cloudflareRewrite(html: string): string {
-  return html
-    .replaceAll(
-      'href="mailto:support@litlabs.net"',
-      'href="/cdn-cgi/l/email-protection#abc123"',
-    )
-    .replaceAll("support@litlabs.net", "[email&#160;protected]");
-}
 
 async function hydrateAndCollect(html: string, node: React.ReactNode) {
   const container = document.createElement("div");
-  container.innerHTML = cloudflareRewrite(html);
+  container.innerHTML = html;
   document.body.appendChild(container);
 
   const recoverableErrors: unknown[] = [];
@@ -34,58 +28,59 @@ async function hydrateAndCollect(html: string, node: React.ReactNode) {
     });
   });
 
-  // Snapshot the hydrated DOM BEFORE teardown — this is what the user sees.
-  const textContent = container.textContent ?? "";
-  const anchorHref = container.querySelector("a")?.getAttribute("href");
+  const textAfterHydration = container.textContent ?? "";
+  const hrefAfterHydration = container.querySelector("a")?.getAttribute("href");
 
-  await act(async () => root?.unmount());
+  // Let effects run
+  await act(async () => {});
+
+  const textAfterEffects = container.textContent ?? "";
+  const hrefAfterEffects = container.querySelector("a")?.getAttribute("href");
+
+  root?.unmount();
   container.remove();
-  return { recoverableErrors, textContent, anchorHref };
+  return {
+    recoverableErrors,
+    textAfterHydration,
+    hrefAfterHydration,
+    textAfterEffects,
+    hrefAfterEffects,
+  };
 }
 
-describe("SafeEmail hydration (Cloudflare email obfuscation)", () => {
-  it("SafeEmailText hydrates cleanly over obfuscated markup", async () => {
-    const node = (
-      <p>
-        Contact us at <SafeEmailText email="support@litlabs.net" /> today.
-      </p>
-    );
-    const html = renderToString(node);
-    expect(html).toContain("support@litlabs.net");
+describe("SafeEmail (client-assembled, Cloudflare-proof)", () => {
+  it("SafeEmailText: SSR has no email, hydrates clean, effect reveals email", async () => {
+    const html = renderToString(<SafeEmailText email="support@litlabs.net" />);
+    expect(html).not.toContain("support@litlabs.net");
+    expect(html).not.toContain("mailto:");
 
-    const { recoverableErrors, textContent } = await hydrateAndCollect(
-      html,
-      node,
-    );
-    expect(recoverableErrors).toHaveLength(0);
-    // React leaves the obfuscated text alone for Cloudflare's decode
-    // script (which runs in the real browser) to restore.
-    expect(textContent).toContain("[email\u00a0protected]");
+    const r = await hydrateAndCollect(html, <SafeEmailText email="support@litlabs.net" />);
+    expect(r.recoverableErrors).toEqual([]);
+    // After effects, the real email appears
+    expect(r.textAfterEffects).toContain("support@litlabs.net");
   });
 
-  it("SafeEmailLink hydrates cleanly over obfuscated href + text", async () => {
-    const node = (
-      <SafeEmailLink email="support@litlabs.net" className="x" />
+  it("SafeEmailLink: SSR has no email, hydrates clean, effect reveals mailto", async () => {
+    const html = renderToString(
+      <SafeEmailLink email="support@litlabs.net" className="x" />,
     );
-    const html = renderToString(node);
-    expect(html).toContain('href="mailto:support@litlabs.net"');
+    expect(html).not.toContain("support@litlabs.net");
+    expect(html).not.toContain("mailto:");
 
-    const { recoverableErrors, anchorHref } = await hydrateAndCollect(
+    const r = await hydrateAndCollect(
       html,
-      node,
+      <SafeEmailLink email="support@litlabs.net" className="x" />,
     );
-    expect(recoverableErrors).toHaveLength(0);
-    // React leaves the obfuscated href alone; Cloudflare's decode script
-    // restores the real mailto: in the browser.
-    expect(anchorHref).toBe("/cdn-cgi/l/email-protection#abc123");
+    expect(r.recoverableErrors).toEqual([]);
+    expect(r.hrefAfterEffects).toBe("mailto:support@litlabs.net");
+    expect(r.textAfterEffects).toContain("support@litlabs.net");
   });
 
-  it("a bare email WITHOUT the guard reproduces React #418", async () => {
-    const node = <p>Contact us at support@litlabs.net today.</p>;
-    const html = renderToString(node);
-    const { recoverableErrors } = await hydrateAndCollect(html, node);
-    // Proves the test simulates the real failure: unguarded email text
-    // against Cloudflare-obfuscated HTML must raise a hydration error.
-    expect(recoverableErrors.length).toBeGreaterThan(0);
+  it("does not regress: plain email text without SafeEmail still mismatches when obfuscated", async () => {
+    // Negative control: unguarded email that Cloudflare rewrites DOES trigger #418.
+    const html = renderToString(<span>support@litlabs.net</span>);
+    const obfuscated = html.replaceAll("support@litlabs.net", "[email&#160;protected]");
+    const r = await hydrateAndCollect(obfuscated, <span>support@litlabs.net</span>);
+    expect(r.recoverableErrors.length).toBeGreaterThan(0);
   });
 });
