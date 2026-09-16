@@ -32,6 +32,9 @@ import StudioTranscript from "./StudioTranscript";
 import LiTTLiveActivity from "./LiTTLiveActivity";
 import LiTTPanel from "./LiTTPanel";
 import LiTTMobileSheet from "./litt/LiTTMobileSheet";
+import MobileBuildStatusBar from "./litt/MobileBuildStatus";
+import MobileToolsSheet from "./litt/MobileToolsSheet";
+import MobileBottomSheet from "./sheets/MobileBottomSheet";
 import MobileDiagOverlay from "./MobileDiagOverlay";
 import { mobileDiag, isMobileDiagEnabled } from "../lib/mobileDiagnostics";
 import ContextDrawer, { type ContextDrawerTab } from "./context/ContextDrawer";
@@ -400,6 +403,19 @@ function CommandStudioContent() {
   const isMobileLitt = viewportTier === "mobile";
   const isDesktopSplit = useDesktopSplit();
   const [mobileLittOpen, setMobileLittOpen] = useState(false);
+  // Mobile density redesign: progressive-disclosure sheet state. Both sheets
+  // render only while the mobile chat sheet is open (see mounts below).
+  const [mobileBuildOpen, setMobileBuildOpen] = useState(false);
+  const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+  // Mobile density redesign: opening a tool from the Tools sheet closes both
+  // sheets so the chosen tool becomes the one dominant surface (this also
+  // fixes the old behavior where tool buttons switched the workspace
+  // invisibly behind the open chat sheet).
+  const openMobileTool = (fn: () => void) => () => {
+    fn();
+    setMobileToolsOpen(false);
+    setMobileLittOpen(false);
+  };
 
   // LiTT panel defaults to EXPANDED on all desktop tiers (laptop + desktop).
   // The chat is the primary left surface — users should see it immediately,
@@ -1377,8 +1393,37 @@ function CommandStudioContent() {
   // LiTTPanel, or the mobile overlay via LiTTMobileSheet). Exactly one of
   // those two ever renders at a time (gated by viewportTier), so there is
   // never a second CommandComposer / LiTTLiveActivity instance (Phase C2.1).
+  // Shared MissionCards wiring — used by the desktop rail and by the mobile
+  // Build status sheet (showActions={false}). One definition, no duplication.
+  const missionCardsHandlers = {
+    capabilities,
+    modelLabel,
+    onOpenCode: () => { setDestination("studio"); setStudioMode("code"); },
+    onOpenCanvas: () => { setDestination("studio"); setStudioMode("files"); },
+    onOpenPreview: handlePreview,
+    onOpenTerminal: handleOpenTerminal,
+    onOpenActivity: () => handleOpenDockTab("activity"),
+    onOpenFiles: () => handleOpenDockTab("files"),
+    onRollback: handleRollback,
+  };
+
   const littChatContent = (
     <>
+      {/* Mission cards — compact pinned intelligence above the chat.
+          The Plan workspace tab's live summary, folded into collapsible
+          cards: mission · checkpoints · next actions. All data comes from
+          the same stores as the plan surface; no fabricated content.
+          Mobile (<1024px): the card stack is replaced by the single
+          MobileBuildStatusBar; the full cards live in the Build sheet. */}
+      {isMobileLitt ? (
+        <div className="shrink-0 px-3 pt-2">
+          <MobileBuildStatusBar open={mobileBuildOpen} onOpen={() => setMobileBuildOpen(true)} />
+        </div>
+      ) : (
+        <div className="shrink-0 px-3 pt-2">
+          <MissionCards {...missionCardsHandlers} />
+        </div>
+      )}
       <StudioWorkSurface
         messages={conversation.messages}
         busy={conversation.busy}
@@ -1394,6 +1439,7 @@ function CommandStudioContent() {
         completion={completion}
         onDismissCompletion={() => setCompletion(null)}
         onUndoCompletion={handleUndoCompletion}
+        overflowDownloads={isMobileLitt}
         onContinueCompletion={() => {
           const textarea = document.querySelector<HTMLTextAreaElement>("[data-testid='studio-command-composer'] textarea");
           textarea?.focus();
@@ -1469,14 +1515,11 @@ function CommandStudioContent() {
         busy={conversation.busy || creatingProject}
         disabled={conversation.requiresReauth}
         onToggleCamera={() => setCameraDock((v) => ({ ...v, open: !v.open }))}
-        onToggleLive={() => {
-          // The live voice overlay (z-[10020]) renders under the mobile sheet
-          // (z-[10021]) — close the sheet so the voice session is visible.
-          setMobileLittOpen(false);
-          setLivePanelOpen((v) => !v);
-        }}
+        onToggleLive={() => setLivePanelOpen((v) => !v)}
         liveActive={livePanelOpen && liveSession.isLive}
         contextLine={contextLine}
+        hideContextLine={isMobileLitt}
+        compact={isMobileLitt}
         onClearSelectedElement={() => setPreviewSelection(null)}
         executionMode={executionMode}
         onExecutionModeChange={setExecutionMode}
@@ -1560,7 +1603,6 @@ function CommandStudioContent() {
       <div
         className="studio-shell flex h-full w-full flex-col overflow-hidden"
         data-layout={theme.layoutStyle}
-        data-studio-chrome
         style={{
           backgroundColor: "var(--bg-main)",
           color: "var(--text-main)",
@@ -1783,7 +1825,7 @@ function CommandStudioContent() {
                     )}
                   </div>
                 ) : isMedia ? (
-                  <div className="min-h-0 min-w-0 flex-1 overflow-auto pb-28 lg:pb-0">
+                  <div className="min-h-0 min-w-0 flex-1 overflow-auto">
                     <MediaWorkspacePanel
                       littMode={littMode}
                       projectId={capabilities.projectId}
@@ -1799,7 +1841,7 @@ function CommandStudioContent() {
                     />
                   </div>
                 ) : WorkspaceComponent ? (
-                  <div className="min-h-0 min-w-0 flex-1 overflow-auto pb-28 lg:pb-0">
+                  <div className="min-h-0 min-w-0 flex-1 overflow-auto">
                     {studioCreator ? (
                       <StudioCreatorHost>
                         <WorkspaceComponent projectId={capabilities.projectId} />
@@ -2052,11 +2094,8 @@ function CommandStudioContent() {
             The desktop/laptop rail above is not rendered on this tier at
             all, so this trigger + sheet is the ONLY way to reach LiTT on
             mobile. The sheet reuses the exact same littChatContent /
-            littLiveContent used by the desktop rail — never both at once.
-            Hidden while the dock, context drawer, canvas overlay, or live
-            voice overlay is open: at z-[10015] the FAB would float over
-            their scrims and cover tool action buttons. */}
-        {isMobileLitt && !mobileLittOpen && !dockOpen && !contextDrawerOpen && !canvasOpen && !livePanelOpen && (
+            littLiveContent used by the desktop rail — never both at once. */}
+        {isMobileLitt && !mobileLittOpen && (
           <button
             type="button"
             onClick={() => setMobileLittOpen(true)}
@@ -2088,10 +2127,45 @@ function CommandStudioContent() {
           <LiTTMobileSheet
             activeTab={littActiveTab}
             onTabChange={setLittActiveTab}
-            onClose={() => setMobileLittOpen(false)}
+            onClose={() => { setMobileLittOpen(false); setMobileBuildOpen(false); setMobileToolsOpen(false); }}
             chatContent={littChatContent}
             liveContent={littLiveContent}
+            projectName={capabilities.projectName}
+            branch={capabilities.activeBranch}
+            onOpenTools={() => setMobileToolsOpen(true)}
           />
+        )}
+        {/* Mobile density redesign: Build status sheet — the existing
+            MissionCards with the actions card hidden (actions live in the
+            Tools sheet; hints render above the mission card). */}
+        {isMobileLitt && mobileLittOpen && mobileBuildOpen && (
+          <MobileBottomSheet
+            open={mobileBuildOpen}
+            onClose={() => setMobileBuildOpen(false)}
+            title="Build status"
+            testId="mobile-build-sheet"
+          >
+            <MissionCards {...missionCardsHandlers} showActions={false} />
+          </MobileBottomSheet>
+        )}
+        {/* Mobile density redesign: Tools sheet — Code, Canvas, Preview,
+            Files, Terminal, Activity in one place. */}
+        {isMobileLitt && mobileLittOpen && mobileToolsOpen && (
+          <MobileBottomSheet
+            open={mobileToolsOpen}
+            onClose={() => setMobileToolsOpen(false)}
+            title="Tools"
+            testId="mobile-tools-dialog"
+          >
+            <MobileToolsSheet
+              onOpenCode={openMobileTool(() => { setDestination("studio"); setStudioMode("code"); })}
+              onOpenCanvas={openMobileTool(() => { setDestination("studio"); setStudioMode("files"); })}
+              onOpenPreview={openMobileTool(handlePreview)}
+              onOpenFiles={openMobileTool(() => handleOpenDockTab("files"))}
+              onOpenTerminal={openMobileTool(handleOpenTerminal)}
+              onOpenActivity={openMobileTool(() => handleOpenDockTab("activity"))}
+            />
+          </MobileBottomSheet>
         )}
         {/* TEMPORARY: real-phone diagnostic HUD — opt-in only (?mobileDiag=1),
             remove once mobile Studio is confirmed working end-to-end on device. */}
@@ -2307,6 +2381,7 @@ function StudioWorkSurface({
   onDismissCompletion,
   onUndoCompletion,
   onContinueCompletion,
+  overflowDownloads = false,
 }: {
   messages: import("../stores/useStudioAgentStore").ChatMessage[];
   busy: boolean;
@@ -2323,6 +2398,7 @@ function StudioWorkSurface({
   onDismissCompletion?: () => void;
   onUndoCompletion?: () => void;
   onContinueCompletion?: () => void;
+  overflowDownloads?: boolean;
 }) {
   // P0.14-15: Only show empty state when messages are truly empty AND
   // conversations have finished loading from the server. During loading,
@@ -2378,6 +2454,7 @@ function StudioWorkSurface({
           onDismissCompletion={onDismissCompletion}
           onUndoCompletion={onUndoCompletion}
           onContinueCompletion={onContinueCompletion}
+          overflowDownloads={overflowDownloads}
         />
       )}
     </div>

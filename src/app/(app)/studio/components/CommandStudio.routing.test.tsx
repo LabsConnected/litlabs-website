@@ -186,6 +186,8 @@ const defaultCapabilities = () => ({
   voiceMicrophoneOn: false,
   voiceHealth: { configured: false, tokenService: "unknown", available: false },
   projectId: null as string | null,
+  projectName: null as string | null,
+  activeBranch: null as string | null,
 });
 let mockCapabilities = defaultCapabilities();
 let mockRuntime: { state: Record<string, unknown>; loading: boolean; error: null; refresh: () => Promise<void> } | undefined;
@@ -1089,6 +1091,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
 
     it("mobile trigger opens Chat with reachable context, input, and send control", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
+      mockCapabilities = { ...defaultCapabilities(), projectName: "Test Project", activeBranch: "main" };
       const { user } = await renderCommandStudio();
       expect(screen.getByRole("button", { name: "Ask LiTT to build" })).toBeTruthy();
       await user.click(screen.getByTestId("litt-mobile-trigger"));
@@ -1102,13 +1105,36 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       // pinned to the viewport top with a visual-viewport-derived height,
       // no bottom-sheet offset anymore.
       expect(sheet.getAttribute("style")).toContain("top: 0px");
-      expect(screen.getByTestId("studio-workspace-context").textContent).toContain("Private LiTT workspace");
+      // Mobile density redesign: the composer context line is hidden on
+      // mobile; project + branch moved to the slim sheet header row.
+      expect(screen.queryByTestId("studio-workspace-context")).toBeNull();
+      expect(screen.getByTestId("litt-mobile-context").textContent).toContain("Test Project");
+      expect(screen.getByTestId("litt-mobile-context").textContent).toContain("main");
       expect(document.activeElement).toBe(input);
       expect(screen.getByRole("button", { name: /send message|cancel response/i })).toBeVisible();
 
       // Closing returns to workspace-only mobile state.
       await user.click(screen.getByTestId("litt-mobile-sheet-close"));
       expect(screen.queryByTestId("litt-mobile-sheet")).toBeNull();
+    });
+
+    it("mobile chat shows the compact Build status bar instead of the Mission card stack", async () => {
+      globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
+      const { user } = await renderCommandStudio();
+      await user.click(screen.getByTestId("litt-mobile-trigger"));
+      await user.click(screen.getByTestId("litt-mobile-tab-chat"));
+
+      // Mobile density redesign: one ~36px status bar, no card stack.
+      expect(screen.getByTestId("mobile-build-status")).toBeVisible();
+      expect(screen.queryByTestId("mission-card-mission")).toBeNull();
+      expect(screen.queryByTestId("mission-card-actions")).toBeNull();
+    });
+
+    it("desktop keeps the MissionCards stack in the LiTT panel", async () => {
+      globalThis.__TEST_VIEWPORT_WIDTH__ = 1200;
+      await renderCommandStudio();
+      expect(screen.getByTestId("mission-cards")).toBeInTheDocument();
+      expect(screen.queryByTestId("mobile-build-status")).toBeNull();
     });
 
     it("laptop tier defaults to expanded LiTT when no preference is stored", async () => {

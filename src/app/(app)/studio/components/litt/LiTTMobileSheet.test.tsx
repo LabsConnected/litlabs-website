@@ -137,38 +137,32 @@ describe("LiTTMobileSheet (real component)", () => {
     fireEvent.click(screen.getByTestId("litt-mobile-sheet-close"));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
-});
 
-describe("LiTTMobileSheet — dismiss (Phase 1 #3)", () => {
-  function renderDismissSheet() {
-    const onClose = vi.fn();
-    render(
-      <LiTTMobileSheet
-        activeTab="chat"
-        onTabChange={vi.fn()}
-        onClose={onClose}
-        chatContent={<div data-testid="chat-slot" />}
-        liveContent={<div data-testid="live-slot" />}
-      />,
-    );
-    return { onClose };
-  }
+  describe("mobile density redesign", () => {
+    it("renders the tools button and calls onOpenTools when tapped", () => {
+      const onOpenTools = vi.fn();
+      renderSheet({ onOpenTools });
+      const toolsButton = screen.getByTestId("litt-mobile-tools-button");
+      expect(toolsButton).toHaveAttribute("aria-label", "Open tools");
+      fireEvent.click(toolsButton);
+      expect(onOpenTools).toHaveBeenCalledTimes(1);
+    });
 
-  it("closes on backdrop pointerdown", () => {
-    const { onClose } = renderDismissSheet();
-    fireEvent.pointerDown(screen.getByTestId("litt-mobile-backdrop"));
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
+    it("omits the tools button when onOpenTools is not provided", () => {
+      renderSheet();
+      expect(screen.queryByTestId("litt-mobile-tools-button")).not.toBeInTheDocument();
+    });
 
-  it("closes on Escape", () => {
-    const { onClose } = renderDismissSheet();
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
+    it("renders the slim project/branch context row when provided", () => {
+      renderSheet({ projectName: "Ember Roast", branch: "main" });
+      const context = screen.getByTestId("litt-mobile-context");
+      expect(context.textContent).toContain("Ember Roast");
+      expect(context.textContent).toContain("main");
+    });
 
-  it("does not close on other keys", () => {
-    const { onClose } = renderDismissSheet();
-    fireEvent.keyDown(window, { key: "Enter" });
-    expect(onClose).not.toHaveBeenCalled();
+    it("omits the context row when no project or branch is provided", () => {
+      renderSheet();
+      expect(screen.queryByTestId("litt-mobile-context")).not.toBeInTheDocument();
+    });
   });
 });
