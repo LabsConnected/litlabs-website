@@ -68,6 +68,7 @@ export default function CommandStudioHeader({
   onProjectSelectAction,
   onCreateProjectAction,
   onDeleteProjectAction,
+  onProjectRenamedAction,
   onDeployAction,
   onClearChatAction,
   onNewChatAction,
@@ -98,6 +99,7 @@ export default function CommandStudioHeader({
    * deletion. The parent clears the active project when it matches.
    */
   onDeleteProjectAction?: (projectId: string) => void;
+  onProjectRenamedAction?: (projectId: string, name: string) => void;
   /** Prefills the chat composer with a deploy request (real deploy runs through LiTT). */
   onDeployAction?: () => void;
   onClearChatAction?: () => void;
@@ -249,6 +251,7 @@ export default function CommandStudioHeader({
         onSelect={(projectId) => onProjectSelectAction?.(projectId)}
         onCreateProject={() => onCreateProjectAction?.()}
         onDeleteProject={(projectId) => onDeleteProjectAction?.(projectId)}
+        onProjectRenamed={(projectId, name) => onProjectRenamedAction?.(projectId, name)}
       />
 
       {/* Agent-status pill — truthful: working / approval needed / ambient runtime.

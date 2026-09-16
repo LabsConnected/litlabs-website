@@ -51,6 +51,7 @@ import { submitApprovalAndPoll, watchApprovalResolution, type ApprovalRunResult 
 import { StudioActivityPanel, StudioInspector } from "./StudioWorkspaceFrame";
 import type { PreviewSelection } from "./StudioPreviewPanel";
 import StudioProjectFiles from "./StudioProjectFiles";
+import ProjectNameDialog from "./ProjectNameDialog";
 import { MediaUtilityDock } from "@/components/media/MediaUtilityDock";
 import {
   mapLegacyToolToDestination,
@@ -1043,8 +1044,15 @@ function CommandStudioContent() {
   }, [watchPausedRunId, watchConversationId]);
 
   const [projectCreateError, setProjectCreateError] = useState<string | null>(null);
+  const [projectNameDialogOpen, setProjectNameDialogOpen] = useState(false);
 
-  const handleStartBlank = useCallback(async () => {
+  const openProjectNameDialog = useCallback(() => {
+    setProjectCreateError(null);
+    setProjectNameDialogOpen(true);
+  }, []);
+
+  const handleStartBlank = useCallback(async (name: string) => {
+    if (creatingProject) return;
     setCreatingProject(true);
     setProjectCreateError(null);
     try {
@@ -1058,7 +1066,7 @@ function CommandStudioContent() {
         },
         body: JSON.stringify({
           sourceType: "blank",
-          name: "Untitled Project",
+          name,
           templateId: "blank-static",
         }),
       });
@@ -1092,6 +1100,7 @@ function CommandStudioContent() {
       setDestination("studio");
       setStudioMode("work");
       setWorkSurface("conversation");
+      setProjectNameDialogOpen(false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Network error while creating project.";
       setProjectCreateError(msg);
@@ -1100,7 +1109,7 @@ function CommandStudioContent() {
     } finally {
       setCreatingProject(false);
     }
-  }, [searchParams, pathname, router, refreshCapabilities, userId, getToken, isMobileLitt]);
+  }, [creatingProject, searchParams, pathname, router, refreshCapabilities, userId, getToken, isMobileLitt]);
 
   const handlePrepareWorkspace = useCallback(async () => {
     if (!runtimeState.projectId) return;
@@ -1184,7 +1193,7 @@ function CommandStudioContent() {
   const handleFirstMissionAction = useCallback((action: FirstMissionActionId) => {
     switch (action) {
       case "start_blank_project":
-        void handleStartBlank();
+        openProjectNameDialog();
         break;
       case "prepare_workspace":
       case "retry_workspace":
@@ -1201,7 +1210,7 @@ function CommandStudioContent() {
         setComposerValue(FIRST_INSPECTION_PROMPT);
         break;
     }
-  }, [handleOpenTerminal, handlePrepareWorkspace, handleStartBlank, router, setExecutionMode]);
+  }, [handleOpenTerminal, handlePrepareWorkspace, openProjectNameDialog, router, setExecutionMode]);
 
   // Real rollback: call restore_checkpoint via the Studio API (git reset --hard <sha>).
   // Falls back to opening Terminal if no checkpoint or API call fails.
@@ -1649,8 +1658,13 @@ function CommandStudioContent() {
           onOpenDockTabAction={handleOpenDockTab}
           dockOpen={dockOpen}
           onProjectSelectAction={handleSelectProject}
-          onCreateProjectAction={() => { void handleStartBlank(); }}
+          onCreateProjectAction={openProjectNameDialog}
           onDeleteProjectAction={handleDeleteProject}
+          onProjectRenamedAction={(projectId, name) => {
+            if (capabilities.projectId !== projectId) return;
+            refreshCapabilities();
+            window.dispatchEvent(new CustomEvent("studio:project-renamed", { detail: { projectId, name } }));
+          }}
           onDeployAction={handleDeployRequest}
           onClearChatAction={conversation.clear}
           onNewChatAction={() => { void conversation.createConversation(); }}
@@ -2207,6 +2221,14 @@ function CommandStudioContent() {
             remove once mobile Studio is confirmed working end-to-end on device. */}
         {isMobileLitt && isMobileDiagEnabled(searchParams) && <MobileDiagOverlay />}
       </div>
+
+      <ProjectNameDialog
+        open={projectNameDialogOpen}
+        busy={creatingProject}
+        error={projectCreateError}
+        onCancel={() => { if (!creatingProject) setProjectNameDialogOpen(false); }}
+        onSubmit={(name) => { void handleStartBlank(name); }}
+      />
 
       {/* Canvas overlay — opens when a canvas action is executed from chat */}
       {canvasOpen && (
