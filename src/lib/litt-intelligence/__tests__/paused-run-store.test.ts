@@ -191,6 +191,51 @@ describe("paused-run-store — expiry truthfulness", () => {
     expect(latest?.status).toBe("expired");
   });
 
+  it("getLatestPausedRunForConversation marks a stale processing run as failed — and persists it", async () => {
+    // The detached resume was killed mid-flight (deploy/restart). Without
+    // this recovery the transcript reconciler sees "processing" forever
+    // and the dead approval card never converges.
+    const row = seedRow({
+      status: "approved",
+      resolved_at: new Date(Date.now() - 15 * 60_000).toISOString(),
+      run_status: "processing",
+      run_started_at: new Date(Date.now() - 15 * 60_000).toISOString(),
+    });
+
+    const latest = await getLatestPausedRunForConversation(CONV, USER);
+    expect(latest?.runStatus).toBe("failed");
+    expect(latest?.runError).toContain("process may have restarted");
+    expect(row.run_status).toBe("failed");
+    expect(row.run_completed_at).toBeTruthy();
+  });
+
+  it("getLatestPausedRunForConversation leaves a freshly-processing run alone", async () => {
+    const row = seedRow({
+      status: "approved",
+      resolved_at: new Date(Date.now() - 30_000).toISOString(),
+      run_status: "processing",
+      run_started_at: new Date(Date.now() - 30_000).toISOString(),
+    });
+
+    const latest = await getLatestPausedRunForConversation(CONV, USER);
+    expect(latest?.runStatus).toBe("processing");
+    expect(row.run_status).toBe("processing");
+  });
+
+  it("getLatestPausedRunForConversation marks an approved run that never started as failed", async () => {
+    // The process died between the atomic decision and markRunProcessing.
+    const row = seedRow({
+      status: "approved",
+      resolved_at: new Date(Date.now() - 15 * 60_000).toISOString(),
+      run_status: null,
+      run_started_at: null,
+    });
+
+    const latest = await getLatestPausedRunForConversation(CONV, USER);
+    expect(latest?.runStatus).toBe("failed");
+    expect(row.run_status).toBe("failed");
+  });
+
   it("resolvePausedRun refuses a decision on an expired gate", async () => {
     const row = seedRow({ expires_at: new Date(Date.now() - 1_000).toISOString() });
     const resolved = await resolvePausedRun(row.id as string, USER, "approved");

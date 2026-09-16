@@ -1309,6 +1309,36 @@ async function getHandler(req: NextRequest, routeCtx: RouteParams) {
             lastAssistant.status = "completed";
             lastAssistant.content = note;
           }
+        } else if (latestRun?.status === "approved" && latestRun.runStatus === "failed") {
+          // The resumed run died without a transcript writeback — the
+          // process was killed mid-flight and the stale-run watchdog
+          // marked it failed. Reconcile the dead approval card to a
+          // truthful terminal state instead of leaving it mounted.
+          const note = `${lastAssistant.content || "Approval was required."}\n\nThe approved run failed before it could finish${latestRun.runError ? ` — ${latestRun.runError}` : ""}. Send the request again to retry.`;
+          const persisted = await updateMessageStatus(lastAssistant.id, userId, "failed", note);
+          if (persisted !== false) {
+            lastAssistant.status = "failed";
+            lastAssistant.content = note;
+          }
+        } else if (latestRun?.status === "approved" && latestRun.runStatus === "completed") {
+          // The resumed run finished but its transcript writeback missed.
+          // Reconcile to the recorded outcome — a nested gate whose row
+          // was never persisted is a dead card and must surface as failed.
+          const result = latestRun.runResult;
+          const note = result?.pendingApproval
+            ? `${lastAssistant.content || "Approval was required."}\n\nThe run reached a follow-up approval that could not be persisted — send the request again to retry.`
+            : result?.finalText?.trim() ||
+              `${lastAssistant.content || "Approval was required."}\n\nThe run finished, but its final response was lost — check the workspace for changes.`;
+          const status = result?.pendingApproval
+            ? "failed"
+            : result?.cancelled
+              ? "cancelled"
+              : "completed";
+          const persisted = await updateMessageStatus(lastAssistant.id, userId, status, note);
+          if (persisted !== false) {
+            lastAssistant.status = status;
+            lastAssistant.content = note;
+          }
         }
         // approved/processing gates own their writeback — leave the
         // message alone while the resumed run is in flight.

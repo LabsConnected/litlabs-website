@@ -201,6 +201,41 @@ async function expireIfStale(record: PausedRunRecord): Promise<PausedRunRecord> 
   return { ...record, status: "expired", resolvedAt: now };
 }
 
+/**
+ * Stale-run recovery: an approved run whose detached execution was killed
+ * mid-flight (deploy/restart) stays "processing" forever and never writes
+ * back to the transcript. Any read past RUN_STALE_TIMEOUT_MS marks it
+ * failed so the GET poll endpoint and the transcript reconciler converge
+ * on the truth. Also covers the narrower window where the process died
+ * after the atomic decision but before markRunProcessing (approved with
+ * runStatus still null long after resolvedAt).
+ */
+async function recoverStaleRun(record: PausedRunRecord): Promise<PausedRunRecord> {
+  if (!supabaseAdmin || record.status !== "approved") return record;
+
+  let staleError: string | null = null;
+  if (record.runStatus === "processing" && record.runStartedAt) {
+    const startedAt = Date.parse(record.runStartedAt);
+    if (Number.isFinite(startedAt) && Date.now() - startedAt > RUN_STALE_TIMEOUT_MS) {
+      staleError = "Execution timed out (process may have restarted)";
+    }
+  } else if (record.runStatus === null && record.resolvedAt) {
+    const resolvedAt = Date.parse(record.resolvedAt);
+    if (Number.isFinite(resolvedAt) && Date.now() - resolvedAt > RUN_STALE_TIMEOUT_MS) {
+      staleError = "Execution never started (process may have restarted)";
+    }
+  }
+  if (!staleError) return record;
+
+  await markRunFailed(record.id, record.userId, staleError);
+  return {
+    ...record,
+    runStatus: "failed",
+    runError: staleError,
+    runCompletedAt: new Date().toISOString(),
+  };
+}
+
 export async function getPausedRun(
   pausedRunId: string,
   userId: string,
@@ -217,21 +252,7 @@ export async function getPausedRun(
   if (error || !data) return null;
 
   const record = await expireIfStale(rowToRecord(data as PausedRunRow));
-
-  // Stale-run recovery: if the run has been "processing" for too long,
-  // mark it as failed. This handles process restarts where the detached
-  // execution was killed mid-flight.
-  if (record.runStatus === "processing" && record.runStartedAt) {
-    const startedAt = new Date(record.runStartedAt).getTime();
-    if (Date.now() - startedAt > RUN_STALE_TIMEOUT_MS) {
-      await markRunFailed(pausedRunId, userId, "Execution timed out (process may have restarted)");
-      record.runStatus = "failed";
-      record.runError = "Execution timed out (process may have restarted)";
-      record.runCompletedAt = new Date().toISOString();
-    }
-  }
-
-  return record;
+  return recoverStaleRun(record);
 }
 
 /**
@@ -284,7 +305,7 @@ export async function getLatestPausedRunForConversation(
     .maybeSingle();
 
   if (error || !data) return null;
-  return expireIfStale(rowToRecord(data as PausedRunRow));
+  return recoverStaleRun(await expireIfStale(rowToRecord(data as PausedRunRow)));
 }
 
 export async function resolvePausedRun(
