@@ -268,9 +268,10 @@ describe("Dashboard v3 — MediaDock", () => {
     expect(src).toContain("AlertCircle");
   });
 
-  it("has empty state when nothing playing", () => {
+  it("hides the dock when nothing is playing (no persistent empty bar)", () => {
     expect(src).toContain('source === "none"');
-    expect(src).toContain("Nothing playing");
+    expect(src).toContain("return null");
+    expect(src).not.toContain("Nothing playing — Choose media");
   });
 
   it("has mobile mini player (md:hidden)", () => {

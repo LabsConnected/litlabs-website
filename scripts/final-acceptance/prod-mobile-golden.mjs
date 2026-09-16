@@ -25,6 +25,10 @@
  *                              fall back when running under GitHub Actions)
  *   LITT_ACCEPTANCE_PROMPT    (default a small static landing page build)
  *   LITT_ACCEPTANCE_DEPLOY    "1" to request deploy in the prompt (default on)
+ *   LITT_GOLDEN_PROJECT_ID    the permanent "Golden Acceptance — Ember Roast"
+ *                              project. REQUIRED in CI — every run mutates
+ *                              this project; local runs without it create the
+ *                              project once under the canonical name.
  */
 
 import { chromium, devices } from "@playwright/test";
@@ -44,13 +48,32 @@ const USER_ID = resolveAcceptanceUserId({
   envUserId: process.env.LITT_ACCEPTANCE_USER_ID,
 });
 const DEPLOY_REQUESTED = (process.env.LITT_ACCEPTANCE_DEPLOY ?? "1") !== "0";
-const PROMPT =
-  process.env.LITT_ACCEPTANCE_PROMPT ||
-  (DEPLOY_REQUESTED
-    ? "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section, then publish it live to a public URL."
-    : "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section.");
 
 const STAMP = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+
+// The permanent golden project. Every CI run mutates THIS project — no more
+// timestamped throwaway copies. Registered as the LITT_GOLDEN_PROJECT_ID
+// repository secret; in CI an unset value fails the run clearly (same rule
+// as LITT_ACCEPTANCE_USER_ID) rather than silently creating a new project.
+// Local/manual runs may omit it — the script then creates the project under
+// the canonical name so it can be adopted as the permanent one.
+const GOLDEN_PROJECT_ID = process.env.LITT_GOLDEN_PROJECT_ID?.trim() || null;
+const IS_CI = process.env.GITHUB_ACTIONS === "true";
+const GOLDEN_PROJECT_NAME = "Golden Acceptance — Ember Roast";
+
+// The exact literal the run asks the model to write. The stamp makes every
+// run's mutation verifiably fresh on the permanent project — a no-op answer
+// ("it's already there") can never produce this text.
+const GOLDEN_MARKER = `Golden build ${STAMP}`;
+const PROMPT =
+  process.env.LITT_ACCEPTANCE_PROMPT ||
+  (GOLDEN_PROJECT_ID
+    ? DEPLOY_REQUESTED
+      ? `In the Ember Roast landing site in index.html, update the footer so it contains exactly this text: ${GOLDEN_MARKER}. Keep everything else unchanged, then publish it live to a public URL.`
+      : `In the Ember Roast landing site in index.html, update the footer so it contains exactly this text: ${GOLDEN_MARKER}. Keep everything else unchanged.`
+    : DEPLOY_REQUESTED
+      ? "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section, then publish it live to a public URL."
+      : "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section.");
 const ARTIFACT_DIR = path.join("artifacts", "final-acceptance", STAMP);
 const SHOT_DIR = path.join(ARTIFACT_DIR, "screenshots");
 mkdirSync(SHOT_DIR, { recursive: true });
@@ -73,6 +96,8 @@ function loadSecret() {
 const verdict = {
   base: BASE,
   userId: USER_ID,
+  goldenProjectId: GOLDEN_PROJECT_ID,
+  prompt: PROMPT,
   startedAt: new Date().toISOString(),
   steps: {},
   sseEvents: [],
@@ -237,16 +262,33 @@ async function main() {
     step("sign_in", authProbe.status() === 200, `GET /api/studio-projects → ${authProbe.status()}`);
     await shot(page, "01-signed-in");
 
-    // ── Step 1.5: create a fresh blank project + provision workspace ──
-    // Same endpoints the Studio UI calls ("Start Blank Project" → POST
-    // /api/studio-projects; "Prepare" → POST /workspace/prepare).
-    const projResp = await page.request.post(`${BASE}/api/studio-projects`, {
-      data: { sourceType: "blank", name: `Ember Roast V1 Acceptance ${STAMP.slice(11)}`, templateId: "blank-static" },
-      timeout: 60_000,
-    });
-    const projBody = await projResp.json().catch(() => null);
-    const projectId = projBody?.project?.id ?? null;
-    step("project_created", projResp.status() === 201 && !!projectId, `HTTP ${projResp.status()} id=${projectId}`);
+    // ── Step 1.5: resolve the permanent golden project + provision workspace ──
+    // When LITT_GOLDEN_PROJECT_ID is set the run reuses that exact project —
+    // persistence across runs is part of what the acceptance proves. Without
+    // it (local/manual runs only) the script creates the project once under
+    // the canonical name; CI refuses to run without the ID.
+    let projectId = null;
+    if (GOLDEN_PROJECT_ID) {
+      const getResp = await page.request.get(`${BASE}/api/studio-projects/${GOLDEN_PROJECT_ID}`, { timeout: 60_000 });
+      const getBody = await getResp.json().catch(() => null);
+      const found = getResp.status() === 200 && (getBody?.project?.id ?? getBody?.id) === GOLDEN_PROJECT_ID;
+      projectId = found ? GOLDEN_PROJECT_ID : null;
+      verdict.projectId = projectId;
+      verdict.workspaceId = getBody?.project?.workspaceId ?? getBody?.workspaceId ?? null;
+      step("golden_project_resolved", found, `GET /api/studio-projects/${GOLDEN_PROJECT_ID} → ${getResp.status()}`);
+    } else if (IS_CI) {
+      step("golden_project_resolved", false, "LITT_GOLDEN_PROJECT_ID is not configured — CI runs must target the permanent golden project");
+    } else {
+      const projResp = await page.request.post(`${BASE}/api/studio-projects`, {
+        data: { sourceType: "blank", name: GOLDEN_PROJECT_NAME, templateId: "blank-static" },
+        timeout: 60_000,
+      });
+      const projBody = await projResp.json().catch(() => null);
+      projectId = projBody?.project?.id ?? null;
+      step("golden_project_resolved", projResp.status() === 201 && !!projectId,
+        `created "${GOLDEN_PROJECT_NAME}" HTTP ${projResp.status()} id=${projectId} — set LITT_GOLDEN_PROJECT_ID to reuse it`);
+      if (projectId) verdict.notes.push(`adopt as permanent: LITT_GOLDEN_PROJECT_ID=${projectId}`);
+    }
 
     let workspaceReady = false;
     if (projectId) {
@@ -317,6 +359,8 @@ async function main() {
     while (!messagesApiSeen && Date.now() < deadline) await page.waitForTimeout(500);
     if (!messagesApiSeen) throw new Error("canonical messages API was never called");
     step("canonical_api_called", messagesApiSeen.status === 200, `POST ${messagesApiSeen.url.replace(BASE, "")} → ${messagesApiSeen.status}`);
+    verdict.projectId = projectId;
+    verdict.conversationId = messagesApiSeen.url.match(/conversations\/([^/]+)/)?.[1] ?? null;
 
     // Poll until the SSE body is fully captured (response completes)
     // OR until the injected interceptor captures a "done" event.
@@ -361,6 +405,18 @@ async function main() {
     const doneEvt = events.find((e) => e.type === "done");
     const finalText = events.filter((e) => e.type === "text").map((e) => e.text).join("");
     step("assistant_completed", !!doneEvt || finalText.length > 0, finalText.slice(0, 200));
+
+    // Raw model tool-call protocol must never reach the user-visible
+    // transcript — a run that "completed" on <tool_call> markup is a
+    // false success. Scan every streamed text field, not just the tail.
+    const TRANSCRIPT_MARKUP = /<\/?(?:tool_call|dots_function_call|function_call|function_calls)\b|<invoke\b|<arg_(?:key|value)\b|```(?:tool_call|function_call)\b/i;
+    const transcriptText = events
+      .filter((e) => e.type === "text" || e.type === "done" || e.type === "error")
+      .map((e) => String(e.text ?? e.summary ?? ""))
+      .join("\n");
+    const markupHit = transcriptText.match(TRANSCRIPT_MARKUP)?.[0] ?? null;
+    step("no_tool_markup_in_transcript", markupHit === null,
+      markupHit ? `leaked protocol token ${JSON.stringify(markupHit)}` : "no raw markup in streamed text");
     await shot(page, "06-after-build");
 
     // ── Step 6: live preview verification ──
@@ -527,6 +583,91 @@ async function main() {
     } else {
       verdict.notes.push("Deploy not requested (LITT_ACCEPTANCE_DEPLOY=0).");
     }
+
+    // ── Step 7.5: exact-content + placeholder verification via file read-back ──
+    // The golden prompt requests a stamped literal ("Golden build <stamp>");
+    // the fresh-create path requests the Ember Roast brand. Either way the
+    // file on disk must contain the exact requested text — this is the
+    // [PERSON_NAME] regression check (a completion claim with the wrong
+    // content is a false success).
+    const EXPECTED_LITERAL = GOLDEN_PROJECT_ID ? GOLDEN_MARKER : "Ember Roast";
+    const readWorkspaceFile = async (filePath) => {
+      if (!projectId) return null;
+      const resp = await page.request
+        .get(`${BASE}/api/studio-projects/${projectId}/files/raw?path=${encodeURIComponent(filePath)}`, { timeout: 60_000 })
+        .catch(() => null);
+      if (!resp?.ok()) return null;
+      // files/raw streams .html as text/html; other text files come back
+      // as { content } JSON.
+      const ct = resp.headers()["content-type"] ?? "";
+      if (ct.includes("application/json")) {
+        const body = await resp.json().catch(() => null);
+        return typeof body?.content === "string" ? body.content : null;
+      }
+      return resp.text().catch(() => null);
+    };
+    let indexHtml = await readWorkspaceFile("index.html");
+    verdict.expectedLiteral = EXPECTED_LITERAL;
+    if (indexHtml !== null) {
+      writeFileSync(path.join(ARTIFACT_DIR, "index.html"), indexHtml);
+    }
+    step("file_content_exact",
+      indexHtml !== null && indexHtml.includes(EXPECTED_LITERAL),
+      indexHtml === null
+        ? "files/raw?path=index.html returned no readable content"
+        : indexHtml.includes(EXPECTED_LITERAL)
+          ? `index.html contains ${JSON.stringify(EXPECTED_LITERAL)}`
+          : `index.html (${indexHtml.length}b) missing ${JSON.stringify(EXPECTED_LITERAL)}`);
+
+    // Unresolved redaction/template tokens must never reach disk. Same token
+    // families the mutation boundary rejects (patch-validation.ts).
+    const PLACEHOLDER = /\{\{\s*[^}{]+\s*\}\}|\[[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\]|\[(?:EMAIL|PHONE|ADDRESS)\]/;
+    const placeholderHit = indexHtml?.match(PLACEHOLDER)?.[0] ?? null;
+    step("no_unresolved_placeholders", indexHtml !== null && placeholderHit === null,
+      indexHtml === null ? "no file content to scan" : placeholderHit ? `found ${JSON.stringify(placeholderHit)}` : "clean");
+
+    // ── Step 7.6: hard refresh preserves project/workspace/conversation/file ──
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 90_000 }).catch(() => null);
+    await page.waitForTimeout(6000);
+    const refreshUrl = page.url();
+    const projectStillSelected = refreshUrl.includes(`/studio`) && refreshUrl.includes(projectId ?? "\0");
+    const shellAfterRefresh = await page.locator(".studio-shell").isVisible().catch(() => false);
+    // File read-back after reload — proves the workspace (not just the UI)
+    // still holds the mutation.
+    const refreshHtml = await readWorkspaceFile("index.html");
+    const filePersisted = refreshHtml !== null && refreshHtml.includes(EXPECTED_LITERAL);
+    step("hard_refresh_persists",
+      projectStillSelected && shellAfterRefresh && filePersisted,
+      `url=${refreshUrl.replace(BASE, "")} shell=${shellAfterRefresh} filePersisted=${filePersisted}`);
+    await shot(page, "07-after-refresh");
+
+    // ── Step 7.7: browser back/forward keeps Builder on its canonical surface ──
+    await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded", timeout: 60_000 }).catch(() => {});
+    await page.waitForTimeout(2000);
+    await page.goBack({ waitUntil: "domcontentloaded", timeout: 60_000 }).catch(() => {});
+    await page.waitForTimeout(3000);
+    const backUrl = page.url();
+    step("back_forward_stable",
+      backUrl.includes("/studio") && backUrl.includes(projectId ?? "\0"),
+      `goBack → ${backUrl.replace(BASE, "")}`);
+
+    // ── Step 7.7b: preview still serves after the refresh ──
+    // API-level probe — the iframe itself may not have re-materialized yet.
+    const prevProbe = projectId
+      ? await page.request.get(`${BASE}/api/studio-projects/${projectId}/preview`, { timeout: 60_000 }).catch(() => null)
+      : null;
+    const prevBody = prevProbe ? await prevProbe.json().catch(() => null) : null;
+    step("preview_recovers_after_refresh",
+      !!prevProbe && prevProbe.status() === 200 &&
+        !!(prevBody?.previewUrl || prevBody?.runtimeStatus === "ready" || prevBody?.runtimeStatus === "running" || prevBody?.runtimeStatus === "starting"),
+      `GET /preview → ${prevProbe?.status() ?? "unreachable"} ${JSON.stringify(prevBody)?.slice(0, 160)}`);
+
+    // ── Step 7.8: no stale approval card left after run resolution ──
+    // A resolved run must not leave an actionable Approve/Deny card behind.
+    const staleApprove = await page.getByTestId("approval-approve").first().isVisible().catch(() => false);
+    const staleDeny = await page.getByTestId("approval-deny").first().isVisible().catch(() => false);
+    step("no_stale_approval", !staleApprove && !staleDeny,
+      staleApprove || staleDeny ? `actionable approval card still visible (approve=${staleApprove} deny=${staleDeny})` : "none");
 
     // ── Step 8: post-build mobile usability re-check ──
     // An approval resolved out-of-band (this script approves via the API, not

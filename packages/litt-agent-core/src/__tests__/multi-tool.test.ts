@@ -145,6 +145,57 @@ describe("parseToolCalls", () => {
     assert.equal(multi.length, 1);
     assert.equal(multi[0].toolId, single!.toolId);
   });
+
+  it("extracts an antml-style <tool_call> envelope (the production leak shape)", () => {
+    const content =
+      "Let me inspect the file first.\n" +
+      "<tool_call>terminal\n<arg_key>command</arg_key>\n<arg_value>cat -n index.html</arg_value>" +
+      "<arg_key>project_id</arg_key>\n<arg_value>abc-123</arg_value>\n</tool_call>";
+    const calls = parseToolCalls(content);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].toolId, "terminal");
+    assert.deepEqual(calls[0].inputs, { command: "cat -n index.html", project_id: "abc-123" });
+  });
+
+  it("extracts <tool_call> envelopes carrying JSON payloads", () => {
+    const calls = parseToolCalls(
+      'Done.\n<tool_call>{"name":"project.read_file","arguments":{"path":"a.txt"}}</tool_call>',
+    );
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].toolId, "project.read_file");
+    assert.deepEqual(calls[0].inputs, { path: "a.txt" });
+  });
+
+  it("extracts <invoke name>…<parameter> envelopes", () => {
+    const calls = parseToolCalls(
+      '<invoke name="project.read_file"><parameter name="path">a.txt</parameter></invoke>',
+    );
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].toolId, "project.read_file");
+    assert.deepEqual(calls[0].inputs, { path: "a.txt" });
+  });
+
+  it("extracts <dots_function_call> envelopes", () => {
+    const calls = parseToolCalls(
+      '<dots_function_call>project.status<arg_key>verbose</arg_key><arg_value>true</arg_value></dots_function_call>',
+    );
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].toolId, "project.status");
+    assert.deepEqual(calls[0].inputs, { verbose: "true" });
+  });
+
+  it("deduplicates an XML envelope against its fenced twin", () => {
+    const content =
+      '<tool_call>{"name":"project.status","arguments":{}}</tool_call>\n' +
+      '```tool_call\n{ "tool": "project.status", "inputs": {} }\n```';
+    const calls = parseToolCalls(content);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].toolId, "project.status");
+  });
+
+  it("does not extract an envelope whose payload is not a call", () => {
+    assert.deepEqual(parseToolCalls("<tool_call>example</tool_call>"), []);
+  });
 });
 
 // ─── Parallel execution tests ──────────────────────────────────────

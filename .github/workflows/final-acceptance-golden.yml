@@ -18,6 +18,11 @@ name: Final Acceptance — Production Mobile Golden
 # step clearly instead of silently authenticating as a stale user.
 on:
   workflow_dispatch:
+    inputs:
+      provision_only:
+        description: "One-time setup: create the permanent golden project and print its ID (register as LITT_GOLDEN_PROJECT_ID secret)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -47,11 +52,25 @@ jobs:
       - name: Install Playwright chromium
         run: pnpm exec playwright install --with-deps chromium
 
+      - name: Provision permanent golden project
+        if: inputs.provision_only
+        run: node scripts/final-acceptance/provision-golden-project.mjs
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          LITT_ACCEPTANCE_USER_ID: ${{ secrets.LITT_ACCEPTANCE_USER_ID }}
+
       - name: Run production golden acceptance
+        if: ${{ !inputs.provision_only }}
         run: node scripts/final-acceptance/prod-mobile-golden.mjs
         env:
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           LITT_ACCEPTANCE_USER_ID: ${{ secrets.LITT_ACCEPTANCE_USER_ID }}
+          # The permanent golden project — every CI run mutates this exact
+          # project ("Golden Acceptance — Ember Roast"), so persistence,
+          # no cross-project writes, and truthful diff behavior are proven
+          # on a real durable surface instead of a throwaway project. An
+          # unset secret fails the run clearly (same rule as the user ID).
+          LITT_GOLDEN_PROJECT_ID: ${{ secrets.LITT_GOLDEN_PROJECT_ID }}
           # project.deploy is the production deploy target for user projects
           # (publishes a verified snapshot to /sites/[deploymentId]). The
           # golden requests "deploy it live", proves the approval gate

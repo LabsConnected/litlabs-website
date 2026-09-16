@@ -55,7 +55,7 @@ export default function CookieConsent() {
 
   return (
     <div
-      className="fixed top-4 left-4 right-4 md:top-auto md:bottom-4 md:left-auto md:right-6 md:w-[420px] z-[10000] border-2 p-4 transition-all duration-300"
+      className="fixed bottom-4 left-4 right-4 md:left-auto md:right-6 md:w-[420px] z-[10000] border-2 p-4 transition-all duration-300"
       style={{
         borderColor: T.accentColor,
         backgroundColor: T.boxBg,
