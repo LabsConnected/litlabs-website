@@ -121,6 +121,31 @@ async function shot(page, name) {
   verdict.screenshots.push(p);
 }
 
+// The cookie-consent dialog can re-render after full navigations
+// (goto/goBack) and overlays the mobile trigger + composer. Dismiss it
+// whenever it appears so assertions hit the real surface underneath.
+async function dismissCookieConsent(page) {
+  const btn = page
+    .getByRole("button", { name: /accept all|essential only/i })
+    .first();
+  if (await btn.isVisible().catch(() => false)) {
+    await btn.click().catch(() => {});
+    await page.waitForTimeout(500);
+  }
+}
+
+// Re-open the LiTT mobile sheet — it is a transient surface that does
+// not (and should not) persist across hard refreshes or history nav.
+async function openMobileSheet(page) {
+  const sheet = page.getByTestId("litt-mobile-sheet");
+  if (await sheet.isVisible().catch(() => false)) return;
+  const trigger = page
+    .getByRole("button", { name: "Ask LiTT to build" })
+    .first();
+  await trigger.click({ timeout: 15_000 });
+  await sheet.waitFor({ state: "visible", timeout: 15_000 });
+}
+
 // ─── Clerk sign-in token ───────────────────────────────────────
 async function createSignInUrl(secretKey) {
   const resp = await fetch("https://api.clerk.com/v1/sign_in_tokens", {
@@ -318,8 +343,8 @@ async function main() {
     await shot(page, "02-studio-mobile");
 
     // ── Step 3: open LiTT mobile sheet, composer usable ──
-    await page.getByRole("button", { name: "Ask LiTT to build" }).click({ timeout: 15_000 });
-    await page.getByTestId("litt-mobile-sheet").waitFor({ state: "visible", timeout: 15_000 });
+    await dismissCookieConsent(page);
+    await openMobileSheet(page);
     const composer = page.getByTestId("studio-command-input");
     await composer.waitFor({ state: "visible", timeout: 15_000 });
     step("mobile_sheet_open", true);
@@ -676,17 +701,28 @@ async function main() {
     // composer becomes usable within a bounded settle window — still fails if
     // the surface never returns to Chat — rather than requiring the flip to
     // land before this script's own status poll.
+    //
+    // After the refresh/goBack the transient LiTT sheet is closed (correct),
+    // and the cookie-consent dialog may have re-rendered over the trigger —
+    // both observed in the 2026-09-16 run. Dismiss + re-open, then assert.
     await page.setViewportSize(KEYBOARD_VIEWPORT);
+    await dismissCookieConsent(page);
     const commandInput = page.getByTestId("studio-command-input");
     let stillUsable = false;
+    let sheetUp = false;
     const usableDeadline = Date.now() + 15_000;
     while (Date.now() < usableDeadline) {
-      await commandInput.focus().catch(() => {});
+      sheetUp = await page.getByTestId("litt-mobile-sheet").isVisible().catch(() => false);
+      if (!sheetUp) {
+        await openMobileSheet(page).catch(() => {});
+      }
       stillUsable = await commandInput.isVisible().catch(() => false);
-      if (stillUsable) break;
+      if (stillUsable && sheetUp) break;
       await page.waitForTimeout(500);
     }
-    const sheetUp = await page.getByTestId("litt-mobile-sheet").isVisible().catch(() => false);
+    if (stillUsable) {
+      await commandInput.focus().catch(() => {});
+    }
     step("post_build_keyboard_usable", stillUsable && sheetUp, `input=${stillUsable} sheet=${sheetUp}`);
     await shot(page, "08-post-build-keyboard");
 
