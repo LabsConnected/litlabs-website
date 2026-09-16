@@ -1,4 +1,4 @@
-// Post Like / Unlike API — DB-backed only. Errors return 500 (never success-on-failure).
+// Post Repost / Unrepost — DB-backed only. Errors return 500.
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSupabase } from "@/lib/supabase-admin";
 import { withRateLimit } from "@/lib/rate-limiter";
@@ -15,28 +15,27 @@ async function postHandler(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "Post not found" }, { status: 404 });
   }
 
-  const { error } = await sb.from("post_likes").insert({ post_id: postId, user_id: dbUser.id });
+  const { error } = await sb.from("post_reposts").insert({ post_id: postId, user_id: dbUser.id });
   if (error) {
     if (error.code === "23505") {
-      return NextResponse.json({ error: "Already liked" }, { status: 409 });
+      return NextResponse.json({ error: "Already reposted" }, { status: 409 });
     }
-    return NextResponse.json({ error: "Failed to like post" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to repost" }, { status: 500 });
   }
-  await sb.rpc("increment_post_likes", { post_id: postId });
+  await sb.rpc("increment_post_reposts", { post_id: postId });
 
-  // Notify post owner (skip if liking own post)
   if (post.user_id !== dbUser.id) {
     await sb.from("notifications").insert({
       recipient_id: post.user_id,
       actor_id: dbUser.id,
-      type: "like",
+      type: "repost",
       entity_type: "post",
       entity_id: postId,
-      content: "liked your post",
+      content: "reposted your post",
     });
   }
 
-  return NextResponse.json({ liked: true });
+  return NextResponse.json({ reposted: true }, { status: 201 });
 }
 
 async function deleteHandler(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -46,21 +45,21 @@ async function deleteHandler(req: NextRequest, { params }: { params: Promise<{ i
 
   const sb = getAdminSupabase();
   const { data: existing } = await sb
-    .from("post_likes")
+    .from("post_reposts")
     .select("id")
     .match({ post_id: postId, user_id: dbUser.id })
     .maybeSingle();
   if (!existing) {
-    return NextResponse.json({ liked: false });
+    return NextResponse.json({ reposted: false });
   }
 
-  const { error } = await sb.from("post_likes").delete().match({ post_id: postId, user_id: dbUser.id });
+  const { error } = await sb.from("post_reposts").delete().match({ post_id: postId, user_id: dbUser.id });
   if (error) {
-    return NextResponse.json({ error: "Failed to unlike post" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to remove repost" }, { status: 500 });
   }
-  await sb.rpc("decrement_post_likes", { post_id: postId });
-  return NextResponse.json({ liked: false });
+  await sb.rpc("decrement_post_reposts", { post_id: postId });
+  return NextResponse.json({ reposted: false });
 }
 
-export const POST = withRateLimit(postHandler, 50, 60);
-export const DELETE = withRateLimit(deleteHandler, 50, 60);
+export const POST = withRateLimit(postHandler, 30, 60);
+export const DELETE = withRateLimit(deleteHandler, 30, 60);
