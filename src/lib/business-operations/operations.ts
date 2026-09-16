@@ -395,7 +395,15 @@ export async function confirmBookingPayment(
 
 export async function createLead(
   ownerId: string,
-  input: { name: string; email?: string; phone?: string; source?: string; notes?: string },
+  input: {
+    name: string;
+    email?: string | null;
+    phone?: string | null;
+    source?: string;
+    notes?: string | null;
+    /** Server-set provenance: deployment id, form name, page, raw fields. */
+    metadata?: Record<string, unknown>;
+  },
 ): Promise<BusinessResult<BusinessLead>> {
   if (!input.name?.trim()) return fail(400, "name is required");
   const { data, error } = await supabaseAdmin
@@ -407,6 +415,7 @@ export async function createLead(
       phone: input.phone ?? null,
       source: input.source ?? null,
       notes: input.notes ?? null,
+      metadata: input.metadata ?? {},
     })
     .select()
     .single();
@@ -429,6 +438,35 @@ export async function updateLead(
   if (error) return fail(500, error.message);
   if (!data) return fail(404, "Lead not found");
   return ok(data as BusinessLead);
+}
+
+/**
+ * Owner-scoped lead inbox query.
+ *
+ * This is the read side of the platform form backend: submissions that
+ * arrive via POST /api/forms/submit land here, attributed to the site
+ * owner through the deployment record — never through a client claim.
+ */
+export async function listLeads(
+  ownerId: string,
+  opts: {
+    status?: BusinessLead["status"];
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<BusinessResult<BusinessLead[]>> {
+  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+  const offset = Math.max(opts.offset ?? 0, 0);
+  let query = supabaseAdmin
+    .from("business_leads")
+    .select("*")
+    .eq("owner_id", ownerId)
+    .order("created_at", { ascending: false })
+    .range(offset, offset + limit - 1);
+  if (opts.status) query = query.eq("status", opts.status);
+  const { data, error } = await query;
+  if (error) return fail(500, error.message);
+  return ok((data ?? []) as BusinessLead[]);
 }
 
 // ─── Escalations ────────────────────────────────────────────────────
