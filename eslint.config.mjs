@@ -18,6 +18,7 @@ const eslintConfig = defineConfig([
     // Dependencies and build output
     "node_modules/**",
     ".next/**",
+    "**/.next/**",
     ".vercel/**",
     "supabase/.temp/**",
     "out/**",
@@ -35,6 +36,9 @@ const eslintConfig = defineConfig([
     "chrome/**",
     "terminal-server/**",
     "**/terminal-server/**",
+    // Historical acceptance worktrees are nested repositories/copies and
+    // must not be included in the root project's lint traversal.
+    "2026-09-15/**",
     "Zoo-Code/**",
     // Generated / copied
     "public/**",

@@ -8,7 +8,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { checkPreviewToken } from "../preview-auth";
+import {
+  checkPreviewToken,
+  previewSessionCookieName,
+  previewSessionSetCookie,
+  readPreviewSessionCookie,
+} from "../preview-auth";
 
 describe("checkPreviewToken", () => {
   let origEnv: NodeJS.ProcessEnv;
@@ -62,5 +67,14 @@ describe("checkPreviewToken", () => {
   it("accepts the correct token", () => {
     process.env.PREVIEW_ACCESS_TOKEN = "correct-token";
     expect(checkPreviewToken("correct-token")).toEqual({ ok: true });
+  });
+
+  it("round-trips a workspace-scoped session cookie", () => {
+    const cookie = previewSessionSetCookie("ws-1", "correct-token");
+    expect(cookie).toContain(`${previewSessionCookieName("ws-1")}=`);
+    expect(cookie).toContain("HttpOnly");
+    expect(cookie).toContain("Path=/preview/ws-1");
+    expect(readPreviewSessionCookie(cookie, "ws-1")).toBe("correct-token");
+    expect(readPreviewSessionCookie(cookie, "ws-2")).toBe("");
   });
 });

@@ -44,7 +44,11 @@ import {
 } from "./workspace/WorkspaceManager";
 import { resolveWorkspacePath as resolveWorkspacePathSecure } from "./workspace/WorkspaceSecurity";
 import { deleteResolvedPath } from "./workspace/FileService";
-import { checkPreviewToken } from "./preview-auth";
+import {
+  checkPreviewToken,
+  previewSessionSetCookie,
+  readPreviewSessionCookie,
+} from "./preview-auth";
 import { evaluateWorkspaceRoot } from "./workspace/durability";
 import {
   startPreview,
@@ -61,6 +65,7 @@ import {
   injectInspector as injectInspectorScript,
   INSPECTOR_DROPPED_HEADERS,
 } from "./preview/inspector";
+import { previewPathPrefix, previewTargetPath, rewritePreviewDocument } from "./preview/proxy-path";
 import { registerWorkspaceRoutes } from "./workspace-routes";
 import { dispatchCommand } from "./command-bridge";
 import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manager";
@@ -1171,11 +1176,19 @@ app.use("/preview/:workspaceId", async (req: AuthenticatedRequest, res: Response
 
   // Verify preview token — fail CLOSED when the token is not configured.
   // (checkPreviewToken denies every request if PREVIEW_ACCESS_TOKEN is unset.)
-  const previewToken = String(req.query.token || req.headers["x-preview-token"] || "");
+  const queryToken = String(req.query.token || req.headers["x-preview-token"] || "");
+  const previewToken = queryToken || readPreviewSessionCookie(req.headers.cookie, workspaceId);
   const previewAuth = checkPreviewToken(previewToken);
   if (!previewAuth.ok) {
     res.status(previewAuth.status).json({ error: previewAuth.error, errorCode: previewAuth.errorCode });
     return;
+  }
+
+  // Bootstrap a workspace-scoped, HttpOnly session so browser subresources
+  // do not need the access token in every URL. The cookie name is derived from
+  // this workspace, so tabs cannot select another workspace's preview.
+  if (queryToken) {
+    res.setHeader("Set-Cookie", previewSessionSetCookie(workspaceId, queryToken));
   }
 
   const status = getPreviewStatus(workspaceId);
@@ -1191,14 +1204,19 @@ app.use("/preview/:workspaceId", async (req: AuthenticatedRequest, res: Response
   }
 
   // Proxy the request to localhost:<port>
-  const targetUrl = `http://127.0.0.1:${status.port}${req.url.replace(/^\/preview\/[^/]+/, "")}`;
+  const targetPath = previewTargetPath(req.originalUrl || req.url, workspaceId);
+  const targetUrl = `http://127.0.0.1:${status.port}${targetPath}`;
   try {
+    const forwardedHeaders: Record<string, string> = {};
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (!value || ["host", "cookie", "referer", "x-preview-token", "accept-encoding"].includes(key.toLowerCase())) continue;
+      forwardedHeaders[key] = Array.isArray(value) ? value.join(", ") : value;
+    }
+    forwardedHeaders.accept = typeof req.headers.accept === "string" ? req.headers.accept : "*/*";
+    forwardedHeaders["accept-encoding"] = "identity";
     const proxyResp = await fetch(targetUrl, {
       method: req.method,
-      headers: {
-        ...req.headers as Record<string, string>,
-        host: `127.0.0.1:${status.port}`,
-      },
+      headers: forwardedHeaders,
       body: ["GET", "HEAD"].includes(req.method) ? undefined : (req as any),
       redirect: "manual",
     });
@@ -1207,6 +1225,8 @@ app.use("/preview/:workspaceId", async (req: AuthenticatedRequest, res: Response
     // Studio iframe can offer element selection across origins.
     const contentType = proxyResp.headers.get("content-type") ?? "";
     const injectInspector = shouldInjectInspector(proxyResp.status, contentType);
+    const rewriteBody = injectInspector || proxyResp.status >= 200 && proxyResp.status < 300 &&
+      (contentType.toLowerCase().includes("text/html") || contentType.toLowerCase().includes("text/css"));
 
     // Forward status, headers, and body
     res.status(proxyResp.status);
@@ -1220,8 +1240,27 @@ app.use("/preview/:workspaceId", async (req: AuthenticatedRequest, res: Response
         return;
       }
 
+      // Keep same-preview redirects inside the workspace proxy. External
+      // redirects are preserved, but a local dev-server Location must not
+      // send the browser to 127.0.0.1 or to the terminal server root.
+      if (header === "location") {
+        try {
+          const location = new URL(value, targetUrl);
+          const targetOrigin = new URL(targetUrl).origin;
+          if (location.origin === targetOrigin) {
+            const prefix = previewPathPrefix(workspaceId);
+            const path = location.pathname === "/" ? "/" : location.pathname;
+            location.pathname = `${prefix}${path}`;
+            location.searchParams.delete("token");
+            value = `${location.pathname}${location.search}${location.hash}`;
+          }
+        } catch {
+          // Preserve malformed upstream locations rather than inventing one.
+        }
+      }
+
       // Rewritten bodies have a new length and are no longer encoded.
-      if (injectInspector && INSPECTOR_DROPPED_HEADERS.has(header)) {
+      if (rewriteBody && INSPECTOR_DROPPED_HEADERS.has(header)) {
         return;
       }
 
@@ -1229,11 +1268,15 @@ app.use("/preview/:workspaceId", async (req: AuthenticatedRequest, res: Response
     });
 
     const body = await proxyResp.arrayBuffer();
+    let output = Buffer.from(body).toString("utf8");
+    if (rewriteBody) {
+      output = rewritePreviewDocument(output, workspaceId, contentType);
+    }
     if (injectInspector) {
-      res.send(injectInspectorScript(Buffer.from(body).toString("utf8")));
+      res.send(injectInspectorScript(output));
       return;
     }
-    res.send(Buffer.from(body));
+    res.send(rewriteBody ? output : Buffer.from(body));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(502).json({ error: "Preview proxy error", detail: message });

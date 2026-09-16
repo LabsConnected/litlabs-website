@@ -1,8 +1,35 @@
-import { timingSafeEqual } from "crypto";
+import { createHash, timingSafeEqual } from "crypto";
+import { previewCookiePath } from "./preview/proxy-path";
 
 export type PreviewAuthResult =
   | { ok: true }
   | { ok: false; status: number; error: string; errorCode: string };
+
+/** Workspace-specific cookie name prevents one preview tab from selecting another workspace. */
+export function previewSessionCookieName(workspaceId: string): string {
+  const digest = createHash("sha256").update(workspaceId).digest("hex").slice(0, 24);
+  return `litt_preview_${digest}`;
+}
+
+export function readPreviewSessionCookie(cookieHeader: string | undefined, workspaceId: string): string {
+  if (!cookieHeader) return "";
+  const name = previewSessionCookieName(workspaceId);
+  for (const part of cookieHeader.split(";")) {
+    const separator = part.indexOf("=");
+    if (separator < 0) continue;
+    if (part.slice(0, separator).trim() !== name) continue;
+    try {
+      return decodeURIComponent(part.slice(separator + 1).trim());
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+export function previewSessionSetCookie(workspaceId: string, token: string): string {
+  return `${previewSessionCookieName(workspaceId)}=${encodeURIComponent(token)}; Path=${previewCookiePath(workspaceId)}; Max-Age=3600; HttpOnly; SameSite=Lax; Secure`;
+}
 
 /**
  * Check the preview access token for GET /preview/:workspaceId/*.

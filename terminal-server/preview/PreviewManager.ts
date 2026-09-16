@@ -22,6 +22,7 @@
 import { execFile, spawn, type ChildProcess } from "child_process";
 import { createHash } from "crypto";
 import { existsSync, readFileSync, statSync } from "fs";
+import { createServer } from "net";
 import { delimiter as PATH_DELIMITER, dirname, join, resolve } from "path";
 import { promisify } from "util";
 import { getWorkspace, type WorkspaceDescriptor } from "../workspace/WorkspaceManager";
@@ -1206,8 +1207,7 @@ export async function restartPreview(workspaceId: string): Promise<PreviewRuntim
   for (let i = 0; i < 10; i++) {
     await new Promise((resolve) => setTimeout(resolve, 500));
     try {
-      const net = require("net");
-      const testServer = net.createServer();
+      const testServer = createServer();
       await new Promise<void>((resolve, reject) => {
         testServer.once("error", reject);
         testServer.once("listening", () => {
