@@ -172,8 +172,8 @@ export const DEMO_FILE_TREE: FileNode = {
           type: "directory",
           children: [
             {
-              path: "/src/components/NavbarWrapper.tsx",
-              name: "NavbarWrapper.tsx",
+              path: "/src/components/AppShell.tsx",
+              name: "AppShell.tsx",
               type: "file",
               extension: "tsx",
               size: 2100,
@@ -351,11 +351,11 @@ export const DEMO_DEPENDENCIES: Dependency[] = [
   { source: "/src/app/page.tsx", target: "@/lib/agents", type: "import" },
   {
     source: "/src/components/LayoutShell.tsx",
-    target: "@/components/NavbarWrapper",
+    target: "@/components/AppShell",
     type: "import",
   },
   {
-    source: "/src/components/NavbarWrapper.tsx",
+    source: "/src/components/AppShell.tsx",
     target: "react",
     type: "import",
   },

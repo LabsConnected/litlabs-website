@@ -18,19 +18,21 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   LogOut,
   UserCircle,
   Wallet as WalletIcon,
   Settings as SettingsIcon,
+  ChevronDown,
 } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useClerkAuth, useAppUser } from "@/hooks/useClerkAuth";
 import { useLittHealth } from "@/hooks/useLittHealth";
 import {
-  getVisibleNavSections,
-  APP_NAV_BOTTOM,
+  getVisibleMainNav,
+  getVisibleMoreNav,
   APP_NAV_SECONDARY,
   isAppNavActive,
   type NavItem,
@@ -125,6 +127,7 @@ function IdentityDock() {
   return (
     <div ref={dockRef} className="relative">
       <button
+        type="button"
         onClick={() => setOpen((v) => !v)}
         className="relative block h-9 w-9 overflow-hidden rounded-full border-2 transition hover:opacity-80"
         style={{ borderColor: open ? T.accentColor : `${T.accentColor}40` }}
@@ -216,6 +219,7 @@ function IdentityMenuDivider({ T }: { T: ReturnType<typeof useTheme>["resolvedCo
 function IdentityMenuSignOut({ onClick }: { onClick: () => void }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-xs font-bold transition hover:bg-red-500/10"
       style={{ color: "#ef4444" }}
@@ -237,10 +241,11 @@ function TopNavItem({
   active: boolean;
   T: ReturnType<typeof useTheme>["resolvedColors"];
 }) {
+  if (!item.href) return null;
   const Icon = item.icon;
   return (
     <Link
-      href={item.href ?? "#"}
+      href={item.href}
       aria-current={active ? "page" : undefined}
       className="flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-[13px] font-bold transition-all"
       style={{
@@ -262,7 +267,130 @@ function TopNavItem({
   );
 }
 
-/* ─── Top Bar ──────────────────────────────────────────────────────── */
+/* ─── More menu (secondary destinations) ────────────────────────────── */
+
+/**
+ * MoreNavMenu — the "More" overflow item in the canonical nav.
+ * Opens a dropdown of secondary destinations (Projects, Games, Discover,
+ * Marketplace, Showcase, Wallet, CLI, Docs, Deployments, Settings,
+ * Profile). Portaled to document.body because the mobile nav strip is
+ * overflow-x:auto and the blurred header is a containing block for fixed
+ * descendants — an in-place dropdown would clip on both.
+ */
+function MoreNavMenu({
+  items,
+  active,
+  T,
+}: {
+  items: NavItem[];
+  active: boolean;
+  T: ReturnType<typeof useTheme>["resolvedColors"];
+}) {
+  const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const pathname = usePathname();
+
+  // Close on route change (a picked destination navigates away)
+  useEffect(() => setOpen(false), [pathname]);
+
+  // Close on outside click / Escape
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (btnRef.current?.contains(target)) return;
+      if ((target as Element).closest?.("[data-more-menu]")) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const toggle = () => {
+    if (!open) {
+      const r = btnRef.current?.getBoundingClientRect();
+      if (r) {
+        setAnchor({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
+      }
+    }
+    setOpen((v) => !v);
+  };
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-current={active ? "page" : undefined}
+        data-testid="nav-more"
+        className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-3 text-[13px] font-bold transition-all"
+        style={{
+          background: active ? `${T.accentColor}14` : "transparent",
+          color: active ? T.textColor : T.textMuted,
+          boxShadow: active ? `inset 0 -2px 0 ${T.accentColor}` : "none",
+        }}
+      >
+        More
+        <ChevronDown
+          size={14}
+          style={{
+            transform: open ? "rotate(180deg)" : "none",
+            transition: "transform 150ms",
+            color: active ? T.accentColor : undefined,
+          }}
+        />
+      </button>
+      {open &&
+        anchor &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            data-more-menu
+            role="menu"
+            aria-label="More"
+            className="w-56 rounded-xl border p-1.5 shadow-2xl"
+            style={{
+              position: "fixed",
+              top: anchor.top,
+              right: anchor.right,
+              zIndex: 60,
+              borderColor: `${T.borderColor}30`,
+              background: `${T.bgColor}f8`,
+              backdropFilter: "blur(16px)",
+            }}
+          >
+            {items.map((item) => {
+              if (!item.href) return null;
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.label}
+                  href={item.href}
+                  role="menuitem"
+                  onClick={() => setOpen(false)}
+                  className="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-xs font-bold transition hover:bg-white/5"
+                  style={{ color: T.textMuted }}
+                >
+                  <Icon size={14} className="shrink-0" />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
 
 function TopBar() {
   const pathname = usePathname();
@@ -277,8 +405,10 @@ function TopBar() {
   // (logo + status + account) still renders.
   const isStudio = pathname?.startsWith("/studio") ?? false;
 
-  const checkActive = (href: string) => isAppNavActive(pathname, searchParams, href);
-  const sections = getVisibleNavSections();
+  const checkActive = (href?: string) => isAppNavActive(pathname, searchParams, href);
+  const mainItems = getVisibleMainNav();
+  const moreItems = getVisibleMoreNav();
+  const moreActive = moreItems.some((i) => i.href && checkActive(i.href));
 
   return (
     <header
@@ -294,27 +424,17 @@ function TopBar() {
       <div className="flex h-14 items-center gap-2 px-3 md:gap-3 md:px-4">
         <BrandLogo href="/dashboard" size={30} showText />
 
-        {/* Desktop nav — sections inline, separated by dividers */}
+        {/* Desktop nav — canonical main items + More overflow */}
         <nav className="ml-2 hidden items-center gap-0.5 md:flex" aria-label="Primary">
-          {sections.map((section, si) => (
-            <div key={section.id} className="flex items-center gap-0.5">
-              {si > 0 && (
-                <span
-                  className="mx-1.5 h-4 w-px"
-                  style={{ background: `${T.borderColor}30` }}
-                  aria-hidden
-                />
-              )}
-              {section.items.map((item) => (
-                <TopNavItem
-                  key={item.label}
-                  item={item}
-                  active={checkActive(item.href ?? "")}
-                  T={T}
-                />
-              ))}
-            </div>
+          {mainItems.map((item) => (
+            <TopNavItem
+              key={item.label}
+              item={item}
+              active={checkActive(item.href)}
+              T={T}
+            />
           ))}
+          <MoreNavMenu items={moreItems} active={moreActive} T={T} />
         </nav>
 
         <div className="flex-1" />
@@ -356,32 +476,6 @@ function TopBar() {
           </span>
         )}
 
-        {/* Wallet + Settings — desktop only (in the mobile strip / account menu otherwise) */}
-        {isSignedIn && (
-          <div className="hidden items-center gap-0.5 md:flex">
-            {APP_NAV_BOTTOM.map((item) => {
-              const Icon = item.icon;
-              const active = checkActive(item.href ?? "");
-              return (
-                <Link
-                  key={item.label}
-                  href={item.href ?? "#"}
-                  aria-current={active ? "page" : undefined}
-                  aria-label={item.label}
-                  title={item.label}
-                  className="grid h-9 w-9 place-items-center rounded-lg transition hover:bg-white/5"
-                  style={{
-                    color: active ? T.accentColor : T.textMuted,
-                    background: active ? `${T.accentColor}10` : "transparent",
-                  }}
-                >
-                  <Icon size={18} />
-                </Link>
-              );
-            })}
-          </div>
-        )}
-
         {/* Identity dock — avatar + account menu */}
         <IdentityDock />
       </div>
@@ -396,42 +490,15 @@ function TopBar() {
           }}
           aria-label="Primary"
         >
-          {sections.map((section, si) => (
-            <div key={section.id} className="flex items-center gap-0.5">
-              {si > 0 && (
-                <span
-                  className="mx-1 h-4 w-px shrink-0"
-                  style={{ background: `${T.borderColor}30` }}
-                  aria-hidden
-                />
-              )}
-              {section.items.map((item) => (
-                <TopNavItem
-                  key={item.label}
-                  item={item}
-                  active={checkActive(item.href ?? "")}
-                  T={T}
-                />
-              ))}
-            </div>
+          {mainItems.map((item) => (
+            <TopNavItem
+              key={item.label}
+              item={item}
+              active={checkActive(item.href)}
+              T={T}
+            />
           ))}
-          {isSignedIn && (
-            <>
-              <span
-                className="mx-1 h-4 w-px shrink-0"
-                style={{ background: `${T.borderColor}30` }}
-                aria-hidden
-              />
-              {APP_NAV_BOTTOM.map((item) => (
-                <TopNavItem
-                  key={item.label}
-                  item={item}
-                  active={checkActive(item.href ?? "")}
-                  T={T}
-                />
-              ))}
-            </>
-          )}
+          <MoreNavMenu items={moreItems} active={moreActive} T={T} />
         </nav>
       )}
     </header>

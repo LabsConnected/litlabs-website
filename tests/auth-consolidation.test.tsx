@@ -154,14 +154,12 @@ describe("Clerk-only client authentication", () => {
 });
 
 describe("legacy authentication removal contracts", () => {
-  it("keeps Navbar authentication state Clerk-only", () => {
-    const navbar = read("src/components/Navbar.tsx");
-    expect(navbar).not.toContain("useSessionAuth");
-    expect(navbar).not.toContain("sessionSignedIn");
-    expect(navbar).not.toContain("sessionLoaded");
-    expect(navbar).toMatch(
-      /const \{ isLoaded: authLoaded, isSignedIn \} = useClerkAuth\(\);/,
-    );
+  it("keeps the canonical shell (AppShell) authentication state Clerk-only", () => {
+    const shell = read("src/components/AppShell.tsx");
+    expect(shell).not.toContain("useSessionAuth");
+    expect(shell).not.toContain("sessionSignedIn");
+    expect(shell).not.toContain("sessionLoaded");
+    expect(shell).toContain("useClerkAuth");
   });
 
   it("has no active source calls to removed legacy auth endpoints", () => {
