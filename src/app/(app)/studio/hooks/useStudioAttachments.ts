@@ -200,16 +200,11 @@ export function useStudioAttachments(): UseStudioAttachments {
   const addFiles = useCallback(
     (files: File[] | FileList) => {
       const list = Array.from(files);
-      setAttachments((prev) => {
-        const remaining = MAX_ATTACHMENTS - prev.length;
-        if (remaining <= 0) return prev;
-        const toAdd = list.slice(0, remaining);
-        // Process each file
-        for (const file of toAdd) {
-          createAndUpload(file, "upload");
-        }
-        return prev; // createAndUpload updates state internally
-      });
+      // Queue each file as its own functional update. The previous
+      // implementation nested setAttachments inside another state updater;
+      // React may defer that nested update, which made file-picker uploads
+      // disappear before the composer could render them.
+      for (const file of list) createAndUpload(file, "upload");
     },
     [createAndUpload],
   );
