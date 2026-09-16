@@ -1399,6 +1399,7 @@ const AGENT_DEFAULT_SETTINGS = {
   fileWrite: false,
   githubAccess: false,
   deployApproval: true,
+  hiddenAgents: [] as string[],
 };
 
 function AgentsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
@@ -1478,6 +1479,24 @@ function AgentsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"]
               <div className="text-[10px] text-white/40">{a.desc}</div>
             </button>
           ))}
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="Agent visibility" description="Show or hide built-in agents">
+        <div className="space-y-3">
+          <ToggleRow
+            title="Show Spark"
+            description="Spark is built-in and can't be uninstalled — hide it instead"
+            checked={!settings.hiddenAgents.includes("spark")}
+            onChange={(v) =>
+              updateSetting(
+                "hiddenAgents",
+                v
+                  ? settings.hiddenAgents.filter((id) => id !== "spark")
+                  : [...settings.hiddenAgents.filter((id) => id !== "spark"), "spark"],
+              )
+            }
+          />
         </div>
       </SettingsCard>
 
