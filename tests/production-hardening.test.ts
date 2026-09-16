@@ -122,27 +122,20 @@ describe("Canvas Build button renamed to Edit", () => {
 // ─── Navigation consistency ───────────────────────────────────────
 
 describe("Navigation routes Music to Studio", () => {
-  it("sidebar has no dedicated Create or Music entries", async () => {
+  it("main nav has no dedicated Music entry (music is a Create intent)", async () => {
     const mod = await import("../src/lib/navigation");
-    const labels = mod.APP_NAV_SECTIONS.flatMap((g) => g.items.map((i) => i.label));
-    expect(labels).not.toContain("Create");
+    const labels = mod.APP_NAV_MAIN.map((i) => i.label);
     expect(labels).not.toContain("Music");
   });
 
-  it("sidebar Music links to /studio?tool=music", async () => {
-    const mod = await import("../src/lib/navigation");
-    const studioGroup = mod.NAV_GROUPS.find((g) => g.label === "Studio");
-    expect(studioGroup).toBeDefined();
-    const musicItem = studioGroup!.items.find((i) => i.label === "Music");
-    expect(musicItem).toBeDefined();
-    expect(musicItem!.href).toBe("/studio?tool=music");
-  });
-
-  it("quick create Music links to /studio?tool=music", async () => {
-    const mod = await import("../src/lib/navigation");
-    const musicQuick = mod.QUICK_CREATE_ITEMS.find((i) => i.label === "Create Music");
-    expect(musicQuick).toBeDefined();
-    expect(musicQuick!.href).toBe("/studio?tool=music");
+  it("the /create hub links Music & Audio to the real Studio music mode", async () => {
+    const fs = await import("fs");
+    const path = await import("path");
+    const content = fs.readFileSync(
+      path.resolve("src/app/(app)/create/page.tsx"),
+      "utf-8",
+    );
+    expect(content).toContain("/studio?tool=chat&mode=music");
   });
 });
 

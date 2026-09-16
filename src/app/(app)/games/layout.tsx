@@ -29,8 +29,8 @@ export default function GamesLayout({
   // The games segment is flag-gated: flipping retroGameRuntime back off
   // makes every nested route in this segment 404 again — /games,
   // /games/retro, /games/retro/play/[gameId], /games/cloud, /games/dos.
-  // Navbar, NavbarWrapper and the app-shell nav all hide/show the links
-  // behind the same flag, so no surface ever links to a 404.
+  // The app-shell nav hides/shows the links behind the same flag, so no
+  // surface ever links to a 404.
   if (!isFeatureEnabled("retroGameRuntime")) {
     notFound();
   }

@@ -1,58 +1,88 @@
 /**
  * AppShell navigation regression tests.
  *
- * Verifies:
- *   - Correct active navigation detection
- *   - Collapsed sidebar persistence key
- *   - Mobile drawer items match desktop sections
- *   - No duplicate navigation (Navbar.tsx is dead code)
- *   - Route accessibility for authenticated routes
+ * Verifies the ONE canonical authenticated global nav:
+ *   Main: Home · Studio · Create · Assets · Agents · Missions · More
+ *   More: Projects · Games · Discover · Marketplace · Showcase · Wallet ·
+ *         CLI · Docs · Deployments · Settings · Profile
+ *
+ * Assets/Agents/Missions are Studio destinations (?tool=…) and must light
+ * up independently of the bare-Studio pill (isAppNavActive).
  */
 
 import { describe, it, expect } from "vitest";
 import {
-  APP_NAV_SECTIONS,
+  APP_NAV_MAIN,
+  APP_NAV_MORE,
   APP_NAV_SECONDARY,
-  APP_NAV_BOTTOM,
-  APP_MOBILE_BOTTOM_ITEMS,
+  getVisibleMainNav,
   isAppNavActive,
-  COLLAPSED_KEY,
 } from "@/lib/navigation";
 
 describe("AppShell Navigation", () => {
-  describe("Canonical nav sections", () => {
-    it("has a single Main section with the canonical destinations", () => {
-      const ids = APP_NAV_SECTIONS.map((s) => s.id);
-      expect(ids).toEqual(["main"]);
-      const labels = APP_NAV_SECTIONS[0].items.map((i) => i.label);
+  describe("Canonical main nav", () => {
+    it("has exactly the canonical destinations in order", () => {
+      const labels = APP_NAV_MAIN.map((i) => i.label);
       expect(labels).toEqual([
-        "Dashboard",
+        "Home",
         "Studio",
-        "Projects",
-        "Explore",
-        "Marketplace",
-        "Games",
+        "Create",
+        "Assets",
+        "Agents",
+        "Missions",
       ]);
     });
 
-    it("does not expose a Create section or Create item", () => {
-      const labels = APP_NAV_SECTIONS.flatMap((section) => section.items.map((item) => item.label));
-      expect(APP_NAV_SECTIONS.some((section) => section.id === "create")).toBe(false);
-      expect(labels).not.toContain("Create");
+    it("every main item resolves to a real route", () => {
+      const hrefs = APP_NAV_MAIN.map((i) => i.href);
+      expect(hrefs).toEqual([
+        "/dashboard",
+        "/studio",
+        "/create",
+        "/studio?tool=assets",
+        "/studio?tool=agents",
+        "/studio?tool=workflows",
+      ]);
     });
 
-    // Music and Showcase were removed from nav (routes still exist).
-    it("does NOT contain Music or Showcase", () => {
-      const labels = APP_NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.label));
-      for (const removed of ["Music", "Showcase"]) {
-        expect(labels).not.toContain(removed);
-      }
-      const hrefs = APP_NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.href));
-      for (const removedHref of ["/studio?tool=music", "/showcase"]) {
-        expect(hrefs).not.toContain(removedHref);
-      }
+    it("no competing legacy nav bars remain (single flat main list)", () => {
+      // One source of truth — no sectioned groups duplicating the bar.
+      expect(APP_NAV_MAIN.length).toBe(6);
+      expect(getVisibleMainNav()).toEqual(APP_NAV_MAIN);
+    });
+  });
+
+  describe("More menu", () => {
+    it("carries every secondary destination", () => {
+      const labels = APP_NAV_MORE.map((i) => i.label);
+      expect(labels).toEqual([
+        "Projects",
+        "Games",
+        "Discover",
+        "Marketplace",
+        "Showcase",
+        "Wallet",
+        "CLI",
+        "Docs",
+        "Deployments",
+        "Settings",
+        "Profile",
+      ]);
     });
 
+    it("all More items have real hrefs", () => {
+      APP_NAV_MORE.forEach((item) => {
+        expect(item.href).toMatch(/^\//);
+      });
+    });
+
+    it("CLI is reachable from nav (Developer tooling)", () => {
+      const cli = APP_NAV_MORE.find((i) => i.label === "CLI");
+      expect(cli?.href).toBe("/cli");
+    });
+  });
+
+  describe("Secondary (account-menu) navigation", () => {
     it("Secondary sections expose Library and Developer Tools", () => {
       const ids = APP_NAV_SECONDARY.map((s) => s.id);
       expect(ids).toEqual(["library", "devtools"]);
@@ -68,57 +98,72 @@ describe("AppShell Navigation", () => {
         ]),
       );
     });
-
-    // Regression: /hire is permanently retired — the page always redirects
-    // to /studio (see tests/hire-redirect.test.ts) — so the signed-in
-    // sidebar must not link to it and strand visitors on a dead-end bounce.
-    it("does NOT link to /hire", () => {
-      const hrefs = APP_NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.href));
-      expect(hrefs).not.toContain("/hire");
-    });
   });
 
-  describe("Bottom utility items", () => {
-    it("has Wallet and Settings (Profile lives in identity dock)", () => {
-      const labels = APP_NAV_BOTTOM.map((i) => i.label);
-      expect(labels).toEqual(["Wallet", "Settings"]);
-    });
-
-    it("all bottom items have hrefs", () => {
-      APP_NAV_BOTTOM.forEach((item) => {
-        expect(item.href).toBeDefined();
-        expect(item.href).toMatch(/^\//);
-      });
-    });
+  // Regression: /hire is permanently retired — the page always redirects
+  // to /studio — so no nav surface may link to it.
+  it("does NOT link to /hire anywhere", () => {
+    const hrefs = [...APP_NAV_MAIN, ...APP_NAV_MORE].map((i) => i.href);
+    expect(hrefs).not.toContain("/hire");
   });
 
   describe("Active route detection (isAppNavActive)", () => {
     const search = new URLSearchParams();
 
-    it("Dashboard is active on /dashboard", () => {
+    it("Home is active on /dashboard", () => {
       expect(isAppNavActive("/dashboard", search, "/dashboard")).toBe(true);
     });
 
-    it("Dashboard is NOT active when ?app= is present", () => {
+    it("Home is NOT active when ?app= is present", () => {
       const s = new URLSearchParams("app=music");
       expect(isAppNavActive("/dashboard", s, "/dashboard")).toBe(false);
     });
 
-    it("Dashboard?app=music is active when ?app=music matches", () => {
-      const s = new URLSearchParams("app=music");
-      expect(isAppNavActive("/dashboard", s, "/dashboard?app=music")).toBe(true);
-    });
-
-    it("Studio is active on /studio and /studio/*", () => {
+    it("Studio is active on /studio and default surfaces", () => {
       expect(isAppNavActive("/studio", search, "/studio")).toBe(true);
       expect(isAppNavActive("/studio/image", search, "/studio")).toBe(true);
-      // pathname from usePathname() doesn't include query string
-      expect(isAppNavActive("/studio", new URLSearchParams("tool=chat"), "/studio")).toBe(true);
+      expect(
+        isAppNavActive("/studio", new URLSearchParams("tool=chat"), "/studio"),
+      ).toBe(true);
+      expect(
+        isAppNavActive("/studio", new URLSearchParams("tool=build"), "/studio"),
+      ).toBe(true);
     });
 
-    it("Gallery is active on /gallery and /gallery/[id]", () => {
-      expect(isAppNavActive("/gallery", search, "/gallery")).toBe(true);
-      expect(isAppNavActive("/gallery/123", search, "/gallery")).toBe(true);
+    it("Studio is NOT active while a sibling destination owns the URL", () => {
+      for (const tool of ["assets", "agents", "workflows"]) {
+        expect(
+          isAppNavActive("/studio", new URLSearchParams(`tool=${tool}`), "/studio"),
+        ).toBe(false);
+      }
+    });
+
+    it("Assets/Agents/Missions light up only on their own tool param", () => {
+      expect(
+        isAppNavActive("/studio", new URLSearchParams("tool=assets"), "/studio?tool=assets"),
+      ).toBe(true);
+      expect(
+        isAppNavActive("/studio", new URLSearchParams("tool=agents"), "/studio?tool=agents"),
+      ).toBe(true);
+      expect(
+        isAppNavActive("/studio", new URLSearchParams("tool=workflows"), "/studio?tool=workflows"),
+      ).toBe(true);
+      // Wrong tool → not active
+      expect(
+        isAppNavActive("/studio", new URLSearchParams("tool=chat"), "/studio?tool=assets"),
+      ).toBe(false);
+      expect(
+        isAppNavActive("/studio", new URLSearchParams("tool=assets"), "/studio?tool=agents"),
+      ).toBe(false);
+      // Not on /studio at all → not active
+      expect(
+        isAppNavActive("/dashboard", new URLSearchParams("tool=assets"), "/studio?tool=assets"),
+      ).toBe(false);
+    });
+
+    it("Create is active on /create", () => {
+      expect(isAppNavActive("/create", search, "/create")).toBe(true);
+      expect(isAppNavActive("/dashboard", search, "/create")).toBe(false);
     });
 
     it("Settings is active on /settings and /settings/*", () => {
@@ -126,63 +171,15 @@ describe("AppShell Navigation", () => {
       expect(isAppNavActive("/settings/connections", search, "/settings")).toBe(true);
     });
 
-    it("Dashboard is NOT active on /dashboard-something (prefix edge case)", () => {
-      // /dashboard should match exactly, not as prefix for /dashboard-foo
-      // But our impl uses startsWith, so this is a known trade-off
-      // The important thing is /studio, /gallery etc. work correctly
-      expect(isAppNavActive("/wallet", search, "/wallet")).toBe(true);
-    });
-
     it("null pathname returns false", () => {
       expect(isAppNavActive(null, search, "/dashboard")).toBe(false);
     });
   });
 
-  describe("Sidebar collapsed persistence", () => {
-    it("COLLAPSED_KEY is a stable string", () => {
-      expect(COLLAPSED_KEY).toBe("litlabs-sidebar-collapsed");
-      expect(typeof COLLAPSED_KEY).toBe("string");
-    });
-  });
-
-  describe("Mobile bottom items", () => {
-    it("has exactly 4 items for the 5-slot bottom bar (2+create+2)", () => {
-      expect(APP_MOBILE_BOTTOM_ITEMS).toHaveLength(4);
-    });
-
-    it("includes Home (Dashboard) and Studio", () => {
-      const labels = APP_MOBILE_BOTTOM_ITEMS.map((i) => i.label);
-      expect(labels).toContain("Home");
-      expect(labels).toContain("Studio");
-    });
-
-    it("includes Explore and Me", () => {
-      const labels = APP_MOBILE_BOTTOM_ITEMS.map((i) => i.label);
-      expect(labels).toContain("Explore");
-      expect(labels).toContain("Me");
-    });
-
-    it("all items have valid hrefs", () => {
-      APP_MOBILE_BOTTOM_ITEMS.forEach((item) => {
-        expect(item.href).toMatch(/^\//);
-      });
-    });
-  });
-
   describe("No duplicate navigation", () => {
-    it("all section items have unique hrefs", () => {
-      const allHrefs = APP_NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.href));
-      const unique = new Set(allHrefs);
-      expect(allHrefs.length).toBe(unique.size);
-    });
-
-    it("bottom items have unique hrefs not in sections", () => {
-      const sectionHrefs = new Set(
-        APP_NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.href)),
-      );
-      APP_NAV_BOTTOM.forEach((item) => {
-        expect(sectionHrefs.has(item.href)).toBe(false);
-      });
+    it("main and More items have unique hrefs across both lists", () => {
+      const allHrefs = [...APP_NAV_MAIN, ...APP_NAV_MORE].map((i) => i.href);
+      expect(allHrefs.length).toBe(new Set(allHrefs).size);
     });
   });
 });

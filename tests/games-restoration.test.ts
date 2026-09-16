@@ -32,14 +32,13 @@ describe("Games enabled — Navigation & Feature Flags", () => {
   });
 
   describe("Navigation is gated on the flag", () => {
-    it("Navbar gates its Games link on retroGameRuntime", () => {
-      const content = readFileSync(join(ROOT, "src/components/Navbar.tsx"), "utf8");
+    // The canonical nav (lib/navigation.ts → AppShell) is the single live
+    // nav source — the legacy Navbar/NavbarWrapper/Sidebar/MobileBottomNav
+    // files were retired with the canonical-nav consolidation.
+    it("the canonical More nav gates its Games link on retroGameRuntime", () => {
+      const content = readFileSync(join(ROOT, "src/lib/navigation.ts"), "utf8");
       expect(content).toContain('isFeatureEnabled("retroGameRuntime")');
-    });
-
-    it("NavbarWrapper gates its Games link on retroGameRuntime", () => {
-      const content = readFileSync(join(ROOT, "src/components/NavbarWrapper.tsx"), "utf8");
-      expect(content).toContain('isFeatureEnabled("retroGameRuntime")');
+      expect(content).toMatch(/Games[\s\S]*\/games|\/games[\s\S]*Games/);
     });
   });
 
