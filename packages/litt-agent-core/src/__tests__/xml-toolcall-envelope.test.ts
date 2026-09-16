@@ -177,13 +177,11 @@ describe("XML envelope parsing", () => {
     );
   });
 
-  it("truncated envelope still normalizes what arrived", () => {
+  it("rejects a truncated envelope without executing what arrived", () => {
     const content =
       "<tool_call>project.read_file\n<arg_key>path</arg_key><arg_value>README.md</arg_value>";
     const calls = parseToolCalls(content);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].toolId, "project.read_file");
-    assert.equal(calls[0].inputs.path, "README.md");
+    assert.equal(calls.length, 0);
   });
 });
 
