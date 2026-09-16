@@ -1130,9 +1130,14 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.queryByTestId("mission-card-actions")).toBeNull();
     });
 
-    it("desktop keeps the MissionCards stack in the LiTT panel", async () => {
+    it("desktop keeps the MissionCards stack in the Activity dock tab, not the LiTT panel", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 1200;
-      await renderCommandStudio();
+      const { user } = await renderCommandStudio();
+      // Chat stays conversation-only on desktop; the mission panels live in
+      // the Activity dock tab.
+      const chatPanel = screen.getByTestId("litt-chat-panel");
+      expect(chatPanel.querySelector("[data-testid='mission-cards']")).toBeNull();
+      await user.click(screen.getByTestId("dock-tab-activity"));
       expect(screen.getByTestId("mission-cards")).toBeInTheDocument();
       expect(screen.queryByTestId("mobile-build-status")).toBeNull();
     });

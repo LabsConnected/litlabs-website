@@ -166,3 +166,37 @@ describe("LiTTMobileSheet (real component)", () => {
     });
   });
 });
+
+describe("LiTTMobileSheet — dismiss (Phase 1 #3)", () => {
+  function renderDismissSheet() {
+    const onClose = vi.fn();
+    render(
+      <LiTTMobileSheet
+        activeTab="chat"
+        onTabChange={vi.fn()}
+        onClose={onClose}
+        chatContent={<div data-testid="chat-slot" />}
+        liveContent={<div data-testid="live-slot" />}
+      />,
+    );
+    return { onClose };
+  }
+
+  it("closes on backdrop pointerdown", () => {
+    const { onClose } = renderDismissSheet();
+    fireEvent.pointerDown(screen.getByTestId("litt-mobile-backdrop"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes on Escape", () => {
+    const { onClose } = renderDismissSheet();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not close on other keys", () => {
+    const { onClose } = renderDismissSheet();
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});

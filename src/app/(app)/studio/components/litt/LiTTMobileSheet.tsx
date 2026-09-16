@@ -99,16 +99,27 @@ export default function LiTTMobileSheet({
     }
   }, [vv.bottomInset, vv.height]);
 
+  // Escape closes the sheet (same pattern as StudioDock's maximized Esc handling).
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
   return (
     <>
-      <button
-        type="button"
-        className="fixed inset-x-0 top-0 z-[10020] bg-black/55"
-        style={{ bottom: `${bottomOffset}px` }}
+      {/* Backdrop covers the full viewport (including the bottom-nav strip the
+          sheet stops above) so there is always a tappable region to dismiss.
+          pointerdown closes immediately — the old onClick-only backdrop sat
+          entirely behind the opaque sheet and could never receive taps. */}
+      <div
+        className="fixed inset-0 z-[10020] bg-black/55"
+        onPointerDown={onClose}
         onClick={onClose}
         aria-label="Close LiTT"
-        tabIndex={-1}
-        aria-hidden
+        data-testid="litt-mobile-backdrop"
       />
       <div
         className="fixed inset-x-0 top-0 z-[10021] flex min-h-0 min-w-0 flex-col overflow-hidden border-t"

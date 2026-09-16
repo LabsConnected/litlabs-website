@@ -631,10 +631,9 @@ export default function CommandComposer({
                         ? "Tell LiTT what website or app to build…"
                         : agentMeta.placeholder
           }
-          className={`order-first w-full flex-none resize-none bg-transparent px-1 ${compact ? "py-2" : "py-2.5"} outline-none`}
+          className={`studio-command-input order-first w-full flex-none resize-none bg-transparent px-1 ${compact ? "py-2" : "py-2.5"} outline-none`}
           style={{
             color: "var(--text-primary)",
-            fontSize: "14px",
             lineHeight: "1.5",
             minHeight: compact ? "40px" : "44px",
             maxHeight: "160px",
