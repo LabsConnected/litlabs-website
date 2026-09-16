@@ -729,7 +729,17 @@ function normalizeTextToolCalls<T extends { text: string; toolCalls: ToolCallReq
   // An invalid-args call is still a protocol failure, not a guess.
   for (const call of recoveredCalls) {
     call.inputs = normalizeRecoveredInputs(call.inputs, tools.find((t) => t.id === call.toolId));
-    const argError = validateToolCallArgs(call.toolId, call.inputs, tools);
+    const argError = validateToolCallArgs(
+      call.toolId,
+      call.inputs,
+      tools.map((tool) => ({
+        id: tool.id,
+        name: tool.id,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        readOnly: true,
+      })),
+    );
     if (argError) {
       throw new ProviderAttemptError(provider, model, {
         class: "tool_call_parse_failed",
