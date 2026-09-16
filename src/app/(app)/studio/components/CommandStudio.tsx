@@ -203,10 +203,29 @@ function CommandStudioContent() {
   }, [searchParams]);
 
   const [destination, setDestination] = useState<StudioDestination>(initial.destination);
-  const [studioMode, setStudioMode] = useState<StudioMode>((initial.mode as StudioMode) ?? "preview");
-  const [createMode, setCreateMode] = useState<CreateMode>((initial.mode as CreateMode) ?? "image");
-  const [moreMode, setMoreMode] = useState<MoreMode>((initial.mode as MoreMode) ?? "plugins");
-  const [missionMode, setMissionMode] = useState<MissionMode>((initial.mode as MissionMode) ?? "overview");
+  // `initial.mode` is only meaningful for the destination it was resolved
+  // for — e.g. a default `tool=chat` mount resolves to (studio, "preview").
+  // Casting that same "preview" value into CreateMode/MoreMode/MissionMode
+  // for destinations the URL never asked for produces bogus modes (e.g.
+  // moreMode = "preview", which isn't a real MoreMode and has no
+  // TOOL_COMPONENTS entry). That silently broke the mobile bottom nav's
+  // "More" button on any mount that didn't already land on ?tool=plugins:
+  // tapping it selected destination "more" but activeLegacyTool resolved
+  // to the stale, invalid mode, so the workspace fell back to
+  // StudioUnavailableSurface instead of PluginsTool. Only adopt
+  // `initial.mode` when the initial destination actually matches.
+  const [studioMode, setStudioMode] = useState<StudioMode>(
+    initial.destination === "studio" ? (initial.mode as StudioMode) ?? "preview" : "preview",
+  );
+  const [createMode, setCreateMode] = useState<CreateMode>(
+    initial.destination === "create" ? (initial.mode as CreateMode) ?? "image" : "image",
+  );
+  const [moreMode, setMoreMode] = useState<MoreMode>(
+    initial.destination === "more" ? (initial.mode as MoreMode) ?? "plugins" : "plugins",
+  );
+  const [missionMode, setMissionMode] = useState<MissionMode>(
+    initial.destination === "missions" ? (initial.mode as MissionMode) ?? "overview" : "overview",
+  );
   // LiTT mode — what LiTT is about to create. Canonical URL: ?tool=chat&mode=image
   const [littMode, setLittMode] = useState<LiTTMode>(initial.littMode ?? "auto");
   const [, setPendingCommand] = useState<string>(initial.command ?? "");
@@ -580,7 +599,19 @@ function CommandStudioContent() {
 
   const handleSelectDestination = useCallback((dest: StudioDestination) => {
     setDestination(dest);
-  }, []);
+    // Mirror the `hasAdvancedSurface` rule (below) for the destination being
+    // navigated TO. Without this, tapping a mobile bottom-nav destination
+    // (Create/Assets/Agents/Missions/More) only updated `destination` state —
+    // `advancedToolsOpen` stayed whatever it was before the tap, so
+    // `showAdvancedWorkspace` never flipped and the center workspace kept
+    // rendering the default chat/preview surface. Every nav button appeared
+    // to do nothing on a fresh /studio visit (advancedToolsOpen starts false).
+    setAdvancedToolsOpen(
+      dest !== "studio"
+        || (studioMode !== "work" && studioMode !== "preview")
+        || workSurface === "builder",
+    );
+  }, [studioMode, workSurface]);
 
   // handleRouteTool must be declared before useStudioConversation so the
   // conversation controller can reference it without a TDZ error.

@@ -85,6 +85,14 @@ export const STARTER_BUILDS: StarterBuild[] = [
     icon: "UserPlus",
     sectionIds: ["signup-form"],
   },
+  {
+    id: "roofing-site",
+    label: "Roofing Company",
+    category: "Website",
+    description: "Hero, services, quote form, footer — honest slots for a roofing business",
+    icon: "House",
+    sectionIds: ["navbar-minimal", "roofing-hero", "roofing-services", "roofing-quote-form", "roofing-footer"],
+  },
 ];
 
 export const STARTER_CATEGORIES: { id: string; label: string; icon: string }[] = [

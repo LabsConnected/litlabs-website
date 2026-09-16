@@ -1,10 +1,23 @@
-// Post Like / Unlike API — DB-backed only. Errors return 500 (never success-on-failure).
+// Post Like / Unlike API — DB-backed only. Honest 503 when the backend
+// isn't connected (CI, unconfigured envs); errors never masquerade as success.
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminSupabase } from "@/lib/supabase-admin";
+import {
+  getAdminSupabase,
+  isAdminSupabaseConfigured,
+} from "@/lib/supabase-admin";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { requireAuthDbUser } from "@/lib/social-feed";
 
 async function postHandler(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  // Honest 503 when the backend isn't connected — checked before auth so an
+  // unconfigured backend never 500s.
+  if (!isAdminSupabaseConfigured()) {
+    return NextResponse.json(
+      { error: "Likes are unavailable — the community feed isn't connected yet." },
+      { status: 503 },
+    );
+  }
+
   const { id: postId } = await params;
   const { dbUser, response } = await requireAuthDbUser(req);
   if (!dbUser) return response;
@@ -40,6 +53,13 @@ async function postHandler(req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 async function deleteHandler(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  if (!isAdminSupabaseConfigured()) {
+    return NextResponse.json(
+      { error: "Likes are unavailable — the community feed isn't connected yet." },
+      { status: 503 },
+    );
+  }
+
   const { id: postId } = await params;
   const { dbUser, response } = await requireAuthDbUser(req);
   if (!dbUser) return response;

@@ -1,5 +1,5 @@
 // Social feed API — GET (paginated feed) / POST (create post)
-// DB-backed only. No mocks: errors return 500.
+// DB-backed only. No mocks: honest 503 when the backend isn't connected.
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
 import { withRateLimit } from "@/lib/rate-limiter";
@@ -55,6 +55,15 @@ async function getHandler(req: NextRequest) {
 }
 
 async function postHandler(req: NextRequest) {
+  // Honest 503 when the backend isn't connected (CI, unconfigured envs) —
+  // checked before auth so an unconfigured backend never 500s.
+  if (!isAdminSupabaseConfigured()) {
+    return NextResponse.json(
+      { error: "Posting is unavailable — the community feed isn't connected yet." },
+      { status: 503 },
+    );
+  }
+
   const { dbUser, response } = await requireAuthDbUser(req);
   if (!dbUser) return response;
 
