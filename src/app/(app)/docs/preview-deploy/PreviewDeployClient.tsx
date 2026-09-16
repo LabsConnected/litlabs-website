@@ -27,7 +27,7 @@ export default function PreviewDeployClient() {
       <DocH1>Preview & Deployment</DocH1>
       <DocIntro>
         Preview and deployment answer two different questions.{" "}
-        <strong>Preview:</strong> “does this work?” <strong>Deployment:</strong>{" "}
+        <strong>Preview:</strong>{" "}“does this work?” <strong>Deployment:</strong>{" "}
         “is this live for the world?” Here&apos;s how each one works — and
         how to recover when either misbehaves.
       </DocIntro>
@@ -41,7 +41,7 @@ export default function PreviewDeployClient() {
 
       <DocH2 id="how-preview-works">How preview works</DocH2>
       <DocP>
-        The <strong>Preview</strong> tab runs your active project in a live
+        The <strong>Preview</strong>{" "}tab runs your active project in a live
         runtime so you can click through it exactly as a visitor would.
         Studio mounts exactly one preview per active project — you&apos;ll
         never have two competing copies of the same project running.
@@ -49,17 +49,17 @@ export default function PreviewDeployClient() {
       <DocList
         items={[
           <>
-            <strong>It starts automatically.</strong> Open the Preview tab or
+            <strong>It starts automatically.</strong>{" "}Open the Preview tab or
             select a project and Studio provisions the workspace and starts
             the preview runtime on its own.
           </>,
           <>
-            <strong>It follows the active project.</strong> Switch projects
+            <strong>It follows the active project.</strong>{" "}Switch projects
             and the preview switches with it — the previous project&apos;s
             preview stops being the one on screen.
           </>,
           <>
-            <strong>It can go stale.</strong> If LiTT edits files while
+            <strong>It can go stale.</strong>{" "}If LiTT edits files while
             you&apos;re looking at the preview, the panel may report
             “Preview may be stale.” Refresh it to see the latest build.
           </>,
@@ -116,7 +116,7 @@ export default function PreviewDeployClient() {
 
       <DocH2 id="deployment">Deployment</DocH2>
       <DocP>
-        When the preview looks right, the <strong>Deploy</strong> action in
+        When the preview looks right, the <strong>Deploy</strong>{" "}action in
         the Studio header prepares your project to go live. Deployment is
         separate from preview on purpose: it&apos;s the moment you decide
         the world should see the project.
@@ -124,7 +124,7 @@ export default function PreviewDeployClient() {
       <DocList
         items={[
           <>
-            <strong>Approval first.</strong> Deploying is a consequential
+            <strong>Approval first.</strong>{" "}Deploying is a consequential
             action, so it may ask for your approval before anything
             publishes. Nothing ships without you saying so — see{" "}
             <Link
@@ -137,12 +137,12 @@ export default function PreviewDeployClient() {
             .
           </>,
           <>
-            <strong>Verified URL.</strong> A successful deployment produces a
+            <strong>Verified URL.</strong>{" "}A successful deployment produces a
             live URL, and LiTT verifies it&apos;s reachable — the deployment
             isn&apos;t “done” until the live project actually responds.
           </>,
           <>
-            <strong>Evidence in chat.</strong> After deploying, the
+            <strong>Evidence in chat.</strong>{" "}After deploying, the
             conversation records what was deployed and the verified result,
             so there&apos;s never ambiguity about what went live.
           </>,

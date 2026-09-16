@@ -71,7 +71,7 @@ export default function BuildingClient() {
             title: "Preview",
             body: (
               <>
-                You open the <strong>Preview</strong> tab and click through
+                You open the <strong>Preview</strong>{" "}tab and click through
                 the running project. This is the moment of truth: does it
                 look right, does it behave right?
               </>
@@ -82,7 +82,7 @@ export default function BuildingClient() {
             body: (
               <>
                 When the preview looks right, the{" "}
-                <strong>Deploy</strong> action prepares the project to go
+                <strong>Deploy</strong>{" "}action prepares the project to go
                 live. Deployment may ask for your approval first — nothing
                 ships without you.
               </>
@@ -100,7 +100,7 @@ export default function BuildingClient() {
       <DocH2 id="examples">Example prompts that work</DocH2>
       <DocP>
         Copy these patterns and adapt them. The formula is simple:{" "}
-        <strong>what it is</strong> + <strong>who it&apos;s for</strong> +{" "}
+        <strong>what it is</strong>{" "}+ <strong>who it&apos;s for</strong>{" "}+{" "}
         <strong>what it must include</strong>.
       </DocP>
 
@@ -138,26 +138,26 @@ export default function BuildingClient() {
       <DocList
         items={[
           <>
-            <strong>Be concrete about the outcome.</strong> “A landing page
+            <strong>Be concrete about the outcome.</strong>{" "}“A landing page
             for my bakery with a menu and contact form” beats “make me a
             website.”
           </>,
           <>
-            <strong>Name the audience and the vibe.</strong> “For busy
+            <strong>Name the audience and the vibe.</strong>{" "}“For busy
             parents, clean and calm” gives LiTT design direction it
             can&apos;t guess.
           </>,
           <>
-            <strong>List must-haves.</strong> Sections, pages, or features
+            <strong>List must-haves.</strong>{" "}Sections, pages, or features
             you know you need — LiTT fills in the rest.
           </>,
           <>
-            <strong>One mission, one outcome.</strong> “Build the landing
+            <strong>One mission, one outcome.</strong>{" "}“Build the landing
             page” first; “now add a blog” second. Short loops, better
             results.
           </>,
           <>
-            <strong>Point at problems precisely.</strong> “The menu overlaps
+            <strong>Point at problems precisely.</strong>{" "}“The menu overlaps
             the hero on my phone” is actionable; “it looks weird” is a
             guessing game.
           </>,
@@ -171,19 +171,19 @@ export default function BuildingClient() {
       <DocList
         items={[
           <>
-            <strong>Preview tab</strong> — click through the running project
+            <strong>Preview tab</strong>{" "}— click through the running project
             yourself. If it works here, the build is real.
           </>,
           <>
-            <strong>Code tab</strong> — read the actual files. Every edit is
+            <strong>Code tab</strong>{" "}— read the actual files. Every edit is
             visible; nothing is hidden behind the chat.
           </>,
           <>
-            <strong>Activity timeline</strong> — see which files changed and
+            <strong>Activity timeline</strong>{" "}— see which files changed and
             which commands ran, in order.
           </>,
           <>
-            <strong>Terminal</strong> — run your own checks.{" "}
+            <strong>Terminal</strong>{" "}— run your own checks.{" "}
             <InlineCode>litt check</InlineCode>-style verification from the
             CLI works on the same project files.
           </>,

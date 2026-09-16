@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, Sparkles } from "lucide-react";
 import { buildMetadata } from "@/lib/seo";
+import { SafeEmailLink, SafeEmailText } from "@/components/SafeEmail";
 
 export const metadata: Metadata = buildMetadata({
   title: "Terms of Service",
@@ -110,7 +111,7 @@ const sections = [
         </ul>
         <p className="mt-4">
           We may remove content and suspend access for violations, with or without
-          notice. Report abuse to support@litlabs.net.
+          notice. Report abuse to <SafeEmailText email="support@litlabs.net" />.
         </p>
       </>
     ),
@@ -165,12 +166,10 @@ const sections = [
       <>
         <p>
           Questions about these Terms? Email{" "}
-          <a
-            href="mailto:support@litlabs.net"
+          <SafeEmailLink
+            email="support@litlabs.net"
             className="font-bold text-[#a8ff2f] underline-offset-4 hover:underline"
-          >
-            support@litlabs.net
-          </a>{" "}
+          />{" "}
           and we&apos;ll get back to you.
         </p>
       </>

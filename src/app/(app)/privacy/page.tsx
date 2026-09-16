@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { buildMetadata } from "@/lib/seo";
+import { SafeEmailText } from "@/components/SafeEmail";
 
 export const metadata: Metadata = buildMetadata({
   title: "Privacy Policy",
@@ -405,7 +406,7 @@ export default function PrivacyPage() {
               <li>Delete conversations and project memory.</li>
             </ul>
             <p className="mt-2">
-              To exercise these rights, contact us at support@litlabs.net.
+              To exercise these rights, contact us at <SafeEmailText email="support@litlabs.net" />.
               We will respond to your request <strong>within 30 days</strong>,
               as required by GDPR Article 12. For complex requests, we may extend
               this by up to 60 additional days and will inform you of the extension
@@ -436,7 +437,7 @@ export default function PrivacyPage() {
                 These actions take effect immediately on our database.
               </li>
               <li>
-                <strong>Email request:</strong>{" "}Email support@litlabs.net with the
+                <strong>Email request:</strong>{" "}Email <SafeEmailText email="support@litlabs.net" /> with the
                 subject line &ldquo;Data Request&rdquo;. Include your account email so we
                 can verify your identity.
               </li>
@@ -477,7 +478,7 @@ export default function PrivacyPage() {
               </li>
             </ul>
             <p className="mt-2">
-              To report a suspected breach, email support@litlabs.net immediately.
+              To report a suspected breach, email <SafeEmailText email="support@litlabs.net" /> immediately.
             </p>
           </section>
 
@@ -571,7 +572,7 @@ export default function PrivacyPage() {
             </h2>
             <p>
               If you have any questions about this Privacy Policy, please
-              contact us at support@litlabs.net.
+              contact us at <SafeEmailText email="support@litlabs.net" />.
             </p>
           </section>
         </div>

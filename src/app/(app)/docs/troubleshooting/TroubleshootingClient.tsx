@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
+import { SafeEmailLink, SafeEmailText } from "@/components/SafeEmail";
 import {
   DocH1,
   DocH2,
@@ -68,7 +69,7 @@ export default function TroubleshootingClient() {
       <DocH2 id="terminal-disconnected">Terminal disconnected</DocH2>
       <DocP>
         If the terminal shows as disconnected or never starts, open the{" "}
-        <strong>Terminal</strong> drawer and reconnect it from there. LiTT
+        <strong>Terminal</strong>{" "}drawer and reconnect it from there. LiTT
         needs a connected terminal to install dependencies, run builds, and
         execute commands — without it, build steps will stall. If
         reconnecting fails repeatedly, refresh the page: Studio
@@ -162,13 +163,13 @@ export default function TroubleshootingClient() {
 
       <Callout kind="note" title="Still stuck?">
         Email{" "}
-        <a
-          href="mailto:support@litlabs.net"
+        <SafeEmailLink
+          email="support@litlabs.net"
           className="font-bold underline decoration-dotted underline-offset-4"
           style={{ color: T.accentColor }}
         >
-          support@litlabs.net
-        </a>{" "}
+          <SafeEmailText email="support@litlabs.net" />
+        </SafeEmailLink>{" "}
         with what you were doing, what you expected, and what you saw
         instead — including any error text. The activity timeline and
         terminal output are the most useful things you can include.

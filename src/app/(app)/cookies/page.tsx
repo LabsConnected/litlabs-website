@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { buildMetadata } from "@/lib/seo";
+import { SafeEmailText } from "@/components/SafeEmail";
 
 export const metadata: Metadata = buildMetadata({
   title: "Cookie Policy",
@@ -89,7 +90,7 @@ export default function CookiesPage() {
               Under GDPR, you have the right to access, export, correct, and delete
               your personal data. You can export or delete your data directly from{" "}
               <a href="/settings" className="underline font-semibold" style={{ color: "var(--link-color)" }}>Settings → Privacy &amp; Security</a>,{" "}
-              or email support@litlabs.net with a data request. We respond to all
+              or email <SafeEmailText email="support@litlabs.net" /> with a data request. We respond to all
               valid requests within 30 days. See our{" "}
               <a href="/privacy" className="underline font-semibold" style={{ color: "var(--link-color)" }}>Privacy Policy</a>{" "}
               for full details.
@@ -99,7 +100,7 @@ export default function CookiesPage() {
           <section>
             <h2 className="text-sm font-bold uppercase tracking-wider mb-2" style={{ color: "var(--header-color)" }}>Contact</h2>
             <p>
-              If you have any questions about our Cookie Policy, please contact us at support@litlabs.net.
+              If you have any questions about our Cookie Policy, please contact us at <SafeEmailText email="support@litlabs.net" />.
             </p>
           </section>
         </div>
