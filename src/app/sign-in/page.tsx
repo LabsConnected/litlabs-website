@@ -4,6 +4,7 @@ import { SignIn } from "@clerk/nextjs";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Suspense } from "react";
+import { getSafeRedirectUrl } from "@/lib/safe-redirect-url";
 
 /**
  * Clerk's OAuth authorize endpoint redirects unauthenticated users to this
@@ -18,7 +19,9 @@ import { Suspense } from "react";
  */
 function SignInContent() {
   const searchParams = useSearchParams();
-  let redirectUrl = searchParams.get("redirect_url") || "/studio";
+  // Validate before use: an unvalidated redirect_url is an open redirect
+  // (?redirect_url=https://evil.com sends a freshly-logged-in user off-site).
+  let redirectUrl = getSafeRedirectUrl(searchParams.get("redirect_url"));
 
   // Clerk Dashboard may still point the OAuth consent URL to the old
   // Account Portal domain (accounts.litlabs.net). After sign-in on

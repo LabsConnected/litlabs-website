@@ -12,6 +12,7 @@ import {
   type PlanDefinition,
   type PlanId,
 } from "@/config/plans";
+import { pricingGuestCheckoutUrl } from "@/lib/pricing-guest-checkout";
 
 type Accent = "neutral" | "cyan" | "purple";
 
@@ -245,7 +246,9 @@ export default function PricingClient() {
       if (plan.billingType === "free") return;
       if (!isSignedIn) {
         track("signup_started", { source: "pricing", plan: plan.id });
-        window.location.href = "/sign-in?redirect_url=/pricing";
+        // redirect_url (not redirect) — sign-in only honors redirect_url,
+        // and the value must survive the same-origin validator.
+        window.location.href = pricingGuestCheckoutUrl();
         return;
       }
       track("checkout_started", { plan: plan.id });

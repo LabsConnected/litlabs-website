@@ -30,6 +30,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useClerkAuth, useAppUser } from "@/hooks/useClerkAuth";
 import { useLittHealth } from "@/hooks/useLittHealth";
+import { planDisplayLabel } from "@/lib/plan-label";
 import {
   getVisibleMainNav,
   getVisibleMoreNav,
@@ -110,8 +111,11 @@ function IdentityDock() {
 
   const displayName = user.firstName || user.fullName || user.username || "User";
   const email = user.primaryEmailAddress?.emailAddress ?? "";
-  const role = plan === "owner" ? "Owner" : plan === "pro" ? "Pro" : "Free";
-  const roleColor = role === "Owner" ? T.accentColor : role === "Pro" ? "#a78bfa" : T.textMuted;
+  // Every real plan ID gets its own honest label — a paying plan must
+  // never render as "Free" (the API returns e.g. "pro_builder_beta").
+  const role = planDisplayLabel(plan);
+  const roleColor =
+    role === "Owner" ? T.accentColor : role === "Free" ? T.textMuted : "#a78bfa";
   const avatarUrl = user.imageUrl;
 
   const menuItems = [
