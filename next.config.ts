@@ -293,6 +293,22 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      // Self-hosted quick-play games — must be frameable by same-origin.
+      // Overrides the global X-Frame-Options: DENY so the /games player
+      // overlay can embed /games/play/2048/ and /games/play/hextris/.
+      // SAMEORIGIN is safe — only litlabs.net can embed these pages.
+      // The parent page CSP is intentionally NOT relaxed here: 2048 is fully
+      // self-contained, and Hextris degrades gracefully to system fonts when
+      // its Google Fonts stylesheet is blocked.
+      {
+        source: "/games/play/:path*",
+        headers: [
+          {
+            key: "X-Frame-Options",
+            value: "SAMEORIGIN",
+          },
+        ],
+      },
       // Arcade runtime iframe host — must be frameable by same-origin.
       // Overrides the global X-Frame-Options: DENY so the emulator iframe
       // (loaded from /arcade-runtime/emulator-session.html) can be embedded

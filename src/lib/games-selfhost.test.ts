@@ -72,4 +72,21 @@ describe("self-hosted games", () => {
       }
     }
   });
+
+  it("next.config.ts lets the player iframe the self-hosted games", () => {
+    // Root cause (2026-09-16): the global X-Frame-Options: DENY in
+    // next.config.ts applied to /games/play/* too, so the /games player
+    // overlay's same-origin iframe was blocked with ERR_BLOCKED_BY_RESPONSE
+    // ("www.litlabs.net refused to connect") even though the files served
+    // 200. The fix is a later matching rule for /games/play/:path* that
+    // relaxes X-Frame-Options to SAMEORIGIN — only litlabs.net can embed
+    // them. Assert against the raw config source (importing next.config.ts
+    // pulls in @sentry/nextjs, not meant to run under vitest).
+    const configSource = readFileSync(join(REPO_ROOT, "next.config.ts"), "utf8");
+    const ruleIdx = configSource.indexOf('source: "/games/play/:path*"');
+    expect(ruleIdx).toBeGreaterThan(-1);
+    const ruleBlock = configSource.slice(ruleIdx, ruleIdx + 600);
+    expect(ruleBlock).toMatch(/X-Frame-Options/);
+    expect(ruleBlock).toMatch(/SAMEORIGIN/);
+  });
 });
