@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   },
   PROJECT_TEMPLATES: {
     "blank-static": { name: "Blank Static" },
+    "empty-static": { name: "Empty Static" },
   } as Record<string, { name: string }>,
 }));
 
@@ -205,6 +206,25 @@ describe("POST /api/studio-projects managed create-time provisioning", () => {
     expect(mocks.provisionWorkspaceForProject).toHaveBeenCalledWith(
       "proj-blank-1",
       "user-1",
+    );
+  });
+
+  it("accepts the explicit empty-static template without changing project routing", async () => {
+    mocks.createBlankProject.mockResolvedValue({ id: "proj-empty-1" });
+    mocks.provisionWorkspaceForProject.mockResolvedValue("ws-proj-empty-1");
+    mocks.getProject.mockResolvedValue({
+      id: "proj-empty-1",
+      workspaceStatus: "ready",
+    });
+
+    const response = await POST(request({
+      ...managedBody,
+      templateId: "empty-static",
+    }));
+
+    expect(response.status).toBe(201);
+    expect(mocks.createBlankProject).toHaveBeenCalledWith(
+      expect.objectContaining({ templateId: "empty-static" }),
     );
   });
 
