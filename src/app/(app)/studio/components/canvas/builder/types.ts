@@ -134,6 +134,8 @@ export interface CanvasNode {
     name?: string;
     locked?: boolean;
     hidden?: boolean;
+    /** Roofing vertical: index of the service card slot this node fills. */
+    roofingServiceSlot?: number;
   };
 }
 
