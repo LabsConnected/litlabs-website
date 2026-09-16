@@ -8,25 +8,26 @@ function fileExists(rel: string): boolean {
   return existsSync(join(ROOT, rel));
 }
 
-// Games were restored once, then retired from the public V1 surface. The
-// implementation is deliberately KEPT — the "Route Files Exist" block below
-// still guards it against deletion, so it can come back. What changed is the
-// public exposure: the feature flag is off, so nav hides the links and the
-// /games segment layout returns 404.
-describe("Games retired from public V1 — Navigation & Feature Flags", () => {
-  describe("Feature flag is disabled", () => {
-    it("retroGameRuntime.enabled is false", () => {
+// Games were restored once, retired from the public V1 surface, then
+// re-enabled at the owner's request (2026-09-16). The implementation is
+// deliberately KEPT — the "Route Files Exist" block below still guards it
+// against deletion. Public exposure now: the feature flag is on, so nav
+// shows the links and the /games segment layout renders (it still
+// 404-guards on the flag, so flipping it back off closes the routes).
+describe("Games enabled — Navigation & Feature Flags", () => {
+  describe("Feature flag is enabled", () => {
+    it("retroGameRuntime.enabled is true", () => {
       const content = readFileSync(join(ROOT, "src/config/feature-flags.ts"), "utf8");
       const match = content.match(/retroGameRuntime:\s*\{[\s\S]*?enabled:\s*(true|false)/);
       expect(match).not.toBeNull();
-      expect(match![1]).toBe("false");
+      expect(match![1]).toBe("true");
     });
 
-    it("retroGameRuntime.hideFromNav is true", () => {
+    it("retroGameRuntime.hideFromNav is false", () => {
       const content = readFileSync(join(ROOT, "src/config/feature-flags.ts"), "utf8");
       const match = content.match(/retroGameRuntime:\s*\{[\s\S]*?hideFromNav:\s*(true|false)/);
       expect(match).not.toBeNull();
-      expect(match![1]).toBe("true");
+      expect(match![1]).toBe("false");
     });
   });
 
@@ -42,7 +43,7 @@ describe("Games retired from public V1 — Navigation & Feature Flags", () => {
     });
   });
 
-  describe("Routes are closed, not just unlinked", () => {
+  describe("Routes are open, and still guard on the flag", () => {
     it("the /games segment layout 404s when the flag is off", () => {
       const content = readFileSync(
         join(ROOT, "src/app/(app)/games/layout.tsx"),
@@ -52,7 +53,7 @@ describe("Games retired from public V1 — Navigation & Feature Flags", () => {
       expect(content).toContain("notFound()");
     });
 
-    it("/games is absent from the sitemap", () => {
+    it("/games is intentionally kept out of the sitemap for now (soft launch)", () => {
       const content = readFileSync(join(ROOT, "src/app/sitemap.ts"), "utf8");
       expect(content).not.toContain('absoluteUrl("/games")');
     });
