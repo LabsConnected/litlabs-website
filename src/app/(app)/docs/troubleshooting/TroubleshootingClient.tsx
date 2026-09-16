@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
+import { SafeEmailLink, SafeEmailText } from "@/components/SafeEmail";
 import {
   DocH1,
   DocH2,
@@ -162,13 +163,13 @@ export default function TroubleshootingClient() {
 
       <Callout kind="note" title="Still stuck?">
         Email{" "}
-        <a
-          href="mailto:support@litlabs.net"
+        <SafeEmailLink
+          email="support@litlabs.net"
           className="font-bold underline decoration-dotted underline-offset-4"
           style={{ color: T.accentColor }}
         >
-          support@litlabs.net
-        </a>{" "}
+          <SafeEmailText email="support@litlabs.net" />
+        </SafeEmailLink>{" "}
         with what you were doing, what you expected, and what you saw
         instead — including any error text. The activity timeline and
         terminal output are the most useful things you can include.

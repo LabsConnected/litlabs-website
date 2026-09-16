@@ -6,6 +6,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { ArrowRight, Mail } from "lucide-react";
 import { DOCS_NAV } from "./_components/docs-nav";
+import { SafeEmailLink, SafeEmailText } from "@/components/SafeEmail";
 import {
   DocH1,
   DocH2,
@@ -62,14 +63,14 @@ export default function DocsOverviewClient() {
             Need help? Reach out and we&apos;ll get back to you as soon as
             possible.
           </p>
-          <a
-            href="mailto:support@litlabs.net"
+          <SafeEmailLink
+            email="support@litlabs.net"
             className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold"
             style={{ backgroundColor: T.accentColor, color: T.bgColor }}
           >
             <Mail size={14} />
-            Email support@litlabs.net
-          </a>
+            Email <SafeEmailText email="support@litlabs.net" />
+          </SafeEmailLink>
         </section>
       )}
 
