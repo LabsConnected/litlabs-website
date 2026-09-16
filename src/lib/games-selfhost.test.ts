@@ -25,6 +25,11 @@ describe("self-hosted games", () => {
       // A relative URL can never be broken by a third-party redirect or
       // frame-ancestors block.
       expect(game!.html5Url).toMatch(/^\//);
+      // The /games app route swallows extensionless directory URLs under it
+      // (e.g. /games/play/2048/ 404s), so self-hosted games must point at
+      // the index.html file explicitly. (Re-applied 2026-09-16 after PR #334
+      // clobbered this in a stale merge.)
+      expect(game!.html5Url).toMatch(/\/index\.html$/);
     }
   });
 
