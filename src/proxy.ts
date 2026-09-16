@@ -218,6 +218,7 @@ function withBotProtection(inner: (...args: never[]) => unknown) {
 //   /resources/*   — public resources
 //   /discover      — public discover
 //   /u/*           — public user profiles
+//   /profile/<username> — 308 → /u/<username> (legacy redirect, runs before auth)
 //   /post/*        — public post thread pages
 //   /api/posts     — public feed API (signed-out sees public posts only)
 //   /api/link-preview — public link-preview API
@@ -772,11 +773,46 @@ function redirectNakedToWww(req: NextRequest): NextResponse | null {
   return NextResponse.redirect(redirectUrl, 308);
 }
 
+/**
+ * Redirect legacy /profile/<username> URLs to the canonical /u/<username>
+ * public profiles (social-mission Phase 2).
+ *
+ * The legacy route used to fabricate a person for any username; PR #333
+ * replaced that with an honest placeholder, and the real database-backed
+ * profiles now live at /u/[handle] (PR #334 + the social Phase 1 migration,
+ * which has been applied to production).
+ *
+ * This runs before bot detection and Clerk auth so signed-out visitors
+ * following old links land on the public profile instead of being bounced
+ * to sign-in (/profile/* is a protected route; /u/* is public).
+ *
+ * Only the single-segment form redirects — bare /profile (the Account menu
+ * link) and deeper paths are left alone.
+ */
+export function redirectLegacyProfileToU(req: NextRequest): NextResponse | null {
+  const match = /^\/profile\/([^/]+)\/?$/.exec(req.nextUrl.pathname);
+  if (!match) return null;
+  // nextUrl.pathname is already percent-encoded, so splice the raw segment
+  // in directly (encoding it again would double-encode % as %25).
+  // Build from the origin rather than clone(): NextURL's trailing-slash
+  // normalization would otherwise carry the original trailing slash over,
+  // and /profile/foo/ should land on the same canonical /u/foo. The query
+  // string is preserved explicitly.
+  const url = new URL(`/u/${match[1]}`, req.nextUrl.origin);
+  url.search = req.nextUrl.search;
+  return NextResponse.redirect(url, 308);
+}
+
 // Dev proxy header fix wraps the bot detection so it runs first.
 // Bot detection wraps the Clerk/passthrough middleware so it runs next.
 const middleware = (req: NextRequest, ...rest: never[]): Promise<NextResponse> => {
   const nakedRedirect = redirectNakedToWww(req);
   if (nakedRedirect) return Promise.resolve(nakedRedirect);
+
+  // Legacy /profile/<username> -> /u/<username>. Runs before auth so
+  // signed-out visitors reach the public profile (see redirectLegacyProfileToU).
+  const legacyProfileRedirect = redirectLegacyProfileToU(req);
+  if (legacyProfileRedirect) return Promise.resolve(legacyProfileRedirect);
 
   const fixed = fixDevProxyHeaders(req);
   if (fixed) return Promise.resolve(fixed);

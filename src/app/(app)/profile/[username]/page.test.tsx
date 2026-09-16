@@ -1,35 +1,38 @@
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
-import "@testing-library/jest-dom";
-import UserProfilePage from "./page";
+import { describe, it, expect, vi } from "vitest";
+import { permanentRedirect } from "next/navigation";
+import LegacyProfileRedirectPage from "./page";
 
-async function renderProfile(username: string) {
-  return render(
-    await UserProfilePage({ params: Promise.resolve({ username }) }),
-  );
-}
+vi.mock("next/navigation", () => ({
+  permanentRedirect: vi.fn(),
+}));
 
-describe("profile [username] page", () => {
-  it("renders an honest not-found state for any username", async () => {
-    await renderProfile("mallory");
-    expect(screen.getByText(/doesn.t exist yet/i)).toBeInTheDocument();
-    expect(
-      screen.getByText(/community profiles are coming soon/i),
-    ).toBeInTheDocument();
+const permanentRedirectMock = vi.mocked(permanentRedirect);
+
+describe("legacy /profile/[username] page", () => {
+  it("permanently redirects to the canonical /u/[handle] profile", async () => {
+    permanentRedirectMock.mockClear();
+    await LegacyProfileRedirectPage({
+      params: Promise.resolve({ username: "mallory" }),
+    });
+    expect(permanentRedirectMock).toHaveBeenCalledWith("/u/mallory");
   });
 
-  it("never fabricates a person: no follower counts, badges, or websites", async () => {
-    const { container } = await renderProfile("mallory");
-    const text = container.textContent ?? "";
-    expect(text).not.toContain("mallory.litlabs.net");
-    expect(screen.queryByText(/followers/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/verified/i)).not.toBeInTheDocument();
+  it("URL-encodes handles with special characters", async () => {
+    permanentRedirectMock.mockClear();
+    await LegacyProfileRedirectPage({
+      params: Promise.resolve({ username: "foo bar" }),
+    });
+    expect(permanentRedirectMock).toHaveBeenCalledWith("/u/foo%20bar");
   });
 
-  it("links somewhere real instead of the fake person's actions", async () => {
-    await renderProfile("mallory");
-    expect(
-      screen.getByRole("link", { name: /browse discover/i }),
-    ).toHaveAttribute("href", "/discover");
+  it("never renders the old fabricated-person content", async () => {
+    // permanentRedirect throws in production; the mock swallows it, so if
+    // we get here without rendering anything, the page redirects unconditionally.
+    permanentRedirectMock.mockClear();
+    const result = await LegacyProfileRedirectPage({
+      params: Promise.resolve({ username: "mallory" }),
+    });
+    expect(permanentRedirectMock).toHaveBeenCalledTimes(1);
+    expect(result).toBeUndefined();
   });
 });

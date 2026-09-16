@@ -633,7 +633,7 @@ export default function SocialFeed({
                   </div>
                   <div className="min-w-0 flex-1">
                     <Link
-                      href={`/profile/${(post.author?.username || "user").toLowerCase().replace(/\s+/g, "")}`}
+                      href={`/u/${(post.author?.username || "user").toLowerCase().replace(/\s+/g, "")}`}
                       className="block hover:opacity-80 transition-opacity"
                     >
                       <div

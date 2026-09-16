@@ -32,7 +32,7 @@ const PUBLIC_PREFIXES = [
   "/showcase",
   "/marketplace",
   "/agents",
-  "/profile/",
+  "/u",
   "/games",
 ];
 
