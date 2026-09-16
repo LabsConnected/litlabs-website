@@ -14,6 +14,7 @@ const fakeTransport = {
   userId: "u-test",
   workspaceRoot: "/tmp/test",
   projectId: "p-test",
+  createCheckpointBeforeMutation: vi.fn().mockResolvedValue(null),
 } as unknown as WorkspaceTransport;
 
 describe("runAgentLoopV2 — provider exhaustion", () => {
@@ -376,5 +377,45 @@ describe("runAgentLoopV2 — files.write placeholder content never reaches the a
 
     expect(result.pendingApproval?.toolId).toBe("files.write");
     expect(result.pendingApproval?.toolCallId).toBe("tc-w2");
+  });
+
+  it("does not report a handler-level write failure as a successful mutation", async () => {
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{
+          toolCallId: "tc-w3",
+          toolId: "files.write",
+          inputs: {
+            projectId: "p-test",
+            path: "index.html",
+            content: "<html><body>Fresh site</body></html>",
+          },
+        }],
+        finishReason: "tool_calls",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "The workspace write failed and the site is not complete.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      });
+
+    const result = await runAgentLoopV2(
+      "Create the website files",
+      fakeTransport,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "auto",
+        enableBuildFix: false,
+      },
+    );
+
+    const writeLog = result.toolCalls.find((tool) => tool.toolId === "files.write");
+    expect(writeLog?.success).toBe(false);
+    expect(writeLog?.mutating).toBe(true);
+    expect(result.finalText).toContain("write failed");
   });
 });

@@ -37,7 +37,13 @@ vi.mock("@/lib/litt-intelligence/paused-run-store", () => ({
 }));
 
 vi.mock("@/lib/litt-intelligence/workspace-transport", () => ({
-  createWorkspaceTransport: vi.fn(() => Promise.resolve({})),
+  createWorkspaceTransport: vi.fn(() =>
+    Promise.resolve({
+      listFiles: vi.fn(async () => ({ entries: [{ name: "index.html", type: "file" }] })),
+      startPreview: vi.fn(async () => ({ status: "ready" })),
+      getPreviewStatus: vi.fn(async () => ({ status: "ready" })),
+    }),
+  ),
 }));
 
 vi.mock("@/lib/litt-intelligence/agent-loop-v2", () => ({

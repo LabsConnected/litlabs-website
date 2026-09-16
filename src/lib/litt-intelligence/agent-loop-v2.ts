@@ -662,11 +662,18 @@ export async function runAgentLoopV2(
         });
 
         if (execResult.ok) {
+          // Handlers use a structured { success: false, error } payload for
+          // domain failures that do not throw (for example a lost terminal
+          // connection).  The registry call itself succeeded, but the tool
+          // operation did not.  Do not turn that into mutation evidence or a
+          // false completed build.
+          const handlerError = handlerFailureError(execResult.result);
           result = {
             toolCallId: toolCall.toolCallId,
             toolId: toolCall.toolId,
             result: execResult.result,
-            success: true,
+            success: handlerError === null,
+            ...(handlerError !== null ? { error: handlerError } : {}),
           };
         } else {
           result = {
