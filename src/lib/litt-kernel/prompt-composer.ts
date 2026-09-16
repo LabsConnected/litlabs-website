@@ -23,6 +23,7 @@
 
 import type { LiTTControlDecision, CapabilityRecord } from "./types";
 import { isCapabilityReady } from "./principles";
+import { buildBusinessProfilePromptBlock } from "../business-profile";
 
 // ─── Constitution (inline — these are immutable and short) ──────
 
@@ -107,13 +108,15 @@ function buildCapabilityBlock(capabilities: CapabilityRecord[]): string {
 // ─── Project context block ──────────────────────────────────────
 
 function buildProjectBlock(decision: LiTTControlDecision): string {
+  const profileBlock = buildBusinessProfilePromptBlock(decision.context.businessProfile);
   if (!decision.context.projectId) {
-    if (decision.routing.requiresProject) {
-      return "Project: REQUIRED but none active. Ask the user to create or select a Project.";
-    }
-    return "Project: none (not required for this request).";
+    const base = decision.routing.requiresProject
+      ? "Project: REQUIRED but none active. Ask the user to create or select a Project."
+      : "Project: none (not required for this request).";
+    return profileBlock ? `${base}\n\n${profileBlock}` : base;
   }
-  return `Project: ${decision.context.projectId} (active).`;
+  const base = `Project: ${decision.context.projectId} (active).`;
+  return profileBlock ? `${base}\n\n${profileBlock}` : base;
 }
 
 // ─── Main composer ──────────────────────────────────────────────
