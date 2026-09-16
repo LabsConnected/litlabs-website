@@ -34,6 +34,7 @@ import {
 } from "../stores/useStudioAgentStore";
 import { useStudioModelStore, MODELS, type SelectedModel, type ProviderHealth } from "../stores/useStudioModelStore";
 import { useUserPlan } from "../hooks/useUserPlan";
+import { useHiddenAgents, visibleAgents } from "@/lib/agent-visibility";
 import { ChevronDown, Check, Lock } from "lucide-react";
 import Link from "next/link";
 import { useStudioAttachments } from "../hooks/useStudioAttachments";
@@ -1085,6 +1086,10 @@ function UnifiedSelectorPopover({
     (m) => m.category === "advanced",
   );
 
+  // Hidden built-in agents (e.g. Spark) stay out of the mode list.
+  const { hiddenAgents } = useHiddenAgents();
+  const visibleModes = visibleAgents(MODE_ITEMS, hiddenAgents);
+
   return (
     <div
       ref={ref}
@@ -1111,7 +1116,7 @@ function UnifiedSelectorPopover({
       </div>
 
       {/* LiTT — main agent */}
-      {MODE_ITEMS.map((item) => {
+      {visibleModes.map((item) => {
         const meta = AGENT_META[item.id];
         if (!meta) return null;
         const accent = meta.color;
