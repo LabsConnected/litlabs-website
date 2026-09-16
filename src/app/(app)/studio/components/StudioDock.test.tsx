@@ -151,4 +151,14 @@ describe("StudioDock", () => {
       unmount();
     }
   });
+
+  it("tab strip scrolls horizontally on narrow screens so all tabs stay reachable", () => {
+    renderDock();
+    // The tablist wraps the tab buttons; at 390px the five labeled tabs
+    // overflow, so the strip must scroll instead of clipping them.
+    const tablist = screen.getByRole("tablist", { name: "Studio dock tabs" });
+    expect(tablist.className).toMatch(/overflow-x-auto/);
+    // Desktop keeps the static strip.
+    expect(tablist.className).toMatch(/sm:overflow-visible/);
+  });
 });

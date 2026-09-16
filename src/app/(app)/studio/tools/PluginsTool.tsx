@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Plug,
   ArrowRight,
+  X,
 } from "lucide-react";
 import ProjectSourceSelector from "@/components/studio/ProjectSourceSelector";
 import { useCapabilities } from "@/app/(app)/studio/hooks/useCapabilities";
@@ -272,6 +273,28 @@ export default function PluginsTool() {
         )}
       </div>
 
+      {/* Error banner — top of the tool, visible on every tab (was buried
+          inside the Installed-tab empty state, so Sync/Disconnect failures
+          on the default Discover tab showed zero feedback). Dismissible. */}
+      {error && (
+        <div
+          className="flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-xs"
+          style={{ borderColor: "#ef444430", background: "#ef444408", color: "#ef4444" }}
+          role="alert"
+          data-testid="plugins-error-banner"
+        >
+          <span className="min-w-0 flex-1">{error}</span>
+          <button
+            type="button"
+            onClick={() => setError(null)}
+            aria-label="Dismiss error"
+            className="grid h-6 w-6 shrink-0 place-items-center rounded-lg transition hover:bg-white/10"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
       {/* Search */}
       <div className="relative shrink-0">
         <Search
@@ -370,11 +393,6 @@ export default function PluginsTool() {
               Browse providers
             </button>
           </div>
-          {error && (
-            <div className="mt-3 rounded-xl border px-3 py-2 text-xs" style={{ borderColor: "#ef444430", color: "#ef4444" }}>
-              {error}
-            </div>
-          )}
         </div>
       )}
 

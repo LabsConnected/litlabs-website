@@ -44,6 +44,10 @@ export default function SocialFeed({
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [loading, setLoading] = useState(true);
   const [posting, setPosting] = useState(false);
+  // True when the feed backend isn't configured (mock mode): posts can't
+  // persist, so the composer is disabled with honest copy instead of
+  // pretending to publish.
+  const [feedMock, setFeedMock] = useState(false);
   const [expandedComments, setExpandedComments] = useState<Set<string>>(
     new Set(),
   );
@@ -104,6 +108,7 @@ export default function SocialFeed({
       const res = await fetch(`/api/posts?filter=${feedFilter}`);
       const data = await res.json();
       setPosts(data.posts || []);
+      setFeedMock(!!data.mock);
     } catch {
       showToast("Failed to load feed. Try refreshing.", "error");
     } finally {
@@ -390,6 +395,24 @@ export default function SocialFeed({
               backgroundColor: T.boxBg,
             }}
           >
+            {/* Mock mode: the feed backend isn't connected, so posts can't
+                persist. Say so and disable the composer instead of letting
+                the user write into the void. */}
+            {feedMock && (
+              <div
+                className="mb-3 rounded-lg px-3 py-2.5 text-xs leading-relaxed"
+                style={{
+                  backgroundColor: T.linkColor + "12",
+                  border: `1px solid ${T.linkColor}30`,
+                  color: T.textColor,
+                }}
+                data-testid="composer-mock-notice"
+              >
+                Posting is paused — the community feed isn&apos;t connected
+                yet, so anything you write wouldn&apos;t save. The composer
+                will unlock automatically once it&apos;s live.
+              </div>
+            )}
             {/* Post Type Selector */}
             <div className="flex items-center gap-2 mb-3">
               {[
@@ -419,12 +442,15 @@ export default function SocialFeed({
 
             <textarea
               placeholder={
-                postType === "text"
-                  ? "What's your AI agent story?"
-                  : `Describe your ${postType}...`
+                feedMock
+                  ? "Posting is paused — the feed isn't connected yet"
+                  : postType === "text"
+                    ? "What's your AI agent story?"
+                    : `Describe your ${postType}...`
               }
               value={postContent}
               onChange={(e) => setPostContent(e.target.value)}
+              disabled={feedMock}
               className="w-full px-3 py-2.5 text-sm rounded-lg outline-none resize-none border"
               style={{
                 backgroundColor: T.bgColor,
@@ -508,6 +534,7 @@ export default function SocialFeed({
               <button
                 onClick={createPost}
                 disabled={
+                  feedMock ||
                   (!postContent.trim() && mediaFiles.length === 0) ||
                   posting ||
                   uploadingMedia
