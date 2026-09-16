@@ -903,6 +903,27 @@ function describeProviderFailureAfterDeployment(
 
 // ─── Resume from paused approval ──────────────────────────────────
 
+/**
+ * Extract a domain-level failure from a tool handler's result payload.
+ * Handlers signal failure by returning { success: false, error? } instead
+ * of throwing (e.g. workspace transport errors). Returns the error message,
+ * or null when the payload does not report failure.
+ */
+export function handlerFailureError(payload: unknown): string | null {
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const rec = payload as Record<string, unknown>;
+    if (rec.success === false) {
+      if (typeof rec.error === "string" && rec.error.trim()) return rec.error;
+      try {
+        return JSON.stringify(payload).slice(0, 500);
+      } catch {
+        return "tool reported failure";
+      }
+    }
+  }
+  return null;
+}
+
 export interface ResumeInput {
   /** The paused conversation messages at the point of approval pause */
   pausedMessages: LLMMessage[];
@@ -1015,12 +1036,33 @@ export async function resumeAgentLoopV2(
       });
 
       if (execResult.ok) {
-        result = {
-          toolCallId: resume.toolCallId,
-          toolId: resume.toolId,
-          result: execResult.result,
-          success: true,
-        };
+        // A handler can execute without throwing yet still report a
+        // domain-level failure ({ success: false, ... }) — e.g. the
+        // workspace transport is unreachable and files.mkdir returns
+        // { success: false, error }. Recording that as a successful
+        // mutation is a lie the rest of the run builds on: the toolCalls
+        // log would claim success, it would count as an intervening
+        // mutation (weakening loop detection, triggering build-fix for
+        // nothing), and the run could complete "successfully" with
+        // nothing created. Surface it as the failure it is so the
+        // model can retry or report, and the run result stays truthful.
+        const handlerError = handlerFailureError(execResult.result);
+        if (handlerError !== null) {
+          result = {
+            toolCallId: resume.toolCallId,
+            toolId: resume.toolId,
+            result: execResult.result,
+            success: false,
+            error: handlerError,
+          };
+        } else {
+          result = {
+            toolCallId: resume.toolCallId,
+            toolId: resume.toolId,
+            result: execResult.result,
+            success: true,
+          };
+        }
       } else {
         result = {
           toolCallId: resume.toolCallId,
@@ -1058,7 +1100,9 @@ export async function resumeAgentLoopV2(
     llmMessages.push(buildToolResultMessage(result));
 
     const toolDef = availableTools.find((t) => t.id === resume.toolId);
-    if (toolDef && !toolDef.readOnly) {
+    // Only a successful mutation counts: a failed approved call must not
+    // be cached as executed work or weaken loop detection.
+    if (toolDef && !toolDef.readOnly && result.success) {
       hasInterveningMutation = true;
       mutationBatchPending = true;
     }
