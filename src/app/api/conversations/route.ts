@@ -28,12 +28,7 @@ async function getHandler(req: NextRequest) {
 
     let query = supabaseAdmin
       .from("conversations")
-      .select(
-        `
-        *,
-        agent:agent_id (*)
-      `,
-      )
+      .select("*")
       .eq("user_id", dbUserId)
       .order("updated_at", { ascending: false });
 
@@ -50,9 +45,37 @@ async function getHandler(req: NextRequest) {
       );
     }
 
+    // conversations.agent_id is a plain TEXT slug — not an FK — so the
+    // PostgREST `agent:agent_id(*)` embed can never resolve and turned this
+    // endpoint into a permanent 500. Look up display names in one batch
+    // instead so consumers still get `agent.display_name` when it exists.
+    const agentIds = [
+      ...new Set(
+        (conversations ?? [])
+          .map((c) => c.agent_id)
+          .filter((id): id is string => typeof id === "string" && id.length > 0),
+      ),
+    ];
+    let agentNames = new Map<string, string>();
+    if (agentIds.length > 0) {
+      const { data: agents } = await supabaseAdmin
+        .from("agents")
+        .select("id, display_name")
+        .in("id", agentIds);
+      agentNames = new Map(
+        (agents ?? []).map((a) => [a.id, a.display_name] as const),
+      );
+    }
+    const enriched = (conversations ?? []).map((c) => ({
+      ...c,
+      agent: agentNames.has(c.agent_id)
+        ? { display_name: agentNames.get(c.agent_id) }
+        : null,
+    }));
+
     return NextResponse.json({
-      conversations: conversations || [],
-      total: conversations?.length || 0,
+      conversations: enriched,
+      total: enriched.length,
     });
   } catch {
     return NextResponse.json(
@@ -101,7 +124,7 @@ async function postHandler(req: NextRequest) {
         agent_id: agentId,
         title: conversationTitle,
       })
-      .select("*, agent:agent_id (*)")
+      .select("*")
       .single();
 
     if (error) {
@@ -112,7 +135,7 @@ async function postHandler(req: NextRequest) {
     }
 
     return NextResponse.json({
-      conversation,
+      conversation: { ...conversation, agent: agent ?? null },
       message: "Conversation created",
     });
   } catch {
