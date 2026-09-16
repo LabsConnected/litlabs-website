@@ -11,6 +11,7 @@ import {
   CircleCheck,
   ShieldCheck,
   Globe,
+  AlertTriangle,
 } from "lucide-react";
 import type { InspectorTab } from "../lib/studio-destinations";
 import type { ConnectionCapabilities } from "../hooks/useConnectionSummary";
@@ -30,6 +31,88 @@ interface DeploymentSummary {
   publicUrl: string | null;
   urlVerified: boolean;
   errorMessage: string | null;
+}
+
+/**
+ * Publish readiness — early warnings for the static-only publish pipeline.
+ *
+ * Publish rejects non-static or oversized artifacts *after* the deploy
+ * approval flow. This block surfaces the same failure modes beforehand,
+ * next to the deploy affordance, so the user can fix them first.
+ */
+interface ReadinessWarning {
+  code: string;
+  message: string;
+}
+
+function PublishReadinessBlock({ projectId }: { projectId: string }) {
+  const { getToken } = useClerkAuth();
+  const [warnings, setWarnings] = useState<ReadinessWarning[] | null>(null);
+  const [checkable, setCheckable] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const token = await getToken?.();
+        const res = await fetch(
+          `/api/studio-projects/${encodeURIComponent(projectId)}/publish-readiness`,
+          {
+            cache: "no-store",
+            credentials: "include",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            signal: AbortSignal.timeout(20000),
+          },
+        );
+        if (!res.ok) return;
+        const data = (await res.json().catch(() => null)) as {
+          checkable?: boolean;
+          warnings?: ReadinessWarning[];
+        } | null;
+        if (!cancelled && data?.checkable) {
+          setCheckable(true);
+          setWarnings(data.warnings ?? []);
+        }
+      } catch {
+        // Non-fatal — the readiness block simply doesn't render.
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, getToken]);
+
+  if (!checkable || warnings === null) return null;
+
+  if (warnings.length === 0) {
+    return (
+      <div className="flex items-center gap-1.5 py-2 text-[10px] leading-4" style={{ color: "#6ee7b7" }}>
+        <CircleCheck size={12} style={{ flexShrink: 0 }} />
+        Looks publishable — static files within publish limits.
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="my-2 rounded-lg border p-2.5"
+      style={{ borderColor: "rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.06)" }}
+      role="alert"
+    >
+      <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider" style={{ color: "#fbbf24" }}>
+        <AlertTriangle size={12} />
+        Before you deploy
+      </div>
+      <ul className="space-y-1.5">
+        {warnings.map((w) => (
+          <li key={w.code} className="text-[10px] leading-4" style={{ color: "#fde68a" }}>
+            {w.message}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 /**
@@ -95,6 +178,10 @@ function DeploymentStatusSection({ projectId }: { projectId: string | null }) {
   return (
     <InspectorSection title="Deployment">
       <InspectorRow label="Status" value={statusLabel} tone={tone} />
+      {/* Early publish warnings — before the user goes through approval. */}
+      {(!deployment || deployment.status !== "ready") ? (
+        <PublishReadinessBlock projectId={projectId} />
+      ) : null}
       {deployment?.publicUrl && deployment.urlVerified ? (
         <div className="flex items-start justify-between gap-3 border-b py-2 last:border-0" style={{ borderColor: "var(--studio-border)" }}>
           <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>Live URL</span>

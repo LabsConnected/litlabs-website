@@ -51,6 +51,25 @@ const AUTH_LABELS: Record<string, string> = {
   none: "No auth",
 };
 
+/**
+ * Where the "Connect" button for a plugin should take the user.
+ *
+ * The settings page reads `?section=` from the query string (it never
+ * reads `location.hash`), and the Connections section holds the AI/API
+ * key entry UI — so plugins without their own connect URL deep-link
+ * to `/settings?section=connections`, where the user can actually
+ * enter a key. Returns null when there is no in-app connect flow.
+ */
+export function settingsDeepLinkForPlugin(
+  plugin: Pick<PluginDefinition, "connectUrl" | "authMethod">,
+): string | null {
+  if (plugin.connectUrl) return plugin.connectUrl;
+  if (plugin.authMethod === "api-key" || plugin.authMethod === "endpoint") {
+    return "/settings?section=connections";
+  }
+  return null;
+}
+
 export default function PluginsTool() {
   const { resolvedColors: T } = useTheme();
   const { summary: capSummary, refresh: refreshCaps } = useCapabilities();
@@ -131,24 +150,14 @@ export default function PluginsTool() {
   const handleConnect = useCallback(
     async (plugin: PluginDefinition) => {
       // Use real connectUrl from API if available
-      const realUrl = plugin.connectUrl;
-      if (realUrl) {
-        window.location.href = realUrl;
+      const target = settingsDeepLinkForPlugin(plugin);
+      if (target) {
+        window.location.href = target;
+        setConnecting(null);
         return;
       }
       setConnecting(plugin.id);
-      // For API key providers, route to settings
-      if (plugin.authMethod === "api-key") {
-        window.location.href = `/settings#keys`;
-        setConnecting(null);
-        return;
-      }
-      // For endpoint providers, route to settings
-      if (plugin.authMethod === "endpoint") {
-        window.location.href = `/settings#connections`;
-        setConnecting(null);
-        return;
-      }
+      // No in-app connect flow for this auth method — nothing to navigate to.
       setConnecting(null);
     },
     [],
