@@ -3946,6 +3946,23 @@ main {
   50% { height: 10px; }
 }
 
+/* ── Loading bar (VMA-006) ────────────────────────────────────────── */
+/* Canonical loadingBar keyframes — the ONLY definition site-wide. All
+   route loading.tsx files render <LoadingBar> (src/components/ui/LoadingBar.tsx)
+   which animates via the .loading-bar class below. The global reduced-motion
+   block neutralizes this animation automatically. */
+
+@keyframes loadingBar {
+  0% { transform: translateX(-100%); width: 30%; }
+  50% { width: 50%; }
+  100% { transform: translateX(340%); width: 30%; }
+}
+
+.loading-bar {
+  animation: loadingBar 1.5s ease-in-out infinite;
+  will-change: transform, width;
+}
+
 /* ── Reduced motion ──────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {
