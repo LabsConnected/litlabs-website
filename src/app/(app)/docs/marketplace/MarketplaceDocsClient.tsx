@@ -43,7 +43,7 @@ export default function MarketplaceDocsClient() {
         code review assistants, blog post writers, product description
         writers, AI customer support, AI meeting notes, legal document
         analyzers, and brand kit generators. Some listings are marked{" "}
-        <strong>Coming soon</strong> — those aren&apos;t installable yet.
+        <strong>Coming soon</strong>{" "}— those aren&apos;t installable yet.
       </DocP>
 
       <DocH2 id="installing">Installing an agent</DocH2>

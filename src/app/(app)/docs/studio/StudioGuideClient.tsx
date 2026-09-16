@@ -82,12 +82,12 @@ export default function StudioGuideClient() {
       <DocList
         items={[
           <>
-            <strong>LiTT Auto</strong> — autonomous mode. Describe the goal
+            <strong>LiTT Auto</strong>{" "}— autonomous mode. Describe the goal
             and LiTT routes the work automatically. Start here if you&apos;re
             not sure which specialist to pick.
           </>,
           <>
-            <strong>Specialists</strong> — <InlineCode>LiTT</InlineCode> (your
+            <strong>Specialists</strong>{" "}— <InlineCode>LiTT</InlineCode> (your
             main operator), <InlineCode>Spark</InlineCode> (creative companion
             and designer), <InlineCode>Coder</InlineCode> (engineering and
             implementation), <InlineCode>Writer</InlineCode> (content and
@@ -99,7 +99,7 @@ export default function StudioGuideClient() {
             <InlineCode>Echo</InlineCode> (creative partner).
           </>,
           <>
-            <strong>Models</strong> — pick the underlying model for the
+            <strong>Models</strong>{" "}— pick the underlying model for the
             conversation, including your own API keys. Each provider shows
             live health: available, degraded, or locked.
           </>,
@@ -113,7 +113,7 @@ export default function StudioGuideClient() {
       <DocH2 id="plan">Plan</DocH2>
       <DocP>
         Before building, LiTT lays out the steps it intends to take. The{" "}
-        <strong>Plan</strong> tab shows that breakdown — what will be
+        <strong>Plan</strong>{" "}tab shows that breakdown — what will be
         created, changed, and verified. Review it, ask for changes, or let
         LiTT proceed. Big missions go smoother when the plan is right, so
         this is the cheapest place to steer.
@@ -121,7 +121,7 @@ export default function StudioGuideClient() {
 
       <DocH2 id="canvas">Canvas</DocH2>
       <DocP>
-        <strong>Canvas</strong> is the visual working surface — a place to
+        <strong>Canvas</strong>{" "}is the visual working surface — a place to
         arrange ideas, mock up layouts, and explore directions visually
         before they become files. Use it when you&apos;re thinking in
         pictures rather than code.
@@ -129,7 +129,7 @@ export default function StudioGuideClient() {
 
       <DocH2 id="code">Code</DocH2>
       <DocP>
-        The <strong>Code</strong> tab shows your project&apos;s actual files.
+        The <strong>Code</strong>{" "}tab shows your project&apos;s actual files.
         Every edit LiTT makes lands here as a real file change you can read,
         and you can switch between a file tree, an editor view, and an app
         preview of the running project. If you know how to code, this is
@@ -138,7 +138,7 @@ export default function StudioGuideClient() {
 
       <DocH2 id="preview">Preview</DocH2>
       <DocP>
-        <strong>Preview</strong> runs the active project so you can see and
+        <strong>Preview</strong>{" "}runs the active project so you can see and
         interact with it. Studio mounts exactly one preview per active
         project — it starts automatically, and if it ever fails to start the
         preview panel offers a retry. Preview is your iteration sandbox: it
@@ -148,7 +148,7 @@ export default function StudioGuideClient() {
 
       <DocH2 id="media">Media</DocH2>
       <DocP>
-        <strong>Media</strong> collects what LiTT generates for the project:
+        <strong>Media</strong>{" "}collects what LiTT generates for the project:
         images, video, music, and audio artifacts. Anything created during
         the build — a hero image, a product video, a jingle — shows up here,
         ready to use in the project or download.
@@ -156,16 +156,16 @@ export default function StudioGuideClient() {
 
       <DocH2 id="files">Files & Components</DocH2>
       <DocP>
-        The <strong>Files</strong> drawer browses the project&apos;s file
+        The <strong>Files</strong>{" "}drawer browses the project&apos;s file
         tree — everything LiTT created or changed, organized the way a
-        developer would expect. <strong>Components</strong> surfaces the
+        developer would expect. <strong>Components</strong>{" "}surfaces the
         reusable pieces. Together they answer “what is actually in my
         project right now?”
       </DocP>
 
       <DocH2 id="terminal">Terminal</DocH2>
       <DocP>
-        The <strong>Terminal</strong> drawer is a real terminal connected to
+        The <strong>Terminal</strong>{" "}drawer is a real terminal connected to
         your project&apos;s environment. LiTT uses it to install
         dependencies, run builds and tests, and inspect the project — every
         command is visible to you. You can also type your own commands any
@@ -176,7 +176,7 @@ export default function StudioGuideClient() {
 
       <DocH2 id="activity">Activity</DocH2>
       <DocP>
-        The <strong>activity timeline</strong> is the project&apos;s log:
+        The <strong>activity timeline</strong>{" "}is the project&apos;s log:
         missions sent, plans made, files edited, commands run, previews
         started, deployments prepared. When something surprises you, the
         timeline shows exactly what led to it.
@@ -184,7 +184,7 @@ export default function StudioGuideClient() {
 
       <DocH2 id="deploy-button">The Deploy button</DocH2>
       <DocP>
-        The <strong>Deploy</strong> button in the Studio header opens the
+        The <strong>Deploy</strong>{" "}button in the Studio header opens the
         preview/deploy flow for the active project. Deploying is the
         deliberate step that prepares your project to go live — and it may
         ask for your approval before anything publishes. What “deployed”

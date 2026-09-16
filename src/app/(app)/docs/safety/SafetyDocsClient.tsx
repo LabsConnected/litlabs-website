@@ -45,17 +45,17 @@ export default function SafetyDocsClient() {
       <DocList
         items={[
           <>
-            <strong>Deployment and publishing</strong> may present an
+            <strong>Deployment and publishing</strong>{" "}may present an
             approval step before anything goes live. Approve it and the
             deploy proceeds; decline or ignore it and nothing publishes.
           </>,
           <>
-            <strong>Plan review.</strong> For larger missions, LiTT shows
+            <strong>Plan review.</strong>{" "}For larger missions, LiTT shows
             its plan before acting — that&apos;s your cheapest moment to
             steer or stop.
           </>,
           <>
-            <strong>Session expiry.</strong> If your session expires
+            <strong>Session expiry.</strong>{" "}If your session expires
             mid-conversation, Studio tells you and asks you to sign in
             again rather than continuing in a broken state.
           </>,
@@ -105,11 +105,11 @@ litt --mode auto    # proceed autonomously`}
       <DocList
         items={[
           <>
-            <strong>LiTT Auto</strong> routes your request automatically —
+            <strong>LiTT Auto</strong>{" "}routes your request automatically —
             you describe the goal and LiTT picks how to handle it.
           </>,
           <>
-            <strong>Specific agents and models</strong> let you take control:
+            <strong>Specific agents and models</strong>{" "}let you take control:
             pick a specialist agent, and pick the underlying model —
             including your own API keys — with live provider health
             (available, degraded, locked) shown in the selector.

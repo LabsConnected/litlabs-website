@@ -69,7 +69,7 @@ export default function TroubleshootingClient() {
       <DocH2 id="terminal-disconnected">Terminal disconnected</DocH2>
       <DocP>
         If the terminal shows as disconnected or never starts, open the{" "}
-        <strong>Terminal</strong> drawer and reconnect it from there. LiTT
+        <strong>Terminal</strong>{" "}drawer and reconnect it from there. LiTT
         needs a connected terminal to install dependencies, run builds, and
         execute commands — without it, build steps will stall. If
         reconnecting fails repeatedly, refresh the page: Studio
