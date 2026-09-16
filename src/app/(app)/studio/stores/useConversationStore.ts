@@ -224,3 +224,16 @@ export function serializeConversationToUrl(
   }
   return params;
 }
+
+/**
+ * During the first hard-refresh render the server conversation list has not
+ * hydrated yet. Do not let an empty client store erase a durable URL
+ * conversation identity before that list can resolve it.
+ */
+export function shouldDeferConversationUrlSync(
+  conversationsHydrated: boolean,
+  urlConversationId: string | null,
+  selectedConversationId: string | null,
+): boolean {
+  return !conversationsHydrated && Boolean(urlConversationId) && !selectedConversationId;
+}

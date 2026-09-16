@@ -24,6 +24,18 @@ export interface IntentResult {
   actions?: Array<{ label: string; action: string }>;
 }
 
+// Navigation shortcuts must never intercept a request that describes a
+// mutation. A request can mention both an edit and a preview (for example,
+// "change the hero text and refresh the preview"); that is still an agent
+// request, not a request to open the Preview panel.
+const MUTATION_VERB = /\b(modif(?:y|ication)|change|edit|update|rewrite|replace|remove|delete|add|create|build|deploy|publish)\b/i;
+const MUTATION_TARGET = /\b(file|content|text|paragraph|code|project|site|page|hero|section|button|component|approval|diff)\b/i;
+
+export function isLikelyMutationRequest(input: string): boolean {
+  const text = input.trim();
+  return MUTATION_VERB.test(text) && MUTATION_TARGET.test(text);
+}
+
 interface IntentPattern {
   intent: StudioIntent;
   patterns: RegExp[];
@@ -151,6 +163,8 @@ export function detectIntent(input: string): IntentResult | null {
   if (generateCode?.patterns.some((pattern) => pattern.test(text))) {
     return buildIntentResult(generateCode.intent, generateCode.tool, text);
   }
+
+  if (isLikelyMutationRequest(text)) return null;
 
   for (const { intent, patterns, tool } of INTENT_PATTERNS) {
     for (const pattern of patterns) {

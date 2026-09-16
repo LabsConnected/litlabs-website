@@ -186,6 +186,14 @@ describe("F. provider produced plain text but took no required action", () => {
     const verdict = evaluateCompletion(requirementForMode("think"), NO_EVIDENCE);
     expect(workLogLabel(verdict)).toBeNull();
   });
+
+  it("does not treat completion prose as execution evidence", () => {
+    const modelText = "All done — the requested file was updated and published.";
+    const verdict = evaluateCompletion(requirementForMode("build"), NO_EVIDENCE);
+    expect(modelText).toMatch(/done/i);
+    expect(verdict.state).toBe("not_started");
+    expect(workLogLabel(verdict)).toMatch(/no action taken/i);
+  });
 });
 
 /* ── Label rendering ────────────────────────────────────────────── */

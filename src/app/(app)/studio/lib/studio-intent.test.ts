@@ -23,6 +23,13 @@ describe("Studio intent routing", () => {
     expect(intent?.intent).toBe("generate_code");
   });
 
+  it("sends an edit that also mentions preview through the agent loop", () => {
+    const intent = detectIntent(
+      'For the frozen Ember Roast project, make one approved modification: change the hero paragraph to exactly "Small-batch coffee, roasted with care and delivered fresh." Show the approval before applying it, apply it once, report the exact diff, refresh the preview, and stop before deploying.',
+    );
+    expect(intent).toBeNull();
+  });
+
   it("routes health and approval requests to their dedicated surfaces", () => {
     expect(detectIntent("Run project health checks")?.intent).toBe("project_health");
     expect(detectIntent("What needs approval?")?.intent).toBe("open_approvals");

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { shouldDeferConversationUrlSync } from "../stores/useConversationStore";
 
 const localStorageMock = (() => {
   let store: Record<string, string> = {};
@@ -43,6 +44,16 @@ describe("getActiveProjectId resolution", () => {
     const serverProjectId = "fresh-server";
     const result = serverProjectId ?? localStorageMock.getItem("litt:active-project-id") ?? null;
     expect(result).toBe("fresh-server");
+  });
+});
+
+describe("conversation URL hydration", () => {
+  it("preserves a durable URL conversation while the client store is empty", () => {
+    expect(shouldDeferConversationUrlSync(false, "conv-ember", null)).toBe(true);
+  });
+
+  it("allows URL synchronization after the server list hydrates", () => {
+    expect(shouldDeferConversationUrlSync(true, "conv-ember", null)).toBe(false);
   });
 });
 
