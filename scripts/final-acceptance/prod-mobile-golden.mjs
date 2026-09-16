@@ -134,11 +134,26 @@ async function dismissCookieConsent(page) {
   }
 }
 
+// The Studio dock persists its open state in sessionStorage
+// ("studio-dock-open"), and while it is open CommandStudio deliberately
+// suppresses the mobile LiTT FAB. Observed in the 2026-09-16 golden run:
+// after the hard refresh/goBack the dock stayed open, so the sheet trigger
+// never rendered. Close it via its own close control — the same path a
+// real user takes — before reopening the sheet.
+async function closeStudioDock(page) {
+  const close = page.getByTestId("dock-close").first();
+  if (await close.isVisible().catch(() => false)) {
+    await close.click().catch(() => {});
+    await page.waitForTimeout(400);
+  }
+}
+
 // Re-open the LiTT mobile sheet — it is a transient surface that does
 // not (and should not) persist across hard refreshes or history nav.
 async function openMobileSheet(page) {
   const sheet = page.getByTestId("litt-mobile-sheet");
   if (await sheet.isVisible().catch(() => false)) return;
+  await closeStudioDock(page);
   const trigger = page
     .getByRole("button", { name: "Ask LiTT to build" })
     .first();
