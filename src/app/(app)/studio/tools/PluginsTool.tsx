@@ -155,7 +155,13 @@ export default function PluginsTool() {
 
   const handleDisconnect = useCallback(async (pluginId: string) => {
     try {
-      await fetch(`/api/connections/${pluginId}/disconnect`, { method: "POST" });
+      const res = await fetch(`/api/connections/${pluginId}/disconnect`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || "Disconnect failed");
+        return;
+      }
+      setError(null);
       setPlugins((prev) =>
         prev.map((p) =>
           p.id === pluginId
@@ -164,16 +170,22 @@ export default function PluginsTool() {
         ),
       );
     } catch {
-      // ignore
+      setError("Disconnect failed — please try again.");
     }
   }, []);
 
   const handleSync = useCallback(async (pluginId: string) => {
     try {
-      await fetch(`/api/connections/${pluginId}/sync`, { method: "POST" });
+      const res = await fetch(`/api/connections/${pluginId}/sync`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || "Sync failed");
+        return;
+      }
+      setError(null);
       void refreshConnections();
     } catch {
-      // ignore
+      setError("Sync failed — please try again.");
     }
   }, [refreshConnections]);
 
@@ -345,34 +357,7 @@ export default function PluginsTool() {
             </p>
           </div>
           <ProjectSourceSelector
-            onSelected={(src) => {
-              if (src.type === "upload") {
-                // Trigger file upload flow
-                const input = document.createElement("input");
-                input.type = "file";
-                input.accept = ".zip,.tar,.tgz";
-                input.onchange = async () => {
-                  const file = input.files?.[0];
-                  if (!file) return;
-                  const formData = new FormData();
-                  formData.append("file", file);
-                  try {
-                    const res = await fetch("/api/project-sources/upload", {
-                      method: "POST",
-                      body: formData,
-                    });
-                    if (!res.ok) {
-                      const data = await res.json().catch(() => ({}));
-                      throw new Error(data.error || "Upload failed");
-                    }
-                    void refreshConnections();
-                  } catch (err) {
-                    setError(err instanceof Error ? err.message : "Upload failed");
-                  }
-                };
-                input.click();
-                return;
-              }
+            onSelected={() => {
               void refreshConnections();
             }}
           />
@@ -436,6 +421,11 @@ function PluginCard({
 }) {
   const statusColor = STATUS_COLORS[plugin.status];
   const isInstalled = plugin.installed;
+  // Only GitHub has real server-side sync/disconnect backends
+  // (/api/connections/[id]/sync, /api/connections/[id]/disconnect).
+  // Other providers derive their status or store keys in settings —
+  // showing the buttons for them would 501, so they stay hidden.
+  const supportsSyncDisconnect = plugin.id === "github";
 
   return (
     <div
@@ -534,7 +524,7 @@ function PluginCard({
             )}
             Connect
           </button>
-        ) : (
+        ) : supportsSyncDisconnect ? (
           <>
             <button
               onClick={onSync}
@@ -551,7 +541,7 @@ function PluginCard({
               Disconnect
             </button>
           </>
-        )}
+        ) : null}
       </div>
     </div>
   );
