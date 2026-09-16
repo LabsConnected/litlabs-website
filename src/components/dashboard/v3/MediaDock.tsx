@@ -80,31 +80,10 @@ export function MediaDock({ dock, actions, onOpenQueue, onOpenFocusMode }: Media
     [actions],
   );
 
-  // Empty state
+  // Empty state — render nothing. The dock only appears once there is
+  // an actual track or queued items; no persistent "nothing playing" bar.
   if (dock.source === "none" && dock.queue.length === 0) {
-    return (
-      <div
-        className="fixed bottom-0 left-0 right-0 z-50 flex h-16 items-center justify-center border-t px-4 backdrop-blur-xl md:h-20 md:px-6"
-        style={{
-          background: "rgba(10,10,10,0.8)",
-          borderColor: "rgba(255,255,255,0.06)",
-        }}
-      >
-        <p className="text-sm" style={{ color: "#71717a" }}>
-          Nothing playing — Choose media or paste a YouTube URL
-        </p>
-        <button
-          onClick={onOpenQueue}
-          className="ml-3 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors"
-          style={{
-            borderColor: "rgba(167,139,250,0.3)",
-            color: "#a78bfa",
-          }}
-        >
-          Open Queue
-        </button>
-      </div>
-    );
+    return null;
   }
 
   const progress = dock.durationMs > 0 ? (dock.positionMs / dock.durationMs) * 100 : 0;
