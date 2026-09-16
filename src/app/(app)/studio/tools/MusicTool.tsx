@@ -5,7 +5,7 @@
  *
  * Three-column layout:
  *   LEFT  — Music rail (Create / Library / Playlists / Likes / Uploads)
- *   CENTER— Creation surface (Quick Create / Custom / Remix / Upload) +
+ *   CENTER— Creation surface (Quick Create / Custom / Remix) +
  *           recent generations as rich TrackCards.
  *   RIGHT — LiTT Producer panel (AI producer chat + one-tap transformations).
  *
@@ -92,7 +92,7 @@ const SURPRISE_PROMPTS = [
 ];
 
 type RailTab = "create" | "library" | "playlists" | "likes" | "uploads";
-type CreateTab = "quick" | "custom" | "remix" | "upload";
+type CreateTab = "quick" | "custom" | "remix";
 
 export default function MusicTool() {
   const { resolvedColors: T } = useTheme();
@@ -599,7 +599,6 @@ export default function MusicTool() {
                   { id: "quick" as const, label: "Quick Create", icon: Sparkles },
                   { id: "custom" as const, label: "Custom", icon: SlidersHorizontal },
                   { id: "remix" as const, label: "Remix / Extend", icon: Wand },
-                  { id: "upload" as const, label: "Upload Audio", icon: Upload },
                 ]).map((t) => {
                   const Icon = t.icon;
                   return (
@@ -611,21 +610,7 @@ export default function MusicTool() {
                 })}
               </div>
 
-              {createTab === "upload" ? (
-                <div style={{ ...cardStyle, textAlign: "center", padding: "48px 24px" }}>
-                  <div style={{ width: 72, height: 72, margin: "0 auto 16px", borderRadius: 18, display: "grid", placeItems: "center", background: `linear-gradient(135deg, ${accent}22, rgba(168,85,247,.18))`, border: "1px solid var(--studio-border)" }}>
-                    <Upload size={30} style={{ color: accent }} />
-                  </div>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text-primary)", marginBottom: 6 }}>Upload your own audio</div>
-                  <div style={{ fontSize: 12, color: "var(--text-muted)", maxWidth: 380, margin: "0 auto 18px", lineHeight: 1.5 }}>
-                    Drop an MP3, WAV or FLAC to bring it into your studio library. You can then remix, extend or use it as a style reference.
-                  </div>
-                  <button style={{ ...tabBtn(true), padding: "10px 20px" }} disabled>
-                    <Upload size={14} /> Choose file
-                  </button>
-                  <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 10 }}>Coming soon — upload pipeline in progress</div>
-                </div>
-              ) : (
+              {
                 <div style={{ ...cardStyle, padding: "clamp(16px, 2vw, 22px)" }}>
                   {/* Remix source banner */}
                   {createTab === "remix" && remixSource && (
@@ -940,7 +925,7 @@ export default function MusicTool() {
                     </div>
                   )}
                 </div>
-              )}
+              }
 
               {/* Recent generations */}
               <div style={{ marginTop: 22 }}>

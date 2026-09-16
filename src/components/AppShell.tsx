@@ -31,6 +31,7 @@ import { useLittHealth } from "@/hooks/useLittHealth";
 import {
   getVisibleNavSections,
   APP_NAV_BOTTOM,
+  APP_NAV_SECONDARY,
   isAppNavActive,
   type NavItem,
 } from "@/lib/navigation";
@@ -116,6 +117,10 @@ function IdentityDock() {
     { label: "Wallet", href: "/wallet", icon: WalletIcon },
     { label: "Settings", href: "/settings", icon: SettingsIcon },
   ];
+  // Secondary surfaces (Library, Developer Tools) — canonical nav data.
+  const secondaryItems = APP_NAV_SECONDARY.flatMap((s) => s.items).filter(
+    (i): i is NavItem & { href: string } => typeof i.href === "string",
+  );
 
   return (
     <div ref={dockRef} className="relative">
@@ -147,6 +152,8 @@ function IdentityDock() {
         >
           <IdentityMenuHeader name={displayName} email={email} role={role} roleColor={roleColor} T={T} />
           <IdentityMenuItems items={menuItems} T={T} onClick={() => setOpen(false)} />
+          <IdentityMenuDivider T={T} />
+          <IdentityMenuItems items={secondaryItems} T={T} onClick={() => setOpen(false)} />
           <IdentityMenuDivider T={T} />
           <IdentityMenuSignOut onClick={() => { setOpen(false); void signOut(); }} />
         </div>

@@ -866,14 +866,20 @@ const MarketplaceCard = memo(function MarketplaceCard({
           )}
         </div>
 
-        {/* Requirements */}
+        {/* Requirements — actionable: links to the connections settings where
+            the dependency can actually be connected. */}
         {needsSetup && (
-          <div className="mt-2 flex items-center gap-1.5 text-[10px]" style={{ color: textMuted }}>
+          <Link
+            href="/settings/connections"
+            className="mt-2 flex items-center gap-1.5 text-[10px] transition hover:opacity-80"
+            style={{ color: textMuted }}
+          >
             <span>Requires:</span>
-            <span className="font-medium" style={{ color: isInstalled && !isEnabled ? "#fbbf24" : textMuted }}>
+            <span className="font-medium underline decoration-dotted" style={{ color: isInstalled && !isEnabled ? "#fbbf24" : textMuted }}>
               {item.required_connections.map((c) => CONNECTION_LABELS[c] || c).join(", ")}
             </span>
-          </div>
+            <ArrowRight size={10} />
+          </Link>
         )}
 
         {/* Status badge + price */}
@@ -930,15 +936,18 @@ const MarketplaceCard = memo(function MarketplaceCard({
             </Link>
           ) : isInstalled ? (
             <div className="flex gap-2">
-              {isEnabled ? (
+              {needsSetup ? (
+                // Capability needs a connected service before it can run —
+                // send the user to the real setup surface instead of a
+                // dead ?capability= studio link.
                 <Link
-                  href={`/studio?tool=chat&capability=${item.capability_key}`}
+                  href="/settings/connections"
                   className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition hover:scale-[1.02]"
                   style={{ background: categoryColor + "20", color: categoryColor }}
                 >
-                  <ArrowRight size={12} /> Use in Studio
+                  <ArrowRight size={12} /> Set up connection
                 </Link>
-              ) : (
+              ) : !isEnabled ? (
                 <button
                   onClick={onToggleEnabled}
                   className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold"
@@ -946,6 +955,17 @@ const MarketplaceCard = memo(function MarketplaceCard({
                 >
                   Enable
                 </button>
+              ) : (
+                // Installed + enabled, no missing connections. Installed
+                // capabilities do not yet have a Studio activation surface —
+                // show the truthful state rather than a dead "Use in Studio"
+                // link whose ?capability= param nothing consumes.
+                <span
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold"
+                  style={{ background: borderColor + "10", color: textMuted }}
+                >
+                  <Check size={12} /> Active
+                </span>
               )}
               <button
                 onClick={onToggleEnabled}

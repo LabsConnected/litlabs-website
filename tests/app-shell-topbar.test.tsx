@@ -105,7 +105,7 @@ describe("AppShell top bar", () => {
     );
     const header = getHeader();
     const scope = within(header);
-    for (const label of ["Dashboard", "Studio", "Discover", "Marketplace", "Wallet", "Settings"]) {
+    for (const label of ["Dashboard", "Studio", "Projects", "Explore", "Marketplace", "Wallet", "Settings"]) {
       expect(scope.getAllByText(label).length).toBeGreaterThanOrEqual(1);
     }
   });
@@ -117,10 +117,10 @@ describe("AppShell top bar", () => {
       </AppShell>,
     );
     const scope = within(getHeader());
-    // Create lived in the old mobile bottom bar; Music/Showcase/Projects
+    // Create lived in the old mobile bottom bar; Music/Showcase
     // were removed from nav earlier. Games 404s while retroGameRuntime
     // is off, so it must not appear.
-    for (const removed of ["Create", "Music", "Showcase", "Projects", "Games"]) {
+    for (const removed of ["Create", "Music", "Showcase", "Games"]) {
       expect(scope.queryByText(removed)).toBeNull();
     }
   });
@@ -138,7 +138,7 @@ describe("AppShell top bar", () => {
     // Desktop inline nav + mobile scroll strip both mark Discover
     expect(current.length).toBeGreaterThanOrEqual(2);
     for (const el of current) {
-      expect(el.textContent).toContain("Discover");
+      expect(el.textContent).toContain("Explore");
     }
   });
 
