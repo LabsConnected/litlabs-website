@@ -24,6 +24,7 @@ import {
   toChatMessage as toCanonicalChatMessage,
   parseConversationFromUrl,
   serializeConversationToUrl,
+  shouldDeferConversationUrlSync,
 } from "../stores/useConversationStore";
 import { useExecutionStore, feedSSEEventToExecutionStore } from "../stores/useExecutionStore";
 import { mobileDiag } from "../lib/mobileDiagnostics";
@@ -228,6 +229,11 @@ export function useCanonicalConversation({
   const searchParamsRef = useRef(searchParams);
   useEffect(() => { searchParamsRef.current = searchParams; }, [searchParams]);
   const loadedProjectIdRef = useRef<string | null | undefined>(undefined);
+  // Keep the URL conversation identity intact until the first server
+  // conversation list has hydrated. On a hard refresh the store starts empty;
+  // syncing that empty state too early deletes ?conversation= before the
+  // server can restore the selected conversation.
+  const conversationsHydratedRef = useRef(false);
   // Bumped every time the active project actually changes. Sends capture
   // the generation at start; a send that hasn't dispatched yet is cancelled
   // when the project switches under it, so a message can never land in the
@@ -517,13 +523,17 @@ export function useCanonicalConversation({
 
   const loadConversations = useCallback(async () => {
     const projectId = getActiveProjectId(serverProjectId, userId);
+    conversationsHydratedRef.current = false;
     const s = getStore();
     if (loadedProjectIdRef.current !== projectId) {
       s.resetForProject();
       loadedProjectIdRef.current = projectId;
       projectGenerationRef.current += 1;
     }
-    if (!projectId) return;
+    if (!projectId) {
+      conversationsHydratedRef.current = true;
+      return;
+    }
 
     s.setLoading(true);
     try {
@@ -557,6 +567,7 @@ export function useCanonicalConversation({
         await loadMessages(conversations[0].id);
         await recoverInterruptedRuns(conversations[0].id);
       }
+      conversationsHydratedRef.current = true;
     } catch {
       // Non-fatal — offline or server unavailable
     } finally {
@@ -620,6 +631,12 @@ export function useCanonicalConversation({
   // Sync URL when conversation or agent changes
   const syncUrl = useCallback(() => {
     if (isSyncingFromUrl.current) return;
+    const urlConversationId = parseConversationFromUrl(searchParams).conversationId;
+    if (shouldDeferConversationUrlSync(
+      conversationsHydratedRef.current,
+      urlConversationId,
+      selectedConversationId,
+    )) return;
     const conversationForUrl = selectedConversationId?.startsWith(OPTIMISTIC_CONVERSATION_ID_PREFIX)
       ? null
       : selectedConversationId;
