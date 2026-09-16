@@ -39,10 +39,10 @@ function currentMode() {
   return currentSearchParams.get("mode");
 }
 
-/** No canonical workspace stage tab is active — the signature of the
-    Builder surface (work mode + workSurface "builder"). */
+/** No primary workspace stage tab is active — the signature of the
+    Builder surface (contextual work mode + workSurface "builder"). */
 function expectBuilderSurfaceActive() {
-  for (const id of ["plan", "canvas", "code", "preview", "media"]) {
+  for (const id of ["canvas", "code", "preview"]) {
     const tab = screen.queryByTestId(`workspace-tab-${id}`);
     expect(tab, `workspace-tab-${id} should be rendered`).toBeTruthy();
     expect(tab!.className, `workspace-tab-${id} should be inactive`).not.toContain("glass-active");
@@ -478,9 +478,12 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     it("direct ?tool=build mounts the Builder surface with the workspace chrome", async () => {
       setUrl("tool=build");
       await renderCommandStudio();
-      // The workspace tab row must be visible — Builder is reachable,
-      // not hidden behind a closed tools drawer.
-      expect(screen.getByTestId("workspace-tab-plan")).toBeTruthy();
+      // The primary workspace row remains visible. Plan is a contextual
+      // surface, not a fourth competing primary workspace mode.
+      expect(screen.queryByTestId("workspace-tab-plan")).toBeNull();
+      expect(screen.getByTestId("workspace-tab-canvas")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-code")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-preview")).toBeTruthy();
       expectBuilderSurfaceActive();
       // The URL must remain the canonical tool=build — not rewritten to
       // chat/preview/canvas by competing canonicalization effects.
@@ -575,6 +578,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       const user = userEvent.setup();
       // The dock is an overlay — Inspector opens inside it without
       // touching the active Builder surface or the canonical URL.
+      await user.click(screen.getByTestId("dock-collapsed-toggle"));
       await user.click(screen.getByTestId("dock-tab-inspector"));
       expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "true");
       expect(screen.getByTestId("dock-tab-inspector")).toHaveAttribute("aria-selected", "true");
@@ -606,6 +610,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       const view = await renderCommandStudio();
       expectBuilderSurfaceActive();
       const user = userEvent.setup();
+      await user.click(screen.getByTestId("dock-collapsed-toggle"));
       await user.click(screen.getByTestId("dock-tab-terminal"));
       expect(screen.getByTestId("dock-tab-terminal")).toHaveAttribute("aria-selected", "true");
       act(() => view.rerender(<CommandStudio />));
@@ -658,6 +663,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       const user = userEvent.setup();
       // Files is a dock tab — opening it must not change the
       // active Builder surface or the canonical URL.
+      await user.click(screen.getByTestId("dock-collapsed-toggle"));
       await user.click(screen.getByTestId("dock-tab-files"));
       expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "true");
       act(() => view.rerender(<CommandStudio />));
@@ -764,13 +770,11 @@ describe("CommandStudio — mounted Work-surface routing", () => {
         setUrl("mode=image&project=proj-1");
         view.rerender(<CommandStudio />);
       });
-      // ?mode=image is an explicit creation-mode assertion — it applies
-      // even without ?tool=, and the LiTT-mode→stage sync opens the
-      // Media stage for the generated artifacts. That stage move is the
-      // authoritative surface change, so Builder exits coherently
-      // (no dormant builder flag under a media stage).
-      const mediaBtn = screen.getByTestId("workspace-tab-media");
-      await waitFor(() => expect(mediaBtn.className).toContain("glass-active"));
+      // ?mode=image is an explicit creation-mode assertion. Media is now a
+      // contextual developer-drawer surface rather than a fourth primary
+      // workspace tab, so the primary row stays reduced while the mode is
+      // preserved in the URL.
+      expect(screen.queryByTestId("workspace-tab-media")).toBeNull();
       await waitFor(() => expect(currentMode()).toBe("image"));
     });
 
@@ -856,7 +860,6 @@ describe("CommandStudio — mounted Work-surface routing", () => {
   describe("canonical workspace tabs", () => {
     it("renders exactly four workspace tabs: Plan, Canvas, Code, Preview", async () => {
       await renderCommandStudio();
-      expect(screen.getByTestId("workspace-tab-plan")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-canvas")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-code")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-preview")).toBeTruthy();
@@ -895,15 +898,20 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       });
     });
 
-    it("clicking Plan returns to plan stage from another stage", async () => {
+    it("keeps Plan contextual while the primary workspace stays reduced", async () => {
       const { user } = await renderCommandStudio();
-      // Go to Code first
+      // Go to Code first.
       await user.click(screen.getByTestId("workspace-tab-code"));
-      // Then back to Plan
-      const planBtn = screen.getByTestId("workspace-tab-plan");
-      await user.click(planBtn);
+      // Plan is no longer a persistent competing tab. The contextual route
+      // remains available through existing Studio routing and the primary
+      // row exposes only Design / Code / Preview.
+      expect(screen.queryByTestId("workspace-tab-plan")).toBeNull();
+      expect(screen.getByTestId("workspace-tab-canvas")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-code")).toBeTruthy();
+      const previewBtn = screen.getByTestId("workspace-tab-preview");
+      await user.click(previewBtn);
       await waitFor(() => {
-        expect(planBtn.className).toContain("glass-active");
+        expect(previewBtn.className).toContain("glass-active");
       });
     });
 
@@ -946,9 +954,10 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(composers.length).toBeLessThanOrEqual(1);
     });
 
-    it("renders Operator status bar at the bottom", async () => {
+    it("keeps developer tools collapsed at the bottom", async () => {
       await renderCommandStudio();
-      expect(screen.getByTestId("studio-operator-bar")).toBeTruthy();
+      expect(screen.getByTestId("dock-collapsed-toggle")).toBeTruthy();
+      expect(screen.queryByTestId("studio-operator-bar")).toBeNull();
     });
 
     it("LiTT collapse button works", async () => {
@@ -986,8 +995,8 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       const { user } = await renderCommandStudio();
       // Collapse LiTT
       await user.click(screen.getByTestId("litt-panel-collapse"));
-      // Workspace tabs should still be present
-      expect(screen.getByTestId("workspace-tab-plan")).toBeTruthy();
+      // The reduced primary workspace tabs should still be present.
+      expect(screen.queryByTestId("workspace-tab-plan")).toBeNull();
       expect(screen.getByTestId("workspace-tab-canvas")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-code")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-preview")).toBeTruthy();
@@ -1049,8 +1058,9 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     it("clicking a dock tab on the collapsed strip opens the dock on that tab", async () => {
       const { user } = await renderCommandStudio();
       expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "false");
-      // The tab strip is visible even when collapsed — clicking Files opens
-      // the dock directly on the Files tab.
+      // The collapsed drawer has one entry point; contextual tabs appear
+      // after opening it.
+      await user.click(screen.getByTestId("dock-collapsed-toggle"));
       await user.click(screen.getByTestId("dock-tab-files"));
       expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "true");
       expect(screen.getByTestId("dock-tab-files")).toHaveAttribute("aria-selected", "true");
@@ -1137,6 +1147,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       // the Activity dock tab.
       const chatPanel = screen.getByTestId("litt-chat-panel");
       expect(chatPanel.querySelector("[data-testid='mission-cards']")).toBeNull();
+      await user.click(screen.getByTestId("dock-collapsed-toggle"));
       await user.click(screen.getByTestId("dock-tab-activity"));
       expect(screen.getByTestId("mission-cards")).toBeInTheDocument();
       expect(screen.queryByTestId("mobile-build-status")).toBeNull();

@@ -3,7 +3,9 @@ import { auth } from "@/lib/auth";
 import {
   getProject,
   deleteProject,
+  renameProject,
 } from "@/lib/projects/project-repository";
+import { validateProjectName } from "@/lib/projects/project-name";
 
 /**
  * GET /api/studio-projects/[projectId]
@@ -66,4 +68,21 @@ export async function DELETE(
   }
 
   return NextResponse.json({ success: true });
+}
+
+/** PATCH /api/studio-projects/[projectId] — rename an owned project. */
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ projectId: string }> },
+) {
+  const { userId } = await auth(request);
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { projectId } = await params;
+  const body = await request.json().catch(() => null) as { name?: unknown } | null;
+  const name = typeof body?.name === "string" ? body.name : "";
+  const nameError = validateProjectName(name);
+  if (nameError) return NextResponse.json({ error: nameError }, { status: 400 });
+  const project = await renameProject(projectId, userId, name);
+  if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  return NextResponse.json({ project });
 }

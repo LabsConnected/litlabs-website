@@ -354,6 +354,26 @@ describe("useInworldSession — TTS state machine", () => {
     ).rejects.toThrow(/not active/i);
   });
 
+  it("propagates microphone permission failures instead of reporting listening", async () => {
+    const getUserMedia = navigator.mediaDevices.getUserMedia as unknown as {
+      mockRejectedValueOnce: (error: unknown) => void;
+    };
+    getUserMedia.mockRejectedValueOnce(new DOMException("Permission denied", "NotAllowedError"));
+
+    const { result } = renderHook(() => useInworldSession({}));
+    await connectAndWait(result);
+
+    await expect(
+      act(async () => {
+        await result.current.startMicrophone();
+      }),
+    ).rejects.toThrow(/microphone permission denied/i);
+
+    expect(result.current.isListening).toBe(false);
+    expect(useVoiceStore.getState().state).toBe("error");
+    expect(useVoiceStore.getState().error).toContain("Microphone permission denied");
+  });
+
   it("connect() retries exactly once with a force-refreshed credential on a 4001 close", async () => {
     vi.mocked(getVoiceConnection).mockClear();
     const { result } = renderHook(() => useInworldSession({}));

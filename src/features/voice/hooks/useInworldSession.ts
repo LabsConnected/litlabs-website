@@ -440,16 +440,43 @@ export function useInworldSession(
       };
       animationFrameRef.current = requestAnimationFrame(checkLevel);
     } catch (err) {
+      const errorName = err instanceof DOMException ? err.name : "";
       const message = err instanceof Error ? err.message : "Failed to access microphone";
-      if (message.includes("Permission") || message.includes("NotAllowed")) {
-        setErrorState("Microphone permission denied. Please allow microphone access in your browser settings.");
-      } else if (message.includes("NotFound") || message.includes("DevicesNotFoundError")) {
-        setErrorState("No microphone found. Please connect a microphone and try again.");
-      } else {
-        setErrorState(`Microphone error: ${message}`);
+      let userMessage = `Microphone error: ${message}`;
+      if (errorName === "NotAllowedError" || errorName === "PermissionDeniedError" || /permission|notallowed/i.test(message)) {
+        userMessage = "Microphone permission denied. Please allow microphone access in your browser settings.";
+      } else if (errorName === "NotFoundError" || errorName === "DevicesNotFoundError" || /notfound|no microphone/i.test(message)) {
+        userMessage = "No microphone found. Please connect a microphone and try again.";
       }
-      setError(message);
+      setErrorState(userMessage);
+      setError(userMessage);
       setState("error");
+      // Do not let the caller mark the session as listening when capture
+      // failed. Tear down any partially-created graph/stream before
+      // propagating the failure to the canonical voice state machine.
+      if (mixerUnsubRef.current) {
+        mixerUnsubRef.current();
+        mixerUnsubRef.current = null;
+      }
+      vadRef.current?.destroy();
+      vadRef.current = null;
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      processorRef.current?.disconnect();
+      processorRef.current = null;
+      micStreamRef.current?.getTracks().forEach((track) => track.stop());
+      micStreamRef.current = null;
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(() => {});
+        audioContextRef.current = null;
+      }
+      analyserRef.current = null;
+      setIsListening(false);
+      isListeningRef.current = false;
+      useVoiceStore.getState().setAudioLevel(0);
+      throw new Error(userMessage);
     }
   }, [ensureAudioContextRunning, setState, setError]);
 

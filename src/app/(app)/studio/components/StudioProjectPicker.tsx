@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, Folder, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Folder, Pencil, Plus, Trash2 } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { isManagedSourceType } from "@/lib/projects/project-source";
+import ProjectNameDialog from "./ProjectNameDialog";
 
 interface ProjectOption {
   id: string;
@@ -25,6 +26,7 @@ export default function StudioProjectPicker({
   onSelect,
   onCreateProject,
   onDeleteProject,
+  onProjectRenamed,
 }: {
   projectId: string | null;
   projectName: string | null;
@@ -35,6 +37,7 @@ export default function StudioProjectPicker({
    * the active project when it matches the deleted id.
    */
   onDeleteProject?: (projectId: string) => void;
+  onProjectRenamed?: (projectId: string, name: string) => void;
 }) {
   const { getToken } = useClerkAuth();
   const [open, setOpen] = useState(false);
@@ -44,6 +47,9 @@ export default function StudioProjectPicker({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [renameProject, setRenameProject] = useState<ProjectOption | null>(null);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [triggerRect, setTriggerRect] = useState<DOMRect | null>(null);
 
@@ -138,6 +144,31 @@ export default function StudioProjectPicker({
     }
   };
 
+  const handleRenameProject = async (name: string) => {
+    if (!renameProject) return;
+    setRenaming(true);
+    setRenameError(null);
+    try {
+      const token = await getToken?.();
+      const response = await fetch(`/api/studio-projects/${encodeURIComponent(renameProject.id)}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ name }),
+        signal: AbortSignal.timeout(15000),
+      });
+      const payload = await response.json().catch(() => null) as { project?: ProjectOption; error?: string } | null;
+      if (!response.ok) throw new Error(payload?.error ?? `Rename failed (${response.status})`);
+      setProjects((prev) => prev.map((project) => project.id === renameProject.id ? { ...project, name } : project));
+      onProjectRenamed?.(renameProject.id, name);
+      setRenameProject(null);
+    } catch (renameErr) {
+      setRenameError(renameErr instanceof Error ? renameErr.message : "Rename failed.");
+    } finally {
+      setRenaming(false);
+    }
+  };
+
   return (
     <div className="min-w-0 shrink-0">
       <button
@@ -179,11 +210,23 @@ export default function StudioProjectPicker({
               onCancelDelete={() => { setConfirmDeleteId(null); setDeleteError(null); }}
               onConfirmDelete={(project) => { void handleDeleteProject(project); }}
               onCreateProject={onCreateProject ? () => { setOpen(false); onCreateProject(); } : undefined}
+              onRequestRename={(project) => { setOpen(false); setRenameError(null); setRenameProject(project); }}
             />,
             document.body,
           )}
         </>
       )}
+      <ProjectNameDialog
+        open={Boolean(renameProject)}
+        defaultName={renameProject?.name}
+        title="Rename project"
+        description="Update this project’s display name without changing its files or workspace."
+        submitLabel="Save name"
+        busy={renaming}
+        error={renameError}
+        onCancel={() => { if (!renaming) setRenameProject(null); }}
+        onSubmit={handleRenameProject}
+      />
     </div>
   );
 }
@@ -211,6 +254,7 @@ function ProjectPickerMenu({
   onCancelDelete,
   onConfirmDelete,
   onCreateProject,
+  onRequestRename,
 }: {
   rect: DOMRect | null;
   loading: boolean;
@@ -225,6 +269,7 @@ function ProjectPickerMenu({
   onCancelDelete: () => void;
   onConfirmDelete: (project: ProjectOption) => void;
   onCreateProject?: () => void;
+  onRequestRename: (project: ProjectOption) => void;
 }) {
   const menuWidth = 256;
   const left = rect
@@ -311,6 +356,11 @@ function ProjectPickerMenu({
                 <span className="min-w-0 flex-1 truncate text-[12px] font-bold">{project.name}</span>
                 <span className="shrink-0 text-[11px]" style={{ color: "var(--text-muted)" }}>{isManagedSourceType(project.sourceType ?? null) ? "LiTT Managed" : "GitHub"}</span>
               </button>
+              {project.id === projectId && !project.legacy && (
+                <button type="button" onClick={() => onRequestRename(project)} aria-label={`Rename project ${project.name}`} title={`Rename project ${project.name}`} className="mr-0.5 shrink-0 rounded-md p-1.5 opacity-60 transition hover:bg-white/10 hover:opacity-100 focus-visible:opacity-100" style={{ color: "var(--text-muted)" }}>
+                  <Pencil size={13} />
+                </button>
+              )}
               {!project.legacy && (
                 <button
                   type="button"

@@ -51,6 +51,7 @@ describe("StudioDock", () => {
     const { props } = renderDock({ open: false });
     // Collapsed strip: content area is hidden
     expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+    fireEvent.click(screen.getByTestId("dock-collapsed-toggle"));
     fireEvent.click(screen.getByTestId("dock-tab-terminal"));
     expect(props.onTabChange).toHaveBeenCalledWith("terminal");
     expect(props.onToggle).toHaveBeenCalled();
@@ -100,8 +101,8 @@ describe("StudioDock", () => {
     renderDock({ open: false });
     const dock = screen.getByTestId("studio-dock");
     expect(dock.style.height).toBe("44px");
-    // Tabs are still clickable in the collapsed strip
-    expect(screen.getByTestId("dock-tab-activity")).toBeDefined();
+    expect(screen.getByTestId("dock-collapsed-toggle")).toBeDefined();
+    expect(screen.getByText("Developer tools")).toBeDefined();
     // Controls are hidden in the collapsed strip
     expect(screen.queryByLabelText("Close dock")).toBeNull();
     expect(screen.queryByLabelText("Maximize")).toBeNull();

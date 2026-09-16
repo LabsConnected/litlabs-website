@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Copy, ExternalLink, Eye, Loader2, Monitor, MoreHorizontal, MousePointer2, RefreshCw, RotateCcw, Smartphone, Square, Tablet, X } from "lucide-react";
+import { Check, Copy, ExternalLink, Eye, Loader2, Monitor, PanelRight, MousePointer2, RefreshCw, RotateCcw, Smartphone, Square, Tablet, X } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { formatSourceSummary } from "@/lib/projects/project-source";
 import { useExecutionStore } from "../stores/useExecutionStore";
@@ -154,6 +154,8 @@ export default function StudioPreviewPanel({
   versionControl = "none",
   refreshKey = 0,
   onSelectionChange,
+  onToggleSplitPreview,
+  splitPreviewOpen = false,
 }: {
   projectId: string | null;
   projectName: string | null;
@@ -169,6 +171,9 @@ export default function StudioPreviewPanel({
   versionControl?: "git" | "none";
   refreshKey?: number;
   onSelectionChange?: (selection: PreviewSelection | null) => void;
+  /** Optional large-screen split layout; never enabled implicitly. */
+  onToggleSplitPreview?: () => void;
+  splitPreviewOpen?: boolean;
 }) {
   const { getToken } = useClerkAuth();
   const [state, setState] = useState<PreviewState>(projectId ? "loading" : "not_started");
@@ -840,6 +845,18 @@ export default function StudioPreviewPanel({
             data-testid="preview-copy-url"
           >
             {urlCopied ? <Check size={12} className="pointer-events-none" style={{ color: "#48EE38" }} /> : <Copy size={12} className="pointer-events-none" />}
+          </button>
+        )}
+        {isLive && onToggleSplitPreview && (
+          <button
+            type="button"
+            onClick={onToggleSplitPreview}
+            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            aria-label={splitPreviewOpen ? "Close split preview" : "Split preview"}
+            title={splitPreviewOpen ? "Return preview to the main workspace" : "Open preview beside the workspace"}
+            data-testid="preview-split-toggle"
+          >
+            <PanelRight size={13} className="pointer-events-none" />
           </button>
         )}
         {/* Maximize */}
