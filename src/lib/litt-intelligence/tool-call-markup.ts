@@ -247,20 +247,33 @@ export function stripToolCallMarkupText(text: string): string {
  */
 export function stripEnvelopeMarkup(text: string): string {
   if (!text) return text;
+  // Inline `code` spans are prose examples, not protocol: shield them before
+  // any stripping pass. The envelope loop below only skips backtick-adjacent
+  // markup, and the trailing stripToolCallBlocks() has no backtick awareness
+  // at all — without shielding it would remove quoted examples too.
+  // Fenced ``` blocks are left in place: the hygiene pass handles those.
+  const codeSpans: string[] = [];
+  const shielded = text.replace(/```[\s\S]*?```|(`[^`\n]*`)/g, (m, code) => {
+    if (code === undefined) return m;
+    const idx = codeSpans.length;
+    codeSpans.push(code);
+    return `__LITT_CODE_${idx}__`;
+  });
   const re = new RegExp(ENVELOPE_RE.source, "gi");
   let out = "";
   let last = 0;
-  for (const m of text.matchAll(re)) {
+  for (const m of shielded.matchAll(re)) {
     const idx = m.index ?? 0;
     const whole = m[0];
-    // Skip markup quoted inside inline code — `like <tool_call>x</tool_call>`
-    // — those are examples, not invocations.
-    if (text[idx - 1] === "`" && text[idx + whole.length] === "`") continue;
-    out += text.slice(last, idx);
+    // Backticks are shielded above; keep the adjacency guard for unbalanced
+    // backtick cases the shield regex leaves alone.
+    if (shielded[idx - 1] === "`" && shielded[idx + whole.length] === "`") continue;
+    out += shielded.slice(last, idx);
     last = idx + whole.length;
   }
-  out += text.slice(last);
-  return stripToolCallBlocks(out).trim();
+  out += shielded.slice(last);
+  const cleaned = stripToolCallBlocks(out).trim();
+  return cleaned.replace(/__LITT_CODE_(\d+)__/g, (_, n) => codeSpans[Number(n)] ?? "");
 }
 
 // ─── Canonical normalization boundary ─────────────────────────────
