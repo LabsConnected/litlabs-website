@@ -9,6 +9,7 @@ import {
   insertMessage,
   updateMessageStatus,
 } from "@/lib/studio/conversation-service";
+import { getLatestPausedRunForConversation } from "@/lib/litt-intelligence/paused-run-store";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { resolveAgent } from "@/lib/studio/agent-registry";
 import { buildStudioContext, buildProjectContextBlock } from "@/lib/studio/project-resolver";
@@ -24,6 +25,44 @@ export const runtime = "nodejs";
 
 interface RouteParams {
   params: Promise<{ conversationId: string }>;
+}
+
+/**
+ * Pure predicate behind the honest-Retry guard (unit tested).
+ *
+ * The /regenerate endpoint is chat-only (generateText — no agent loop, no
+ * tools, no approvals). When the target message is the terminal message of
+ * a FAILED workspace run, regenerating would silently downgrade the retry
+ * to a chat reply while the mission stays Idle. This detects that linkage:
+ * either the explicit `resume:<pausedRunId>` clientRequestId stamp, or —
+ * for the update-in-place writeback path — the message having been marked
+ * failed at/after the run completed.
+ */
+export function isFailedWorkspaceTurnMessage(
+  message: {
+    status?: string | null;
+    clientRequestId?: string | null;
+    updatedAt?: string | null;
+    createdAt?: string | null;
+  },
+  latestRun: {
+    id: string;
+    runStatus: string | null;
+    runCompletedAt?: string | null;
+    resolvedAt?: string | null;
+  } | null,
+): boolean {
+  if (message.status !== "failed" || !latestRun || latestRun.runStatus !== "failed") {
+    return false;
+  }
+  if (message.clientRequestId === `resume:${latestRun.id}`) return true;
+  const runFailedAt = latestRun.runCompletedAt ?? latestRun.resolvedAt ?? null;
+  const msgTime = message.updatedAt ?? message.createdAt ?? null;
+  return (
+    !!runFailedAt &&
+    !!msgTime &&
+    new Date(msgTime).getTime() >= new Date(runFailedAt).getTime() - 1000
+  );
 }
 
 const HISTORY_LIMIT = 12;
@@ -96,6 +135,33 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   }
   if (originalAssistant.role !== "assistant") {
     return NextResponse.json({ error: "Can only regenerate assistant messages" }, { status: 400 });
+  }
+
+  // 2b. Honest Retry: this endpoint is chat-only (generateText — no agent
+  // loop, no tools, no approvals). If the target message is the terminal
+  // message of a FAILED workspace run, regenerating here would silently
+  // downgrade the retry to a chat reply while the mission stays Idle — the
+  // exact failure observed in production. Refuse with a clear, actionable
+  // error so callers surface the truth instead of a fake retry.
+  if (originalAssistant.status === "failed") {
+    let linkedToFailedRun = false;
+    try {
+      const latestRun = await getLatestPausedRunForConversation(conversation.id, userId);
+      linkedToFailedRun = isFailedWorkspaceTurnMessage(originalAssistant, latestRun);
+    } catch {
+      // Best-effort — a lookup failure must not block legitimate regenerations.
+    }
+    if (linkedToFailedRun) {
+      return NextResponse.json(
+        {
+          error: "Cannot regenerate a failed workspace turn",
+          code: "WORKSPACE_RETRY_UNSUPPORTED",
+          detail:
+            "This turn failed while running workspace operations. Regenerating only rewrites the reply text — it cannot re-run the failed work. Send your request again as a new message to retry it.",
+        },
+        { status: 409 },
+      );
+    }
   }
 
   // 3. Find the parent user message

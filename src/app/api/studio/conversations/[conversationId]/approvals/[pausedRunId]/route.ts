@@ -12,6 +12,7 @@ import {
 } from "@/lib/litt-intelligence/paused-run-store";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { resumeAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
+import { resolveAvailableCapabilities } from "@/lib/litt-intelligence/capabilities";
 import { ensureProjectPreviewReady } from "@/lib/litt-intelligence/launch-flow";
 import { buildPreviewProxyUrl } from "@/lib/terminal-internal-client";
 import {
@@ -285,6 +286,11 @@ export async function POST(
       existingCheckpoint: resolved.checkpointId
         ? { checkpointId: resolved.checkpointId, label: "pre-approval", gitSha: "" }
         : undefined,
+      // Capability set for the resume execution gate. Resolved fresh here
+      // from the same source of truth the initial loop used
+      // (resolveAvailableCapabilities), so the approved tool cannot fail
+      // closed as "incapable" after the user approved it.
+      availableCapabilities: resolveAvailableCapabilities({ transport }),
     },
     transport,
   )
