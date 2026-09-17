@@ -1235,6 +1235,16 @@ describe("callLLMWithTools — exhaustion and privacy", () => {
     expect(result.toolCalls[0].toolCallId).toBe("call_123");
     expect(result.toolCalls[0].toolId).toBe("write_file");
     expect(result.toolCalls[0].inputs).toEqual({ path: "test.txt", content: "hello" });
+    expect(result.responseShape).toMatchObject({
+      contentType: "string",
+      messageKeys: ["content", "tool_calls"],
+      toolCalls: [{
+        name: "write_file",
+        idPresent: true,
+        argumentsJsonValid: true,
+        argumentKeys: ["path", "content"],
+      }],
+    });
   });
 });
 

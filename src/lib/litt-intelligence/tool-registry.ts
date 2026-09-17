@@ -687,7 +687,7 @@ export function registerInternalTools(): void {
       tool: {
         id: "files.list",
         name: "List Files",
-        description: "List files in a project directory",
+      description: "List files in a project directory. path must be workspace-relative; use . for the workspace root. Never use an absolute or parent path.",
         source: "internal",
         version: "1.0.0",
         inputSchema: { type: "object", properties: { projectId: { type: "string" }, path: { type: "string" } }, required: ["projectId"] },
@@ -708,7 +708,7 @@ export function registerInternalTools(): void {
       tool: {
         id: "files.read",
         name: "Read File",
-        description: "Read a file from the project workspace",
+      description: "Read a file from the project workspace. path must be workspace-relative; never use an absolute or parent path.",
         source: "internal",
         version: "1.0.0",
         inputSchema: { type: "object", properties: { projectId: { type: "string" }, path: { type: "string" } }, required: ["projectId", "path"] },
@@ -751,7 +751,7 @@ export function registerInternalTools(): void {
       tool: {
         id: "files.write",
         name: "Write File",
-        description: "Write or create a file in the project workspace",
+      description: "Write or create a file in the project workspace. path must be workspace-relative; never use an absolute or parent path.",
         source: "internal",
         version: "1.0.0",
         inputSchema: { type: "object", properties: { projectId: { type: "string" }, path: { type: "string" }, content: { type: "string" } }, required: ["projectId", "path", "content"] },
@@ -1194,7 +1194,7 @@ export function registerInternalTools(): void {
       tool: {
         id: "apply_patch",
         name: "Apply Patch",
-        description: "Apply targeted search-and-replace patches to an existing file in the project workspace.",
+      description: "Apply targeted search-and-replace patches to an existing file. path must be workspace-relative; re-read the file before patching and never use an absolute or parent path.",
         source: "internal",
         version: "1.0.0",
         inputSchema: { type: "object", properties: { path: { type: "string" }, patches: { type: "array", items: { type: "object", properties: { search: { type: "string" }, replace: { type: "string" } } } } }, required: ["path", "patches"] },
