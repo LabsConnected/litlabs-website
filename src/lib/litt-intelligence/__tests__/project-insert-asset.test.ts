@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { WorkspaceTransport } from "../workspace-transport";
-import { handleProjectInsertAsset } from "../tool-handlers-v2";
+import { handleProjectInsertAsset, insertAssetFromUrl } from "../tool-handlers-v2";
 
 const PNG_BYTES = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
@@ -186,5 +186,72 @@ describe("project.insert_asset — registration", () => {
       expect(prompt).toContain("project.insert_asset");
       expect(prompt).toContain("image.generate");
     }
+  });
+});
+
+describe("insertAssetFromUrl (shared core)", () => {
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  it("saves the image and returns the exact sitePath the agent must reference", async () => {
+    globalThis.fetch = vi.fn(async () => mockImageResponse()) as unknown as typeof fetch;
+    const transport = spyTransport();
+    const result = await insertAssetFromUrl("https://cdn.example.com/hero.png", { nameHint: "hero" }, transport);
+    expect(result.success).toBe(true);
+    expect(result.sitePath).toMatch(/^\/assets\/images\/hero-[a-z0-9]+\.png$/);
+    expect(transport.writeBinaryFile).toHaveBeenCalledTimes(1);
+    const [writtenPath, b64] = transport.writeBinaryFile.mock.calls[0];
+    expect(writtenPath).toBe(`public${result.sitePath}`);
+    expect(Buffer.from(b64 as string, "base64").length).toBe(PNG_BYTES.length);
+  });
+
+  it("rejects non-HTTPS URLs", async () => {
+    globalThis.fetch = vi.fn(async () => mockImageResponse()) as unknown as typeof fetch;
+    const transport = spyTransport();
+    const result = await insertAssetFromUrl("http://cdn.example.com/hero.png", {}, transport);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/HTTPS/i);
+    expect(transport.writeBinaryFile).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsafe directories", async () => {
+    globalThis.fetch = vi.fn(async () => mockImageResponse()) as unknown as typeof fetch;
+    const transport = spyTransport();
+    const result = await insertAssetFromUrl(
+      "https://cdn.example.com/hero.png",
+      { directory: "../../etc" },
+      transport,
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/Invalid directory/i);
+    expect(transport.writeBinaryFile).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-image content types", async () => {
+    globalThis.fetch = vi.fn(
+      async () => mockImageResponse({ contentType: "text/html" }),
+    ) as unknown as typeof fetch;
+    const transport = spyTransport();
+    const result = await insertAssetFromUrl("https://cdn.example.com/page", {}, transport);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/Not an image/i);
+    expect(transport.writeBinaryFile).not.toHaveBeenCalled();
+  });
+
+  it("surfaces download failures as errors, never exceptions", async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error("boom");
+    }) as unknown as typeof fetch;
+    const transport = spyTransport();
+    const result = await insertAssetFromUrl("https://cdn.example.com/hero.png", {}, transport);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("boom");
   });
 });

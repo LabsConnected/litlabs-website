@@ -621,14 +621,35 @@ function isSafeInsertDir(dir: string): boolean {
   );
 }
 
-export const handleProjectInsertAsset: ToolHandler = async (inputs, transport) => {
-  const url = inputs.url as string | undefined;
-  const nameHint = inputs.name as string | undefined;
-  const directory = (inputs.directory as string | undefined) ?? DEFAULT_INSERT_DIR;
+export interface InsertAssetOptions {
+  nameHint?: string;
+  directory?: string;
+}
 
-  if (!url || typeof url !== "string") {
-    return { success: false, error: "url is required" };
-  }
+export interface InsertAssetResult {
+  success: boolean;
+  path?: string;
+  sitePath?: string;
+  contentType?: string;
+  sizeBytes?: number;
+  error?: string;
+}
+
+/**
+ * Download an image URL and save it into the project workspace as a binary
+ * file. Shared core behind the project.insert_asset tool AND the automatic
+ * post-generation save in the tool registry: after image.generate succeeds
+ * in a project context, the registry calls this directly, so the
+ * generate → site loop closes in code instead of depending on the model
+ * remembering to call the tool (the 2026-09-17 acceptance run proved the
+ * model skips it and ships a broken <img> reference).
+ */
+export async function insertAssetFromUrl(
+  url: string,
+  opts: InsertAssetOptions,
+  transport: WorkspaceTransport,
+): Promise<InsertAssetResult> {
+  const directory = opts.directory ?? DEFAULT_INSERT_DIR;
   if (!url.startsWith("https://")) {
     return { success: false, error: "Asset URL must be a public HTTPS URL" };
   }
@@ -653,24 +674,40 @@ export const handleProjectInsertAsset: ToolHandler = async (inputs, transport) =
       return { success: false, error: `Asset exceeds max size (${MAX_INSERT_ASSET_BYTES} bytes)` };
     }
 
-    const filename = sanitizeAssetName(nameHint, contentType);
+    const filename = sanitizeAssetName(opts.nameHint, contentType);
     const path = `${directory}/${filename}`;
     await transport.writeBinaryFile(path, buffer.toString("base64"));
 
     // Site-relative URL: the public/ directory is served as the site root.
     const sitePath = `/${path.replace(/^public\//, "")}`;
-    return {
-      success: true,
-      path,
-      sitePath,
-      contentType,
-      sizeBytes: buffer.length,
-      hint: `Reference this image in the site's HTML as <img src="${sitePath}" />.`,
-    };
+    return { success: true, path, sitePath, contentType, sizeBytes: buffer.length };
   } catch (err) {
     return {
       success: false,
       error: err instanceof Error ? err.message : "Failed to insert asset",
     };
   }
+}
+
+export const handleProjectInsertAsset: ToolHandler = async (inputs, transport) => {
+  const url = inputs.url as string | undefined;
+  const nameHint = inputs.name as string | undefined;
+  const directory = (inputs.directory as string | undefined) ?? DEFAULT_INSERT_DIR;
+
+  if (!url || typeof url !== "string") {
+    return { success: false, error: "url is required" };
+  }
+
+  const result = await insertAssetFromUrl(url, { nameHint, directory }, transport);
+  if (!result.success) {
+    return { success: false, error: result.error ?? "Failed to insert asset" };
+  }
+  return {
+    success: true,
+    path: result.path,
+    sitePath: result.sitePath,
+    contentType: result.contentType,
+    sizeBytes: result.sizeBytes,
+    hint: `Reference this image in the site's HTML as <img src="${result.sitePath}" />.`,
+  };
 };

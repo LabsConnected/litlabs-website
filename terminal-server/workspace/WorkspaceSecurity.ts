@@ -4,6 +4,12 @@ import { existsSync, realpathSync, statSync } from "fs";
 const MAX_PATH_LENGTH = 4096;
 const MAX_READ_SIZE = 2 * 1024 * 1024;
 const MAX_WRITE_SIZE = 1 * 1024 * 1024;
+// Binary (base64) asset writes — generated images, audio, video — are
+// advertised at 50MB by the web app's asset-insert API and the
+// project.insert_asset tool. The cap is enforced on DECODED bytes so the
+// advertised limit is actually reachable (base64 inflates ~33%); measuring
+// the base64 string instead would silently reject every image over ~750KB.
+const MAX_BINARY_WRITE_SIZE = 50 * 1024 * 1024;
 
 const IGNORED_DIRS = new Set([
   "node_modules",
@@ -87,4 +93,40 @@ export function isWithinSizeLimit(filePath: string, isWrite: boolean): void {
   }
 }
 
-export { MAX_READ_SIZE, MAX_WRITE_SIZE };
+export type WritePayloadCheck =
+  | { ok: true; binary: Buffer | null }
+  | { ok: false; status: number; error: string };
+
+/**
+ * Validate a ws-files/write payload before touching the filesystem.
+ *
+ * Text writes keep the 1MB cap; base64 (binary) writes are decoded first
+ * and measured against MAX_BINARY_WRITE_SIZE. Returns the decoded buffer
+ * for binary writes so the route doesn't decode twice.
+ */
+export function validateWritePayload(encoding: string, content: string): WritePayloadCheck {
+  if (encoding === "base64") {
+    const binary = Buffer.from(content, "base64");
+    if (binary.length === 0) {
+      return { ok: false, status: 400, error: "Decoded binary content is empty" };
+    }
+    if (binary.length > MAX_BINARY_WRITE_SIZE) {
+      return {
+        ok: false,
+        status: 413,
+        error: `Decoded binary exceeds max write size (${MAX_BINARY_WRITE_SIZE} bytes)`,
+      };
+    }
+    return { ok: true, binary };
+  }
+  if (Buffer.byteLength(content, "utf8") > MAX_WRITE_SIZE) {
+    return {
+      ok: false,
+      status: 413,
+      error: `Content exceeds max write size (${MAX_WRITE_SIZE} bytes)`,
+    };
+  }
+  return { ok: true, binary: null };
+}
+
+export { MAX_READ_SIZE, MAX_WRITE_SIZE, MAX_BINARY_WRITE_SIZE };

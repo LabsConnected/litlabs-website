@@ -42,7 +42,7 @@ import {
   listWorkspaces,
   type WorkspaceDescriptor,
 } from "./workspace/WorkspaceManager";
-import { resolveWorkspacePath as resolveWorkspacePathSecure } from "./workspace/WorkspaceSecurity";
+import { resolveWorkspacePath as resolveWorkspacePathSecure, validateWritePayload } from "./workspace/WorkspaceSecurity";
 import { deleteResolvedPath } from "./workspace/FileService";
 import { checkPreviewToken } from "./preview-auth";
 import { evaluateWorkspaceRoot } from "./workspace/durability";
@@ -97,6 +97,8 @@ const USE_DOCKER = process.env.TERMINAL_USE_DOCKER === "true";
 
 const MAX_READ_SIZE = 2 * 1024 * 1024;
 const MAX_WRITE_SIZE = 1 * 1024 * 1024;
+// Binary write cap lives in workspace/WorkspaceSecurity.ts
+// (MAX_BINARY_WRITE_SIZE) alongside validateWritePayload.
 const MAX_PATH_LENGTH = 4096;
 
 /**
@@ -180,7 +182,15 @@ mkdirSync(WORKSPACE_ROOT, { recursive: true });
 
 const app = express();
 app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
-app.use(express.json({ limit: "1mb" }));
+// Binary asset writes (POST /ws-files/write with encoding=base64) may carry
+// up to MAX_BINARY_WRITE_SIZE of decoded media. Everything else stays at 1MB
+// so a large body can't be smuggled through an unrelated route.
+const jsonParserSmall = express.json({ limit: "1mb" });
+const jsonParserLarge = express.json({ limit: "50mb" });
+app.use((req, res, next) => {
+  const parser = req.path === "/ws-files/write" ? jsonParserLarge : jsonParserSmall;
+  parser(req, res, next);
+});
 
 const server = http.createServer(app);
 
@@ -1451,21 +1461,23 @@ app.post("/ws-files/write", (req: AuthenticatedRequest, res) => {
   const filePath = String(req.body.path || "");
   const content = String(req.body.content || "");
   const encoding = String(req.body.encoding || "utf-8");
-  if (Buffer.byteLength(content, "utf8") > MAX_WRITE_SIZE) {
-    return res.status(413).json({ error: `Content exceeds max write size (${MAX_WRITE_SIZE} bytes)` });
-  }
   if (!filePath || filePath === ".") {
     return res.status(400).json({ error: "Refusing to write to workspace root" });
+  }
+  // Size enforcement: binary (base64) writes are measured on DECODED bytes
+  // against the 50MB binary cap so the advertised asset limit is reachable;
+  // text writes keep the 1MB cap.
+  const sizeCheck = validateWritePayload(encoding, content);
+  if (!sizeCheck.ok) {
+    return res.status(sizeCheck.status).json({ error: sizeCheck.error });
   }
   try {
     const target = resolveWorkspacePath(req.workspaceId!, req.terminalUserId!, filePath);
     mkdirSync(resolve(target, ".."), { recursive: true });
-    if (encoding === "base64") {
-      // Binary file write — decode base64 to buffer before writing.
-      // Used by the "Use asset in project" feature to save generated
-      // images/audio/video into the project workspace.
-      const buf = Buffer.from(content, "base64");
-      writeFileSync(target, buf);
+    if (sizeCheck.binary) {
+      // Binary file write — used by the "Use asset in project" feature to
+      // save generated images/audio/video into the project workspace.
+      writeFileSync(target, sizeCheck.binary);
     } else {
       writeFileSync(target, content, "utf-8");
     }
