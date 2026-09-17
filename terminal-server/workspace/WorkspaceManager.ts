@@ -2,6 +2,11 @@ import { resolve, join } from "path";
 import { mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync } from "fs";
 import { execFileSync } from "child_process";
 import { simpleGit, type SimpleGit } from "simple-git";
+import {
+  buildWelcomeHtml,
+  buildWelcomeNextJs,
+  buildWelcomeReactVite,
+} from "./welcome-screen";
 
 
 export interface WorkspaceDescriptor {
@@ -392,27 +397,10 @@ function writeTemplateFiles(root: string, templateId: string): void {
     return;
   }
   if (templateId === "blank-static") {
-    writeFileSync(
-      join(root, "index.html"),
-      `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>My Project</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
-    h1 { color: #a970ff; }
-  </style>
-</head>
-<body>
-  <h1>Hello from LiTTree Studio</h1>
-  <p>Start building your project here.</p>
-</body>
-</html>
-`,
-      "utf-8",
-    );
+    // Polished LiTT Studio welcome / blank-state. This is the empty state of
+    // the builder itself, not project content — the agent replaces it with
+    // the user's real files as soon as it starts building.
+    writeFileSync(join(root, "index.html"), buildWelcomeHtml(), "utf-8");
     return;
   }
 
@@ -437,19 +425,8 @@ function writeTemplateFiles(root: string, templateId: string): void {
       "utf-8",
     );
     mkdirSync(join(root, "app"), { recursive: true });
-    writeFileSync(
-      join(root, "app", "page.tsx"),
-      `export default function Home() {
-  return (
-    <main style={{ fontFamily: "system-ui", padding: "2rem" }}>
-      <h1>Hello from LiTTree Studio</h1>
-      <p>Start building your Next.js project here.</p>
-    </main>
-  );
-}
-`,
-      "utf-8",
-    );
+    // Polished LiTT Studio welcome / blank-state (see blank-static above).
+    writeFileSync(join(root, "app", "page.tsx"), buildWelcomeNextJs(), "utf-8");
     writeFileSync(
       join(root, "app", "layout.tsx"),
       `export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -517,19 +494,8 @@ createRoot(document.getElementById("root")!).render(<App />);
 `,
       "utf-8",
     );
-    writeFileSync(
-      join(root, "src", "App.tsx"),
-      `export default function App() {
-  return (
-    <main style={{ fontFamily: "system-ui", padding: "2rem" }}>
-      <h1>Hello from LiTTree Studio</h1>
-      <p>Start building your React + Vite project here.</p>
-    </main>
-  );
-}
-`,
-      "utf-8",
-    );
+    // Polished LiTT Studio welcome / blank-state (see blank-static above).
+    writeFileSync(join(root, "src", "App.tsx"), buildWelcomeReactVite(), "utf-8");
     return;
   }
 
