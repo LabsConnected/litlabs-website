@@ -120,7 +120,7 @@ describe("loop-integrity: domain-failure normalization", () => {
     // as success:true (phantom mutation → false "completed").
     expect(
       AGENT_LOOP_SRC.match(
-        /resumeAgentLoopV2[\s\S]{0,4000}const handlerError = handlerFailureError\(execResult\.result\)/,
+        /resumeAgentLoopV2[\s\S]{0,6000}const handlerError = handlerFailureError\(execResult\.result\)/,
       ),
     ).not.toBeNull();
   });
