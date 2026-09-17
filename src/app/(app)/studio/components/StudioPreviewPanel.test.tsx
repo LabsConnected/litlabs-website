@@ -290,4 +290,98 @@ describe("StudioPreviewPanel", () => {
       expect(btn!.className).toContain("shrink-0");
     }
   });
+
+  describe("welcome-screen bridge (litt-welcome postMessage)", () => {
+    async function renderReadyPreview() {
+      mockFetch(() => jsonResponse({ runtimeStatus: "ready", previewUrl: "/api/studio-projects/project-1/preview/proxy", runtimeError: null }));
+      render(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName={null} branch="main" workspaceStatus="ready" />);
+      return (await screen.findByTitle("Demo preview")) as HTMLIFrameElement;
+    }
+
+    function listenForAskLitt() {
+      const seen: Array<{ prompt?: string }> = [];
+      const handler = (e: Event) => {
+        seen.push(((e as CustomEvent).detail ?? {}) as { prompt?: string });
+      };
+      window.addEventListener("studio:ask-litt", handler);
+      return {
+        seen,
+        stop: () => window.removeEventListener("studio:ask-litt", handler),
+      };
+    }
+
+    it("turns a starter-prompt from the preview iframe into studio:ask-litt with the prompt", async () => {
+      const iframe = await renderReadyPreview();
+      const { seen, stop } = listenForAskLitt();
+      try {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            source: iframe.contentWindow,
+            data: { source: "litt-welcome", type: "starter-prompt", prompt: "Build me a modern website for my business." },
+          }),
+        );
+        expect(seen).toHaveLength(1);
+        expect(seen[0].prompt).toBe("Build me a modern website for my business.");
+      } finally {
+        stop();
+      }
+    });
+
+    it("turns the welcome CTA from the preview iframe into studio:ask-litt with no prompt", async () => {
+      const iframe = await renderReadyPreview();
+      const { seen, stop } = listenForAskLitt();
+      try {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            source: iframe.contentWindow,
+            data: { source: "litt-welcome", type: "welcome-cta" },
+          }),
+        );
+        expect(seen).toHaveLength(1);
+        expect(seen[0].prompt).toBeUndefined();
+      } finally {
+        stop();
+      }
+    });
+
+    it("ignores messages that do not come from the preview iframe", async () => {
+      await renderReadyPreview();
+      const { seen, stop } = listenForAskLitt();
+      try {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            source: window,
+            data: { source: "litt-welcome", type: "starter-prompt", prompt: "evil prompt" },
+          }),
+        );
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            data: { source: "litt-welcome", type: "welcome-cta" },
+          }),
+        );
+        expect(seen).toHaveLength(0);
+      } finally {
+        stop();
+      }
+    });
+
+    it("ignores malformed litt-welcome payloads", async () => {
+      const iframe = await renderReadyPreview();
+      const { seen, stop } = listenForAskLitt();
+      try {
+        for (const data of [
+          { source: "litt-welcome", type: "starter-prompt", prompt: 42 },
+          { source: "litt-welcome", type: "starter-prompt", prompt: "   " },
+          { source: "litt-welcome", type: "unknown-type" },
+          { source: "something-else", type: "starter-prompt", prompt: "hi" },
+          null,
+        ]) {
+          window.dispatchEvent(new MessageEvent("message", { source: iframe.contentWindow, data }));
+        }
+        expect(seen).toHaveLength(0);
+      } finally {
+        stop();
+      }
+    });
+  });
 });

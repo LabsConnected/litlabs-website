@@ -458,6 +458,33 @@ export default function StudioPreviewPanel({
     if (refreshKey > 0) void loadStatus(true);
   }, [loadStatus, refreshKey]);
 
+  // Welcome-screen bridge: the blank-state preview (terminal-server/
+  // workspace/welcome-screen.ts) posts `litt-welcome` messages when the user
+  // taps a starter prompt or the Start Building CTA. Turn those into the
+  // canonical `studio:ask-litt` event so LiTT chat opens with the prompt
+  // pre-filled. The message is only honored when it comes from this panel's
+  // own preview iframe — anything else is ignored.
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      const frame = iframeRef.current?.contentWindow ?? null;
+      if (!frame || event.source !== frame) return;
+      const data = event.data as { source?: unknown; type?: unknown; prompt?: unknown } | null;
+      if (!data || data.source !== "litt-welcome" || typeof data.type !== "string") return;
+      if (data.type === "starter-prompt") {
+        if (typeof data.prompt !== "string") return;
+        const prompt = data.prompt.slice(0, 500).trim();
+        if (!prompt) return;
+        window.dispatchEvent(new CustomEvent("studio:ask-litt", { detail: { prompt } }));
+        return;
+      }
+      if (data.type === "welcome-cta") {
+        window.dispatchEvent(new CustomEvent("studio:ask-litt", { detail: {} }));
+      }
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, []);
+
   // Listen for file change events from CodeWorkspace or other sources.
   // This covers the standalone Preview tab which doesn't receive refreshKey.
   // A file change while the preview is live marks it stale and re-checks
