@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
 import * as React from "react";
 import SettingsPage from "@/app/(app)/settings/page";
 import {
@@ -145,7 +145,7 @@ describe("SettingsPage top-bar conversion", () => {
     render(<SettingsPage />);
     expect(getTabButtons().length).toBe(SETTINGS_SECTIONS.length);
 
-    fireEvent.change(screen.getByLabelText("Search settings"), {
+    fireEvent.change(screen.getByTestId("desktop-settings-search"), {
       target: { value: "billing" },
     });
 
@@ -166,5 +166,66 @@ describe("SettingsPage top-bar conversion", () => {
 
     const current = getTabStrip().querySelector('[aria-current="page"]');
     expect(current!.textContent).toContain("Account");
+  });
+
+  it("uses a compact mobile selector instead of rendering mobile category tabs", () => {
+    render(<SettingsPage />);
+
+    expect(screen.getByTestId("mobile-settings-selector")).toBeTruthy();
+    expect(screen.getByTestId("desktop-settings-sections").className).toContain("lg:flex");
+    expect(screen.queryByRole("dialog", { name: "All settings" })).toBeNull();
+
+    fireEvent.click(screen.getByTestId("mobile-settings-selector"));
+
+    const sheet = screen.getByRole("dialog", { name: "All settings" });
+    expect(within(sheet).getByText("Choose a category")).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Workspace" })).toBeTruthy();
+  });
+
+  it("opens a category from the mobile sheet and exposes a back control", () => {
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByTestId("mobile-settings-selector"));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "All settings" })).getByRole("button", { name: "Workspace" }));
+
+    expect(screen.queryByRole("dialog", { name: "All settings" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Back to all settings" })).toBeTruthy();
+    expect(within(screen.getByTestId("mobile-settings-content")).getByRole("heading", { name: "Workspace" })).toBeTruthy();
+  });
+
+  it("collapses settings search behind an icon on mobile", () => {
+    render(<SettingsPage />);
+    expect(screen.queryByTestId("mobile-settings-search")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Search settings" }));
+
+    expect(screen.getByTestId("mobile-settings-search")).toBeTruthy();
+  });
+
+  it("shows a selected workspace profile with a radio state and persists it", () => {
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByTestId("mobile-settings-selector"));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "All settings" })).getByRole("button", { name: "Workspace" }));
+
+    const mobileContent = screen.getByTestId("mobile-settings-content");
+    const builder = within(mobileContent).getByRole("radio", { name: "Builder workspace profile" });
+    expect(builder.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(builder);
+    expect(builder.getAttribute("aria-checked")).toBe("true");
+    expect(JSON.parse(localStorage.getItem("littree:workspace-preferences") ?? "{}").defaultView).toBe("code");
+
+    cleanup();
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByTestId("mobile-settings-selector"));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "All settings" })).getByRole("button", { name: "Workspace" }));
+    expect(within(screen.getByTestId("mobile-settings-content")).getByRole("radio", { name: "Builder workspace profile" }).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("reserves the mobile safe area for floating assistance and save actions", () => {
+    useSettingsStore.setState({ hasUnsavedChanges: true });
+    render(<SettingsPage />);
+
+    const saveBar = screen.getByText("Save changes").parentElement as HTMLElement;
+    expect(saveBar.className).toContain("env(safe-area-inset-bottom)");
+    expect(screen.getByTestId("mobile-settings-content").className).toContain("safe-area-inset-bottom");
   });
 });

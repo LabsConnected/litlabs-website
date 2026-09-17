@@ -21,7 +21,7 @@ export function SettingsCard({
         {icon && <span className="text-cyan-300">{icon}</span>}
         <div>
           <h3 className="text-sm font-bold text-white">{title}</h3>
-          {description && <p className="mt-0.5 text-xs text-white/40">{description}</p>}
+          {description && <p className="mt-0.5 text-xs text-white/60">{description}</p>}
         </div>
       </div>
       {children}
@@ -33,7 +33,7 @@ export function SectionHeader({ title, description }: { title: string; descripti
   return (
     <div className="mb-4">
       <h1 className="text-2xl font-black tracking-tight text-white">{title}</h1>
-      {description && <p className="mt-1 text-[13px] text-white/40">{description}</p>}
+      {description && <p className="mt-1 text-[13px] text-white/60">{description}</p>}
     </div>
   );
 }
@@ -61,7 +61,7 @@ export function ToggleRow({
         {icon && <span className="text-white/40 shrink-0">{icon}</span>}
         <div className="min-w-0">
           <p className="text-xs font-bold text-white truncate">{title}</p>
-          {description && <p className="text-[9px] text-white/35 truncate">{description}</p>}
+          {description && <p className="text-[9px] text-white/55 truncate">{description}</p>}
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
@@ -105,7 +105,7 @@ export function SettingsInput({
 }) {
   return (
     <label className="block">
-      <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">{label}</span>
+      <span className="text-[10px] font-bold uppercase tracking-wider text-white/55">{label}</span>
       <input
         type={type}
         value={value}
@@ -130,13 +130,13 @@ export function SaveBar({
 }) {
   if (!hasChanges && status === "idle") return null;
   return (
-    <div className="fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-white/10 bg-black/80 px-4 py-2.5 shadow-2xl backdrop-blur-xl">
+    <div className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] left-1/2 z-50 flex max-w-[calc(100vw-1.5rem)] -translate-x-1/2 items-center gap-3 rounded-xl border border-white/10 bg-black/90 px-4 py-2.5 shadow-2xl backdrop-blur-xl">
       {status === "saving" && <span className="text-xs text-white/60">Saving…</span>}
       {status === "saved" && <span className="text-xs text-green-400">Saved to account</span>}
       {status === "error" && <span className="text-xs text-red-400">Save failed — try again</span>}
       {status === "idle" && (
         <>
-          <button onClick={onDiscard} className="rounded-lg px-3 py-1.5 text-xs font-bold text-white/50 hover:bg-white/8 hover:text-white">
+          <button onClick={onDiscard} className="rounded-lg px-3 py-1.5 text-xs font-bold text-white/65 hover:bg-white/8 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70">
             Discard
           </button>
           <button onClick={onSave} className="rounded-lg bg-cyan-400 px-4 py-1.5 text-xs font-black text-slate-950">
