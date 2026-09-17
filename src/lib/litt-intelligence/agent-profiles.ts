@@ -257,9 +257,6 @@ export const AGENT_PROFILES: Record<AgentMode, AgentProfile> = {
       "memory.search",
       "web.search",
       "image.generate",
-      "video.generate",
-      "audio.generate",
-      "music.generate",
     ],
     blockedToolIds: [
       "terminal.execute",

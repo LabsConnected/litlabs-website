@@ -8,6 +8,7 @@
  */
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import "@testing-library/jest-dom";
 
 // Retro arcade storage touches IndexedDB — not present in jsdom. The
 // components already degrade gracefully, so resolve to an empty library.
@@ -79,5 +80,30 @@ describe("GamesPage player overlay", () => {
     expect(
       screen.queryByTitle(`${GAME_LIBRARY[0].title} game`),
     ).toBeNull();
+  });
+});
+
+describe("GamesPage — PR-1 honest build CTAs", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
+
+  it("hero CTA labeled for game art links to the image tool", () => {
+    render(<GamesPage />);
+    const artLink = screen.getByRole("link", { name: /game art/i });
+    expect(artLink).toHaveAttribute("href", "/studio?tool=image");
+    // No CTA may promise game *building* while routing to the image tool.
+    const buildLinks = screen
+      .getAllByRole("link")
+      .filter((a) => /build a game/i.test(a.textContent ?? ""));
+    expect(buildLinks).toHaveLength(0);
+  });
+
+  it("studio build section is honestly labeled as coming soon", () => {
+    render(<GamesPage />);
+    expect(
+      screen.getByRole("heading", { name: /game building is coming to studio/i }),
+    ).toBeInTheDocument();
   });
 });
