@@ -584,3 +584,93 @@ export const handleProjectDeploy: ToolHandler = async (_inputs, transport) => {
     liveUrl: result.publicUrl,
   };
 };
+
+// ─── Project Asset Insert ──────────────────────────────────────────
+
+/**
+ * Downloads an image/asset from a URL and saves it into the project
+ * workspace as a binary file. This closes the "generate → site" loop:
+ * after image.generate returns a downloadUrl, the agent calls this tool
+ * to place the image into public/assets/ and then references the
+ * returned sitePath in the site's HTML — instead of leaving the image
+ * as a chat-only render.
+ *
+ * Mirrors the guards of POST /api/studio-projects/[projectId]/assets/insert:
+ * https-only URLs, 30s download timeout, 50MB cap, image/* content types.
+ */
+const MAX_INSERT_ASSET_BYTES = 50 * 1024 * 1024;
+const DEFAULT_INSERT_DIR = "public/assets/images";
+
+function sanitizeAssetName(raw: string | undefined, contentType: string | null): string {
+  const ext = contentType?.split("/")[1]?.split("+")[0]?.replace(/[^a-z0-9]/gi, "") || "png";
+  const base = (raw ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40) || "asset";
+  const stamped = `${base}-${Date.now().toString(36)}`;
+  return stamped.endsWith(`.${ext}`) ? stamped : `${stamped}.${ext}`;
+}
+
+function isSafeInsertDir(dir: string): boolean {
+  const normalized = dir.replace(/\\/g, "/");
+  return (
+    normalized.length > 0 &&
+    !normalized.startsWith("/") &&
+    !normalized.split("/").some((seg) => seg === ".." || seg.includes("\0"))
+  );
+}
+
+export const handleProjectInsertAsset: ToolHandler = async (inputs, transport) => {
+  const url = inputs.url as string | undefined;
+  const nameHint = inputs.name as string | undefined;
+  const directory = (inputs.directory as string | undefined) ?? DEFAULT_INSERT_DIR;
+
+  if (!url || typeof url !== "string") {
+    return { success: false, error: "url is required" };
+  }
+  if (!url.startsWith("https://")) {
+    return { success: false, error: "Asset URL must be a public HTTPS URL" };
+  }
+  if (!isSafeInsertDir(directory)) {
+    return { success: false, error: "Invalid directory: must be a safe relative path" };
+  }
+
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    if (!resp.ok) {
+      return { success: false, error: `Failed to download asset: HTTP ${resp.status}` };
+    }
+    const contentType = resp.headers.get("content-type") || "application/octet-stream";
+    if (!contentType.startsWith("image/")) {
+      return { success: false, error: `Not an image (content-type: ${contentType})` };
+    }
+    const buffer = Buffer.from(await resp.arrayBuffer());
+    if (buffer.length === 0) {
+      return { success: false, error: "Downloaded asset is empty" };
+    }
+    if (buffer.length > MAX_INSERT_ASSET_BYTES) {
+      return { success: false, error: `Asset exceeds max size (${MAX_INSERT_ASSET_BYTES} bytes)` };
+    }
+
+    const filename = sanitizeAssetName(nameHint, contentType);
+    const path = `${directory}/${filename}`;
+    await transport.writeBinaryFile(path, buffer.toString("base64"));
+
+    // Site-relative URL: the public/ directory is served as the site root.
+    const sitePath = `/${path.replace(/^public\//, "")}`;
+    return {
+      success: true,
+      path,
+      sitePath,
+      contentType,
+      sizeBytes: buffer.length,
+      hint: `Reference this image in the site's HTML as <img src="${sitePath}" />.`,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "Failed to insert asset",
+    };
+  }
+};

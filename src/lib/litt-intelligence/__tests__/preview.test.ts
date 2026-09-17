@@ -18,6 +18,7 @@ function makeTransport(overrides: Partial<WorkspaceTransport> = {}): WorkspaceTr
     deleteFile: vi.fn(),
     mkdir: vi.fn(),
     rename: vi.fn(),
+    writeBinaryFile: vi.fn().mockResolvedValue({ saved: true }),
     exec: vi.fn(),
     gitStatus: vi.fn(),
     gitDiff: vi.fn(),

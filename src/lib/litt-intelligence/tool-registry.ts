@@ -48,6 +48,7 @@ const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
   "git.status": workspaceTool((m) => m.handleGitStatus),
   "terminal.execute": workspaceTool((m) => m.handleTerminalExecute),
   "project.health": workspaceTool((m) => m.handleProjectHealth),
+  "project.insert_asset": workspaceTool((m) => m.handleProjectInsertAsset),
   // App-level capability — server-side HTTP, not workspace-scoped.
   "image.generate": async () => (await import("./tool-handlers")).handleImageGenerate,
   // V2 workspace-aware handlers (used by agent-loop-v2.ts)
@@ -746,6 +747,39 @@ export function registerInternalTools(): void {
         enabled: true,
       },
       handler: lazyHandlers["image.generate"],
+    },
+    {
+      tool: {
+        id: "project.insert_asset",
+        name: "Insert Asset into Project",
+        description:
+          "Download an image from a URL and save it into the project workspace (default public/assets/images/). " +
+          "Use this right after image.generate to place a generated image into the website being built — " +
+          "then reference the returned sitePath in the site's HTML. Never leave site images as chat-only renders.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            projectId: { type: "string" },
+            url: { type: "string", description: "Public HTTPS URL of the image (e.g. the downloadUrl from image.generate)" },
+            name: { type: "string", description: "Optional filename hint, e.g. 'hero-sunset'" },
+            directory: { type: "string", description: "Optional workspace directory; defaults to public/assets/images" },
+          },
+          required: ["projectId", "url"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["files:write"],
+        risk: "high",
+        approvalPolicy: MUTATION_APPROVAL,
+        timeoutMs: 60000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: 'workspace-write',
+        enabled: true,
+      },
+      handler: lazyHandlers["project.insert_asset"],
     },
     {
       tool: {

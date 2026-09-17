@@ -26,6 +26,7 @@ function createMockTransport(overrides: Partial<WorkspaceTransport> = {}): Works
     gitDiff: vi.fn().mockResolvedValue({ diff: "" }),
     gitLog: vi.fn().mockResolvedValue({ commits: [] }),
     gitCommit: vi.fn().mockResolvedValue({ committed: true, sha: "abc123" }),
+    writeBinaryFile: vi.fn().mockResolvedValue({ saved: true }),
     searchCode: vi.fn().mockResolvedValue({ results: [] }),
     discoverPackageInfo: vi.fn().mockResolvedValue({
       packageManager: "pnpm",
