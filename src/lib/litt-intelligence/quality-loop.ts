@@ -75,7 +75,7 @@ export const STAGE_REQUIREMENTS: Record<QualityStage, StageRequirement> = {
   },
   build: {
     stage: "build",
-    evidence: "At least one successful mutating tool call that changed the workspace.",
+    evidence: "A workspace inspection proves a runnable entry artifact exists after the build.",
     skippable: false,
   },
   run: {
@@ -105,7 +105,7 @@ export const STAGE_REQUIREMENTS: Record<QualityStage, StageRequirement> = {
   },
   test: {
     stage: "test",
-    evidence: "Build/typecheck/test checks all passed (build-fix loop result).",
+    evidence: "At least one real build/typecheck/test check executed and all results passed.",
     skippable: false,
   },
   deploy: {

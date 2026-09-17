@@ -13,7 +13,15 @@ import {
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { resumeAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
 import { ensureProjectPreviewReady } from "@/lib/litt-intelligence/launch-flow";
-import { shouldEnableQualityLoop } from "@/lib/litt-intelligence/quality-loop-flow";
+import { buildPreviewProxyUrl } from "@/lib/terminal-internal-client";
+import {
+  finalizeQualityLoop,
+  noteBuildArtifacts,
+  notePreviewReady,
+  restoreQualityLoopSession,
+  shouldEnableQualityLoop,
+  snapshotQualityLoopSession,
+} from "@/lib/litt-intelligence/quality-loop-flow";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import {
   getAwaitingApprovalAssistantMessage,
@@ -256,6 +264,7 @@ export async function POST(
           userRequest: String(
             resolved.pausedMessages.find((m) => m.role === "user")?.content ?? "",
           ).slice(0, 2000),
+          state: resolved.qualityLoopState,
         }
       : undefined,
   };
@@ -289,20 +298,21 @@ export async function POST(
       const successfulMutation = result.toolCalls.some((call) => call.mutating && call.success);
       const failedMutation = result.toolCalls.some((call) => call.mutating && !call.success);
       let resumeArtifactError: string | undefined;
+      let resumePreview: Awaited<ReturnType<typeof ensureProjectPreviewReady>> | null = null;
       if (!result.pendingApproval && !result.cancelled) {
         if (failedMutation && !successfulMutation) {
           resumeArtifactError = "The approved workspace operation failed, so the project was not completed.";
         } else if (successfulMutation) {
-          const preview = await ensureProjectPreviewReady(transport);
-          if (!preview.ok) {
-            resumeArtifactError = preview.error ?? "The project files were not runnable after approval.";
+          resumePreview = await ensureProjectPreviewReady(transport);
+          if (!resumePreview.ok) {
+            resumeArtifactError = resumePreview.error ?? "The project files were not runnable after approval.";
           }
         }
       } else if (result.pendingApproval && successfulMutation) {
         // A nested approval is allowed to continue, but preview can already
         // be useful once the first file mutation has landed. Do not fail the
         // nested gate merely because a later file has not been written yet.
-        await ensureProjectPreviewReady(transport).catch(() => undefined);
+        resumePreview = await ensureProjectPreviewReady(transport).catch(() => null);
       }
 
       if (resumeArtifactError) {
@@ -337,6 +347,7 @@ export async function POST(
             executionMode: resolved.executionMode,
             systemPrompt: resolved.systemPrompt,
             checkpointId: null,
+            qualityLoopState: result.pendingApproval.qualityLoopState,
           });
           nestedPausedRunId = nested.id;
         } catch (nestedErr) {
@@ -349,7 +360,42 @@ export async function POST(
         }
       }
 
-      // Reflect the outcome on the transcript BEFORE marking the run
+      let qualityLoop = result.qualityLoop;
+      let qualityLoopState = result.qualityLoopState;
+      let finalText = result.finalText;
+
+      // Preview startup is owned by the approval boundary, not by the agent
+      // loop. Feed its real artifact/runtime result back into the same
+      // canonical ledger before persisting the terminal run result. This is
+      // what prevents a successful resumed run from reporting all stages as
+      // pending merely because those events happened outside the LLM loop.
+      if (qualityLoopState && successfulMutation) {
+        const qualitySession = restoreQualityLoopSession(qualityLoopState);
+        const previewUrl = buildPreviewProxyUrl(transport.workspaceId);
+        if (resumePreview?.ok) {
+          noteBuildArtifacts(qualitySession, resumePreview.files);
+          notePreviewReady(qualitySession, previewUrl);
+          const finale = finalizeQualityLoop(qualitySession, {
+            deployRequested:
+              resolved.toolId === "project.deploy" ||
+              result.toolCalls.some((call) => call.toolId === "project.deploy"),
+          });
+          qualityLoop = {
+            verdict: finale.verdict,
+            stages: finale.stages,
+            designPasses: finale.designPasses,
+          };
+          qualityLoopState = snapshotQualityLoopSession(qualitySession);
+          if (finale.verdict.ok) {
+            // The resumed agent may have finalized before the approval-boundary
+            // preview check completed. Remove only that stale machine-gate
+            // suffix; never suppress ordinary model output or a failed gate.
+            finalText = finalText.replace(/\n\nQuality check — [\s\S]*$/i, "");
+          }
+        }
+      }
+
+      // Reflect the final outcome on the transcript BEFORE marking the run
       // completed — a poller that sees "completed" can then loadMessages
       // and get the real persisted result.
       await writeResumedResultToTranscript({
@@ -362,11 +408,11 @@ export async function POST(
           : result.pendingApproval
             ? "awaiting_approval"
             : "completed",
-        content: result.finalText || undefined,
+        content: finalText || undefined,
       });
 
       const runResult: RunResult = {
-        finalText: result.finalText,
+        finalText,
         stepsUsed: result.stepsUsed,
         toolCalls: result.toolCalls,
         cancelled: result.cancelled,
@@ -380,13 +426,14 @@ export async function POST(
           : undefined,
         // Persist the quality-loop finale on the run record: the durable,
         // machine-readable answer to "was this good enough to ship?"
-        qualityLoop: result.qualityLoop
+        qualityLoop: qualityLoop
           ? {
-              verdict: result.qualityLoop.verdict,
-              stages: result.qualityLoop.stages,
-              designPasses: result.qualityLoop.designPasses,
+              verdict: qualityLoop.verdict,
+              stages: qualityLoop.stages,
+              designPasses: qualityLoop.designPasses,
             }
           : undefined,
+        qualityLoopState,
       };
       return markRunCompleted(pausedRunId, userId, runResult);
     })
