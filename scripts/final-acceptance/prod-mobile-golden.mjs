@@ -807,9 +807,12 @@ async function main() {
     await shot(page, "08-post-build-keyboard");
 
     // Finish the mobile acceptance contract with an actual follow-up sent
-    // through the reopened composer, not just a visibility assertion.
+    // through the reopened composer. The follow-up must mutate the existing
+    // project, so this gate proves the complete edit path rather than only
+    // proving that the messages POST returned 200.
     if (stillUsable && sheetUp) {
-      const followUp = "Confirm the site is ready and summarize the files you created.";
+      const followUpMarker = "Golden Acceptance follow-up verified";
+      const followUp = `Update the existing Ember Roast site footer to include exactly: ${followUpMarker}. Keep the rest of the site unchanged and save the edit to index.html.`;
       await commandInput.fill(followUp);
       const followUpResponse = page.waitForResponse((response) =>
         /\/api\/studio\/conversations\/[^/]+\/messages/.test(response.url()) &&
@@ -820,8 +823,46 @@ async function main() {
       const followUpResult = await followUpResponse;
       step("post_build_follow_up_submitted", !!followUpResult && followUpResult.status() === 200,
         followUpResult ? `POST follow-up → ${followUpResult.status()}` : "follow-up messages POST not observed");
+
+      if (followUpResult?.status() === 200) {
+        // Preserve the second provider/model response for diagnosis. This is
+        // the raw SSE response for the follow-up only; it is kept separate
+        // from the initial build stream so a no-op assistant answer cannot be
+        // mistaken for a successful edit.
+        const followUpRaw = await followUpResult.text().catch(() => "");
+        const followUpEvents = parseSSE(followUpRaw);
+        writeFileSync(path.join(ARTIFACT_DIR, "follow-up-sse-events.json"), JSON.stringify(followUpEvents, null, 2));
+        const followUpProviderShapes = followUpEvents.filter((event) => event.type === "model_response");
+        writeFileSync(path.join(ARTIFACT_DIR, "follow-up-provider-response-shapes.json"), JSON.stringify(followUpProviderShapes, null, 2));
+        step("post_build_follow_up_provider_evidence", followUpProviderShapes.length > 0,
+          followUpProviderShapes.length > 0
+            ? followUpProviderShapes.map((event) => `${event.provider}/${event.model} toolCalls=${event.toolCalls?.length ?? 0}`).join("; ")
+            : "no model response was present in the follow-up stream");
+
+        const followUpFile = await readWorkspaceFile("index.html");
+        step("post_build_follow_up_mutation",
+          followUpFile !== null && followUpFile.includes(followUpMarker),
+          followUpFile === null
+            ? "index.html could not be read after the follow-up"
+            : followUpFile.includes(followUpMarker)
+              ? `index.html contains ${JSON.stringify(followUpMarker)}`
+              : `index.html did not contain ${JSON.stringify(followUpMarker)} after the follow-up`);
+
+        const followUpPreview = iframeSrc
+          ? await page.request.get(`${iframeSrc}${iframeSrc.includes("?") ? "&" : "?"}acceptance_follow_up=${Date.now()}`, { timeout: 45_000 }).catch(() => null)
+          : null;
+        const followUpPreviewBody = followUpPreview ? await followUpPreview.text().catch(() => "") : "";
+        step("post_build_follow_up_preview",
+          followUpPreview?.status() === 200 && followUpPreviewBody.includes(followUpMarker),
+          `HTTP ${followUpPreview?.status() ?? "unreachable"}, marker=${followUpPreviewBody.includes(followUpMarker)}`);
+      } else {
+        step("post_build_follow_up_mutation", false, "follow-up request did not complete successfully");
+        step("post_build_follow_up_preview", false, "follow-up request did not complete successfully");
+      }
     } else {
       step("post_build_follow_up_submitted", false, "composer was not usable after the drawer was closed and LiTT was reopened");
+      step("post_build_follow_up_mutation", false, "composer was not usable after the drawer was closed and LiTT was reopened");
+      step("post_build_follow_up_preview", false, "composer was not usable after the drawer was closed and LiTT was reopened");
     }
 
     // Verify the generated site from a real desktop viewport as well. This
