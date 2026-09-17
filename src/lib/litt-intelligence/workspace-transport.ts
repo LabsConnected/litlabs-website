@@ -102,6 +102,7 @@ export interface WorkspaceTransport {
   listFiles(path: string): Promise<{ entries: Array<{ name: string; type: string }> }>;
   readFile(path: string): Promise<{ content: string; size: number }>;
   writeFile(path: string, content: string): Promise<{ saved: boolean }>;
+  writeBinaryFile(path: string, base64Content: string): Promise<{ saved: boolean }>;
   deleteFile(path: string): Promise<{ deleted: boolean }>;
   mkdir(path: string): Promise<{ created: boolean }>;
   rename(path: string, newPath: string): Promise<{ renamed: boolean }>;
@@ -224,6 +225,19 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
     if (!resp.ok) {
       const err = await resp.text().catch(() => "");
       throw new Error(`writeFile failed (${resp.status}): ${err}`);
+    }
+    return resp.json();
+  }
+
+  async writeBinaryFile(path: string, base64Content: string): Promise<{ saved: boolean }> {
+    const resp = await fetch(`${terminalBase()}/ws-files/write`, {
+      method: "POST",
+      headers: this.wsFileHeaders,
+      body: JSON.stringify({ path, content: base64Content, encoding: "base64" }),
+    });
+    if (!resp.ok) {
+      const err = await resp.text().catch(() => "");
+      throw new Error(`writeBinaryFile failed (${resp.status}): ${err}`);
     }
     return resp.json();
   }

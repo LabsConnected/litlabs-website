@@ -69,6 +69,9 @@ export async function handleImageGenerate(inputs: Record<string, unknown>): Prom
       cost: payload.cost ?? 0,
       free: payload.free ?? true,
       markdown: `![${prompt}](${payload.downloadUrl})`,
+      // Tell the model how to place this image into the website project
+      // instead of leaving it as a chat-only render.
+      insertHint: "To place this image into the active website project, call project.insert_asset with this downloadUrl, then reference the returned sitePath in the site's HTML.",
     };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : "Image generation request failed" };
