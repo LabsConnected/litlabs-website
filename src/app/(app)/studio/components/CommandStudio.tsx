@@ -18,7 +18,8 @@ import { useConversationStore } from "../stores/useConversationStore";
 import { useLiTTRealtimeSession } from "../hooks/useLiTTRealtimeSession";
 import type { LiTTLiveSessionContext } from "@/lib/litt/live/types";
 import type { ArtifactAction } from "@/lib/canvas/types";
-import { INITIAL_RUNTIME_STATE } from "@/lib/projects/runtime-state";
+import { INITIAL_RUNTIME_STATE, deriveExecutionHint } from "@/lib/projects/runtime-state";
+import { useLiTTRuntime } from "@/hooks/useLiTTRuntime";
 
 import CommandStudioHeader from "./CommandStudioHeader";
 import StudioDock, { type StudioDockTab } from "./StudioDock";
@@ -177,6 +178,14 @@ function CommandStudioContent() {
     runtime,
   } = useConnectionSummary();
   const runtimeState = runtime?.state ?? INITIAL_RUNTIME_STATE;
+  // Socket status-feed freshness for the pre-send hint. useLiTTRuntime is a
+  // refCounted singleton socket (LiTTLiveActivity already holds one), so this
+  // opens no new connection.
+  const { freshness: runtimeFeedFreshness } = useLiTTRuntime();
+  const executionHint = useMemo(
+    () => deriveExecutionHint(runtimeFeedFreshness, runtimeState),
+    [runtimeFeedFreshness, runtimeState],
+  );
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
   const providerHealth = useStudioModelStore((s) => s.providerHealth);
   const executionMode = useStudioAgentStore((s) => s.executionMode);
@@ -1541,6 +1550,7 @@ function CommandStudioContent() {
         onExecutionModeChange={setExecutionMode}
         littMode={littMode}
         onLittModeChange={setLittMode}
+        executionHint={executionHint}
       />
     </>
   );
