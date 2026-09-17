@@ -76,8 +76,8 @@ const PROMPT =
       ? `In the Ember Roast landing site in index.html, update the footer so it contains exactly this text: ${GOLDEN_MARKER}. Keep everything else unchanged, then publish it live to a public URL.`
       : `In the Ember Roast landing site in index.html, update the footer so it contains exactly this text: ${GOLDEN_MARKER}. Keep everything else unchanged.`
     : DEPLOY_REQUESTED
-      ? "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section, then publish it live to a public URL."
-      : "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section.");
+      ? "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section. This is an empty static workspace: write the runnable entry at the workspace root as index.html (not public/index.html), then publish it live to a public URL."
+      : "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section. This is an empty static workspace: write the runnable entry at the workspace root as index.html (not public/index.html).");
 const ARTIFACT_DIR = path.join("artifacts", "final-acceptance", STAMP);
 const SHOT_DIR = path.join(ARTIFACT_DIR, "screenshots");
 mkdirSync(SHOT_DIR, { recursive: true });
@@ -480,6 +480,29 @@ async function main() {
         ? responseShapeEvents.map((e) => `${e.provider}/${e.model} toolCalls=${e.toolCalls.length}`).join("; ")
         : "no redacted provider response-shape event was streamed");
 
+    // Resolve the real deploy approval as soon as the paused-run event is
+    // available. Preview is independent from deployment, but waiting through
+    // its recovery budget before approving can consume the five-minute server
+    // approval TTL and turn a valid pause into a misleading expiry failure.
+    const approvalEvents = events.filter((e) => e.type === "pending_approval");
+    const deployApproval = approvalEvents.find((e) => e.toolId === "project.deploy");
+    let deployResult = events.find((e) => e.type === "deploy_result");
+    const deployVerify = events.find((e) => e.type === "deploy_verify");
+    let productionUrl = deployResult?.productionUrl || deployVerify?.url || null;
+    const convId = (messagesApiSeen?.url ?? "").match(/conversations\/([^/]+)\/messages/)?.[1];
+    let deployApprovalResponse = null;
+    let deployApprovalBody = null;
+    if (DEPLOY_REQUESTED && deployApproval?.pausedRunId && convId) {
+      deployApprovalResponse = await page.request.post(
+        `${BASE}/api/studio/conversations/${convId}/approvals/${deployApproval.pausedRunId}`,
+        { data: { decision: "approved" }, timeout: 30_000 },
+      ).catch(() => null);
+      deployApprovalBody = deployApprovalResponse
+        ? await deployApprovalResponse.json().catch(() => null)
+        : null;
+      writeFileSync(path.join(ARTIFACT_DIR, "deploy-approval-response.json"), JSON.stringify(deployApprovalBody, null, 2));
+    }
+
     const previewResult = events.find((e) => e.type === "preview_result");
     const previewStart = events.find((e) => e.type === "preview_start");
     const previewUrl = previewResult?.previewUrl || null;
@@ -561,11 +584,6 @@ async function main() {
     // pending_approval pause would mean the gate was bypassed. The golden
     // then approves through the real server-authoritative endpoint and reads
     // the resumed run's toolCalls for the deployment outcome.
-    const approvalEvents = events.filter((e) => e.type === "pending_approval");
-    const deployApproval = approvalEvents.find((e) => e.toolId === "project.deploy");
-    let deployResult = events.find((e) => e.type === "deploy_result");
-    const deployVerify = events.find((e) => e.type === "deploy_verify");
-    let productionUrl = deployResult?.productionUrl || deployVerify?.url || null;
     if (DEPLOY_REQUESTED) {
       step("deploy_approval_gate", !!deployApproval, deployApproval
         ? `pausedRunId=${deployApproval.pausedRunId ?? "none"} reason=${String(deployApproval.reason ?? "").slice(0, 120)}`
@@ -574,19 +592,23 @@ async function main() {
           : deployResult ? "deploy executed with NO approval pause — gate bypassed" : "no pending_approval event in stream");
 
       if (deployApproval?.pausedRunId) {
-        const convId = (messagesApiSeen?.url ?? "").match(/conversations\/([^/]+)\/messages/)?.[1];
         // Async approval contract: POST returns 202 immediately, then poll
         // GET for the resumed execution result. This avoids the Cloudflare
         // 524 timeout that occurred when the approval endpoint synchronously
         // awaited the full resumed agent loop (deploy + model continuation).
-        const approval = convId
+        const reusedEarlyApproval = deployApprovalResponse !== null;
+        const approval = deployApprovalResponse ?? (convId
           ? await page.request.post(
               `${BASE}/api/studio/conversations/${convId}/approvals/${deployApproval.pausedRunId}`,
               { data: { decision: "approved" }, timeout: 30_000 },
             ).catch(() => null)
-          : null;
-        const approvalBody = approval ? await approval.json().catch(() => null) : null;
-        writeFileSync(path.join(ARTIFACT_DIR, "deploy-approval-response.json"), JSON.stringify(approvalBody, null, 2));
+          : null);
+        const approvalBody = deployApprovalBody ?? (approval ? await approval.json().catch(() => null) : null);
+        deployApprovalResponse = approval;
+        deployApprovalBody = approvalBody;
+        if (!reusedEarlyApproval) {
+          writeFileSync(path.join(ARTIFACT_DIR, "deploy-approval-response.json"), JSON.stringify(approvalBody, null, 2));
+        }
         step("deploy_approved", (approval?.status() === 202 || approval?.status() === 200) && approvalBody?.resolved === true,
           `HTTP ${approval?.status() ?? "no-request"} resolved=${approvalBody?.resolved} status=${approvalBody?.status ?? "none"}`);
 
