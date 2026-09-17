@@ -2043,6 +2043,14 @@ main {
   -webkit-overflow-scrolling: touch;
 }
 
+/* Horizontal chip/carousel rows nested inside a vertical page scroller.
+   Explicit pan-x pan-y so a vertical swipe that starts on the row always
+   scrolls the page instead of getting latched by the horizontal overflow
+   region (Android directional-lock can otherwise trap the gesture). */
+.chip-scroll-row {
+  touch-action: pan-x pan-y;
+}
+
 /* Responsive grid helpers */
 .responsive-3col {
   display: grid;

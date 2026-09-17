@@ -434,9 +434,6 @@ export default function ImageTool() {
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
-  const stylePresetsRef = useRef<HTMLDivElement>(null);
-  const moodPresetsRef = useRef<HTMLDivElement>(null);
-
   /* Auto-expand the mobile prompt box while typing (capped) */
   useEffect(() => {
     const el = promptRef.current;
@@ -541,6 +538,10 @@ export default function ImageTool() {
   const [imgError, setImgError] = useState<string | null>(null);
   const [favoritedIds, setFavoritedIds] = useState<Set<string>>(new Set());
   const [imageHovered, setImageHovered] = useState(false);
+  // Mobile: which generation is open in the full-screen preview (null = closed)
+  const [previewGen, setPreviewGen] = useState<Generation | null>(null);
+  // Mobile: which design section is expanded (accordion — one at a time)
+  const [designOpen, setDesignOpen] = useState<"style" | "mood" | "ratio" | null>(null);
 
   /* ── UI state ── */
   // Use shared WalletContext rather than localStorage or ad-hoc fetches
@@ -1445,16 +1446,24 @@ export default function ImageTool() {
           />
         )}
 
-        {/* ── MOBILE: Single-column workspace ──────────────────────── */}
+        {/* ── MOBILE: Single-column workspace ────────────────────────
+            Single vertical scroll container for the whole mobile image
+            surface. overflow-x-clip keeps the edge-bleed chip rows from
+            creating a page-level horizontal scroll context (which can trap
+            vertical swipe gestures on Android); overflow-y-auto owns the
+            vertical scroll. overscroll-contain blocks pull-to-refresh. */}
         <div
-          className="md:hidden flex-1 flex flex-col min-h-0 overflow-y-auto overscroll-contain"
+          className="md:hidden flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-clip overscroll-contain"
           style={{ backgroundColor: T.bgColor }}
+          data-testid="image-mobile-scroller"
         >
           <div
             className="flex-1 px-4 pt-3 pb-[calc(20px+env(safe-area-inset-bottom))] space-y-3"
           >
-            {/* Prompt — compact, auto-expands while typing */}
-            <div className="space-y-1.5">
+            {/* ══ MOBILE REBUILD — dedicated AI image generator ══ */}
+
+            {/* 1 ── Prompt + Generate — first viewport */}
+            <div className="space-y-2">
               <textarea
                 ref={promptRef}
                 value={prompt}
@@ -1471,224 +1480,278 @@ export default function ImageTool() {
                 }}
                 data-testid="image-prompt-input"
               />
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5">
                   <button
                     onClick={enhancePrompt}
                     disabled={!prompt.trim() || isWorking}
-                    className="flex items-center gap-1 h-7 px-2.5 rounded-lg border text-[10px] font-bold transition-all hover:opacity-80 disabled:opacity-30"
+                    className="flex items-center gap-1 min-h-[44px] px-3 rounded-xl border text-[11px] font-bold transition-all hover:opacity-80 disabled:opacity-30"
                     style={{ borderColor: T.accentColor + "40", color: T.accentColor }}
                   >
-                    <Zap size={10} /> Enhance
+                    <Zap size={12} /> Enhance
                   </button>
                   <button
                     onClick={surpriseMe}
                     disabled={isWorking}
-                    className="flex items-center gap-1 h-7 px-2.5 rounded-lg border text-[10px] font-bold transition-all hover:opacity-80 disabled:opacity-30"
+                    className="flex items-center gap-1 min-h-[44px] px-3 rounded-xl border text-[11px] font-bold transition-all hover:opacity-80 disabled:opacity-30"
                     style={{ borderColor: T.accentColor + "40", color: T.accentColor }}
                   >
-                    <Sparkles size={10} /> Surprise
+                    <Sparkles size={12} /> Surprise
                   </button>
                 </div>
-                <span className="text-[9px]" style={{ color: prompt.length > 900 ? "#e3b341" : T.textMuted + "60" }}>
+                <span className="text-[10px] shrink-0" style={{ color: prompt.length > 900 ? "#e3b341" : T.textMuted + "60" }}>
                   {prompt.length} / 1000
                 </span>
               </div>
-            </div>
-
-            {/* Quick settings — 4 primary controls */}
-            <div className="grid grid-cols-4 gap-1.5">
               <button
-                onClick={() => stylePresetsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                className="h-9 px-2 flex items-center justify-center gap-1 rounded-xl border text-[10px] font-bold transition-all"
-                style={pill(!!selectedStyle)}
-              >
-                <Palette size={11} className="shrink-0" />
-                <span className="truncate">{selectedStyle ? selectedStyle.split(" ").slice(0, 2).join(" ") : "Style"}</span>
-              </button>
-              <button
-                onClick={() => moodPresetsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                className="h-9 px-2 flex items-center justify-center gap-1 rounded-xl border text-[10px] font-bold transition-all"
-                style={pill(!!selectedMood)}
-              >
-                <Flame size={11} className="shrink-0" />
-                <span className="truncate">{selectedMood ? selectedMood.split(" ").slice(0, 2).join(" ") : "Mood"}</span>
-              </button>
-              <button
-                onClick={() => {
-                  const i = ASPECT_OPTIONS.findIndex((o) => o.value === aspectRatio);
-                  const next = ASPECT_OPTIONS[(i + 1) % ASPECT_OPTIONS.length];
-                  setAspectRatio(next.value);
-                  addLog("info", `Aspect ratio: ${next.label}`);
+                onClick={handleGenerate}
+                disabled={!promptValid || !canAfford || isWorking}
+                className="w-full min-h-[52px] rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{
+                  background: isWorking
+                    ? "#155e75"
+                    : "linear-gradient(135deg, #22d3ee 0%, #3b82f6 100%)",
+                  color: "#04121a",
+                  boxShadow: isWorking ? "none" : "0 4px 24px #22d3ee45",
                 }}
-                disabled={isWorking}
-                className="h-9 px-2 flex items-center justify-center gap-1 rounded-xl border text-[10px] font-bold transition-all disabled:opacity-40"
-                style={pill(false)}
-                title="Tap to cycle aspect ratio"
+                data-testid="generate-image-button"
               >
-                <Layout size={11} className="shrink-0" />
-                <span className="truncate">{aspectRatio}</span>
+                {isWorking ? (
+                  <><Loader2 size={16} className="animate-spin" /> Forging...</>
+                ) : (
+                  <><Sparkles size={16} /> Generate{batchSize > 1 ? ` ${batchSize}×` : ""}</>
+                )}
               </button>
-              <button
-                onClick={() => setAdvancedOpen((v) => !v)}
-                className="h-9 px-2 flex items-center justify-center gap-1 rounded-xl border text-[10px] font-bold transition-all"
-                style={pill(advancedOpen)}
-                aria-expanded={advancedOpen}
-              >
-                <SlidersHorizontal size={11} className="shrink-0" />
-                <span className="truncate">{advancedOpen ? "Less" : "More"}</span>
-              </button>
-            </div>
-
-            {/* Advanced — everything else, collapsed by default */}
-            {advancedOpen && (
-              <div
-                className="rounded-xl border p-3 space-y-3"
-                style={sectionBox}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
-                    Advanced
-                  </span>
-                  {(selectedStyle || selectedLighting || selectedMood || selectedCamera || selectedQualityTag) && (
+              {error && (
+                <div
+                  className="text-[11px] px-3 py-2.5 rounded-xl border"
+                  style={{
+                    backgroundColor: error.includes("✓") ? T.success + "12" : "#f8514912",
+                    borderColor: error.includes("✓") ? T.success + "40" : "#f8514940",
+                    color: error.includes("✓") ? T.success : "#f85149",
+                  }}
+                  role="alert"
+                >
+                  <div className="flex items-start gap-2">
+                    {error.includes("✓") ? <CheckCircle2 size={13} className="mt-px shrink-0" /> : <AlertTriangle size={13} className="mt-px shrink-0" />}
+                    <span className="flex-1">{error}</span>
+                  </div>
+                  {!error.includes("✓") && (
                     <button
-                      onClick={() => {
-                        setSelectedStyle(null);
-                        setSelectedLighting(null);
-                        setSelectedMood(null);
-                        setSelectedCamera(null);
-                        setSelectedQualityTag(null);
-                        addLog("info", "All enhancements cleared");
-                      }}
+                      onClick={handleGenerate}
                       disabled={isWorking}
-                      className="flex items-center gap-1 text-[10px] font-bold disabled:opacity-40"
-                      style={{ color: T.textMuted }}
+                      className="mt-2 w-full min-h-[44px] rounded-lg border font-bold flex items-center justify-center gap-2 disabled:opacity-40"
+                      style={{ borderColor: "#f8514960", color: "#f85149" }}
                     >
-                      <X size={10} /> Clear all
+                      <RefreshCw size={13} /> Try again
                     </button>
                   )}
                 </div>
+              )}
+            </div>
 
-                {/* Lighting */}
-                <div className="space-y-1.5">
-                  <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
-                    Lighting{selectedLighting ? `: ${selectedLighting}` : ""}
-                  </span>
-                  <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-3 px-3">
-                    {LIGHTING_PRESETS.map((l) => (
-                      <button
-                        key={l}
-                        onClick={() => { setSelectedLighting(selectedLighting === l ? null : l); addLog("info", `Lighting: ${l}`); }}
-                        disabled={isWorking}
-                        className="shrink-0 px-2.5 py-1.5 text-[10px] font-bold rounded-full border transition-all disabled:opacity-40"
-                        style={{
-                          borderColor: selectedLighting === l ? T.accentColor : T.borderColor + "60",
-                          color: selectedLighting === l ? T.accentColor : T.textMuted,
-                          backgroundColor: selectedLighting === l ? T.accentColor + "15" : T.bgColor,
-                        }}
-                      >
-                        {l}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Camera */}
-                <div className="space-y-1.5">
-                  <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
-                    Camera{selectedCamera ? `: ${selectedCamera}` : ""}
-                  </span>
-                  <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-3 px-3">
-                    {CAMERA_PRESETS.map((c) => (
-                      <button
-                        key={c}
-                        onClick={() => { setSelectedCamera(selectedCamera === c ? null : c); addLog("info", `Camera: ${c}`); }}
-                        disabled={isWorking}
-                        className="shrink-0 px-2.5 py-1.5 text-[10px] font-bold rounded-full border transition-all disabled:opacity-40"
-                        style={{
-                          borderColor: selectedCamera === c ? T.accentColor : T.borderColor + "60",
-                          color: selectedCamera === c ? T.accentColor : T.textMuted,
-                          backgroundColor: selectedCamera === c ? T.accentColor + "15" : T.bgColor,
-                        }}
-                      >
-                        {c}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Provider */}
-                <div className="space-y-1.5">
-                  <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
-                    Model
-                  </span>
-                  <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-3 px-3">
-                    {PROVIDER_OPTIONS.map((p) => {
-                      const ready = isProviderReady(p.id);
-                      return (
-                        <button
-                          key={p.id}
-                          onClick={() => setProviderId(p.id)}
-                          disabled={isWorking || (!ready && p.id !== "auto-free" && p.id !== "auto-quality")}
-                          className="shrink-0 px-2.5 py-1.5 text-[10px] font-bold rounded-full border transition-all disabled:opacity-40"
-                          style={pill(providerId === p.id)}
-                        >
-                          {p.label}{p.cost === 0 ? "" : ` · ${p.cost}🪙`}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Quality + Batch */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
-                      Quality
-                    </span>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {QUALITY_PRESETS.map((preset) => (
-                        <button
-                          key={preset.id}
-                          onClick={() => {
-                            setQualityPreset(preset.id);
-                            setInferenceSteps(preset.steps);
-                            setGuidanceScale(preset.cfg);
-                          }}
-                          disabled={isWorking}
-                          className="py-1.5 rounded-lg border text-[10px] font-bold transition-all disabled:opacity-40"
-                          style={pill(qualityPreset === preset.id)}
-                        >
-                          {preset.label}
-                        </button>
-                      ))}
+            {/* 2 ── Result hero — the artwork is the focus */}
+            <div data-testid="image-result-hero">
+              {currentResult?.fileUrl ? (
+                <div>
+                  <button
+                    onClick={() => setPreviewGen(currentResult)}
+                    className="block w-full text-left rounded-2xl overflow-hidden border transition-transform active:scale-[0.99]"
+                    style={{ borderColor: T.borderColor + "40" }}
+                    aria-label="Open image preview"
+                    data-testid="image-hero-open-preview"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={currentResult.fileUrl}
+                      alt={currentResult.prompt}
+                      className="w-full object-cover"
+                      style={{ aspectRatio: `${currentAspect.width} / ${currentAspect.height}` }}
+                      onError={() => setImgError("Failed to load image")}
+                      data-testid="generated-image"
+                    />
+                  </button>
+                  {imgError ? (
+                    <div className="mt-1.5 text-[11px] px-3 py-2 rounded-lg" style={{ backgroundColor: "#f8514912", color: "#f85149" }}>
+                      {imgError}
                     </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
-                      Batch
+                  ) : (
+                    <p className="px-1 pt-1.5 text-[11px] line-clamp-2" style={{ color: T.textMuted }}>
+                      {currentResult.prompt}
+                    </p>
+                  )}
+                </div>
+              ) : isWorking ? (
+                <div
+                  className="rounded-2xl border overflow-hidden"
+                  style={{
+                    borderColor: T.borderColor + "40",
+                    backgroundColor: T.boxBg,
+                    aspectRatio: `${currentAspect.width} / ${currentAspect.height}`,
+                    maxHeight: 420,
+                  }}
+                  aria-busy="true"
+                  aria-label="Generating image"
+                  data-testid="image-generating-skeleton"
+                >
+                  <div className="h-full w-full flex flex-col items-center justify-center gap-2 animate-pulse">
+                    <Loader2 size={28} className="animate-spin" style={{ color: "#22d3ee" }} />
+                    <span className="text-xs font-bold" style={{ color: T.textMuted }}>
+                      Forging your image…
                     </span>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {([1, 2, 4] as const).map((n) => (
-                        <button
-                          key={n}
-                          onClick={() => setBatchSize(n)}
-                          disabled={isWorking}
-                          className="py-1.5 rounded-lg border text-[10px] font-bold transition-all disabled:opacity-40"
-                          style={pill(batchSize === n)}
-                        >
-                          {n}×
-                        </button>
-                      ))}
-                    </div>
+                    <span className="text-[10px]" style={{ color: T.textMuted + "80" }}>
+                      {currentAspect.label} · {providerId === "auto-free" ? "Free" : providerId === "auto-quality" ? "Quality" : "Pro"} model
+                    </span>
                   </div>
                 </div>
+              ) : (
+                <div
+                  className="rounded-2xl border border-dashed flex flex-col items-center justify-center gap-1.5 py-8"
+                  style={{ borderColor: T.borderColor + "50", color: T.textMuted }}
+                  data-testid="image-empty-state"
+                >
+                  <ImagePlus size={26} style={{ color: T.accentColor + "80" }} />
+                  <span className="text-xs font-bold">Your creation appears here</span>
+                  <span className="text-[10px] opacity-70">Describe it above and hit Generate</span>
+                </div>
+              )}
+            </div>
+
+            {/* 3 ── Design controls — Style / Mood / Ratio (wrapping, collapsed) */}
+            <div className="rounded-2xl border p-3 space-y-1" style={sectionBox}>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+                  Design
+                </span>
+                {(selectedStyle || selectedMood) && (
+                  <button
+                    onClick={() => { setSelectedStyle(null); setSelectedMood(null); addLog("info", "Style & mood cleared"); }}
+                    disabled={isWorking}
+                    className="min-h-[44px] px-2 text-[10px] font-bold disabled:opacity-40"
+                    style={{ color: T.accentColor }}
+                  >
+                    Clear
+                  </button>
+                )}
               </div>
-            )}
 
-            {/* Reference image — compact row */}
+              {/* Style */}
+              <div className="rounded-xl overflow-hidden">
+                <button
+                  onClick={() => setDesignOpen(designOpen === "style" ? null : "style")}
+                  className="w-full min-h-[48px] flex items-center justify-between px-1"
+                  aria-expanded={designOpen === "style"}
+                >
+                  <span className="flex items-center gap-2 text-xs font-bold" style={{ color: T.textColor }}>
+                    <Palette size={13} style={{ color: T.accentColor }} /> Style
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[11px] truncate max-w-[55%]" style={{ color: T.textMuted }}>
+                    <span className="truncate">{selectedStyle ?? "None"}</span>
+                    <ChevronDown size={13} className={`shrink-0 transition-transform ${designOpen === "style" ? "rotate-180" : ""}`} />
+                  </span>
+                </button>
+                {designOpen === "style" && (
+                  <div className="flex flex-wrap gap-1.5 pb-2 pt-1">
+                    {STYLE_PRESETS.map((style) => (
+                      <button
+                        key={style}
+                        onClick={() => { setSelectedStyle(selectedStyle === style ? null : style); addLog("info", `Style: ${style}`); }}
+                        disabled={isWorking}
+                        className="min-h-[44px] px-3 text-[11px] font-bold rounded-full border transition-all disabled:opacity-40"
+                        style={{
+                          borderColor: selectedStyle === style ? T.accentColor : T.borderColor + "60",
+                          color: selectedStyle === style ? T.accentColor : T.textMuted,
+                          backgroundColor: selectedStyle === style ? T.accentColor + "15" : T.bgColor,
+                        }}
+                      >
+                        {style}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Mood */}
+              <div className="rounded-xl overflow-hidden" style={{ borderTop: `1px solid ${T.borderColor}20` }}>
+                <button
+                  onClick={() => setDesignOpen(designOpen === "mood" ? null : "mood")}
+                  className="w-full min-h-[48px] flex items-center justify-between px-1"
+                  aria-expanded={designOpen === "mood"}
+                >
+                  <span className="flex items-center gap-2 text-xs font-bold" style={{ color: T.textColor }}>
+                    <Flame size={13} style={{ color: T.accentColor }} /> Mood
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[11px] truncate max-w-[55%]" style={{ color: T.textMuted }}>
+                    <span className="truncate">{selectedMood ?? "None"}</span>
+                    <ChevronDown size={13} className={`shrink-0 transition-transform ${designOpen === "mood" ? "rotate-180" : ""}`} />
+                  </span>
+                </button>
+                {designOpen === "mood" && (
+                  <div className="flex flex-wrap gap-1.5 pb-2 pt-1">
+                    {MOOD_PRESETS.map((mood) => (
+                      <button
+                        key={mood}
+                        onClick={() => { setSelectedMood(selectedMood === mood ? null : mood); addLog("info", `Mood: ${mood}`); }}
+                        disabled={isWorking}
+                        className="min-h-[44px] px-3 text-[11px] font-bold rounded-full border transition-all disabled:opacity-40"
+                        style={{
+                          borderColor: selectedMood === mood ? T.accentColor : T.borderColor + "60",
+                          color: selectedMood === mood ? T.accentColor : T.textMuted,
+                          backgroundColor: selectedMood === mood ? T.accentColor + "15" : T.bgColor,
+                        }}
+                      >
+                        {mood}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Ratio */}
+              <div className="rounded-xl overflow-hidden" style={{ borderTop: `1px solid ${T.borderColor}20` }}>
+                <button
+                  onClick={() => setDesignOpen(designOpen === "ratio" ? null : "ratio")}
+                  className="w-full min-h-[48px] flex items-center justify-between px-1"
+                  aria-expanded={designOpen === "ratio"}
+                >
+                  <span className="flex items-center gap-2 text-xs font-bold" style={{ color: T.textColor }}>
+                    <Layout size={13} style={{ color: T.accentColor }} /> Ratio
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[11px]" style={{ color: T.textMuted }}>
+                    {aspectRatio}
+                    <ChevronDown size={13} className={`shrink-0 transition-transform ${designOpen === "ratio" ? "rotate-180" : ""}`} />
+                  </span>
+                </button>
+                {designOpen === "ratio" && (
+                  <div className="flex flex-wrap gap-1.5 pb-2 pt-1">
+                    {ASPECT_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        onClick={() => { setAspectRatio(opt.value); addLog("info", `Aspect ratio: ${opt.label}`); }}
+                        disabled={isWorking}
+                        className="min-h-[44px] px-3 text-[11px] font-bold rounded-xl border transition-all disabled:opacity-40"
+                        style={pill(aspectRatio === opt.value)}
+                      >
+                        {opt.icon} {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* More — opens the bottom sheet */}
+              <button
+                onClick={() => setAdvancedOpen(true)}
+                className="w-full min-h-[48px] mt-1 rounded-xl border flex items-center justify-center gap-2 text-xs font-bold transition-all"
+                style={pill(false)}
+              >
+                <SlidersHorizontal size={13} /> More settings
+              </button>
+            </div>
+
+            {/* 4 ── Reference image — compact row */}
             <div
-              className="rounded-xl border flex items-center gap-2.5 pl-2 pr-2.5 h-[3.25rem] overflow-hidden"
+              className="rounded-2xl border flex items-center gap-2.5 pl-2 pr-2.5 min-h-[3.5rem] overflow-hidden"
               style={sectionBox}
             >
               {referenceImage ? (
@@ -1701,7 +1764,7 @@ export default function ImageTool() {
                   <ImagePlus size={16} />
                 </div>
               )}
-              <span className="flex-1 min-w-0 text-[10px] font-bold truncate" style={{ color: T.textMuted }}>
+              <span className="flex-1 min-w-0 text-[11px] font-bold truncate" style={{ color: T.textMuted }}>
                 {referenceImage ? "Reference attached" : "Reference image (optional)"}
               </span>
               <button
@@ -1714,7 +1777,7 @@ export default function ImageTool() {
                   }
                 }}
                 disabled={isWorking}
-                className="h-8 px-3 rounded-lg border text-[10px] font-bold transition-all hover:opacity-80 disabled:opacity-40 shrink-0"
+                className="min-h-[44px] px-4 rounded-xl border text-[11px] font-bold transition-all hover:opacity-80 disabled:opacity-40 shrink-0"
                 style={pill(!!referenceImage)}
               >
                 {referenceImage ? "Remove" : "Upload"}
@@ -1730,118 +1793,57 @@ export default function ImageTool() {
               className="hidden"
             />
 
-            {/* Generate — sticky above bottom nav */}
-            <div
-              className="sticky bottom-2 z-10 -mx-4 px-4 pt-3 pb-1"
-              style={{ background: `linear-gradient(to top, ${T.bgColor} 55%, transparent)` }}
-            >
-              <button
-                onClick={handleGenerate}
-                disabled={!promptValid || !canAfford || isWorking}
-                className="w-full h-12 rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed"
-                style={{
-                  background: isWorking
-                    ? "#155e75"
-                    : "linear-gradient(135deg, #22d3ee 0%, #3b82f6 100%)",
-                  color: "#04121a",
-                  boxShadow: isWorking ? "none" : "0 4px 24px #22d3ee45",
-                }}
-                data-testid="generate-image-button"
-              >
-                {isWorking ? (
-                  <><Loader2 size={15} className="animate-spin" /> Forging...</>
-                ) : (
-                  <><Sparkles size={16} /> Generate{batchSize > 1 ? ` ${batchSize}×` : ""}</>
-                )}
-              </button>
-              {error && (
-                <div
-                  className="mt-2 text-[10px] px-3 py-2.5 rounded-lg flex items-start gap-1.5"
-                  style={{
-                    backgroundColor: error.includes("✓") ? T.success + "15" : "#f8514915",
-                    borderLeft: `3px solid ${error.includes("✓") ? T.success : "#f85149"}`,
-                    color: error.includes("✓") ? T.success : "#f85149",
-                  }}
-                >
-                  {error.includes("✓") ? <CheckCircle2 size={11} className="mt-px shrink-0" /> : <AlertTriangle size={11} className="mt-px shrink-0" />}
-                  <span>{error}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Generated result / canvas */}
-            {currentResult?.fileUrl ? (
-              <div className="rounded-xl border overflow-hidden" style={{ borderColor: T.borderColor + "40" }}>
-                <div className="flex items-center justify-between px-3 h-9" style={{ borderBottom: `1px solid ${T.borderColor}15` }}>
-                  <div className="flex items-center gap-2 text-[10px]" style={{ color: T.textMuted }}>
-                    <ImageIcon size={10} />
-                    <span className="font-bold uppercase tracking-widest">Result</span>
-                    {currentResult.status === "succeeded" && (
-                      <span className="flex items-center gap-1 text-[9px]" style={{ color: T.success }}>
-                        <CheckCircle2 size={9} /> Ready
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => currentResult?.fileUrl && handleDownload(currentResult.fileUrl, currentResult.prompt)} className="h-6 px-2 flex items-center gap-1 rounded border text-[9px] font-bold" style={{ borderColor: T.borderColor + "50", color: T.textMuted }}>
-                      <Download size={9} /> Save
-                    </button>
-                    <button onClick={handleGenerate} className="h-6 px-2 flex items-center gap-1 rounded border text-[9px] font-bold" style={{ borderColor: T.borderColor + "50", color: T.textMuted }}>
-                      <RefreshCw size={9} /> Regen
-                    </button>
-                  </div>
-                </div>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={currentResult.fileUrl} alt={currentResult.prompt} className="w-full" onError={() => setImgError("Failed to load image")} data-testid="generated-image" />
-                <div className="px-3 py-2 text-[10px] opacity-50" style={{ color: T.textMuted }}>
-                  {currentResult.prompt}
-                </div>
-              </div>
-            ) : isWorking ? (
-              <div className="rounded-xl border flex flex-col items-center justify-center py-16" style={{ borderColor: T.borderColor + "40", backgroundColor: T.boxBg }}>
-                <Loader2 size={32} className="animate-spin mb-3" style={{ color: "#22d3ee" }} />
-                <span className="text-xs font-bold" style={{ color: T.textMuted }}>Generating...</span>
-              </div>
-            ) : null}
-
-            {/* Recent generations — horizontal scroll */}
+            {/* 5 ── Recent generations — responsive grid */}
             {history.length > 0 && (
               <div className="space-y-2">
                 <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
                   Recent generations
                 </span>
-                <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4">
-                  {history.slice(0, 10).map((g) => (
-                    <GenerationHistoryCard
+                <div className="grid grid-cols-3 gap-2" data-testid="image-recents-grid">
+                  {history.slice(0, 9).map((g) => (
+                    <button
                       key={g.id}
-                      generation={g}
-                      isSelected={currentResult?.id === g.id}
-                      onSelect={(gen) => setCurrentResult(gen as Generation)}
-                      onDelete={deleteGeneration}
-                      accentColor={T.accentColor}
-                      borderColor={T.borderColor}
-                      bgColor={T.bgColor}
-                      textMuted={T.textMuted}
-                      className="w-20 h-20 shrink-0"
-                      testId="canvas-recent-card"
-                    />
+                      onClick={() => { if (g.fileUrl) setPreviewGen(g as Generation); }}
+                      disabled={!g.fileUrl}
+                      className="relative aspect-square rounded-xl overflow-hidden border min-h-[44px] transition-transform active:scale-[0.98] disabled:opacity-60"
+                      style={{
+                        borderColor: currentResult?.id === g.id ? T.accentColor : T.borderColor + "40",
+                        backgroundColor: T.boxBg,
+                      }}
+                      aria-label={`Preview: ${g.prompt.slice(0, 60)}`}
+                      data-testid="canvas-recent-card"
+                    >
+                      {g.thumbUrl || g.fileUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={g.thumbUrl || g.fileUrl} alt={g.prompt} className="h-full w-full object-cover" loading="lazy" />
+                      ) : (
+                        <div className="h-full w-full flex items-center justify-center">
+                          <AlertTriangle size={16} style={{ color: "#f85149" }} />
+                        </div>
+                      )}
+                      {g.status !== "succeeded" && g.fileUrl && (
+                        <span className="absolute bottom-1 left-1 text-[8px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: "rgba(0,0,0,.6)", color: "#e3b341" }}>
+                          {g.status}
+                        </span>
+                      )}
+                    </button>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Prompt starters — below the fold */}
+            {/* 6 ── Prompt suggestions — responsive cards */}
             <div className="space-y-2">
               <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
                 Try a prompt
               </span>
-              <div className="flex gap-2 overflow-x-auto snap-x snap-mandatory pb-1 -mx-4 px-4">
-                {PROMPT_PRESETS.map((p, i) => (
+              <div className="grid grid-cols-1 gap-2">
+                {PROMPT_PRESETS.slice(0, 4).map((p, i) => (
                   <button
                     key={i}
                     onClick={() => handleUsePrompt(p)}
                     disabled={isWorking}
-                    className="w-[78%] shrink-0 snap-start text-left text-[11px] px-3 py-2.5 rounded-lg border hover:opacity-80 disabled:opacity-40 line-clamp-2 transition-all"
+                    className="min-h-[52px] text-left text-[12px] leading-snug px-3 py-2.5 rounded-xl border hover:opacity-80 disabled:opacity-40 line-clamp-2 transition-all"
                     style={{
                       backgroundColor: T.bgColor,
                       borderColor: T.borderColor + "40",
@@ -1853,70 +1855,262 @@ export default function ImageTool() {
                 ))}
               </div>
             </div>
+          </div>
+        </div>
 
-            {/* Style presets */}
-            <div className="space-y-2 scroll-mt-16" ref={stylePresetsRef}>
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
-                  Style
-                </span>
-                {selectedStyle && (
-                  <button onClick={() => setSelectedStyle(null)} className="text-[9px] opacity-60 hover:opacity-100" style={{ color: T.accentColor }}>
-                    Clear
+        {/* ── MOBILE: More-settings bottom sheet ─────────────────────── */}
+        {advancedOpen && (
+          <div className="md:hidden fixed inset-0 z-[10030]" data-testid="image-more-sheet" role="dialog" aria-label="More image settings">
+            <div className="absolute inset-0 bg-black/60" onClick={() => setAdvancedOpen(false)} aria-hidden />
+            <div
+              className="absolute inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto rounded-t-3xl border-t p-4 pb-[calc(16px+env(safe-area-inset-bottom))]"
+              style={{ backgroundColor: T.bgColor, borderColor: T.borderColor + "40" }}
+            >
+              <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-white/20" aria-hidden />
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-black" style={{ color: T.textColor }}>More settings</span>
+                <button
+                  onClick={() => setAdvancedOpen(false)}
+                  className="min-h-[44px] min-w-[44px] grid place-items-center rounded-xl border"
+                  style={{ borderColor: T.borderColor + "40", color: T.textMuted }}
+                  aria-label="Close settings"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="space-y-4">
+                {/* Lighting */}
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+                    Lighting{selectedLighting ? `: ${selectedLighting}` : ""}
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {LIGHTING_PRESETS.map((l) => (
+                      <button
+                        key={l}
+                        onClick={() => { setSelectedLighting(selectedLighting === l ? null : l); addLog("info", `Lighting: ${l}`); }}
+                        disabled={isWorking}
+                        className="min-h-[44px] px-3 text-[11px] font-bold rounded-full border transition-all disabled:opacity-40"
+                        style={{
+                          borderColor: selectedLighting === l ? T.accentColor : T.borderColor + "60",
+                          color: selectedLighting === l ? T.accentColor : T.textMuted,
+                          backgroundColor: selectedLighting === l ? T.accentColor + "15" : T.bgColor,
+                        }}
+                      >
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* Camera */}
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+                    Camera{selectedCamera ? `: ${selectedCamera}` : ""}
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {CAMERA_PRESETS.map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => { setSelectedCamera(selectedCamera === c ? null : c); addLog("info", `Camera: ${c}`); }}
+                        disabled={isWorking}
+                        className="min-h-[44px] px-3 text-[11px] font-bold rounded-full border transition-all disabled:opacity-40"
+                        style={{
+                          borderColor: selectedCamera === c ? T.accentColor : T.borderColor + "60",
+                          color: selectedCamera === c ? T.accentColor : T.textMuted,
+                          backgroundColor: selectedCamera === c ? T.accentColor + "15" : T.bgColor,
+                        }}
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* Model */}
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+                    Model
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {PROVIDER_OPTIONS.map((p) => {
+                      const ready = isProviderReady(p.id);
+                      return (
+                        <button
+                          key={p.id}
+                          onClick={() => setProviderId(p.id)}
+                          disabled={isWorking || (!ready && p.id !== "auto-free" && p.id !== "auto-quality")}
+                          className="min-h-[44px] px-3 text-[11px] font-bold rounded-full border transition-all disabled:opacity-40"
+                          style={pill(providerId === p.id)}
+                        >
+                          {p.label}{p.cost === 0 ? "" : ` · ${p.cost}🪙`}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                {/* Quality + Batch */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+                      Quality
+                    </span>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {QUALITY_PRESETS.map((preset) => (
+                        <button
+                          key={preset.id}
+                          onClick={() => {
+                            setQualityPreset(preset.id);
+                            setInferenceSteps(preset.steps);
+                            setGuidanceScale(preset.cfg);
+                          }}
+                          disabled={isWorking}
+                          className="min-h-[44px] rounded-xl border text-[11px] font-bold transition-all disabled:opacity-40"
+                          style={pill(qualityPreset === preset.id)}
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+                      Batch
+                    </span>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {([1, 2, 4] as const).map((n) => (
+                        <button
+                          key={n}
+                          onClick={() => setBatchSize(n)}
+                          disabled={isWorking}
+                          className="min-h-[44px] rounded-xl border text-[11px] font-bold transition-all disabled:opacity-40"
+                          style={pill(batchSize === n)}
+                        >
+                          {n}×
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                {(selectedStyle || selectedLighting || selectedMood || selectedCamera || selectedQualityTag) && (
+                  <button
+                    onClick={() => {
+                      setSelectedStyle(null);
+                      setSelectedLighting(null);
+                      setSelectedMood(null);
+                      setSelectedCamera(null);
+                      setSelectedQualityTag(null);
+                      addLog("info", "All enhancements cleared");
+                    }}
+                    disabled={isWorking}
+                    className="w-full min-h-[44px] rounded-xl border text-[11px] font-bold disabled:opacity-40"
+                    style={{ borderColor: T.borderColor + "40", color: T.textMuted }}
+                  >
+                    Clear all enhancements
                   </button>
                 )}
-              </div>
-              <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-4 px-4">
-                {STYLE_PRESETS.map((style) => (
-                  <button
-                    key={style}
-                    onClick={() => { setSelectedStyle(style); addLog("info", `Style: ${style}`); }}
-                    disabled={isWorking}
-                    className="shrink-0 px-2.5 py-1.5 text-[10px] font-bold rounded-full border transition-all hover:scale-105 disabled:opacity-40"
-                    style={{
-                      borderColor: selectedStyle === style ? T.accentColor : T.borderColor + "60",
-                      color: selectedStyle === style ? T.accentColor : T.textMuted,
-                      backgroundColor: selectedStyle === style ? T.accentColor + "15" : T.bgColor,
-                    }}
-                  >
-                    {style}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Mood presets */}
-            <div className="space-y-2 scroll-mt-16" ref={moodPresetsRef}>
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
-                  Mood
-                </span>
-                {selectedMood && (
-                  <button onClick={() => setSelectedMood(null)} className="text-[9px] opacity-60 hover:opacity-100" style={{ color: T.accentColor }}>
-                    Clear
-                  </button>
-                )}
-              </div>
-              <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-4 px-4">
-                {MOOD_PRESETS.map((mood) => (
-                  <button
-                    key={mood}
-                    onClick={() => { setSelectedMood(mood); addLog("info", `Mood: ${mood}`); }}
-                    disabled={isWorking}
-                    className="shrink-0 px-2.5 py-1.5 text-[10px] font-bold rounded-full border transition-all hover:scale-105 disabled:opacity-40"
-                    style={{
-                      borderColor: selectedMood === mood ? T.accentColor : T.borderColor + "60",
-                      color: selectedMood === mood ? T.accentColor : T.textMuted,
-                      backgroundColor: selectedMood === mood ? T.accentColor + "15" : T.bgColor,
-                    }}
-                  >
-                    {mood}
-                  </button>
-                ))}
               </div>
             </div>
           </div>
-        </div>
+        )}
+
+        {/* ── MOBILE: full-screen preview ────────────────────────────── */}
+        {previewGen && (
+          <div className="md:hidden fixed inset-0 z-[10040]" data-testid="image-preview" role="dialog" aria-label="Image preview">
+            <div className="absolute inset-0 bg-black/90" onClick={() => setPreviewGen(null)} aria-hidden />
+            <div className="absolute inset-0 flex flex-col p-4 pt-[calc(12px+env(safe-area-inset-top))] pb-[calc(12px+env(safe-area-inset-bottom))]">
+              <div className="flex items-center justify-between mb-2 shrink-0">
+                <span className="text-sm font-black text-white">Preview</span>
+                <button
+                  onClick={() => setPreviewGen(null)}
+                  className="min-h-[44px] min-w-[44px] grid place-items-center rounded-xl border border-white/15 text-white/80"
+                  aria-label="Close preview"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="flex-1 min-h-0 flex items-center justify-center">
+                {previewGen.fileUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={previewGen.fileUrl}
+                    alt={previewGen.prompt}
+                    className="max-h-full max-w-full rounded-2xl object-contain"
+                    data-testid="image-preview-img"
+                  />
+                ) : (
+                  <div className="text-white/60 text-xs">No image available</div>
+                )}
+              </div>
+              <p className="shrink-0 px-1 py-2 text-[11px] line-clamp-2 text-white/70">
+                {previewGen.prompt}
+              </p>
+              <div className="shrink-0 grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => {
+                    if (previewGen.fileUrl) {
+                      window.dispatchEvent(new CustomEvent("canvas:add-image", { detail: { url: previewGen.fileUrl } }));
+                      addLog("info", "Sent to project canvas");
+                    }
+                    setPreviewGen(null);
+                  }}
+                  className="min-h-[48px] rounded-xl font-bold text-[12px] flex items-center justify-center gap-2 text-white"
+                  style={{ backgroundColor: "rgba(34,211,238,.16)", border: "1px solid rgba(34,211,238,.4)", color: "#22d3ee" }}
+                >
+                  <Palette size={14} /> Use in Project
+                </button>
+                <button
+                  onClick={() => { if (previewGen.fileUrl) handleDownload(previewGen.fileUrl, previewGen.prompt); }}
+                  className="min-h-[48px] rounded-xl font-bold text-[12px] flex items-center justify-center gap-2 text-white"
+                  style={{ backgroundColor: "rgba(255,255,255,.08)", border: "1px solid rgba(255,255,255,.14)" }}
+                >
+                  <Download size={14} /> Download
+                </button>
+                <button
+                  onClick={() => {
+                    const g = previewGen;
+                    setPreviewGen(null);
+                    setPrompt(g.prompt);
+                    setError(null);
+                    addLog("info", "Prompt loaded for regenerate");
+                    setTimeout(() => {
+                      document.getElementById("image-mobile-scroller")?.scrollTo({ top: 0, behavior: "smooth" });
+                      setTimeout(() => {
+                        document.querySelector<HTMLButtonElement>('[data-testid="generate-image-button"]')?.click();
+                      }, 350);
+                    }, 60);
+                  }}
+                  disabled={isWorking}
+                  className="min-h-[48px] rounded-xl font-bold text-[12px] flex items-center justify-center gap-2 text-white disabled:opacity-40"
+                  style={{ backgroundColor: "rgba(255,255,255,.08)", border: "1px solid rgba(255,255,255,.14)" }}
+                >
+                  <RefreshCw size={14} /> Regenerate
+                </button>
+                <button
+                  onClick={() => {
+                    const g = previewGen;
+                    setPreviewGen(null);
+                    setPrompt(g.prompt);
+                    setError(null);
+                    setTimeout(() => {
+                      document.getElementById("image-mobile-scroller")?.scrollTo({ top: 0, behavior: "smooth" });
+                      promptRef.current?.focus();
+                    }, 60);
+                  }}
+                  className="min-h-[48px] rounded-xl font-bold text-[12px] flex items-center justify-center gap-2 text-white"
+                  style={{ backgroundColor: "rgba(255,255,255,.08)", border: "1px solid rgba(255,255,255,.14)" }}
+                >
+                  <Wand2 size={14} /> Edit
+                </button>
+                <button
+                  onClick={() => { deleteGeneration(previewGen.id); setPreviewGen(null); }}
+                  className="col-span-2 min-h-[48px] rounded-xl font-bold text-[12px] flex items-center justify-center gap-2"
+                  style={{ backgroundColor: "rgba(248,81,73,.12)", border: "1px solid rgba(248,81,73,.35)", color: "#f85149" }}
+                >
+                  <Trash2 size={14} /> Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── LEFT PANEL: Controls (desktop only) ─────────────────── */}
         <div
