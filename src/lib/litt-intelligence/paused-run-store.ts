@@ -22,7 +22,7 @@ import "server-only";
 
 import { supabaseAdmin } from "@/lib/supabase";
 import type { LLMMessage } from "./llm-tool-calling";
-import type { QualityFinale } from "./quality-loop-flow";
+import type { QualityFinale, QualityLoopSnapshot } from "./quality-loop-flow";
 
 const APPROVAL_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const TABLE = "agent_paused_runs";
@@ -52,6 +52,8 @@ export interface RunResult {
    * the quality loop existed simply lack it.
    */
   qualityLoop?: Pick<QualityFinale, "verdict" | "stages" | "designPasses">;
+  /** Evidence ledger captured before a pause, including pending observations. */
+  qualityLoopState?: QualityLoopSnapshot;
 }
 
 export interface PausedRunRecord {
@@ -78,6 +80,7 @@ export interface PausedRunRecord {
   runError: string | null;
   runStartedAt: string | null;
   runCompletedAt: string | null;
+  qualityLoopState?: QualityLoopSnapshot;
 }
 
 interface PausedRunRow {
@@ -103,6 +106,7 @@ interface PausedRunRow {
   run_error: string | null;
   run_started_at: string | null;
   run_completed_at: string | null;
+  quality_loop_state?: QualityLoopSnapshot | null;
 }
 
 function rowToRecord(row: PausedRunRow): PausedRunRecord {
@@ -129,6 +133,7 @@ function rowToRecord(row: PausedRunRow): PausedRunRecord {
     runError: row.run_error ?? null,
     runStartedAt: row.run_started_at ?? null,
     runCompletedAt: row.run_completed_at ?? null,
+    qualityLoopState: row.quality_loop_state ?? undefined,
   };
 }
 
@@ -145,6 +150,7 @@ export async function createPausedRun(input: {
   executionMode: "plan" | "act" | "auto";
   systemPrompt: string;
   checkpointId: string | null;
+  qualityLoopState?: QualityLoopSnapshot;
 }): Promise<PausedRunRecord> {
   if (!supabaseAdmin) throw new Error("Database not available");
 
@@ -170,6 +176,7 @@ export async function createPausedRun(input: {
       created_at: now.toISOString(),
       expires_at: expiresAt.toISOString(),
       resolved_at: null,
+      quality_loop_state: input.qualityLoopState ?? null,
     })
     .select()
     .single();

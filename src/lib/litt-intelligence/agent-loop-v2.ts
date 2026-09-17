@@ -36,10 +36,12 @@ import {
   noteDeployment,
   noteToolResult,
   runQualityInspection,
+  snapshotQualityLoopSession,
   startQualityLoopSession,
   verifyLiveUrl,
   type QualityFinale,
   type QualityLoopSession,
+  type QualityLoopSnapshot,
 } from "./quality-loop-flow";
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -71,6 +73,8 @@ export interface AgentLoopConfig {
     userId: string;
     /** The user's original request (judge context). Falls back to the first user message. */
     userRequest?: string;
+    /** Server-persisted evidence restored after an approval pause. */
+    state?: QualityLoopSnapshot;
   };
 }
 
@@ -92,6 +96,8 @@ export interface PendingApproval {
   reason: string;
   /** The conversation messages at the point of pause — resume from here after approval */
   pausedMessages: LLMMessage[];
+  /** Quality evidence captured before this approval pause. */
+  qualityLoopState?: QualityLoopSnapshot;
 }
 
 export interface AgentLoopResult {
@@ -129,6 +135,8 @@ export interface AgentLoopResult {
     stages: QualityFinale["stages"];
     designPasses: number;
   };
+  /** Canonical quality ledger snapshot, including evidence not yet filed. */
+  qualityLoopState?: QualityLoopSnapshot;
 }
 
 // ─── Loop detection ───────────────────────────────────────────────
@@ -312,6 +320,7 @@ export async function runAgentLoopV2(
       projectId: cfg.qualityLoop.projectId,
       userId: cfg.qualityLoop.userId,
       userRequest: cfg.qualityLoop.userRequest ?? userMessage,
+      snapshot: cfg.qualityLoop.state,
     });
     cfg.systemPrompt += QUALITY_LOOP_PROMPT_SECTION;
   }
@@ -606,6 +615,7 @@ export async function runAgentLoopV2(
               inputs: toolCall.inputs,
               reason: permResult.reason ?? "Approval required",
               pausedMessages: [...llmMessages],
+              qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
             },
           };
         }
@@ -833,6 +843,7 @@ export async function runAgentLoopV2(
           designPasses: qualityFinale.designPasses,
         }
       : undefined,
+    qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
   };
 }
 
@@ -975,9 +986,9 @@ export async function resumeAgentLoopV2(
   const cfg = { ...DEFAULT_LOOP_CONFIG, ...resume.config };
   const startTime = Date.now();
 
-  // Quality loop (opt-in): a fresh evidence session for the resumed run.
-  // Cognitive-stage markers in the paused messages are re-harvested below,
-  // so agent-declared evidence survives the approval pause.
+  // Quality loop (opt-in): restore the server-persisted evidence session from
+  // before the approval pause. The paused messages are still re-harvested for
+  // idempotency, but conversation text is not the source of machine evidence.
   let qualitySession: QualityLoopSession | null = null;
   if (cfg.qualityLoop?.enabled) {
     qualitySession = startQualityLoopSession({
@@ -985,6 +996,7 @@ export async function resumeAgentLoopV2(
       projectId: cfg.qualityLoop.projectId,
       userId: cfg.qualityLoop.userId,
       userRequest: cfg.qualityLoop.userRequest ?? "",
+      snapshot: cfg.qualityLoop.state,
     });
     cfg.systemPrompt += QUALITY_LOOP_PROMPT_SECTION;
   }
@@ -1294,6 +1306,7 @@ export async function resumeAgentLoopV2(
               inputs: toolCall.inputs,
               reason: permResult.reason ?? "Approval required in ACT mode",
               pausedMessages: [...llmMessages],
+              qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
             },
           };
         }
@@ -1455,6 +1468,7 @@ export async function resumeAgentLoopV2(
           designPasses: qualityFinale.designPasses,
         }
       : undefined,
+    qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
   };
 }
 

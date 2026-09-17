@@ -28,10 +28,14 @@ import {
   buildRedesignPrompt,
   finalizeQualityLoop,
   harvestStageMarkers,
+  noteBuildArtifacts,
   noteBuildFix,
   noteDeployment,
+  notePreviewReady,
   noteToolResult,
+  restoreQualityLoopSession,
   runQualityInspection,
+  snapshotQualityLoopSession,
   shouldEnableQualityLoop,
   startQualityLoopSession,
   verifyLiveUrl,
@@ -48,6 +52,10 @@ function makeSession(): QualityLoopSession {
     userId: "user-1",
     userRequest: "Build a dog grooming site",
   });
+}
+
+function recordVerifiedBuild(s: QualityLoopSession): void {
+  noteBuildArtifacts(s, ["index.html"]);
 }
 
 function makeScorecard(overall: number): VisualScorecard {
@@ -172,6 +180,7 @@ describe("implied stage advancement", () => {
       { success: true, result: {}, mutating: true, summary: "wrote index.html" },
       "ws-1",
     );
+    recordVerifiedBuild(s);
 
     expect(s.state.stages.understand.status).toBe("passed");
     expect(s.state.stages.research.status).toBe("skipped");
@@ -179,7 +188,7 @@ describe("implied stage advancement", () => {
     expect(s.state.stages.plan.status).toBe("passed");
     expect(s.state.stages.design.status).toBe("passed");
     expect(s.state.stages.build.status).toBe("active");
-    expect(s.state.stages.build.evidence).toHaveLength(1);
+    expect(s.state.stages.build.evidence).toHaveLength(2);
     expect(s.observations).toHaveLength(0);
   });
 
@@ -211,6 +220,7 @@ describe("noteBuildFix / noteDeployment", () => {
       { success: true, result: {}, mutating: true, summary: "wrote it" },
       "ws-1",
     );
+    recordVerifiedBuild(s);
     noteToolResult(
       s,
       "preview.status",
@@ -235,6 +245,17 @@ describe("noteBuildFix / noteDeployment", () => {
     expect(s.state.stages.test.evidence).toHaveLength(1);
     expect(s.state.stages.test.evidence[0].summary).toMatch(/all passed/);
     expect(s.state.stages.test.evidence[0].artifacts).toContain("typecheck:pass");
+  });
+
+  it("does not pass TEST when a run claims success without executed checks", () => {
+    const s = makeSession();
+    noteBuildFix(s, { allPassed: true, results: [] });
+    expect(s.state.stages.test.evidence).toHaveLength(0);
+    expect(s.observations[0]?.evidence.detail).toEqual({
+      passed: false,
+      executedChecks: false,
+      reason: "No checks were executed",
+    });
   });
 
   it("records DEPLOY evidence from a completed deployment", () => {
@@ -266,6 +287,7 @@ describe("finalizeQualityLoop", () => {
       { success: true, result: {}, mutating: true, summary: "wrote index.html" },
       "ws-1",
     );
+    recordVerifiedBuild(s);
     noteToolResult(
       s,
       "preview.status",
@@ -281,7 +303,7 @@ describe("finalizeQualityLoop", () => {
       });
       await runQualityInspection(s);
     }
-    noteBuildFix(s, { allPassed: true, results: [] });
+    noteBuildFix(s, { allPassed: true, results: [{ check: "tests", passed: true }] });
     return s;
   }
 
@@ -312,6 +334,56 @@ describe("finalizeQualityLoop", () => {
     expect(s.state.stages.inspect.skipReason).toMatch(/browser unavailable/);
     expect(s.state.stages.test.status).toBe("passed");
   });
+
+  it("persists successful build, preview, deploy, and verification evidence across approval resume", async () => {
+    const beforeApproval = makeSession();
+    harvestStageMarkers(beforeApproval, [
+      {
+        role: "assistant",
+        content: [
+          "QUALITY: understand — Coffee customers; goal: online orders.",
+          "QUALITY: plan — Hero, menu, contact, and responsive layout.",
+          "QUALITY: design — Warm roast palette with clear mobile hierarchy.",
+          "QUALITY: polish — Copy and spacing checked.",
+        ].join("\n"),
+      },
+    ]);
+    noteToolResult(
+      beforeApproval,
+      "files.write",
+      { success: true, result: {}, mutating: true, summary: "wrote index.html" },
+      "ws-1",
+    );
+    recordVerifiedBuild(beforeApproval);
+    notePreviewReady(beforeApproval, "https://preview.test/ws-1");
+    noteBuildFix(beforeApproval, {
+      allPassed: true,
+      results: [{ check: "website smoke", passed: true }],
+    });
+
+    // This is the exact boundary that previously discarded the in-memory
+    // ledger and caused every stage to appear pending after resume.
+    const afterApproval = restoreQualityLoopSession(
+      snapshotQualityLoopSession(beforeApproval),
+    );
+    noteDeployment(afterApproval, "https://ember.example");
+    mockVerifyUrl.mockResolvedValue({
+      success: true,
+      detail: "GET https://ember.example returned HTTP 200",
+      url: "https://ember.example",
+    });
+    await verifyLiveUrl(afterApproval, "https://ember.example");
+
+    const finale = finalizeQualityLoop(afterApproval, { deployRequested: true });
+    expect(finale.verdict.ok).toBe(true);
+    expect(finale.verdict.missing).toHaveLength(0);
+    expect(finale.stages.filter((stage) => stage.status === "pending")).toHaveLength(0);
+    expect(finale.stages.find((stage) => stage.stage === "build")?.status).toBe("passed");
+    expect(finale.stages.find((stage) => stage.stage === "run")?.status).toBe("passed");
+    expect(finale.stages.find((stage) => stage.stage === "test")?.status).toBe("passed");
+    expect(finale.stages.find((stage) => stage.stage === "deploy")?.status).toBe("passed");
+    expect(finale.stages.find((stage) => stage.stage === "verify")?.status).toBe("passed");
+  });
 });
 
 describe("runQualityInspection", () => {
@@ -335,6 +407,7 @@ describe("runQualityInspection", () => {
       { success: true, result: {}, mutating: true, summary: "wrote index.html" },
       "ws-1",
     );
+    recordVerifiedBuild(s);
     noteToolResult(
       s,
       "preview.status",
@@ -439,6 +512,7 @@ describe("failed evidence blocks the gate — never a false pass", () => {
       { success: true, result: {}, mutating: true, summary: "wrote index.html" },
       "ws-1",
     );
+    recordVerifiedBuild(s);
     noteToolResult(
       s,
       "preview.status",
@@ -454,7 +528,7 @@ describe("failed evidence blocks the gate — never a false pass", () => {
     noteBuildFix(
       s,
       buildFixPassed
-        ? { allPassed: true, results: [] }
+        ? { allPassed: true, results: [{ check: "tests", passed: true }] }
         : {
             allPassed: false,
             results: [
@@ -584,6 +658,7 @@ describe("AUTO-mode quality gating", () => {
         { success: true, result: {}, mutating: true, summary: "wrote index.html" },
         "ws-1",
       );
+      recordVerifiedBuild(s);
     }
     if (opts.withPreview !== false) {
       noteToolResult(
@@ -603,7 +678,7 @@ describe("AUTO-mode quality gating", () => {
     });
     await runQualityInspection(s);
     if (opts.withTest !== false) {
-      noteBuildFix(s, { allPassed: true, results: [] });
+      noteBuildFix(s, { allPassed: true, results: [{ check: "tests", passed: true }] });
     }
     return s;
   }
@@ -673,6 +748,7 @@ describe("AUTO-mode quality gating", () => {
       { success: true, result: {}, mutating: true, summary: "wrote index.html" },
       "ws-1",
     );
+    recordVerifiedBuild(s);
     noteToolResult(
       s,
       "preview.status",

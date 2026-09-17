@@ -807,6 +807,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 executionMode: canonicalCtx.executionMode,
                 systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
                 checkpointId: v2Result.checkpoint?.checkpointId ?? null,
+                qualityLoopState: v2Result.qualityLoopState,
               });
               pausedRunId = pausedRun.id;
             } catch (pausedErr) {

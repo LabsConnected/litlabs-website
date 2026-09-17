@@ -24,6 +24,12 @@ import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import type { BuildFixLoopResult } from "./build-fix-loop";
 import { ProgressEmitter } from "./progress-events";
 import { buildPreviewProxyUrl } from "@/lib/terminal-internal-client";
+import {
+  noteBuildArtifacts,
+  notePreviewReady,
+  restoreQualityLoopSession,
+  snapshotQualityLoopSession,
+} from "./quality-loop-flow";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -502,7 +508,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
 
     // Phase 2: start and verify the live preview
     checkSignal(signal);
-    if (options.requireProjectArtifacts && !pausedApproval) {
+    if ((options.requireProjectArtifacts || options.qualityLoop?.enabled) && !pausedApproval) {
       const artifacts = await verifyProjectArtifacts(transport);
       if (!artifacts.ok) {
         return baseResult({
@@ -512,6 +518,15 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
           runtimeRepairAttempts,
         });
+      }
+      if (agentResult.qualityLoopState) {
+        const qualitySession = restoreQualityLoopSession(agentResult.qualityLoopState);
+        noteBuildArtifacts(qualitySession, artifacts.files);
+        agentResult = {
+          ...agentResult,
+          qualityLoopState: snapshotQualityLoopSession(qualitySession),
+        };
+        lastAgentLoopResult = agentResult;
       }
     }
     emitStep(progress, steps, "Starting live preview...");
@@ -651,6 +666,16 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
     const previewUrl = (options.buildPreviewUrl ?? buildPreviewProxyUrl)(transport.workspaceId);
     progress.emit({ type: "preview_result", success: true, previewUrl });
 
+    if (agentResult.qualityLoopState) {
+      const qualitySession = restoreQualityLoopSession(agentResult.qualityLoopState);
+      notePreviewReady(qualitySession, previewUrl);
+      agentResult = {
+        ...agentResult,
+        qualityLoopState: snapshotQualityLoopSession(qualitySession),
+      };
+      lastAgentLoopResult = agentResult;
+    }
+
     // Phase 1 paused for approval — preview is live; return the pause now.
     if (pausedApproval) {
       return baseResult({
@@ -701,6 +726,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
       // Resume context: the original request, so the resumed loop's model
       // continuation knows what it was doing when it reports the live URL.
       pausedMessages: [{ role: "user", content: options.userMessage }],
+      qualityLoopState: agentResult.qualityLoopState,
     };
     // The messages route persists the paused run off agentLoopResult —
     // the synthesized pause must be visible there or the approval card
