@@ -65,6 +65,16 @@ const MODE_PATTERNS: ModePattern[] = [
       // to `think` mode with requiresExecution:false, so the request reached
       // only the read-only loop — it could be discussed but never built.
       /\b(build|create|make|generate|scaffold|set up)\b.*\b(website|web ?site|web ?app|site|landing site|landing page|homepage|web page|webpage|blog|portfolio|store|shop|dashboard|app)\b/i,
+      // Desire-driven artifact requests ("I want a landing page …", "I need
+      // a website for …") express build intent without a leading imperative
+      // verb. Without this they fell into `create`'s bare artifact-noun
+      // pattern and took the text-only chat lane — the model echoed
+      // tool-call markup that can never execute, and the run silently
+      // completed with no file. The artifact list deliberately excludes
+      // media nouns (image, logo, video, …) so generation requests stay in
+      // `create`; it also excludes bare "site"/"store"/"shop" to avoid
+      // catching "site visit" / "I want to shop".
+      /\b(want|need|would like|looking for|get me|give me)\b.*\b(landing page|landing site|website|web ?site|web ?app|home ?page|web ?page|blog|portfolio|dashboard|app)\b/i,
       /\b(add|implement|support)\b.*\b(dark mode|feature|endpoint|route|page)\b/i,
       /\b(fix|debug|resolve|patch)\b.*\b(bug|error|issue|crash|fail)\b/i,
       /\b(edit|update|change|modify|rename|delete)\b.*\b(file|readme|config|code|component)\b/i,
