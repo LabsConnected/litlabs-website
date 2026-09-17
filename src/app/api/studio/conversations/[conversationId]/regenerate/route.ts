@@ -9,7 +9,6 @@ import {
   insertMessage,
   updateMessageStatus,
 } from "@/lib/studio/conversation-service";
-import { getLatestPausedRunForConversation } from "@/lib/litt-intelligence/paused-run-store";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { resolveAgent } from "@/lib/studio/agent-registry";
 import { buildStudioContext, buildProjectContextBlock } from "@/lib/studio/project-resolver";
@@ -20,6 +19,11 @@ import type { AgentSlug } from "@/lib/studio/types";
 import { translateCapabilities, type RawCapabilities } from "@/lib/capabilities/translate";
 import { routeKernel, composeSystemPrompt, adaptLegacyCapability } from "@/lib/litt-kernel";
 import type { CapabilityRecord } from "@/lib/litt-kernel";
+import {
+  findToolCallMarkup,
+  stripToolCallMarkupText,
+  type ToolCallMarkupHit,
+} from "@/lib/litt-intelligence/tool-call-markup";
 
 export const runtime = "nodejs";
 
@@ -27,45 +31,44 @@ interface RouteParams {
   params: Promise<{ conversationId: string }>;
 }
 
-/**
- * Pure predicate behind the honest-Retry guard (unit tested).
- *
- * The /regenerate endpoint is chat-only (generateText — no agent loop, no
- * tools, no approvals). When the target message is the terminal message of
- * a FAILED workspace run, regenerating would silently downgrade the retry
- * to a chat reply while the mission stays Idle. This detects that linkage:
- * either the explicit `resume:<pausedRunId>` clientRequestId stamp, or —
- * for the update-in-place writeback path — the message having been marked
- * failed at/after the run completed.
- */
-export function isFailedWorkspaceTurnMessage(
-  message: {
-    status?: string | null;
-    clientRequestId?: string | null;
-    updatedAt?: string | null;
-    createdAt?: string | null;
-  },
-  latestRun: {
-    id: string;
-    runStatus: string | null;
-    runCompletedAt?: string | null;
-    resolvedAt?: string | null;
-  } | null,
-): boolean {
-  if (message.status !== "failed" || !latestRun || latestRun.runStatus !== "failed") {
-    return false;
-  }
-  if (message.clientRequestId === `resume:${latestRun.id}`) return true;
-  const runFailedAt = latestRun.runCompletedAt ?? latestRun.resolvedAt ?? null;
-  const msgTime = message.updatedAt ?? message.createdAt ?? null;
-  return (
-    !!runFailedAt &&
-    !!msgTime &&
-    new Date(msgTime).getTime() >= new Date(runFailedAt).getTime() - 1000
-  );
+const HISTORY_LIMIT = 12;
+
+export interface RegenerateMarkupScan {
+  /** True when the output must NOT persist as completed. */
+  failed: boolean;
+  /**
+   * The content to persist: the stripped model output on the clean path,
+   * the honest failure explanation on the markup path.
+   */
+  content: string;
+  /** The scan hit, for logging, when failed. */
+  hit?: ToolCallMarkupHit;
 }
 
-const HISTORY_LIMIT = 12;
+/**
+ * Scan a regenerate-model output for pseudo tool-call markup before it
+ * is persisted. The regenerate path is chat-only (generateText — no agent
+ * loop, no tools), so markup carrying invocation intent means the model
+ * tried to invoke a tool that can never execute here. Persisting it as a
+ * completed answer would claim work was done — the same production defect
+ * the messages V1 lane already guards against. Mirrors the V1 lane:
+ * fail truthfully on a hit, strip-and-persist otherwise.
+ */
+export function scanRegenerateOutput(
+  output: string,
+  knownToolIds: ReadonlySet<string>,
+): RegenerateMarkupScan {
+  const hit = findToolCallMarkup(output, knownToolIds);
+  if (hit) {
+    return {
+      failed: true,
+      content:
+        "The model produced a tool call in a format this run cannot execute, so nothing was executed.",
+      hit,
+    };
+  }
+  return { failed: false, content: stripToolCallMarkupText(output) };
+}
 
 /**
  * POST /api/studio/conversations/[conversationId]/regenerate
@@ -135,33 +138,6 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   }
   if (originalAssistant.role !== "assistant") {
     return NextResponse.json({ error: "Can only regenerate assistant messages" }, { status: 400 });
-  }
-
-  // 2b. Honest Retry: this endpoint is chat-only (generateText — no agent
-  // loop, no tools, no approvals). If the target message is the terminal
-  // message of a FAILED workspace run, regenerating here would silently
-  // downgrade the retry to a chat reply while the mission stays Idle — the
-  // exact failure observed in production. Refuse with a clear, actionable
-  // error so callers surface the truth instead of a fake retry.
-  if (originalAssistant.status === "failed") {
-    let linkedToFailedRun = false;
-    try {
-      const latestRun = await getLatestPausedRunForConversation(conversation.id, userId);
-      linkedToFailedRun = isFailedWorkspaceTurnMessage(originalAssistant, latestRun);
-    } catch {
-      // Best-effort — a lookup failure must not block legitimate regenerations.
-    }
-    if (linkedToFailedRun) {
-      return NextResponse.json(
-        {
-          error: "Cannot regenerate a failed workspace turn",
-          code: "WORKSPACE_RETRY_UNSUPPORTED",
-          detail:
-            "This turn failed while running workspace operations. Regenerating only rewrites the reply text — it cannot re-run the failed work. Send your request again as a new message to retry it.",
-        },
-        { status: 409 },
-      );
-    }
   }
 
   // 3. Find the parent user message
@@ -348,8 +324,53 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       undefined,
     );
 
-    // 12. Persist the new assistant response
-    await updateMessageStatus(newAssistant.id, userId, "completed", r.text);
+    // Tool-protocol boundary for the regenerate path (mirrors the
+    // messages V1 lane): this endpoint is chat-only — no agent loop, no
+    // tools — so markup carrying invocation intent means the model tried
+    // to invoke a tool that can never execute here. Persisting it as a
+    // completed answer would imply work was done. Markup without intent
+    // (quoted examples, orphan tags) is stripped so it never reaches the
+    // transcript verbatim.
+    const toolIds = new Set(
+      (await import("@/lib/litt-intelligence/tool-registry")).toolRegistry.list().map((t) => t.id),
+    );
+    const scan = scanRegenerateOutput(r.text, toolIds);
+    if (scan.failed) {
+      // Same contract as the V1 lane's TOOL_CALL_PARSE_FAILED — a
+      // classified failure, not a done card and not a retryable
+      // provider error.
+      await updateMessageStatus(newAssistant.id, userId, "failed", scan.content);
+      studioLog("regenerate:tool_call_markup_in_text", {
+        conversationId: conversation.id,
+        userId,
+        agentSlug,
+        provider: r.provider,
+        model: r.model,
+        latencyMs: r.latencyMs,
+        errorClass: `tool_call_markup_${scan.hit?.kind}`,
+        tool: scan.hit?.toolId,
+      });
+      return NextResponse.json(
+        {
+          error: "Tool call markup",
+          code: "TOOL_CALL_PARSE_FAILED",
+          detail: scan.content,
+          // Same contract as the V1 lane's error event: the revision was
+          // already bumped at step 1b, so surface it or the client's next
+          // send 409s on a stale expectedRevision.
+          revision: newRevision,
+          assistantMessage: {
+            ...newAssistant,
+            content: scan.content,
+            status: "failed" as const,
+          },
+        },
+        { status: 422 },
+      );
+    }
+
+    // 12. Persist the new assistant response (markup stripped)
+    await updateMessageStatus(newAssistant.id, userId, "completed", scan.content);
 
     // 13. Revision was already incremented atomically at step 1b (if expectedRevision provided)
     // If no expectedRevision was sent, increment non-atomically for backward compat
@@ -381,7 +402,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     return NextResponse.json({
       assistantMessage: {
         ...newAssistant,
-        content: r.text,
+        content: scan.content,
         status: "completed" as const,
       },
       originalAssistantMessageId: originalAssistant.id,
