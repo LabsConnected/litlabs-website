@@ -21,8 +21,6 @@ const DEFAULT_CAPABILITIES: Array<{ id: string; permissions: string[]; dependenc
   { id: "preview", permissions: [], dependencies: ["project.create"] },
   { id: "browser", permissions: [], dependencies: [] },
   { id: "image.generate", permissions: [], dependencies: [] },
-  { id: "video.generate", permissions: [], dependencies: [] },
-  { id: "audio.generate", permissions: [], dependencies: [] },
   { id: "camera", permissions: ["camera"], dependencies: [] },
   { id: "screen.capture", permissions: ["display-capture"], dependencies: [] },
   { id: "plugins", permissions: [], dependencies: [] },

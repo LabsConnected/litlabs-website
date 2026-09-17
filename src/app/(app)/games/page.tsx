@@ -189,8 +189,8 @@ export default function GamesPage() {
               <Link href="#quick-play" className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-black text-white transition-colors hover:bg-white/10">
                 <Play size={16} fill="currentColor" /> Quick Play
               </Link>
-              <Link href="/studio?tool=image" className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-5 py-3 text-sm font-bold text-white/70 transition-colors hover:bg-white/5 hover:text-white">
-                <Wand2 size={16} /> Build a Game
+              <Link href="/studio?tool=image" title="Open the image tool to design game art" className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-5 py-3 text-sm font-bold text-white/70 transition-colors hover:bg-white/5 hover:text-white">
+                <Wand2 size={16} /> Game Art
               </Link>
             </div>
             <div className="mt-5 text-[11px] font-medium text-white/55">
@@ -257,8 +257,8 @@ export default function GamesPage() {
           <div className="flex flex-col items-start gap-4 rounded-3xl border border-white/10 bg-linear-to-br from-violet-500/10 to-transparent p-6 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-[10px] font-black uppercase tracking-[.25em] text-violet-400">Build with LiTT</p>
-              <h2 className="mt-2 text-xl font-black sm:text-2xl">Make your own game in Studio</h2>
-              <p className="mt-2 max-w-md text-sm text-white/65">Use AI agents to design, code, and ship original mini-games — no engine setup required.</p>
+              <h2 className="mt-2 text-xl font-black sm:text-2xl">Game building is coming to Studio</h2>
+              <p className="mt-2 max-w-md text-sm text-white/65">We&apos;re teaching LiTT&apos;s agents to design, code, and ship original mini-games — no engine setup required. Today, start with game art in the image tool.</p>
             </div>
             <Link href="/studio?tool=image" className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-violet-500 px-5 py-3 text-sm font-black text-white transition-colors hover:bg-violet-400">
               <Wand2 size={16} /> Open Studio

@@ -346,3 +346,36 @@ describe("CommandComposer — mobile input sizing (Phase 1 #8)", () => {
     expect(input.style.fontSize).toBe("");
   });
 });
+
+describe("CommandComposer — PR-1 honesty placeholders", () => {
+  const renderComposer = (littMode: "video" | "music" | "image") =>
+    render(
+      <CommandComposer
+        value=""
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        busy={false}
+        littMode={littMode}
+      />,
+    );
+
+  it("video mode placeholder does not promise chat generation", () => {
+    renderComposer("video");
+    const input = screen.getByTestId("studio-command-input") as HTMLTextAreaElement;
+    expect(input.placeholder).not.toMatch(/want LiTT to create/i);
+    expect(input.placeholder).toMatch(/video tool/i);
+  });
+
+  it("music mode placeholder does not promise chat generation", () => {
+    renderComposer("music");
+    const input = screen.getByTestId("studio-command-input") as HTMLTextAreaElement;
+    expect(input.placeholder).not.toMatch(/want LiTT to create/i);
+    expect(input.placeholder).toMatch(/music tool/i);
+  });
+
+  it("image mode placeholder still promises image creation (it exists)", () => {
+    renderComposer("image");
+    const input = screen.getByTestId("studio-command-input") as HTMLTextAreaElement;
+    expect(input.placeholder).toMatch(/image you want LiTT to create/i);
+  });
+});
