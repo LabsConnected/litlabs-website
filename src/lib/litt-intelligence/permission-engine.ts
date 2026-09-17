@@ -33,6 +33,14 @@ export interface ToolPermissionInfo {
   isReadOnly: boolean;
   isMutation: boolean;
   enabled: boolean;
+  /**
+   * Capabilities the tool declares as required (mirrors the registry's
+   * `requiredCapabilities`). The permission gate and the registry execution
+   * gate MUST agree: a tool whose capability is unavailable here is never
+   * advertised to the model and never approved — it can never reach the
+   * registry only to be rejected as "incapable" after approval.
+   */
+  requiredCapabilities?: string[];
 }
 
 // Tools that are safe to auto-approve in AUTO mode.
@@ -84,6 +92,7 @@ export class PermissionEngine {
     tool: ToolPermissionInfo,
     _inputs: Record<string, unknown>,
     mode: ExecutionMode,
+    availableCapabilities: string[] = [],
   ): PermissionResult {
     // 1. Disabled tools are never allowed
     if (!tool.enabled) {
@@ -94,7 +103,26 @@ export class PermissionEngine {
       };
     }
 
-    // 2. PLAN mode: read-only only
+    // 2. Capability gate — unified with ToolRegistry.execute. A tool whose
+    // required capability is not available is NOT allowed at all: it is
+    // filtered from the model-facing tool list and can never be approved.
+    // This is what prevents the "approved, then rejected as incapable"
+    // failure where the user approves image.generate and the execution
+    // gate fails closed with "requires capability ... which is not
+    // available". Fail-closed default ([]) matches the registry: callers
+    // must pass the resolved capability set (see resolveAvailableCapabilities).
+    const missingCapabilities = (tool.requiredCapabilities ?? []).filter(
+      (c) => !availableCapabilities.includes(c),
+    );
+    if (missingCapabilities.length > 0) {
+      return {
+        allowed: false,
+        reason: `Tool "${tool.toolId}" requires capability "${missingCapabilities[0]}" which is not available`,
+        requiresApproval: false,
+      };
+    }
+
+    // 3. PLAN mode: read-only only
     if (mode === "plan") {
       if (!tool.isReadOnly) {
         return {
@@ -106,7 +134,7 @@ export class PermissionEngine {
       return { allowed: true, requiresApproval: false };
     }
 
-    // 3. ACT and AUTO: same security boundary
+    // 4. ACT and AUTO: same security boundary
     // Sensitive actions always require approval
     if (SENSITIVE_ACTIONS.has(tool.toolId)) {
       return {
@@ -116,12 +144,12 @@ export class PermissionEngine {
       };
     }
 
-    // 4. Read-only tools: always allowed in ACT/AUTO
+    // 5. Read-only tools: always allowed in ACT/AUTO
     if (tool.isReadOnly) {
       return { allowed: true, requiresApproval: false };
     }
 
-    // 5. Mutation tools in ACT mode: allowed, but always require approval
+    // 6. Mutation tools in ACT mode: allowed, but always require approval
     if (mode === "act") {
       return {
         allowed: true,
@@ -130,7 +158,7 @@ export class PermissionEngine {
       };
     }
 
-    // 6. AUTO mode: auto-approve safe workspace operations
+    // 7. AUTO mode: auto-approve safe workspace operations
     if (mode === "auto") {
       if (AUTO_APPROVE_SAFE.has(tool.toolId)) {
         return { allowed: true, requiresApproval: false };

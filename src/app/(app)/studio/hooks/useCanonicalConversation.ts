@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { findRetryResendText } from "@/lib/studio/retry-strategy";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { parseBuilderLocalCommand } from "../lib/builder-command-router";
@@ -1599,6 +1600,16 @@ export function useCanonicalConversation({
       : allMessages.findLast((m) => m.role === "assistant" && m.status === "completed");
     if (!target?.id) return;
 
+    // A failed turn means the work never completed — re-send the parent user
+    // message through the normal send pipeline so the turn is genuinely
+    // re-run (see findRetryResendText). Falls back to the regenerate API
+    // when there is no parent message to re-send.
+    const resendText = findRetryResendText(target, allMessages);
+    if (resendText) {
+      await send(resendText);
+      return;
+    }
+
     setBusy(true);
     getStore().setStreaming(true);
     // Bounded and cancellable: the 120s timeout matches the send() stall
@@ -1655,7 +1666,7 @@ export function useCanonicalConversation({
       useExecutionStore.getState().endRun();
       setBusy(false);
     }
-  }, [busy, getStore, loadMessages, authHeaders, runtimeContext, setSendError]);
+  }, [busy, getStore, loadMessages, authHeaders, runtimeContext, setSendError, send]);
 
   // Explicit Stop. Ordering:
   //   1. POST the authenticated server-side cancellation FIRST — transport
