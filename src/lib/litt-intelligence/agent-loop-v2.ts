@@ -21,7 +21,7 @@ import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from ".
 import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, AllRoutesFailedError, AgentBudgetExhaustedError, type ToolDefinition, type ToolCallResult, type LLMMessage } from "./llm-tool-calling";
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
-import { validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
+import { buildPatchRecoveryMessage, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
 import { computeWorkspaceChange } from "./workspace-change-producer";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { toolRegistry } from "./tool-registry";
@@ -333,6 +333,7 @@ export async function runAgentLoopV2(
   // identical mutation after failover replays the recorded result instead
   // of executing it again.
   const executedMutations = new Map<string, ToolCallResult>();
+  const patchRecoveryAttempts = new Map<string, number>();
 
   // Collect progress events
   const localProgress = new ProgressEmitter((event) => {
@@ -398,6 +399,9 @@ export async function runAgentLoopV2(
           signal: cfg.signal,
         },
       );
+      if (llmResponse.responseShape && llmResponse.provider) {
+        localProgress.emit({ type: "model_response", provider: llmResponse.provider, model: llmResponse.model, ...llmResponse.responseShape, finishReason: llmResponse.finishReason });
+      }
       // Emit model routing event so LiTT Live shows which provider/model was actually used
       localProgress.emit({
         type: "model_routing",
@@ -565,22 +569,34 @@ export async function runAgentLoopV2(
               ? validateFilesWriteInputs(toolCall.inputs)
               : null;
         if (writeError) {
+          const recoveryKey = `${toolCall.toolId}:${String(toolCall.inputs.path ?? "")}`;
+          const recoveryAttempt = (patchRecoveryAttempts.get(recoveryKey) ?? 0) + 1;
+          patchRecoveryAttempts.set(recoveryKey, recoveryAttempt);
+          const recoveryMessage = toolCall.toolId === "apply_patch"
+            ? await buildPatchRecoveryMessage(toolCall.inputs, transport, writeError, recoveryAttempt)
+            : writeError;
           const result: ToolCallResult = {
             toolCallId: toolCall.toolCallId,
             toolId: toolCall.toolId,
             result: null,
             success: false,
-            error: writeError,
+            error: recoveryMessage,
           };
           llmMessages.push(buildToolResultMessage(result));
-          toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: "invalid write — regenerating", mutating: false });
+          toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: recoveryAttempt >= 2 ? "invalid write — stopped safely" : "invalid write — re-read and regenerate", mutating: false });
           localProgress.emit({
             type: "tool_result",
             toolId: toolCall.toolId,
             success: false,
-            summary: "Invalid write — regenerating with real file content",
+            summary: recoveryAttempt >= 2 ? "Invalid patch repeated after disk re-read; stopped without mutation" : "Invalid patch re-read from disk; regenerate or use files.write",
             durationMs: 0,
           });
+          if (toolCall.toolId === "apply_patch" && recoveryAttempt >= 2) {
+            cancelled = true;
+            cancelReason = "The model repeated an unsafe patch after the file was re-read; no mutation was executed";
+            finalText = "I could not safely apply that change after re-reading the current file. No mutation was executed.";
+            break;
+          }
           continue;
         }
       }
@@ -1181,6 +1197,9 @@ export async function resumeAgentLoopV2(
           signal: cfg.signal,
         },
       );
+      if (llmResponse.responseShape && llmResponse.provider) {
+        localProgress.emit({ type: "model_response", provider: llmResponse.provider, model: llmResponse.model, ...llmResponse.responseShape, finishReason: llmResponse.finishReason });
+      }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       localProgress.emit({

@@ -43,10 +43,13 @@ const BASE = (process.env.LITT_PROD_BASE_URL || "https://www.litlabs.net").repla
 // GITHUB_ACTIONS is set unconditionally by every Actions runner (unlike CI,
 // which is only present if a step opts in), so it's the reliable signal that
 // we're in the production CI run rather than a local/manual invocation.
-const USER_ID = resolveAcceptanceUserId({
-  isCI: process.env.GITHUB_ACTIONS === "true",
-  envUserId: process.env.LITT_ACCEPTANCE_USER_ID,
-});
+const FRESH_ACCOUNT_REQUESTED = process.env.LITT_ACCEPTANCE_FRESH_ACCOUNT === "1";
+let USER_ID = FRESH_ACCOUNT_REQUESTED
+  ? resolveAcceptanceUserId({ isCI: true, envUserId: process.env.LITT_ACCEPTANCE_USER_ID })
+  : resolveAcceptanceUserId({
+      isCI: process.env.GITHUB_ACTIONS === "true",
+      envUserId: process.env.LITT_ACCEPTANCE_USER_ID,
+    });
 const DEPLOY_REQUESTED = (process.env.LITT_ACCEPTANCE_DEPLOY ?? "1") !== "0";
 
 const STAMP = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
@@ -58,9 +61,9 @@ const STAMP = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
 // Local/manual runs may omit it — the script then creates the project under
 // the canonical name so it can be adopted as the permanent one.
 const GOLDEN_PROJECT_ID = process.env.LITT_GOLDEN_PROJECT_ID?.trim() || null;
-const IS_CI = process.env.GITHUB_ACTIONS === "true";
 const GOLDEN_PROJECT_NAME = "Golden Acceptance — Ember Roast";
 const FRESH_PROJECT_TEMPLATE = process.env.LITT_ACCEPTANCE_TEMPLATE_ID?.trim() || "empty-static";
+const REUSE_GOLDEN_PROJECT = !!GOLDEN_PROJECT_ID && !FRESH_ACCOUNT_REQUESTED;
 
 // The exact literal the run asks the model to write. The stamp makes every
 // run's mutation verifiably fresh on the permanent project — a no-op answer
@@ -68,7 +71,7 @@ const FRESH_PROJECT_TEMPLATE = process.env.LITT_ACCEPTANCE_TEMPLATE_ID?.trim() |
 const GOLDEN_MARKER = `Golden build ${STAMP}`;
 const PROMPT =
   process.env.LITT_ACCEPTANCE_PROMPT ||
-  (GOLDEN_PROJECT_ID
+  (REUSE_GOLDEN_PROJECT
     ? DEPLOY_REQUESTED
       ? `In the Ember Roast landing site in index.html, update the footer so it contains exactly this text: ${GOLDEN_MARKER}. Keep everything else unchanged, then publish it live to a public URL.`
       : `In the Ember Roast landing site in index.html, update the footer so it contains exactly this text: ${GOLDEN_MARKER}. Keep everything else unchanged.`
@@ -109,7 +112,7 @@ const verdict = {
   screenshots: [],
   verdict: "INCOMPLETE",
   notes: [],
-  freshAccount: process.env.LITT_ACCEPTANCE_FRESH_ACCOUNT === "1",
+  freshAccount: false,
 };
 
 function step(name, ok, detail) {
@@ -295,6 +298,14 @@ async function main() {
     await page.waitForTimeout(4000);
     const authProbe = await page.request.get(`${BASE}/api/studio-projects`, { timeout: 60_000 });
     step("sign_in", authProbe.status() === 200, `GET /api/studio-projects → ${authProbe.status()}`);
+    const authBody = await authProbe.json().catch(() => null);
+    const initialProjects = Array.isArray(authBody?.projects) ? authBody.projects : [];
+    const freshAccountProof = FRESH_ACCOUNT_REQUESTED && authProbe.status() === 200 && initialProjects.length === 0;
+    verdict.freshAccount = freshAccountProof;
+    step("fresh_account", freshAccountProof,
+      FRESH_ACCOUNT_REQUESTED
+        ? `new Clerk user ${USER_ID} has ${initialProjects.length} existing project(s)`
+        : "fresh-account mode is required for this acceptance");
     await shot(page, "01-signed-in");
 
     // ── Step 1.5: resolve the permanent golden project + provision workspace ──
@@ -303,7 +314,7 @@ async function main() {
     // it (local/manual runs only) the script creates the project once under
     // the canonical name; CI refuses to run without the ID.
     let projectId = null;
-    if (GOLDEN_PROJECT_ID) {
+    if (REUSE_GOLDEN_PROJECT) {
       const getResp = await page.request.get(`${BASE}/api/studio-projects/${GOLDEN_PROJECT_ID}`, { timeout: 60_000 });
       const getBody = await getResp.json().catch(() => null);
       const found = getResp.status() === 200 && (getBody?.project?.id ?? getBody?.id) === GOLDEN_PROJECT_ID;
@@ -311,8 +322,6 @@ async function main() {
       verdict.projectId = projectId;
       verdict.workspaceId = getBody?.project?.workspaceId ?? getBody?.workspaceId ?? null;
       step("golden_project_resolved", found, `GET /api/studio-projects/${GOLDEN_PROJECT_ID} → ${getResp.status()}`);
-    } else if (IS_CI) {
-      step("golden_project_resolved", false, "LITT_GOLDEN_PROJECT_ID is not configured — CI runs must target the permanent golden project");
     } else {
       const projResp = await page.request.post(`${BASE}/api/studio-projects`, {
         data: { sourceType: "blank", name: GOLDEN_PROJECT_NAME, templateId: FRESH_PROJECT_TEMPLATE },
@@ -321,8 +330,8 @@ async function main() {
       const projBody = await projResp.json().catch(() => null);
       projectId = projBody?.project?.id ?? null;
       step("golden_project_resolved", projResp.status() === 201 && !!projectId,
-        `created "${GOLDEN_PROJECT_NAME}" HTTP ${projResp.status()} id=${projectId} — set LITT_GOLDEN_PROJECT_ID to reuse it`);
-      if (projectId) verdict.notes.push(`adopt as permanent: LITT_GOLDEN_PROJECT_ID=${projectId}`);
+        `created dedicated ${FRESH_PROJECT_TEMPLATE} project "${GOLDEN_PROJECT_NAME}" HTTP ${projResp.status()} id=${projectId}`);
+      if (projectId && !FRESH_ACCOUNT_REQUESTED) verdict.notes.push(`adopt as permanent: LITT_GOLDEN_PROJECT_ID=${projectId}`);
     }
 
     let workspaceReady = false;
@@ -354,12 +363,29 @@ async function main() {
       const entries = Array.isArray(filesBody?.entries) ? filesBody.entries : [];
       const userEntries = entries.filter((entry) => entry?.name !== ".git");
       step("fresh_project_zero_user_files",
-        !GOLDEN_PROJECT_ID && FRESH_PROJECT_TEMPLATE === "empty-static" && filesResp?.status() === 200 && userEntries.length === 0,
+        !REUSE_GOLDEN_PROJECT && FRESH_PROJECT_TEMPLATE === "empty-static" && filesResp?.status() === 200 && userEntries.length === 0,
         `template=${FRESH_PROJECT_TEMPLATE} HTTP ${filesResp?.status() ?? "unreachable"} userFiles=${userEntries.length}`);
     }
 
+    // Always start a new conversation. Selecting the first existing
+    // conversation is convenient in Studio, but invalid for acceptance: it
+    // can silently reuse an old run and make a fresh account claim false.
+    let conversationId = null;
+    if (projectId) {
+      const conversationResp = await page.request.post(`${BASE}/api/studio/conversations`, {
+        data: { projectId, title: GOLDEN_PROJECT_NAME, activeAgentSlug: "litt" },
+        timeout: 60_000,
+      });
+      const conversationBody = await conversationResp.json().catch(() => null);
+      conversationId = conversationBody?.conversation?.id ?? null;
+      step("fresh_conversation", conversationResp.status() === 201 && !!conversationId,
+        `created conversation HTTP ${conversationResp.status()} id=${conversationId}`);
+    } else {
+      step("fresh_conversation", false, "no project available for a new conversation");
+    }
+
     // ── Step 2: Studio loads on mobile with the project selected ──
-    const studioResp = await page.goto(`${BASE}/studio?project=${projectId ?? ""}`, { waitUntil: "domcontentloaded", timeout: 90_000 });
+    const studioResp = await page.goto(`${BASE}/studio?project=${projectId ?? ""}&conversation=${conversationId ?? ""}`, { waitUntil: "domcontentloaded", timeout: 90_000 });
     step("studio_load", studioResp?.status() === 200, `HTTP ${studioResp?.status()}`);
     await page.waitForTimeout(6000);
     const shellVisible = await page.locator(".studio-shell").isVisible().catch(() => false);
@@ -446,6 +472,13 @@ async function main() {
     step("files_written", writeEvents.length > 0 || (await page.evaluate(() => (window.__littFilesChanged || []).length)) > 0,
       `${writeEvents.length} write-ish tool events, ${await page.evaluate(() => (window.__littFilesChanged || []).length)} files-changed events`);
     verdict.filesChangedEvents = await page.evaluate(() => window.__littFilesChanged || []);
+
+    const responseShapeEvents = events.filter((e) => e.type === "model_response");
+    writeFileSync(path.join(ARTIFACT_DIR, "provider-response-shapes.json"), JSON.stringify(responseShapeEvents, null, 2));
+    step("provider_response_evidence", responseShapeEvents.length > 0,
+      responseShapeEvents.length > 0
+        ? responseShapeEvents.map((e) => `${e.provider}/${e.model} toolCalls=${e.toolCalls.length}`).join("; ")
+        : "no redacted provider response-shape event was streamed");
 
     const previewResult = events.find((e) => e.type === "preview_result");
     const previewStart = events.find((e) => e.type === "preview_start");
@@ -640,7 +673,7 @@ async function main() {
     // file on disk must contain the exact requested text — this is the
     // [PERSON_NAME] regression check (a completion claim with the wrong
     // content is a false success).
-    const EXPECTED_LITERAL = GOLDEN_PROJECT_ID ? GOLDEN_MARKER : "Ember Roast";
+    const EXPECTED_LITERAL = REUSE_GOLDEN_PROJECT ? GOLDEN_MARKER : "Ember Roast";
     const readWorkspaceFile = async (filePath) => {
       if (!projectId) return null;
       const resp = await page.request

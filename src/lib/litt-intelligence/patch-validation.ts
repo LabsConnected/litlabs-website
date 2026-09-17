@@ -19,6 +19,7 @@
  */
 
 import type { WorkspaceTransport } from "./workspace-transport";
+import { workspacePathError } from "./workspace-path";
 
 /** `{{anything}}` — moustache/handlebars-style unresolved slots. */
 const MOUSTACHE_TOKEN = /\{\{\s*[^}{]+\s*\}\}/;
@@ -76,6 +77,42 @@ export interface FilesWriteInputs {
 }
 
 /**
+ * Re-read the file after a rejected patch and give the model the exact
+ * current content. This is an internal tool-result instruction, not chat
+ * output. It prevents a blind second patch against stale or hallucinated
+ * context and offers files.write as the safe full-file fallback.
+ */
+export async function buildPatchRecoveryMessage(
+  inputs: ApplyPatchInputs,
+  transport: WorkspaceTransport,
+  validationError: string,
+  attempt: number,
+): Promise<string> {
+  const path = typeof inputs.path === "string" ? inputs.path : "the requested file";
+  try {
+    const { content } = await transport.readFile(path);
+    const bounded = content.length > 16_000
+      ? `${content.slice(0, 16_000)}\n[content truncated; use files.read before retrying]`
+      : content;
+    return (
+      `${validationError}\n\n` +
+      `SAFE PATCH RECOVERY ATTEMPT ${attempt}: The file was re-read from disk. ` +
+      `Do not repeat the rejected patch. Either use files.write with the complete ` +
+      `literal contents, or use apply_patch with search text copied exactly from ` +
+      `CURRENT FILE CONTENT below.\n\n` +
+      `CURRENT FILE CONTENT (${path}):\n${bounded}`
+    );
+  } catch (readError) {
+    return (
+      `${validationError}\n\n` +
+      `SAFE PATCH RECOVERY ATTEMPT ${attempt}: A fresh read of ${path} failed ` +
+      `(${readError instanceof Error ? readError.message : String(readError)}). ` +
+      `Do not guess or repeat the patch; no mutation was executed.`
+    );
+  }
+}
+
+/**
  * Validate apply_patch inputs before they reach the approval gate.
  *
  * Returns a model-facing error message when the patch is provably
@@ -94,6 +131,9 @@ export async function validateApplyPatchInputs(
   if (!path || !patches || patches.length === 0) {
     return "apply_patch requires a target path and a non-empty patches[] array — re-read the file and generate a concrete patch.";
   }
+
+  const pathError = workspacePathError(path);
+  if (pathError) return `apply_patch rejected: ${pathError}.`;
 
   // 1. Lexical placeholder scan — covers both search and replace so a
   //    patch can't smuggle template slots into the file either direction.
@@ -156,6 +196,9 @@ export function validateFilesWriteInputs(inputs: FilesWriteInputs): string | nul
   if (!path || content === null) {
     return "files.write requires a target path and string content — re-read the file and generate the full content.";
   }
+
+  const pathError = workspacePathError(path);
+  if (pathError) return `files.write rejected: ${pathError}.`;
 
   const token = findPlaceholderToken(content);
   if (token) {

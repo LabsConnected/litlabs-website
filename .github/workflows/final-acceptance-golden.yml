@@ -11,11 +11,9 @@ name: Final Acceptance — Production Mobile Golden
 # written to the produced artifact (the script only ever uses it as a
 # Bearer header value to mint a short-lived sign-in token).
 #
-# LITT_ACCEPTANCE_USER_ID selects which Clerk user the golden run signs
-# in as. It must be wired here as a repository secret — the script
-# refuses to fall back to its hard-coded legacy QA user when running in
-# CI (see prod-mobile-golden.mjs), so an unset/removed secret fails this
-# step clearly instead of silently authenticating as a stale user.
+# Every acceptance run creates a disposable Clerk user immediately before
+# the browser journey. The generated id is passed to the script so a stale
+# QA identity can never make a run appear fresh.
 on:
   workflow_dispatch:
     inputs:
@@ -59,18 +57,23 @@ jobs:
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           LITT_ACCEPTANCE_USER_ID: ${{ secrets.LITT_ACCEPTANCE_USER_ID }}
 
+      - name: Create disposable fresh acceptance account
+        id: fresh-user
+        if: ${{ !inputs.provision_only }}
+        run: echo "user_id=$(node scripts/final-acceptance/create-fresh-user.mjs)" >> "$GITHUB_OUTPUT"
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+
       - name: Run production golden acceptance
         if: ${{ !inputs.provision_only }}
         run: node scripts/final-acceptance/prod-mobile-golden.mjs
         env:
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
-          LITT_ACCEPTANCE_USER_ID: ${{ secrets.LITT_ACCEPTANCE_USER_ID }}
-          # The permanent golden project — every CI run mutates this exact
-          # project ("Golden Acceptance — Ember Roast"), so persistence,
-          # no cross-project writes, and truthful diff behavior are proven
-          # on a real durable surface instead of a throwaway project. An
-          # unset secret fails the run clearly (same rule as the user ID).
-          LITT_GOLDEN_PROJECT_ID: ${{ secrets.LITT_GOLDEN_PROJECT_ID }}
+          LITT_ACCEPTANCE_USER_ID: ${{ steps.fresh-user.outputs.user_id }}
+          LITT_ACCEPTANCE_FRESH_ACCOUNT: "1"
+          # Fresh mode deliberately ignores the permanent-project secret and
+          # creates a dedicated empty-static project under the new user.
+          LITT_GOLDEN_PROJECT_ID: ""
           # project.deploy is the production deploy target for user projects
           # (publishes a verified snapshot to /sites/[deploymentId]). The
           # golden requests "deploy it live", proves the approval gate

@@ -728,6 +728,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 category: evt.category,
                 latencyMs: evt.latencyMs,
               });
+            } else if (evt.type === "model_response") {
+              safeEvent({
+                type: "model_response",
+                provider: evt.provider,
+                model: evt.model,
+                finishReason: evt.finishReason,
+                contentType: evt.contentType,
+                contentLength: evt.contentLength,
+                messageKeys: evt.messageKeys,
+                toolCalls: evt.toolCalls,
+              });
             } else if (evt.type === "model_failed") {
               safeEvent({
                 type: "model_failed",

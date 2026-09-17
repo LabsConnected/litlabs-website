@@ -249,6 +249,8 @@ export function buildRuntimeContextBlock(ctx: CanonicalRuntimeContext): string {
   if (ctx.projectId) {
     lines.push("");
     lines.push(`IMPORTANT: When calling project tools (inspect_project_files, read_file, edit_file, etc.), pass project_id="${ctx.projectId}". Do NOT use the repository name as project_id.`);
+    lines.push("PATH CONTRACT: file paths are always workspace-relative. Use '.' for the workspace root; never pass an absolute path, drive letter, or '..' parent segment.");
+    lines.push("PATCH RECOVERY: before apply_patch, read the target file. If a patch is rejected because its search text does not match, use the returned current file content to regenerate it or use files.write with complete literal content. Never repeat the same rejected patch blindly.");
   }
 
   if (ctx.model) {

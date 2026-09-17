@@ -28,6 +28,7 @@ export type ProgressEvent =
   | { type: "finished"; totalSteps: number; totalDurationMs: number }
   | { type: "cancelled"; reason: string }
   | { type: "model_routing"; model: string; provider: string; fallbackFrom?: string; category?: string; latencyMs?: number }
+  | { type: "model_response"; provider: string; model: string; finishReason: string; contentType: string; contentLength: number; messageKeys: string[]; toolCalls: Array<{ name: string; idPresent: boolean; argumentsJsonValid: boolean; argumentKeys: string[]; argumentLength: number }> }
   | { type: "model_failed"; model: string; category: string; message: string }
   | { type: "reasoning"; summary: string }
   | { type: "status"; summary: string }
