@@ -27,6 +27,18 @@ describe("final-acceptance-golden workflow secret wiring", () => {
     expect(block).toMatch(/LITT_ACCEPTANCE_FRESH_ACCOUNT:\s*"1"/);
     expect(block).toMatch(/LITT_GOLDEN_PROJECT_ID:\s*""/);
   });
+
+  it("resolves deploy approval before the preview polling budget can expire it", () => {
+    const script = readFileSync(
+      path.resolve(__dirname, "../scripts/final-acceptance/prod-mobile-golden.mjs"),
+      "utf-8",
+    );
+    const approvalPost = script.indexOf("deployApprovalResponse = await page.request.post");
+    const previewPolling = script.indexOf("const iframe = page.getByTestId(\"preview-iframe\")");
+    expect(approvalPost).toBeGreaterThan(-1);
+    expect(previewPolling).toBeGreaterThan(-1);
+    expect(approvalPost).toBeLessThan(previewPolling);
+  });
 });
 
 describe("resolveAcceptanceUserId CI guard", () => {

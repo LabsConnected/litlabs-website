@@ -29,6 +29,8 @@ import type { StudioContext } from "@/lib/capabilities/studio-context";
 export interface CanonicalRuntimeContext {
   projectId: string | null;
   projectName: string | null;
+  /** Project runtime metadata; used for explicit static-site instructions. */
+  framework?: string | null;
   workspaceId: string | null;
   workspaceReady: boolean;
   workspaceRoot: string | null;
@@ -97,6 +99,7 @@ export async function buildCanonicalRuntimeContext(
   const ctx: CanonicalRuntimeContext = {
     projectId: null,
     projectName: null,
+    framework: null,
     workspaceId: null,
     workspaceReady: false,
     workspaceExecutionAvailable: false,
@@ -145,6 +148,7 @@ export async function buildCanonicalRuntimeContext(
     ctx.workspaceReady = true;
     ctx.workspaceExecutionAvailable = true;
     ctx.projectName = verified.project.name;
+    ctx.framework = verified.project.framework ?? null;
     ctx.branch = verified.project.githubBranch ?? verified.project.githubDefaultBranch ?? null;
     ctx.sourceType = verified.project.sourceType ?? null;
     ctx.repository = verified.project.githubFullName ?? null;
@@ -251,6 +255,9 @@ export function buildRuntimeContextBlock(ctx: CanonicalRuntimeContext): string {
     lines.push(`IMPORTANT: When calling project tools (inspect_project_files, read_file, edit_file, etc.), pass project_id="${ctx.projectId}". Do NOT use the repository name as project_id.`);
     lines.push("PATH CONTRACT: file paths are always workspace-relative. Use '.' for the workspace root; never pass an absolute path, drive letter, or '..' parent segment.");
     lines.push("PATCH RECOVERY: before apply_patch, read the target file. If a patch is rejected because its search text does not match, use the returned current file content to regenerate it or use files.write with complete literal content. Never repeat the same rejected patch blindly.");
+    if (ctx.framework === "static") {
+      lines.push("STATIC SITE CONTRACT: for a static or empty-static website, the runnable and deployable entry file must be workspace-root index.html. Use path=\"index.html\"; do not put the entry file under public/.");
+    }
   }
 
   if (ctx.model) {

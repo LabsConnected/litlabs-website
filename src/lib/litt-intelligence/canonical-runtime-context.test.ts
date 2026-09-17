@@ -53,6 +53,13 @@ describe("buildRuntimeContextBlock — project identity", () => {
     expect(block).toContain("Do NOT use the repository name");
   });
 
+  it("requires empty static sites to write the root deployable entry", () => {
+    const block = buildRuntimeContextBlock(makeCtx({ framework: "static" }));
+    expect(block).toContain("STATIC SITE CONTRACT");
+    expect(block).toContain('path="index.html"');
+    expect(block).toContain("do not put the entry file under public/");
+  });
+
   it("does not include project_id instruction when projectId is null", () => {
     const block = buildRuntimeContextBlock(makeCtx({ projectId: null }));
     expect(block).not.toContain("project_id=\"");
