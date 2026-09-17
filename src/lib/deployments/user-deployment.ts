@@ -130,6 +130,90 @@ export type ArtifactValidation =
   | { ok: false; error: string };
 
 /**
+ * Extract local (non-external) subresource references from HTML/CSS source.
+ *
+ * Covers src=/srcset=/poster= attributes, <link> stylesheets/icons, and
+ * CSS url(...) references. External URLs, data:/blob:/mailto: URIs, and
+ * fragments/query strings are skipped. Root-relative refs ("/assets/x.png")
+ * map to artifact paths ("assets/x.png"); relative refs resolve against the
+ * referencing file's directory. Refs escaping the artifact root are ignored
+ * (path validation already rejects those files).
+ */
+function extractLocalAssetRefs(source: string, fromDir: string): string[] {
+  const refs: string[] = [];
+  const push = (raw: string | undefined | null) => {
+    if (!raw) return;
+    let ref = raw.trim();
+    if (!ref) return;
+    if (/^(https?:)?\/\//i.test(ref)) return; // absolute URL
+    if (/^(data|blob|mailto|tel):/i.test(ref)) return; // non-file schemes
+    ref = ref.replace(/[#?].*$/, ""); // strip fragment/query
+    if (!ref) return;
+    if (ref.startsWith("/")) {
+      ref = ref.slice(1);
+    } else {
+      const parts = [...fromDir.split("/").filter(Boolean), ...ref.split("/")];
+      const out: string[] = [];
+      for (const seg of parts) {
+        if (seg === "" || seg === ".") continue;
+        if (seg === "..") {
+          if (out.length === 0) return; // escapes artifact root
+          out.pop();
+          continue;
+        }
+        out.push(seg);
+      }
+      ref = out.join("/");
+    }
+    if (ref) refs.push(ref);
+  };
+
+  // src= / poster= attributes; srcset= may list several candidates.
+  const attrRe = /\b(src|srcset|poster)\s*=\s*["']([^"']+)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = attrRe.exec(source)) !== null) {
+    const name = m[1].toLowerCase();
+    const value = m[2];
+    if (name === "srcset") {
+      for (const candidate of value.split(",")) {
+        push(candidate.trim().split(/\s+/)[0]);
+      }
+    } else {
+      push(value);
+    }
+  }
+  // <link rel="stylesheet|icon" href="..."> — subresource, unlike <a> links.
+  const linkRe = /<link\b[^>]*>/gi;
+  while ((m = linkRe.exec(source)) !== null) {
+    const href = /href\s*=\s*["']([^"']+)["']/i.exec(m[0]);
+    if (href) push(href[1]);
+  }
+  // CSS url(...) in <style> blocks and stylesheets.
+  const urlRe = /url\(\s*["']?([^"')]+)["']?\s*\)/gi;
+  while ((m = urlRe.exec(source)) !== null) push(m[1]);
+  return refs;
+}
+
+/**
+ * Find subresource references in the artifact's HTML/CSS files that point at
+ * files missing from the artifact.
+ */
+function findMissingLocalAssets(files: ArtifactFile[], seen: Set<string>): string[] {
+  const missing: string[] = [];
+  for (const file of files) {
+    if (!/\.(html?|css)$/i.test(file.path)) continue;
+    const fromDir = file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : "";
+    for (const ref of extractLocalAssetRefs(file.content ?? "", fromDir)) {
+      const label = `${file.path} → ${ref}`;
+      if (!seen.has(ref) && !missing.includes(label)) {
+        missing.push(label);
+      }
+    }
+  }
+  return missing;
+}
+
+/**
  * Validate a collected artifact before anything is persisted or published.
  *
  * Requires an index.html entrypoint: without one there is nothing to serve
@@ -177,6 +261,22 @@ export function validateArtifact(files: ArtifactFile[]): ArtifactValidation {
   }
   if (!seen.has("index.html")) {
     return { ok: false, error: "Deployment artifact must contain an index.html entrypoint." };
+  }
+
+  // Local-asset integrity: every subresource the site's HTML/CSS references
+  // must exist in the artifact. The 2026-09-17 acceptance run shipped a site
+  // whose hero <img> pointed at a file that was never saved, while deploy
+  // claimed "verified with a 200 response" — the root-URL liveness check
+  // cannot catch that. Fail the build instead of publishing broken pages.
+  const missing = findMissingLocalAssets(files, seen);
+  if (missing.length > 0) {
+    const preview = missing.slice(0, 5).join("; ");
+    return {
+      ok: false,
+      error:
+        `Deployment references ${missing.length} missing file(s): ${preview}` +
+        (missing.length > 5 ? "; …" : ""),
+    };
   }
 
   return { ok: true, files, totalBytes };
