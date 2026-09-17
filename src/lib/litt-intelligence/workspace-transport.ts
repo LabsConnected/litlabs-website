@@ -57,10 +57,38 @@ export interface CheckpointInfo {
 export interface ProjectPackageInfo {
   packageManager: string;
   scripts: Record<string, string>;
+  /** Whether package.json exists. False means no toolchain at all — a
+      static workspace where typecheck/lint/test/build are not applicable
+      (see workspace-capability.ts). */
+  hasPackageJson: boolean;
   hasTypecheck: boolean;
   hasLint: boolean;
   hasBuild: boolean;
   hasTest: boolean;
+}
+
+export type QualityCheckId = "build" | "typecheck" | "lint" | "test";
+
+/** Resolve the shell command for a quality check, or null when the check is
+    not applicable to this workspace. A workspace with no package.json has no
+    toolchain — typecheck must not fall back to `tsc` (it would fail spuriously
+    and burn repair attempts); all checks are not_applicable there. */
+export function checkCommandForWorkspace(
+  checkId: QualityCheckId,
+  info: ProjectPackageInfo,
+): string | null {
+  const pm = info.packageManager;
+  const commandMap: Record<QualityCheckId, string | null> = {
+    build: info.hasBuild ? `${pm} run build` : null,
+    typecheck: !info.hasPackageJson
+      ? null
+      : info.hasTypecheck
+        ? `${pm} run typecheck`
+        : `${pm} exec tsc --noEmit`,
+    lint: info.hasLint ? `${pm} run lint` : null,
+    test: info.hasTest ? `${pm} run test` : null,
+  };
+  return commandMap[checkId];
 }
 
 export interface PreviewStartResult {
@@ -415,10 +443,12 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
 
     // Read package.json
     let scripts: Record<string, string> = {};
+    let hasPackageJson = false;
     try {
       const { content } = await this.readFile("package.json");
       const pkg = JSON.parse(content);
       scripts = pkg.scripts ?? {};
+      hasPackageJson = true;
     } catch {
       // No package.json — return defaults
     }
@@ -426,6 +456,7 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
     return {
       packageManager,
       scripts,
+      hasPackageJson,
       hasTypecheck: "typecheck" in scripts || "tsc" in scripts,
       hasLint: "lint" in scripts,
       hasBuild: "build" in scripts,
@@ -438,18 +469,7 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
     packageInfo?: ProjectPackageInfo,
   ): Promise<ExecResult> {
     const info = packageInfo ?? await this.discoverPackageInfo();
-    const pm = info.packageManager;
-
-    const commandMap: Record<string, string | null> = {
-      build: info.hasBuild ? `${pm} run build` : null,
-      typecheck: info.hasTypecheck
-        ? `${pm} run typecheck`
-        : `${pm} exec tsc --noEmit`,
-      lint: info.hasLint ? `${pm} run lint` : null,
-      test: info.hasTest ? `${pm} run test` : null,
-    };
-
-    const cmd = commandMap[checkId];
+    const cmd = checkCommandForWorkspace(checkId, info);
     if (!cmd) {
       return {
         exitCode: 0,

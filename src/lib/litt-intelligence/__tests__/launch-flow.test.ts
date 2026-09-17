@@ -30,6 +30,7 @@ function createMockTransport(overrides: Partial<WorkspaceTransport> = {}): Works
     discoverPackageInfo: vi.fn().mockResolvedValue({
       packageManager: "pnpm",
       scripts: { build: "next build", dev: "next dev" },
+      hasPackageJson: true,
       hasTypecheck: true,
       hasLint: true,
       hasBuild: true,

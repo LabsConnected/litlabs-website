@@ -34,6 +34,7 @@ function createMockTransport(overrides: Partial<{
     discoverPackageInfo: overrides.discoverPackageInfo ?? vi.fn().mockResolvedValue({
       packageManager: "pnpm",
       scripts: { build: "next build", test: "vitest run", lint: "eslint ." },
+      hasPackageJson: true,
       hasTypecheck: true,
       hasLint: true,
       hasBuild: true,
@@ -244,6 +245,7 @@ describe("V2 Integration: Build-Fix Loop", () => {
       discoverPackageInfo: vi.fn().mockResolvedValue({
         packageManager: "pnpm",
         scripts: { build: "next build", test: "vitest run" },
+        hasPackageJson: true,
         hasTypecheck: true,
         hasLint: false,
         hasBuild: true,
