@@ -82,23 +82,23 @@ export default function DocsOverviewClient() {
       <DocList
         items={[
           <>
-            <strong>Mission</strong> — you describe the outcome in plain
+            <strong>Mission</strong>{" "}— you describe the outcome in plain
             language: “build me a landing page for my bakery.”
           </>,
           <>
-            <strong>Plan</strong> — LiTT breaks the mission into steps you can
+            <strong>Plan</strong>{" "}— LiTT breaks the mission into steps you can
             see and adjust.
           </>,
           <>
-            <strong>Build</strong> — LiTT edits real project files and runs
+            <strong>Build</strong>{" "}— LiTT edits real project files and runs
             real terminal commands.
           </>,
           <>
-            <strong>Verify</strong> — checks, tests, and a live preview confirm
+            <strong>Verify</strong>{" "}— checks, tests, and a live preview confirm
             it actually works.
           </>,
           <>
-            <strong>Ship</strong> — with your approval, LiTT prepares the work
+            <strong>Ship</strong>{" "}— with your approval, LiTT prepares the work
             for deployment.
           </>,
         ]}
@@ -153,7 +153,7 @@ export default function DocsOverviewClient() {
 
       <DocH2 id="projects">Projects & workspaces</DocH2>
       <DocP>
-        A <strong>project</strong> is the thing you are building — a website,
+        A <strong>project</strong>{" "}is the thing you are building — a website,
         an app, a campaign. Each project gets its own <strong>workspace</strong>:
         the files, the preview runtime, and a terminal session connected to
         that environment. Create a project from a template or start blank,
@@ -164,11 +164,11 @@ export default function DocsOverviewClient() {
       <DocH2 id="chat-agents">Chat & agents</DocH2>
       <DocP>
         You drive LiTT by chatting. Pick a specialist for the job —{" "}
-        <InlineCode>LiTT</InlineCode>, <InlineCode>Spark</InlineCode> (creative),{" "}
-        <InlineCode>Coder</InlineCode> (engineering), <InlineCode>Writer</InlineCode>,{" "}
+        <InlineCode>LiTT</InlineCode>, <InlineCode>Spark</InlineCode>{" "}(creative),{" "}
+        <InlineCode>Coder</InlineCode>{" "}(engineering), <InlineCode>Writer</InlineCode>,{" "}
         <InlineCode>Researcher</InlineCode>, <InlineCode>Marketer</InlineCode>,{" "}
         <InlineCode>Analyst</InlineCode>, <InlineCode>Nova</InlineCode>,{" "}
-        <InlineCode>Forge</InlineCode>, <InlineCode>Echo</InlineCode> — or use{" "}
+        <InlineCode>Forge</InlineCode>, <InlineCode>Echo</InlineCode>{" "}— or use{" "}
         <InlineCode>LiTT Auto</InlineCode>, which routes your request
         automatically. You can also choose the underlying model, including
         your own API keys, with live provider health shown in the selector.
@@ -176,7 +176,7 @@ export default function DocsOverviewClient() {
 
       <DocH2 id="preview">Preview</DocH2>
       <DocP>
-        The <strong>Preview</strong> tab runs your active project so you can
+        The <strong>Preview</strong>{" "}tab runs your active project so you can
         see and click through it while LiTT works. Preview starts
         automatically for the active project, and if it ever fails to start
         you can retry it from the preview panel. Preview is a working copy
@@ -218,7 +218,7 @@ export default function DocsOverviewClient() {
 
       <DocH2 id="deployment">Deployment</DocH2>
       <DocP>
-        When the project is ready, the <strong>Deploy</strong> action in
+        When the project is ready, the <strong>Deploy</strong>{" "}action in
         Studio prepares it to go live. Publishing is a deliberate step and
         may ask for your approval first — previewing is free and unlimited,
         deploying is the moment you decide the world should see it.
@@ -226,7 +226,7 @@ export default function DocsOverviewClient() {
 
       <DocH2 id="cli">CLI</DocH2>
       <DocP>
-        Prefer the terminal? The <strong>LiTT CLI</strong> (
+        Prefer the terminal? The <strong>LiTT CLI</strong>{" "}(
         <InlineCode>@litlabs1/litt-cli</InlineCode>) brings the same
         operator to your command line: health checks, builds, tests, and
         deployment verification. See{" "}
@@ -268,7 +268,7 @@ export default function DocsOverviewClient() {
         LiTT asks for your approval before consequential actions like
         deploying or publishing. In the CLI you can also set a permission
         mode — <InlineCode>plan</InlineCode>, <InlineCode>act</InlineCode>, or{" "}
-        <InlineCode>auto</InlineCode> — to control how much runs without
+        <InlineCode>auto</InlineCode>{" "}— to control how much runs without
         asking. How it all works is covered in{" "}
         <Link
           href="/docs/safety"

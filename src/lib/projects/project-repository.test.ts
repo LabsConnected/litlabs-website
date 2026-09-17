@@ -481,9 +481,10 @@ describe("project-repository ownership enforcement", () => {
         // Verify the template itself has all the fields needed downstream
         expect(template.framework).toBeTruthy();
         expect(template.packageManager).toBeDefined();
-        // blank-static has empty commands by design (no build step), but
+        // blank-static and empty-static have empty commands by design (the
+        // latter starts with zero user files and gets its app from LiTT), but
         // nextjs/react-vite/expo must have install/dev/build/test commands.
-        if (templateId !== "blank-static") {
+        if (templateId !== "blank-static" && templateId !== "empty-static") {
           expect(template.installCommand).toBeTruthy();
           expect(template.developmentCommand).toBeTruthy();
           expect(template.buildCommand).toBeTruthy();

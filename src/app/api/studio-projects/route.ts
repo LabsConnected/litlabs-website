@@ -11,6 +11,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
 import { getProject } from "@/lib/projects/project-repository";
 import type { ProjectTemplateId } from "@/lib/projects/types";
+import { validateProjectName } from "@/lib/projects/project-name";
 
 /**
  * GET /api/studio-projects
@@ -62,9 +63,10 @@ export async function POST(request: NextRequest) {
   const sourceType = body.sourceType;
   const name = typeof body.name === "string" ? body.name.trim() : "";
 
-  if (!name || name.length < 2) {
+  const nameError = validateProjectName(name);
+  if (nameError) {
     return NextResponse.json(
-      { error: "Project name must be at least 2 characters" },
+      { error: nameError },
       { status: 400 },
     );
   }

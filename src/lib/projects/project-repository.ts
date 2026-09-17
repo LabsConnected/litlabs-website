@@ -17,6 +17,7 @@ import {
   type PreviewStatusResponse,
 } from "@/lib/terminal-internal-client";
 import type { StudioProjectRow, LegacyProjectRow } from "./types";
+import { normalizeProjectName } from "./project-name";
 import {
   rowToCanonical,
   legacyRowToCanonical,
@@ -47,6 +48,16 @@ export const PROJECT_TEMPLATES: Record<
   "blank-static": {
     label: "Blank Static Site",
     description: "A single index.html with minimal CSS. No build step.",
+    framework: "static",
+    packageManager: "none",
+    installCommand: "",
+    developmentCommand: "",
+    buildCommand: "",
+    testCommand: "",
+  },
+  "empty-static": {
+    label: "Empty Static Site",
+    description: "An empty managed workspace. LiTT creates the application files from your request.",
     framework: "static",
     packageManager: "none",
     installCommand: "",
@@ -106,11 +117,12 @@ export async function createBlankProject(
     throw new Error(`Unknown template: ${input.templateId}`);
   }
 
-  const slug = slugify(input.name) || `project-${Date.now()}`;
+  const name = normalizeProjectName(input.name);
+  const slug = slugify(name) || `project-${Date.now()}`;
 
   const insert: Record<string, unknown> = {
     user_id: input.userId,
-    name: input.name,
+    name,
     slug,
     source_type: "blank",
     access_mode: input.accessMode ?? "private",
@@ -837,6 +849,24 @@ export async function deleteProject(
 
   if (error) return false;
   return data !== null;
+}
+
+/** Rename an owned canonical project without changing its workspace binding. */
+export async function renameProject(
+  projectId: string,
+  userId: string,
+  name: string,
+): Promise<CanonicalProject | null> {
+  const normalizedName = normalizeProjectName(name);
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .update({ name: normalizedName, slug: slugify(normalizedName), updated_at: new Date().toISOString() })
+    .eq("id", projectId)
+    .eq("user_id", userId)
+    .select()
+    .maybeSingle();
+  if (error || !data) return null;
+  return rowToCanonical(data as StudioProjectRow);
 }
 
 /**

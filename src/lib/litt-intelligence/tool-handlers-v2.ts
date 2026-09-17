@@ -15,6 +15,7 @@
 import "server-only";
 
 import { placeholderViolation } from "./patch-validation";
+import { normalizeWorkspaceRelativePath, workspacePathError } from "./workspace-path";
 import type { WorkspaceTransport } from "./workspace-transport";
 
 // ─── Tool Handler Signature ───────────────────────────────────────
@@ -33,7 +34,9 @@ export type ToolHandler = (
 // ─── File Tools ───────────────────────────────────────────────────
 
 export const handleFilesList: ToolHandler = async (inputs, transport) => {
-  const path = (inputs.path as string) || ".";
+  const normalized = normalizeWorkspaceRelativePath(inputs.path, { defaultToRoot: true });
+  if ("error" in normalized) return { success: false, error: `path must be workspace-relative: ${normalized.error}` };
+  const path = normalized.path;
   try {
     const { entries } = await transport.listFiles(path);
     return {
@@ -52,6 +55,8 @@ export const handleFilesList: ToolHandler = async (inputs, transport) => {
 export const handleFilesRead: ToolHandler = async (inputs, transport) => {
   const path = inputs.path as string;
   if (!path) return { success: false, error: "path is required" };
+  const pathError = workspacePathError(path);
+  if (pathError) return { success: false, error: pathError };
 
   try {
     const { content, size } = await transport.readFile(path);
@@ -73,6 +78,8 @@ export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
   if (!path || content === undefined) {
     return { success: false, error: "path and content are required" };
   }
+  const pathError = workspacePathError(path);
+  if (pathError) return { success: false, error: pathError };
 
   // Enforcement floor: unresolved template placeholders must never reach
   // the filesystem, no matter which entry point invoked the handler.
@@ -94,6 +101,8 @@ export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
 export const handleFilesDelete: ToolHandler = async (inputs, transport) => {
   const path = inputs.path as string;
   if (!path) return { success: false, error: "path is required" };
+  const pathError = workspacePathError(path);
+  if (pathError) return { success: false, error: pathError };
   const badPath = placeholderViolation(path, "path");
   if (badPath) return { success: false, error: badPath };
 
@@ -108,6 +117,8 @@ export const handleFilesDelete: ToolHandler = async (inputs, transport) => {
 export const handleFilesMkdir: ToolHandler = async (inputs, transport) => {
   const path = inputs.path as string;
   if (!path) return { success: false, error: "path is required" };
+  const pathError = workspacePathError(path);
+  if (pathError) return { success: false, error: pathError };
   const badPath = placeholderViolation(path, "path");
   if (badPath) return { success: false, error: badPath };
 
@@ -125,6 +136,8 @@ export const handleFilesRename: ToolHandler = async (inputs, transport) => {
   if (!path || !newPath) {
     return { success: false, error: "path and newPath are required" };
   }
+  const pathError = workspacePathError(path, "path") ?? workspacePathError(newPath, "newPath");
+  if (pathError) return { success: false, error: pathError };
   const badPath = placeholderViolation(path, "path") ?? placeholderViolation(newPath, "newPath");
   if (badPath) return { success: false, error: badPath };
 

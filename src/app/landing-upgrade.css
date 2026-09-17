@@ -15,7 +15,7 @@
 
 .litt-landing a:focus-visible,
 .litt-landing button:focus-visible {
-  outline: 2px solid var(--litt-cyan);
+  outline: 2px solid rgba(168, 255, 47, 0.55);
   outline-offset: 3px;
 }
 
@@ -155,7 +155,7 @@
 
 .litt-primary-button:focus-visible,
 .litt-secondary-button:focus-visible {
-  outline: 2px solid var(--litt-cyan);
+  outline: 2px solid rgba(168, 255, 47, 0.55);
   outline-offset: 3px;
 }
 
@@ -1024,7 +1024,7 @@
 }
 
 .litt-faq-item button:focus-visible {
-  outline: 2px solid var(--litt-cyan);
+  outline: 2px solid rgba(168, 255, 47, 0.55);
   outline-offset: -2px;
 }
 

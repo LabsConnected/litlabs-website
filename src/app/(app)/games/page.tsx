@@ -169,7 +169,7 @@ export default function GamesPage() {
             {/* Back to Dashboard — visible on mobile where top nav is hidden */}
             <Link
               href="/dashboard"
-              className="mb-6 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold text-white/70 transition hover:bg-white/10 hover:text-white md:hidden"
+              className="mb-6 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold text-white/70 transition-colors hover:bg-white/10 hover:text-white md:hidden"
             >
               <span>←</span> Dashboard
             </Link>
@@ -180,16 +180,16 @@ export default function GamesPage() {
             <h1 className="mt-3 text-4xl font-black tracking-tight sm:text-5xl">Play instantly.</h1>
             <p className="mt-3 max-w-xl text-base text-white/65">Classic browser games. No install. Instant play. Bring games you legally own.</p>
             <div className="mt-6 flex flex-wrap gap-3">
-              <Link href="/games/retro" className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-sm font-black text-black transition hover:bg-orange-400">
+              <Link href="/games/retro" className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-sm font-black text-black transition-colors hover:bg-orange-400">
                 <Gamepad2 size={16} /> Open Retro Arcade
               </Link>
-              <Link href="/games/dos" className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-black text-white transition hover:bg-white/10">
+              <Link href="/games/dos" className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-black text-white transition-colors hover:bg-white/10">
                 <Play size={16} fill="currentColor" /> DOS Classics
               </Link>
-              <Link href="#quick-play" className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-black text-white transition hover:bg-white/10">
+              <Link href="#quick-play" className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-black text-white transition-colors hover:bg-white/10">
                 <Play size={16} fill="currentColor" /> Quick Play
               </Link>
-              <Link href="/studio?tool=image" className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-5 py-3 text-sm font-bold text-white/70 transition hover:bg-white/5 hover:text-white">
+              <Link href="/studio?tool=image" className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-5 py-3 text-sm font-bold text-white/70 transition-colors hover:bg-white/5 hover:text-white">
                 <Wand2 size={16} /> Build a Game
               </Link>
             </div>
@@ -206,7 +206,7 @@ export default function GamesPage() {
               <p className="text-[10px] font-black uppercase tracking-[.25em] text-orange-400">Continue Playing</p>
               <h2 className="mt-1 text-xl font-black sm:text-2xl">Pick up where you left off</h2>
             </div>
-            <Link href={`/games/retro/play/${recentRetro.id}`} className="group relative flex min-h-32 items-center overflow-hidden rounded-2xl border border-orange-400/20 bg-linear-to-r from-orange-950 via-[#15100a] to-transparent p-5 transition hover:border-orange-400/40">
+            <Link href={`/games/retro/play/${recentRetro.id}`} className="group relative flex min-h-32 items-center overflow-hidden rounded-2xl border border-orange-400/20 bg-linear-to-r from-orange-950 via-[#15100a] to-transparent p-5 transition-colors hover:border-orange-400/40">
               <div className="relative z-10 flex items-center gap-4">
                 <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-orange-500/20 text-orange-300">
                   <Gamepad2 size={24} />
@@ -260,7 +260,7 @@ export default function GamesPage() {
               <h2 className="mt-2 text-xl font-black sm:text-2xl">Make your own game in Studio</h2>
               <p className="mt-2 max-w-md text-sm text-white/65">Use AI agents to design, code, and ship original mini-games — no engine setup required.</p>
             </div>
-            <Link href="/studio?tool=image" className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-violet-500 px-5 py-3 text-sm font-black text-white transition hover:bg-violet-400">
+            <Link href="/studio?tool=image" className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-violet-500 px-5 py-3 text-sm font-black text-white transition-colors hover:bg-violet-400">
               <Wand2 size={16} /> Open Studio
             </Link>
           </div>
@@ -310,7 +310,7 @@ export default function GamesPage() {
               return (
                 <article
                   key={game.id}
-                  className="group relative overflow-hidden rounded-2xl border border-[#9B4DFF]/15 bg-[#140F1F]/72 transition hover:-translate-y-1 hover:border-[#9B4DFF]/35 hover:shadow-[0_12px_40px_rgba(0,0,0,0.45),0_0_24px_rgba(155,77,255,0.15)]"
+                  className="group relative overflow-hidden rounded-2xl border border-[#9B4DFF]/15 bg-[#140F1F]/72 transition-[transform,border-color,box-shadow] hover:-translate-y-1 hover:border-[#9B4DFF]/35 hover:shadow-[0_12px_40px_rgba(0,0,0,0.45),0_0_24px_rgba(155,77,255,0.15)]"
                 >
                   <button
                     type="button"
@@ -331,7 +331,7 @@ export default function GamesPage() {
                       }}
                     />
                     {/* Gradient overlay on hover */}
-                    <div className="absolute inset-0 bg-linear-to-t from-black/70 to-transparent opacity-0 transition group-hover:opacity-100" />
+                    <div className="absolute inset-0 bg-linear-to-t from-black/70 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
 
                     {/* LiTT logo badge — top left */}
                     <div className="absolute left-2 top-2 flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-1 backdrop-blur-sm">
@@ -345,8 +345,8 @@ export default function GamesPage() {
                     </span>
 
                     {/* Play button — appears on hover */}
-                    <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between opacity-0 transition group-hover:opacity-100">
-                      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-black shadow-lg transition group-hover:scale-110">
+                    <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between opacity-0 transition-opacity group-hover:opacity-100">
+                      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-black shadow-lg transition-transform group-hover:scale-110">
                         <Play size={15} fill="currentColor" />
                       </span>
                       <span className="rounded-md bg-black/60 px-1.5 py-0.5 text-[8px] font-bold uppercase text-white/80 backdrop-blur-sm">
@@ -369,7 +369,7 @@ export default function GamesPage() {
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); handleToggleFav(game.id); }}
-                        className="relative z-20 shrink-0 text-white/50 transition hover:text-white"
+                        className="relative z-20 shrink-0 text-white/50 transition-colors hover:text-white"
                         aria-label={favorites.includes(game.id) ? `Unfavorite ${displayTitle}` : `Favorite ${displayTitle}`}
                       >
                         <Heart size={14} fill={favorites.includes(game.id) ? "#f97316" : "none"} className={favorites.includes(game.id) ? "text-orange-500" : ""} />
@@ -406,7 +406,7 @@ export default function GamesPage() {
         {/* === GAME PLAYER OVERLAY === */}
         {selectedGame && (
           <div
-            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 p-2 backdrop-blur-md sm:p-4"
+            className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/95 p-2 backdrop-blur-md sm:p-4"
             onClick={(e) => { if (e.target === e.currentTarget) closeGame(); }}
           >
             <div
@@ -416,17 +416,17 @@ export default function GamesPage() {
               {/* Header bar — hidden in fullscreen */}
               {!isFullscreen && (
                 <div className="mb-2 flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <button onClick={closeGame} className="rounded-lg border border-white/10 p-2 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Close game" title="Close">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <button onClick={closeGame} className="shrink-0 rounded-lg border border-white/10 p-2 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Close game" title="Close">
                       <X size={16} />
                     </button>
-                    <div>
-                      <div className="font-black">{selectedGame.title}</div>
-                      <div className="text-[10px] text-white/55">{selectedGame.platform.toUpperCase()} · {selectedGame.licenseLabel}</div>
+                    <div className="min-w-0">
+                      <div className="truncate font-black">{selectedGame.title}</div>
+                      <div className="truncate text-[10px] text-white/55">{selectedGame.platform.toUpperCase()} · {selectedGame.licenseLabel}</div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Link href="/dashboard" className="rounded-lg border border-white/10 px-3 py-2 text-[11px] font-bold text-white/60 transition hover:bg-white/10 hover:text-white" title="Back to Dashboard">
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Link href="/dashboard" className="rounded-lg border border-white/10 px-3 py-2 text-[11px] font-bold text-white/60 transition-colors hover:bg-white/10 hover:text-white" title="Back to Dashboard">
                       ← Dashboard
                     </Link>
                     <button
@@ -457,10 +457,10 @@ export default function GamesPage() {
                 </div>
               )}
 
-              {/* Game viewport — flexible height instead of fixed aspect-video */}
+              {/* Game viewport — explicit height so the iframe never collapses */}
               <div
                 className={`relative overflow-hidden rounded-2xl border border-white/10 bg-black ${isFullscreen ? "h-full rounded-none border-0" : ""}`}
-                style={isFullscreen ? undefined : { minHeight: "500px", maxHeight: "80vh" }}
+                style={isFullscreen ? undefined : { height: "min(78vh, 860px)", minHeight: 420 }}
               >
                 {selectedGame.html5Url ? (
                   <>
@@ -528,9 +528,12 @@ export default function GamesPage() {
 
               {/* Footer bar — hidden in fullscreen */}
               {!isFullscreen && (
-                <div className="mt-2 flex flex-wrap items-center gap-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-[10px] text-white/55">
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-[10px] text-white/55">
                   <span>👤 {selectedGame.players}P</span>
                   <span>🛡️ {selectedGame.licenseLabel}</span>
+                  {selectedGame.controlsHint && (
+                    <span className="font-bold text-white/75">🎮 {selectedGame.controlsHint}</span>
+                  )}
                   {selectedGame.sourceUrl && (
                     <a href={selectedGame.sourceUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 hover:text-white/70" aria-label={`View ${selectedGame.title} source`}>
                       <Code2 size={11} /> Source

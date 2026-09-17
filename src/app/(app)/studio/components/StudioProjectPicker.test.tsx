@@ -125,3 +125,54 @@ describe("StudioProjectPicker project deletion", () => {
     expect(screen.getByLabelText("Delete project Alpha")).toBeTruthy();
   });
 });
+
+describe("StudioProjectPicker dropdown placement (mobile regression)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    cleanup();
+  });
+
+  it("renders the open menu as a fixed portal on document.body, not inside the scrollable header", async () => {
+    mockListFetch();
+    // Simulate the studio header: overflow-x: auto on mobile clips any
+    // absolutely-positioned dropdown inside it (the reported bug).
+    const { container } = render(
+      <div style={{ overflowX: "auto", overflowY: "hidden", height: 52 }}>
+        <StudioProjectPicker
+          projectId="p1"
+          projectName="Golden Acceptance — Ember Roast"
+          onSelect={vi.fn()}
+          onCreateProject={vi.fn()}
+          onDeleteProject={vi.fn()}
+        />
+      </div>,
+    );
+    fireEvent.click(screen.getByTitle("Switch active project"));
+    await waitFor(() => expect(screen.getByText("Beta")).toBeTruthy());
+
+    const menu = screen.getByTestId("project-picker-menu");
+    // Fixed positioning escapes the overflow-x: auto clipping ancestor…
+    expect(menu.className).toMatch(/fixed/);
+    // …and the portal mounts it on document.body, outside the header.
+    expect(menu.parentElement).toBe(document.body);
+    expect(container.querySelector('[data-testid="project-picker-menu"]')).toBeNull();
+  });
+
+  it("closes the menu on Escape", async () => {
+    mockListFetch();
+    render(
+      <StudioProjectPicker
+        projectId="p1"
+        projectName="Golden Acceptance — Ember Roast"
+        onSelect={vi.fn()}
+        onCreateProject={vi.fn()}
+        onDeleteProject={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTitle("Switch active project"));
+    await waitFor(() => expect(screen.getByTestId("project-picker-menu")).toBeTruthy());
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByTestId("project-picker-menu")).toBeNull());
+  });
+});

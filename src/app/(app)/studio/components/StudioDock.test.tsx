@@ -51,6 +51,7 @@ describe("StudioDock", () => {
     const { props } = renderDock({ open: false });
     // Collapsed strip: content area is hidden
     expect(screen.queryByTestId("dock-content-activity")).toBeNull();
+    fireEvent.click(screen.getByTestId("dock-collapsed-toggle"));
     fireEvent.click(screen.getByTestId("dock-tab-terminal"));
     expect(props.onTabChange).toHaveBeenCalledWith("terminal");
     expect(props.onToggle).toHaveBeenCalled();
@@ -100,8 +101,8 @@ describe("StudioDock", () => {
     renderDock({ open: false });
     const dock = screen.getByTestId("studio-dock");
     expect(dock.style.height).toBe("44px");
-    // Tabs are still clickable in the collapsed strip
-    expect(screen.getByTestId("dock-tab-activity")).toBeDefined();
+    expect(screen.getByTestId("dock-collapsed-toggle")).toBeDefined();
+    expect(screen.getByText("Developer tools")).toBeDefined();
     // Controls are hidden in the collapsed strip
     expect(screen.queryByLabelText("Close dock")).toBeNull();
     expect(screen.queryByLabelText("Maximize")).toBeNull();
@@ -150,5 +151,15 @@ describe("StudioDock", () => {
       expect(screen.getByTestId(`${tab}-slot`)).toBeDefined();
       unmount();
     }
+  });
+
+  it("tab strip scrolls horizontally on narrow screens so all tabs stay reachable", () => {
+    renderDock();
+    // The tablist wraps the tab buttons; at 390px the five labeled tabs
+    // overflow, so the strip must scroll instead of clipping them.
+    const tablist = screen.getByRole("tablist", { name: "Studio dock tabs" });
+    expect(tablist.className).toMatch(/overflow-x-auto/);
+    // Desktop keeps the static strip.
+    expect(tablist.className).toMatch(/sm:overflow-visible/);
   });
 });

@@ -14,6 +14,7 @@ const fakeTransport = {
   userId: "u-test",
   workspaceRoot: "/tmp/test",
   projectId: "p-test",
+  createCheckpointBeforeMutation: vi.fn().mockResolvedValue(null),
 } as unknown as WorkspaceTransport;
 
 describe("runAgentLoopV2 — provider exhaustion", () => {
@@ -295,6 +296,81 @@ describe("runAgentLoopV2 — invalid apply_patch never reaches the approval gate
     expect(result.pendingApproval?.toolId).toBe("apply_patch");
     expect(result.pendingApproval?.toolCallId).toBe("tc-3");
   });
+
+  it("re-reads a rejected patch and safely falls back to files.write", async () => {
+    const writeFile = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(transportWithFile.readFile).mockClear();
+    const transport = {
+      ...transportWithFile,
+      writeFile,
+      createCheckpointBeforeMutation: vi.fn().mockResolvedValue(null),
+    } as unknown as WorkspaceTransport;
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{
+          toolCallId: "tc-recovery-1",
+          toolId: "apply_patch",
+          inputs: { path: "index.html", patches: [{ search: "stale content", replace: "new content" }] },
+        }],
+        finishReason: "tool_calls",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{
+          toolCallId: "tc-recovery-2",
+          toolId: "files.write",
+          inputs: {
+            projectId: "p-test",
+            path: "index.html",
+            content: "<footer>Ember Roast · Freshly roasted.</footer>",
+          },
+        }],
+        finishReason: "tool_calls",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({ text: "The file was updated safely.", toolCalls: [], finishReason: "stop", model: "test-model" });
+
+    const result = await runAgentLoopV2("change the footer", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+
+    expect(transportWithFile.readFile).toHaveBeenCalledTimes(2);
+    expect(writeFile).toHaveBeenCalledWith("index.html", "<footer>Ember Roast · Freshly roasted.</footer>");
+    expect(result.pendingApproval).toBeUndefined();
+    expect(result.finalText).toContain("updated safely");
+    expect(result.toolCalls.some((tool) => tool.toolId === "apply_patch" && !tool.success)).toBe(true);
+    expect(result.toolCalls.some((tool) => tool.toolId === "files.write" && tool.success)).toBe(true);
+  });
+
+  it("stops truthfully when the model repeats the rejected patch", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "",
+      toolCalls: [{
+        toolCallId: "tc-repeat",
+        toolId: "apply_patch",
+        inputs: { path: "index.html", patches: [{ search: "stale content", replace: "new content" }] },
+      }],
+      finishReason: "tool_calls",
+      model: "test-model",
+    });
+
+    const result = await runAgentLoopV2("change the footer", transportWithFile, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+
+    expect(result.cancelled).toBe(true);
+    expect(result.finalText).toContain("No mutation was executed");
+    expect(result.toolCalls.filter((tool) => tool.toolId === "apply_patch")).toHaveLength(2);
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("runAgentLoopV2 — files.write placeholder content never reaches the approval gate", () => {
@@ -376,5 +452,45 @@ describe("runAgentLoopV2 — files.write placeholder content never reaches the a
 
     expect(result.pendingApproval?.toolId).toBe("files.write");
     expect(result.pendingApproval?.toolCallId).toBe("tc-w2");
+  });
+
+  it("does not report a handler-level write failure as a successful mutation", async () => {
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{
+          toolCallId: "tc-w3",
+          toolId: "files.write",
+          inputs: {
+            projectId: "p-test",
+            path: "index.html",
+            content: "<html><body>Fresh site</body></html>",
+          },
+        }],
+        finishReason: "tool_calls",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "The workspace write failed and the site is not complete.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      });
+
+    const result = await runAgentLoopV2(
+      "Create the website files",
+      fakeTransport,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "auto",
+        enableBuildFix: false,
+      },
+    );
+
+    const writeLog = result.toolCalls.find((tool) => tool.toolId === "files.write");
+    expect(writeLog?.success).toBe(false);
+    expect(writeLog?.mutating).toBe(true);
+    expect(result.finalText).toContain("write failed");
   });
 });

@@ -1,7 +1,8 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from "vitest";
 import type { WorkspaceTransport } from "../workspace-transport";
-import { validateApplyPatchInputs, validateFilesWriteInputs } from "../patch-validation";
+import { buildPatchRecoveryMessage, validateApplyPatchInputs, validateFilesWriteInputs } from "../patch-validation";
+import { normalizeWorkspaceRelativePath } from "../workspace-path";
 
 /**
  * Regression tests for the pre-approval apply_patch guard (P1 patch
@@ -177,6 +178,35 @@ describe("validateFilesWriteInputs — placeholder tokens in written content", (
   });
 });
 
+describe("workspace-relative paths", () => {
+  it("defaults an omitted files.list path to the workspace root", () => {
+    expect(normalizeWorkspaceRelativePath(undefined, { defaultToRoot: true })).toEqual({ path: "." });
+  });
+
+  it.each(["C:/workspace/index.html", "/workspace/index.html", "../index.html", "src/../../index.html"])(
+    "rejects unsafe path %s",
+    (value) => expect(normalizeWorkspaceRelativePath(value)).toHaveProperty("error"),
+  );
+
+  it("normalizes harmless separator and whitespace differences", () => {
+    expect(normalizeWorkspaceRelativePath("  src\\pages\\home.html  ")).toEqual({ path: "src/pages/home.html" });
+  });
+
+  it("re-reads the real file and supplies safe recovery context", async () => {
+    const transport = fakeTransport();
+    const message = await buildPatchRecoveryMessage(
+      { path: "index.html", patches: [{ search: "stale", replace: "new" }] },
+      transport,
+      "patch did not match",
+      1,
+    );
+    expect(transport.readFile).toHaveBeenCalledTimes(1);
+    expect(message).toContain("CURRENT FILE CONTENT (index.html)");
+    expect(message).toContain("Ember Roast");
+    expect(message).toContain("files.write");
+  });
+});
+
 // ─── Handler-level enforcement floor ─────────────────────────────
 //
 // The loop's pre-approval gate is not the only route into a mutation:
@@ -232,6 +262,14 @@ describe("mutation handlers — enforcement floor", () => {
     );
     expect(res.success).toBe(true);
     expect(t.writeFile).toHaveBeenCalledWith("index.html", "<title>Ember Roast — Premium Coffee Roasters</title>");
+  });
+
+  it("files.list rejects absolute and parent paths before transport access", async () => {
+    const { handleFilesList } = await loadHandlers();
+    const t = spyTransport();
+    const res = await handleFilesList({ path: "C:/workspace/index.html" }, t);
+    expect(res.success).toBe(false);
+    expect(res.error).toContain("workspace-relative");
   });
 
   it("apply_patch rejects a placeholder in replace before executing", async () => {

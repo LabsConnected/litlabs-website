@@ -82,6 +82,7 @@ export type PreviewErrorCode =
   | "preview_no_free_port"
   | "preview_no_dev_command"
   | "preview_dependency_install_failed"
+  | "preview_root_route_missing"
   | "preview_clerk_config_error"
   | "preview_auth_config_error";
 
@@ -648,9 +649,11 @@ interface HealthProbeResult {
   status: number | null;
   /** Snippet of the response body if status >= 400 (redacted). */
   bodySnippet: string | null;
+  /** The process answered, but the preview entry route returned 404. */
+  rootRouteMissing: boolean;
 }
 
-async function probeHealth(
+export async function probeHealth(
   port: number,
   timeoutMs: number,
 ): Promise<HealthProbeResult> {
@@ -660,9 +663,20 @@ async function probeHealth(
       const resp = await fetch(`http://127.0.0.1:${port}/`, {
         signal: AbortSignal.timeout(3000),
       });
-      if (resp.ok || resp.status === 404) {
-        // 404 is still a response — server is running, just no route at /
-        return { healthy: true, authConfigError: false, status: resp.status, bodySnippet: null };
+      if (resp.ok) {
+        return { healthy: true, authConfigError: false, status: resp.status, bodySnippet: null, rootRouteMissing: false };
+      }
+      if (resp.status === 404) {
+        // A running process is not a usable website preview when its root
+        // route is missing. This is the source of the visible "Cannot GET /"
+        // state; keep it truthful instead of marking the runtime ready.
+        return {
+          healthy: false,
+          authConfigError: false,
+          status: resp.status,
+          bodySnippet: "The preview server returned 404 for /. A website preview must serve its entry route at /.",
+          rootRouteMissing: true,
+        };
       }
       // 5xx — server booted but something is broken. Capture the body
       // to detect Clerk/auth config errors vs. generic server errors.
@@ -676,6 +690,7 @@ async function probeHealth(
             authConfigError: true,
             status: resp.status,
             bodySnippet,
+            rootRouteMissing: false,
           };
         }
       }
@@ -684,7 +699,7 @@ async function probeHealth(
     }
     await new Promise((resolve) => setTimeout(resolve, HEALTH_PROBE_INTERVAL_MS));
   }
-  return { healthy: false, authConfigError: false, status: null, bodySnippet: null };
+  return { healthy: false, authConfigError: false, status: null, bodySnippet: null, rootRouteMissing: false };
 }
 
 /**
@@ -1062,6 +1077,15 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
       if (result.healthy && runtime.status === "starting") {
         runtime.status = "ready";
         pushLog(runtime, `[preview] Health check passed — ready on port ${port}`);
+      } else if (result.rootRouteMissing && runtime.status === "starting") {
+        runtime.status = "failed";
+        runtime.errorCode = "preview_root_route_missing";
+        runtime.error = [
+          "The preview server is running, but GET / returned 404 (Cannot GET /).",
+          "The detected dev server does not expose the project entry route at /.",
+          "Fix the project's dev command or serve index.html from the root, then restart preview.",
+        ].join(" ");
+        pushLog(runtime, `[preview] Root route missing (HTTP ${result.status})`);
       } else if (result.authConfigError && runtime.status === "starting") {
         // Server booted but Clerk/auth config is broken — surface the
         // real error, not a generic timeout.
@@ -1224,9 +1248,16 @@ export async function verifyPreviewHealth(workspaceId: string): Promise<boolean>
     const resp = await fetch(`http://127.0.0.1:${rt.port}/`, {
       signal: AbortSignal.timeout(3000),
     });
-    if (resp.ok || resp.status === 404) {
+    if (resp.ok) {
       rt.lastHealthCheck = Date.now();
       return true;
+    }
+    if (resp.status === 404) {
+      rt.status = "failed";
+      rt.errorCode = "preview_root_route_missing";
+      rt.error = "The preview server is running, but GET / returned 404 (Cannot GET /). Fix the project's root entry route and restart preview.";
+      pushLog(rt, "[preview] Root route missing during live health check (HTTP 404)");
+      return false;
     }
     // Detect auth config errors on live health checks too
     if (resp.status >= 500) {

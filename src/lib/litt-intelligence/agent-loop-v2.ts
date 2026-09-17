@@ -21,7 +21,7 @@ import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from ".
 import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, AllRoutesFailedError, AgentBudgetExhaustedError, type ToolDefinition, type ToolCallResult, type LLMMessage } from "./llm-tool-calling";
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
-import { validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
+import { buildPatchRecoveryMessage, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
 import { computeWorkspaceChange } from "./workspace-change-producer";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { toolRegistry } from "./tool-registry";
@@ -36,10 +36,12 @@ import {
   noteDeployment,
   noteToolResult,
   runQualityInspection,
+  snapshotQualityLoopSession,
   startQualityLoopSession,
   verifyLiveUrl,
   type QualityFinale,
   type QualityLoopSession,
+  type QualityLoopSnapshot,
 } from "./quality-loop-flow";
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -71,6 +73,8 @@ export interface AgentLoopConfig {
     userId: string;
     /** The user's original request (judge context). Falls back to the first user message. */
     userRequest?: string;
+    /** Server-persisted evidence restored after an approval pause. */
+    state?: QualityLoopSnapshot;
   };
 }
 
@@ -92,6 +96,8 @@ export interface PendingApproval {
   reason: string;
   /** The conversation messages at the point of pause — resume from here after approval */
   pausedMessages: LLMMessage[];
+  /** Quality evidence captured before this approval pause. */
+  qualityLoopState?: QualityLoopSnapshot;
 }
 
 export interface AgentLoopResult {
@@ -129,6 +135,8 @@ export interface AgentLoopResult {
     stages: QualityFinale["stages"];
     designPasses: number;
   };
+  /** Canonical quality ledger snapshot, including evidence not yet filed. */
+  qualityLoopState?: QualityLoopSnapshot;
 }
 
 // ─── Loop detection ───────────────────────────────────────────────
@@ -312,6 +320,7 @@ export async function runAgentLoopV2(
       projectId: cfg.qualityLoop.projectId,
       userId: cfg.qualityLoop.userId,
       userRequest: cfg.qualityLoop.userRequest ?? userMessage,
+      snapshot: cfg.qualityLoop.state,
     });
     cfg.systemPrompt += QUALITY_LOOP_PROMPT_SECTION;
   }
@@ -324,6 +333,7 @@ export async function runAgentLoopV2(
   // identical mutation after failover replays the recorded result instead
   // of executing it again.
   const executedMutations = new Map<string, ToolCallResult>();
+  const patchRecoveryAttempts = new Map<string, number>();
 
   // Collect progress events
   const localProgress = new ProgressEmitter((event) => {
@@ -389,6 +399,9 @@ export async function runAgentLoopV2(
           signal: cfg.signal,
         },
       );
+      if (llmResponse.responseShape && llmResponse.provider) {
+        localProgress.emit({ type: "model_response", provider: llmResponse.provider, model: llmResponse.model, ...llmResponse.responseShape, finishReason: llmResponse.finishReason });
+      }
       // Emit model routing event so LiTT Live shows which provider/model was actually used
       localProgress.emit({
         type: "model_routing",
@@ -556,22 +569,34 @@ export async function runAgentLoopV2(
               ? validateFilesWriteInputs(toolCall.inputs)
               : null;
         if (writeError) {
+          const recoveryKey = `${toolCall.toolId}:${String(toolCall.inputs.path ?? "")}`;
+          const recoveryAttempt = (patchRecoveryAttempts.get(recoveryKey) ?? 0) + 1;
+          patchRecoveryAttempts.set(recoveryKey, recoveryAttempt);
+          const recoveryMessage = toolCall.toolId === "apply_patch"
+            ? await buildPatchRecoveryMessage(toolCall.inputs, transport, writeError, recoveryAttempt)
+            : writeError;
           const result: ToolCallResult = {
             toolCallId: toolCall.toolCallId,
             toolId: toolCall.toolId,
             result: null,
             success: false,
-            error: writeError,
+            error: recoveryMessage,
           };
           llmMessages.push(buildToolResultMessage(result));
-          toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: "invalid write — regenerating", mutating: false });
+          toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: recoveryAttempt >= 2 ? "invalid write — stopped safely" : "invalid write — re-read and regenerate", mutating: false });
           localProgress.emit({
             type: "tool_result",
             toolId: toolCall.toolId,
             success: false,
-            summary: "Invalid write — regenerating with real file content",
+            summary: recoveryAttempt >= 2 ? "Invalid patch repeated after disk re-read; stopped without mutation" : "Invalid patch re-read from disk; regenerate or use files.write",
             durationMs: 0,
           });
+          if (toolCall.toolId === "apply_patch" && recoveryAttempt >= 2) {
+            cancelled = true;
+            cancelReason = "The model repeated an unsafe patch after the file was re-read; no mutation was executed";
+            finalText = "I could not safely apply that change after re-reading the current file. No mutation was executed.";
+            break;
+          }
           continue;
         }
       }
@@ -606,6 +631,7 @@ export async function runAgentLoopV2(
               inputs: toolCall.inputs,
               reason: permResult.reason ?? "Approval required",
               pausedMessages: [...llmMessages],
+              qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
             },
           };
         }
@@ -662,11 +688,18 @@ export async function runAgentLoopV2(
         });
 
         if (execResult.ok) {
+          // Handlers use a structured { success: false, error } payload for
+          // domain failures that do not throw (for example a lost terminal
+          // connection).  The registry call itself succeeded, but the tool
+          // operation did not.  Do not turn that into mutation evidence or a
+          // false completed build.
+          const handlerError = handlerFailureError(execResult.result);
           result = {
             toolCallId: toolCall.toolCallId,
             toolId: toolCall.toolId,
             result: execResult.result,
-            success: true,
+            success: handlerError === null,
+            ...(handlerError !== null ? { error: handlerError } : {}),
           };
         } else {
           result = {
@@ -826,6 +859,7 @@ export async function runAgentLoopV2(
           designPasses: qualityFinale.designPasses,
         }
       : undefined,
+    qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
   };
 }
 
@@ -903,6 +937,27 @@ function describeProviderFailureAfterDeployment(
 
 // ─── Resume from paused approval ──────────────────────────────────
 
+/**
+ * Extract a domain-level failure from a tool handler's result payload.
+ * Handlers signal failure by returning { success: false, error? } instead
+ * of throwing (e.g. workspace transport errors). Returns the error message,
+ * or null when the payload does not report failure.
+ */
+export function handlerFailureError(payload: unknown): string | null {
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const rec = payload as Record<string, unknown>;
+    if (rec.success === false) {
+      if (typeof rec.error === "string" && rec.error.trim()) return rec.error;
+      try {
+        return JSON.stringify(payload).slice(0, 500);
+      } catch {
+        return "tool reported failure";
+      }
+    }
+  }
+  return null;
+}
+
 export interface ResumeInput {
   /** The paused conversation messages at the point of approval pause */
   pausedMessages: LLMMessage[];
@@ -947,9 +1002,9 @@ export async function resumeAgentLoopV2(
   const cfg = { ...DEFAULT_LOOP_CONFIG, ...resume.config };
   const startTime = Date.now();
 
-  // Quality loop (opt-in): a fresh evidence session for the resumed run.
-  // Cognitive-stage markers in the paused messages are re-harvested below,
-  // so agent-declared evidence survives the approval pause.
+  // Quality loop (opt-in): restore the server-persisted evidence session from
+  // before the approval pause. The paused messages are still re-harvested for
+  // idempotency, but conversation text is not the source of machine evidence.
   let qualitySession: QualityLoopSession | null = null;
   if (cfg.qualityLoop?.enabled) {
     qualitySession = startQualityLoopSession({
@@ -957,6 +1012,7 @@ export async function resumeAgentLoopV2(
       projectId: cfg.qualityLoop.projectId,
       userId: cfg.qualityLoop.userId,
       userRequest: cfg.qualityLoop.userRequest ?? "",
+      snapshot: cfg.qualityLoop.state,
     });
     cfg.systemPrompt += QUALITY_LOOP_PROMPT_SECTION;
   }
@@ -1015,12 +1071,33 @@ export async function resumeAgentLoopV2(
       });
 
       if (execResult.ok) {
-        result = {
-          toolCallId: resume.toolCallId,
-          toolId: resume.toolId,
-          result: execResult.result,
-          success: true,
-        };
+        // A handler can execute without throwing yet still report a
+        // domain-level failure ({ success: false, ... }) — e.g. the
+        // workspace transport is unreachable and files.mkdir returns
+        // { success: false, error }. Recording that as a successful
+        // mutation is a lie the rest of the run builds on: the toolCalls
+        // log would claim success, it would count as an intervening
+        // mutation (weakening loop detection, triggering build-fix for
+        // nothing), and the run could complete "successfully" with
+        // nothing created. Surface it as the failure it is so the
+        // model can retry or report, and the run result stays truthful.
+        const handlerError = handlerFailureError(execResult.result);
+        if (handlerError !== null) {
+          result = {
+            toolCallId: resume.toolCallId,
+            toolId: resume.toolId,
+            result: execResult.result,
+            success: false,
+            error: handlerError,
+          };
+        } else {
+          result = {
+            toolCallId: resume.toolCallId,
+            toolId: resume.toolId,
+            result: execResult.result,
+            success: true,
+          };
+        }
       } else {
         result = {
           toolCallId: resume.toolCallId,
@@ -1058,7 +1135,9 @@ export async function resumeAgentLoopV2(
     llmMessages.push(buildToolResultMessage(result));
 
     const toolDef = availableTools.find((t) => t.id === resume.toolId);
-    if (toolDef && !toolDef.readOnly) {
+    // Only a successful mutation counts: a failed approved call must not
+    // be cached as executed work or weaken loop detection.
+    if (toolDef && !toolDef.readOnly && result.success) {
       hasInterveningMutation = true;
       mutationBatchPending = true;
     }
@@ -1118,6 +1197,9 @@ export async function resumeAgentLoopV2(
           signal: cfg.signal,
         },
       );
+      if (llmResponse.responseShape && llmResponse.provider) {
+        localProgress.emit({ type: "model_response", provider: llmResponse.provider, model: llmResponse.model, ...llmResponse.responseShape, finishReason: llmResponse.finishReason });
+      }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       localProgress.emit({
@@ -1243,6 +1325,7 @@ export async function resumeAgentLoopV2(
               inputs: toolCall.inputs,
               reason: permResult.reason ?? "Approval required in ACT mode",
               pausedMessages: [...llmMessages],
+              qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
             },
           };
         }
@@ -1404,6 +1487,7 @@ export async function resumeAgentLoopV2(
           designPasses: qualityFinale.designPasses,
         }
       : undefined,
+    qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
   };
 }
 

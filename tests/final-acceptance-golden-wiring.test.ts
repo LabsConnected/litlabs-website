@@ -3,10 +3,8 @@ import { readFileSync } from "fs";
 import path from "path";
 import { resolveAcceptanceUserId, LEGACY_QA_USER_ID } from "../scripts/final-acceptance/acceptance-user.mjs";
 
-// Regression coverage for the CI/Clerk wiring bug where the "Run production
-// golden acceptance" step only forwarded CLERK_SECRET_KEY and not
-// LITT_ACCEPTANCE_USER_ID, causing the script to silently fall back to a
-// stale hard-coded QA user id and fail Clerk's sign_in_tokens with a 404.
+// Regression coverage for the CI/Clerk wiring: the production run must create
+// a disposable fresh user and pass that exact id to the browser journey.
 
 describe("final-acceptance-golden workflow secret wiring", () => {
   const workflowPath = path.resolve(
@@ -22,12 +20,36 @@ describe("final-acceptance-golden workflow secret wiring", () => {
     return workflow.slice(stepStart, nextStep === -1 ? workflow.length : nextStep);
   }
 
-  it("passes both CLERK_SECRET_KEY and LITT_ACCEPTANCE_USER_ID to the golden acceptance run", () => {
+  it("passes the freshly created user id and enables fresh-account mode", () => {
     const block = stepBlock("Run production golden acceptance");
     expect(block).toMatch(/CLERK_SECRET_KEY:\s*\$\{\{\s*secrets\.CLERK_SECRET_KEY\s*\}\}/);
-    expect(block).toMatch(
-      /LITT_ACCEPTANCE_USER_ID:\s*\$\{\{\s*secrets\.LITT_ACCEPTANCE_USER_ID\s*\}\}/,
+    expect(block).toMatch(/LITT_ACCEPTANCE_USER_ID:\s*\$\{\{\s*steps\.fresh-user\.outputs\.user_id\s*\}\}/);
+    expect(block).toMatch(/LITT_ACCEPTANCE_FRESH_ACCOUNT:\s*"1"/);
+    expect(block).toMatch(/LITT_GOLDEN_PROJECT_ID:\s*""/);
+  });
+
+  it("resolves deploy approval before the preview polling budget can expire it", () => {
+    const script = readFileSync(
+      path.resolve(__dirname, "../scripts/final-acceptance/prod-mobile-golden.mjs"),
+      "utf-8",
     );
+    const approvalPost = script.indexOf("deployApprovalResponse = await page.request.post");
+    const previewPolling = script.indexOf("const iframe = page.getByTestId(\"preview-iframe\")");
+    expect(approvalPost).toBeGreaterThan(-1);
+    expect(previewPolling).toBeGreaterThan(-1);
+    expect(approvalPost).toBeLessThan(previewPolling);
+  });
+
+  it("requires the post-build follow-up to prove a real file and preview mutation", () => {
+    const script = readFileSync(
+      path.resolve(__dirname, "../scripts/final-acceptance/prod-mobile-golden.mjs"),
+      "utf-8",
+    );
+    expect(script).toContain("post_build_follow_up_mutation");
+    expect(script).toContain("post_build_follow_up_preview");
+    expect(script).toContain("readWorkspaceFile(\"index.html\")");
+    expect(script).toContain("followUpPreviewBody.includes(followUpMarker)");
+    expect(script).toContain("follow-up-provider-response-shapes.json");
   });
 });
 

@@ -703,6 +703,87 @@ describe("callLLMWithTools — text-format tool-call markup (P0-B)", () => {
   });
 });
 
+describe("callLLMWithTools — intent-free envelope markup (P0-C)", () => {
+  // Production 2026-09-16: after an approval resume, the model emitted
+  // prose wrapped around an intent-free <dots_function_call> envelope
+  // (`<dots_function_call>find ./src -type d</dots_function_call>`) — no
+  // tool id, no arg structure, so the intent detector stays silent. The
+  // old behavior accepted that as a final answer with zero tool calls:
+  // the run "completed", the launch flow burned its one reprompt on the
+  // same dead end, and the user got TOOL_EXECUTION_UNAVAILABLE. The
+  // envelope is still a text-format tool attempt — it must fail over,
+  // never become a zero-call final answer.
+  const JUNK_ENVELOPE =
+    "I'll create the directory structure now.\n" +
+    "<dots_function_call>find ./src -type d</dots_function_call>\n" +
+    "Let me verify it was created.";
+
+  it("fails over when a model emits an intent-free <dots_function_call> envelope amid prose", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    // First OpenRouter model emits the junk envelope; the sibling model
+    // returns a proper structured tool call.
+    mockFetch
+      .mockResolvedValueOnce(makeSuccessResponse("m1", JUNK_ENVELOPE))
+      .mockResolvedValueOnce(
+        makeSuccessResponse("m2", "", [
+          { id: "call_1", type: "function", function: { name: "write_file", arguments: '{"path":"a.txt","content":"x"}' } },
+        ]),
+      );
+
+    const result = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "create the directory" }],
+      [WRITE_TOOL],
+    );
+
+    // The structured call from the SECOND model wins — the junk envelope
+    // never becomes a zero-tool-call final answer.
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].toolId).toBe("write_file");
+    expect(result.text).not.toContain("dots_function_call");
+    expect(callsTo("openrouter").length).toBe(2);
+  });
+
+  it("throws AllRoutesFailedError classified tool_call_parse_failed when every route emits intent-free envelopes", async () => {
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValue(makeSuccessResponse("any", JUNK_ENVELOPE));
+
+    const err = await callLLMWithTools(
+      "sys",
+      [{ role: "user", content: "hi" }],
+      [WRITE_TOOL],
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(AllRoutesFailedError);
+    expect(err.failures.length).toBeGreaterThan(0);
+    expect(err.failures.every((f: { class: string }) => f.class === "tool_call_parse_failed")).toBe(true);
+    // The error is the truthful terminal state — not a fake completion
+    // with "nothing was executed".
+    expect(err.userMessage).toMatch(/all currently available AI routes/i);
+  });
+
+  it("does not fail over when native structured calls accompany an intent-free envelope", async () => {
+    // A healthy response that happens to contain envelope-shaped text
+    // alongside real tool calls still executes — only the zero-call case
+    // is a protocol failure.
+    vi.stubEnv("GROQ_API_KEY", "test-groq-key");
+    mockFetch.mockResolvedValueOnce(
+      makeSuccessResponse(
+        "m1",
+        "Working on it.\n<dots_function_call>find ./src</dots_function_call>",
+        [
+          { id: "call_1", type: "function", function: { name: "write_file", arguments: '{"path":"a.txt","content":"x"}' } },
+        ],
+      ),
+    );
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], [WRITE_TOOL]);
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.text).not.toContain("dots_function_call");
+    expect(callsTo("groq").length).toBe(1); // no failover — single call
+  });
+});
+
 describe("callLLMWithTools — canonical text-call recovery (P0-B)", () => {
   // A toolset that includes terminal.execute so the production payload's
   // bare `terminal` name resolves to a real registered tool.
@@ -1154,6 +1235,16 @@ describe("callLLMWithTools — exhaustion and privacy", () => {
     expect(result.toolCalls[0].toolCallId).toBe("call_123");
     expect(result.toolCalls[0].toolId).toBe("write_file");
     expect(result.toolCalls[0].inputs).toEqual({ path: "test.txt", content: "hello" });
+    expect(result.responseShape).toMatchObject({
+      contentType: "string",
+      messageKeys: ["content", "tool_calls"],
+      toolCalls: [{
+        name: "write_file",
+        idPresent: true,
+        argumentsJsonValid: true,
+        argumentKeys: ["path", "content"],
+      }],
+    });
   });
 });
 
@@ -1318,5 +1409,37 @@ describe("buildToolResultMessage", () => {
     expect(result.parts).toEqual([
       { functionResponse: { name: "project_scan", response: { found: 1 } } },
     ]);
+  });
+});
+
+describe("buildAssistantToolCallMessage — envelope hygiene", () => {
+  it("strips tool-call envelope markup from replayed raw text parts", () => {
+    const msg = buildAssistantToolCallMessage(
+      [{ toolId: "files.mkdir", toolCallId: "tc-1", inputs: { path: "x" } }],
+      "Creating the directory.",
+      [
+        { text: "Let me check.\n<dots_function_call>find ./src -type d</dots_function_call>\nDone." },
+        { functionCall: { name: "files_mkdir", args: { path: "x" } } },
+      ],
+    );
+    const parts = msg.parts ?? [];
+    expect(parts).toHaveLength(2);
+    // The envelope is gone from the replayed text…
+    expect((parts[0] as { text: string }).text).not.toContain("dots_function_call");
+    expect((parts[0] as { text: string }).text).toContain("Let me check.");
+    // …native functionCall parts pass through untouched.
+    expect(parts[1]).toEqual({ functionCall: { name: "files_mkdir", args: { path: "x" } } });
+  });
+
+  it("leaves text parts without envelopes byte-identical", () => {
+    const raw = "Just a normal explanation with trailing space. ";
+    const msg = buildAssistantToolCallMessage([], raw, [{ text: raw }]);
+    expect((msg.parts?.[0] as { text: string }).text).toBe(raw);
+  });
+
+  it("handles missing rawParts", () => {
+    const msg = buildAssistantToolCallMessage([], "hi", undefined);
+    expect(msg.parts).toBeUndefined();
+    expect(msg.content).toBe("hi");
   });
 });

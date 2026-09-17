@@ -167,9 +167,15 @@ export function VisualCanvasBuilder() {
 
   const typeMeta = getProjectTypeMeta(projectType);
 
-  // Collapsible palette/inspector — overlays instead of permanently consuming width
-  const [paletteOpen, setPaletteOpen] = useState(true);
-  const [inspectorOpen, setInspectorOpen] = useState(true);
+  // Progressive disclosure: an entered project starts with a full-width
+  // workspace. Selection opens the inspector automatically; the add drawer
+  // is always available from the compact toolbar.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(() => Boolean(selectedNodeId));
+
+  useEffect(() => {
+    if (selectedNodeId) setInspectorOpen(true);
+  }, [selectedNodeId]);
 
   // Resizable palette and inspector widths — persisted, clamped
   const paletteResize = useResizableWidth({
@@ -191,8 +197,21 @@ export function VisualCanvasBuilder() {
   if (typeMeta.editor === "html") {
     return (
       <div className="relative flex h-full w-full flex-col overflow-hidden" style={{ backgroundColor: "#0a0b10" }}>
+        <div className="flex shrink-0 items-center justify-end gap-1 border-b px-2 py-1" style={{ borderColor: "var(--studio-border)" }}>
+          <button
+            type="button"
+            onClick={() => setPaletteOpen((v) => !v)}
+            className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold transition hover:bg-white/10"
+            style={{ color: paletteOpen ? "var(--litt-primary)" : "var(--text-muted)" }}
+            aria-label={paletteOpen ? "Hide add drawer" : "Open add drawer"}
+            aria-pressed={paletteOpen}
+          >
+            {paletteOpen ? <PanelLeftClose size={12} className="pointer-events-none" /> : <PanelLeftOpen size={12} className="pointer-events-none" />}
+            + Add
+          </button>
+        </div>
         <div className="flex flex-1 overflow-hidden">
-          {/* Left: Project type selector (narrow) — collapsible */}
+          {/* Contextual project/file drawer — closed after entry. */}
           {paletteOpen && (
             <div className="shrink-0" style={{ width: 200 }}>
               <ProjectTypeSelector />
@@ -210,10 +229,21 @@ export function VisualCanvasBuilder() {
   if (typeMeta.editor === "game") {
     return (
       <div className="flex h-full w-full flex-col overflow-hidden" style={{ backgroundColor: "#0a0b10" }}>
+        <div className="flex shrink-0 items-center justify-end gap-1 border-b px-2 py-1" style={{ borderColor: "var(--studio-border)" }}>
+          <button
+            type="button"
+            onClick={() => setPaletteOpen((v) => !v)}
+            className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold transition hover:bg-white/10"
+            style={{ color: paletteOpen ? "var(--litt-primary)" : "var(--text-muted)" }}
+            aria-label={paletteOpen ? "Hide add drawer" : "Open add drawer"}
+            aria-pressed={paletteOpen}
+          >
+            {paletteOpen ? <PanelLeftClose size={12} className="pointer-events-none" /> : <PanelLeftOpen size={12} className="pointer-events-none" />}
+            + Add
+          </button>
+        </div>
         <div className="flex flex-1 overflow-hidden">
-          <div className="shrink-0" style={{ width: 200 }}>
-            <ProjectTypeSelector />
-          </div>
+          {paletteOpen && <div className="shrink-0" style={{ width: 200 }}><ProjectTypeSelector /></div>}
           <div className="flex flex-1 items-center justify-center">
             <div className="text-center">
               <div className="text-2xl font-bold mb-2" style={{ color: "var(--text-primary)" }}>
@@ -232,7 +262,8 @@ export function VisualCanvasBuilder() {
   // Website / App / Component mode — the visual canvas builder
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden" style={{ backgroundColor: "#0a0b10" }}>
-      {/* Top toolbar with palette/inspector toggle buttons */}
+      {/* Compact workspace toolbar. Add and Inspector open overlays rather
+          than reserving permanent columns. */}
       <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1" style={{ borderColor: "var(--studio-border)" }}>
         <CanvasToolbar />
         <div className="flex-1" />
@@ -241,11 +272,11 @@ export function VisualCanvasBuilder() {
           onClick={() => setPaletteOpen((v) => !v)}
           className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold transition hover:bg-white/10"
           style={{ color: paletteOpen ? "var(--litt-primary)" : "var(--text-muted)" }}
-          aria-label={paletteOpen ? "Hide palette" : "Show palette"}
+          aria-label={paletteOpen ? "Close add drawer" : "Open add drawer"}
           aria-pressed={paletteOpen}
         >
           {paletteOpen ? <PanelLeftClose size={12} className="pointer-events-none" /> : <PanelLeftOpen size={12} className="pointer-events-none" />}
-          Components
+          + Add
         </button>
         <button
           type="button"

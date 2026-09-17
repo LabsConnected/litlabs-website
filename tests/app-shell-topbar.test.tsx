@@ -169,6 +169,19 @@ describe("AppShell top bar", () => {
     expect(main!.className).toContain("flex-1");
   });
 
+  it("keeps the Studio global bar in normal flow so its top edge cannot clip", () => {
+    mockPathname = "/studio";
+    render(
+      <AppShell>
+        <div>content</div>
+      </AppShell>,
+    );
+    const header = getHeader();
+    expect(header.className).toContain("relative");
+    expect(header.className).not.toContain("sticky");
+    expect(header.className).toContain("shrink-0");
+  });
+
   it("keeps layout overflow guards in place (min-w-0 main, no sideways scroll)", () => {
     render(
       <AppShell>

@@ -43,10 +43,13 @@ const BASE = (process.env.LITT_PROD_BASE_URL || "https://www.litlabs.net").repla
 // GITHUB_ACTIONS is set unconditionally by every Actions runner (unlike CI,
 // which is only present if a step opts in), so it's the reliable signal that
 // we're in the production CI run rather than a local/manual invocation.
-const USER_ID = resolveAcceptanceUserId({
-  isCI: process.env.GITHUB_ACTIONS === "true",
-  envUserId: process.env.LITT_ACCEPTANCE_USER_ID,
-});
+const FRESH_ACCOUNT_REQUESTED = process.env.LITT_ACCEPTANCE_FRESH_ACCOUNT === "1";
+let USER_ID = FRESH_ACCOUNT_REQUESTED
+  ? resolveAcceptanceUserId({ isCI: true, envUserId: process.env.LITT_ACCEPTANCE_USER_ID })
+  : resolveAcceptanceUserId({
+      isCI: process.env.GITHUB_ACTIONS === "true",
+      envUserId: process.env.LITT_ACCEPTANCE_USER_ID,
+    });
 const DEPLOY_REQUESTED = (process.env.LITT_ACCEPTANCE_DEPLOY ?? "1") !== "0";
 
 const STAMP = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
@@ -58,8 +61,9 @@ const STAMP = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
 // Local/manual runs may omit it — the script then creates the project under
 // the canonical name so it can be adopted as the permanent one.
 const GOLDEN_PROJECT_ID = process.env.LITT_GOLDEN_PROJECT_ID?.trim() || null;
-const IS_CI = process.env.GITHUB_ACTIONS === "true";
 const GOLDEN_PROJECT_NAME = "Golden Acceptance — Ember Roast";
+const FRESH_PROJECT_TEMPLATE = process.env.LITT_ACCEPTANCE_TEMPLATE_ID?.trim() || "empty-static";
+const REUSE_GOLDEN_PROJECT = !!GOLDEN_PROJECT_ID && !FRESH_ACCOUNT_REQUESTED;
 
 // The exact literal the run asks the model to write. The stamp makes every
 // run's mutation verifiably fresh on the permanent project — a no-op answer
@@ -67,13 +71,13 @@ const GOLDEN_PROJECT_NAME = "Golden Acceptance — Ember Roast";
 const GOLDEN_MARKER = `Golden build ${STAMP}`;
 const PROMPT =
   process.env.LITT_ACCEPTANCE_PROMPT ||
-  (GOLDEN_PROJECT_ID
+  (REUSE_GOLDEN_PROJECT
     ? DEPLOY_REQUESTED
       ? `In the Ember Roast landing site in index.html, update the footer so it contains exactly this text: ${GOLDEN_MARKER}. Keep everything else unchanged, then publish it live to a public URL.`
       : `In the Ember Roast landing site in index.html, update the footer so it contains exactly this text: ${GOLDEN_MARKER}. Keep everything else unchanged.`
     : DEPLOY_REQUESTED
-      ? "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section, then publish it live to a public URL."
-      : "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section.");
+      ? "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section. This is an empty static workspace: write the runnable entry at the workspace root as index.html (not public/index.html), then publish it live to a public URL."
+      : "Build a simple single-page landing site for a coffee roastery called Ember Roast with a hero, a menu section, and a contact section. This is an empty static workspace: write the runnable entry at the workspace root as index.html (not public/index.html).");
 const ARTIFACT_DIR = path.join("artifacts", "final-acceptance", STAMP);
 const SHOT_DIR = path.join(ARTIFACT_DIR, "screenshots");
 mkdirSync(SHOT_DIR, { recursive: true });
@@ -108,6 +112,7 @@ const verdict = {
   screenshots: [],
   verdict: "INCOMPLETE",
   notes: [],
+  freshAccount: false,
 };
 
 function step(name, ok, detail) {
@@ -300,6 +305,14 @@ async function main() {
     await page.waitForTimeout(4000);
     const authProbe = await page.request.get(`${BASE}/api/studio-projects`, { timeout: 60_000 });
     step("sign_in", authProbe.status() === 200, `GET /api/studio-projects → ${authProbe.status()}`);
+    const authBody = await authProbe.json().catch(() => null);
+    const initialProjects = Array.isArray(authBody?.projects) ? authBody.projects : [];
+    const freshAccountProof = FRESH_ACCOUNT_REQUESTED && authProbe.status() === 200 && initialProjects.length === 0;
+    verdict.freshAccount = freshAccountProof;
+    step("fresh_account", freshAccountProof,
+      FRESH_ACCOUNT_REQUESTED
+        ? `new Clerk user ${USER_ID} has ${initialProjects.length} existing project(s)`
+        : "fresh-account mode is required for this acceptance");
     await shot(page, "01-signed-in");
 
     // ── Step 1.5: resolve the permanent golden project + provision workspace ──
@@ -308,7 +321,7 @@ async function main() {
     // it (local/manual runs only) the script creates the project once under
     // the canonical name; CI refuses to run without the ID.
     let projectId = null;
-    if (GOLDEN_PROJECT_ID) {
+    if (REUSE_GOLDEN_PROJECT) {
       const getResp = await page.request.get(`${BASE}/api/studio-projects/${GOLDEN_PROJECT_ID}`, { timeout: 60_000 });
       const getBody = await getResp.json().catch(() => null);
       const found = getResp.status() === 200 && (getBody?.project?.id ?? getBody?.id) === GOLDEN_PROJECT_ID;
@@ -316,18 +329,16 @@ async function main() {
       verdict.projectId = projectId;
       verdict.workspaceId = getBody?.project?.workspaceId ?? getBody?.workspaceId ?? null;
       step("golden_project_resolved", found, `GET /api/studio-projects/${GOLDEN_PROJECT_ID} → ${getResp.status()}`);
-    } else if (IS_CI) {
-      step("golden_project_resolved", false, "LITT_GOLDEN_PROJECT_ID is not configured — CI runs must target the permanent golden project");
     } else {
       const projResp = await page.request.post(`${BASE}/api/studio-projects`, {
-        data: { sourceType: "blank", name: GOLDEN_PROJECT_NAME, templateId: "blank-static" },
+        data: { sourceType: "blank", name: GOLDEN_PROJECT_NAME, templateId: FRESH_PROJECT_TEMPLATE },
         timeout: 60_000,
       });
       const projBody = await projResp.json().catch(() => null);
       projectId = projBody?.project?.id ?? null;
       step("golden_project_resolved", projResp.status() === 201 && !!projectId,
-        `created "${GOLDEN_PROJECT_NAME}" HTTP ${projResp.status()} id=${projectId} — set LITT_GOLDEN_PROJECT_ID to reuse it`);
-      if (projectId) verdict.notes.push(`adopt as permanent: LITT_GOLDEN_PROJECT_ID=${projectId}`);
+        `created dedicated ${FRESH_PROJECT_TEMPLATE} project "${GOLDEN_PROJECT_NAME}" HTTP ${projResp.status()} id=${projectId}`);
+      if (projectId && !FRESH_ACCOUNT_REQUESTED) verdict.notes.push(`adopt as permanent: LITT_GOLDEN_PROJECT_ID=${projectId}`);
     }
 
     let workspaceReady = false;
@@ -346,10 +357,42 @@ async function main() {
         if (pj?.project?.workspaceStatus === "ready" || pj?.workspaceStatus === "ready") workspaceReady = true;
       }
       step("workspace_ready", workspaceReady, `projectId=${projectId}`);
+
+      // The explicit empty-static contract is stronger than merely having a
+      // blank-looking preview: before the first request the managed workspace
+      // must contain no user application files. Git metadata is not a user
+      // project file and is intentionally excluded from this proof.
+      const filesResp = await page.request.get(
+        `${BASE}/api/studio-projects/${projectId}/files?path=${encodeURIComponent(".")}`,
+        { timeout: 60_000 },
+      ).catch(() => null);
+      const filesBody = filesResp ? await filesResp.json().catch(() => null) : null;
+      const entries = Array.isArray(filesBody?.entries) ? filesBody.entries : [];
+      const userEntries = entries.filter((entry) => entry?.name !== ".git");
+      step("fresh_project_zero_user_files",
+        !REUSE_GOLDEN_PROJECT && FRESH_PROJECT_TEMPLATE === "empty-static" && filesResp?.status() === 200 && userEntries.length === 0,
+        `template=${FRESH_PROJECT_TEMPLATE} HTTP ${filesResp?.status() ?? "unreachable"} userFiles=${userEntries.length}`);
+    }
+
+    // Always start a new conversation. Selecting the first existing
+    // conversation is convenient in Studio, but invalid for acceptance: it
+    // can silently reuse an old run and make a fresh account claim false.
+    let conversationId = null;
+    if (projectId) {
+      const conversationResp = await page.request.post(`${BASE}/api/studio/conversations`, {
+        data: { projectId, title: GOLDEN_PROJECT_NAME, activeAgentSlug: "litt" },
+        timeout: 60_000,
+      });
+      const conversationBody = await conversationResp.json().catch(() => null);
+      conversationId = conversationBody?.conversation?.id ?? null;
+      step("fresh_conversation", conversationResp.status() === 201 && !!conversationId,
+        `created conversation HTTP ${conversationResp.status()} id=${conversationId}`);
+    } else {
+      step("fresh_conversation", false, "no project available for a new conversation");
     }
 
     // ── Step 2: Studio loads on mobile with the project selected ──
-    const studioResp = await page.goto(`${BASE}/studio?project=${projectId ?? ""}`, { waitUntil: "domcontentloaded", timeout: 90_000 });
+    const studioResp = await page.goto(`${BASE}/studio?project=${projectId ?? ""}&conversation=${conversationId ?? ""}`, { waitUntil: "domcontentloaded", timeout: 90_000 });
     step("studio_load", studioResp?.status() === 200, `HTTP ${studioResp?.status()}`);
     await page.waitForTimeout(6000);
     const shellVisible = await page.locator(".studio-shell").isVisible().catch(() => false);
@@ -437,6 +480,36 @@ async function main() {
       `${writeEvents.length} write-ish tool events, ${await page.evaluate(() => (window.__littFilesChanged || []).length)} files-changed events`);
     verdict.filesChangedEvents = await page.evaluate(() => window.__littFilesChanged || []);
 
+    const responseShapeEvents = events.filter((e) => e.type === "model_response");
+    writeFileSync(path.join(ARTIFACT_DIR, "provider-response-shapes.json"), JSON.stringify(responseShapeEvents, null, 2));
+    step("provider_response_evidence", responseShapeEvents.length > 0,
+      responseShapeEvents.length > 0
+        ? responseShapeEvents.map((e) => `${e.provider}/${e.model} toolCalls=${e.toolCalls.length}`).join("; ")
+        : "no redacted provider response-shape event was streamed");
+
+    // Resolve the real deploy approval as soon as the paused-run event is
+    // available. Preview is independent from deployment, but waiting through
+    // its recovery budget before approving can consume the five-minute server
+    // approval TTL and turn a valid pause into a misleading expiry failure.
+    const approvalEvents = events.filter((e) => e.type === "pending_approval");
+    const deployApproval = approvalEvents.find((e) => e.toolId === "project.deploy");
+    let deployResult = events.find((e) => e.type === "deploy_result");
+    const deployVerify = events.find((e) => e.type === "deploy_verify");
+    let productionUrl = deployResult?.productionUrl || deployVerify?.url || null;
+    const convId = (messagesApiSeen?.url ?? "").match(/conversations\/([^/]+)\/messages/)?.[1];
+    let deployApprovalResponse = null;
+    let deployApprovalBody = null;
+    if (DEPLOY_REQUESTED && deployApproval?.pausedRunId && convId) {
+      deployApprovalResponse = await page.request.post(
+        `${BASE}/api/studio/conversations/${convId}/approvals/${deployApproval.pausedRunId}`,
+        { data: { decision: "approved" }, timeout: 30_000 },
+      ).catch(() => null);
+      deployApprovalBody = deployApprovalResponse
+        ? await deployApprovalResponse.json().catch(() => null)
+        : null;
+      writeFileSync(path.join(ARTIFACT_DIR, "deploy-approval-response.json"), JSON.stringify(deployApprovalBody, null, 2));
+    }
+
     const previewResult = events.find((e) => e.type === "preview_result");
     const previewStart = events.find((e) => e.type === "preview_start");
     const previewUrl = previewResult?.previewUrl || null;
@@ -518,11 +591,6 @@ async function main() {
     // pending_approval pause would mean the gate was bypassed. The golden
     // then approves through the real server-authoritative endpoint and reads
     // the resumed run's toolCalls for the deployment outcome.
-    const approvalEvents = events.filter((e) => e.type === "pending_approval");
-    const deployApproval = approvalEvents.find((e) => e.toolId === "project.deploy");
-    let deployResult = events.find((e) => e.type === "deploy_result");
-    const deployVerify = events.find((e) => e.type === "deploy_verify");
-    let productionUrl = deployResult?.productionUrl || deployVerify?.url || null;
     if (DEPLOY_REQUESTED) {
       step("deploy_approval_gate", !!deployApproval, deployApproval
         ? `pausedRunId=${deployApproval.pausedRunId ?? "none"} reason=${String(deployApproval.reason ?? "").slice(0, 120)}`
@@ -531,19 +599,23 @@ async function main() {
           : deployResult ? "deploy executed with NO approval pause — gate bypassed" : "no pending_approval event in stream");
 
       if (deployApproval?.pausedRunId) {
-        const convId = (messagesApiSeen?.url ?? "").match(/conversations\/([^/]+)\/messages/)?.[1];
         // Async approval contract: POST returns 202 immediately, then poll
         // GET for the resumed execution result. This avoids the Cloudflare
         // 524 timeout that occurred when the approval endpoint synchronously
         // awaited the full resumed agent loop (deploy + model continuation).
-        const approval = convId
+        const reusedEarlyApproval = deployApprovalResponse !== null;
+        const approval = deployApprovalResponse ?? (convId
           ? await page.request.post(
               `${BASE}/api/studio/conversations/${convId}/approvals/${deployApproval.pausedRunId}`,
               { data: { decision: "approved" }, timeout: 30_000 },
             ).catch(() => null)
-          : null;
-        const approvalBody = approval ? await approval.json().catch(() => null) : null;
-        writeFileSync(path.join(ARTIFACT_DIR, "deploy-approval-response.json"), JSON.stringify(approvalBody, null, 2));
+          : null);
+        const approvalBody = deployApprovalBody ?? (approval ? await approval.json().catch(() => null) : null);
+        deployApprovalResponse = approval;
+        deployApprovalBody = approvalBody;
+        if (!reusedEarlyApproval) {
+          writeFileSync(path.join(ARTIFACT_DIR, "deploy-approval-response.json"), JSON.stringify(approvalBody, null, 2));
+        }
         step("deploy_approved", (approval?.status() === 202 || approval?.status() === 200) && approvalBody?.resolved === true,
           `HTTP ${approval?.status() ?? "no-request"} resolved=${approvalBody?.resolved} status=${approvalBody?.status ?? "none"}`);
 
@@ -630,7 +702,7 @@ async function main() {
     // file on disk must contain the exact requested text — this is the
     // [PERSON_NAME] regression check (a completion claim with the wrong
     // content is a false success).
-    const EXPECTED_LITERAL = GOLDEN_PROJECT_ID ? GOLDEN_MARKER : "Ember Roast";
+    const EXPECTED_LITERAL = REUSE_GOLDEN_PROJECT ? GOLDEN_MARKER : "Ember Roast";
     const readWorkspaceFile = async (filePath) => {
       if (!projectId) return null;
       const resp = await page.request
@@ -740,6 +812,80 @@ async function main() {
     }
     step("post_build_keyboard_usable", stillUsable && sheetUp, `input=${stillUsable} sheet=${sheetUp}`);
     await shot(page, "08-post-build-keyboard");
+
+    // Finish the mobile acceptance contract with an actual follow-up sent
+    // through the reopened composer. The follow-up must mutate the existing
+    // project, so this gate proves the complete edit path rather than only
+    // proving that the messages POST returned 200.
+    if (stillUsable && sheetUp) {
+      const followUpMarker = "Golden Acceptance follow-up verified";
+      const followUp = `Update the existing Ember Roast site footer to include exactly: ${followUpMarker}. Keep the rest of the site unchanged and save the edit to index.html.`;
+      await commandInput.fill(followUp);
+      const followUpResponse = page.waitForResponse((response) =>
+        /\/api\/studio\/conversations\/[^/]+\/messages/.test(response.url()) &&
+        response.request().method() === "POST",
+        { timeout: 60_000 },
+      ).catch(() => null);
+      await page.getByTestId("studio-send-button").click().catch(() => {});
+      const followUpResult = await followUpResponse;
+      step("post_build_follow_up_submitted", !!followUpResult && followUpResult.status() === 200,
+        followUpResult ? `POST follow-up → ${followUpResult.status()}` : "follow-up messages POST not observed");
+
+      if (followUpResult?.status() === 200) {
+        // Preserve the second provider/model response for diagnosis. This is
+        // the raw SSE response for the follow-up only; it is kept separate
+        // from the initial build stream so a no-op assistant answer cannot be
+        // mistaken for a successful edit.
+        const followUpRaw = await followUpResult.text().catch(() => "");
+        const followUpEvents = parseSSE(followUpRaw);
+        writeFileSync(path.join(ARTIFACT_DIR, "follow-up-sse-events.json"), JSON.stringify(followUpEvents, null, 2));
+        const followUpProviderShapes = followUpEvents.filter((event) => event.type === "model_response");
+        writeFileSync(path.join(ARTIFACT_DIR, "follow-up-provider-response-shapes.json"), JSON.stringify(followUpProviderShapes, null, 2));
+        step("post_build_follow_up_provider_evidence", followUpProviderShapes.length > 0,
+          followUpProviderShapes.length > 0
+            ? followUpProviderShapes.map((event) => `${event.provider}/${event.model} toolCalls=${event.toolCalls?.length ?? 0}`).join("; ")
+            : "no model response was present in the follow-up stream");
+
+        const followUpFile = await readWorkspaceFile("index.html");
+        step("post_build_follow_up_mutation",
+          followUpFile !== null && followUpFile.includes(followUpMarker),
+          followUpFile === null
+            ? "index.html could not be read after the follow-up"
+            : followUpFile.includes(followUpMarker)
+              ? `index.html contains ${JSON.stringify(followUpMarker)}`
+              : `index.html did not contain ${JSON.stringify(followUpMarker)} after the follow-up`);
+
+        const followUpPreview = iframeSrc
+          ? await page.request.get(`${iframeSrc}${iframeSrc.includes("?") ? "&" : "?"}acceptance_follow_up=${Date.now()}`, { timeout: 45_000 }).catch(() => null)
+          : null;
+        const followUpPreviewBody = followUpPreview ? await followUpPreview.text().catch(() => "") : "";
+        step("post_build_follow_up_preview",
+          followUpPreview?.status() === 200 && followUpPreviewBody.includes(followUpMarker),
+          `HTTP ${followUpPreview?.status() ?? "unreachable"}, marker=${followUpPreviewBody.includes(followUpMarker)}`);
+      } else {
+        step("post_build_follow_up_mutation", false, "follow-up request did not complete successfully");
+        step("post_build_follow_up_preview", false, "follow-up request did not complete successfully");
+      }
+    } else {
+      step("post_build_follow_up_submitted", false, "composer was not usable after the drawer was closed and LiTT was reopened");
+      step("post_build_follow_up_mutation", false, "composer was not usable after the drawer was closed and LiTT was reopened");
+      step("post_build_follow_up_preview", false, "composer was not usable after the drawer was closed and LiTT was reopened");
+    }
+
+    // Verify the generated site from a real desktop viewport as well. This
+    // is deliberately a separate browser page so the mobile composer proof
+    // remains independent of responsive reflow.
+    if (verdict.liveDeploymentUrl) {
+      const desktopPage = await context.newPage();
+      await desktopPage.setViewportSize({ width: 1440, height: 900 });
+      const desktopResp = await desktopPage.goto(verdict.liveDeploymentUrl, { waitUntil: "domcontentloaded", timeout: 60_000 }).catch(() => null);
+      const desktopBody = await desktopPage.locator("body").innerText().catch(() => "");
+      step("desktop_generated_site", desktopResp?.status() === 200 && /ember roast/i.test(desktopBody),
+        `HTTP ${desktopResp?.status() ?? "unreachable"} body=${desktopBody.length}b`);
+      await desktopPage.close().catch(() => {});
+    } else {
+      step("desktop_generated_site", false, "no live deployment URL to verify");
+    }
 
   } catch (err) {
     step("fatal", false, err instanceof Error ? err.message : String(err));

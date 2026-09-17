@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { findToolCallMarkup, recoverTextToolCalls } from "./tool-call-markup";
+import { findToolCallMarkup, hasToolCallEnvelope, recoverTextToolCalls, stripEnvelopeMarkup } from "./tool-call-markup";
 
 /**
  * The agent loop executes native structured tool calls only — a model that
@@ -148,6 +148,45 @@ describe("findToolCallMarkup — prose that must not be flagged", () => {
   });
 });
 
+describe("hasToolCallEnvelope — intent-free envelopes are still tool attempts", () => {
+  // Production 2026-09-16: the model emitted
+  // `<dots_function_call>find ./src -type f</dots_function_call>` amid
+  // prose — no tool id, no arg structure, so findToolCallMarkup returns
+  // null. The execution lane must still treat it as a text-format tool
+  // attempt (fail over) rather than a final answer with zero tool calls.
+  it("detects an intent-free <dots_function_call> envelope", () => {
+    expect(hasToolCallEnvelope("<dots_function_call>find ./src -type f</dots_function_call>")).toBe(true);
+  });
+
+  it("detects an intent-free envelope surrounded by prose", () => {
+    expect(
+      hasToolCallEnvelope(
+        "I'll search the workspace now.\n<dots_function_call>find ./src -type f</dots_function_call>\nLet me check the results.",
+      ),
+    ).toBe(true);
+  });
+
+  it("detects a truncated envelope at end of text", () => {
+    expect(hasToolCallEnvelope("Creating the directory now:\n<dots_function_call>")).toBe(true);
+  });
+
+  it("detects intent-free <tool_call> envelopes too", () => {
+    expect(hasToolCallEnvelope("<tool_call>makeItPretty</tool_call>")).toBe(true);
+  });
+
+  it("ignores envelopes quoted inside inline code", () => {
+    expect(
+      hasToolCallEnvelope("Models sometimes emit `<dots_function_call>find ./src</dots_function_call>` instead of structured calls."),
+    ).toBe(false);
+  });
+
+  it("ignores ordinary prose and empty input", () => {
+    expect(hasToolCallEnvelope("The footer now reads Ember Roast.")).toBe(false);
+    expect(hasToolCallEnvelope("")).toBe(false);
+    expect(hasToolCallEnvelope("   ")).toBe(false);
+  });
+});
+
 describe("recoverTextToolCalls — canonical normalization", () => {
   it("recovers the production antml <tool_call> payload", () => {
     const r = recoverTextToolCalls(PRODUCTION_PAYLOAD, TOOLS);
@@ -275,5 +314,40 @@ describe("recoverTextToolCalls — canonical normalization", () => {
     );
     expect(r.calls).toHaveLength(1);
     expect(r.residualText).toBe("Before.\n\nAfter.");
+  });
+});
+
+
+describe("stripEnvelopeMarkup", () => {
+  it("removes closed dots_function_call envelopes", () => {
+    expect(
+      stripEnvelopeMarkup(
+        "Let me check.\n<dots_function_call>find ./src -type d</dots_function_call>\nDone.",
+      ),
+    ).toBe("Let me check.\n\nDone.");
+  });
+
+  it("removes closed invoke envelopes", () => {
+    expect(
+      stripEnvelopeMarkup("Working.\n<invoke>files.read path=a</invoke>\nAfter."),
+    ).toBe("Working.\n\nAfter.");
+  });
+
+  it("removes truncated envelopes at end of text", () => {
+    expect(stripEnvelopeMarkup("Creating it now:\n<dots_function_call>")).toBe(
+      "Creating it now:",
+    );
+  });
+
+  it("preserves markup quoted inside inline code", () => {
+    const text =
+      "Models sometimes emit `<dots_function_call>find ./src</dots_function_call>` instead.";
+    expect(stripEnvelopeMarkup(text)).toBe(text);
+  });
+
+  it("leaves plain prose untouched", () => {
+    expect(stripEnvelopeMarkup("The footer reads Ember Roast.")).toBe(
+      "The footer reads Ember Roast.",
+    );
   });
 });

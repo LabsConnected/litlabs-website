@@ -173,6 +173,30 @@ export function findToolCallMarkup(
   return null;
 }
 
+/**
+ * True when the text contains a recognizable tool-call envelope
+ * (<tool_call>, <invoke>, <dots_function_call>, …) — closed or truncated —
+ * that is not quoted inside inline code.
+ *
+ * Unlike findToolCallMarkup this does NOT require invocation intent: an
+ * envelope whose payload names no tool and carries no arg structure is
+ * still a text-format tool attempt. The execution lane uses this to fail
+ * over instead of accepting such a response as a final answer — otherwise
+ * the run silently completes with "nothing was executed".
+ */
+export function hasToolCallEnvelope(text: string): boolean {
+  if (!text || !text.trim()) return false;
+  for (const m of text.matchAll(new RegExp(ENVELOPE_RE.source, "gi"))) {
+    const idx = m.index ?? 0;
+    const whole = m[0];
+    // Skip markup quoted inside inline code — `like <tool_call>x</tool_call>`
+    // — those are examples, not invocations.
+    if (text[idx - 1] === "`" && text[idx + whole.length] === "`") continue;
+    return true;
+  }
+  return false;
+}
+
 // ─── Hygiene: strip non-executable markup from visible text ──────────
 //
 // Models that regress from native function calling emit tool calls as
@@ -207,6 +231,49 @@ function normalizeXmlToolCallTags(text: string): string {
 export function stripToolCallMarkupText(text: string): string {
   if (!text) return text;
   return stripToolCallBlocks(normalizeXmlToolCallTags(text)).trim();
+}
+
+/**
+ * Strip tool-call ENVELOPE markup — <tool_call>, <invoke>,
+ * <dots_function_call>, <function_call>, <function_calls>, closed or
+ * truncated — from text. stripToolCallMarkupText only covers <tool_call>
+ * plus fenced/JSON blocks; the other XML envelope tags pass straight
+ * through it.
+ *
+ * Markup quoted inside inline code (backticks) is prose, not protocol,
+ * and is preserved. Used to keep replayed assistant history (including
+ * across approval resumes) from re-priming the model to emit the
+ * envelope again instead of using structured calls.
+ */
+export function stripEnvelopeMarkup(text: string): string {
+  if (!text) return text;
+  // Inline `code` spans are prose examples, not protocol: shield them before
+  // any stripping pass. The envelope loop below only skips backtick-adjacent
+  // markup, and the trailing stripToolCallBlocks() has no backtick awareness
+  // at all — without shielding it would remove quoted examples too.
+  // Fenced ``` blocks are left in place: the hygiene pass handles those.
+  const codeSpans: string[] = [];
+  const shielded = text.replace(/```[\s\S]*?```|(`[^`\n]*`)/g, (m, code) => {
+    if (code === undefined) return m;
+    const idx = codeSpans.length;
+    codeSpans.push(code);
+    return `__LITT_CODE_${idx}__`;
+  });
+  const re = new RegExp(ENVELOPE_RE.source, "gi");
+  let out = "";
+  let last = 0;
+  for (const m of shielded.matchAll(re)) {
+    const idx = m.index ?? 0;
+    const whole = m[0];
+    // Backticks are shielded above; keep the adjacency guard for unbalanced
+    // backtick cases the shield regex leaves alone.
+    if (shielded[idx - 1] === "`" && shielded[idx + whole.length] === "`") continue;
+    out += shielded.slice(last, idx);
+    last = idx + whole.length;
+  }
+  out += shielded.slice(last);
+  const cleaned = stripToolCallBlocks(out).trim();
+  return cleaned.replace(/__LITT_CODE_(\d+)__/g, (_, n) => codeSpans[Number(n)] ?? "");
 }
 
 // ─── Canonical normalization boundary ─────────────────────────────

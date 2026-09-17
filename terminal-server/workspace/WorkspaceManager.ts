@@ -294,7 +294,13 @@ async function ensureGitRepository(root: string): Promise<{ branch: string; comm
       // Older git without -B on an unborn branch — fall back below.
     }
     await git.add(".");
-    await git.commit("Initial commit — LiTT managed project");
+    // Empty managed workspaces still need a stable Git identity/branch for
+    // checkpoints and revision routing before the first approved file write.
+    // Git refuses a normal commit with no user files, so allow an empty
+    // initial commit for the explicit empty-static template.
+    await git.commit("Initial commit — LiTT managed project", {
+      "--allow-empty": null,
+    });
   }
 
   const status = await git.status();
@@ -380,6 +386,11 @@ export async function prepareBlankWorkspace(input: {
 
 /** Write initial template files for blank projects. */
 function writeTemplateFiles(root: string, templateId: string): void {
+  if (templateId === "empty-static") {
+    // The agent must create the first application artifact through the normal
+    // approved tool gateway; do not seed a starter file here.
+    return;
+  }
   if (templateId === "blank-static") {
     writeFileSync(
       join(root, "index.html"),

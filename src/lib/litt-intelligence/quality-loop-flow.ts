@@ -72,10 +72,36 @@ export interface QualityLoopSession {
   /** True after a below-threshold critique — next mutations count as fixes. */
   critiqueFailed: boolean;
   /** Machine observations not yet filed into the stage machine. */
-  observations: Array<{
-    stage: QualityStage;
-    evidence: Omit<StageEvidence, "at"> & { at?: string };
-  }>;
+  observations: QualityLoopObservation[];
+}
+
+export interface QualityLoopObservation {
+  stage: QualityStage;
+  evidence: Omit<StageEvidence, "at"> & { at?: string };
+}
+
+/**
+ * JSON-safe quality state carried across an approval pause.  The quality
+ * ledger is deliberately persisted as data, rather than reconstructed from
+ * assistant prose after resume.
+ */
+export interface QualityLoopSnapshot {
+  state: QualityLoopState;
+  userRequest: string;
+  previewUrl?: string;
+  deployedUrl?: string;
+  inspectionRan: boolean;
+  inspectionNote?: string;
+  critiqueFailed: boolean;
+  observations: QualityLoopObservation[];
+}
+
+export function snapshotQualityLoopSession(session: QualityLoopSession): QualityLoopSnapshot {
+  return JSON.parse(JSON.stringify(session)) as QualityLoopSnapshot;
+}
+
+export function restoreQualityLoopSession(snapshot: QualityLoopSnapshot): QualityLoopSession {
+  return JSON.parse(JSON.stringify(snapshot)) as QualityLoopSession;
 }
 
 export function startQualityLoopSession(opts: {
@@ -83,7 +109,16 @@ export function startQualityLoopSession(opts: {
   projectId: string;
   userId: string;
   userRequest: string;
+  snapshot?: QualityLoopSnapshot;
 }): QualityLoopSession {
+  if (
+    opts.snapshot &&
+    opts.snapshot.state.projectId === opts.projectId &&
+    opts.snapshot.state.userId === opts.userId
+  ) {
+    return restoreQualityLoopSession(opts.snapshot);
+  }
+
   return {
     state: createQualityLoop({
       runId: opts.runId,
@@ -119,10 +154,23 @@ export function shouldEnableQualityLoop(
  * agent's word. This is what keeps the loop from ever auto-approving a
  * deploy — especially in AUTO mode, where no human is watching.
  */
-const MACHINE_EVIDENCE_STAGES: ReadonlySet<QualityStage> = new Set(["deploy", "verify"]);
+const MACHINE_EVIDENCE_STAGES: ReadonlySet<QualityStage> = new Set([
+  "build",
+  "run",
+  "test",
+  "deploy",
+  "verify",
+]);
 
-function hasMachineEvidence(state: QualityLoopState, stage: QualityStage): boolean {
-  return state.stages[stage].evidence.some((e) => e.by !== "agent");
+function hasMachineEvidence(
+  state: QualityLoopState,
+  stage: QualityStage,
+  predicate?: (detail: Record<string, unknown> | undefined) => boolean,
+): boolean {
+  return state.stages[stage].evidence.some((e) => {
+    if (e.by === "agent") return false;
+    return predicate ? predicate(e.detail) : true;
+  });
 }
 
 /**
@@ -134,7 +182,16 @@ function stagePassable(state: QualityLoopState, stage: QualityStage): boolean {
   const s = state.stages[stage];
   if (s.evidence.length === 0) return false;
   if (blockedReason(state, stage)) return false;
-  if (MACHINE_EVIDENCE_STAGES.has(stage) && !hasMachineEvidence(state, stage)) return false;
+  if (MACHINE_EVIDENCE_STAGES.has(stage)) {
+    const predicates: Partial<Record<QualityStage, (detail: Record<string, unknown> | undefined) => boolean>> = {
+      build: (detail) => detail?.artifactVerified === true,
+      run: (detail) => detail?.reachable === true,
+      test: (detail) => detail?.executedChecks === true && detail?.passed === true,
+      deploy: (detail) => detail?.deploymentVerified === true,
+      verify: (detail) => detail?.passed === true && detail?.httpStatus === 200,
+    };
+    if (!hasMachineEvidence(state, stage, predicates[stage])) return false;
+  }
   return true;
 }
 
@@ -196,6 +253,39 @@ function fileObservation(
 ): void {
   session.observations.push({ stage, evidence });
   reconcile(session);
+}
+
+/** Record a build only after the workspace has been inspected for an actual
+ * runnable entry artifact. Tool success alone is intentionally insufficient. */
+export function noteBuildArtifacts(session: QualityLoopSession, files: string[]): void {
+  try {
+    if (files.length === 0) return;
+    fileObservation(session, "build", {
+      summary: `Runnable build artifact verified in the workspace (${files.length} files found).`,
+      artifacts: files.slice(0, 100),
+      by: "system",
+      detail: { artifactVerified: true },
+    });
+  } catch {
+    // Evidence recording must never break the run.
+  }
+}
+
+/** Record preview evidence only after the runtime reports ready and the
+ * caller has confirmed it is reachable. */
+export function notePreviewReady(session: QualityLoopSession, previewUrl: string): void {
+  try {
+    if (!previewUrl.trim()) return;
+    session.previewUrl = previewUrl;
+    fileObservation(session, "run", {
+      summary: `Preview server reached ready status: ${previewUrl}`,
+      artifacts: [previewUrl],
+      by: "system",
+      detail: { reachable: true },
+    });
+  } catch {
+    // Evidence recording must never break the run.
+  }
 }
 
 /**
@@ -349,12 +439,7 @@ export function noteToolResult(
         (toolId === "preview.start" && payload?.success !== false));
     if (previewReady) {
       const url = buildPreviewProxyUrl(workspaceId);
-      if (!session.previewUrl) session.previewUrl = url;
-      fileObservation(session, "run", {
-        summary: `Preview server reached ready status: ${url}`,
-        artifacts: [url],
-        by: "system",
-      });
+      notePreviewReady(session, url);
     }
   } catch {
     // Evidence recording must never break the run.
@@ -369,17 +454,25 @@ export function noteBuildFix(
   try {
     const checks = result.results ?? [];
     const failed = checks.filter((c) => !c.passed).map((c) => c.check);
+    const executedChecks = checks.length > 0;
+    const passed = result.allPassed && executedChecks && failed.length === 0;
     fileObservation(session, "test", {
-      summary: result.allPassed
+      summary: passed
         ? `Build/typecheck/test checks all passed (${checks.length} checks).`
         : `Build-fix loop finished with failing checks after repair attempts.`,
       artifacts: checks.map((c) => `${c.check}:${c.passed ? "pass" : "fail"}`),
       by: "system" as EvidenceSource,
       // Failing checks must NOT satisfy the TEST gate — same convention
       // as verifyLiveUrl: detail.passed === false blocks the finalize sweep.
-      detail: result.allPassed
-        ? { passed: true }
-        : { passed: false, reason: `Failing checks: ${failed.join(", ") || "unknown"}` },
+      detail: passed
+        ? { passed: true, executedChecks: true }
+        : {
+            passed: false,
+            executedChecks,
+            reason: failed.length > 0
+              ? `Failing checks: ${failed.join(", ")}`
+              : "No checks were executed",
+          },
     });
   } catch {
     // Never break the run.
@@ -394,6 +487,7 @@ export function noteDeployment(session: QualityLoopSession, publicUrl: string): 
       summary: `Deployment completed with live public URL: ${publicUrl}`,
       artifacts: [publicUrl],
       by: "system",
+      detail: { deploymentVerified: true },
     });
   } catch {
     // Never break the run.
@@ -411,12 +505,14 @@ export async function verifyLiveUrl(
 ): Promise<void> {
   try {
     const result = await verifyProductionUrl(publicUrl, { timeoutMs: 30_000 });
-    if (result.success) {
+    const statusMatch = result.detail.match(/\bHTTP\s+(\d{3})\b|\b(\d{3})\b/i);
+    const httpStatus = Number(statusMatch?.[1] ?? statusMatch?.[2]);
+    if (result.success && httpStatus === 200) {
       fileObservation(session, "verify", {
         summary: `Live URL verified serving expected content: ${result.detail.slice(0, 200)}`,
         artifacts: [publicUrl],
         by: "system",
-        detail: { detail: result.detail },
+        detail: { passed: true, httpStatus, detail: result.detail },
       });
     } else {
       fileObservation(session, "verify", {

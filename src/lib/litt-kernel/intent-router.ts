@@ -68,6 +68,10 @@ const MODE_PATTERNS: ModePattern[] = [
       /\b(add|implement|support)\b.*\b(dark mode|feature|endpoint|route|page)\b/i,
       /\b(fix|debug|resolve|patch)\b.*\b(bug|error|issue|crash|fail)\b/i,
       /\b(edit|update|change|modify|rename|delete)\b.*\b(file|readme|config|code|component)\b/i,
+      // Existing product edits often describe the user-facing target rather
+      // than naming a source file. They still require the executable V2 lane;
+      // routing them to text-only chat silently drops the requested mutation.
+      /\b(edit|update|change|modify|rename|replace|delete)\b.*\b(site|website|web ?app|homepage|landing page|footer|header|nav|menu|section)\b/i,
       /\b(run|execute)\b.*\b(tests?|builds?|lint|commands?|scripts?)\b/i,
     ],
     requiresProject: true,

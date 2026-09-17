@@ -24,6 +24,12 @@ import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import type { BuildFixLoopResult } from "./build-fix-loop";
 import { ProgressEmitter } from "./progress-events";
 import { buildPreviewProxyUrl } from "@/lib/terminal-internal-client";
+import {
+  noteBuildArtifacts,
+  notePreviewReady,
+  restoreQualityLoopSession,
+  snapshotQualityLoopSession,
+} from "./quality-loop-flow";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -44,6 +50,13 @@ export interface LaunchFlowOptions {
   requiresExecution?: boolean;
   enableBuildFix?: boolean;
   enableDeploy?: boolean;
+  /**
+   * Require a real website entry artifact before this flow can report a
+   * successful build. Production chat enables this for execution requests;
+   * keeping it opt-in preserves the lower-level orchestration tests and
+   * non-website callers.
+   */
+  requireProjectArtifacts?: boolean;
   /**
    * Quality-loop opt-in, passed through to the main agent-loop phase.
    * When set, the build is gated by the UNDERSTAND→VERIFY evidence stages
@@ -154,6 +167,127 @@ async function startAndWaitForPreview(
   }
 
   return "timeout";
+}
+
+export interface ProjectArtifactCheck {
+  ok: boolean;
+  files: string[];
+  error?: string;
+}
+
+const WEBSITE_ENTRY_FILES = new Set([
+  "index.html",
+  "index.htm",
+  "app/page.tsx",
+  "app/page.ts",
+  "app/page.jsx",
+  "app/page.js",
+  "pages/index.tsx",
+  "pages/index.ts",
+  "pages/index.jsx",
+  "pages/index.js",
+  "src/main.tsx",
+  "src/main.ts",
+  "src/main.jsx",
+  "src/main.js",
+]);
+
+/**
+ * Verify that a website build produced a real entry artifact in the bound
+ * workspace. This deliberately asks the workspace transport rather than
+ * trusting tool-call metadata or the model's final prose.
+ */
+export async function verifyProjectArtifacts(
+  transport: Pick<WorkspaceTransport, "listFiles">,
+): Promise<ProjectArtifactCheck> {
+  const files: string[] = [];
+  const queue: Array<{ path: string; depth: number }> = [{ path: ".", depth: 0 }];
+  const visited = new Set<string>();
+
+  try {
+    while (queue.length > 0 && files.length < 500) {
+      const current = queue.shift()!;
+      if (visited.has(current.path)) continue;
+      visited.add(current.path);
+
+      const { entries } = await transport.listFiles(current.path);
+      for (const entry of entries) {
+        const name = String(entry.name || "").replace(/\\/g, "/");
+        if (!name || name === "." || name === ".." || name.includes("/")) continue;
+        const relative = current.path === "." ? name : `${current.path}/${name}`;
+        if (entry.type === "folder" || entry.type === "directory") {
+          if (current.depth < 4 && !name.startsWith(".")) {
+            queue.push({ path: relative, depth: current.depth + 1 });
+          }
+        } else {
+          files.push(relative);
+        }
+      }
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      files,
+      error: error instanceof Error ? error.message : "Could not inspect project artifacts",
+    };
+  }
+
+  const normalized = new Set(files.map((file) => file.toLowerCase()));
+  const hasEntry = [...WEBSITE_ENTRY_FILES].some((file) => normalized.has(file));
+  if (!hasEntry) {
+    return {
+      ok: false,
+      files,
+      error: "No runnable website entry file was created in the project workspace.",
+    };
+  }
+
+  return { ok: true, files };
+}
+
+/**
+ * After an approved mutation, prove the artifact is on disk and bring up a
+ * real preview. Used by approval-resume handling so the resumed path has the
+ * same physical-artifact gate as the initial launch path.
+ */
+export async function ensureProjectPreviewReady(
+  transport: WorkspaceTransport,
+  options: { maxWaitMs?: number; pollIntervalMs?: number } = {},
+  progress: ProgressEmitter = new ProgressEmitter(),
+): Promise<{ ok: boolean; files: string[]; error?: string }> {
+  let artifacts: ProjectArtifactCheck = { ok: false, files: [] };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    artifacts = await verifyProjectArtifacts(transport);
+    if (artifacts.ok) break;
+    if (attempt < 2) await sleep(250);
+  }
+  if (!artifacts.ok) return artifacts;
+
+  try {
+    const status = await startAndWaitForPreview(
+      transport,
+      {
+        maxWaitMs: options.maxWaitMs ?? 120_000,
+        pollIntervalMs: options.pollIntervalMs ?? 1_000,
+      },
+      progress,
+    );
+    if (status !== "ready") {
+      const runtime = await transport.getPreviewStatus().catch(() => null);
+      return {
+        ok: false,
+        files: artifacts.files,
+        error: runtime?.error ?? `Preview did not become ready (status: ${status})`,
+      };
+    }
+    return { ok: true, files: artifacts.files };
+  } catch (error) {
+    return {
+      ok: false,
+      files: artifacts.files,
+      error: error instanceof Error ? error.message : "Preview startup failed",
+    };
+  }
 }
 
 // ─── Main Orchestrator ────────────────────────────────────────────
@@ -374,6 +508,27 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
 
     // Phase 2: start and verify the live preview
     checkSignal(signal);
+    if ((options.requireProjectArtifacts || options.qualityLoop?.enabled) && !pausedApproval) {
+      const artifacts = await verifyProjectArtifacts(transport);
+      if (!artifacts.ok) {
+        return baseResult({
+          status: "failed",
+          finalText: `The build did not produce a runnable project. ${artifacts.error ?? "Required project files are missing."}`,
+          error: "PROJECT_ARTIFACTS_MISSING",
+          repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
+          runtimeRepairAttempts,
+        });
+      }
+      if (agentResult.qualityLoopState) {
+        const qualitySession = restoreQualityLoopSession(agentResult.qualityLoopState);
+        noteBuildArtifacts(qualitySession, artifacts.files);
+        agentResult = {
+          ...agentResult,
+          qualityLoopState: snapshotQualityLoopSession(qualitySession),
+        };
+        lastAgentLoopResult = agentResult;
+      }
+    }
     emitStep(progress, steps, "Starting live preview...");
     progress.emit({ type: "phase", phase: "preview", step: agentResult.stepsUsed + 1 });
     progress.emit({ type: "preview_start" });
@@ -511,6 +666,16 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
     const previewUrl = (options.buildPreviewUrl ?? buildPreviewProxyUrl)(transport.workspaceId);
     progress.emit({ type: "preview_result", success: true, previewUrl });
 
+    if (agentResult.qualityLoopState) {
+      const qualitySession = restoreQualityLoopSession(agentResult.qualityLoopState);
+      notePreviewReady(qualitySession, previewUrl);
+      agentResult = {
+        ...agentResult,
+        qualityLoopState: snapshotQualityLoopSession(qualitySession),
+      };
+      lastAgentLoopResult = agentResult;
+    }
+
     // Phase 1 paused for approval — preview is live; return the pause now.
     if (pausedApproval) {
       return baseResult({
@@ -561,6 +726,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
       // Resume context: the original request, so the resumed loop's model
       // continuation knows what it was doing when it reports the live URL.
       pausedMessages: [{ role: "user", content: options.userMessage }],
+      qualityLoopState: agentResult.qualityLoopState,
     };
     // The messages route persists the paused run off agentLoopResult —
     // the synthesized pause must be visible there or the approval card

@@ -30,6 +30,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useClerkAuth, useAppUser } from "@/hooks/useClerkAuth";
 import { useLittHealth } from "@/hooks/useLittHealth";
+import { planDisplayLabel } from "@/lib/plan-label";
 import {
   getVisibleMainNav,
   getVisibleMoreNav,
@@ -110,8 +111,11 @@ function IdentityDock() {
 
   const displayName = user.firstName || user.fullName || user.username || "User";
   const email = user.primaryEmailAddress?.emailAddress ?? "";
-  const role = plan === "owner" ? "Owner" : plan === "pro" ? "Pro" : "Free";
-  const roleColor = role === "Owner" ? T.accentColor : role === "Pro" ? "#a78bfa" : T.textMuted;
+  // Every real plan ID gets its own honest label — a paying plan must
+  // never render as "Free" (the API returns e.g. "pro_builder_beta").
+  const role = planDisplayLabel(plan);
+  const roleColor =
+    role === "Owner" ? T.accentColor : role === "Free" ? T.textMuted : "#a78bfa";
   const avatarUrl = user.imageUrl;
 
   const menuItems = [
@@ -412,7 +416,11 @@ function TopBar() {
 
   return (
     <header
-      className="sticky top-0 z-40 shrink-0"
+      // Studio owns a viewport-locked, overflow-hidden layout. A sticky
+      // top bar inside that scroll context can retain a clipped offset after
+      // navigation/refresh, hiding the top of the global nav. Keep it in the
+      // normal flex flow there; other app routes still benefit from stickiness.
+      className={`${isStudio ? "relative" : "sticky top-0"} z-40 shrink-0`}
       style={{
         background: `${T.bgColor}e6`,
         backdropFilter: "blur(14px)",

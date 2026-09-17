@@ -317,11 +317,10 @@ async function postHandler(req: NextRequest) {
     }
 
     if (!isSupabaseConfigured()) {
-      return NextResponse.json({
-        success: true,
-        id: `mock_${Date.now()}`,
-        mock: true,
-      });
+      return NextResponse.json(
+      { error: "Gallery uploads are unavailable — storage isn’t connected yet." },
+      { status: 503 },
+    );
     }
 
     const { data: user } = await supabaseAdmin
@@ -380,7 +379,10 @@ async function deleteHandler(req: NextRequest) {
     }
 
     if (!isSupabaseConfigured()) {
-      return NextResponse.json({ success: true, mock: true });
+      return NextResponse.json(
+      { error: "Gallery changes are unavailable — storage isn’t connected yet." },
+      { status: 503 },
+    );
     }
 
     const { data: user } = await supabaseAdmin
@@ -433,7 +435,10 @@ async function patchHandler(req: NextRequest) {
     const { isPublic, caption, category } = body;
 
     if (!isSupabaseConfigured()) {
-      return NextResponse.json({ success: true, mock: true });
+      return NextResponse.json(
+      { error: "Gallery changes are unavailable — storage isn’t connected yet." },
+      { status: 503 },
+    );
     }
 
     const { data: user } = await supabaseAdmin

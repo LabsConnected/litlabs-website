@@ -27,7 +27,7 @@
 import "server-only";
 
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
-import { findToolCallMarkup, recoverTextToolCalls, stripToolCallMarkupText } from "./tool-call-markup";
+import { findToolCallMarkup, hasToolCallEnvelope, recoverTextToolCalls, stripEnvelopeMarkup, stripToolCallMarkupText } from "./tool-call-markup";
 import { validateToolCallArgs } from "@litt/agent-core";
 import { SITE_URL } from "@/lib/siteConfig";
 import { logLLMCall, type LLMCallMetadata } from "@/lib/evals/braintrust";
@@ -70,6 +70,20 @@ export interface ToolCallResult {
   error?: string;
 }
 
+/** Safe provider response-shape evidence. Values and file contents are never recorded. */
+export interface ProviderResponseShape {
+  contentType: string;
+  contentLength: number;
+  messageKeys: string[];
+  toolCalls: Array<{
+    name: string;
+    idPresent: boolean;
+    argumentsJsonValid: boolean;
+    argumentKeys: string[];
+    argumentLength: number;
+  }>;
+}
+
 export interface LLMToolCallResponse {
   text: string;
   toolCalls: ToolCallRequest[];
@@ -77,6 +91,8 @@ export interface LLMToolCallResponse {
   model: string;
   /** Provider that produced this response (e.g. "gemini", "openrouter"). */
   provider?: string;
+  /** Redacted shape evidence for diagnosing provider/tool protocol failures. */
+  responseShape?: ProviderResponseShape;
   /** Raw Gemini parts preserved for subsequent conversation rounds (thought signatures, ids). */
   rawParts?: GeminiPart[];
 }
@@ -549,6 +565,21 @@ function toGeminiResponse(
     model,
     provider: "gemini",
     rawParts: parts,
+    responseShape: {
+      contentType: "gemini_parts",
+      contentLength: text.length,
+      messageKeys: ["candidates", "content", "parts"],
+      toolCalls: functionCallParts.map((p) => {
+        const fc = p.functionCall!;
+        return {
+          name: fc.name,
+          idPresent: typeof fc.id === "string" && fc.id.length > 0,
+          argumentsJsonValid: true,
+          argumentKeys: Object.keys(fc.args ?? {}),
+          argumentLength: JSON.stringify(fc.args ?? {}).length,
+        };
+      }),
+    },
   };
 }
 
@@ -701,7 +732,27 @@ function normalizeTextToolCalls<T extends { text: string; toolCalls: ToolCallReq
 ): T {
   const knownIds = new Set(toolIdMap.values());
   const hit = findToolCallMarkup(parsed.text, knownIds);
-  if (!hit) return parsed;
+  if (!hit) {
+    // A response that carries tool-call envelope markup but no detectable
+    // invocation is still a text-format tool attempt — the model reached
+    // for the tool protocol instead of the structured channel (e.g.
+    // `<dots_function_call>find ./src</dots_function_call>` amid prose).
+    // Accepting it as a final answer silently drops the request: the run
+    // completes with zero tool calls ("nothing was executed") and the
+    // launch flow burns its one reprompt on the same dead end. Fail over
+    // to a sibling model instead; when every route does this the run fails
+    // truthfully via AllRoutesFailedError. Responses that already carry
+    // native structured calls are unaffected — the envelope is stripped
+    // from the text by the hygiene pass below.
+    if (parsed.toolCalls.length === 0 && hasToolCallEnvelope(parsed.text)) {
+      throw new ProviderAttemptError(provider, model, {
+        class: "tool_call_parse_failed",
+        scope: "model",
+        message: "model emitted tool-call envelope markup with no parseable invocation",
+      });
+    }
+    return parsed;
+  }
 
   const recovery = recoverTextToolCalls(parsed.text, knownIds);
 
@@ -887,23 +938,55 @@ function parseOpenAiCompatibleResponse(
   }
 
   const message = choice.message as Record<string, unknown> | undefined;
-  const text: string = (message?.content as string) ?? "";
+  const rawContent = message?.content;
+  const text: string = typeof rawContent === "string" ? rawContent : "";
   const rawToolCalls = (message?.tool_calls as Array<{
-    id: string;
-    function: { name: string; arguments: string };
+    id?: string;
+    function?: { name?: string; arguments?: string };
   }>) ?? [];
   const finishReason: string = (choice.finish_reason as string) ?? "stop";
 
+  const responseShape: ProviderResponseShape = {
+    contentType: Array.isArray(rawContent) ? "array" : typeof rawContent,
+    contentLength: text.length,
+    messageKeys: message ? Object.keys(message).sort() : [],
+    toolCalls: rawToolCalls.map((raw) => {
+      const rawArguments = raw?.function?.arguments;
+      let parsedArguments: unknown = null;
+      let argumentsJsonValid = false;
+      if (typeof rawArguments === "string") {
+        try {
+          parsedArguments = JSON.parse(rawArguments);
+          argumentsJsonValid = !!parsedArguments && typeof parsedArguments === "object" && !Array.isArray(parsedArguments);
+        } catch {
+          // The parser below keeps the call non-executable via schema validation.
+        }
+      }
+      return {
+        name: typeof raw?.function?.name === "string" ? raw.function.name : "",
+        idPresent: typeof raw?.id === "string" && raw.id.length > 0,
+        argumentsJsonValid,
+        argumentKeys: argumentsJsonValid ? Object.keys(parsedArguments as Record<string, unknown>) : [],
+        argumentLength: typeof rawArguments === "string" ? rawArguments.length : 0,
+      };
+    }),
+  };
+
   const toolCalls: ToolCallRequest[] = rawToolCalls.map((raw) => {
+    const rawName = typeof raw?.function?.name === "string" ? raw.function.name : "";
+    const rawArguments = typeof raw?.function?.arguments === "string" ? raw.function.arguments : "";
     let inputs: Record<string, unknown> = {};
     try {
-      inputs = JSON.parse(raw.function.arguments);
+      const parsed = JSON.parse(rawArguments);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        inputs = parsed as Record<string, unknown>;
+      }
     } catch {
       inputs = {};
     }
     return {
-      toolCallId: raw.id,
-      toolId: toolIdMap.get(raw.function.name) ?? toToolDefinitionId(raw.function.name),
+      toolCallId: raw.id ?? `native-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      toolId: toolIdMap.get(rawName) ?? toToolDefinitionId(rawName),
       inputs,
     };
   });
@@ -926,6 +1009,7 @@ function parseOpenAiCompatibleResponse(
     ...normalized,
     model: (data.model as string) ?? model,
     provider: route.provider,
+    responseShape,
   };
 }
 
@@ -1319,6 +1403,11 @@ export async function callLLMWithTools(
           model: result.model,
           latencyMs,
           toolCalls: result.toolCalls.length,
+          responseContentType: result.responseShape?.contentType,
+          responseMessageKeys: result.responseShape?.messageKeys.join(","),
+          responseToolCalls: result.responseShape?.toolCalls.map((call) =>
+            `${call.name || "<missing>"}:${call.argumentsJsonValid ? "valid" : "invalid"}`,
+          ).join(","),
           remainingBudgetMs: options?.deadlineMs
             ? Math.max(0, options.deadlineMs - Date.now())
             : undefined,
@@ -1456,7 +1545,18 @@ export function buildAssistantToolCallMessage(
   return {
     role: "assistant",
     content: text,
-    parts: rawParts,
+    // The raw provider parts are replayed into future turns (including
+    // across an approval resume via pausedMessages). If the model emitted
+    // tool-call envelope markup (<tool_call>, <dots_function_call>, …),
+    // replaying it verbatim primes the model to emit the envelope again
+    // instead of using structured calls. Strip the markup from text parts
+    // so history carries the cleaned content; native functionCall parts
+    // pass through untouched.
+    parts: rawParts?.map((p) =>
+      typeof p.text === "string" && hasToolCallEnvelope(p.text)
+        ? { ...p, text: stripEnvelopeMarkup(p.text) }
+        : p,
+    ),
     tool_calls: toolCalls.map((tc) => ({
       id: tc.toolCallId,
       type: "function" as const,

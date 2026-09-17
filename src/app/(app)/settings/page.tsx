@@ -12,7 +12,7 @@ const clerkConfigured = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 import {
   LayoutGrid, User, Palette, Sparkles, Briefcase,
   Cpu, Bot, Mic, Plug, Zap, Bell, Coins, Shield, Gauge, Terminal,
-  Search, ChevronRight, Check, Loader2,
+  Search, ChevronRight, Check, Loader2, X,
   RotateCcw, ArrowLeft, Camera, Volume2,
   Monitor, Moon, Sun,
 } from "lucide-react";
@@ -64,6 +64,8 @@ export default function SettingsPage() {
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [mobileSection, setMobileSection] = useState<string | null>(null);
+  const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const searchParams = useSearchParams();
   const returnTo = searchParams.get("returnTo") || "/studio";
 
@@ -120,14 +122,17 @@ export default function SettingsPage() {
   const handleSectionClick = useCallback((sectionId: string) => {
     setActiveSection(sectionId);
     setMobileSection(sectionId);
+    setMobileSettingsOpen(false);
   }, [setActiveSection]);
 
-  /* ── Mobile: section list → active section ──────────────────── */
-  const isMobileSectionActive = mobileSection !== null;
+  const handleMobileBack = useCallback(() => {
+    setMobileSection(null);
+    setActiveSection("overview");
+  }, [setActiveSection]);
 
   return (
     <div
-      className="min-h-screen"
+      className="min-h-screen overflow-x-clip"
       style={{ color: T.textColor }}
     >
       {/* Light veil for text contrast — lets the wallpaper show through */}
@@ -150,46 +155,40 @@ export default function SettingsPage() {
           onSearchChange={setSearchQuery}
           T={T}
           returnTo={returnTo}
+          mobileSettingsOpen={mobileSettingsOpen}
+          onOpenMobileSettings={() => setMobileSettingsOpen(true)}
+          mobileSearchOpen={mobileSearchOpen}
+          onToggleMobileSearch={() => setMobileSearchOpen((open) => !open)}
         />
       </div>
 
       {/* ── Content — full width below the tab strip ───────────────────── */}
-      <div className="relative mx-auto w-full max-w-375">
-        {/* Mobile: section list or active section */}
-        {isMobileSectionActive ? (
-          <div className="min-w-0 px-4 py-4 pb-24 lg:hidden">
+      <div className="relative mx-auto w-full max-w-375 overflow-x-clip">
+        {/* Mobile: one active category at a time. Category discovery lives in
+            the All settings sheet, so content starts immediately below the
+            compact toolbar instead of below a second navigation list. */}
+        <div className="min-w-0 px-3 py-4 pb-[calc(8rem+env(safe-area-inset-bottom))] sm:px-4 lg:hidden" data-testid="mobile-settings-content">
+          {mobileSection && (
             <button
               type="button"
-              onClick={() => setMobileSection(null)}
-              className="mb-3 flex items-center gap-2 text-xs font-bold text-white/50 transition-colors hover:text-white/80"
-              aria-label="Back to settings list"
+              onClick={() => { handleMobileBack(); setMobileSettingsOpen(true); }}
+              className="mb-3 inline-flex min-h-9 items-center gap-2 rounded-lg px-1 text-xs font-bold text-white/65 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
+              aria-label="Back to all settings"
             >
               <ArrowLeft size={14} className="pointer-events-none" />
               All settings
             </button>
-            {activeSectionMeta && (
-              <>
-                <SectionHeader
-                  title={activeSectionMeta.label}
-                  description={activeSectionMeta.description}
-                />
-                <SettingsContent section={activeSectionMeta.id} T={T} controlMode={controlMode} />
-              </>
-            )}
-          </div>
-        ) : (
-          <div className="min-w-0 px-4 py-4 pb-24 lg:hidden">
-            <MobileSectionList
-              sections={filteredSections}
-              allSections={SETTINGS_SECTIONS}
-              controlMode={controlMode}
-              onSectionClick={handleSectionClick}
-              onModeChange={setControlMode}
-              searchQuery={searchQuery}
-              T={T}
-            />
-          </div>
-        )}
+          )}
+          {activeSectionMeta && (
+            <>
+              <SectionHeader
+                title={activeSectionMeta.label}
+                description={activeSectionMeta.description}
+              />
+              <SettingsContent section={activeSectionMeta.id} T={T} controlMode={controlMode} />
+            </>
+          )}
+        </div>
 
         {/* Desktop: active section content */}
         <div className="hidden min-w-0 px-6 py-8 pb-24 pr-16 lg:block lg:px-8 xl:px-10 xl:pr-20">
@@ -212,6 +211,19 @@ export default function SettingsPage() {
         onDiscard={handleDiscard}
         hasChanges={hasUnsavedChanges}
       />
+
+      {mobileSettingsOpen && (
+        <MobileSettingsSheet
+          sections={filteredSections}
+          allSections={SETTINGS_SECTIONS}
+          controlMode={controlMode}
+          activeSection={activeSection}
+          searchQuery={searchQuery}
+          onSectionClick={handleSectionClick}
+          onModeChange={setControlMode}
+          onClose={() => setMobileSettingsOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -236,6 +248,10 @@ function SettingsTabStrip({
   onSearchChange,
   T,
   returnTo,
+  mobileSettingsOpen,
+  onOpenMobileSettings,
+  mobileSearchOpen,
+  onToggleMobileSearch,
 }: {
   sections: SettingsSection[];
   allSections: SettingsSection[];
@@ -247,6 +263,10 @@ function SettingsTabStrip({
   onSearchChange: (q: string) => void;
   T: ReturnType<typeof useTheme>["resolvedColors"];
   returnTo: string;
+  mobileSettingsOpen: boolean;
+  onOpenMobileSettings: () => void;
+  mobileSearchOpen: boolean;
+  onToggleMobileSearch: () => void;
 }) {
   const modeIdx = MODE_ORDER.indexOf(controlMode);
   const hasSearch = searchQuery.trim().length > 0;
@@ -261,8 +281,10 @@ function SettingsTabStrip({
         backdropFilter: "blur(20px)",
       }}
     >
-      {/* Row 1: back + title + search + mode */}
-      <div className="flex items-center gap-2 px-3 pt-2.5 md:gap-3 md:px-4">
+      {/* Desktop and mobile share this toolbar, while category discovery is
+          intentionally different: desktop keeps its established strip and
+          mobile uses the compact selector below. */}
+      <div className="flex items-center gap-2 px-3 py-2.5 md:gap-3 md:px-4">
         <Link
           href={returnTo}
           className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border transition-colors hover:bg-white/5"
@@ -274,7 +296,7 @@ function SettingsTabStrip({
         <span className="shrink-0 text-sm font-black" style={{ color: "rgba(255,255,255,0.9)" }}>
           Settings
         </span>
-        <div className="relative min-w-0 flex-1 md:max-w-64">
+        <div className="relative hidden min-w-0 flex-1 md:block md:max-w-64">
           <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/30" />
           <input
             value={searchQuery}
@@ -287,19 +309,69 @@ function SettingsTabStrip({
               color: "rgba(255,255,255,0.88)",
             }}
             aria-label="Search settings"
+            data-testid="desktop-settings-search"
           />
         </div>
-        <ModeSelector
-          controlMode={controlMode}
-          onModeChange={onModeChange}
-          T={T}
-        />
+        <button
+          type="button"
+          onClick={onToggleMobileSearch}
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-white/10 text-white/70 transition hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70 md:hidden"
+          aria-label={mobileSearchOpen ? "Close settings search" : "Search settings"}
+          aria-expanded={mobileSearchOpen}
+        >
+          <Search size={15} className="pointer-events-none" />
+        </button>
+        <div className="relative ml-auto shrink-0 md:ml-0">
+          <ModeSelector
+            controlMode={controlMode}
+            onModeChange={onModeChange}
+            T={T}
+          />
+        </div>
       </div>
 
-      {/* Row 2: horizontally scrollable section tabs */}
+      <div className="px-3 pb-2.5 md:hidden">
+        <button
+          type="button"
+          onClick={onOpenMobileSettings}
+          className="flex min-h-11 w-full items-center gap-3 rounded-xl border border-cyan-300/20 bg-cyan-300/[0.07] px-3 text-left transition hover:bg-cyan-300/[0.12] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
+          aria-label="Open all settings"
+          aria-expanded={mobileSettingsOpen}
+          data-testid="mobile-settings-selector"
+        >
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-cyan-300/10 text-cyan-200">
+            <LayoutGrid size={15} className="pointer-events-none" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[10px] font-black uppercase tracking-[0.16em] text-cyan-200/75">All settings</span>
+            <span className="block truncate text-sm font-bold text-white">{SETTINGS_SECTIONS.find((s) => s.id === activeSection)?.label ?? "Overview"}</span>
+          </span>
+          <ChevronRight size={16} className="shrink-0 text-cyan-200/80" />
+        </button>
+      </div>
+
+      {mobileSearchOpen && (
+        <div className="px-3 pb-2.5 md:hidden">
+          <div className="relative">
+            <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/55" />
+            <input
+              value={searchQuery}
+              onChange={(e) => onSearchChange(e.target.value)}
+              placeholder="Search settings…"
+              className="min-h-10 w-full rounded-xl border border-white/12 bg-black/40 py-2 pl-9 pr-3 text-sm text-white outline-none transition focus:border-cyan-300/60 focus:ring-2 focus:ring-cyan-300/20"
+              aria-label="Search settings"
+              data-testid="mobile-settings-search"
+              autoFocus
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Desktop category tabs. Mobile uses the full-screen selector sheet. */}
       <nav
-        className="flex items-center gap-1 overflow-x-auto px-3 py-2.5 md:px-4"
+        className="hidden items-center gap-1 overflow-x-auto px-3 py-2.5 md:px-4 lg:flex"
         aria-label="Settings sections"
+        data-testid="desktop-settings-sections"
         style={{ scrollbarWidth: "none" }}
       >
         {displaySections.map((section) => {
@@ -347,6 +419,93 @@ function SettingsTabStrip({
           );
         })}
       </nav>
+    </div>
+  );
+}
+
+function MobileSettingsSheet({
+  sections,
+  allSections,
+  controlMode,
+  activeSection,
+  searchQuery,
+  onSectionClick,
+  onModeChange,
+  onClose,
+}: {
+  sections: SettingsSection[];
+  allSections: SettingsSection[];
+  controlMode: ControlMode;
+  activeSection: string;
+  searchQuery: string;
+  onSectionClick: (id: string) => void;
+  onModeChange: (mode: ControlMode) => void;
+  onClose: () => void;
+}) {
+  const modeIdx = MODE_ORDER.indexOf(controlMode);
+  const hasSearch = searchQuery.trim().length > 0;
+  const displaySections = hasSearch ? sections : allSections;
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-[100] lg:hidden" role="dialog" aria-modal="true" aria-label="All settings">
+      <button type="button" className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} aria-label="Close all settings" />
+      <section className="absolute inset-0 flex flex-col overflow-hidden border border-white/10 bg-[#090b12] pb-[env(safe-area-inset-bottom)] shadow-2xl">
+        <header className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-white/10 text-white/75 transition hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
+            aria-label="Close all settings"
+          >
+            <X size={17} className="pointer-events-none" />
+          </button>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-base font-black text-white">All settings</h2>
+            <p className="text-xs text-white/60">Choose a category</p>
+          </div>
+          <span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-bold text-white/60">{MODE_META[controlMode].label}</span>
+        </header>
+        <nav className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-3 py-4" aria-label="Settings sections">
+          {displaySections.map((section) => {
+            const Icon = ICONS[section.icon] ?? LayoutGrid;
+            const isActive = activeSection === section.id;
+            const isLocked = MODE_ORDER.indexOf(section.minMode) > modeIdx;
+            const lockedMode = MODE_META[section.minMode];
+            return (
+              <button
+                key={section.id}
+                type="button"
+                onClick={() => isLocked ? onModeChange(section.minMode) : onSectionClick(section.id)}
+                className="flex min-h-14 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
+                style={{
+                  borderColor: isActive ? "rgba(103,232,249,0.45)" : "rgba(255,255,255,0.1)",
+                  backgroundColor: isActive ? "rgba(34,211,238,0.1)" : "rgba(255,255,255,0.025)",
+                  opacity: isLocked ? 0.72 : 1,
+                }}
+                aria-current={isActive ? "page" : undefined}
+                aria-label={isLocked ? `${section.label} — switch to ${lockedMode.label} mode to unlock` : section.label}
+              >
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-cyan-200/90">
+                  <Icon size={16} className="pointer-events-none" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className={`block text-sm font-bold ${isActive ? "text-cyan-100" : "text-white/90"}`}>{section.label}</span>
+                  <span className="block truncate text-xs text-white/60">{section.description}</span>
+                </span>
+                {isLocked ? <span className="shrink-0 text-[10px] font-bold text-white/55">{lockedMode.label}</span> : isActive ? <Check size={16} className="shrink-0 text-cyan-200" /> : <ChevronRight size={15} className="shrink-0 text-white/45" />}
+              </button>
+            );
+          })}
+        </nav>
+      </section>
     </div>
   );
 }
@@ -419,116 +578,6 @@ function ModeSelector({
           </div>
         </>
       )}
-    </div>
-  );
-}
-
-/* ── Mobile section list ─────────────────────────────────────────────
- * Section cards only — search and the control-mode selector live in the
- * sticky SettingsTabStrip above, so they are not duplicated here. */
-
-function MobileSectionList({
-  sections,
-  allSections,
-  controlMode,
-  onSectionClick,
-  onModeChange,
-  searchQuery,
-  T: _T,
-}: {
-  sections: SettingsSection[];
-  allSections: SettingsSection[];
-  controlMode: ControlMode;
-  onSectionClick: (id: string) => void;
-  onModeChange: (m: ControlMode) => void;
-  searchQuery: string;
-  T: ReturnType<typeof useTheme>["resolvedColors"];
-}) {
-  const modeIdx = MODE_ORDER.indexOf(controlMode);
-  const hasSearch = searchQuery.trim().length > 0;
-
-  // When searching, show filtered results. Otherwise show ALL sections
-  // with locked ones greyed out so users can see what exists.
-  const displaySections = hasSearch ? sections : allSections;
-
-  return (
-    <div className="space-y-3">
-      <div className="space-y-1">
-        {displaySections.map((section) => {
-          const Icon = ICONS[section.icon] ?? LayoutGrid;
-          const sIdx = MODE_ORDER.indexOf(section.minMode);
-          const isLocked = sIdx > modeIdx;
-          const lockedMode = MODE_META[section.minMode];
-
-          if (isLocked && !hasSearch) {
-            return (
-              <button
-                key={section.id}
-                type="button"
-                onClick={() => onModeChange(section.minMode)}
-                className="flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition-all hover:bg-white/3"
-                style={{
-                  borderColor: "rgba(255,255,255,0.04)",
-                  backgroundColor: "rgba(255,255,255,0.01)",
-                  opacity: 0.55,
-                }}
-                aria-label={`${section.label} — switch to ${lockedMode.label} mode to unlock`}
-              >
-                <span
-                  className="grid h-9 w-9 shrink-0 place-items-center rounded-lg"
-                  style={{
-                    backgroundColor: `${lockedMode.color}10`,
-                    color: `${lockedMode.color}80`,
-                  }}
-                >
-                  <Icon size={16} className="pointer-events-none" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-sm font-bold text-white/60">{section.label}</span>
-                    <span className="text-[10px] text-white/30">🔒</span>
-                  </div>
-                  <div className="truncate text-[10px] text-white/30">{section.description}</div>
-                </div>
-                <span
-                  className="shrink-0 rounded-md px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider"
-                  style={{ color: lockedMode.color, backgroundColor: `${lockedMode.color}15` }}
-                >
-                  {lockedMode.label}
-                </span>
-              </button>
-            );
-          }
-
-          return (
-            <button
-              key={section.id}
-              type="button"
-              onClick={() => onSectionClick(section.id)}
-              className="flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition-all"
-              style={{
-                borderColor: "rgba(255,255,255,0.06)",
-                backgroundColor: "rgba(255,255,255,0.02)",
-              }}
-            >
-              <span
-                className="grid h-9 w-9 shrink-0 place-items-center rounded-lg"
-                style={{
-                  backgroundColor: "rgba(255,255,255,0.04)",
-                  color: "rgba(255,255,255,0.5)",
-                }}
-              >
-                <Icon size={16} className="pointer-events-none" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-bold text-white/80">{section.label}</div>
-                <div className="truncate text-[10px] text-white/35">{section.description}</div>
-              </div>
-              <ChevronRight size={14} className="pointer-events-none text-white/20" />
-            </button>
-          );
-        })}
-      </div>
     </div>
   );
 }
@@ -1191,19 +1240,35 @@ function WorkspaceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColor
     },
   ] as const;
 
+  const selectedProfile = workspaceProfiles.find((profile) =>
+    Object.entries(profile.values).every(([key, value]) => defaults[key as keyof typeof defaults] === value),
+  )?.name;
+
   return (
     <div className="space-y-4">
       <SettingsCard title="Workspace profiles" description="Coordinated layouts that set sensible Studio defaults" icon={<LayoutGrid size={16} />}>
-        <div className="grid gap-2 md:grid-cols-3">
+        <div className="grid gap-2 md:grid-cols-3" role="radiogroup" aria-label="Workspace profiles">
           {workspaceProfiles.map((profile) => (
             <button
               key={profile.name}
               type="button"
               onClick={() => setDefaults((current) => ({ ...current, ...profile.values }))}
-              className="rounded-xl border border-white/8 bg-white/2 p-3 text-left transition hover:border-white/15 hover:bg-white/5"
+              role="radio"
+              aria-checked={selectedProfile === profile.name}
+              aria-label={`${profile.name} workspace profile`}
+              className="relative rounded-xl border p-3 pr-10 text-left transition hover:border-cyan-200/45 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
+              style={{
+                borderColor: selectedProfile === profile.name ? `${T.accentColor}80` : "rgba(255,255,255,0.1)",
+                backgroundColor: selectedProfile === profile.name ? `${T.accentColor}12` : "rgba(255,255,255,0.02)",
+              }}
             >
-              <span className="text-xs font-black" style={{ color: T.accentColor }}>{profile.name}</span>
-              <span className="mt-1 block text-[10px] leading-4 text-white/45">{profile.description}</span>
+              <span className="text-xs font-black" style={{ color: selectedProfile === profile.name ? T.accentColor : "rgba(255,255,255,0.9)" }}>{profile.name}</span>
+              <span className="mt-1 block text-[10px] leading-4 text-white/60">{profile.description}</span>
+              {selectedProfile === profile.name && (
+                <span className="absolute right-3 top-3 grid h-5 w-5 place-items-center rounded-full bg-cyan-300/15 text-cyan-200" aria-hidden="true">
+                  <Check size={12} />
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -1211,30 +1276,34 @@ function WorkspaceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColor
 
       <SettingsCard title="Studio defaults" description="What opens when you enter Studio" icon={<Briefcase size={16} />}>
         <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Default view</span>
-            <div className="mt-1 flex gap-2">
+          <fieldset className="rounded-xl border border-cyan-300/15 bg-cyan-300/[0.03] p-3">
+            <legend className="px-1 text-[10px] font-black uppercase tracking-[0.14em] text-cyan-200/80">Default view</legend>
+            <p className="mt-1 text-[11px] text-white/60">The workspace surface opened first.</p>
+            <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label="Default view">
               {["chat", "code", "preview"].map((v) => (
-                <button key={v} type="button" onClick={() => setDefaults({ ...defaults, defaultView: v })}
-                  className="rounded-lg border px-3 py-1.5 text-[10px] font-bold capitalize"
-                  style={{ borderColor: defaults.defaultView === v ? T.accentColor : "rgba(255,255,255,0.08)", color: defaults.defaultView === v ? T.accentColor : "rgba(255,255,255,0.5)" }}>
+                <button key={v} type="button" onClick={() => setDefaults((current) => ({ ...current, defaultView: v }))}
+                  role="radio" aria-checked={defaults.defaultView === v}
+                  className="rounded-lg border px-3 py-2 text-[10px] font-bold capitalize transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
+                  style={{ borderColor: defaults.defaultView === v ? T.accentColor : "rgba(255,255,255,0.12)", backgroundColor: defaults.defaultView === v ? `${T.accentColor}12` : "transparent", color: defaults.defaultView === v ? T.accentColor : "rgba(255,255,255,0.75)" }}>
                   {v}
                 </button>
               ))}
             </div>
-          </div>
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Default tool</span>
-            <div className="mt-1 flex gap-2">
+          </fieldset>
+          <fieldset className="rounded-xl border border-purple-300/15 bg-purple-300/[0.03] p-3">
+            <legend className="px-1 text-[10px] font-black uppercase tracking-[0.14em] text-purple-200/80">Default tool</legend>
+            <p className="mt-1 text-[11px] text-white/60">The tool selected inside that surface.</p>
+            <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label="Default tool">
               {["chat", "code", "agents"].map((v) => (
-                <button key={v} type="button" onClick={() => setDefaults({ ...defaults, defaultTool: v })}
-                  className="rounded-lg border px-3 py-1.5 text-[10px] font-bold capitalize"
-                  style={{ borderColor: defaults.defaultTool === v ? T.accentColor : "rgba(255,255,255,0.08)", color: defaults.defaultTool === v ? T.accentColor : "rgba(255,255,255,0.5)" }}>
+                <button key={v} type="button" onClick={() => setDefaults((current) => ({ ...current, defaultTool: v }))}
+                  role="radio" aria-checked={defaults.defaultTool === v}
+                  className="rounded-lg border px-3 py-2 text-[10px] font-bold capitalize transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300/70"
+                  style={{ borderColor: defaults.defaultTool === v ? "#c084fc" : "rgba(255,255,255,0.12)", backgroundColor: defaults.defaultTool === v ? "rgba(192,132,252,0.12)" : "transparent", color: defaults.defaultTool === v ? "#d8b4fe" : "rgba(255,255,255,0.75)" }}>
                   {v}
                 </button>
               ))}
             </div>
-          </div>
+          </fieldset>
         </div>
       </SettingsCard>
 
@@ -1399,6 +1468,7 @@ const AGENT_DEFAULT_SETTINGS = {
   fileWrite: false,
   githubAccess: false,
   deployApproval: true,
+  hiddenAgents: [] as string[],
 };
 
 function AgentsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
@@ -1478,6 +1548,24 @@ function AgentsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"]
               <div className="text-[10px] text-white/40">{a.desc}</div>
             </button>
           ))}
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="Agent visibility" description="Show or hide built-in agents">
+        <div className="space-y-3">
+          <ToggleRow
+            title="Show Spark"
+            description="Spark is built-in and can't be uninstalled — hide it instead"
+            checked={!settings.hiddenAgents.includes("spark")}
+            onChange={(v) =>
+              updateSetting(
+                "hiddenAgents",
+                v
+                  ? settings.hiddenAgents.filter((id) => id !== "spark")
+                  : [...settings.hiddenAgents.filter((id) => id !== "spark"), "spark"],
+              )
+            }
+          />
         </div>
       </SettingsCard>
 
@@ -2417,7 +2505,7 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
 
 /* ── Privacy & Security ────────────────────────────────────────────── */
 
-function PrivacySection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
+function PrivacySection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -2492,8 +2580,7 @@ function PrivacySection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
       </SettingsCard>
 
       <SettingsCard title="Active sessions" description="Devices logged into your account">
-        <p className="text-xs text-white/40">Manage your active sessions across devices. Sign out remotely from the Clerk account page.</p>
-        <Link href="/account" className="mt-2 inline-block text-xs font-bold" style={{ color: T.accentColor }}>Manage sessions →</Link>
+        <p className="text-xs text-white/40">Session management is coming soon — for now, sign out directly on each device.</p>
       </SettingsCard>
 
       <SettingsCard title="Data management" description="Export or delete your data (GDPR)">
@@ -2697,4 +2784,3 @@ function AdvancedSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCo
 
 /* ── System Control removed — feature flags and system health
        moved into Advanced section ─────────────────────────────────── */
-

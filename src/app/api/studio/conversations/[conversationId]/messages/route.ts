@@ -728,6 +728,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 category: evt.category,
                 latencyMs: evt.latencyMs,
               });
+            } else if (evt.type === "model_response") {
+              safeEvent({
+                type: "model_response",
+                provider: evt.provider,
+                model: evt.model,
+                finishReason: evt.finishReason,
+                contentType: evt.contentType,
+                contentLength: evt.contentLength,
+                messageKeys: evt.messageKeys,
+                toolCalls: evt.toolCalls,
+              });
             } else if (evt.type === "model_failed") {
               safeEvent({
                 type: "model_failed",
@@ -774,6 +785,11 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             qualityLoop: v2Config.qualityLoop,
             enableDeploy: built.kernelResult.decision.routing.mode === "ship",
             requiresExecution: built.kernelResult.decision.routing.requiresExecution,
+            // A production execution request is not complete until the
+            // agent-created website entry file is physically present in the
+            // verified workspace. This is enforced again after approval
+            // resume by the approvals route.
+            requireProjectArtifacts: built.kernelResult.decision.routing.requiresExecution,
             evalMetadata: v2Config.evalMetadata,
             progress: streamProgress,
             signal: executionAbort.signal,
@@ -802,6 +818,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 executionMode: canonicalCtx.executionMode,
                 systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
                 checkpointId: v2Result.checkpoint?.checkpointId ?? null,
+                qualityLoopState: v2Result.qualityLoopState,
               });
               pausedRunId = pausedRun.id;
             } catch (pausedErr) {

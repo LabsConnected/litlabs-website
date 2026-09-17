@@ -8,7 +8,14 @@
  *
  * This is the foundation for the unified workspace — one builder that
  * adapts to what the user is creating instead of separate tools.
+ *
+ * Labels and ids follow the canonical creation vocabulary in
+ * `src/lib/creation-types.ts` (`creationTypeId`) — the same words the
+ * dashboard Quick Start and media modes use. Do not invent a new label
+ * for an existing creation type here.
  */
+
+import type { CreationTypeId } from "@/lib/creation-types";
 
 export type ProjectType =
   | "website"
@@ -23,6 +30,8 @@ export interface ProjectTypeMeta {
   label: string;
   icon: string; // lucide icon name
   description: string;
+  /** Maps to the canonical creation vocabulary (creation-types.ts). */
+  creationTypeId: CreationTypeId;
   /** Whether this type uses the visual CanvasDocument or a custom editor */
   editor: "canvas" | "html" | "game";
   /**
@@ -39,6 +48,7 @@ export const PROJECT_TYPES: ProjectTypeMeta[] = [
     label: "Website",
     icon: "Globe",
     description: "Landing pages, SaaS sites, portfolios, stores",
+    creationTypeId: "website",
     editor: "canvas",
   },
   {
@@ -46,6 +56,7 @@ export const PROJECT_TYPES: ProjectTypeMeta[] = [
     label: "HTML / CSS / JS",
     icon: "Code2",
     description: "Raw HTML, CSS, and JavaScript with live preview",
+    creationTypeId: "html",
     editor: "html",
   },
   {
@@ -53,6 +64,7 @@ export const PROJECT_TYPES: ProjectTypeMeta[] = [
     label: "2D Game",
     icon: "Gamepad2",
     description: "HTML Canvas or Phaser games with Quick Build",
+    creationTypeId: "game",
     editor: "game",
     available: false,
   },
@@ -61,14 +73,16 @@ export const PROJECT_TYPES: ProjectTypeMeta[] = [
     label: "3D Game",
     icon: "Box",
     description: "Three.js or Babylon.js 3D games",
+    creationTypeId: "game",
     editor: "game",
     available: false,
   },
   {
     id: "app",
-    label: "Web App",
+    label: "App",
     icon: "AppWindow",
     description: "Interactive React/Next.js applications",
+    creationTypeId: "app",
     editor: "canvas",
   },
   {
@@ -76,6 +90,7 @@ export const PROJECT_TYPES: ProjectTypeMeta[] = [
     label: "Component",
     icon: "Component",
     description: "Reusable UI components",
+    creationTypeId: "component",
     editor: "canvas",
   },
 ];

@@ -7,7 +7,7 @@
  * entire structure directly on the Canvas.
  */
 
-import { createNode, type CanvasNode, type CanvasDocument, createEmptyDocument } from "./types";
+import { collectCreatedNodes, type CanvasNode, type CanvasDocument, createEmptyDocument } from "./types";
 import { SECTION_BLOCKS } from "./section-blocks";
 
 export interface StarterBuild {
@@ -85,6 +85,14 @@ export const STARTER_BUILDS: StarterBuild[] = [
     icon: "UserPlus",
     sectionIds: ["signup-form"],
   },
+  {
+    id: "roofing-site",
+    label: "Roofing Company",
+    category: "Website",
+    description: "Hero, services, quote form, footer — honest slots for a roofing business",
+    icon: "House",
+    sectionIds: ["navbar-minimal", "roofing-hero", "roofing-services", "roofing-quote-form", "roofing-footer"],
+  },
 ];
 
 export const STARTER_CATEGORIES: { id: string; label: string; icon: string }[] = [
@@ -110,11 +118,15 @@ export function buildStarterPage(build: StarterBuild): CanvasDocument {
   for (const sectionId of build.sectionIds) {
     const template = SECTION_BLOCKS.find((b) => b.id === sectionId);
     if (!template) continue;
-    const { node: section, children } = template.build();
+    // Templates return only their top-level children from build(), but every
+    // node created during the build must land in the document — otherwise
+    // nested content (nav links, hero copy, hero images…) is silently dropped
+    // and starter pages render incomplete.
+    const created: CanvasNode[] = [];
+    const section = collectCreatedNodes(created, () => template.build().node);
     section.parentId = root.id;
-    allNewNodes[section.id] = section;
-    for (const child of children) {
-      allNewNodes[child.id] = child;
+    for (const node of created) {
+      allNewNodes[node.id] = node;
     }
     rootChildren.push(section.id);
   }

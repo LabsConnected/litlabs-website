@@ -484,10 +484,11 @@ describe("CommandStudioHeader dock toggle (top command bar)", () => {
 });
 
 describe("Dock tab open semantics", () => {
-  // Opening a dock tab is an OPEN action: tab click while collapsed opens
-  // the dock on that tab. Truthful aria state comes from the dock itself.
+  // Opening a dock tab is an OPEN action: the collapsed drawer first exposes
+  // one quiet entry point, then the tab click selects the requested surface.
+  // Truthful aria state comes from the dock itself.
 
-  it("9. dock tab click while collapsed fires onTabChange + onToggle", () => {
+  it("9. collapsed developer drawer opens before tab selection", () => {
     const onTabChange = vi.fn();
     const onToggle = vi.fn();
     render(
@@ -506,9 +507,15 @@ describe("Dock tab open semantics", () => {
         mediaContent={<div>media</div>}
       />,
     );
+    expect(screen.queryByTestId("dock-tab-terminal")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("dock-collapsed-toggle"));
+
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("dock-tab-terminal")).toBeTruthy();
+
     fireEvent.click(screen.getByTestId("dock-tab-terminal"));
     expect(onTabChange).toHaveBeenCalledWith("terminal");
-    expect(onToggle).toHaveBeenCalledTimes(1);
   });
 
   it("12. Terminal is an independent dock tab (not tied to Activity visibility)", () => {
