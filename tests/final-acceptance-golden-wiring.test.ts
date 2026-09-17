@@ -39,6 +39,18 @@ describe("final-acceptance-golden workflow secret wiring", () => {
     expect(previewPolling).toBeGreaterThan(-1);
     expect(approvalPost).toBeLessThan(previewPolling);
   });
+
+  it("requires the post-build follow-up to prove a real file and preview mutation", () => {
+    const script = readFileSync(
+      path.resolve(__dirname, "../scripts/final-acceptance/prod-mobile-golden.mjs"),
+      "utf-8",
+    );
+    expect(script).toContain("post_build_follow_up_mutation");
+    expect(script).toContain("post_build_follow_up_preview");
+    expect(script).toContain("readWorkspaceFile(\"index.html\")");
+    expect(script).toContain("followUpPreviewBody.includes(followUpMarker)");
+    expect(script).toContain("follow-up-provider-response-shapes.json");
+  });
 });
 
 describe("resolveAcceptanceUserId CI guard", () => {

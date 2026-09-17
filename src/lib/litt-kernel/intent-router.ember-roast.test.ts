@@ -77,4 +77,13 @@ describe("Ember Roast prompt — AUTO classifier routing", () => {
     expect(result.requiresExecution).toBe(true);
     expect(result.requiresProject).toBe(true);
   });
+
+  it("routes a plain-language edit to an existing site into execution", () => {
+    const result = classifyIntent(
+      "Update the existing Ember Roast site footer to include Golden Acceptance follow-up verified and save the edit to index.html.",
+    );
+    expect(result.mode).toBe("build");
+    expect(result.requiresExecution).toBe(true);
+    expect(result.requiresProject).toBe(true);
+  });
 });
