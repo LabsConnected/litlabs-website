@@ -25,7 +25,6 @@ import { buildPatchRecoveryMessage, validateApplyPatchInputs, validateFilesWrite
 import { computeWorkspaceChange } from "./workspace-change-producer";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { toolRegistry } from "./tool-registry";
-import { resolveAvailableCapabilities } from "./capabilities";
 import type { LiTTToolDefinition } from "./types";
 import {
   QUALITY_LOOP_PROMPT_SECTION,
@@ -202,9 +201,6 @@ function toPermissionInfo(tool: LiTTToolDefinition): ToolPermissionInfo {
     isReadOnly: tool.readOnly,
     isMutation: !tool.readOnly,
     enabled: tool.enabled,
-    // Unify the permission gate with the registry execution gate: a tool
-    // whose capability is unavailable is never advertised or approved.
-    requiredCapabilities: tool.requiredCapabilities,
   };
 }
 
@@ -347,17 +343,11 @@ export async function runAgentLoopV2(
 
   const permissionEngine = new PermissionEngine();
 
-  // Capability set for this run — the single source of truth shared by the
-  // permission gate (model-facing tool list + approval decisions below) and
-  // the registry execution gate, so an approved tool can never fail closed
-  // as "incapable" at execution time. See resolveAvailableCapabilities.
-  const availableCapabilities = resolveAvailableCapabilities({ transport });
-
-  // Get available tools from registry, filtered by mode AND capabilities
+  // Get available tools from registry, filtered by mode
   const allTools = toolRegistry.listEnabled();
   const availableTools = allTools.filter((tool) => {
     const permInfo = toPermissionInfo(tool);
-    return permissionEngine.check(permInfo, {}, cfg.executionMode, availableCapabilities).allowed;
+    return permissionEngine.check(permInfo, {}, cfg.executionMode).allowed;
   });
 
   const toolDefs = availableTools.map(toToolDefinition);
@@ -545,7 +535,7 @@ export async function runAgentLoopV2(
 
       // Check permissions
       const permInfo = toPermissionInfo(toolDef);
-      const permResult = permissionEngine.check(permInfo, toolCall.inputs, cfg.executionMode, availableCapabilities);
+      const permResult = permissionEngine.check(permInfo, toolCall.inputs, cfg.executionMode);
 
       if (!permResult.allowed) {
         const result: ToolCallResult = {
@@ -611,26 +601,6 @@ export async function runAgentLoopV2(
         }
       }
 
-      // Create the pre-mutation checkpoint BEFORE the approval gate, so the
-      // resumed-after-approval run diffs the workspace truthfully instead of
-      // reporting "unknown". Safe when the user rejects: this only snapshots
-      // pre-mutation state and never writes workspace files.
-      if (!toolDef.readOnly && !mutationBatchPending && !checkpoint) {
-        localProgress.emit({ type: "phase", phase: "execute", step: stepsUsed });
-        checkpoint = await transport.createCheckpointBeforeMutation(
-          `Pre-agent-loop: ${userMessage.slice(0, 80)}`,
-        ) ?? undefined;
-        if (checkpoint) {
-          localProgress.emit({
-            type: "checkpoint",
-            label: checkpoint.label,
-            gitSha: checkpoint.gitSha,
-          });
-        }
-        mutationBatchPending = true;
-        batchHasMutation = true;
-      }
-
       if (permResult.requiresApproval) {
         localProgress.emit({
           type: "approval_required",
@@ -638,11 +608,6 @@ export async function runAgentLoopV2(
           reason: permResult.reason ?? "Approval required",
         });
 
-        // The pre-mutation checkpoint is created BEFORE this pause (see
-        // above), so the resumed run diffs the workspace truthfully instead
-        // of reporting "unknown" ("could not verify whether files changed").
-        // It is threaded through the pause result → paused-run record →
-        // ResumeInput.existingCheckpoint.
         {
           // Pause the loop and return to the caller for approval — in AUTO
           // mode as well as ACT.
@@ -660,7 +625,6 @@ export async function runAgentLoopV2(
             toolCalls: toolCallLog,
             cancelled: false,
             events,
-            checkpoint: checkpoint ?? undefined,
             pendingApproval: {
               toolId: toolCall.toolId,
               toolCallId: toolCall.toolCallId,
@@ -693,6 +657,31 @@ export async function runAgentLoopV2(
         break;
       }
 
+      // Create checkpoint before first mutation in a batch
+      if (!toolDef.readOnly && !mutationBatchPending && !checkpoint) {
+        localProgress.emit({ type: "phase", phase: "execute", step: stepsUsed });
+        checkpoint = await transport.createCheckpointBeforeMutation(
+          `Pre-agent-loop: ${userMessage.slice(0, 80)}`,
+        ) ?? undefined;
+        if (checkpoint) {
+          localProgress.emit({
+            type: "checkpoint",
+            label: checkpoint.label,
+            gitSha: checkpoint.gitSha,
+          });
+        }
+        mutationBatchPending = true;
+        batchHasMutation = true;
+      }
+
+      // Stop must also stop in-flight tool work: never start a tool call
+      // once the caller has aborted.
+      if (cfg.signal?.aborted) {
+        cancelled = true;
+        cancelReason = "Cancelled by user";
+        break;
+      }
+
       // Execute the tool
       localProgress.emit({ type: "tool_start", toolId: toolCall.toolId, summary: `${toolCall.toolId}` });
 
@@ -703,7 +692,6 @@ export async function runAgentLoopV2(
         // Use the registry's execute method, passing transport for V2 handlers
         const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {
           hasApproval: !permResult.requiresApproval,
-          availableCapabilities,
           transport,
         });
 
@@ -803,7 +791,7 @@ export async function runAgentLoopV2(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode),
     });
   }
 
@@ -997,13 +985,6 @@ export interface ResumeInput {
   hadInterveningMutation: boolean;
   /** Existing checkpoint (if created before pause) */
   existingCheckpoint?: { checkpointId: string; label: string; gitSha: string };
-  /**
-   * Capability set the model-facing tool list was filtered with when the
-   * user approved. Threaded into the resume execution gate so the approved
-   * tool cannot fail closed as "incapable". Optional for backwards
-   * compatibility — resume falls back to resolving fresh when absent.
-   */
-  availableCapabilities?: string[];
 }
 
 /**
@@ -1056,17 +1037,10 @@ export async function resumeAgentLoopV2(
 
   const permissionEngine = new PermissionEngine();
 
-  // Capability set for the resumed run. Prefer the set captured at approval
-  // time (the model-facing tool list the user approved against); fall back
-  // to resolving fresh so runs paused before this field existed self-heal
-  // instead of failing closed on every capability-gated tool.
-  const availableCapabilities =
-    resume.availableCapabilities ?? resolveAvailableCapabilities({ transport });
-
   const allTools = toolRegistry.listEnabled();
   const availableTools = allTools.filter((tool) => {
     const permInfo = toPermissionInfo(tool);
-    return permissionEngine.check(permInfo, {}, cfg.executionMode, availableCapabilities).allowed;
+    return permissionEngine.check(permInfo, {}, cfg.executionMode).allowed;
   });
 
   const toolDefs = availableTools.map(toToolDefinition);
@@ -1098,10 +1072,21 @@ export async function resumeAgentLoopV2(
     localProgress.emit({ type: "tool_start", toolId: resume.toolId, summary: `${resume.toolId} (approved)` });
 
     let result: ToolCallResult;
-    try {
+    if (cfg.signal?.aborted) {
+      // The run was stopped while awaiting approval: the approved tool
+      // must not execute. Surface cancelled without running it.
+      cancelled = true;
+      cancelReason = "Cancelled by user";
+      result = {
+        toolCallId: resume.toolCallId,
+        toolId: resume.toolId,
+        result: null,
+        success: false,
+        error: "Cancelled by user",
+      };
+    } else try {
       const execResult = await toolRegistry.execute(resume.toolId, resume.inputs, {
         hasApproval: true,
-        availableCapabilities,
         transport,
       });
 
@@ -1206,7 +1191,7 @@ export async function resumeAgentLoopV2(
   }
 
   // Continue the loop
-  while (stepsUsed < cfg.maxSteps) {
+  while (stepsUsed < cfg.maxSteps && !cancelled) {
     const elapsed = Date.now() - startTime;
     if (elapsed > cfg.maxRuntimeMs) {
       cancelled = true;
@@ -1328,7 +1313,7 @@ export async function resumeAgentLoopV2(
       }
 
       const permInfo = toPermissionInfo(toolDef);
-      const permResult = permissionEngine.check(permInfo, toolCall.inputs, cfg.executionMode, availableCapabilities);
+      const permResult = permissionEngine.check(permInfo, toolCall.inputs, cfg.executionMode);
 
       if (!permResult.allowed) {
         const result: ToolCallResult = {
@@ -1343,18 +1328,6 @@ export async function resumeAgentLoopV2(
         continue;
       }
 
-      // Create the pre-mutation checkpoint BEFORE the approval gate (same
-      // guarantee as the initial loop): a nested approval pause carries the
-      // checkpoint so the next resume diffs truthfully instead of "unknown".
-      if (!toolDef.readOnly && !mutationBatchPending && !checkpoint) {
-        checkpoint = await transport.createCheckpointBeforeMutation(`Pre-agent-loop resume`) ?? undefined;
-        if (checkpoint) {
-          localProgress.emit({ type: "checkpoint", label: checkpoint.label, gitSha: checkpoint.gitSha });
-        }
-        mutationBatchPending = true;
-        batchHasMutation = true;
-      }
-
       if (permResult.requiresApproval) {
         localProgress.emit({ type: "approval_required", toolId: toolCall.toolId, reason: permResult.reason ?? "Approval required" });
 
@@ -1366,7 +1339,6 @@ export async function resumeAgentLoopV2(
             toolCalls: toolCallLog,
             cancelled: false,
             events,
-            checkpoint: checkpoint ?? undefined,
             pendingApproval: {
               toolId: toolCall.toolId,
               toolCallId: toolCall.toolCallId,
@@ -1397,18 +1369,45 @@ export async function resumeAgentLoopV2(
         break;
       }
 
+      // Checkpoint before first mutation
+      if (!toolDef.readOnly && !mutationBatchPending && !checkpoint) {
+        checkpoint = await transport.createCheckpointBeforeMutation(`Pre-agent-loop resume`) ?? undefined;
+        if (checkpoint) {
+          localProgress.emit({ type: "checkpoint", label: checkpoint.label, gitSha: checkpoint.gitSha });
+        }
+        mutationBatchPending = true;
+        batchHasMutation = true;
+      }
+
+      // Stop must also stop in-flight tool work: never start a tool call
+      // once the caller has aborted.
+      if (cfg.signal?.aborted) {
+        cancelled = true;
+        cancelReason = "Cancelled by user";
+        break;
+      }
+
       localProgress.emit({ type: "tool_start", toolId: toolCall.toolId, summary: `${toolCall.toolId}` });
 
       let result: ToolCallResult;
       try {
         const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {
           hasApproval: !permResult.requiresApproval,
-          availableCapabilities,
           transport,
         });
 
         if (execResult.ok) {
-          result = { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: execResult.result, success: true };
+          // Same domain-failure normalization as the other execute sites:
+          // a handler returning { success: false } is a failed mutation,
+          // never a success.
+          const handlerError = handlerFailureError(execResult.result);
+          result = {
+            toolCallId: toolCall.toolCallId,
+            toolId: toolCall.toolId,
+            result: execResult.result,
+            success: handlerError === null,
+            ...(handlerError !== null ? { error: handlerError } : {}),
+          };
         } else {
           result = { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: null, success: false, error: execResult.error };
         }
@@ -1457,7 +1456,7 @@ export async function resumeAgentLoopV2(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode),
     });
   }
 
@@ -1543,11 +1542,9 @@ export function createAutonomousRepairCallback(
   toolDefs: ToolDefinition[],
   deadlineMs?: number,
   signal?: AbortSignal,
-  // Capability set for repair-loop tool execution. Defaults to the resolved
-  // deployment set so repair tools (files.patch, checkpoint.*) cannot fail
-  // closed as "incapable" — the same unified-gate guarantee as the main loop.
-  availableCapabilities: string[] = resolveAvailableCapabilities({ transport }),
+  executionMode: ExecutionMode = "act",
 ): (attempt: number, errors: string) => Promise<boolean> {
+  const permissionEngine = new PermissionEngine();
   return async (attempt: number, errors: string) => {
     // Feed the error output to the LLM and let it repair
     const repairMessages: LLMMessage[] = [
@@ -1574,20 +1571,58 @@ export function createAutonomousRepairCallback(
 
         repairMessages.push(buildAssistantToolCallMessage(response.toolCalls, response.text, response.rawParts));
 
-        // Execute each tool call
+        // Execute each tool call — routed through the same permission
+        // check the main loop uses. Repair is autonomous: there is no
+        // user to approve a gated call, so a denied or
+        // approval-requiring call fails closed (the model sees the gate
+        // and must work around it) instead of executing silently with
+        // hasApproval: true.
         for (const toolCall of response.toolCalls) {
+          // Stop must also stop repair work: never start a tool call once
+          // the caller has aborted.
+          if (signal?.aborted) {
+            return false;
+          }
+
           const toolDef = toolRegistry.get(toolCall.toolId);
           if (!toolDef) continue;
+
+          const repairPermResult = permissionEngine.check(
+            toPermissionInfo(toolDef),
+            toolCall.inputs,
+            executionMode,
+          );
+          if (!repairPermResult.allowed || repairPermResult.requiresApproval) {
+            repairMessages.push(buildToolResultMessage({
+              toolCallId: toolCall.toolCallId,
+              toolId: toolCall.toolId,
+              result: null,
+              success: false,
+              error: repairPermResult.requiresApproval
+                ? `Permission gate: ${repairPermResult.reason ?? "this operation requires explicit approval"} — approval cannot be granted during autonomous repair, so the call was not executed.`
+                : `${repairPermResult.reason ?? "Permission denied"} — the call was not executed.`,
+            }));
+            continue;
+          }
 
           try {
             const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {
               hasApproval: true,
-              availableCapabilities,
               transport,
             });
 
+            // Same domain-failure normalization as the main loop: a
+            // handler returning { success: false } is a failed repair
+            // step, never a success.
+            const handlerError = execResult.ok ? handlerFailureError(execResult.result) : null;
             const result: ToolCallResult = execResult.ok
-              ? { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: execResult.result, success: true }
+              ? {
+                  toolCallId: toolCall.toolCallId,
+                  toolId: toolCall.toolId,
+                  result: execResult.result,
+                  success: handlerError === null,
+                  ...(handlerError !== null ? { error: handlerError } : {}),
+                }
               : { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: null, success: false, error: execResult.error };
 
             repairMessages.push(buildToolResultMessage(result));
