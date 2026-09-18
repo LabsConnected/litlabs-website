@@ -18,6 +18,20 @@ export interface ApprovalCardProps {
   autoApproved?: boolean;
   isDeploy?: boolean;
   compact?: boolean;
+  /**
+   * Client-side approval lifecycle phase. The card stays mounted through
+   * every phase: "submitting" disables the buttons, "executing" shows the
+   * run in progress, and "failed" shows the backend error with a Retry
+   * affordance (re-POSTs the same pausedRunId — no silent clear, no auto
+   * re-request).
+   */
+  phase?: "idle" | "submitting" | "executing" | "failed";
+  /** Backend error shown when phase is "failed". */
+  error?: string | null;
+  /** Whether the failed approval may be retried. Defaults to true. */
+  retryable?: boolean;
+  /** Re-submits the approval decision for the same paused run. */
+  onRetry?: () => void;
 }
 
 /* ── Helpers ──────────────────────────────────────────────────────── */
@@ -121,10 +135,18 @@ export function ApprovalCard({
   autoApproved = false,
   isDeploy = false,
   compact = false,
+  phase = "idle",
+  error = null,
+  retryable = true,
+  onRetry,
 }: ApprovalCardProps) {
   const toolLabel = approval.toolId.replace(/_/g, " ");
   const affectedCount = countAffectedFiles(approval.inputs);
-  const showButtons = !autoApproved && onResolve != null;
+  // Once a decision is submitted the gate is consumed server-side — the
+  // buttons must not be clickable again while submitting/executing, and a
+  // failed gate offers Retry (same paused run) instead of a second decision.
+  const showButtons = !autoApproved && onResolve != null && phase !== "failed";
+  const buttonsDisabled = phase === "submitting" || phase === "executing";
 
   const borderColor = isDeploy ? "#ef444480" : "#e3b34140";
   const backgroundColor = isDeploy ? "#ef44440d" : "#e3b34108";
@@ -180,6 +202,41 @@ export function ApprovalCard({
         )}
       </div>
 
+      {/* Status line — submitting / executing / failed */}
+      {phase === "submitting" && (
+        <div
+          data-testid="approval-status"
+          className="pb-1.5 text-[10px] font-bold"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          Submitting approval…
+        </div>
+      )}
+      {phase === "executing" && (
+        <div
+          data-testid="approval-status"
+          className="pb-1.5 text-[10px] font-bold"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          Approved — running…
+        </div>
+      )}
+      {phase === "failed" && (
+        <div
+          data-testid="approval-error"
+          className="mb-1.5 rounded-lg border px-2 py-1.5 text-[10px] leading-snug"
+          style={{
+            borderColor: "#ef444466",
+            backgroundColor: "#ef444412",
+            color: "#fca5a5",
+          }}
+          role="alert"
+        >
+          <span className="font-bold">Approval failed: </span>
+          {error || "The approval request failed."}
+        </div>
+      )}
+
       {/* Actions */}
       {autoApproved ? (
         <div
@@ -188,13 +245,13 @@ export function ApprovalCard({
         >
           Auto-approved in AUTO mode
         </div>
-      ) : (
-        showButtons && (
-          <div className="flex gap-1.5">
+      ) : phase === "failed" ? (
+        <div className="flex gap-1.5">
+          {retryable && onRetry ? (
             <button
               type="button"
-              data-testid="approval-approve"
-              onClick={() => onResolve?.("approved")}
+              data-testid="approval-retry"
+              onClick={onRetry}
               className="flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold transition hover:bg-white/10"
               style={{
                 borderColor: "#22d3ee66",
@@ -202,9 +259,35 @@ export function ApprovalCard({
                 color: "#22d3ee",
               }}
             >
-              Approve
+              Retry approval
             </button>
-            {onEdit && (
+          ) : (
+            <div
+              className="flex-1 py-1.5 text-center text-[10px]"
+              style={{ color: "var(--text-muted)" }}
+            >
+              This approval can no longer be retried.
+            </div>
+          )}
+        </div>
+      ) : (
+        showButtons && (
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              data-testid="approval-approve"
+              onClick={() => onResolve?.("approved")}
+              disabled={buttonsDisabled}
+              className="flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold transition hover:bg-white/10 disabled:opacity-40"
+              style={{
+                borderColor: "#22d3ee66",
+                backgroundColor: "#22d3ee12",
+                color: "#22d3ee",
+              }}
+            >
+              {phase === "submitting" ? "Submitting…" : phase === "executing" ? "Running…" : "Approve"}
+            </button>
+            {onEdit && !buttonsDisabled && (
               <button
                 type="button"
                 data-testid="approval-edit"
@@ -223,7 +306,8 @@ export function ApprovalCard({
               type="button"
               data-testid="approval-deny"
               onClick={() => onResolve?.("rejected")}
-              className="flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold transition hover:bg-white/10"
+              disabled={buttonsDisabled}
+              className="flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold transition hover:bg-white/10 disabled:opacity-40"
               style={{
                 borderColor: "#ef444466",
                 backgroundColor: "#ef444412",

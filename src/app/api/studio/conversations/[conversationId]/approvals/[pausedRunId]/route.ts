@@ -4,10 +4,12 @@ import { auth } from "@/lib/auth";
 import {
   getPausedRun,
   resolvePausedRun,
+  resetRunForRetry,
   markRunProcessing,
   markRunCompleted,
   markRunFailed,
   createPausedRun,
+  type PausedRunRecord,
   type RunResult,
 } from "@/lib/litt-intelligence/paused-run-store";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
@@ -133,11 +135,42 @@ export async function POST(
     return NextResponse.json({ error: "Approval not found or expired" }, { status: 404 });
   }
 
+  // Set when this POST is a controlled retry of an approved run whose
+  // execution failed: the existing record is reused as the resolved
+  // approval instead of calling resolvePausedRun (single-use).
+  let retriedApproval: PausedRunRecord | null = null;
+
   if (pausedRun.status !== "pending") {
     // Already resolved — check if the execution is still running
     // This is the idempotent path: a repeated approval request returns 202
     // with the current run status instead of launching a duplicate.
-    if (pausedRun.status === "approved" || pausedRun.status === "rejected") {
+    //
+    // Controlled retry: an approved run whose execution FAILED can be
+    // re-run from THIS record (no new approval, no new billing operation —
+    // the shared image service replays on the stable requestId). Only a
+    // repeat "approved" decision on an approved+failed run retries; every
+    // other already-resolved state returns the current status idempotently.
+    if (
+      body.decision === "approved" &&
+      pausedRun.status === "approved" &&
+      pausedRun.runStatus === "failed"
+    ) {
+      const retried = await resetRunForRetry(pausedRunId, userId);
+      if (retried) {
+        retriedApproval = pausedRun;
+      } else {
+        // Lost a race with another retry request — report current state.
+        const current = await getPausedRun(pausedRunId, userId);
+        return NextResponse.json({
+          resolved: true,
+          decision: "approved",
+          status: current?.runStatus ?? "processing",
+          pausedRunId,
+          runStatus: current?.runStatus,
+          runError: current?.runError,
+        }, { status: 202 });
+      }
+    } else if (pausedRun.status === "approved" || pausedRun.status === "rejected") {
       return NextResponse.json({
         resolved: true,
         decision: pausedRun.status,
@@ -146,11 +179,12 @@ export async function POST(
         runStatus: pausedRun.runStatus,
         runError: pausedRun.runError,
       }, { status: 202 });
+    } else {
+      return NextResponse.json(
+        { error: `Approval already ${pausedRun.status}` },
+        { status: 409 },
+      );
     }
-    return NextResponse.json(
-      { error: `Approval already ${pausedRun.status}` },
-      { status: 409 },
-    );
   }
 
   // 2. Verify conversation ownership
@@ -158,8 +192,10 @@ export async function POST(
     return NextResponse.json({ error: "Conversation mismatch" }, { status: 403 });
   }
 
-  // 3. Resolve the approval (single-use, atomic)
-  const resolved = await resolvePausedRun(pausedRunId, userId, body.decision);
+  // 3. Resolve the approval (single-use, atomic). A controlled retry
+  // reuses the existing record — the approval was already granted.
+  const resolved =
+    retriedApproval ?? (await resolvePausedRun(pausedRunId, userId, body.decision));
   if (!resolved) {
     return NextResponse.json(
       { error: "Approval could not be resolved (expired or already resolved)" },
@@ -188,10 +224,15 @@ export async function POST(
     });
   }
 
-  // 5. For APPROVED: validate workspace, then start detached execution
+  // 5. For APPROVED: validate workspace, then start detached execution.
+  // The approved operation's identity rides the transport so tools with
+  // idempotent side effects (image.generate billing) derive a stable
+  // operation key from it — a retried approval replays, never double-debits.
   let transport;
   try {
-    transport = await createWorkspaceTransport(resolved.projectId, userId);
+    transport = await createWorkspaceTransport(resolved.projectId, userId, {
+      operationId: pausedRunId,
+    });
   } catch {
     await markRunFailed(pausedRunId, userId, "Workspace is no longer available");
     return NextResponse.json(

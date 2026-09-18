@@ -66,7 +66,13 @@ export function submitApprovalAndPoll(opts: {
   decision: "approved" | "rejected";
   onAccepted?: () => void;
   onCompleted?: (result: ApprovalRunResult) => void;
-  onFailed?: (error: string) => void;
+  /**
+   * Called with the backend error when the approval POST is rejected
+   * (non-2xx) or the resumed run fails. `info.retryable` says whether
+   * re-POSTing the same pausedRunId is meaningful — the server re-runs the
+   * same record (no new approval, no double billing).
+   */
+  onFailed?: (error: string, info?: { retryable: boolean }) => void;
   onPolling?: () => void;
   /** Test hooks — production callers use the real fetch/timers. */
   fetchImpl?: typeof fetch;
@@ -107,7 +113,10 @@ export function submitApprovalAndPoll(opts: {
 
       if (!postResp.ok && postResp.status !== 202 && postResp.status !== 409) {
         const body = await postResp.json().catch(() => null) as { error?: string } | null;
-        onFailed?.(body?.error ?? `Approval failed (${postResp.status})`);
+        // 5xx/429/408 may succeed on retry (the POST is idempotent);
+        // other 4xx will not — surface the error without a retry affordance.
+        const retryable = postResp.status >= 500 || postResp.status === 429 || postResp.status === 408;
+        onFailed?.(body?.error ?? `Approval failed (${postResp.status})`, { retryable });
         return;
       }
 
@@ -131,9 +140,11 @@ export function submitApprovalAndPoll(opts: {
       // Approval accepted — notify caller
       onAccepted?.();
 
-      // A failure already recorded on the paused run is terminal.
+      // A failure already recorded on the paused run is terminal for this
+      // attempt — but retryable: re-POSTing the same pausedRunId re-runs
+      // the same record via the server's controlled-retry path.
       if (postBody?.runStatus === "failed") {
-        onFailed?.(postBody.runError ?? "Execution failed");
+        onFailed?.(postBody.runError ?? "Execution failed", { retryable: true });
         return;
       }
 
@@ -160,29 +171,30 @@ export function submitApprovalAndPoll(opts: {
         }
 
         if (status.runStatus === "failed") {
-          onFailed?.(status.runError ?? "Execution failed");
+          onFailed?.(status.runError ?? "Execution failed", { retryable: true });
           return;
         }
 
         // The gate itself settled without producing a run — surface the
-        // honest state instead of polling into a timeout.
+        // honest state instead of polling into a timeout. Not retryable:
+        // the gate is gone.
         if (status.status === "expired") {
-          onFailed?.("This approval expired before it could be resumed. Please resend your request.");
+          onFailed?.("This approval expired before it could be resumed. Please resend your request.", { retryable: false });
           return;
         }
         if (status.status === "rejected") {
-          onFailed?.("This approval was already declined in another session.");
+          onFailed?.("This approval was already declined in another session.", { retryable: false });
           return;
         }
         // Still processing — continue polling
       }
 
       if (!cancelled) {
-        onFailed?.("Deployment timed out — please check the project status and try again.");
+        onFailed?.("Approval timed out — please check the project status and try again.", { retryable: true });
       }
     } catch (err) {
       if (!cancelled) {
-        onFailed?.(err instanceof Error ? err.message : "Approval request failed");
+        onFailed?.(err instanceof Error ? err.message : "Approval request failed", { retryable: true });
       }
     }
   }

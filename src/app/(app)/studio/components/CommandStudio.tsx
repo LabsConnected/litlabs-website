@@ -291,6 +291,9 @@ function CommandStudioContent() {
     return 320;
   });
   const pendingApproval = useExecutionStore((s) => s.pendingApproval);
+  const approvalPhase = useExecutionStore((s) => s.approvalPhase);
+  const approvalError = useExecutionStore((s) => s.approvalError);
+  const approvalRetryable = useExecutionStore((s) => s.approvalRetryable);
 
   const handleToggleDock = useCallback(() => setDockOpen((v) => !v), []);
   const handleOpenDockTab = useCallback((tab: StudioDockTab) => {
@@ -895,12 +898,13 @@ function CommandStudioContent() {
     }
   }, [conversation, capabilities.projectId, refreshCapabilities, isMobileLitt]);
 
-  // Converge the UI once an approval gate settles — regardless of whether
-  // the decision came from this client's Approve/Reject click or from the
-  // watchApprovalResolution watcher below (another session/device, a reload
-  // while the resumed run was still executing, or server-side TTL expiry).
-  // The outcome is the same: clear the card, pull the authoritative
-  // transcript, and return the user to Chat so the composer is usable again.
+  // Approval decisions resume the SAME paused server-side execution — never
+  // a new run. The approval lifecycle only settles when the resumed run
+  // reaches a terminal state: the card stays mounted through submitting
+  // and executing, and a non-2xx POST or a failed run keeps the card
+  // visible with the backend error and a Retry affordance (re-POSTs the
+  // same pausedRunId; the server re-runs the same record). Nothing
+  // silently clears, nothing auto re-requests.
   // Exception: a resumed run that pauses on a NEW gate stays on Live so the
   // fresh Approve/Reject card is visible.
   const applyApprovalOutcome = useCallback((opts: {
@@ -908,17 +912,44 @@ function CommandStudioContent() {
     resolution: "approved" | "rejected" | "expired" | "gone";
     runResult?: ApprovalRunResult | null;
     runError?: string | null;
+    retryable?: boolean;
   }) => {
     const exec = useExecutionStore.getState();
-    if (opts.resolution === "approved" || opts.resolution === "rejected") {
-      // Idempotent on the click path — pendingApproval is already null, so
-      // this clears state without logging a duplicate decision event.
-      exec.resolveApproval(opts.resolution);
-    } else {
-      // Expired/gone — the gate can no longer be actioned. Clear the stale
-      // card without logging a decision the user never made.
-      exec.endRun("cancelled");
+    if (opts.resolution === "rejected") {
+      if (opts.runError) {
+        // The rejection POST itself failed — keep the card with the error
+        // and a retry affordance instead of clearing a decision that never
+        // landed server-side.
+        exec.failApproval(opts.runError, opts.retryable);
+        return;
+      }
+      exec.resolveApproval("rejected");
+      // The resumed run's outcome was written back onto the conversation
+      // transcript server-side — pull it instead of fabricating anything.
+      void conversation.loadMessages(opts.conversationId);
+      setLittActiveTab("chat");
+      return;
     }
+    if (opts.resolution === "expired" || opts.resolution === "gone") {
+      // The gate can no longer be actioned. Clear the stale card without
+      // logging a decision the user never made.
+      exec.endRun("cancelled");
+      void conversation.loadMessages(opts.conversationId);
+      setLittActiveTab("chat");
+      return;
+    }
+    // resolution === "approved"
+    if (opts.runError) {
+      // The run failed AFTER approval — keep the card mounted with the
+      // backend error and a Retry affordance. The user re-approves the
+      // same record; the resumed execution replays instead of double-running.
+      exec.failApproval(opts.runError, opts.retryable);
+      void conversation.loadMessages(opts.conversationId);
+      return;
+    }
+    // Idempotent on the click path — pendingApproval is already null, so
+    // this clears state without logging a duplicate decision event.
+    exec.resolveApproval("approved");
     // The resumed run's outcome was written back onto the conversation
     // transcript server-side — pull it instead of fabricating anything.
     void conversation.loadMessages(opts.conversationId);
@@ -938,9 +969,6 @@ function CommandStudioContent() {
       });
       return;
     }
-    if (opts.runError) {
-      conversation.reportSendError?.(opts.runError);
-    }
     setLittActiveTab("chat");
   }, [conversation, capabilities.projectId]);
 
@@ -948,11 +976,16 @@ function CommandStudioContent() {
   // a new run. When no pausedRunId exists (persistence failed or the paused
   // run expired), silently dropping the click would leave the user thinking
   // the work resumed while nothing ran — surface a truthful error instead.
+  //
+  // The card is NOT cleared on click: it stays mounted through submitting
+  // and executing so a non-2xx POST or a failed run surfaces visibly with
+  // a Retry affordance instead of silently clearing.
   const handleResolveApproval = useCallback((decision: "approved" | "rejected") => {
-    const pending = useExecutionStore.getState().pendingApproval;
+    const exec = useExecutionStore.getState();
+    const pending = exec.pendingApproval;
     const convId = conversation.selectedConversationId;
     if (pending?.pausedRunId && convId) {
-      useExecutionStore.getState().resolveApproval(decision);
+      exec.beginApprovalSubmit();
       submitApprovalAndPoll({
         conversationId: convId,
         pausedRunId: pending.pausedRunId,
@@ -962,16 +995,19 @@ function CommandStudioContent() {
           // user lands back on the composer instead of a dead Live tab.
           if (decision === "rejected") {
             applyApprovalOutcome({ conversationId: convId, resolution: "rejected" });
+          } else {
+            exec.approvalAccepted();
           }
         },
         onCompleted: (result) => {
           applyApprovalOutcome({ conversationId: convId, resolution: decision, runResult: result });
         },
-        onFailed: (error) => {
+        onFailed: (error, info) => {
           applyApprovalOutcome({
             conversationId: convId,
             resolution: decision,
             runError: error || "The resumed run failed on the server.",
+            retryable: info?.retryable,
           });
         },
       });
@@ -997,9 +1033,11 @@ function CommandStudioContent() {
   // resumed run was still executing (loadMessages rehydrates the gate), or
   // server-side TTL expiry. The card alone cannot converge in those cases —
   // watch the server-authoritative status and fold the outcome back into
-  // the store + transcript, returning the user to Chat. The click path is
-  // unaffected: resolveApproval clears pendingApproval on click, disarming
-  // this watcher before submitApprovalAndPoll's own polling begins.
+  // the store + transcript, returning the user to Chat. The click path keeps
+  // the card mounted through submitting/executing, so this watcher stays
+  // armed alongside submitApprovalAndPoll's own polling — applyApprovalOutcome
+  // is idempotent, so whichever path observes the terminal state first
+  // settles and the other converges quietly.
   const applyApprovalOutcomeRef = useRef(applyApprovalOutcome);
   useEffect(() => {
     applyApprovalOutcomeRef.current = applyApprovalOutcome;
@@ -1515,6 +1553,10 @@ function CommandStudioContent() {
             approval={pendingApproval}
             onResolve={handleResolveApproval}
             isDeploy={pendingApproval.toolId === "project.deploy"}
+            phase={approvalPhase}
+            error={approvalError}
+            retryable={approvalRetryable}
+            onRetry={() => handleResolveApproval("approved")}
           />
         </div>
       )}

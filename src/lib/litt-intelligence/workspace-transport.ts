@@ -125,6 +125,13 @@ export interface WorkspaceTransport {
   readonly userId: string;
   readonly workspaceRoot: string;
   readonly projectId: string;
+  /**
+   * Stable identity of the approved operation being executed (the paused
+   * run id), when known. Tools that perform idempotent side effects (e.g.
+   * image.generate billing) derive their operation key from it so a retried
+   * approval replays instead of double-executing.
+   */
+  readonly operationId?: string;
 
   // File operations
   listFiles(path: string): Promise<{ entries: Array<{ name: string; type: string }> }>;
@@ -181,6 +188,7 @@ function internalServiceKey(): string {
 export async function createWorkspaceTransport(
   projectId: string,
   userId: string,
+  opts?: { operationId?: string },
 ): Promise<WorkspaceTransport> {
   if (!projectId || !userId) {
     throw new Error("createWorkspaceTransport requires projectId and userId");
@@ -189,7 +197,13 @@ export async function createWorkspaceTransport(
   const verified = await verifyProjectWorkspace(projectId, userId);
   const { workspaceId, workspaceRoot } = verified;
 
-  return new WorkspaceTransportImpl(projectId, userId, workspaceId, workspaceRoot);
+  return new WorkspaceTransportImpl(
+    projectId,
+    userId,
+    workspaceId,
+    workspaceRoot,
+    opts?.operationId,
+  );
 }
 
 // ─── Implementation ───────────────────────────────────────────────
@@ -200,6 +214,7 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
     public readonly userId: string,
     public readonly workspaceId: string,
     public readonly workspaceRoot: string,
+    public readonly operationId?: string,
   ) {}
 
   private get token(): string {

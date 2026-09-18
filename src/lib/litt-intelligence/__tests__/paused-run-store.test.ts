@@ -110,6 +110,7 @@ import {
   getPendingPausedRunForConversation,
   getLatestPausedRunForConversation,
   resolvePausedRun,
+  resetRunForRetry,
 } from "@/lib/litt-intelligence/paused-run-store";
 
 const USER = "user_1";
@@ -241,5 +242,59 @@ describe("paused-run-store — expiry truthfulness", () => {
     const resolved = await resolvePausedRun(row.id as string, USER, "approved");
     expect(resolved).toBeNull();
     expect(row.status).toBe("expired");
+  });
+});
+
+describe("paused-run-store — resetRunForRetry", () => {
+  beforeEach(() => {
+    rows.length = 0;
+  });
+
+  it("resets an approved+failed run to the not-yet-started state and clears the error", async () => {
+    const row = seedRow({
+      status: "approved",
+      run_status: "failed",
+      run_error: "The approved workspace operation failed",
+      run_completed_at: new Date().toISOString(),
+    });
+
+    const ok = await resetRunForRetry(row.id as string, USER);
+
+    expect(ok).toBe(true);
+    // Back to NULL (not-yet-started) so the resume route's markRunProcessing
+    // claims the retried execution exactly like a fresh approval.
+    expect(row.run_status).toBeNull();
+    expect(row.run_error).toBeNull();
+    expect(row.run_completed_at).toBeNull();
+    // The approval decision itself is untouched — single-use still holds.
+    expect(row.status).toBe("approved");
+  });
+
+  it("refuses a run that is still processing (no double execution)", async () => {
+    const row = seedRow({ status: "approved", run_status: "processing" });
+    expect(await resetRunForRetry(row.id as string, USER)).toBe(false);
+    expect(row.run_status).toBe("processing");
+  });
+
+  it("refuses a completed run", async () => {
+    const row = seedRow({ status: "approved", run_status: "completed" });
+    expect(await resetRunForRetry(row.id as string, USER)).toBe(false);
+    expect(row.run_status).toBe("completed");
+  });
+
+  it("refuses a pending (undecided) run — a retry is not a decision", async () => {
+    const row = seedRow({ status: "pending", run_status: "failed" });
+    expect(await resetRunForRetry(row.id as string, USER)).toBe(false);
+    expect(row.run_status).toBe("failed");
+  });
+
+  it("refuses another user's run", async () => {
+    const row = seedRow({
+      status: "approved",
+      run_status: "failed",
+      user_id: "user_2",
+    });
+    expect(await resetRunForRetry(row.id as string, USER)).toBe(false);
+    expect(row.run_status).toBe("failed");
   });
 });

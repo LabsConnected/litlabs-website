@@ -19,19 +19,26 @@
 
 import "server-only";
 
+import {
+  generateImage,
+  type ImageGenerationInput,
+} from "@/lib/generation/image-service";
+import type { MediaProviderId } from "@/lib/media";
+
 /**
- * Image Generate handler — calls the shared media generation API.
- * Uses auto-free mode (Pollinations) by default to avoid wallet requirements.
- * Returns a downloadUrl that can be rendered inline in chat.
+ * Image Generate handler — calls the shared image generation service
+ * DIRECTLY. There is no HTTP self-fetch to /api/media/generate: the agent
+ * loop has no Clerk session, so the registry passes the workspace
+ * transport as the second argument and the handler takes the approving
+ * user's identity from it as trusted server-side context.
  *
- * Server-to-server auth: the agent loop has no Clerk session, so a bare
- * self-fetch to /api/media/generate is rejected (401 "Sign in to generate
- * media") and every approved image.generate run died with "The approved
- * workspace operation failed". The registry passes the workspace transport
- * as the second argument; it carries the approving user's ID. When the
- * internal service key is configured, the call is authenticated with it and
- * attributed to that user for billing/rate-limiting exactly as a direct
- * call would be.
+ * Uses auto-free mode (Pollinations) by default to avoid wallet
+ * requirements. Returns a downloadUrl that can be rendered inline in chat.
+ *
+ * Stable operation identity: when the transport carries the approved
+ * operation's identity (operationId), it becomes the service requestId, so
+ * retries of the same approved operation replay instead of generating
+ * and debiting twice.
  */
 export async function handleImageGenerate(
   inputs: Record<string, unknown>,
@@ -44,59 +51,72 @@ export async function handleImageGenerate(
     return { success: false, error: "Prompt must be at least 3 characters" };
   }
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  const url = baseUrl.startsWith("http") ? baseUrl : `https://${baseUrl}`;
-
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  const agentUserId =
+  // Trusted server-side context only. Never read a user ID from the tool
+  // inputs — the agent never has a Clerk session, and a client-supplied
+  // user ID must never be trusted for billing.
+  const t =
     transport && typeof transport === "object"
-      ? (transport as { userId?: unknown }).userId
-      : undefined;
-  const internalKey = process.env.TERMINAL_INTERNAL_SERVICE_KEY;
-  if (internalKey && typeof agentUserId === "string" && agentUserId) {
-    headers["X-Internal-Service-Key"] = internalKey;
-    headers["X-Agent-User-Id"] = agentUserId;
+      ? (transport as {
+          userId?: unknown;
+          projectId?: unknown;
+          operationId?: unknown;
+        })
+      : null;
+  const userId = typeof t?.userId === "string" && t.userId ? t.userId : null;
+  if (!userId) {
+    return {
+      success: false,
+      error: "Image generation requires an authenticated user context",
+    };
   }
 
+  const input: ImageGenerationInput = {
+    prompt,
+    format: "image",
+    generationMode: providerId ? "manual" : "auto-free",
+    ...(providerId ? { providerId: providerId as MediaProviderId } : {}),
+  };
+
   try {
-    const response = await fetch(`${url}/api/media/generate`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        prompt,
-        format: "image",
-        generationMode: "auto-free",
-        ...(providerId ? { providerId, generationMode: "manual" } : {}),
-      }),
-    });
+    const result = await generateImage(
+      {
+        userId,
+        projectId:
+          typeof t?.projectId === "string" && t.projectId
+            ? t.projectId
+            : undefined,
+        requestId:
+          typeof t?.operationId === "string" && t.operationId
+            ? `approval:${t.operationId}`
+            : undefined,
+      },
+      input,
+    );
 
-    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
-
-    if (!response.ok || !payload) {
-      const error = typeof payload?.error === "string" ? payload.error : `Generation failed (${response.status})`;
-      return { success: false, error };
-    }
-
-    if (payload.success !== true) {
-      const error = typeof payload.error === "string" ? payload.error : "Generation failed";
-      return { success: false, error };
+    if (!result.success) {
+      return {
+        success: false,
+        error: result.error,
+        code: result.code,
+        retryable: result.retryable,
+      };
     }
 
     return {
       success: true,
-      downloadUrl: payload.downloadUrl,
-      thumbUrl: payload.thumbUrl ?? null,
-      providerId: payload.providerId,
-      title: payload.title,
-      id: payload.id,
-      cost: payload.cost ?? 0,
-      free: payload.free ?? true,
-      markdown: `![${prompt}](${payload.downloadUrl})`,
+      downloadUrl: result.downloadUrl,
+      thumbUrl: result.thumbUrl ?? null,
+      providerId: result.providerId,
+      title: result.title,
+      id: result.id,
+      cost: result.cost ?? 0,
+      free: result.free ?? true,
+      markdown: `![${prompt}](${result.downloadUrl})`,
       // Tell the model how to place this image into the website project
       // instead of leaving it as a chat-only render.
       insertHint: "To place this image into the active website project, call project.insert_asset with this downloadUrl, then reference the returned sitePath in the site's HTML.",
     };
   } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : "Image generation request failed" };
+    return { success: false, error: err instanceof Error ? err.message : "Image generation failed" };
   }
 }
