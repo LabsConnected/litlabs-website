@@ -326,7 +326,7 @@ describe("A. static project deploys and returns a verified live URL", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport,
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -371,7 +371,7 @@ describe("A. static project deploys and returns a verified live URL", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport,
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     expect(result.ok).toBe(false);
@@ -416,7 +416,7 @@ describe("A. static project deploys and returns a verified live URL", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport,
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
