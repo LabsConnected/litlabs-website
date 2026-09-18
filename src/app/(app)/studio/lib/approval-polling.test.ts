@@ -490,7 +490,7 @@ describe("submitApprovalAndPoll — failure visibility and retryability", () => 
   }
 
   async function runOnce(fetchImpl: typeof fetch, decision: "approved" | "rejected" = "approved") {
-    const failed: Array<{ error: string; info?: { retryable: boolean } }> = [];
+    const failed: Array<{ error: string; info?: { retryable: boolean; expired?: boolean } }> = [];
     const completed: unknown[] = [];
     let accepted = 0;
     submitApprovalAndPoll({
