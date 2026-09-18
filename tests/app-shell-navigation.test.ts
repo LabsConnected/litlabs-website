@@ -83,20 +83,19 @@ describe("AppShell Navigation", () => {
   });
 
   describe("Secondary (account-menu) navigation", () => {
-    it("Secondary sections expose Library and Developer Tools", () => {
+    it("Secondary sections expose the trimmed account menu", () => {
       const ids = APP_NAV_SECONDARY.map((s) => s.id);
       expect(ids).toEqual(["library", "devtools"]);
       const hrefs = APP_NAV_SECONDARY.flatMap((s) => s.items.map((i) => i.href));
-      expect(hrefs).toEqual(
-        expect.arrayContaining([
-          "/library/files",
-          "/library/saved",
-          "/code",
-          "/cli",
-          "/settings/connections",
-          "/docs",
-        ]),
-      );
+      // Account menu keeps Files / Saved / Connections / Docs. Code Workspace
+      // (Projects page + footer), CLI (More menu), and Terminal (Studio) live
+      // in their own surfaces — they are not duplicated here.
+      expect(hrefs).toEqual([
+        "/library/files",
+        "/library/saved",
+        "/settings/connections",
+        "/docs",
+      ]);
     });
   });
 
