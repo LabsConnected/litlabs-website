@@ -268,6 +268,44 @@ jobs:
           fi
           echo "✅ Secret scan passed — no secrets found in source."
 
+  j2b-studio-hue-gate:
+    name: J2b Studio Hue Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI: true
+
+      - name: Build workspace deps
+        run: pnpm build:workspace-deps
+        env:
+          CI: true
+
+      # J2b: signed-in Studio hue gate — BLOCKING.
+      # The quality judge's blind spot was litlabs.net's own signed-in Studio
+      # surfaces (a cyan-blue Generate button in ImageTool and an orange-500
+      # Generate button in NeuralImagingStudio shipped despite the lime
+      # decision). PR-G (#394) recolored both, so this ships blocking
+      # directly — no report-only phase. (Larry: "Build J2b now", 2026-09-18.)
+      # Credential-free by design: static + structural assertions against the
+      # real component sources — no Clerk test user, no browser in CI.
+      - name: Run J2b hue gate
+        run: npx vitest run src/lib/design/__tests__/studio-hue-gate.test.ts src/lib/design/__tests__/accent-token-parity.test.ts src/context/__tests__/theme-default-accent.test.ts
+        env:
+          CI: true
+
   litt-shell:
     name: LiTT Shell Type Check and Frontend Build
     runs-on: ubuntu-latest
