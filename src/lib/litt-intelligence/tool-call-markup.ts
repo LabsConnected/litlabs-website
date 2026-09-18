@@ -11,6 +11,7 @@
  *   <dots_function_call>…</dots_function_call>
  *   ```tool_call {"name": "files.read", "arguments": {…}} ```
  *   {"name": "files.read", "arguments": {…}}          (bare JSON body)
+ *   files.write(path="index.html", …)                (pseudo-function-call)
  *
  * Production defect: such a response was persisted as normal assistant
  * prose and the run finished `completed` even though no tool executed —
@@ -43,9 +44,17 @@ const FENCED_BLOCK_RE = /```(?:tool_call|function_call|json)?\s*\n([\s\S]*?)```/
 
 const ARG_STRUCTURE_RE = /<arg_key>|<arg_value>|<parameter|<antml:parameter|"arguments"\s*:|"parameters"\s*:|"command"\s*:/;
 
+/** `tool.name(` pseudo-function calls — the `[\s>({\["'`]` lead keeps
+ *  `v1.2.3`-style version dots and `foo.bar(` glued to a word from
+ *  matching; the name itself must still resolve to a registered tool. */
+const FUNCTION_CALL_RE = /(^|[\s>({\["'`])([a-z][a-z0-9_]*)\.([a-z][a-z0-9_]*)\s*\(/gim;
+/** What follows the paren must look like call arguments: a named arg
+ *  (`path=`, `content =`), a quoted literal, or a brace/bracket payload. */
+const ARG_SIGNATURE_RE = /^\s*(?:[a-z_][a-z0-9_]*\s*=|["'`{[])/i;
+
 export interface ToolCallMarkupHit {
   /** Which surface produced the hit — for diagnostics, never secrets. */
-  kind: "envelope" | "fenced_json" | "bare_json" | "truncated_envelope";
+  kind: "envelope" | "fenced_json" | "bare_json" | "truncated_envelope" | "function_call_syntax";
   /** The matched tool id when one was recognized. */
   toolId?: string;
 }
@@ -168,6 +177,28 @@ export function findToolCallMarkup(
     } catch {
       // Not JSON — not markup.
     }
+  }
+
+  // 4. Pseudo-function-call syntax: `files.write(path="index.html", …)`.
+  //    Models primed with tool-invocation instructions but given no
+  //    structured tools echo the call as code-like text. The name must
+  //    resolve to a REGISTERED tool id and the paren must carry an
+  //    argument signature (named arg `k=` or a quoted literal) — so
+  //    `node.js docs`, `v1.2.3`, or `foo.bar(baz=1)` for an unknown tool
+  //    never count. Markup quoted inside inline code is prose, not
+  //    protocol, and is skipped.
+  for (const m of text.matchAll(FUNCTION_CALL_RE)) {
+    const start = m.index ?? 0;
+    const whole = m[0];
+    // Skip when quoted inside inline code — `like files.write(path="x")`.
+    // The lead char is part of the match, so the tool name starts after it.
+    const nameStart = start + (m[1]?.length ?? 0);
+    if (text[nameStart - 1] === "`") continue;
+    const toolId = resolveToolId(`${m[2]}.${m[3]}`, knownToolIds);
+    if (!toolId) continue;
+    const afterParen = text.slice(start + whole.length, start + whole.length + 160);
+    if (!ARG_SIGNATURE_RE.test(afterParen)) continue;
+    return { kind: "function_call_syntax", toolId };
   }
 
   return null;

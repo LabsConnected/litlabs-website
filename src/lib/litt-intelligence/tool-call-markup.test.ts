@@ -351,3 +351,43 @@ describe("stripEnvelopeMarkup", () => {
     );
   });
 });
+describe("findToolCallMarkup — pseudo-function-call syntax", () => {
+  // The exact shape observed in production: a model primed with
+  // tool-invocation instructions but given no structured tools echoed the
+  // call as code-like text, which was persisted as a completed answer.
+  const PRODUCTION_FN_CALL =
+    'Sure — writing it now.\nfiles.write(path="index.html", content=`<!DOCTYPE html><html>…';
+
+  it("flags the production files.write pseudo-call", () => {
+    const hit = findToolCallMarkup(PRODUCTION_FN_CALL, TOOLS);
+    expect(hit).not.toBeNull();
+    expect(hit).toMatchObject({ kind: "function_call_syntax", toolId: "files.write" });
+  });
+
+  it("flags a closed pseudo-call mid-prose", () => {
+    const hit = findToolCallMarkup(
+      "Done — I ran terminal.execute(command='ls') for you.",
+      TOOLS,
+    );
+    expect(hit).toMatchObject({ kind: "function_call_syntax", toolId: "terminal.execute" });
+  });
+
+  it("ignores pseudo-calls naming unregistered tools", () => {
+    expect(findToolCallMarkup("foo.bar(baz=1) is not a thing.", TOOLS)).toBeNull();
+  });
+
+  it("ignores version numbers and dotted prose", () => {
+    expect(findToolCallMarkup("upgraded to v1.2.3 today", TOOLS)).toBeNull();
+    expect(findToolCallMarkup("see the node.js docs", TOOLS)).toBeNull();
+  });
+
+  it("ignores a bare tool mention with no argument signature", () => {
+    expect(findToolCallMarkup("I considered files.write but decided otherwise.", TOOLS)).toBeNull();
+  });
+
+  it("preserves pseudo-calls quoted inside inline code", () => {
+    expect(
+      findToolCallMarkup("Models sometimes emit `files.write(path='x')` instead.", TOOLS),
+    ).toBeNull();
+  });
+});

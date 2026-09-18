@@ -28,6 +28,7 @@ import {
 import { runAgentLoop } from "@/lib/litt-intelligence/agent-loop";
 import { runAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
 import { findToolCallMarkup, stripToolCallMarkupText } from "@/lib/litt-intelligence/tool-call-markup";
+import { withV1NoToolsDirective } from "@/lib/litt-intelligence/text-lane-guard";
 import { runLaunchFlow, type LaunchFlowResult } from "@/lib/litt-intelligence/launch-flow";
 import { shouldEnableQualityLoop } from "@/lib/litt-intelligence/quality-loop-flow";
 import { ProgressEmitter, type ProgressEvent } from "@/lib/litt-intelligence/progress-events";
@@ -968,10 +969,16 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           // loss never touches this signal.
           let cancelledV1 = executionAbort.signal.aborted;
           let r: Awaited<ReturnType<typeof streamText>> | null = null;
+          // The V1 text-only lane attaches NO tools to the model call, but
+          // the shared runtime-context block teaches tool-invocation tokens
+          // (files.write, path="index.html", …) that the model may echo as
+          // text — markup that can never execute here. State the constraint
+          // explicitly so the model answers in plain words instead.
+          const v1TextPrompt = withV1NoToolsDirective(finalPrompt);
           if (!cancelledV1) {
             try {
               r = await streamText(
-                finalPrompt,
+                v1TextPrompt,
                 (chunk) => {
                   // Suppress late provider callbacks after an abort — a
                   // cancelled run must not keep mutating the response or
