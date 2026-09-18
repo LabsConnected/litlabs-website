@@ -1,30 +1,29 @@
 /**
  * Deployment orchestration for the LiTT launch flow.
  *
- * Validates required credentials up front, triggers a Railway or Vercel
+ * Railway is the deployment provider. There is no Vercel fallback: a
+ * provider that is not configured is reported as unconfigured, never
+ * silently substituted.
+ *
+ * Validates required credentials up front, triggers a Railway
  * deployment, polls for status, and verifies the production URL. All
  * failures surface the real cause — never a fake success message.
  */
 
 import "server-only";
 
-export type DeployProvider = "railway" | "vercel";
+/** The deployment provider. Railway only — no fallbacks, no assumptions. */
+export type DeployProvider = "railway";
 
 export interface DeployEnvironmentConfig {
   provider: DeployProvider;
   token: string;
-  /** Railway service ID or Vercel project ID. */
+  /** Railway service ID. */
   projectId: string;
   /** Railway project ID (optional, for GraphQL context). */
   railwayProjectId?: string;
   /** Railway environment ID (optional). */
   environmentId?: string;
-  /** Vercel team ID (optional). */
-  teamId?: string;
-  /** Git source for Vercel deployments: "owner/repo". */
-  repo?: string;
-  /** Git ref for Vercel deployments. */
-  ref?: string;
   /** The production URL to verify after deployment. */
   productionUrl?: string;
 }
@@ -63,13 +62,13 @@ export interface DeployFlowOptions {
 }
 
 const RAILWAY_GRAPHQL_URL = "https://backboard.railway.com/graphql/v2";
-const VERCEL_API_URL = "https://api.vercel.com";
 const DEFAULT_POLL_INTERVAL_MS = 10_000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 36; // 6 minutes
 
 /**
  * Resolve deployment configuration from environment variables.
- * Returns a truthful error if neither Railway nor Vercel is configured.
+ * Railway only. Returns a truthful error when Railway is not configured —
+ * there is no fallback provider.
  */
 export function resolveDeployConfig(
   env: Record<string, string | undefined> = process.env,
@@ -100,27 +99,11 @@ export function resolveDeployConfig(
     };
   }
 
-  const vercelToken = env.VERCEL_TOKEN;
-  const vercelProjectId = env.VERCEL_PROJECT_ID;
-
-  if (vercelToken && vercelProjectId) {
-    return {
-      ok: true,
-      config: {
-        provider: "vercel",
-        token: vercelToken,
-        projectId: vercelProjectId,
-        teamId: env.VERCEL_TEAM_ID,
-        productionUrl: env.DEPLOY_PRODUCTION_URL,
-      },
-    };
-  }
-
   return {
     ok: false,
     error:
-      "Deployment is not configured. Set RAILWAY_API_TOKEN + RAILWAY_SERVICE_ID " +
-      "or VERCEL_TOKEN + VERCEL_PROJECT_ID, plus DEPLOY_PRODUCTION_URL for verification.",
+      "Railway deployment is not configured. " +
+      "Set RAILWAY_API_TOKEN, RAILWAY_SERVICE_ID, and RAILWAY_ENVIRONMENT_ID.",
   };
 }
 
@@ -249,101 +232,6 @@ async function pollRailwayDeployment(
   return { status: "TIMEOUT", ok: false };
 }
 
-/**
- * Trigger a Vercel production deployment.
- */
-async function triggerVercelDeployment(
-  config: DeployEnvironmentConfig,
-  fetchFn: typeof fetch,
-): Promise<TriggerResult> {
-  const url = new URL(`${VERCEL_API_URL}/v13/deployments`);
-  if (config.teamId) {
-    url.searchParams.set("teamId", config.teamId);
-  }
-
-  const body: Record<string, unknown> = {
-    name: config.projectId,
-    project: config.projectId,
-    target: "production",
-  };
-
-  if (config.repo && config.ref) {
-    const [org, repo] = config.repo.split("/");
-    if (org && repo) {
-      body.gitSource = {
-        type: "github",
-        org,
-        repo,
-        ref: config.ref,
-      };
-    }
-  }
-
-  const resp = await fetchFn(url.toString(), {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-
-  const data = (await resp.json().catch(() => ({}))) as Record<string, unknown>;
-
-  if (!resp.ok) {
-    const error = data.error as { message?: string } | undefined;
-    const errorMessage = error?.message ?? JSON.stringify(data.error ?? "Unknown error");
-    throw new Error(`Vercel deploy failed (${resp.status}): ${errorMessage}`);
-  }
-
-  const deployment = data as { id?: string; url?: string; state?: string; status?: string };
-  if (!deployment.id) {
-    throw new Error("Vercel deploy did not return a deployment ID");
-  }
-
-  return { id: deployment.id, status: deployment.state ?? deployment.status ?? "QUEUED", url: deployment.url };
-}
-
-/**
- * Poll Vercel deployment status.
- */
-async function pollVercelDeployment(
-  config: DeployEnvironmentConfig,
-  deploymentId: string,
-  fetchFn: typeof fetch,
-  signal?: AbortSignal,
-  pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
-  maxAttempts = DEFAULT_MAX_POLL_ATTEMPTS,
-): Promise<{ status: string; ok: boolean }> {
-  const url = new URL(`${VERCEL_API_URL}/v13/deployments/${encodeURIComponent(deploymentId)}`);
-  if (config.teamId) {
-    url.searchParams.set("teamId", config.teamId);
-  }
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    checkSignal(signal);
-    await sleep(pollIntervalMs);
-    checkSignal(signal);
-
-    const resp = await fetchFn(url.toString(), {
-      headers: { Authorization: `Bearer ${config.token}` },
-    });
-
-    const data = (await resp.json().catch(() => ({}))) as Record<string, unknown>;
-    const state = (data.state ?? data.status ?? "QUEUED") as string;
-    const upper = state.toUpperCase();
-
-    if (["READY", "COMPLETED", "LIVE"].includes(upper)) {
-      return { status: upper, ok: true };
-    }
-    if (["ERROR", "FAILED", "CANCELED", "CANCELLED"].includes(upper)) {
-      return { status: upper, ok: false };
-    }
-  }
-
-  return { status: "TIMEOUT", ok: false };
-}
-
 function deriveProductionUrl(config: DeployEnvironmentConfig, deploymentUrl?: string): string | undefined {
   if (deploymentUrl) {
     return deploymentUrl.startsWith("http") ? deploymentUrl : `https://${deploymentUrl}`;
@@ -443,15 +331,16 @@ export async function runDeployFlow(options: DeployFlowOptions = {}): Promise<De
   try {
     checkSignal(signal);
 
-    const triggered =
-      config.provider === "railway"
-        ? await triggerRailwayDeployment(config, fetchFn)
-        : await triggerVercelDeployment(config, fetchFn);
+    const triggered = await triggerRailwayDeployment(config, fetchFn);
 
-    const pollResult =
-      config.provider === "railway"
-        ? await pollRailwayDeployment(config, triggered.id, fetchFn, signal, pollIntervalMs, maxAttempts)
-        : await pollVercelDeployment(config, triggered.id, fetchFn, signal, pollIntervalMs, maxAttempts);
+    const pollResult = await pollRailwayDeployment(
+      config,
+      triggered.id,
+      fetchFn,
+      signal,
+      pollIntervalMs,
+      maxAttempts,
+    );
 
     if (!pollResult.ok) {
       return {

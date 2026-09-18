@@ -22,11 +22,11 @@ describe("Deploy: resolveDeployConfig", () => {
     const result = resolveDeployConfig();
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain("Deployment is not configured");
+      expect(result.error).toContain("Railway deployment is not configured");
     }
   });
 
-  it("prefers Railway when both Railway and Vercel envs are present", () => {
+  it("uses Railway and ignores Vercel envs (no fallback provider)", () => {
     process.env.RAILWAY_API_TOKEN = "railway-token";
     process.env.RAILWAY_SERVICE_ID = "svc-1";
     process.env.RAILWAY_ENVIRONMENT_ID = "env-1";
@@ -43,18 +43,16 @@ describe("Deploy: resolveDeployConfig", () => {
     }
   });
 
-  it("falls back to Vercel when Railway is not configured", () => {
+  it("Vercel-only envs fail closed (no Vercel fallback)", () => {
     delete process.env.RAILWAY_API_TOKEN;
     delete process.env.RAILWAY_SERVICE_ID;
     process.env.VERCEL_TOKEN = "vercel-token";
     process.env.VERCEL_PROJECT_ID = "prj-1";
 
     const result = resolveDeployConfig();
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.config.provider).toBe("vercel");
-      expect(result.config.token).toBe("vercel-token");
-      expect(result.config.projectId).toBe("prj-1");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("Railway deployment is not configured");
     }
   });
 
@@ -91,7 +89,7 @@ describe("Deploy: runDeployFlow", () => {
 
     const result = await runDeployFlow();
     expect(result.success).toBe(false);
-    expect(result.error).toContain("Deployment is not configured");
+    expect(result.error).toContain("Railway deployment is not configured");
   });
 
   it("Railway successful deploy and verify", async () => {
@@ -149,59 +147,15 @@ describe("Deploy: runDeployFlow", () => {
     expect(result.error).toContain("FAILED");
   });
 
-  it("Vercel successful deploy", async () => {
-    process.env.VERCEL_TOKEN = "test-token";
-    process.env.VERCEL_PROJECT_ID = "prj-123";
-    process.env.DEPLOY_PRODUCTION_URL = "https://example.vercel.app";
-
-    const fetchFn = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ id: "dep-v1", url: "https://example.vercel.app", state: "READY" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ state: "READY" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        text: async () => "ok",
-      });
-
-    const result = await runDeployFlow({ fetchFn, poll: { intervalMs: 10, maxAttempts: 1 } });
-
-    expect(result.success).toBe(true);
-    expect(result.deploymentId).toBe("dep-v1");
-    expect(result.productionUrl).toBe("https://example.vercel.app");
-  });
-
-  it("Vercel failed deploy", async () => {
-    process.env.VERCEL_TOKEN = "test-token";
-    process.env.VERCEL_PROJECT_ID = "prj-123";
-
-    const fetchFn = vi.fn().mockResolvedValueOnce({
-      ok: false,
-      status: 403,
-      json: async () => ({ error: { message: "Unauthorized" } }),
-    });
-
-    const result = await runDeployFlow({ fetchFn });
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("Unauthorized");
-  });
-
   it("token never appears in returned errors", async () => {
-    process.env.VERCEL_TOKEN = "supersecret-token-xyz";
-    process.env.VERCEL_PROJECT_ID = "prj-123";
+    process.env.RAILWAY_API_TOKEN = "supersecret-token-xyz";
+    process.env.RAILWAY_SERVICE_ID = "svc-123";
+    process.env.RAILWAY_ENVIRONMENT_ID = "env-123";
 
     const fetchFn = vi.fn().mockResolvedValueOnce({
       ok: false,
       status: 500,
-      json: async () => ({ error: { message: "supersecret-token-xyz is invalid" } }),
+      json: async () => ({ errors: [{ message: "supersecret-token-xyz is invalid" }] }),
     });
 
     const result = await runDeployFlow({ fetchFn });

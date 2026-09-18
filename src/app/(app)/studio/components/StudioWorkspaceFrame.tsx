@@ -33,8 +33,14 @@ interface DeploymentSummary {
   errorMessage: string | null;
 }
 
+interface HostingSummary {
+  name: string;
+  configured: boolean;
+  reason?: string | null;
+}
+
 /**
- * Publish readiness — early warnings for the static-only publish pipeline.
+ * Publish readiness — early warnings for the LiTT Hosting publish pipeline.
  *
  * Publish rejects non-static or oversized artifacts *after* the deploy
  * approval flow. This block surfaces the same failure modes beforehand,
@@ -124,11 +130,13 @@ function PublishReadinessBlock({ projectId }: { projectId: string }) {
 function DeploymentStatusSection({ projectId }: { projectId: string | null }) {
   const { getToken } = useClerkAuth();
   const [deployment, setDeployment] = useState<DeploymentSummary | null>(null);
+  const [hosting, setHosting] = useState<HostingSummary | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!projectId) {
       setDeployment(null);
+      setHosting(null);
       return;
     }
     let cancelled = false;
@@ -143,8 +151,11 @@ function DeploymentStatusSection({ projectId }: { projectId: string | null }) {
           signal: AbortSignal.timeout(15000),
         });
         if (!res.ok) return;
-        const data = await res.json().catch(() => null) as { deployment?: DeploymentSummary | null } | null;
-        if (!cancelled) setDeployment(data?.deployment ?? null);
+        const data = await res.json().catch(() => null) as { deployment?: DeploymentSummary | null; hosting?: HostingSummary | null } | null;
+        if (!cancelled) {
+          setDeployment(data?.deployment ?? null);
+          setHosting(data?.hosting ?? null);
+        }
       } catch {
         // Non-fatal — the section simply shows the last known state.
       } finally {
@@ -178,6 +189,13 @@ function DeploymentStatusSection({ projectId }: { projectId: string | null }) {
   return (
     <InspectorSection title="Deployment">
       <InspectorRow label="Status" value={statusLabel} tone={tone} />
+      {hosting ? (
+        <InspectorRow
+          label="Hosting"
+          value={hosting.configured ? hosting.name : `${hosting.name} — unavailable`}
+          tone={hosting.configured ? "muted" : "warn"}
+        />
+      ) : null}
       {/* Early publish warnings — before the user goes through approval. */}
       {(!deployment || deployment.status !== "ready") ? (
         <PublishReadinessBlock projectId={projectId} />
@@ -203,9 +221,15 @@ function DeploymentStatusSection({ projectId }: { projectId: string | null }) {
         </div>
       ) : null}
       {!deployment && !loading ? (
-        <div className="py-2 text-[10px] leading-4" style={{ color: "var(--text-muted)" }}>
-          Ask LiTT in chat to deploy this project — you&apos;ll get a live public URL here when it&apos;s ready.
-        </div>
+        hosting && !hosting.configured ? (
+          <div className="py-2 text-[10px] leading-4" style={{ color: "#fca5a5" }}>
+            {hosting.reason ?? "Publishing is unavailable right now."}
+          </div>
+        ) : (
+          <div className="py-2 text-[10px] leading-4" style={{ color: "var(--text-muted)" }}>
+            Ask LiTT in chat to deploy this project — you&apos;ll get a live public URL here when it&apos;s ready.
+          </div>
+        )
       ) : null}
     </InspectorSection>
   );

@@ -1,5 +1,5 @@
 /**
- * Publish-readiness checks — UI-side early warnings for the static-only
+ * Publish-readiness checks — UI-side early warnings for the LiTT Hosting
  * publish pipeline.
  *
  * `validateArtifact` (user-deployment.ts) rejects non-static or oversized

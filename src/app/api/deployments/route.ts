@@ -2,8 +2,50 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
+import { listLatestDeploymentsForUser } from "@/lib/deployments/deployment-store";
+import { HOSTING_DISPLAY_NAME } from "@/lib/deployments/litt-hosting";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * GET /api/deployments
+ *
+ * Returns the account's own CI/CD deployment history (`deployments`) plus
+ * the user's published sites (`sites`): the latest LiTT Hosting deployment
+ * per project, with the verified live URL when one exists.
+ *
+ * Copy rule: sites are "Published with LiTT Hosting". Infrastructure
+ * provider names never appear here.
+ */
+async function getPublishedSites(userId: string) {
+  try {
+    const latest = await listLatestDeploymentsForUser(userId);
+    if (latest.length === 0) return [];
+    const projectIds = [...new Set(latest.map((d) => d.projectId))];
+    const { data: projects } = await supabaseAdmin
+      .from("studio_projects")
+      .select("id,name")
+      .eq("user_id", userId)
+      .in("id", projectIds);
+    const names = new Map(
+      ((projects ?? []) as Array<{ id: string; name: string }>).map((p) => [p.id, p.name]),
+    );
+    return latest.map((d) => ({
+      id: d.id,
+      projectId: d.projectId,
+      projectName: names.get(d.projectId) ?? "Untitled project",
+      status: d.status,
+      hosting: HOSTING_DISPLAY_NAME,
+      liveUrl: d.status === "ready" && d.urlVerified ? d.publicUrl : null,
+      urlVerified: d.urlVerified,
+      errorMessage: d.status === "failed" ? d.errorMessage : null,
+      fileCount: d.fileCount,
+    }));
+  } catch {
+    // Sites are additive: a failure here must not break the main history.
+    return [];
+  }
+}
 
 export async function GET(req: NextRequest) {
   const { userId } = await auth(req);
@@ -52,7 +94,9 @@ export async function GET(req: NextRequest) {
     if (error) throw error;
     const deployments = data ?? [];
 
-    return NextResponse.json({ deployments, count: deployments.length });
+    const sites = await getPublishedSites(userId);
+
+    return NextResponse.json({ deployments, count: deployments.length, sites });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json(

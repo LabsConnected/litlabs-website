@@ -252,3 +252,31 @@ export async function findLatestDeploymentForProject(
   if (error || !data) return null;
   return rowToRecord(data as DeploymentRow);
 }
+
+/**
+ * The latest deployment per project for a user (newest first).
+ *
+ * Powers the "Published sites" section of the /deployments page: one row
+ * per project, showing the live LiTT Hosting URL when the deployment is
+ * ready and verified. Returns [] when storage is unavailable.
+ */
+export async function listLatestDeploymentsForUser(
+  userId: string,
+): Promise<DeploymentRecord[]> {
+  if (!supabaseAdmin) return [];
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (error || !data) return [];
+  const seen = new Set<string>();
+  const latest: DeploymentRecord[] = [];
+  for (const row of data as DeploymentRow[]) {
+    if (seen.has(row.project_id)) continue;
+    seen.add(row.project_id);
+    latest.push(rowToRecord(row));
+  }
+  return latest;
+}
