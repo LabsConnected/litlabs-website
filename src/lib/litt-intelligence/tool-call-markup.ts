@@ -9,8 +9,10 @@
  *   <tool_call>terminal\n<arg_key>command</arg_key>…</tool_call>
  *   <invoke name="files.read">…</invoke>
  *   <dots_function_call>…</dots_function_call>
+ *   <antml:invoke name="files.read">…</antml:invoke>   (antml: prefix)
  *   ```tool_call {"name": "files.read", "arguments": {…}} ```
- *   {"name": "files.read", "arguments": {…}}          (bare JSON body)
+ *   {"name": "files.read", "arguments": {…}}          (bare JSON body —
+ *     whole payload, or a balanced span mid-prose)
  *   files.write(path="index.html", …)                (pseudo-function-call)
  *
  * Production defect: such a response was persisted as normal assistant
@@ -35,8 +37,16 @@ const ENVELOPE_TAGS = [
   "function_calls",
 ] as const;
 
+/** Close-tag test shared by the envelope matchers. The `antml:` prefix is
+ *  optional on the close tag, matching the opener's optional prefix. */
+function envelopeClosedTagRe(): RegExp {
+  return new RegExp(`<\\/(?:antml:)?(?:${ENVELOPE_TAGS.join("|")})>\\s*$`, "i");
+}
+
+/** Some models namespace the envelope tags (`<antml:invoke …>` instead of
+ *  `<invoke …>`); the prefix is optional on both the open and close tags. */
 const ENVELOPE_RE = new RegExp(
-  `<(${ENVELOPE_TAGS.join("|")})(\\s[^>]*)?>([\\s\\S]*?)(?:<\\/(?:${ENVELOPE_TAGS.join("|")})>|$)`,
+  `<(?:antml:)?(${ENVELOPE_TAGS.join("|")})(\\s[^>]*)?>([\\s\\S]*?)(?:<\\/(?:antml:)?(?:${ENVELOPE_TAGS.join("|")})>|$)`,
   "gi",
 );
 
@@ -149,7 +159,7 @@ export function findToolCallMarkup(
     const toolId = payloadMentionsTool(payload, candidates) ?? payloadMentionsTool(m[2] ?? "", candidates);
     const hasArgs = ARG_STRUCTURE_RE.test(payload);
     if (toolId || hasArgs) {
-      const truncated = !new RegExp(`<\\/(?:${ENVELOPE_TAGS.join("|")})>\\s*$`, "i").test(openTag);
+      const truncated = !envelopeClosedTagRe().test(openTag);
       return { kind: truncated ? "truncated_envelope" : "envelope", toolId };
     }
   }
@@ -163,7 +173,8 @@ export function findToolCallMarkup(
 
   // 3. Bare JSON object as the entire payload.
   const trimmed = text.trim();
-  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+  const wholeIsJson = trimmed.startsWith("{") && trimmed.endsWith("}");
+  if (wholeIsJson) {
     const toolId = jsonPayloadToolId(trimmed, candidates);
     if (toolId) return { kind: "bare_json", toolId };
     // A response that is entirely an action envelope is an attempted
@@ -177,6 +188,27 @@ export function findToolCallMarkup(
     } catch {
       // Not JSON — not markup.
     }
+  }
+
+  // 3b. Balanced JSON spans mid-prose. Shape 3 requires the whole trimmed
+  // text to be `{…}`; a model embedding the envelope inside prose evades
+  // it. Scan each balanced span and apply the same recognized-tool-id
+  // gate — prose that merely mentions JSON is not flagged. Spans quoted
+  // inside inline code are examples, not invocations. The whole-payload
+  // span was already handled above; nested spans inside it still get a
+  // pass.
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== "{") continue;
+    const span = balancedBraceSpan(text, i);
+    if (!span) continue;
+    const end = i + span.length;
+    const isWholePayload = wholeIsJson && text.slice(0, i).trim() === "" && text.slice(end).trim() === "";
+    const quoted = text[i - 1] === "`" && text[end] === "`";
+    if (!isWholePayload && !quoted) {
+      const toolId = jsonPayloadToolId(span, candidates);
+      if (toolId) return { kind: "bare_json", toolId };
+    }
+    i = end - 1;
   }
 
   // 4. Pseudo-function-call syntax: `files.write(path="index.html", …)`.
@@ -458,7 +490,7 @@ export function recoverTextToolCalls(
     const whole = m[0];
     // Skip markup quoted inside inline code — `like <tool_call>x</tool_call>`.
     if (text[start - 1] === "`" && text[start + whole.length] === "`") continue;
-    const truncated = !new RegExp(`<\\/(?:${ENVELOPE_TAGS.join("|")})>\\s*$`, "i").test(whole);
+    const truncated = !envelopeClosedTagRe().test(whole);
     const parsed = truncated ? null : parseEnvelopePayload(m[2] ?? "", m[3] ?? "");
     const payload = `${m[2] ?? ""}\n${m[3] ?? ""}`;
     const intent =
