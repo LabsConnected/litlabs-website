@@ -464,3 +464,179 @@ describe("approval lifecycle — card state machine (useExecutionStore)", () => 
     expect(eventsAfter).toBe(eventsBefore);
   });
 });
+
+/**
+ * Regression tests for the 2026-09-18 approval-lifecycle re-fix.
+ *
+ * The defect: handleResolveApproval cleared the approval card BEFORE the
+ * POST completed, so a non-2xx approval POST silently cleared the UI —
+ * the user saw nothing, the error vanished, and the model re-requested
+ * the approval (infinite loop). The fix keeps the card mounted through
+ * submitting/executing and lands failures visibly on the card with a
+ * Retry affordance (re-POSTs the same pausedRunId — the server re-runs
+ * the same record, never a new approval or a new billing operation).
+ */
+describe("submitApprovalAndPoll — failure visibility and retryability", () => {
+  function jsonResp(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  function queueHttp(...responses: Response[]) {
+    const queue = [...responses];
+    return vi.fn(async () => queue.length > 0 ? queue.shift()! : jsonResp({ error: "gone" }, 404)) as unknown as typeof fetch;
+  }
+
+  async function runOnce(fetchImpl: typeof fetch, decision: "approved" | "rejected" = "approved") {
+    const failed: Array<{ error: string; info?: { retryable: boolean } }> = [];
+    const completed: unknown[] = [];
+    let accepted = 0;
+    submitApprovalAndPoll({
+      conversationId: "conv-1",
+      pausedRunId: "run-1",
+      decision,
+      onAccepted: () => { accepted += 1; },
+      onCompleted: (r) => completed.push(r),
+      onFailed: (error, info) => failed.push({ error, info }),
+      fetchImpl,
+      sleep: noSleep,
+    });
+    for (let i = 0; i < 50 && failed.length === 0 && completed.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    return { failed, completed, accepted };
+  }
+
+  it("a non-2xx POST surfaces the backend error as retryable — the card must stay, not silently clear", async () => {
+    const fetchImpl = queueHttp(jsonResp({ error: "Resume worker crashed" }, 500));
+    const { failed, completed } = await runOnce(fetchImpl);
+
+    expect(completed).toHaveLength(0);
+    expect(failed).toHaveLength(1);
+    expect(failed[0].error).toBe("Resume worker crashed");
+    expect(failed[0].info?.retryable).toBe(true);
+    // No polling after a rejected POST — exactly one request went out.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("a 4xx POST is not retryable — retrying the same request cannot succeed", async () => {
+    const fetchImpl = queueHttp(jsonResp({ error: "Conversation mismatch" }, 403));
+    const { failed } = await runOnce(fetchImpl);
+
+    expect(failed).toHaveLength(1);
+    expect(failed[0].error).toBe("Conversation mismatch");
+    expect(failed[0].info?.retryable).toBe(false);
+  });
+
+  it("an already-failed run on the 202 response is retryable via the same pausedRunId", async () => {
+    const fetchImpl = queueHttp(
+      jsonResp({ resolved: true, decision: "approved", status: "failed", runStatus: "failed", runError: "image provider timed out" }, 202),
+    );
+    const { failed } = await runOnce(fetchImpl);
+
+    expect(failed).toHaveLength(1);
+    expect(failed[0].error).toBe("image provider timed out");
+    expect(failed[0].info?.retryable).toBe(true);
+  });
+
+  it("an expired gate is not retryable — the gate is gone", async () => {
+    const fetchImpl = queueHttp(
+      jsonResp({ error: "Approval could not be resolved (expired or already resolved)" }, 409),
+      jsonResp({ status: "expired", runStatus: null }),
+    );
+    const { failed } = await runOnce(fetchImpl);
+
+    expect(failed).toHaveLength(1);
+    expect(failed[0].error).toContain("expired");
+    expect(failed[0].info?.retryable).toBe(false);
+  });
+});
+
+describe("approval lifecycle — card phase machine (useExecutionStore)", () => {
+  async function freshStore() {
+    const { useExecutionStore } = await import("../stores/useExecutionStore");
+    const exec = useExecutionStore.getState();
+    exec.reset();
+    return exec;
+  }
+
+  function mountGate(exec: { setPendingApproval: (a: { toolId: string; reason: string; pausedRunId: string }) => void }) {
+    exec.setPendingApproval({
+      toolId: "image.generate",
+      reason: "Generate an image",
+      pausedRunId: "run-9",
+    });
+  }
+
+  it("the card stays mounted through submitting and executing — it only unmounts on a terminal state", async () => {
+    const { useExecutionStore } = await import("../stores/useExecutionStore");
+    const exec = await freshStore();
+    mountGate(exec);
+
+    exec.beginApprovalSubmit();
+    let s = useExecutionStore.getState();
+    expect(s.pendingApproval?.pausedRunId).toBe("run-9");
+    expect(s.approvalPhase).toBe("submitting");
+
+    exec.approvalAccepted();
+    s = useExecutionStore.getState();
+    expect(s.pendingApproval?.pausedRunId).toBe("run-9");
+    expect(s.approvalPhase).toBe("executing");
+
+    // Terminal: approved + completed → the card unmounts.
+    exec.resolveApproval("approved");
+    s = useExecutionStore.getState();
+    expect(s.pendingApproval).toBeNull();
+    expect(s.approvalPhase).toBe("idle");
+  });
+
+  it("a failed approval keeps the card mounted with the backend error and retry state", async () => {
+    const { useExecutionStore } = await import("../stores/useExecutionStore");
+    const exec = await freshStore();
+    mountGate(exec);
+
+    exec.beginApprovalSubmit();
+    exec.failApproval("Resume worker crashed", true);
+
+    const s = useExecutionStore.getState();
+    expect(s.pendingApproval?.pausedRunId).toBe("run-9");
+    expect(s.approvalPhase).toBe("failed");
+    expect(s.approvalError).toBe("Resume worker crashed");
+    expect(s.approvalRetryable).toBe(true);
+  });
+
+  it("retry re-arms the card to submitting and clears the error — no auto re-request happens by itself", async () => {
+    const { useExecutionStore } = await import("../stores/useExecutionStore");
+    const exec = await freshStore();
+    mountGate(exec);
+
+    exec.failApproval("boom", true);
+    exec.beginApprovalSubmit();
+
+    const s = useExecutionStore.getState();
+    expect(s.approvalPhase).toBe("submitting");
+    expect(s.approvalError).toBeNull();
+    expect(s.pendingApproval?.pausedRunId).toBe("run-9");
+  });
+
+  it("a fresh gate resets the phase machine", async () => {
+    const { useExecutionStore } = await import("../stores/useExecutionStore");
+    const exec = await freshStore();
+    mountGate(exec);
+    exec.failApproval("boom", false);
+
+    exec.setPendingApproval({
+      toolId: "project.deploy",
+      reason: "Deploy",
+      pausedRunId: "run-10",
+    });
+
+    const s = useExecutionStore.getState();
+    expect(s.pendingApproval?.pausedRunId).toBe("run-10");
+    expect(s.approvalPhase).toBe("idle");
+    expect(s.approvalError).toBeNull();
+    expect(s.approvalRetryable).toBe(true);
+  });
+});

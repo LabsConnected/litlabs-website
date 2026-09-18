@@ -117,3 +117,71 @@ describe("ApprovalCard", () => {
     expect(screen.queryByTestId("approval-deny")).toBeNull();
   });
 });
+
+describe("ApprovalCard — approval lifecycle phases", () => {
+  it("disables Approve/Deny and shows submitting state while the POST is in flight", () => {
+    const onResolve = vi.fn();
+    render(
+      <ApprovalCard approval={baseApproval} onResolve={onResolve} phase="submitting" />
+    );
+    expect(screen.getByTestId("approval-status").textContent).toContain("Submitting");
+    expect(screen.getByTestId("approval-approve")).toHaveProperty("disabled", true);
+    expect(screen.getByTestId("approval-deny")).toHaveProperty("disabled", true);
+    // The card is still mounted — nothing silently cleared.
+    expect(screen.getByTestId("approval-card")).toBeTruthy();
+  });
+
+  it("shows the executing state while the resumed run is running", () => {
+    const onResolve = vi.fn();
+    render(
+      <ApprovalCard approval={baseApproval} onResolve={onResolve} phase="executing" />
+    );
+    expect(screen.getByTestId("approval-status").textContent).toContain("running");
+    expect(screen.getByTestId("approval-card")).toBeTruthy();
+  });
+
+  it("shows the backend error and a Retry button on failure — never a silent clear", () => {
+    const onRetry = vi.fn();
+    const onResolve = vi.fn();
+    render(
+      <ApprovalCard
+        approval={baseApproval}
+        onResolve={onResolve}
+        phase="failed"
+        error="Resume worker crashed"
+        onRetry={onRetry}
+      />
+    );
+    const err = screen.getByTestId("approval-error");
+    expect(err.textContent).toContain("Resume worker crashed");
+    // The decision buttons are gone — the gate was consumed; Retry is the path.
+    expect(screen.queryByTestId("approval-approve")).toBeNull();
+    expect(screen.queryByTestId("approval-deny")).toBeNull();
+    fireEvent.click(screen.getByTestId("approval-retry"));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(onResolve).not.toHaveBeenCalled();
+  });
+
+  it("omits the Retry button when the failure is not retryable", () => {
+    render(
+      <ApprovalCard
+        approval={baseApproval}
+        phase="failed"
+        error="This approval expired before it could be resumed."
+        retryable={false}
+        onRetry={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId("approval-error")).toBeTruthy();
+    expect(screen.queryByTestId("approval-retry")).toBeNull();
+    expect(screen.getByText("This approval can no longer be retried.")).toBeTruthy();
+  });
+
+  it("keeps the default idle rendering unchanged", () => {
+    const onResolve = vi.fn();
+    render(<ApprovalCard approval={baseApproval} onResolve={onResolve} />);
+    expect(screen.getByTestId("approval-approve")).toHaveProperty("disabled", false);
+    expect(screen.queryByTestId("approval-status")).toBeNull();
+    expect(screen.queryByTestId("approval-error")).toBeNull();
+  });
+});

@@ -449,3 +449,42 @@ export async function expireStaleRuns(): Promise<number> {
 }
 
 export const APPROVAL_TTL = APPROVAL_TTL_MS;
+
+/**
+ * Reset a failed approved run for a controlled retry.
+ *
+ * Atomically transitions `status='approved' AND run_status='failed'` back
+ * to the not-yet-started state (run_status NULL, errors cleared), so the
+ * resume endpoint re-runs the SAME approval record — no new approval, no
+ * new billing operation (the shared image service replays on the stable
+ * requestId). Step 7's markRunProcessing then claims the execution exactly
+ * as it does for a freshly approved run, so a retried run flows through
+ * the identical downstream machinery.
+ *
+ * Returns true when a row was reset; false when the record is not in the
+ * approved+failed state (already handled, still processing, or unknown) —
+ * the caller must not retry then.
+ */
+export async function resetRunForRetry(
+  pausedRunId: string,
+  userId: string,
+): Promise<boolean> {
+  if (!supabaseAdmin) return false;
+
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .update({
+      run_status: null,
+      run_error: null,
+      run_started_at: null,
+      run_completed_at: null,
+    })
+    .eq("id", pausedRunId)
+    .eq("user_id", userId)
+    .eq("status", "approved")
+    .eq("run_status", "failed")
+    .select("id");
+
+  if (error) return false;
+  return (data?.length ?? 0) > 0;
+}
