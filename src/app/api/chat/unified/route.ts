@@ -39,6 +39,8 @@ interface UnifiedChatRequest {
   category?: string;
   stream?: boolean;
   simulateResponse?: boolean;
+  /** Client-generated idempotency key — retries with the same id never double-charge. */
+  requestId?: string;
 }
 
 function buildPrompt(
@@ -327,6 +329,7 @@ async function handleSimpleChat(body: UnifiedChatRequest, userId: string | null)
 async function authorizeAgentRun(
   clerkId: string,
   agentSlug: string,
+  requestId?: string,
 ): Promise<{ idempotencyKey: string } | NextResponse> {
   const entitlement = await resolveAgentEntitlement({ clerkId, agentSlug });
 
@@ -345,7 +348,7 @@ async function authorizeAgentRun(
   }
 
   // Pre-charge LiTTBits (atomic, idempotent). Free agents skip charging.
-  const idempotencyKey = `agentrun:${clerkId}:${agentSlug}:${Date.now()}`;
+  const idempotencyKey = `agentrun:${clerkId}:${agentSlug}:${requestId ?? crypto.randomUUID()}`;
   const charge = await chargeAgentRun({ clerkId, agentSlug, idempotencyKey });
   if (charge.error) {
     return NextResponse.json(
@@ -386,7 +389,7 @@ async function handler(req: NextRequest) {
     }
 
     const agentSlug = (body.agentSlug || body.agent || "litt") as string;
-    const authz = await authorizeAgentRun(clerkId, agentSlug);
+    const authz = await authorizeAgentRun(clerkId, agentSlug, body.requestId);
     if (authz instanceof NextResponse) {
       return authz;
     }

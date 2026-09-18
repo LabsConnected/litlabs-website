@@ -11,6 +11,8 @@ import {
   completeGenerationJob,
 } from "@/lib/generation/jobs";
 import { resolveInternalUserId } from "@/lib/generation/identity";
+import { calculateRetailBits } from "@/lib/generation/cost-engine";
+import { buildChargeRating } from "@/lib/billing/canonical-pricing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,7 +48,10 @@ async function handler(req: NextRequest) {
   }
 
   try {
-    const { imageUrl, prompt, parentAssetId } = await req.json();
+    const { imageUrl, prompt, parentAssetId, requestId: clientRequestId } = await req.json();
+    // Stable key for the debit + job row — client retries with the same
+    // requestId can never double-charge.
+    const requestId = clientRequestId || crypto.randomUUID();
     if (!imageUrl?.startsWith("https://"))
       return NextResponse.json({ error: "imageUrl must be a public HTTPS URL" }, { status: 400 });
     if (!prompt?.trim())
@@ -101,12 +106,27 @@ async function handler(req: NextRequest) {
     if (exempt) {
       try { balance = (await getCreditBalances(userId)).total; } catch { balance = null; }
     } else {
+      const costResult = calculateRetailBits({
+        modality: "image",
+        provider: "gemini",
+        model,
+      });
       const reservation = await adjustWalletBalance({
         clerkId: userId,
         amount: -COST,
         type: "spend",
         reason: `image-edit: ${prompt.slice(0, 60)}`,
-        idempotencyKey: `imgedit_${userId}_${Date.now()}`,
+        idempotencyKey: `imgedit:charge:${requestId}`,
+        rating: buildChargeRating({
+          capability: "image",
+          provider: "gemini",
+          model,
+          providerCostMicros: costResult.providerCostCents * 10_000,
+          bitsCharged: COST,
+          billingClass: "flat",
+          lane: "flat",
+        }),
+        usage: { imageCount: 1 },
       });
       balance = reservation.balance;
     }
@@ -156,7 +176,7 @@ async function handler(req: NextRequest) {
           provider: "gemini",
           model,
           prompt: prompt.trim(),
-          requestId: `imgedit_${userId}_${Date.now()}`,
+          requestId,
           littBitsCharged: exempt ? 0 : COST,
           metadata: {
             durableUrl,

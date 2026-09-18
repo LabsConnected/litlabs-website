@@ -15,6 +15,7 @@
 import "server-only";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { calculateLlmCost, isShadowMode, type CostCalculation } from "@/lib/llm-cost-engine";
+import { buildChargeRating, recordChargeEvidence } from "@/lib/billing/canonical-pricing";
 import { isOwnerClerkId, isBillingExempt, isOwnerWithinSpendCeiling, OWNER_SPEND_CEILING_USD, type SimulatedPlan } from "@/lib/owner";
 
 export interface LlmBillingInput {
@@ -243,6 +244,30 @@ export async function chargeLlmUsage(
   }
 
   await recordUsage(input, cost, balance, true);
+
+  // Canonical pricing evidence — stamps the ledger row with the pricing
+  // version + provider cost and writes the usage/rating evidence chain.
+  // Best-effort; never blocks the billing result.
+  if (!replayed) {
+    await recordChargeEvidence(admin, {
+      userId: user.id,
+      idempotencyKey,
+      rating: buildChargeRating({
+        capability: "llm",
+        provider: input.provider,
+        model: input.model,
+        providerCostMicros: cost.providerCostMicros,
+        bitsCharged: cost.retailLiTTBits,
+        billingClass: cost.billingClass,
+        lane: "llm",
+      }),
+      usage: {
+        promptTokens: input.promptTokens,
+        completionTokens: input.completionTokens,
+        isByok: input.isByok,
+      },
+    });
+  }
 
   return {
     calculated: true,

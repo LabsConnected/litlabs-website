@@ -31,8 +31,12 @@ import {
   getProvider,
 } from "@/lib/media";
 import { uploadBinaryAsset } from "@/lib/r2";
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabaseAdmin, getSupabaseAdmin } from "@/lib/supabase";
 import { calculateRetailBits } from "@/lib/generation/cost-engine";
+import {
+  buildChargeRating,
+  recordChargeEvidence,
+} from "@/lib/billing/canonical-pricing";
 import {
   createGenerationJob,
   getGenerationJobByRequestId,
@@ -1368,6 +1372,26 @@ export async function generateImage(
           `image:charge:${requestId}`,
         );
         newBalance = charge.balance;
+        // Canonical pricing evidence — stamps the ledger row and writes the
+        // usage/rating chain. Best-effort; never blocks the result.
+        if (internalUserId) {
+          const admin = getSupabaseAdmin();
+          if (admin) {
+            await recordChargeEvidence(admin, {
+              userId: internalUserId,
+              idempotencyKey: `image:charge:${requestId}`,
+              rating: buildChargeRating({
+                capability: "image",
+                provider: usedProviderId,
+                model: GEMINI_IMAGE_MODEL,
+                providerCostMicros: usedCostResult.providerCostCents * 10_000,
+                bitsCharged: usedCost,
+                lane: "generation",
+              }),
+              usage: { imageCount: 1, computeMs: Date.now() - startTime },
+            }).catch(() => {});
+          }
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Wallet debit failed";
         await failJob(msg);
