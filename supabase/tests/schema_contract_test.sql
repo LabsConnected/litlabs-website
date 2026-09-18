@@ -10,7 +10,7 @@ CREATE EXTENSION IF NOT EXISTS pgtap;
 -- ============================================
 -- Plan: number of test assertions
 -- ============================================
-SELECT plan(68);
+SELECT plan(69);
 
 -- ============================================
 -- 1. Users table: internal UUID + clerk_id

@@ -187,6 +187,19 @@ describe("storage-safe content", () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.files[0].content).toBe(content);
   });
+
+  it("accepts literal backslash-escape text — only real control chars are unsafe", () => {
+    // The characters \\ u 1 2 3 4 inside source text are plain ASCII; they
+    // serialize to JSON as a doubled backslash and Postgres stores them
+    // verbatim. The 22P05 hazard is a REAL U+0000/U+D800 code unit in the
+    // string, never an escape-looking literal — validation must not
+    // over-reject source files that discuss escapes (regexes, JSON docs).
+    const content = String.raw`const re = /\u1234/; // literal escape text`;
+    expect(isStorableUtf8(content)).toBe(true);
+    const result = validateArtifact([html("index.html", content)]);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.files[0].content).toBe(content);
+  });
 });
 
 /* ── Artifact validation ────────────────────────────────────────── */
