@@ -10,6 +10,8 @@
  * Client-side hook: useProjectRuntime
  */
 
+import type { RuntimeFreshness } from "@/hooks/useLiTTRuntime";
+
 export type RuntimePhase =
   | "idle" // no project selected
   | "resolving" // resolving project + workspace
@@ -152,7 +154,10 @@ export function runtimePhaseLabel(phase: RuntimePhase): string {
     case "workspace_not_ready":
       return "Workspace not ready";
     case "terminal_disconnected":
-      return "Terminal disconnected";
+      // "Terminal idle" — the workspace is ready; only the visible terminal
+      // PTY isn't attached. Builds and commands run server-side regardless,
+      // so this must never read as an outage.
+      return "Terminal idle";
     case "terminal_reconnecting":
       return "Reconnecting terminal…";
     case "error":
@@ -160,6 +165,47 @@ export function runtimePhaseLabel(phase: RuntimePhase): string {
     case "unauthenticated":
       return "Sign in required";
   }
+}
+
+/**
+ * Human-readable label for the socket's heartbeat freshness.
+ * The socket is a STATUS FEED, not the execution pipe — tool execution runs
+ * server-side over HTTP, so a stale/down feed never blocks chat or builds.
+ * Labels say that explicitly so "UNREACHABLE" never reads as an outage.
+ */
+export function runtimeFreshnessLabel(freshness: RuntimeFreshness): string {
+  switch (freshness) {
+    case "fresh":
+      return "Live";
+    case "stale":
+      return "State feed stale — status may be behind";
+    case "unreachable":
+      return "State feed unreachable — chat works; builds run through the server";
+  }
+}
+
+/**
+ * Pre-send expectation hint for the composer.
+ *
+ * Returns a hint string only when the live status feed is down but the
+ * workspace is ready — the one case where the UI would otherwise show an
+ * alarming "UNREACHABLE" with zero warning before a build request.
+ * Returns null in every other case (nothing needs saying).
+ *
+ * The composer stays ENABLED regardless — chat always works; the hint only
+ * sets expectations.
+ */
+export function deriveExecutionHint(
+  freshness: RuntimeFreshness,
+  runtime: { phase: RuntimePhase; workspaceProvisioned: boolean },
+): string | null {
+  if (freshness !== "unreachable") return null;
+  const workspaceReady =
+    runtime.workspaceProvisioned ||
+    runtime.phase === "ready" ||
+    runtime.phase === "terminal_disconnected";
+  if (!workspaceReady) return null;
+  return "Live status feed is down — LiTT can still chat and run builds through the server.";
 }
 
 /**

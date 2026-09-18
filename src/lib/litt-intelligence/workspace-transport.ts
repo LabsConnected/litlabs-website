@@ -15,6 +15,7 @@
 import "server-only";
 
 import { createTerminalToken } from "@/lib/terminal-auth";
+import { isCanonicalBase64 } from "@/lib/deployments/user-deployment";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createWorkspaceCheckpoint } from "@/lib/missions/workspace-checkpoint";
 import { getTerminalServerUrl } from "@/lib/terminal-url";
@@ -269,7 +270,19 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
       const err = await resp.text().catch(() => "");
       throw new Error(`readFile failed (${resp.status}): ${err}`);
     }
-    return resp.json();
+    const data = (await resp.json()) as { content: string; size: number; encoding?: string };
+    if (encoding === "base64") {
+      // The response must prove the bytes were actually base64-encoded —
+      // a terminal build that ignores the parameter returns a utf-8
+      // decode of binary data, which contains NULs/replacement chars and
+      // would corrupt any downstream text-shaped storage.
+      if (data.encoding !== "base64" || !isCanonicalBase64(data.content)) {
+        throw new Error(
+          `readBinaryFile failed for "${path}": terminal did not return base64 content`,
+        );
+      }
+    }
+    return data;
   }
 
   async writeFile(path: string, content: string): Promise<{ saved: boolean }> {

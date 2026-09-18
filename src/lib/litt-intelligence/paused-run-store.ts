@@ -22,6 +22,7 @@ import "server-only";
 
 import { supabaseAdmin } from "@/lib/supabase";
 import type { LLMMessage } from "./llm-tool-calling";
+import type { DeferredToolCall } from "./agent-loop-v2";
 import type { QualityFinale, QualityLoopSnapshot } from "./quality-loop-flow";
 
 /**
@@ -90,6 +91,16 @@ export interface PausedRunRecord {
   runStartedAt: string | null;
   runCompletedAt: string | null;
   qualityLoopState?: QualityLoopSnapshot;
+  /**
+   * The unexecuted remainder of the tool batch that hit the approval gate,
+   * captured at pause time and re-injected after the approved tool runs on
+   * resume. Absent (legacy rows) means "no deferred calls recorded".
+   */
+  deferredToolCalls?: DeferredToolCall[];
+  /** Steps used before the pause — resume continues the budget from here. */
+  stepsUsed?: number;
+  /** Whether any mutation had executed before the pause. */
+  hadInterveningMutation?: boolean;
 }
 
 interface PausedRunRow {
@@ -116,6 +127,9 @@ interface PausedRunRow {
   run_started_at: string | null;
   run_completed_at: string | null;
   quality_loop_state?: QualityLoopSnapshot | null;
+  deferred_tool_calls?: DeferredToolCall[] | null;
+  steps_used?: number | null;
+  had_intervening_mutation?: boolean | null;
 }
 
 function rowToRecord(row: PausedRunRow): PausedRunRecord {
@@ -143,6 +157,9 @@ function rowToRecord(row: PausedRunRow): PausedRunRecord {
     runStartedAt: row.run_started_at ?? null,
     runCompletedAt: row.run_completed_at ?? null,
     qualityLoopState: row.quality_loop_state ?? undefined,
+    deferredToolCalls: row.deferred_tool_calls ?? undefined,
+    stepsUsed: row.steps_used ?? undefined,
+    hadInterveningMutation: row.had_intervening_mutation ?? undefined,
   };
 }
 
@@ -160,6 +177,9 @@ export async function createPausedRun(input: {
   systemPrompt: string;
   checkpointId: string | null;
   qualityLoopState?: QualityLoopSnapshot;
+  deferredToolCalls?: DeferredToolCall[];
+  stepsUsed?: number;
+  hadInterveningMutation?: boolean;
 }): Promise<PausedRunRecord> {
   if (!supabaseAdmin) throw new Error("Database not available");
 
@@ -186,6 +206,9 @@ export async function createPausedRun(input: {
       expires_at: expiresAt.toISOString(),
       resolved_at: null,
       quality_loop_state: input.qualityLoopState ?? null,
+      deferred_tool_calls: input.deferredToolCalls ?? null,
+      steps_used: input.stepsUsed ?? null,
+      had_intervening_mutation: input.hadInterveningMutation ?? null,
     })
     .select()
     .single();

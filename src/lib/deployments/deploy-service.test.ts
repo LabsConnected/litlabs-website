@@ -16,6 +16,7 @@ import {
   type DeploySourceTransport,
   type DeploymentRecord,
 } from "./deploy-service";
+import { isCanonicalBase64, isStorableUtf8 } from "./user-deployment";
 
 /* ── Fakes ──────────────────────────────────────────────────────── */
 
@@ -100,6 +101,14 @@ function fakeStore(): DeploymentStore & { rows: DeploymentRecord[]; files: Map<s
 const reachableFetch = vi.fn(async () => new Response("<h1>Ember Roast</h1>", { status: 200 }));
 
 const BASE = "https://litlabs.example";
+
+/** A LiTT Hosting backend fake: the live URL is resolved from "infrastructure". */
+function fakeHosting(baseUrl: string = BASE): import("./litt-hosting").HostingBackend {
+  return {
+    isConfigured: () => ({ ok: true }),
+    resolveBaseUrl: async () => baseUrl,
+  };
+}
 
 /* ── Artifact collection ────────────────────────────────────────── */
 
@@ -189,6 +198,36 @@ describe("collectStaticArtifact", () => {
     const artifact = await collectStaticArtifact(transport);
     expect(artifact.find((f) => f.path === "assets/hero.png")).toBeUndefined();
   });
+
+  it("collects the full set of generated-site binary types", async () => {
+    const names = ["hero.avif", "doc.pdf", "mod.wasm", "font.otf", "img.bmp", "bundle.zip"];
+    const transport = fakeTransport({
+      async listFiles(path: string) {
+        if (path === "." || path === "") {
+          return {
+            entries: [
+              { name: "index.html", type: "file" },
+              { name: "assets", type: "folder" },
+            ],
+          };
+        }
+        if (path === "assets") {
+          return { entries: names.map((name) => ({ name, type: "file" })) };
+        }
+        return { entries: [] };
+      },
+      async readBinaryFile() {
+        const content = Buffer.from([0xde, 0xad, 0xbe, 0xef]).toString("base64");
+        return { content, size: 4 };
+      },
+    });
+    const artifact = await collectStaticArtifact(transport);
+    for (const name of names) {
+      const file = artifact.find((f) => f.path === `assets/${name}`);
+      expect(file, `assets/${name} should be collected`).toBeDefined();
+      expect(file!.encoding).toBe("base64");
+    }
+  });
 });
 
 /* ── Case A: successful deployment of a static project ──────────── */
@@ -201,7 +240,7 @@ describe("A. static project deploys and returns a verified live URL", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl });
 
     expect(result.ok).toBe(true);
@@ -221,7 +260,7 @@ describe("A. static project deploys and returns a verified live URL", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -242,7 +281,7 @@ describe("A. static project deploys and returns a verified live URL", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store: spied, fetchImpl: reachableFetch });
 
     expect(seen).toEqual(["deploying", "ready"]);
@@ -254,10 +293,142 @@ describe("A. static project deploys and returns a verified live URL", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
     const serialized = JSON.stringify(result);
     expect(serialized).not.toMatch(/service[-_]?key|secret|password|bearer|sk-/i);
+  });
+
+  it("stores each file with its explicit storage encoding", async () => {
+    // The 22P05 "unsupported Unicode escape sequence" failure happened
+    // because binary content reached a text-shaped insert. Files must be
+    // persisted with an explicit encoding so serving can decode correctly.
+    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const transport = fakeTransport({
+      async listFiles(path: string) {
+        if (path === "." || path === "") {
+          return {
+            entries: [
+              { name: "index.html", type: "file" },
+              { name: "assets", type: "folder" },
+            ],
+          };
+        }
+        if (path === "assets") return { entries: [{ name: "hero.png", type: "file" }] };
+        return { entries: [] };
+      },
+      async readBinaryFile() {
+        return { content: pngBytes.toString("base64"), size: pngBytes.length };
+      },
+    });
+    const store = fakeStore();
+    const result = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport,
+      publicBaseUrl: BASE,
+    }, { store, fetchImpl: reachableFetch });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const stored = store.files.get(result.deploymentId) as Array<{
+      path: string; content: string; encoding: string; bytes: number;
+    }>;
+    const htmlRow = stored.find((f) => f.path === "index.html")!;
+    const pngRow = stored.find((f) => f.path === "assets/hero.png")!;
+    expect(htmlRow.encoding).toBe("utf-8");
+    expect(pngRow.encoding).toBe("base64");
+    // The stored payload decodes back to the exact source bytes.
+    expect(Buffer.from(pngRow.content, "base64")).toEqual(pngBytes);
+    expect(pngRow.bytes).toBe(pngBytes.length);
+  });
+
+  it("fails cleanly before persisting when binary content arrives corrupted", async () => {
+    // A transport that returns a utf-8 decode labeled as binary (e.g. an
+    // older terminal ignoring encoding=base64) must not reach the insert —
+    // the content contains NULs that Postgres rejects with 22P05.
+    const utf8Jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]).toString("utf-8");
+    const transport = fakeTransport({
+      async listFiles(path: string) {
+        if (path === "." || path === "") {
+          return {
+            entries: [
+              { name: "index.html", type: "file" },
+              { name: "assets", type: "folder" },
+            ],
+          };
+        }
+        if (path === "assets") return { entries: [{ name: "x.jpeg", type: "file" }] };
+        return { entries: [] };
+      },
+      async readBinaryFile() {
+        // Dishonored contract: utf-8 content masquerading as base64.
+        return { content: utf8Jpeg, size: 6 };
+      },
+    });
+    const store = fakeStore();
+    const result = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport,
+      publicBaseUrl: BASE,
+    }, { store, fetchImpl: reachableFetch });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errorClass).toBe("validation");
+    expect(result.message).toContain("assets/x.jpeg");
+    // Nothing was persisted — no half-written deployment.
+    expect(store.rows).toHaveLength(0);
+  });
+
+  it("stores a generated JPEG as canonical base64, not as mangled text", async () => {
+    // The incident artifact: an image-generated JPEG under assets/images/.
+    // Through the honored base64 contract it must persist byte-exact —
+    // and its stored payload must itself satisfy the storable-text rules
+    // (a utf-8 decode of these bytes would contain NULs and fail).
+    const jpegBytes = Buffer.from([
+      0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
+      0x02, 0x03, 0x04, 0x05, 0xff, 0xd9,
+    ]);
+    const transport = fakeTransport({
+      async listFiles(path: string) {
+        if (path === "." || path === "") {
+          return {
+            entries: [
+              { name: "index.html", type: "file" },
+              { name: "assets", type: "folder" },
+            ],
+          };
+        }
+        if (path === "assets") return { entries: [{ name: "images", type: "folder" }] };
+        if (path === "assets/images") {
+          return { entries: [{ name: "puppy.jpeg", type: "file" }] };
+        }
+        return { entries: [] };
+      },
+      async readBinaryFile() {
+        return { content: jpegBytes.toString("base64"), size: jpegBytes.length };
+      },
+    });
+    const store = fakeStore();
+    const result = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport,
+      publicBaseUrl: BASE,
+    }, { store, fetchImpl: reachableFetch });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const stored = store.files.get(result.deploymentId) as Array<{
+      path: string; content: string; encoding: string; bytes: number;
+    }>;
+    const jpegRow = stored.find((f) => f.path === "assets/images/puppy.jpeg")!;
+    expect(jpegRow.encoding).toBe("base64");
+    expect(isCanonicalBase64(jpegRow.content)).toBe(true);
+    expect(isStorableUtf8(jpegRow.content)).toBe(true);
+    expect(Buffer.from(jpegRow.content, "base64")).toEqual(jpegBytes);
   });
 });
 
@@ -271,7 +442,7 @@ describe("M. in-flight duplicate deploy is reused, not republished", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
@@ -300,7 +471,7 @@ describe("M. in-flight duplicate deploy is reused, not republished", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     expect(second.ok).toBe(true);
@@ -319,7 +490,7 @@ describe("M. in-flight duplicate deploy is reused, not republished", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
@@ -338,7 +509,7 @@ describe("M. in-flight duplicate deploy is reused, not republished", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     expect(second.ok).toBe(true);
@@ -367,7 +538,7 @@ describe("L. live URL must be independently verified before success", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: fetchImpl as unknown as typeof fetch });
 
     expect(calls).toHaveLength(1);
@@ -389,7 +560,7 @@ describe("L. live URL must be independently verified before success", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: fetchImpl as unknown as typeof fetch });
 
     expect(result.ok).toBe(true);
@@ -405,7 +576,7 @@ describe("L. live URL must be independently verified before success", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: fetchImpl as unknown as typeof fetch });
 
     expect(result.ok).toBe(false);
@@ -425,7 +596,7 @@ describe("L. live URL must be independently verified before success", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: fetchImpl as unknown as typeof fetch });
 
     expect(result.ok).toBe(false);
@@ -452,7 +623,7 @@ describe("C. a failed deployment never reports live", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport,
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     expect(result.ok).toBe(false);
@@ -474,7 +645,7 @@ describe("C. a failed deployment never reports live", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport,
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
     expect(store.files.size).toBe(0);
   });
@@ -489,7 +660,7 @@ describe("D. deployment is rejected for the wrong user", () => {
       userId: "user_attacker",
       projectId: "proj_ember",
       transport: fakeTransport({ userId: "user_owner" }),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     expect(result.ok).toBe(false);
@@ -506,7 +677,7 @@ describe("D. deployment is rejected for the wrong user", () => {
         userId,
         projectId: "proj_ember",
         transport: fakeTransport(),
-        publicBaseUrl: BASE,
+        hosting: fakeHosting(),
       }, { store, fetchImpl: reachableFetch });
       expect(result.ok).toBe(false);
     }
@@ -523,7 +694,7 @@ describe("E. deployment is rejected on project/workspace mismatch", () => {
       userId: "user_owner",
       projectId: "proj_someone_else",
       transport: fakeTransport({ projectId: "proj_ember" }),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     expect(result.ok).toBe(false);
@@ -539,7 +710,7 @@ describe("E. deployment is rejected on project/workspace mismatch", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport({ workspaceId: "" }),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
     expect(result.ok).toBe(false);
     expect(store.rows).toHaveLength(0);
@@ -551,7 +722,7 @@ describe("E. deployment is rejected on project/workspace mismatch", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport({ workspaceId: "ws_specific" }),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
     expect(result.ok).toBe(true);
     expect(store.rows[0].workspaceId).toBe("ws_specific");
@@ -569,7 +740,7 @@ describe("G. the user deploy path cannot target LiTT infrastructure", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
       railwayServiceId: "litt-production-service",
       provider: "railway",
       target: "railway",
@@ -594,7 +765,7 @@ describe("G. the user deploy path cannot target LiTT infrastructure", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: fetchImpl as unknown as typeof fetch });
 
     for (const url of urls) {
@@ -613,7 +784,7 @@ describe("J. a duplicate deploy of identical content does not republish", () => 
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     };
 
     const first = await deployUserProject(request, { store, fetchImpl: reachableFetch });
@@ -634,7 +805,7 @@ describe("J. a duplicate deploy of identical content does not republish", () => 
     const base = {
       userId: "user_owner",
       projectId: "proj_ember",
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     };
     const first = await deployUserProject(
       { ...base, transport: fakeTransport() },
@@ -666,14 +837,14 @@ describe("J. a duplicate deploy of identical content does not republish", () => 
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     const other = await deployUserProject({
       userId: "user_owner",
       projectId: "proj_other",
       transport: fakeTransport({ projectId: "proj_other" }),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     expect(other.ok).toBe(true);
@@ -689,14 +860,14 @@ describe("J. a duplicate deploy of identical content does not republish", () => 
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: failing as unknown as typeof fetch });
 
     const retry = await deployUserProject({
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     expect(retry.ok).toBe(true);
@@ -727,7 +898,7 @@ describe("publish gates", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport,
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     expect(result.ok).toBe(false);
@@ -750,9 +921,119 @@ describe("publish gates", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     expect(result.ok).toBe(true);
+  });
+});
+
+/* ── LiTT Hosting: infra-resolved live URL, honest failures ───────── */
+
+describe("LiTT Hosting backend", () => {
+  it("unconfigured hosting fails BEFORE any deployment row exists", async () => {
+    const store = fakeStore();
+    const unconfigured: import("./litt-hosting").HostingBackend = {
+      isConfigured: () => ({ ok: false, reason: "LiTT Hosting isn't set up on this workspace yet." }),
+      resolveBaseUrl: async () => {
+        throw new Error("must not be called when unconfigured");
+      },
+    };
+    const result = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport: fakeTransport(),
+      hosting: unconfigured,
+    }, { store, fetchImpl: reachableFetch });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.status).toBe("failed");
+    expect(result.publicUrl).toBe(null);
+    expect(result.deploymentId).toBe(null);
+    // Honest, user-safe, and provider-agnostic.
+    expect(result.message).toContain("LiTT Hosting");
+    expect(result.message).not.toMatch(/railway|vercel/i);
+    // No row was created — there is nothing to misreport as deployed.
+    expect(store.rows).toHaveLength(0);
+  });
+
+  it("infrastructure URL-resolution failure marks the deployment failed with the real error", async () => {
+    const store = fakeStore();
+    const broken: import("./litt-hosting").HostingBackend = {
+      isConfigured: () => ({ ok: true }),
+      resolveBaseUrl: async () => {
+        throw new Error("Hosting infrastructure error: service not found.");
+      },
+    };
+    const result = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport: fakeTransport(),
+      hosting: broken,
+    }, { store, fetchImpl: reachableFetch });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.publicUrl).toBe(null);
+    // The REAL infrastructure error surfaces — no fake URL, no fake success.
+    expect(result.message).toContain("service not found");
+    expect(store.rows).toHaveLength(1);
+    expect(store.rows[0].status).toBe("failed");
+    expect(store.rows[0].publicUrl).toBe(null);
+    expect(store.rows[0].urlVerified).toBe(false);
+    expect(store.rows[0].errorMessage).toContain("service not found");
+  });
+
+  it("persists the infrastructure-resolved live URL and verifies it", async () => {
+    const store = fakeStore();
+    const fetchImpl = vi.fn(async (_url: RequestInfo | URL): Promise<Response> => new Response("<h1>Ember Roast</h1>", { status: 200 }));
+    const result = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport: fakeTransport(),
+      hosting: fakeHosting("https://infra-resolved.example"),
+    }, { store, fetchImpl });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The URL comes from the backend's resolved infrastructure base —
+    // never from caller input.
+    expect(result.publicUrl).toContain("https://infra-resolved.example");
+    expect(result.publicUrl).toContain(result.deploymentId);
+    expect(result.urlVerified).toBe(true);
+    const row = store.rows.find((r) => r.id === result.deploymentId);
+    expect(row?.publicUrl).toBe(result.publicUrl);
+    expect(row?.urlVerified).toBe(true);
+    expect(row?.target).toBe("litt-static");
+    // Verification actually fetched the resolved URL.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls[0][0]).toBe(result.publicUrl);
+  });
+
+  it("retry of identical content reuses the verified deployment (idempotent)", async () => {
+    const store = fakeStore();
+    const first = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport: fakeTransport(),
+      hosting: fakeHosting(),
+    }, { store, fetchImpl: reachableFetch });
+    expect(first.ok).toBe(true);
+
+    const second = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport: fakeTransport(),
+      hosting: fakeHosting("https://other-infra.example"),
+    }, { store, fetchImpl: reachableFetch });
+
+    expect(second.ok).toBe(true);
+    if (!second.ok || !first.ok) return;
+    // Same deployment reused — the second backend's base never leaks in.
+    expect(second.deploymentId).toBe(first.deploymentId);
+    expect(second.publicUrl).toBe(first.publicUrl);
+    expect(second.publicUrl).not.toContain("other-infra");
+    expect(store.rows).toHaveLength(1);
   });
 });

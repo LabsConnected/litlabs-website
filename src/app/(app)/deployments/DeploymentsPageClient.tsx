@@ -32,6 +32,18 @@ type Deployment = {
   created_at: string;
 };
 
+type PublishedSite = {
+  id: string;
+  projectId: string;
+  projectName: string;
+  status: "building" | "deploying" | "ready" | "failed";
+  hosting: string;
+  liveUrl: string | null;
+  urlVerified: boolean;
+  errorMessage: string | null;
+  fileCount: number;
+};
+
 function statusIcon(status: string) {
   if (status === "ready")
     return <CheckCircle2 size={18} style={{ color: "#22c55e" }} />;
@@ -48,6 +60,7 @@ export default function DeploymentsPageClient() {
   const { resolvedColors: T, tokens } = useTheme();
   const { isLoaded, isSignedIn } = useClerkAuth();
   const [deployments, setDeployments] = useState<Deployment[]>([]);
+  const [sites, setSites] = useState<PublishedSite[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,6 +72,7 @@ export default function DeploymentsPageClient() {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Deployments are unavailable");
       setDeployments(Array.isArray(payload.deployments) ? payload.deployments : []);
+      setSites(Array.isArray(payload.sites) ? payload.sites : []);
     } catch (loadError) {
       if ((loadError as { name?: string })?.name !== "AbortError") {
         setError("We couldn’t load deployment history. Your projects are unaffected—try again in a moment.");
@@ -198,6 +212,70 @@ export default function DeploymentsPageClient() {
 
       {/* Content */}
       <div className="px-4 sm:px-6 py-6">
+        {!loading && !error && sites.length > 0 ? (
+          <div className="mb-8">
+            <div
+              className="mb-3 text-xs font-black uppercase tracking-widest"
+              style={{ color: tokens.textMuted }}
+            >
+              Published sites
+            </div>
+            <div className="space-y-3">
+              {sites.map((site) => {
+                const live = site.status === "ready" && site.urlVerified && site.liveUrl;
+                return (
+                  <div
+                    key={site.id}
+                    className="rounded-2xl border p-4 flex flex-col md:flex-row md:items-center justify-between gap-4"
+                    style={{ backgroundColor: T.boxBg, borderColor: T.borderColor }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="shrink-0">{statusIcon(live ? "ready" : site.status === "failed" ? "error" : "building")}</div>
+                      <div>
+                        <div className="font-black text-sm" style={{ color: tokens.text }}>
+                          {site.projectName}
+                        </div>
+                        <div className="flex items-center gap-2 text-[10px] mt-0.5" style={{ color: tokens.textMuted }}>
+                          <span>{site.hosting}</span>
+                          <span>·</span>
+                          <span>{live ? "Live" : site.status === "failed" ? "Failed" : "Publishing…"}</span>
+                          <span>·</span>
+                          <span>{site.fileCount} files</span>
+                        </div>
+                        {site.status === "failed" && site.errorMessage ? (
+                          <p className="mt-1 max-w-xl truncate text-[11px]" style={{ color: "#ef4444" }}>
+                            {site.errorMessage}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {live && site.liveUrl ? (
+                        <a
+                          href={site.liveUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition-all hover:opacity-80"
+                          style={{ borderColor: T.borderColor, color: tokens.text }}
+                        >
+                          <ExternalLink size={11} /> Open live site
+                        </a>
+                      ) : (
+                        <Link
+                          href="/studio"
+                          className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition-all hover:opacity-80"
+                          style={{ borderColor: T.borderColor, color: tokens.text }}
+                        >
+                          <Sparkles size={11} /> Continue in Studio
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
         {loading ? (
           <div className="flex items-center justify-center gap-2 py-12">
             <Loader2
@@ -221,7 +299,7 @@ export default function DeploymentsPageClient() {
             </div>
             <button type="button" onClick={() => void loadDeployments()} className="min-h-11 rounded-xl border px-4 text-sm font-bold" style={{ borderColor: "#ef444450", color: tokens.text }}>Try again</button>
           </div>
-        ) : deployments.length === 0 ? (
+        ) : deployments.length === 0 && sites.length === 0 ? (
           <div
             className="rounded-2xl border p-10 text-center"
             style={{ backgroundColor: T.boxBg, borderColor: T.borderColor }}

@@ -546,17 +546,13 @@ export const handleProjectDeploy: ToolHandler = async (_inputs, transport) => {
   const { deployUserProject } = await import("@/lib/deployments/deploy-service");
   const { supabaseDeploymentStore } = await import("@/lib/deployments/deployment-store");
 
-  const publicBaseUrl =
-    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "") ||
-    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, "") ||
-    "https://litlabs.net";
-
+  // The live URL is resolved from LiTT Hosting's actual infrastructure
+  // inside deployUserProject — never from caller input.
   const result = await deployUserProject(
     {
       userId: transport.userId,
       projectId: transport.projectId,
       transport,
-      publicBaseUrl,
     },
     { store: supabaseDeploymentStore },
   );

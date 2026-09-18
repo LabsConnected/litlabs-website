@@ -155,8 +155,8 @@ describe("supabaseDeploymentStore — table targeting", () => {
 
   it("writes files to user_project_deployment_files only", async () => {
     await supabaseDeploymentStore.putFiles("dep-1", [
-      { path: "index.html", content: "<html/>", contentType: "text/html", bytes: 7 },
-      { path: "assets/app.css", content: "body{}", contentType: "text/css", bytes: 6 },
+      { path: "index.html", content: "<html/>", contentType: "text/html", encoding: "utf-8", bytes: 7 },
+      { path: "assets/hero.png", content: "iVBORw==", contentType: "image/png", encoding: "base64", bytes: 4 },
     ]);
     expectOnlyV1Tables();
     const del = calls.find((c) => c.method === "delete");
@@ -169,7 +169,48 @@ describe("supabaseDeploymentStore — table targeting", () => {
       deployment_id: "dep-1",
       path: "index.html",
       content_type: "text/html",
+      encoding: "utf-8",
     });
+    // Binary payloads are stored base64 with the encoding recorded —
+    // never raw bytes in the text column.
+    expect((ins?.payload as Array<Record<string, unknown>>)[1]).toMatchObject({
+      path: "assets/hero.png",
+      content: "iVBORw==",
+      encoding: "base64",
+    });
+  });
+
+  it("retries the file insert without encoding when the column is not applied yet", async () => {
+    let fileInserts = 0;
+    handler = (table, call) => {
+      if (table === FILES && call.method === "insert") {
+        fileInserts += 1;
+        if (fileInserts === 1) {
+          return { data: null, error: { code: "PGRST204", message: "column 'encoding' not found" } };
+        }
+      }
+      return { data: null, error: null };
+    };
+    await supabaseDeploymentStore.putFiles("dep-1", [
+      { path: "a.png", content: "iVBORw==", contentType: "image/png", encoding: "base64", bytes: 4 },
+    ]);
+    const inserts = calls.filter((c) => c.table === FILES && c.method === "insert");
+    expect(inserts).toHaveLength(2);
+    expect((inserts[0].payload as Array<Record<string, unknown>>)[0]).toHaveProperty("encoding", "base64");
+    expect((inserts[1].payload as Array<Record<string, unknown>>)[0]).not.toHaveProperty("encoding");
+  });
+
+  it("does not retry the file insert for non-schema errors", async () => {
+    handler = (table, call) =>
+      table === FILES && call.method === "insert"
+        ? { data: null, error: { code: "23505", message: "duplicate key" } }
+        : { data: null, error: null };
+    await expect(
+      supabaseDeploymentStore.putFiles("dep-1", [
+        { path: "index.html", content: "<html/>", contentType: "text/html", encoding: "utf-8", bytes: 7 },
+      ]),
+    ).rejects.toThrow("Deployment file write failed");
+    expect(calls.filter((c) => c.table === FILES && c.method === "insert")).toHaveLength(1);
   });
 });
 
@@ -200,6 +241,27 @@ describe("readPublishedFile — public serving read path", () => {
   it("returns null for a missing deployment", async () => {
     expect(await readPublishedFile("dep-missing", "index.html")).toBeNull();
     expect(calls.find((c) => c.table === FILES)).toBeUndefined();
+  });
+
+  it("re-reads without encoding when the column is not applied yet", async () => {
+    let fileReads = 0;
+    handler = (table) => {
+      if (table === DEPLOYMENTS) return { data: readyRow, error: null };
+      if (table === FILES) {
+        fileReads += 1;
+        if (fileReads === 1) {
+          return { data: null, error: { code: "PGRST204", message: "column 'encoding' not found" } };
+        }
+        return { data: { content: "<h1>x</h1>", content_type: "text/html" }, error: null };
+      }
+      return { data: null, error: null };
+    };
+    const file = await readPublishedFile("dep-1", "index.html");
+    expect(file).toEqual({ content: "<h1>x</h1>", contentType: "text/html", encoding: undefined });
+    const fileCalls = calls.filter((c) => c.table === FILES);
+    expect(fileCalls).toHaveLength(2);
+    expect(fileCalls[0].payload).toContain("encoding");
+    expect(fileCalls[1].payload).not.toContain("encoding");
   });
 });
 

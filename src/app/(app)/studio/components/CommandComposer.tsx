@@ -92,6 +92,9 @@ interface CommandComposerProps {
   hideContextLine?: boolean;
   /** Slimmer composer chrome for mobile: tighter padding, smaller min-height */
   compact?: boolean;
+  /** Pre-send expectation hint (e.g. status feed down). Send stays enabled —
+      chat always works; the hint only sets expectations before a build request. */
+  executionHint?: string | null;
 }
 
 export default function CommandComposer({
@@ -113,6 +116,7 @@ export default function CommandComposer({
   onLittModeChange,
   hideContextLine = false,
   compact = false,
+  executionHint = null,
 }: CommandComposerProps) {
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
   const setActiveAgent = useStudioAgentStore((s) => s.setActiveAgent);
@@ -601,6 +605,20 @@ export default function CommandComposer({
             />,
             document.body,
           )}
+
+        {/* Pre-send expectation hint — sits directly above the textarea so the
+            user sees it before typing a build request. Send stays enabled:
+            chat always works; this only sets expectations. */}
+        {executionHint && (
+          <div
+            className="order-first w-full px-1 pb-1 text-[10px] font-semibold leading-snug"
+            style={{ color: "#e3b341" }}
+            data-testid="composer-execution-hint"
+            role="status"
+          >
+            {executionHint}
+          </div>
+        )}
 
         {/* Text input — min 14px font.
             While recording, the interim transcript appears as live placeholder

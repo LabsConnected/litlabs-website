@@ -322,8 +322,15 @@ export async function POST(
       decision: body.decision as "approved" | "rejected",
       rejectionReason: body.reason,
       config: resumeConfig,
-      stepsUsedBeforePause: 0,
-      hadInterveningMutation: false,
+      // Real pause-time counters — restarting these at 0 would hand the
+      // resumed run a fresh budget/loop-detection state and let it repeat
+      // work (or miss the "already mutated" signal) after approval.
+      stepsUsedBeforePause: resolved.stepsUsed ?? 0,
+      hadInterveningMutation: resolved.hadInterveningMutation ?? false,
+      // The unexecuted remainder of the batch that hit the approval gate —
+      // re-injected after the approved tool runs so approving one tool
+      // cannot silently drop the rest of the batch.
+      deferredToolCalls: resolved.deferredToolCalls,
       existingCheckpoint: resolved.checkpointId
         ? { checkpointId: resolved.checkpointId, label: "pre-approval", gitSha: "" }
         : undefined,
@@ -395,6 +402,9 @@ export async function POST(
             systemPrompt: resolved.systemPrompt,
             checkpointId: null,
             qualityLoopState: result.pendingApproval.qualityLoopState,
+            deferredToolCalls: result.pendingApproval.deferredToolCalls,
+            stepsUsed: result.pendingApproval.stepsUsedAtPause,
+            hadInterveningMutation: result.pendingApproval.hadInterveningMutationAtPause,
           });
           nestedPausedRunId = nested.id;
         } catch (nestedErr) {
@@ -404,6 +414,22 @@ export async function POST(
             tool: result.pendingApproval.toolId,
             errorClass: nestedErr instanceof Error ? nestedErr.message : "unknown",
           });
+          // A nested gate that cannot be persisted is unresumable — the
+          // client's Approve button would be a dead card (pausedRunId:
+          // undefined). Fail the run loudly instead of completing it with
+          // a broken gate.
+          const nestedPersistError =
+            `The follow-up approval for \`${result.pendingApproval.toolId}\` could not be saved — send the request again to retry.`;
+          await writeResumedResultToTranscript({
+            conversationId,
+            userId,
+            projectId: resolved.projectId,
+            pausedRunId,
+            status: "failed",
+            content: nestedPersistError,
+          });
+          await markRunFailed(pausedRunId, userId, nestedPersistError);
+          return;
         }
       }
 

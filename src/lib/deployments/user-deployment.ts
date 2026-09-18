@@ -84,9 +84,15 @@ const CONTENT_TYPES: Record<string, string> = {
   gif: "image/gif",
   webp: "image/webp",
   ico: "image/x-icon",
+  avif: "image/avif",
+  bmp: "image/bmp",
   woff: "font/woff",
   woff2: "font/woff2",
   ttf: "font/ttf",
+  otf: "font/otf",
+  pdf: "application/pdf",
+  wasm: "application/wasm",
+  zip: "application/zip",
   webmanifest: "application/manifest+json; charset=utf-8",
 };
 
@@ -115,6 +121,46 @@ export function isBinaryContentType(contentType: string): boolean {
   if (contentType.startsWith("text/")) return false;
   if (contentType === "image/svg+xml") return false;
   return !contentType.includes("charset=utf-8");
+}
+
+/**
+ * Whether a string is canonical base64 (the form Buffer/Node emits:
+ * strict alphabet, 4-char groups, no whitespace, correct padding).
+ *
+ * Used at two trust boundaries: the workspace transport checks a binary
+ * read actually came back base64 (an older terminal ignored the encoding
+ * parameter and returned a utf-8 decode instead — its replacement
+ * characters and NULs fail this check), and artifact validation re-checks
+ * before anything is persisted so corrupt content becomes a named-path
+ * validation failure rather than a Postgres 22P05 insert error.
+ */
+export function isCanonicalBase64(content: string): boolean {
+  if (typeof content !== "string" || content.length % 4 !== 0) return false;
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(content)) return false;
+  return Buffer.from(content, "base64").toString("base64") === content;
+}
+
+/**
+ * Whether utf-8 text content can be stored in a Postgres text column via
+ * the JSON insert path. Postgres's json parser rejects \u0000 escapes and
+ * unpaired surrogate escapes ("unsupported Unicode escape sequence",
+ * 22P05), so content containing a NUL or a lone surrogate can never be
+ * persisted — it must fail validation instead.
+ */
+export function isStorableUtf8(content: string): boolean {
+  if (typeof content !== "string") return false;
+  for (let i = 0; i < content.length; i++) {
+    const code = content.charCodeAt(i);
+    if (code === 0) return false;
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = content.charCodeAt(i + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      i++;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** Byte length of an artifact's payload after decoding. */
@@ -271,6 +317,25 @@ export function validateArtifact(files: ArtifactFile[]): ArtifactValidation {
     }
     seen.add(file.path);
 
+    // Storage safety: content lands in a Postgres text column via a JSON
+    // insert, which rejects NULs, unpaired surrogates, and (for binary
+    // payloads) anything that isn't canonical base64. Fail here with the
+    // offending path named, instead of surfacing a raw 22P05 database
+    // error after a deployment row already exists.
+    if (file.encoding === "base64") {
+      if (!isCanonicalBase64(file.content)) {
+        return {
+          ok: false,
+          error: `File "${file.path}" contains invalid binary data. Please try deploying again.`,
+        };
+      }
+    } else if (!isStorableUtf8(file.content)) {
+      return {
+        ok: false,
+        error: `File "${file.path}" contains invalid characters that cannot be stored. Please remove them and try again.`,
+      };
+    }
+
     const bytes = artifactBytes(file);
     if (bytes > DEPLOYMENT_LIMITS.maxFileBytes) {
       return {
@@ -393,7 +458,7 @@ export function describeDeploymentFailure(error: unknown): DescribedFailure {
   const safe = redact(raw);
 
   // Validation and authorization failures will fail again identically.
-  if (/required|must contain|unsafe|duplicate|too large|too many|not found|forbidden|mismatch/i.test(raw)) {
+  if (/required|must contain|unsafe|duplicate|too large|too many|not found|forbidden|mismatch|invalid/i.test(raw)) {
     return {
       errorClass: /forbidden|not found|mismatch/i.test(raw) ? "authorization" : "validation",
       message: safe,

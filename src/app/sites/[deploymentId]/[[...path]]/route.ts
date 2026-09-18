@@ -71,9 +71,13 @@ export async function GET(
   let content: string | Uint8Array<ArrayBuffer> = file.content;
   // Binary artifacts (images, fonts) are stored base64 — the files table
   // is text-shaped — so decode them back to raw bytes before serving.
-  // The predicate is content-type-derived, so pre-existing text rows are
-  // unaffected.
-  if (isBinaryContentType(file.contentType)) {
+  // The stored `encoding` column is authoritative; rows written before it
+  // existed fall back to the content-type predicate.
+  const binary =
+    file.encoding != null
+      ? file.encoding === "base64"
+      : isBinaryContentType(file.contentType);
+  if (binary) {
     content = new Uint8Array(Buffer.from(file.content, "base64"));
   }
   // LiTT form wiring: static exports render forms with an empty

@@ -87,4 +87,33 @@ describe("sites route — form deploymentId injection", () => {
     const body = Buffer.from(await res.arrayBuffer());
     expect(body).toEqual(png);
   });
+
+  it("decodes on the explicit encoding column, not just content type", async () => {
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+    mockRead.mockResolvedValue({
+      content: jpeg.toString("base64"),
+      contentType: "image/jpeg",
+      encoding: "base64",
+    });
+    const res = await GET(req("/sites/dep_abc123"), {
+      params: Promise.resolve({ deploymentId: "dep_abc123" }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/jpeg");
+    expect(Buffer.from(await res.arrayBuffer())).toEqual(jpeg);
+  });
+
+  it("serves encoding=utf-8 rows verbatim even under a binary content type", async () => {
+    // The stored encoding is authoritative — an explicit utf-8 row is text,
+    // never base64-decoded.
+    mockRead.mockResolvedValue({
+      content: "plain stored text",
+      contentType: "image/png",
+      encoding: "utf-8",
+    });
+    const res = await GET(req("/sites/dep_abc123"), {
+      params: Promise.resolve({ deploymentId: "dep_abc123" }),
+    });
+    expect(await res.text()).toBe("plain stored text");
+  });
 });
