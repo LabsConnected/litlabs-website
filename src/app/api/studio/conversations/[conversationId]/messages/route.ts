@@ -830,6 +830,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
                 checkpointId: v2Result.checkpoint?.checkpointId ?? null,
                 qualityLoopState: v2Result.qualityLoopState,
+                deferredToolCalls: v2Result.pendingApproval.deferredToolCalls,
+                stepsUsed: v2Result.pendingApproval.stepsUsedAtPause,
+                hadInterveningMutation: v2Result.pendingApproval.hadInterveningMutationAtPause,
               });
               pausedRunId = pausedRun.id;
             } catch (pausedErr) {
