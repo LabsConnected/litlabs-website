@@ -103,6 +103,13 @@ async function handler(req: NextRequest) {
       format: body.format as MediaFormat | undefined,
       aspectRatio:
         typeof body.aspectRatio === "string" ? body.aspectRatio : undefined,
+      imageSize:
+        body.imageSize === "1K" ||
+        body.imageSize === "2K" ||
+        body.imageSize === "4K"
+          ? body.imageSize
+          : undefined,
+      seed: typeof body.seed === "number" ? body.seed : undefined,
       referenceUrl:
         typeof body.referenceUrl === "string" ? body.referenceUrl : undefined,
       generationMode:
