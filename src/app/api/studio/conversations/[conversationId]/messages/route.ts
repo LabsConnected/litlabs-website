@@ -29,6 +29,7 @@ import { runAgentLoop } from "@/lib/litt-intelligence/agent-loop";
 import { runAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
 import { findToolCallMarkup, stripToolCallMarkupText } from "@/lib/litt-intelligence/tool-call-markup";
 import { withV1NoToolsDirective } from "@/lib/litt-intelligence/text-lane-guard";
+import { sanitizeTextLaneHistory } from "@/lib/litt-intelligence/toolless-lane-guard";
 import { runLaunchFlow, type LaunchFlowResult } from "@/lib/litt-intelligence/launch-flow";
 import { shouldEnableQualityLoop } from "@/lib/litt-intelligence/quality-loop-flow";
 import { ProgressEmitter, type ProgressEvent } from "@/lib/litt-intelligence/progress-events";
@@ -272,14 +273,22 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const allMessages = await listMessages(conversation.id, userId);
   const priorMessages = allMessages.filter((m) => m.id !== userMessage.id);
 
-  // 7. Build model history in chronological order
-  const history = priorMessages
-    .filter((m) => m.status === "completed" && (m.role === "user" || m.role === "assistant"))
-    .slice(-HISTORY_LIMIT)
-    .map((m) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-    }));
+  // 7. Build model history in chronological order.
+  // V1 text-lane hygiene: this lane calls the model with NO tools
+  // attached, so a pseudo tool call persisted by an earlier turn would
+  // re-prime the model to emit envelope markup again mid-conversation.
+  // Strip envelope markup from assistant turns before history reaches the
+  // prompt (user turns and backtick-quoted examples are preserved). The
+  // V2 native lane performs its own strip in buildAssistantToolCallMessage.
+  const history = sanitizeTextLaneHistory(
+    priorMessages
+      .filter((m) => m.status === "completed" && (m.role === "user" || m.role === "assistant"))
+      .slice(-HISTORY_LIMIT)
+      .map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      })),
+  );
 
   // 7.5. Resolve ambiguous references in the user message using conversation history.
   // Expands "it", "that", "same thing", "why", etc. into self-contained messages.

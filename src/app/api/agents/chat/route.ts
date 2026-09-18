@@ -15,6 +15,11 @@ import {
   type RuntimeContextSnapshot,
 } from "@/lib/litt-intelligence/runtime-context-injector";
 import { withRateLimit } from "@/lib/rate-limiter";
+import {
+  buildToollessPrompt,
+  scanToollessOutput,
+} from "@/lib/litt-intelligence/toolless-lane-guard";
+import { stripToolCallMarkupText } from "@/lib/litt-intelligence/tool-call-markup";
 
 function getSupermemory() {
   const key = process.env.SUPERMEMORY_API_KEY;
@@ -294,12 +299,27 @@ async function handler(req: NextRequest) {
       : "";
 
     if (!agent && resolvedId === "director") {
-      // Fallback: create a minimal director agent if not initialized
+      // Fallback: create a minimal director agent if not initialized.
+      // Tool-less by construction (generateText attaches no tools), yet
+      // the prompt above injects the full tool manifest — including the
+      // imperative "you MUST call the tool before answering". Append the
+      // no-tools directive and scan the output so a primed model can never
+      // echo a fake tool call as a chat reply (mirrors the messages V1
+      // lane's markup boundary).
+      const fallbackToolIds = new Set(toolManifest.tools.map((t) => t.id));
       const r = await generateText(
-        `${directorPrompt}\n\n${memoryContext}USER: ${message}\n\nRespond as LiTT Director. Be direct and useful.`,
+        buildToollessPrompt(
+          `${directorPrompt}\n\n${memoryContext}USER: ${message}\n\nRespond as LiTT Director. Be direct and useful.`,
+        ),
         { task: "chat" },
       );
-      const response = r.text || "I'm on it.";
+      const markupHit = scanToollessOutput(r.text, fallbackToolIds);
+      // Fail honestly on invocation intent — never return or persist the
+      // pseudo-call. Intent-free markup gets hygiene-stripped instead.
+      const response =
+        markupHit !== null
+          ? "I hit a snag: I tried to call a tool, but this chat path can't run tools — so nothing was executed. Ask me in Studio chat for anything needing live data or actions, or rephrase and I'll answer directly."
+          : stripToolCallMarkupText(r.text) || "I'm on it.";
       // Persist the fallback chat turn as well.
       void persistMemory(userId, `User said: ${message}`, {
         agentId: resolvedId,
