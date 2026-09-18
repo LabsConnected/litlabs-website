@@ -43,7 +43,7 @@ function ConnectorPill({
   const label = `${connector.label}`;
   const body = (
     <>
-      <Icon size={12} className="text-cyan-300" />
+      <Icon size={12} className="text-accent" />
       <span className="hidden sm:inline">{label}</span>
       <span className="sm:hidden">{connector.label.split(" ")[0]}</span>
       {statusIcon}
@@ -51,7 +51,7 @@ function ConnectorPill({
   );
 
   const className =
-    "flex items-center gap-1.5 rounded-full border border-neutral-700/50 bg-neutral-900/60 px-2 py-1 text-[10px] font-bold text-neutral-300 transition hover:border-cyan-500/30 hover:bg-neutral-800/60 hover:text-cyan-200";
+    "flex items-center gap-1.5 rounded-full border border-neutral-700/50 bg-neutral-900/60 px-2 py-1 text-[10px] font-bold text-neutral-300 transition hover:border-accent/30 hover:bg-neutral-800/60 hover:text-accent";
 
   if (connector.href) {
     return (

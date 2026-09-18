@@ -131,6 +131,64 @@ describe("collectStaticArtifact", () => {
     expect(paths).toEqual(["index.html"]);
     expect(paths).not.toContain(".env");
   });
+
+  it("recurses into directories reported as \"folder\"", async () => {
+    // Regression: the terminal workspace API labels directories "folder",
+    // not "directory" — assets under subdirectories were never collected,
+    // so every deployment shipped only root-level files and the artifact
+    // validator failed deploys that referenced images.
+    const transport = fakeTransport({
+      async listFiles(path: string) {
+        if (path === "." || path === "") {
+          return {
+            entries: [
+              { name: "index.html", type: "file" },
+              { name: "assets", type: "folder" },
+            ],
+          };
+        }
+        if (path === "assets") {
+          return { entries: [{ name: "images", type: "folder" }] };
+        }
+        if (path === "assets/images") {
+          return { entries: [{ name: "hero.png", type: "file" }] };
+        }
+        return { entries: [] };
+      },
+      async readBinaryFile(path: string) {
+        if (path !== "assets/images/hero.png") throw new Error(`no such file: ${path}`);
+        const content = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64");
+        return { content, size: 4 };
+      },
+    });
+    const artifact = await collectStaticArtifact(transport);
+    const png = artifact.find((f) => f.path === "assets/images/hero.png");
+    expect(png).toBeDefined();
+    expect(png!.encoding).toBe("base64");
+    expect(Buffer.from(png!.content, "base64")).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  });
+
+  it("skips binary files when the transport cannot read them, so validation reports the missing reference", async () => {
+    const transport = fakeTransport({
+      async listFiles(path: string) {
+        if (path === "." || path === "") {
+          return {
+            entries: [
+              { name: "index.html", type: "file" },
+              { name: "assets", type: "folder" },
+            ],
+          };
+        }
+        if (path === "assets") {
+          return { entries: [{ name: "hero.png", type: "file" }] };
+        }
+        return { entries: [] };
+      },
+      readBinaryFile: undefined,
+    });
+    const artifact = await collectStaticArtifact(transport);
+    expect(artifact.find((f) => f.path === "assets/hero.png")).toBeUndefined();
+  });
 });
 
 /* ── Case A: successful deployment of a static project ──────────── */

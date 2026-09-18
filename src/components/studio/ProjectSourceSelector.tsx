@@ -31,9 +31,9 @@ export default function ProjectSourceSelector({
           key={label}
           disabled={disabled}
           onClick={() => onSelected?.({ type, label })}
-          className="flex flex-col items-start gap-1 rounded-xl border border-white/10 bg-white/3 p-3 text-left transition hover:border-cyan-300/30 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:bg-white/3"
+          className="flex flex-col items-start gap-1 rounded-xl border border-white/10 bg-white/3 p-3 text-left transition hover:border-accent/30 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:bg-white/3"
         >
-          <Icon size={16} className="text-cyan-300" />
+          <Icon size={16} className="text-accent" />
           <span className="flex items-center gap-1.5 text-[10px] font-bold text-white">
             {label}
             {disabled && (

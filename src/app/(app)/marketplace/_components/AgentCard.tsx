@@ -189,7 +189,7 @@ function AgentCardInner({
         <div className="mt-3 flex items-center gap-2 text-[10px]" style={{ color: textMuted }}>
           <span>Works with:</span>
           {item.compatible_assistants.includes("litt") && (
-            <span className="rounded-md bg-cyan-400/10 px-1.5 py-0.5 font-bold text-cyan-300">LiTT</span>
+            <span className="rounded-md bg-accent/10 px-1.5 py-0.5 font-bold text-accent">LiTT</span>
           )}
           {item.compatible_assistants.includes("spark") && (
             <span className="rounded-md bg-violet-400/10 px-1.5 py-0.5 font-bold text-violet-300">Spark</span>
@@ -231,7 +231,7 @@ function StateBadge({ state }: { state: AgentState }) {
     case "processing": return <span className="flex items-center gap-1 rounded-md bg-blue-400/10 px-2 py-0.5 font-bold text-blue-300"><Clock size={10} /> Processing</span>;
     case "revoked": return <span className="flex items-center gap-1 rounded-md bg-rose-400/10 px-2 py-0.5 font-bold text-rose-300"><Ban size={10} /> Revoked</span>;
     case "unavailable": return <span className="rounded-md bg-white/5 px-2 py-0.5 font-bold text-white/40">Unavailable</span>;
-    case "install": return <span className="rounded-md bg-cyan-400/10 px-2 py-0.5 font-bold text-cyan-300">Owned</span>;
+    case "install": return <span className="rounded-md bg-accent/10 px-2 py-0.5 font-bold text-accent">Owned</span>;
     case "buy": return <span className="rounded-md bg-white/5 px-2 py-0.5 font-bold text-white/60">Available</span>;
     default: return <span className="rounded-md bg-white/5 px-2 py-0.5 font-bold text-white/40">...</span>;
   }

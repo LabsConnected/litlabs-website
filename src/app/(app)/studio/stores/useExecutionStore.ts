@@ -126,6 +126,12 @@ interface ExecutionStore {
   approvalError: string | null;
   /** Whether the failed approval may be retried (re-POST the same pausedRunId). */
   approvalRetryable: boolean;
+  /**
+   * True when the failure was an expiry: the gate is gone server-side and
+   * "Retry" must re-request a fresh gate (re-request endpoint), not re-POST
+   * the dead pausedRunId (which would 409). Set by failApproval({expired}).
+   */
+  approvalExpired: boolean;
   checkpoint: { label: string; gitSha: string } | null;
   /** Tool calls in the current run */
   toolCalls: Array<{ toolId: string; success?: boolean; summary: string }>;
@@ -155,7 +161,7 @@ interface ExecutionStore {
    * card mounted with the backend error and a Retry affordance. Never
    * silently clears, never auto re-requests.
    */
-  failApproval: (error: string, retryable?: boolean) => void;
+  failApproval: (error: string, retryable?: boolean, opts?: { expired?: boolean }) => void;
   setCheckpoint: (checkpoint: { label: string; gitSha: string } | null) => void;
   collapseEvent: (id: string) => void;
   collapseLowLevel: () => void;
@@ -253,6 +259,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   approvalPhase: "idle",
   approvalError: null,
   approvalRetryable: true,
+  approvalExpired: false,
   checkpoint: null,
   toolCalls: [],
   changesSummary: null,
@@ -269,6 +276,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       approvalPhase: "idle",
       approvalError: null,
       approvalRetryable: true,
+      approvalExpired: false,
       checkpoint: null,
       toolCalls: [],
       changesSummary: null,
@@ -294,6 +302,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       approvalPhase: paused ? state.approvalPhase : "idle",
       approvalError: paused ? state.approvalError : null,
       approvalRetryable: paused ? state.approvalRetryable : true,
+      approvalExpired: paused ? state.approvalExpired : false,
     });
   },
 
@@ -348,6 +357,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       approvalPhase: "idle",
       approvalError: null,
       approvalRetryable: true,
+      approvalExpired: false,
     });
     if (approval) {
       get().addEvent({
@@ -374,6 +384,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       approvalPhase: "idle",
       approvalError: null,
       approvalRetryable: true,
+      approvalExpired: false,
     });
   },
 
@@ -389,11 +400,12 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     }
   },
 
-  failApproval: (error, retryable = true) => {
+  failApproval: (error, retryable = true, opts) => {
     set({
       approvalPhase: "failed",
       approvalError: error,
       approvalRetryable: retryable,
+      approvalExpired: opts?.expired === true,
       phase: "awaiting_approval",
     });
     get().addEvent({
@@ -453,6 +465,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       approvalPhase: "idle",
       approvalError: null,
       approvalRetryable: true,
+      approvalExpired: false,
       checkpoint: null,
       toolCalls: [],
       changesSummary: null,

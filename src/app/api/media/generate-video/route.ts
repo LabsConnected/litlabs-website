@@ -8,6 +8,7 @@ import { submitAlibabaVideoTask, isAlibabaConfigured } from "@/lib/alibaba-video
 import { getVideoModel, getVideoModelPricing } from "@/lib/studio-models";
 import { createVideoJob } from "@/lib/video-jobs";
 import { calculateRetailBits } from "@/lib/generation/cost-engine";
+import { buildChargeRating } from "@/lib/billing/canonical-pricing";
 import {
   createGenerationJob,
   getGenerationJobByRequestId,
@@ -123,8 +124,10 @@ async function handler(req: NextRequest) {
     if (isHappyHorse) {
       if (!isAlibabaConfigured())
         return NextResponse.json(
+          // 422, not 503: gateway statuses make the edge serve branded HTML
+          // instead of this JSON body (verified in production).
           { error: "Alibaba video not configured. Set ALIBABA_DASHSCOPE_API_KEY and ALIBABA_MODELSTUDIO_WORKSPACE_ID." },
-          { status: 503 },
+          { status: 422 },
         );
       if (!imageUrl)
         return NextResponse.json(
@@ -143,13 +146,23 @@ async function handler(req: NextRequest) {
         if (balances.total < cost)
           return NextResponse.json({ error: `Need ${cost} LiTTBits` }, { status: 402 });
 
-        // Reserve LiTTBits (atomic debit — refunded on failure)
+        // Reserve LiTTBits (atomic debit — refunded on failure).
+        // Keyed on requestId so client retries can never double-charge.
         const reservation = await adjustWalletBalance({
           clerkId: userId,
           amount: -cost,
           type: "spend",
           reason: `Video: ${videoModel.label} — Alibaba i2v`,
-          idempotencyKey: `video_${model}_${userId}_${Date.now()}`,
+          idempotencyKey: `video:charge:${requestId}`,
+          rating: buildChargeRating({
+            capability: "video",
+            provider: "alibaba",
+            model,
+            providerCostMicros: costResult.providerCostCents * 10_000,
+            bitsCharged: cost,
+            lane: "generation",
+          }),
+          usage: { videoSeconds: Number(duration) || 0 },
         });
 
         if (reservation.replayed) {
@@ -229,7 +242,7 @@ async function handler(req: NextRequest) {
             amount: cost,
             type: "refund",
             reason: `Video refund: ${videoModel.label} submission failed`,
-            idempotencyKey: `video_refund_${model}_${userId}_${Date.now()}`,
+            idempotencyKey: `video:refund:${requestId}`,
           });
         }
         throw submitErr;
@@ -261,7 +274,8 @@ async function handler(req: NextRequest) {
     if (!prompt?.trim())
       return NextResponse.json({ error: "Prompt required" }, { status: 400 });
 
-    // Reserve LiTTBits (atomic debit — refunded on failure)
+    // Reserve LiTTBits (atomic debit — refunded on failure).
+    // Keyed on requestId so client retries can never double-charge.
     let reservation: { balance: number; replayed: boolean } | null = null;
     if (!veoExempt) {
       const res = await adjustWalletBalance({
@@ -269,7 +283,16 @@ async function handler(req: NextRequest) {
         amount: -cost,
         type: "spend",
         reason: `Video: ${videoModel.label} — Veo generation`,
-        idempotencyKey: `video_${model}_${userId}_${Date.now()}`,
+        idempotencyKey: `video:charge:${requestId}`,
+        rating: buildChargeRating({
+          capability: "video",
+          provider: "veo",
+          model,
+          providerCostMicros: costResult.providerCostCents * 10_000,
+          bitsCharged: cost,
+          lane: "generation",
+        }),
+        usage: { videoSeconds: Number(duration) || 0 },
       });
 
       if (res.replayed) {
@@ -372,7 +395,7 @@ async function handler(req: NextRequest) {
           amount: cost,
           type: "refund",
           reason: `Video refund: ${videoModel.label} generation failed`,
-          idempotencyKey: `video_refund_${model}_${userId}_${Date.now()}`,
+          idempotencyKey: `video:refund:${requestId}`,
         });
       }
       throw genErr;

@@ -214,3 +214,6 @@ COMMIT_MSG_DO_FIX*
 # Temp source archives
 *-source.tar.gz
 
+
+# Acceptance driver scripts (local evidence tooling, not shipped)
+.acceptance-tmp/

@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { brand } from "@/lib/design/litt-tokens";
 import Link from "next/link";
 import { ArrowRight, BarChart3, Music2, Palette } from "lucide-react";
 
@@ -32,7 +33,7 @@ const PROJECTS = [
     outcome: "Brand-consistent campaign kit",
     tools: ["Brand", "Image", "Copy", "Social"],
     icon: Palette,
-    accent: "#a8ff2f",
+    accent: brand.primary.DEFAULT,
     image: "/studio/creative-engine-hero.png",
     imageAlt: "Creative engine artwork representing a coordinated multimedia campaign",
   },

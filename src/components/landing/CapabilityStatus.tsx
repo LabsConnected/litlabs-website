@@ -22,11 +22,11 @@ export function CapabilityStatus() {
       <div className="mx-auto flex max-w-[1500px] flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex shrink-0 items-center gap-3">
           <span className="relative flex h-2.5 w-2.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#a8ff2f] opacity-45" />
-            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#a8ff2f] shadow-[0_0_14px_rgba(168,255,47,.7)]" />
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-45" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-accent shadow-accent-glow-strong" />
           </span>
           <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-[#a8ff2f]">Working now</div>
+            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-accent">Working now</div>
             <div className="mt-0.5 text-xs font-semibold text-white/42">Core capabilities available in Studio</div>
           </div>
         </div>

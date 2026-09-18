@@ -11,6 +11,8 @@ import {
   completeGenerationJob,
 } from "@/lib/generation/jobs";
 import { resolveInternalUserId } from "@/lib/generation/identity";
+import { calculateRetailBits } from "@/lib/generation/cost-engine";
+import { buildChargeRating } from "@/lib/billing/canonical-pricing";
 
 // ── Route configuration ──────────────────────────────────────────
 export const runtime = "nodejs";
@@ -88,7 +90,15 @@ async function handler(req: NextRequest) {
   }
 
   try {
-    const { prompt, voice = "Kore", styleDirection } = await req.json();
+    const {
+      prompt,
+      voice = "Kore",
+      styleDirection,
+      requestId: clientRequestId,
+    } = await req.json();
+    // Stable key for the debit + job row — client retries with the same
+    // requestId can never double-charge.
+    const requestId = clientRequestId || crypto.randomUUID();
     if (!prompt?.trim())
       return NextResponse.json({ error: "Prompt required" }, { status: 400 });
 
@@ -129,13 +139,28 @@ async function handler(req: NextRequest) {
         audioBalance = null;
       }
     } else {
-      // Atomic debit via canonical ledger
+      // Atomic debit via canonical ledger — keyed on requestId.
+      const costResult = calculateRetailBits({
+        modality: "speech",
+        provider: "elevenlabs",
+        model: "tts",
+      });
       const reservation = await adjustWalletBalance({
         clerkId: userId,
         amount: -COST,
         type: "spend",
         reason: `TTS: voice=${voice}`,
-        idempotencyKey: `tts_${userId}_${Date.now()}`,
+        idempotencyKey: `tts:charge:${requestId}`,
+        rating: buildChargeRating({
+          capability: "speech",
+          provider: "gemini",
+          model: "gemini-2.5-flash-preview-tts",
+          providerCostMicros: costResult.providerCostCents * 10_000,
+          bitsCharged: COST,
+          billingClass: "flat",
+          lane: "flat",
+        }),
+        usage: { audioSeconds: 0 },
       });
       audioBalance = reservation.balance;
     }
@@ -162,7 +187,7 @@ async function handler(req: NextRequest) {
           provider: "gemini",
           model: "gemini-2.5-flash-preview-tts",
           prompt: finalPrompt,
-          requestId: `tts_${userId}_${Date.now()}`,
+          requestId,
           littBitsCharged: audioExempt ? 0 : COST,
           metadata: {
             durableUrl,

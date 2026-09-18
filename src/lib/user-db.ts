@@ -117,7 +117,9 @@ export async function getOrCreateUser(
   }
 
   await db.from("user_preferences").insert({ user_id: user.id });
-  await db.from("wallets").insert({ user_id: user.id, balance: 500 });
+  // No wallets row: credit_ledger is the authoritative balance system.
+  // The Starter 500 grant is issued lazily by getCreditBalances with an
+  // idempotency key, so nothing needs to be written here.
 
   return { user: user as UserProfile, isNew: true };
 }
@@ -204,242 +206,27 @@ export async function upsertUserPreferences(
   return data as UserPreferenceRow;
 }
 
-/** Get user wallet — auto-creates with 500 LiTTBits if missing. Returns synthetic wallet on ANY failure. */
+/**
+ * Get user wallet — canonical balance from credit_ledger via
+ * get_user_balances. Throws on failure: the previous synthetic
+ * "9999 LiTTBits" fallback reported a fake balance whenever the
+ * database was unreachable, and the wallets table is not a
+ * balance source anymore.
+ */
 export async function getUserWallet(clerkId: string): Promise<Wallet> {
-  const db = getDb();
-  if (db) {
-    try {
-      const user = await getUserByClerkId(clerkId);
-      if (user) {
-        const { data } = await db
-          .from("wallets")
-          .select("*")
-          .eq("user_id", user.id)
-          .single();
-        if (data) return data as Wallet;
-        // Wallet missing — create with default 500 LiTTBits
-        const { data: created } = await db
-          .from("wallets")
-          .insert({ user_id: user.id, balance: 500 })
-          .select()
-          .single();
-        if (created) return created as Wallet;
-      }
-    } catch {
-      // DB query failed — fall through to synthetic wallet
-    }
-  }
-
-  // Fallback: Use localStorage for wallet persistence when Supabase isn't configured
-  const storageKey = `litlabs-wallet-${clerkId}`;
-  let stored: string | null = null;
-  try {
-    stored =
-      typeof window !== "undefined" ? localStorage.getItem(storageKey) : null;
-  } catch {
-    // localStorage not available
-  }
-
-  if (stored) {
-    try {
-      const parsed = JSON.parse(stored);
-      return {
-        id: "local",
-        user_id: clerkId,
-        balance: parsed.balance ?? 9999,
-        last_claim_date: parsed.last_claim_date ?? null,
-        created_at: parsed.created_at ?? new Date().toISOString(),
-        updated_at: parsed.updated_at ?? new Date().toISOString(),
-      };
-    } catch {
-      // Invalid stored data
-    }
-  }
-
-  // Default fallback wallet
+  // Lazy import: this module predates the server-only split and is
+  // structured for dual client/server bundling — resolve the ledger at
+  // call time so a stray client import fails at the call site, not at
+  // bundle time.
+  const { getCreditBalances } = await import("@/lib/wallet-ledger");
+  const balances = await getCreditBalances(clerkId);
+  const now = new Date().toISOString();
   return {
-    id: "fallback",
-    user_id: "00000000-0000-0000-0000-000000000000",
-    balance: 9999,
-    last_claim_date: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    id: "ledger",
+    user_id: clerkId,
+    balance: balances.total,
+    last_claim_date: balances.lastDailyClaim,
+    created_at: now,
+    updated_at: now,
   };
-}
-
-/** Update wallet balance. Pass `absolute: true` to set a fixed value; otherwise amount is treated as a delta. */
-export async function updateWalletBalance(
-  clerkId: string,
-  amount: number,
-  options?: { absolute?: boolean; lastClaimDate?: string },
-) {
-  const { absolute = false, lastClaimDate } = options || {};
-  const db = getDb();
-
-  // Fallback mode — Supabase not configured, use localStorage
-  if (!db) {
-    const storageKey = `litlabs-wallet-${clerkId}`;
-    let currentBalance = 9999;
-
-    // Try to get existing balance from localStorage
-    try {
-      const stored =
-        typeof window !== "undefined" ? localStorage.getItem(storageKey) : null;
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        currentBalance = parsed.balance ?? 9999;
-      }
-    } catch {
-      // localStorage not available
-    }
-
-    // Calculate new balance
-    const newBalance = absolute ? amount : currentBalance + amount;
-
-    // Save to localStorage
-    const walletData = {
-      balance: Math.max(0, newBalance),
-      last_claim_date: lastClaimDate || null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    try {
-      if (typeof window !== "undefined") {
-        localStorage.setItem(storageKey, JSON.stringify(walletData));
-      }
-    } catch {
-      // localStorage not available
-    }
-
-    return {
-      id: "local",
-      user_id: clerkId,
-      ...walletData,
-    } as Wallet;
-  }
-
-  const user = await getUserByClerkId(clerkId);
-  if (!user) {
-    // Graceful fallback — user exists in Clerk but not yet in Supabase, use localStorage
-    const storageKey = `litlabs-wallet-${clerkId}`;
-    let currentBalance = 9999;
-
-    try {
-      const stored =
-        typeof window !== "undefined" ? localStorage.getItem(storageKey) : null;
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        currentBalance = parsed.balance ?? 9999;
-      }
-    } catch {
-      /* ignore */
-    }
-
-    const newBalance = absolute ? amount : currentBalance + amount;
-    const walletData = {
-      balance: Math.max(0, newBalance),
-      last_claim_date: lastClaimDate || null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    try {
-      if (typeof window !== "undefined") {
-        localStorage.setItem(storageKey, JSON.stringify(walletData));
-      }
-    } catch {
-      /* ignore */
-    }
-
-    return {
-      id: "local",
-      user_id: clerkId,
-      ...walletData,
-    } as Wallet;
-  }
-
-  let targetBalance = amount;
-  if (!absolute) {
-    // For deductions (negative amount), use optimistic locking to prevent
-    // race conditions. Read current balance, compute new balance, then
-    // update only if the current balance hasn't changed since we read it.
-    // If 0 rows are updated, retry once.
-    if (amount < 0) {
-      const deductionAmount = Math.abs(amount);
-      const maxRetries = 2;
-
-      for (let attempt = 0; attempt < maxRetries; attempt++) {
-        const { data: wallet } = await db
-          .from("wallets")
-          .select("balance")
-          .eq("user_id", user.id)
-          .single();
-
-        const currentBalance = wallet?.balance ?? 0;
-        if (currentBalance < deductionAmount) {
-          throw new Error("Insufficient balance");
-        }
-
-        const newBalance = currentBalance + amount; // amount is negative
-        const { data: updated, error: updateError, count } = await db
-          .from("wallets")
-          .update({
-            balance: newBalance,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("user_id", user.id)
-          .eq("balance", currentBalance) // Optimistic lock: only update if balance hasn't changed
-          .select()
-          .single();
-
-        if (updateError || count === 0) {
-          // Concurrent modification — retry if we have attempts left
-          if (attempt < maxRetries - 1) continue;
-          throw new Error("Failed to update wallet: concurrent modification detected");
-        }
-
-        return updated as Wallet;
-      }
-      // Unreachable, but TypeScript needs it
-      throw new Error("Failed to update wallet: retry exhausted");
-    }
-
-    // For credits (positive amount), read-then-write is acceptable
-    const { data: wallet } = await db
-      .from("wallets")
-      .select("balance")
-      .eq("user_id", user.id)
-      .single();
-    targetBalance = (wallet?.balance ?? 0) + amount;
-    if (targetBalance < 0) throw new Error("Insufficient balance");
-  }
-
-  const { data, error } = await db
-    .from("wallets")
-    .update({
-      balance: targetBalance,
-      ...(lastClaimDate && { last_claim_date: lastClaimDate }),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("user_id", user.id)
-    .select()
-    .single();
-  if (error) throw new Error(`Failed to update wallet: ${error.message}`);
-  return data as Wallet;
-}
-
-/** Claim daily bonus */
-export async function claimDailyBonus(
-  clerkId: string,
-  bonusAmount: number = 50,
-) {
-  const wallet = await getUserWallet(clerkId);
-  const today = new Date().toISOString().split("T")[0];
-  if (wallet.last_claim_date === today)
-    throw new Error("Daily bonus already claimed");
-  return updateWalletBalance(clerkId, wallet.balance + bonusAmount, {
-    absolute: true,
-    lastClaimDate: today,
-  });
 }

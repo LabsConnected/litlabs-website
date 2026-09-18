@@ -90,6 +90,18 @@ export const DEFAULT_LOOP_CONFIG: AgentLoopConfig = {
   enableBuildFix: true,
 };
 
+/**
+ * A tool call the model emitted in the same batch as a call that paused for
+ * approval. It was never validated, never executed, and never logged —
+ * without persistence + re-injection on resume, approving one tool silently
+ * drops the rest of the batch while the run reports "done".
+ */
+export interface DeferredToolCall {
+  toolCallId: string;
+  toolId: string;
+  inputs: Record<string, unknown>;
+}
+
 export interface PendingApproval {
   toolId: string;
   toolCallId: string;
@@ -99,6 +111,11 @@ export interface PendingApproval {
   pausedMessages: LLMMessage[];
   /** Quality evidence captured before this approval pause. */
   qualityLoopState?: QualityLoopSnapshot;
+  /** The unexecuted remainder of the batch that hit this gate. */
+  deferredToolCalls?: DeferredToolCall[];
+  /** Run counters captured at pause time — resume must not restart them at 0. */
+  stepsUsedAtPause?: number;
+  hadInterveningMutationAtPause?: boolean;
 }
 
 export interface AgentLoopResult {
@@ -653,6 +670,11 @@ export async function runAgentLoopV2(
           // never prompted, so `project.deploy` could never run. Pausing asks
           // the user instead, which still never grants AUTO more privilege
           // than ACT — the tool runs only after an explicit approval.
+          //
+          // The calls after this one in the batch were never executed. They
+          // are captured as deferred calls on the pause so resume re-injects
+          // them after the approved tool runs — approving one tool must not
+          // silently drop the rest of the batch.
           return {
             finalText: `I need your approval to run \`${toolCall.toolId}\`. ${permResult.reason ?? "This operation requires explicit approval."}`,
             stepsUsed,
@@ -668,6 +690,9 @@ export async function runAgentLoopV2(
               reason: permResult.reason ?? "Approval required",
               pausedMessages: [...llmMessages],
               qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
+              deferredToolCalls: deferredCallsAfterBatchPause(llmResponse.toolCalls, toolCall.toolCallId),
+              stepsUsedAtPause: stepsUsed,
+              hadInterveningMutationAtPause: hasInterveningMutation,
             },
           };
         }
@@ -690,6 +715,14 @@ export async function runAgentLoopV2(
       if (detectRepeatedCalls(toolCallRecords, toolCall.toolId, inputsHash, hasInterveningMutation)) {
         cancelled = true;
         cancelReason = `Repeated tool call detected: ${toolCall.toolId} called 3+ times with same inputs and no intervening mutation`;
+        break;
+      }
+
+      // Stop must also stop in-flight tool work: never start a tool call
+      // once the caller has aborted.
+      if (cfg.signal?.aborted) {
+        cancelled = true;
+        cancelReason = "Cancelled by user";
         break;
       }
 
@@ -803,7 +836,7 @@ export async function runAgentLoopV2(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode),
     });
   }
 
@@ -998,12 +1031,293 @@ export interface ResumeInput {
   /** Existing checkpoint (if created before pause) */
   existingCheckpoint?: { checkpointId: string; label: string; gitSha: string };
   /**
+   * Calls deferred from the batch that hit the approval gate. Executed
+   * after the approved tool on resume (in batch order), through the same
+   * validate → permission → dedupe → execute machinery as a live batch.
+   */
+  deferredToolCalls?: DeferredToolCall[];
+  /**
    * Capability set the model-facing tool list was filtered with when the
    * user approved. Threaded into the resume execution gate so the approved
    * tool cannot fail closed as "incapable". Optional for backwards
    * compatibility — resume falls back to resolving fresh when absent.
    */
   availableCapabilities?: string[];
+}
+
+/**
+ * Split a tool-call batch at the call that paused for approval: everything
+ * after it was never executed and becomes the deferred remainder. Pure —
+ * the caller persists the result on the paused run and re-injects it on
+ * resume.
+ */
+export function deferredCallsAfterBatchPause(
+  batch: Array<{ toolCallId: string; toolId: string; inputs: Record<string, unknown> }>,
+  pausedToolCallId: string,
+): DeferredToolCall[] {
+  const idx = batch.findIndex((c) => c.toolCallId === pausedToolCallId);
+  if (idx < 0) return [];
+  return batch.slice(idx + 1).map((c) => ({
+    toolCallId: c.toolCallId,
+    toolId: c.toolId,
+    inputs: c.inputs,
+  }));
+}
+
+/**
+ * Mutable run state shared with deferred-call re-injection. The helper
+ * mutates this in place; the caller reads it back after the await.
+ */
+export interface DeferredToolBatchState {
+  hasInterveningMutation: boolean;
+  cancelled: boolean;
+  cancelReason?: string;
+  checkpoint?: { checkpointId: string; label: string; gitSha: string };
+  mutationBatchPending: boolean;
+  batchHasMutation: boolean;
+  completedDeployment: CompletedDeployment | null;
+}
+
+export interface DeferredToolBatchContext {
+  availableTools: LiTTToolDefinition[];
+  executionMode: ExecutionMode;
+  transport: WorkspaceTransport;
+  llmMessages: LLMMessage[];
+  toolCallLog: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }>;
+  toolCallRecords: ToolCallRecord[];
+  executedMutations: Map<string, ToolCallResult>;
+  localProgress: ProgressEmitter;
+  qualitySession: QualityLoopSession | null;
+  startTime: number;
+  stepsUsed: number;
+  maxOutputChars: number;
+  /** Upstream/client abort signal. Deferred execution must honor the same stop request as the resumed loop. */
+  signal?: AbortSignal;
+  state: DeferredToolBatchState;
+}
+
+export interface DeferredToolBatchResult {
+  /**
+   * Set when a deferred call hit a NEW approval gate. The remaining deferred
+   * calls stay attached to it, so the next resume continues the batch —
+   * the batch is never truncated, it just pauses again.
+   */
+  nestedApproval: PendingApproval | null;
+}
+
+/**
+ * Execute deferred tool calls (the unexecuted remainder of the batch that
+ * hit an approval gate) after the approved tool ran on resume.
+ *
+ * Each call goes through the same validate → dedupe → permission →
+ * loop-detection → checkpoint → execute → log machinery as a live batch:
+ * a deferred mutation that itself requires approval pauses AGAIN (nested
+ * gate, remainder still attached), a disallowed one feeds back an honest
+ * error result, and every call lands in the toolCalls transcript. This is
+ * the "re-injection" half of the no-silent-truncation fix; the other half
+ * is `deferredCallsAfterBatchPause` capturing the remainder at pause time.
+ */
+export async function executeDeferredToolCalls(
+  deferred: DeferredToolCall[],
+  ctx: DeferredToolBatchContext,
+): Promise<DeferredToolBatchResult> {
+  const { state } = ctx;
+  const permissionEngine = new PermissionEngine();
+
+  for (const toolCall of deferred) {
+    // A resumed approval batch must honor the same user stop signal as the
+    // surrounding agent loop. Check before every deferred execution so an
+    // already-aborted resume executes zero remaining tools, and a mid-batch
+    // abort prevents every later call from starting.
+    if (ctx.signal?.aborted) {
+      state.cancelled = true;
+      state.cancelReason = "Cancelled by user";
+      break;
+    }
+
+    const toolDef = ctx.availableTools.find((t) => t.id === toolCall.toolId);
+
+    if (!toolDef) {
+      const result: ToolCallResult = {
+        toolCallId: toolCall.toolCallId,
+        toolId: toolCall.toolId,
+        result: null,
+        success: false,
+        error: `Unknown tool: ${toolCall.toolId}`,
+      };
+      ctx.llmMessages.push(buildToolResultMessage(result));
+      continue;
+    }
+
+    const validationError = toolRegistry.validateInputs(toolCall.toolId, toolCall.inputs);
+    if (validationError) {
+      const result: ToolCallResult = {
+        toolCallId: toolCall.toolCallId,
+        toolId: toolCall.toolId,
+        result: null,
+        success: false,
+        error: validationError,
+      };
+      ctx.llmMessages.push(buildToolResultMessage(result));
+      continue;
+    }
+
+    // Duplicate-mutation protection: a deferred call identical to an
+    // already-executed mutation replays the recorded result.
+    const dedupeKey = `${toolCall.toolId}:${hashInputs(toolCall.inputs)}`;
+    if (!toolDef.readOnly) {
+      const prior = ctx.executedMutations.get(dedupeKey);
+      if (prior) {
+        ctx.llmMessages.push(buildToolResultMessage({
+          toolCallId: toolCall.toolCallId,
+          toolId: toolCall.toolId,
+          result: prior.result,
+          success: true,
+        }));
+        ctx.toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true });
+        ctx.localProgress.emit({
+          type: "tool_result",
+          toolId: toolCall.toolId,
+          success: true,
+          summary: "skipped — already executed",
+          durationMs: 0,
+        });
+        continue;
+      }
+    }
+
+    const permInfo = toPermissionInfo(toolDef);
+    const permResult = permissionEngine.check(permInfo, toolCall.inputs, ctx.executionMode);
+
+    if (!permResult.allowed) {
+      const result: ToolCallResult = {
+        toolCallId: toolCall.toolCallId,
+        toolId: toolCall.toolId,
+        result: null,
+        success: false,
+        error: permResult.reason ?? "Permission denied",
+      };
+      ctx.llmMessages.push(buildToolResultMessage(result));
+      ctx.localProgress.emit({
+        type: "approval_required",
+        toolId: toolCall.toolId,
+        reason: permResult.reason ?? "Permission denied",
+      });
+      continue;
+    }
+
+    if (permResult.requiresApproval) {
+      ctx.localProgress.emit({
+        type: "approval_required",
+        toolId: toolCall.toolId,
+        reason: permResult.reason ?? "Approval required",
+      });
+
+      if (ctx.executionMode === "act") {
+        // Pause again — the calls after this one stay deferred on the new
+        // gate, so the batch still loses nothing.
+        return {
+          nestedApproval: {
+            toolId: toolCall.toolId,
+            toolCallId: toolCall.toolCallId,
+            inputs: toolCall.inputs,
+            reason: permResult.reason ?? "Approval required",
+            pausedMessages: [...ctx.llmMessages],
+            qualityLoopState: ctx.qualitySession ? snapshotQualityLoopSession(ctx.qualitySession) : undefined,
+            deferredToolCalls: deferredCallsAfterBatchPause(deferred, toolCall.toolCallId),
+            stepsUsedAtPause: ctx.stepsUsed,
+            hadInterveningMutationAtPause: state.hasInterveningMutation,
+          },
+        };
+      }
+
+      const result: ToolCallResult = {
+        toolCallId: toolCall.toolCallId,
+        toolId: toolCall.toolId,
+        result: null,
+        success: false,
+        error: "Approval required — this operation is not in the AUTO-approve safe set",
+      };
+      ctx.llmMessages.push(buildToolResultMessage(result));
+      continue;
+    }
+
+    // Loop detection
+    const inputsHash = hashInputs(toolCall.inputs);
+    if (detectRepeatedCalls(ctx.toolCallRecords, toolCall.toolId, inputsHash, state.hasInterveningMutation)) {
+      state.cancelled = true;
+      state.cancelReason = `Repeated tool call detected: ${toolCall.toolId} called 3+ times with same inputs and no intervening mutation`;
+      break;
+    }
+
+    // Checkpoint before first mutation
+    if (!toolDef.readOnly && !state.mutationBatchPending && !state.checkpoint) {
+      ctx.localProgress.emit({ type: "phase", phase: "execute", step: ctx.stepsUsed });
+      state.checkpoint = await ctx.transport.createCheckpointBeforeMutation(
+        `Pre-agent-loop resume (deferred batch)`,
+      ) ?? undefined;
+      if (state.checkpoint) {
+        ctx.localProgress.emit({
+          type: "checkpoint",
+          label: state.checkpoint.label,
+          gitSha: state.checkpoint.gitSha,
+        });
+      }
+      state.mutationBatchPending = true;
+      state.batchHasMutation = true;
+    }
+
+    ctx.localProgress.emit({ type: "tool_start", toolId: toolCall.toolId, summary: `${toolCall.toolId} (deferred)` });
+
+    let result: ToolCallResult;
+    try {
+      const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {
+        hasApproval: !permResult.requiresApproval,
+        transport: ctx.transport,
+      });
+
+      if (execResult.ok) {
+        result = { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: execResult.result, success: true };
+      } else {
+        result = { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: null, success: false, error: execResult.error };
+      }
+    } catch (err) {
+      result = { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: null, success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+
+    ctx.toolCallRecords.push({ toolId: toolCall.toolId, inputsHash, resultHash: hashResult(result.result), step: ctx.stepsUsed });
+
+    if (!toolDef.readOnly) {
+      state.hasInterveningMutation = true;
+      state.batchHasMutation = true;
+      if (result.success) ctx.executedMutations.set(dedupeKey, result);
+    }
+
+    const summary = summarizeToolResult(toolCall.toolId, result.result);
+    ctx.toolCallLog.push({ toolId: toolCall.toolId, success: result.success, summary, mutating: !toolDef.readOnly });
+    state.completedDeployment = readDeploymentOutcome(toolCall.toolId, result.result) ?? state.completedDeployment;
+    if (ctx.qualitySession) {
+      noteToolResult(
+        ctx.qualitySession,
+        toolCall.toolId,
+        { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
+        ctx.transport.workspaceId,
+      );
+    }
+
+    ctx.localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: result.success, summary, durationMs: 0 });
+
+    ctx.llmMessages.push(buildToolResultMessage(result));
+
+    const totalOutput = ctx.llmMessages.map((m) => m.content).join("").length;
+    if (totalOutput > ctx.maxOutputChars) {
+      state.cancelled = true;
+      state.cancelReason = `Max output exceeded (${ctx.maxOutputChars} chars)`;
+      break;
+    }
+  }
+
+  return { nestedApproval: null };
 }
 
 /**
@@ -1090,6 +1404,7 @@ export async function resumeAgentLoopV2(
   const toolCallLog: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }> = [];
   let completedDeployment: CompletedDeployment | null = null;
   let mutationBatchPending = false;
+  let batchHasMutation = false;
 
   // Execute the approved/rejected tool FIRST, then continue the loop
   localProgress.emit({ type: "phase", phase: "execute", step: stepsUsed });
@@ -1098,7 +1413,19 @@ export async function resumeAgentLoopV2(
     localProgress.emit({ type: "tool_start", toolId: resume.toolId, summary: `${resume.toolId} (approved)` });
 
     let result: ToolCallResult;
-    try {
+    if (cfg.signal?.aborted) {
+      // The run was stopped while awaiting approval: the approved tool
+      // must not execute. Surface cancelled without running it.
+      cancelled = true;
+      cancelReason = "Cancelled by user";
+      result = {
+        toolCallId: resume.toolCallId,
+        toolId: resume.toolId,
+        result: null,
+        success: false,
+        error: "Cancelled by user",
+      };
+    } else try {
       const execResult = await toolRegistry.execute(resume.toolId, resume.inputs, {
         hasApproval: true,
         availableCapabilities,
@@ -1205,8 +1532,61 @@ export async function resumeAgentLoopV2(
     llmMessages.push(buildToolResultMessage(result));
   }
 
+  // Re-inject the deferred remainder of the batch that hit the approval
+  // gate: these calls were never executed before the pause, and approving
+  // the gated tool must not silently drop them. Deferred mutations that
+  // themselves require approval pause AGAIN (nested gate with the rest
+  // still attached) rather than running unapproved. On REJECT the model
+  // re-plans from the rejection result, so there is nothing to re-inject.
+  if (resume.decision === "approved" && resume.deferredToolCalls && resume.deferredToolCalls.length > 0) {
+    const deferredState: DeferredToolBatchState = {
+      hasInterveningMutation,
+      cancelled,
+      cancelReason,
+      checkpoint,
+      mutationBatchPending,
+      batchHasMutation,
+      completedDeployment,
+    };
+    const deferredResult = await executeDeferredToolCalls(resume.deferredToolCalls, {
+      availableTools,
+      executionMode: cfg.executionMode,
+      transport,
+      llmMessages,
+      toolCallLog,
+      toolCallRecords,
+      executedMutations,
+      localProgress,
+      qualitySession,
+      startTime,
+      stepsUsed,
+      maxOutputChars: cfg.maxOutputChars,
+      signal: cfg.signal,
+      state: deferredState,
+    });
+    hasInterveningMutation = deferredState.hasInterveningMutation;
+    cancelled = deferredState.cancelled;
+    cancelReason = deferredState.cancelReason;
+    checkpoint = deferredState.checkpoint;
+    mutationBatchPending = deferredState.mutationBatchPending;
+    batchHasMutation = deferredState.batchHasMutation;
+    completedDeployment = deferredState.completedDeployment;
+
+    if (deferredResult.nestedApproval) {
+      return {
+        finalText: `I need your approval to run \`${deferredResult.nestedApproval.toolId}\`. ${deferredResult.nestedApproval.reason}`,
+        stepsUsed,
+        totalDurationMs: Date.now() - startTime,
+        toolCalls: toolCallLog,
+        cancelled: false,
+        events,
+        pendingApproval: deferredResult.nestedApproval,
+      };
+    }
+  }
+
   // Continue the loop
-  while (stepsUsed < cfg.maxSteps) {
+  while (stepsUsed < cfg.maxSteps && !cancelled) {
     const elapsed = Date.now() - startTime;
     if (elapsed > cfg.maxRuntimeMs) {
       cancelled = true;
@@ -1358,35 +1738,35 @@ export async function resumeAgentLoopV2(
       if (permResult.requiresApproval) {
         localProgress.emit({ type: "approval_required", toolId: toolCall.toolId, reason: permResult.reason ?? "Approval required" });
 
-        if (cfg.executionMode === "act") {
-          return {
-            finalText: `I need your approval to run \`${toolCall.toolId}\`. ${permResult.reason ?? "This operation requires explicit approval in ACT mode."}`,
-            stepsUsed,
-            totalDurationMs: Date.now() - startTime,
-            toolCalls: toolCallLog,
-            cancelled: false,
-            events,
-            checkpoint: checkpoint ?? undefined,
-            pendingApproval: {
-              toolId: toolCall.toolId,
-              toolCallId: toolCall.toolCallId,
-              inputs: toolCall.inputs,
-              reason: permResult.reason ?? "Approval required in ACT mode",
-              pausedMessages: [...llmMessages],
-              qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
-            },
-          };
-        }
-
-        const result: ToolCallResult = {
-          toolCallId: toolCall.toolCallId,
-          toolId: toolCall.toolId,
-          result: null,
-          success: false,
-          error: "Approval required — this operation is not in the AUTO-approve safe set",
+        // Pause for approval in AUTO as well as ACT — the same contract as
+        // the initial loop. A resumed run that reaches a second gated tool
+        // must produce a resumable paused run; the previous AUTO branch
+        // fed the model an "approval required" tool error instead, so the
+        // run "completed" with text asking for an approval that had no
+        // button — a dead end the user could never answer.
+        // As in the initial loop, the calls after this one were never
+        // executed — capture them as deferred calls so the next resume
+        // re-injects them after the approved tool.
+        return {
+          finalText: `I need your approval to run \`${toolCall.toolId}\`. ${permResult.reason ?? "This operation requires explicit approval."}`,
+          stepsUsed,
+          totalDurationMs: Date.now() - startTime,
+          toolCalls: toolCallLog,
+          cancelled: false,
+          events,
+          checkpoint: checkpoint ?? undefined,
+          pendingApproval: {
+            toolId: toolCall.toolId,
+            toolCallId: toolCall.toolCallId,
+            inputs: toolCall.inputs,
+            reason: permResult.reason ?? "Approval required",
+            pausedMessages: [...llmMessages],
+            qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
+            deferredToolCalls: deferredCallsAfterBatchPause(llmResponse.toolCalls, toolCall.toolCallId),
+            stepsUsedAtPause: stepsUsed,
+            hadInterveningMutationAtPause: hasInterveningMutation,
+          },
         };
-        llmMessages.push(buildToolResultMessage(result));
-        continue;
       }
 
       // Loop detection
@@ -1394,6 +1774,14 @@ export async function resumeAgentLoopV2(
       if (detectRepeatedCalls(toolCallRecords, toolCall.toolId, inputsHash, hasInterveningMutation)) {
         cancelled = true;
         cancelReason = `Repeated tool call detected: ${toolCall.toolId} called 3+ times with same inputs and no intervening mutation`;
+        break;
+      }
+
+      // Stop must also stop in-flight tool work: never start a tool call
+      // once the caller has aborted.
+      if (cfg.signal?.aborted) {
+        cancelled = true;
+        cancelReason = "Cancelled by user";
         break;
       }
 
@@ -1408,7 +1796,17 @@ export async function resumeAgentLoopV2(
         });
 
         if (execResult.ok) {
-          result = { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: execResult.result, success: true };
+          // Same domain-failure normalization as the other execute sites:
+          // a handler returning { success: false } is a failed mutation,
+          // never a success.
+          const handlerError = handlerFailureError(execResult.result);
+          result = {
+            toolCallId: toolCall.toolCallId,
+            toolId: toolCall.toolId,
+            result: execResult.result,
+            success: handlerError === null,
+            ...(handlerError !== null ? { error: handlerError } : {}),
+          };
         } else {
           result = { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: null, success: false, error: execResult.error };
         }
@@ -1457,7 +1855,7 @@ export async function resumeAgentLoopV2(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode),
     });
   }
 
@@ -1543,11 +1941,13 @@ export function createAutonomousRepairCallback(
   toolDefs: ToolDefinition[],
   deadlineMs?: number,
   signal?: AbortSignal,
+  executionMode: ExecutionMode = "act",
   // Capability set for repair-loop tool execution. Defaults to the resolved
   // deployment set so repair tools (files.patch, checkpoint.*) cannot fail
   // closed as "incapable" — the same unified-gate guarantee as the main loop.
   availableCapabilities: string[] = resolveAvailableCapabilities({ transport }),
 ): (attempt: number, errors: string) => Promise<boolean> {
+  const permissionEngine = new PermissionEngine();
   return async (attempt: number, errors: string) => {
     // Feed the error output to the LLM and let it repair
     const repairMessages: LLMMessage[] = [
@@ -1574,10 +1974,39 @@ export function createAutonomousRepairCallback(
 
         repairMessages.push(buildAssistantToolCallMessage(response.toolCalls, response.text, response.rawParts));
 
-        // Execute each tool call
+        // Execute each tool call — routed through the same permission
+        // check the main loop uses. Repair is autonomous: there is no
+        // user to approve a gated call, so a denied or
+        // approval-requiring call fails closed (the model sees the gate
+        // and must work around it) instead of executing silently with
+        // hasApproval: true.
         for (const toolCall of response.toolCalls) {
+          // Stop must also stop repair work: never start a tool call once
+          // the caller has aborted.
+          if (signal?.aborted) {
+            return false;
+          }
+
           const toolDef = toolRegistry.get(toolCall.toolId);
           if (!toolDef) continue;
+
+          const repairPermResult = permissionEngine.check(
+            toPermissionInfo(toolDef),
+            toolCall.inputs,
+            executionMode,
+          );
+          if (!repairPermResult.allowed || repairPermResult.requiresApproval) {
+            repairMessages.push(buildToolResultMessage({
+              toolCallId: toolCall.toolCallId,
+              toolId: toolCall.toolId,
+              result: null,
+              success: false,
+              error: repairPermResult.requiresApproval
+                ? `Permission gate: ${repairPermResult.reason ?? "this operation requires explicit approval"} — approval cannot be granted during autonomous repair, so the call was not executed.`
+                : `${repairPermResult.reason ?? "Permission denied"} — the call was not executed.`,
+            }));
+            continue;
+          }
 
           try {
             const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {
@@ -1586,8 +2015,18 @@ export function createAutonomousRepairCallback(
               transport,
             });
 
+            // Same domain-failure normalization as the main loop: a
+            // handler returning { success: false } is a failed repair
+            // step, never a success.
+            const handlerError = execResult.ok ? handlerFailureError(execResult.result) : null;
             const result: ToolCallResult = execResult.ok
-              ? { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: execResult.result, success: true }
+              ? {
+                  toolCallId: toolCall.toolCallId,
+                  toolId: toolCall.toolId,
+                  result: execResult.result,
+                  success: handlerError === null,
+                  ...(handlerError !== null ? { error: handlerError } : {}),
+                }
               : { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: null, success: false, error: execResult.error };
 
             repairMessages.push(buildToolResultMessage(result));

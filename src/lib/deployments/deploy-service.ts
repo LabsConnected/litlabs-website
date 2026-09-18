@@ -28,7 +28,9 @@ import { createHash } from "node:crypto";
 
 import {
   validateArtifact,
+  artifactBytes,
   contentTypeFor,
+  isBinaryContentType,
   describeDeploymentFailure,
   isSafeArtifactPath,
   DEPLOYMENT_LIMITS,
@@ -52,6 +54,13 @@ export interface DeploySourceTransport {
   readonly workspaceId: string;
   listFiles(path: string): Promise<{ entries: Array<{ name: string; type: string }> }>;
   readFile(path: string): Promise<{ content: string; size: number }>;
+  /**
+   * Read a binary file, content returned base64-encoded. Optional: a
+   * transport without it simply cannot ship binary assets — the artifact
+   * validator then fails the deploy on the missing reference rather than
+   * publishing a broken site.
+   */
+  readBinaryFile?(path: string): Promise<{ content: string; size: number }>;
 }
 
 export interface DeploymentRecord {
@@ -181,17 +190,26 @@ export async function collectStaticArtifact(
       const path = dir === "." ? entry.name : `${dir}/${entry.name}`;
       if (!isSafeArtifactPath(path)) continue;
 
-      if (entry.type === "directory") {
+      // Workspace transports disagree on the directory label ("directory"
+      // vs "folder") — accept either or nested assets are silently dropped.
+      if (entry.type === "directory" || entry.type === "folder") {
         queue.push(path);
         continue;
       }
-      if (contentTypeFor(path) === "application/octet-stream") {
+      const contentType = contentTypeFor(path);
+      if (contentType === "application/octet-stream") {
         // Not a known static web type — skip rather than publish opaque bytes.
         continue;
       }
       try {
-        const { content } = await transport.readFile(path);
-        collected.push({ path, content });
+        if (isBinaryContentType(contentType)) {
+          if (!transport.readBinaryFile) continue;
+          const { content } = await transport.readBinaryFile(path);
+          collected.push({ path, content, encoding: "base64" });
+        } else {
+          const { content } = await transport.readFile(path);
+          collected.push({ path, content });
+        }
       } catch {
         // Unreadable file — skip; validation decides whether the result is
         // still publishable.
@@ -402,7 +420,7 @@ export async function deployUserProject(
         path: file.path,
         content: file.content,
         contentType: contentTypeFor(file.path),
-        bytes: Buffer.byteLength(file.content, "utf8"),
+        bytes: artifactBytes(file),
       })),
     );
 

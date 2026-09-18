@@ -70,7 +70,7 @@ export function VisualPackSettings() {
               style={{ background: PACK_PREVIEWS[pack.id] ?? "#0a0a0f" }}
             >
               <div className="flex h-full items-end gap-1.5 p-2">
-                <div className="h-1.5 w-8 rounded-full" style={{ backgroundColor: pack.accent === "cyber-yellow" ? "#f59e0b" : pack.accent === "matrix-green" ? "#8b5cf6" : pack.accent === "electric-blue" ? "#3b82f6" : pack.accent === "sunset-orange" ? "#f97316" : pack.accent === "neon-green" ? "#06b6d4" : "#a855f7", opacity: 0.6 }} />
+                <div className="h-1.5 w-8 rounded-full" style={{ backgroundColor: pack.accent === "lime" ? "#a8ff2f" : pack.accent === "cyber-yellow" ? "#f59e0b" : pack.accent === "matrix-green" ? "#8b5cf6" : pack.accent === "electric-blue" ? "#3b82f6" : pack.accent === "sunset-orange" ? "#f97316" : pack.accent === "neon-green" ? "#06b6d4" : "#a855f7", opacity: 0.6 }} />
                 <div className="h-1.5 w-12 rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.15)" }} />
                 <div className="h-1.5 w-6 rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.08)" }} />
               </div>

@@ -38,7 +38,7 @@ vi.mock("@/app/(app)/studio/context/VoiceSessionContext", () => ({
 vi.mock("@/context/ThemeContext", () => ({
   useTheme: () => ({
     theme: "dark",
-    resolvedColors: { accentColor: "#22d3ee", textColor: "#fff", textMuted: "#888" },
+    resolvedColors: { accentColor: "#a8ff2f", textColor: "#fff", textMuted: "#888" },
     layoutStyle: "compact",
   }),
 }));

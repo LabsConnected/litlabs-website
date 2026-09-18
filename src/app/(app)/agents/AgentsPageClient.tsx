@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { brand } from "@/lib/design/litt-tokens";
 import Image from "next/image";
 import Link from "next/link";
 import {
@@ -64,7 +65,7 @@ const LOCAL_MISSIONS_KEY = "litlabs-agent-local-missions-v1";
 
 const STARTER_NODES: FlowNode[] = [
   { id: "brief", kind: "input", title: "Mission brief", subtitle: "Your goal and constraints", color: "#65f4ff", x: 54, y: 118 },
-  { id: "litt", kind: "agent", title: "LiTT", subtitle: "Plans, builds, and directs", color: "#a8ff2f", x: 306, y: 76, agentId: "litt" },
+  { id: "litt", kind: "agent", title: "LiTT", subtitle: "Plans, builds, and directs", color: brand.primary.DEFAULT, x: 306, y: 76, agentId: "litt" },
   { id: "spark", kind: "agent", title: "Spark", subtitle: "Explores creative directions", color: "#a970ff", x: 306, y: 232, agentId: "spark" },
   { id: "review", kind: "output", title: "Approval gate", subtitle: "You review before shipping", color: "#ffca5c", x: 558, y: 154 },
 ];
@@ -77,7 +78,7 @@ const STARTER_EDGES: FlowEdge[] = [
 ];
 
 const PALETTE: PaletteItem[] = [
-  { kind: "agent", title: "LiTT", subtitle: "Copilot + builder", color: "#a8ff2f", agentId: "litt", icon: Brain },
+  { kind: "agent", title: "LiTT", subtitle: "Copilot + builder", color: brand.primary.DEFAULT, agentId: "litt", icon: Brain },
   { kind: "agent", title: "Spark", subtitle: "Creative explorer", color: "#a970ff", agentId: "spark", icon: Sparkles },
   { kind: "input", title: "Mission brief", subtitle: "Goal + context", color: "#65f4ff", icon: Target },
   { kind: "action", title: "Build code", subtitle: "App, site, or feature", color: "#22d3ee", icon: Code2 },
@@ -86,7 +87,7 @@ const PALETTE: PaletteItem[] = [
   { kind: "action", title: "Use data", subtitle: "Read or write records", color: "#34d399", icon: Database },
   { kind: "action", title: "Create audio", subtitle: "Voice, music, sound", color: "#fb923c", icon: Music },
   { kind: "output", title: "Approval gate", subtitle: "Pause for your review", color: "#ffca5c", icon: CheckCircle2 },
-  { kind: "output", title: "Ship result", subtitle: "Deploy or publish", color: "#a8ff2f", icon: Zap },
+  { kind: "output", title: "Ship result", subtitle: "Deploy or publish", color: brand.primary.DEFAULT, icon: Zap },
 ];
 
 function statusMeta(status: TaskStatus) {
@@ -379,7 +380,7 @@ export default function AgentsPageClient() {
           <div className="absolute -right-20 -top-28 h-72 w-72 rounded-full bg-violet-500/15 blur-3xl" />
           <div className="relative flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
             <div className="flex items-center gap-3">
-              <div className="grid h-10 w-10 place-items-center rounded-xl border border-lime-300/30 bg-lime-300/10 text-lime-300 shadow-[0_0_24px_rgba(168,255,47,.12)]"><Workflow size={19} /></div>
+              <div className="grid h-10 w-10 place-items-center rounded-xl border border-accent/30 bg-accent/10 text-accent shadow-accent-glow"><Workflow size={19} /></div>
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <h1 className="text-lg font-black tracking-tight sm:text-xl">Workflow Forge</h1>
@@ -392,9 +393,9 @@ export default function AgentsPageClient() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-xl border border-white/10 bg-white/[.035] px-3 py-2 text-[10px] text-white/45">{nodes.length} blocks · {edges.length} links</span>
-              <button onClick={saveFlow} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[.035] px-3 py-2 text-xs font-black text-white/65 hover:border-cyan-300/35 hover:text-cyan-200"><Save size={13} />{saved ? "Saved" : "Save"}</button>
+              <button onClick={saveFlow} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[.035] px-3 py-2 text-xs font-black text-white/65 hover:border-accent/40 hover:text-accent"><Save size={13} />{saved ? "Saved" : "Save"}</button>
               <button onClick={resetFlow} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[.035] px-3 py-2 text-xs font-black text-white/65 hover:border-white/25"><RefreshCw size={13} />Reset</button>
-              <button onClick={() => void runWorkflow()} disabled={running || nodes.length < 2} className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#a8ff2f] to-[#5df5d0] px-4 py-2 text-xs font-black text-[#03050a] shadow-[0_0_35px_rgba(168,255,47,.18)] disabled:opacity-40">
+              <button onClick={() => void runWorkflow()} disabled={running || nodes.length < 2} className="flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-xs font-black text-on-accent shadow-accent-glow transition-colors hover:bg-accent-strong disabled:opacity-40">
                 {running ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} fill="currentColor" />} Run workflow
               </button>
             </div>
@@ -404,7 +405,7 @@ export default function AgentsPageClient() {
         <section className="grid min-h-[600px] gap-2.5 lg:grid-cols-[190px_minmax(420px,1fr)_240px] 2xl:grid-cols-[210px_minmax(620px,1fr)_260px]">
           <aside className="h-fit rounded-2xl border border-white/10 bg-[#070a12]/95 p-3 lg:sticky lg:top-3">
             <div className="flex items-center justify-between">
-              <div><p className="text-[8px] font-black uppercase tracking-[.18em] text-cyan-300">Add to mission</p><h2 className="mt-0.5 text-xs font-black">Crew & capabilities</h2></div>
+              <div><p className="text-[8px] font-black uppercase tracking-[.18em] text-accent">Add to mission</p><h2 className="mt-0.5 text-xs font-black">Crew & capabilities</h2></div>
               <Plus size={16} className="text-white/35" />
             </div>
             <div className="mt-3 grid grid-cols-2 gap-1.5">
@@ -439,19 +440,19 @@ export default function AgentsPageClient() {
                 );
               })}
             </div>
-            <Link href="/studio?intent=agent" className="mt-2.5 flex items-center justify-center gap-1.5 rounded-xl border border-violet-400/25 bg-violet-400/[.08] px-2 py-2 text-[8px] font-black text-violet-300 hover:border-violet-400/50">
+            <Link href="/studio?intent=agent" className="mt-2.5 flex items-center justify-center gap-1.5 rounded-xl border border-accent/25 bg-accent/[.08] px-2 py-2 text-[8px] font-black text-accent hover:border-accent/50">
               <Plus size={11} /> New specialist
             </Link>
           </aside>
 
-          <div className="overflow-hidden rounded-3xl border border-cyan-300/15 bg-[#050812] shadow-[inset_0_0_80px_rgba(0,0,0,.45),0_25px_80px_rgba(0,0,0,.3)]">
+          <div className="overflow-hidden rounded-3xl border border-accent/15 bg-[#050812] shadow-[inset_0_0_80px_rgba(0,0,0,.45),0_25px_80px_rgba(0,0,0,.3)]">
             <div className="flex flex-col gap-2 border-b border-white/10 bg-black/20 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0 flex-1">
                 <label className="text-[8px] font-black uppercase tracking-[.18em] text-white/30">Mission name</label>
                 <input value={missionName} onChange={(event) => setMissionName(event.target.value)} className="mt-0.5 w-full bg-transparent text-xs font-black text-white outline-none placeholder:text-white/20" placeholder="Name the outcome you want…" />
               </div>
               <div className="flex items-center gap-2">
-                {connectingFrom ? <span className="rounded-lg border border-cyan-300/25 bg-cyan-300/10 px-2.5 py-1.5 text-[9px] font-bold text-cyan-200">Choose a target block</span> : <span className="hidden text-[9px] text-white/30 sm:block">Drag blocks · click to inspect</span>}
+                {connectingFrom ? <span className="rounded-lg border border-accent/25 bg-accent/10 px-2.5 py-1.5 text-[9px] font-bold text-accent">Choose a target block</span> : <span className="hidden text-[9px] text-white/30 sm:block">Drag blocks · click to inspect</span>}
                 {connectingFrom && <button onClick={() => setConnectingFrom(null)} className="text-[9px] font-bold text-white/40 hover:text-white">Cancel</button>}
               </div>
             </div>
@@ -534,21 +535,21 @@ export default function AgentsPageClient() {
 
           <aside className="h-fit lg:sticky lg:top-3">
             <section className="rounded-2xl border border-white/10 bg-[#070a12]/95 p-3.5">
-              <div className="flex items-center justify-between"><div><p className="text-[9px] font-black uppercase tracking-[.18em] text-violet-300">Inspector</p><h2 className="mt-1 text-sm font-black">{selected ? selected.title : "Select a block"}</h2></div><Settings2 size={15} className="text-white/30" /></div>
+              <div className="flex items-center justify-between"><div><p className="text-[9px] font-black uppercase tracking-[.18em] text-accent">Inspector</p><h2 className="mt-1 text-sm font-black">{selected ? selected.title : "Select a block"}</h2></div><Settings2 size={15} className="text-white/30" /></div>
               {selected ? (
                 <div className="mt-3 space-y-3">
                   <div>
                     <label className="text-[8px] font-black uppercase tracking-wider text-white/30">Block name</label>
-                    <input value={selected.title} onChange={(event) => updateSelected({ title: event.target.value })} className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-xs font-bold outline-none focus:border-violet-400/50" />
+                    <input value={selected.title} onChange={(event) => updateSelected({ title: event.target.value })} className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-xs font-bold outline-none focus:border-accent/50" />
                   </div>
                   <div>
                     <label className="text-[8px] font-black uppercase tracking-wider text-white/30">What it does</label>
-                    <textarea value={selected.subtitle} onChange={(event) => updateSelected({ subtitle: event.target.value })} rows={3} className="mt-1.5 w-full resize-none rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-xs leading-5 outline-none focus:border-violet-400/50" />
+                    <textarea value={selected.subtitle} onChange={(event) => updateSelected({ subtitle: event.target.value })} rows={3} className="mt-1.5 w-full resize-none rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-xs leading-5 outline-none focus:border-accent/50" />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
-                    <button onClick={() => setConnectingFrom(selected.id)} className="flex items-center justify-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-300/[.07] px-3 py-2.5 text-[9px] font-black text-cyan-200 hover:border-cyan-300/50"><Link2 size={12} /> Connect</button>
+                    <button onClick={() => setConnectingFrom(selected.id)} className="flex items-center justify-center gap-2 rounded-xl border border-accent/25 bg-accent/[.07] px-3 py-2.5 text-[9px] font-black text-accent hover:border-accent/50"><Link2 size={12} /> Connect</button>
                     <button onClick={removeSelected} className="flex items-center justify-center gap-2 rounded-xl border border-rose-400/20 bg-rose-400/[.06] px-3 py-2.5 text-[9px] font-black text-rose-300 hover:border-rose-400/45"><Trash2 size={12} /> Remove</button>
-                    <button onClick={duplicateSelected} className="col-span-2 flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[.035] px-3 py-2.5 text-[9px] font-black text-white/60 hover:border-violet-300/35 hover:text-violet-200"><Plus size={12} /> Duplicate block</button>
+                    <button onClick={duplicateSelected} className="col-span-2 flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[.035] px-3 py-2.5 text-[9px] font-black text-white/60 hover:border-accent/40 hover:text-accent"><Plus size={12} /> Duplicate block</button>
                   </div>
                   <div className="rounded-2xl border border-white/8 bg-white/[.025] p-3">
                     <div className="flex items-center justify-between text-[9px]"><span className="text-white/35">Incoming links</span><span className="font-black">{edges.filter((edge) => edge.to === selected.id).length}</span></div>
@@ -566,7 +567,7 @@ export default function AgentsPageClient() {
                             const peer = nodes.find((node) => node.id === peerId);
                             return (
                               <div key={edge.id} className="flex items-center gap-2 rounded-xl border border-white/8 bg-black/20 px-2.5 py-2 text-[9px]">
-                                <Link2 size={10} className="text-cyan-300" />
+                                <Link2 size={10} className="text-accent" />
                                 <span className="min-w-0 flex-1 truncate text-white/55">
                                   {edge.from === selected.id ? "To" : "From"} {peer?.title || "Unknown block"}
                                 </span>
@@ -588,9 +589,9 @@ export default function AgentsPageClient() {
         <details className="group rounded-2xl border border-white/10 bg-[#070a12]">
           <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div><p className="text-[9px] font-black uppercase tracking-[.18em] text-lime-300">{executionMode === "connected" ? "Real mission activity" : "Local mission drafts"}</p><h2 className="mt-1 text-sm font-black">{activeMissions.length ? `${activeMissions.length} mission${activeMissions.length === 1 ? "" : "s"} running` : executionMode === "connected" ? "Forge activity" : "Build now · connect later"}</h2></div>
+            <div><p className="text-[9px] font-black uppercase tracking-[.18em] text-accent">{executionMode === "connected" ? "Real mission activity" : "Local mission drafts"}</p><h2 className="mt-1 text-sm font-black">{activeMissions.length ? `${activeMissions.length} mission${activeMissions.length === 1 ? "" : "s"} running` : executionMode === "connected" ? "Forge activity" : "Build now · connect later"}</h2></div>
           </div>
-            <span className="text-[9px] font-black text-white/35 group-open:text-cyan-300">View activity +</span>
+            <span className="text-[9px] font-black text-white/35 group-open:text-accent">View activity +</span>
           </summary>
           <div className="border-t border-white/8 px-4 pb-4">
           {error && <div className="mt-3 rounded-xl border border-rose-400/20 bg-rose-400/[.06] px-3 py-2 text-[10px] text-rose-300">{error}</div>}
@@ -616,7 +617,7 @@ export default function AgentsPageClient() {
           </div>
           <div className="mt-4 flex items-center justify-between">
             <button onClick={() => void loadMissions()} className="rounded-xl border border-white/10 p-2 text-white/40 hover:text-white" aria-label="Refresh missions"><RefreshCw size={13} className={loading ? "animate-spin" : ""} /></button>
-            <Link href="/studio" className="flex items-center gap-2 text-[10px] font-black text-cyan-300">Open execution workspace <ArrowRight size={11} /></Link>
+            <Link href="/studio" className="flex items-center gap-2 text-[10px] font-black text-accent">Open execution workspace <ArrowRight size={11} /></Link>
           </div>
           </div>
         </details>

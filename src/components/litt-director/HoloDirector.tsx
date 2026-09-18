@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useMemo } from "react";
 import { useTheme } from "@/context/ThemeContext";
+import { brand } from "@/lib/design/litt-tokens";
 
 export type DirectorState =
   | "idle"
@@ -30,16 +31,20 @@ export function HoloDirector({
   const tRef = useRef(0);
   const visibleRef = useRef(true);
 
+  // The legacy brand accent was cyan — listening/speaking now resolve to the
+  // canonical lime accent (J1). Process states keep semantic hues: thinking =
+  // restrained violet, working = in-progress amber, approval = warning orange,
+  // complete = success green, error = danger red.
   const stateColor = useMemo(() => {
     switch (state) {
       case "listening":
-        return "#22d3ee"; // cyan
+        return brand.primary.DEFAULT;
       case "thinking":
         return "#a855f7"; // purple
       case "working":
         return "#f59e0b"; // amber
       case "speaking":
-        return "#22d3ee";
+        return brand.primary.DEFAULT;
       case "complete":
         return "#22c55e"; // green
       case "error":

@@ -8,7 +8,7 @@
  * - Normal click → open/close companion panel
  * - Press and hold → optionally start voice listening
  * - Microphone lives inside the composer, not as a separate floating button
- * - Status ring reflects REAL voice state (gray/cyan/purple/green/yellow/red)
+ * - Status ring reflects REAL voice state (gray/accent/purple/green/yellow/red)
  * - Page context is sent with each message
  * - "Open in Studio" handoff for deep work
  * - "Creative with Spark" as a specialist action, not a separate assistant
@@ -28,6 +28,7 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useVoiceSession } from "@/app/(app)/studio/context/VoiceSessionContext";
 import { VoiceSessionProvider } from "@/app/(app)/studio/context/VoiceSessionContext";
 import { AGENT_META, type ChatMessage } from "@/app/(app)/studio/stores/useStudioAgentStore";
+import { brand } from "@/lib/design/litt-tokens";
 
 // ---------------------------------------------------------------------------
 // Page context derivation
@@ -105,7 +106,7 @@ function deriveRingColor(
 
 const RING_COLORS: Record<RingColor, string> = {
   gray: "#6b7280",
-  cyan: "#22d3ee",
+  cyan: brand.primary.DEFAULT, // listening = active voice state -> brand accent
   purple: "#a970ff",
   green: "#22c55e",
   yellow: "#f59e0b",
@@ -416,7 +417,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
                 <div
                   className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
                     msg.role === "user"
-                      ? "bg-cyan-500/15 text-cyan-50"
+                      ? "bg-accent/15 text-accent"
                       : withSpark
                         ? "bg-pink-500/10 text-pink-50"
                         : "bg-white/5 text-white/80"
@@ -440,7 +441,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
             {suggestedAction && !busy && (
               <button
                 onClick={() => { router.push(suggestedAction.href); onClose(); }}
-                className="w-full rounded-xl border border-[#a8ff2f]/25 bg-[#a8ff2f]/10 px-3 py-2 text-left text-xs font-black text-[#b8ff5f] transition hover:bg-[#a8ff2f]/15"
+                className="w-full rounded-xl border border-accent/25 bg-accent/10 px-3 py-2 text-left text-xs font-black text-accent transition hover:bg-accent/15"
               >
                 {suggestedAction.label} →
               </button>
@@ -448,7 +449,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
             {/* Live transcript while listening */}
             {voiceInputState === "listening" && transcript && (
               <div className="flex justify-end">
-                <div className="max-w-[85%] rounded-2xl bg-cyan-500/10 px-3 py-2 text-sm text-cyan-200/70 italic">
+                <div className="max-w-[85%] rounded-2xl bg-accent/10 px-3 py-2 text-sm text-accent/70 italic">
                   {transcript}
                 </div>
               </div>
@@ -481,7 +482,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
             onKeyDown={handleKeyDown}
             placeholder={AGENT_META[activeAgentId].placeholder}
             rows={1}
-            className="flex-1 resize-none rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 outline-none focus:border-cyan-300/40"
+            className="flex-1 resize-none rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 outline-none focus:border-accent/40"
             style={{ maxHeight: "100px" }}
           />
           {/* Mic button */}
@@ -505,7 +506,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
           <button
             onClick={() => void handleSend(input)}
             disabled={!input.trim() || busy}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cyan-500/20 text-cyan-300 transition hover:bg-cyan-500/30 disabled:opacity-30"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent/20 text-accent transition hover:bg-accent/30 disabled:opacity-30"
             aria-label="Send message"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -602,8 +603,8 @@ export function GlobalCompanion() {
         className="fixed bottom-6 right-6 z-[10000] flex h-14 w-14 items-center justify-center rounded-full shadow-2xl transition-all hover:scale-105 active:scale-95 max-sm:bottom-[calc(80px+env(safe-area-inset-bottom))]"
         style={{
           background: "radial-gradient(circle at 30% 30%, #1a1f2e 0%, #0a0c13 70%)",
-          border: "2px solid rgba(34, 211, 238, 0.3)",
-          boxShadow: "0 0 24px rgba(34, 211, 238, 0.15), 0 4px 16px rgba(0,0,0,0.4)",
+          border: `2px solid color-mix(in srgb, ${brand.primary.DEFAULT} 30%, transparent)`,
+          boxShadow: `0 0 24px color-mix(in srgb, ${brand.primary.DEFAULT} 15%, transparent), 0 4px 16px rgba(0,0,0,0.4)`,
         }}
         aria-label="Open LiTT companion"
         title="LiTT — tap to chat, hold for voice"

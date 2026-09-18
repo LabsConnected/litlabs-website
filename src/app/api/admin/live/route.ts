@@ -27,22 +27,27 @@ function fallbackStats(): TelemetryData {
 
 async function fetchRealStats(): Promise<TelemetryData> {
   const sb = getAdminSupabase();
-  const [usersRes, postsRes, agentsRes, walletRes, logsRes, tasksRes] = await Promise.all([
+  const [usersRes, postsRes, agentsRes, ledgerRes, logsRes, tasksRes] = await Promise.all([
     sb.from("users").select("id", { count: "exact", head: true }),
     sb.from("posts").select("id", { count: "exact", head: true }),
     sb.from("agents").select("id", { count: "exact", head: true }),
-    sb.from("wallets").select("balance"),
+    // credit_ledger is the authoritative balance system — wallets is legacy.
+    sb.from("credit_ledger").select("amount, direction"),
     sb.from("agent_logs").select("id", { count: "exact", head: true }),
     sb.from("agent_tasks").select("id", { count: "exact", head: true }),
   ]);
 
-  const totalCoins = walletRes.data?.reduce((sum, row) => sum + (row.balance || 0), 0) ?? 0;
+  const totalCoins =
+    ledgerRes.data?.reduce(
+      (sum, row) => sum + (row.direction === "debit" ? -(row.amount || 0) : (row.amount || 0)),
+      0,
+    ) ?? 0;
 
   return {
     onlineUsers: Math.max(1, Math.min(999, (usersRes.count || 0) % 137)),
     totalUsers: usersRes.count || 0,
     todaySignups: Math.max(0, (postsRes.count || 0) % 31),
-    todaySales: Math.max(0, (walletRes.data?.length || 0) % 20),
+    todaySales: Math.max(0, (ledgerRes.data?.length || 0) % 20),
     todayRevenueLBC: totalCoins,
     activeAgents: agentsRes.count || 0,
     totalConversations: logsRes.count || 0,

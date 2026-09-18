@@ -48,7 +48,7 @@ export default async function ShowcasePage({ params }: { params: Promise<{ slug:
           <Link href="/#creations" className="flex items-center gap-2 text-sm font-bold text-white/60 transition hover:text-white">
             <ArrowRight size={14} className="rotate-180" /> Back to demos
           </Link>
-          <Link href="/sign-up" className="inline-flex items-center gap-2 rounded-full bg-[#a8ff2f] px-4 py-2 text-xs font-black text-[#03050a] transition hover:bg-[#b8ff5f]">
+          <Link href="/sign-up" className="inline-flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-xs font-black text-on-accent transition hover:bg-accent-strong">
             <Sparkles size={12} /> Try it yourself
           </Link>
         </div>
@@ -133,7 +133,7 @@ export default async function ShowcasePage({ params }: { params: Promise<{ slug:
           </div>
           <Link
             href="/sign-up"
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#a8ff2f] px-6 py-3 text-sm font-black text-[#03050a] transition hover:bg-[#b8ff5f]"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-6 py-3 text-sm font-black text-on-accent transition hover:bg-accent-strong"
           >
             Start building free <ArrowRight size={14} />
           </Link>

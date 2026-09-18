@@ -44,16 +44,16 @@ export function AgentCrew() {
           <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(3,5,10,.94),rgba(3,5,10,.7)_42%,rgba(3,5,10,.12)),linear-gradient(0deg,rgba(3,5,10,.9),transparent_52%)]" />
           <div className="relative z-10 flex min-h-[520px] max-w-2xl flex-col p-6 sm:p-8 lg:min-h-[590px]">
             <div className="flex items-center justify-between gap-4">
-              <span className="inline-flex items-center gap-2 rounded-full border border-[#a8ff2f]/22 bg-[#a8ff2f]/8 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-[#caff85]">
-                <span className="h-1.5 w-1.5 rounded-full bg-[#a8ff2f] shadow-[0_0_9px_#a8ff2f]" /> Online · operator
+              <span className="inline-flex items-center gap-2 rounded-full border border-accent/20 bg-accent/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-accent">
+                <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-accent-glow" /> Online · operator
               </span>
               <span className="font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-white/36">Operator / 01</span>
             </div>
 
             <div className="mt-auto rounded-2xl border border-white/12 bg-[#05070d]/78 p-5 shadow-2xl backdrop-blur-xl sm:p-6">
               <div className="flex items-center gap-3">
-                <span className="grid h-11 w-11 place-items-center rounded-xl border border-[#a8ff2f]/24 bg-[#a8ff2f]/10 text-[#a8ff2f]"><Bot size={21} /></span>
-                <div><h3 className="text-2xl font-black text-white">LiTT</h3><p className="text-[10px] font-black uppercase tracking-[0.17em] text-[#a8ff2f]">Control plane + builder</p></div>
+                <span className="grid h-11 w-11 place-items-center rounded-xl border border-accent/25 bg-accent/10 text-accent"><Bot size={21} /></span>
+                <div><h3 className="text-2xl font-black text-white">LiTT</h3><p className="text-[10px] font-black uppercase tracking-[0.17em] text-accent">Control plane + builder</p></div>
               </div>
               <p className="mt-4 text-sm leading-6 text-white/58">Understands the brief, forms a mission, plans the work, writes code, edits files, runs terminal and git, calls tools, tests changes, manages approvals, and prepares deployment.</p>
               <div className="mt-4 flex flex-wrap gap-2">
@@ -63,7 +63,7 @@ export function AgentCrew() {
                   </span>
                 ))}
               </div>
-              <SmartLink href="/studio?tool=chat" signedOutHref="/studio?tool=chat" className="mt-5 inline-flex items-center gap-2 text-xs font-black text-white/74 transition hover:text-[#a8ff2f]">Meet LiTT <ArrowRight size={13} /></SmartLink>
+              <SmartLink href="/studio?tool=chat" signedOutHref="/studio?tool=chat" className="mt-5 inline-flex items-center gap-2 text-xs font-black text-white/74 transition hover:text-accent">Meet LiTT <ArrowRight size={13} /></SmartLink>
             </div>
           </div>
         </article>

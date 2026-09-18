@@ -9,7 +9,7 @@ export default function GameHero() {
         <p className="text-sm text-slate-300 mt-2">
           Compete for prizes, XP, LiTTs, and leaderboard glory.
         </p>
-        <button className="mt-5 rounded-xl bg-orange-500 px-5 py-3 text-sm font-black text-black hover:bg-orange-400 transition-colors">
+        <button className="mt-5 rounded-xl bg-accent px-5 py-3 text-sm font-black text-on-accent hover:bg-accent-strong transition-colors">
           Play Now
         </button>
       </div>

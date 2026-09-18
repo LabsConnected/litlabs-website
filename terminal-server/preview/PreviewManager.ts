@@ -1284,6 +1284,150 @@ export async function verifyPreviewHealth(workspaceId: string): Promise<boolean>
   return false;
 }
 
+// ─── Proxy-time servability guard (2026-09-18) ──────────────────────
+// The public preview proxy (/preview/:workspaceId) is the last mile to
+// the user's eyes, but it only checked the IN-MEMORY runtime status
+// ("ready" + port) — never whether the backend is still serving the app.
+// When the process on the recorded port stopped serving the entry route
+// (a stale/wrong server on the port, a crash between the status check
+// and the proxy), the iframe showed the backend's white "Cannot GET /"
+// while every badge still said "Preview ready".
+//
+// The proxy now applies the same entry-route invariant the health probe
+// uses: a 404 on / at proxy time flips the runtime to failed and serves
+// an honest error page — never the raw backend 404.
+
+/**
+ * Whether a proxied request path is the preview entry path.
+ * Only the entry document determines "the app loads" — asset 404s
+ * (/_next/static/..., /favicon.ico, ...) are normal and must never fail
+ * the runtime.
+ */
+export function isPreviewEntryPath(strippedPath: string): boolean {
+  const path = strippedPath.split("?")[0].split("#")[0];
+  return path === "" || path === "/";
+}
+
+/**
+ * Decide what the preview proxy should do with a backend response.
+ * A 404 on the entry path means the thing on the preview port is not
+ * serving the app — the proxy must not forward that as a ready preview.
+ */
+export function decideProxiedEntryResponse(
+  strippedPath: string,
+  backendStatus: number,
+): "proxy" | "entry_route_missing" {
+  if (backendStatus === 404 && isPreviewEntryPath(strippedPath)) {
+    return "entry_route_missing";
+  }
+  return "proxy";
+}
+
+/**
+ * Flip a preview runtime to failed because the backend 404'd the entry
+ * path at proxy time. Mirrors verifyPreviewHealth's rootRouteMissing flip
+ * so every surface (status endpoint, UI badge, proxy) converges on the
+ * same truth. Returns true when a runtime was flipped.
+ */
+export function markPreviewRootRouteMissing(workspaceId: string): boolean {
+  const rt = runtimes.get(workspaceId);
+  if (!rt || rt.status === "failed" || rt.status === "stopped") return false;
+  rt.status = "failed";
+  rt.errorCode = "preview_root_route_missing";
+  rt.error =
+    "The preview server is running, but GET / returned 404 (Cannot GET /). Fix the project's root entry route and restart preview.";
+  pushLog(rt, "[preview] Entry route 404 at proxy time — runtime marked failed");
+  return true;
+}
+
+/**
+ * Flip a preview runtime to failed because the backend connection failed
+ * at proxy time (the process died between the status check and the
+ * proxy). Returns true when a runtime was flipped.
+ */
+export function markPreviewBackendUnreachable(workspaceId: string): boolean {
+  const rt = runtimes.get(workspaceId);
+  if (!rt || rt.status === "failed" || rt.status === "stopped") return false;
+  rt.status = "failed";
+  rt.errorCode = "preview_dev_server_failed";
+  rt.error =
+    "The preview proxy could not reach the dev server — the process may have crashed. Restart preview to try again.";
+  pushLog(rt, "[preview] Backend unreachable at proxy time — runtime marked failed");
+  return true;
+}
+
+export interface PreviewErrorPageOpts {
+  heading: string;
+  message: string;
+  command?: string | null;
+  framework?: string | null;
+  errorCode?: string | null;
+  workspaceId: string;
+}
+
+function escapeHtmlAttr(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * Honest, self-contained error page for the preview iframe. Served by the
+ * proxy when the backend cannot produce the app — the user sees what
+ * happened and what to do, never a bare backend 404. Notifies the Studio
+ * parent window so the "Preview ready" badge flips without waiting for
+ * the next status poll.
+ */
+export function buildPreviewErrorPage(opts: PreviewErrorPageOpts): string {
+  const heading = escapeHtmlAttr(opts.heading);
+  const message = escapeHtmlAttr(opts.message);
+  const command = escapeHtmlAttr(opts.command ?? "unknown");
+  const framework = escapeHtmlAttr(opts.framework ?? "unknown");
+  const errorCode = escapeHtmlAttr(opts.errorCode ?? "preview_error");
+  const workspaceId = escapeHtmlAttr(opts.workspaceId);
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${heading} — LiTT Preview</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         background: #0a0a0b; color: #e4e4e7; font-family: system-ui, -apple-system, sans-serif; }
+  .card { max-width: 560px; margin: 24px; padding: 32px; border: 1px solid #27272a; border-radius: 12px;
+          background: #111113; }
+  h1 { font-size: 20px; margin: 0 0 12px; color: #fafafa; }
+  p { font-size: 14px; line-height: 1.6; color: #a1a1aa; margin: 0 0 16px; }
+  .meta { font-size: 12px; color: #71717a; border-top: 1px solid #27272a; padding-top: 16px; }
+  .meta div { margin: 4px 0; }
+  code { background: #1c1c1f; padding: 2px 6px; border-radius: 4px; font-size: 12px; color: #d4d4d8; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; margin-right: 8px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1><span class="dot"></span>${heading}</h1>
+    <p>${message}</p>
+    <p>Restart the preview from Studio — if it still fails, check the preview logs for the dev server output.</p>
+    <div class="meta">
+      <div>Command: <code>${command}</code></div>
+      <div>Framework: <code>${framework}</code> &middot; Error: <code>${errorCode}</code></div>
+    </div>
+  </div>
+  <script>
+    try {
+      window.parent.postMessage(
+        { source: "litt-preview", type: "preview-entry-missing", workspaceId: "${workspaceId}" },
+        "*"
+      );
+    } catch (e) { /* parent unreachable — the page itself is the message */ }
+  </script>
+</body>
+</html>`;
+}
+
 /**
  * Stop all previews for a given user (used on workspace cleanup).
  */

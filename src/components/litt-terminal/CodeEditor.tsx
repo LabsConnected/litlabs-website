@@ -112,7 +112,7 @@ export function CodeEditor({
     <div className="flex h-full flex-col rounded-xl border border-neutral-800 bg-neutral-950">
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2">
         <div className="flex items-center gap-2">
-          <FileCode className="h-4 w-4 text-orange-400" />
+          <FileCode className="h-4 w-4 text-accent" />
           <span className="text-sm font-semibold text-neutral-200">
             {filePath || "Untitled"}
           </span>
@@ -122,7 +122,7 @@ export function CodeEditor({
           <button
             onClick={saveFile}
             disabled={saving || !dirty}
-            className="flex items-center gap-1.5 rounded-lg bg-orange-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50 hover:bg-orange-500"
+            className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-bold text-on-accent disabled:opacity-50 hover:bg-accent-strong"
           >
             {saving ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />

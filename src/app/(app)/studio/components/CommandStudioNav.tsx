@@ -101,7 +101,7 @@ export default function CommandStudioNav({
               className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all hover:bg-white/8"
               style={{
                 color: isActive ? "var(--litt-primary)" : "var(--text-muted)",
-                backgroundColor: isActive ? "rgba(77,255,98,0.1)" : "transparent",
+                backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
                 boxShadow: isActive ? "var(--studio-glow-green)" : "none",
               }}
               title={item.label}
@@ -285,7 +285,7 @@ export function MobileCommandNav({
             onClick={() => onSelect(item.id)}
             className="relative flex flex-1 flex-col items-center justify-center gap-1 transition-colors"
             style={{
-              color: isActive ? "#22d3ee" : "var(--text-muted)",
+              color: isActive ? "var(--color-accent)" : "var(--text-muted)",
             }}
             aria-label={item.label}
             aria-current={isActive ? "page" : undefined}
@@ -294,8 +294,8 @@ export function MobileCommandNav({
               <span
                 className="absolute top-0 h-0.5 w-8 rounded-b-full"
                 style={{
-                  backgroundColor: "#22d3ee",
-                  boxShadow: "0 0 8px #22d3ee",
+                  backgroundColor: "var(--color-accent)",
+                  boxShadow: "0 0 8px var(--color-accent)",
                 }}
                 aria-hidden
               />

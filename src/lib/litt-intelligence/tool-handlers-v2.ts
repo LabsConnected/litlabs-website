@@ -126,7 +126,16 @@ export const handleFilesMkdir: ToolHandler = async (inputs, transport) => {
     await transport.mkdir(path);
     return { success: true, path, created: true };
   } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : "Failed to create directory" };
+    // mkdir is naturally idempotent — the caller wants the directory to
+    // exist, and a 409/already-exists means it already does. Reporting a
+    // hard failure aborts the whole resumed run (the acceptance run died
+    // exactly here: auto-insert had already created assets/, the model's
+    // defensive mkdir then 409'd and the run was marked failed).
+    const msg = err instanceof Error ? err.message : "Failed to create directory";
+    if (/already exists|EEXIST|\b409\b/i.test(msg)) {
+      return { success: true, path, created: false, alreadyExists: true };
+    }
+    return { success: false, error: msg };
   }
 };
 
@@ -596,10 +605,12 @@ export const handleProjectDeploy: ToolHandler = async (_inputs, transport) => {
  * as a chat-only render.
  *
  * Mirrors the guards of POST /api/studio-projects/[projectId]/assets/insert:
- * https-only URLs, 30s download timeout, 50MB cap, image/* content types.
+ * https or data:image/* URLs only, 30s download timeout, 50MB cap,
+ * image/* content types.
  */
 const MAX_INSERT_ASSET_BYTES = 50 * 1024 * 1024;
 const DEFAULT_INSERT_DIR = "public/assets/images";
+const STATIC_INSERT_DIR = "assets/images";
 
 function sanitizeAssetName(raw: string | undefined, contentType: string | null): string {
   const ext = contentType?.split("/")[1]?.split("+")[0]?.replace(/[^a-z0-9]/gi, "") || "png";
@@ -636,6 +647,116 @@ export interface InsertAssetResult {
 }
 
 /**
+ * Structural completeness check for a binary image payload. A truncated
+ * data URL (e.g. a model re-emitting a clipped base64 blob it only saw a
+ * fragment of) still decodes "successfully" into a corrupt file that then
+ * ships as a broken site asset — the 2026-09-18 acceptance run produced a
+ * 1KB JPEG stub with no EOI marker. Verify the format's required head and
+ * tail markers for the formats we accept; unknown image types pass
+ * through rather than being over-rejected.
+ */
+function imagePayloadLooksComplete(buffer: Buffer, contentType: string): boolean {
+  const mime = contentType.toLowerCase();
+  if (mime === "image/jpeg" || mime === "image/jpg") {
+    return (
+      buffer.length > 4 &&
+      buffer[0] === 0xff && buffer[1] === 0xd8 &&
+      buffer[buffer.length - 2] === 0xff && buffer[buffer.length - 1] === 0xd9
+    );
+  }
+  if (mime === "image/png") {
+    return (
+      buffer.length > 16 &&
+      buffer[0] === 0x89 && buffer[1] === 0x50 &&
+      buffer.subarray(-8).equals(
+        Buffer.from([0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]),
+      )
+    );
+  }
+  if (mime === "image/gif") {
+    return (
+      buffer.length > 7 &&
+      buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 &&
+      buffer[buffer.length - 1] === 0x3b
+    );
+  }
+  if (mime === "image/webp") {
+    return (
+      buffer.length > 20 &&
+      buffer.toString("ascii", 0, 4) === "RIFF" &&
+      buffer.toString("ascii", 8, 12) === "WEBP" &&
+      buffer.readUInt32LE(4) + 8 <= buffer.length
+    );
+  }
+  return true;
+}
+
+/**
+ * Decode a data:image/* URL into bytes + MIME without a network fetch.
+ * The free image providers (pollinations, cloudflare) return generated
+ * images inline as data URLs — the bytes are already server-side, so
+ * rejecting them for not being https:// dead-ended the default free
+ * generation path: auto-insert failed and "Use in project" could never
+ * write the asset.
+ */
+function decodeDataImageUrl(
+  url: string,
+): { buffer: Buffer; contentType: string } | { error: string } {
+  const match = /^data:(image\/[a-z0-9.+-]+)(;base64)?,([\s\S]*)$/i.exec(url);
+  if (!match) return { error: "Malformed data:image URL" };
+  try {
+    const buffer = match[2]
+      ? Buffer.from(match[3], "base64")
+      : Buffer.from(decodeURIComponent(match[3]), "utf8");
+    return { buffer, contentType: match[1].toLowerCase() };
+  } catch {
+    return { error: "Malformed data:image URL" };
+  }
+}
+
+/**
+ * Resolve the workspace directory an inserted asset is written to. The
+ * sitePath convention (/assets/images/x) only resolves if the file lands
+ * under the directory the preview/deploy server treats as the web root —
+ * and that root differs by project shape:
+ *   - Framework projects (package.json with a next/vite toolchain) serve
+ *     public/ at /, so assets belong in public/assets/images.
+ *   - Static sites are served from the WORKSPACE ROOT (`serve -s .` in
+ *     PreviewManager) — public/ is not special there, so the same sitePath
+ *     only resolves when the file lives at root-level assets/images.
+ * The 2026-09-18 acceptance run proved the mismatch: a generated image
+ * saved under public/ produced an <img> that got serve's SPA HTML
+ * fallback instead of the bytes. Detection mirrors PreviewManager's
+ * framework rules; an explicit opts.directory always wins.
+ */
+async function resolveInsertDirectory(
+  opts: InsertAssetOptions,
+  transport: WorkspaceTransport,
+): Promise<string> {
+  if (opts.directory) return opts.directory;
+  try {
+    const { entries } = await transport.listFiles(".");
+    const names = new Set(entries.map((e) => e.name));
+    if (!names.has("package.json")) return STATIC_INSERT_DIR;
+    const hasFrameworkConfig = [
+      "next.config.js", "next.config.mjs", "next.config.ts",
+      "vite.config.js", "vite.config.mjs", "vite.config.ts",
+    ].some((n) => names.has(n));
+    if (hasFrameworkConfig) return DEFAULT_INSERT_DIR;
+    const { content } = await transport.readFile("package.json");
+    const pkg = JSON.parse(content) as { scripts?: Record<string, string> };
+    const dev = String(pkg?.scripts?.dev ?? "");
+    if (dev.includes("next") || dev.includes("vite")) return DEFAULT_INSERT_DIR;
+    // package.json with no framework dev script + a root index.html still
+    // falls back to `serve -s .` in PreviewManager — workspace-root serve.
+    if (!dev && names.has("index.html")) return STATIC_INSERT_DIR;
+    return DEFAULT_INSERT_DIR;
+  } catch {
+    return DEFAULT_INSERT_DIR;
+  }
+}
+
+/**
  * Download an image URL and save it into the project workspace as a binary
  * file. Shared core behind the project.insert_asset tool AND the automatic
  * post-generation save in the tool registry: after image.generate succeeds
@@ -649,26 +770,41 @@ export async function insertAssetFromUrl(
   opts: InsertAssetOptions,
   transport: WorkspaceTransport,
 ): Promise<InsertAssetResult> {
-  const directory = opts.directory ?? DEFAULT_INSERT_DIR;
-  if (!url.startsWith("https://")) {
-    return { success: false, error: "Asset URL must be a public HTTPS URL" };
+  const directory = await resolveInsertDirectory(opts, transport);
+  const isDataImage = /^data:image\//i.test(url);
+  if (!isDataImage && !url.startsWith("https://")) {
+    return { success: false, error: "Asset URL must be a public HTTPS URL or a data:image/* URL" };
   }
   if (!isSafeInsertDir(directory)) {
     return { success: false, error: "Invalid directory: must be a safe relative path" };
   }
 
   try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-    if (!resp.ok) {
-      return { success: false, error: `Failed to download asset: HTTP ${resp.status}` };
+    let buffer: Buffer;
+    let contentType: string;
+    if (isDataImage) {
+      const decoded = decodeDataImageUrl(url);
+      if ("error" in decoded) {
+        return { success: false, error: decoded.error };
+      }
+      buffer = decoded.buffer;
+      contentType = decoded.contentType;
+    } else {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+      if (!resp.ok) {
+        return { success: false, error: `Failed to download asset: HTTP ${resp.status}` };
+      }
+      contentType = resp.headers.get("content-type") || "application/octet-stream";
+      buffer = Buffer.from(await resp.arrayBuffer());
     }
-    const contentType = resp.headers.get("content-type") || "application/octet-stream";
     if (!contentType.startsWith("image/")) {
       return { success: false, error: `Not an image (content-type: ${contentType})` };
     }
-    const buffer = Buffer.from(await resp.arrayBuffer());
     if (buffer.length === 0) {
       return { success: false, error: "Downloaded asset is empty" };
+    }
+    if (!imagePayloadLooksComplete(buffer, contentType)) {
+      return { success: false, error: "Image data is truncated or corrupt" };
     }
     if (buffer.length > MAX_INSERT_ASSET_BYTES) {
       return { success: false, error: `Asset exceeds max size (${MAX_INSERT_ASSET_BYTES} bytes)` };
@@ -676,10 +812,27 @@ export async function insertAssetFromUrl(
 
     const filename = sanitizeAssetName(opts.nameHint, contentType);
     const path = `${directory}/${filename}`;
-    await transport.writeBinaryFile(path, buffer.toString("base64"));
+    // Transient workspace errors (a volume blip or mid-prepare window can
+    // briefly ENOENT the workspace root) must not lose the generated
+    // asset — retry the write once before reporting saveError.
+    const base64 = buffer.toString("base64");
+    try {
+      await transport.writeBinaryFile(path, base64);
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await transport.writeBinaryFile(path, base64);
+    }
 
-    // Site-relative URL: the public/ directory is served as the site root.
-    const sitePath = `/${path.replace(/^public\//, "")}`;
+    // Site path the model embeds in HTML. Framework projects serve
+    // public/ at the site root, so a root-relative "/assets/x" is right.
+    // Static sites are served from the workspace root — but under a
+    // path mount (/preview/ws-id/, /sites/{deploymentId}/) a leading
+    // slash escapes the mount and 404s, so static assets must be
+    // RELATIVE ("assets/images/x"), which resolves correctly from a
+    // root index.html at any mount depth.
+    const sitePath = path.startsWith("public/")
+      ? `/${path.slice("public/".length)}`
+      : path;
     return { success: true, path, sitePath, contentType, sizeBytes: buffer.length };
   } catch (err) {
     return {
@@ -692,7 +845,7 @@ export async function insertAssetFromUrl(
 export const handleProjectInsertAsset: ToolHandler = async (inputs, transport) => {
   const url = inputs.url as string | undefined;
   const nameHint = inputs.name as string | undefined;
-  const directory = (inputs.directory as string | undefined) ?? DEFAULT_INSERT_DIR;
+  const directory = inputs.directory as string | undefined;
 
   if (!url || typeof url !== "string") {
     return { success: false, error: "url is required" };

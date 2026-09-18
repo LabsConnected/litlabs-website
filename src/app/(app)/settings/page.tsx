@@ -7,6 +7,7 @@ import { useSearchParams } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerk, useUser } from "@clerk/nextjs";
 import { useClerkAuthContext } from "@/context/ClerkAuthContext";
+import { brand } from "@/lib/design/litt-tokens";
 
 const clerkConfigured = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 import {
@@ -172,7 +173,7 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={() => { handleMobileBack(); setMobileSettingsOpen(true); }}
-              className="mb-3 inline-flex min-h-9 items-center gap-2 rounded-lg px-1 text-xs font-bold text-white/65 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
+              className="mb-3 inline-flex min-h-9 items-center gap-2 rounded-lg px-1 text-xs font-bold text-white/65 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
               aria-label="Back to all settings"
             >
               <ArrowLeft size={14} className="pointer-events-none" />
@@ -315,7 +316,7 @@ function SettingsTabStrip({
         <button
           type="button"
           onClick={onToggleMobileSearch}
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-white/10 text-white/70 transition hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70 md:hidden"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-white/10 text-white/70 transition hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 md:hidden"
           aria-label={mobileSearchOpen ? "Close settings search" : "Search settings"}
           aria-expanded={mobileSearchOpen}
         >
@@ -334,19 +335,19 @@ function SettingsTabStrip({
         <button
           type="button"
           onClick={onOpenMobileSettings}
-          className="flex min-h-11 w-full items-center gap-3 rounded-xl border border-cyan-300/20 bg-cyan-300/[0.07] px-3 text-left transition hover:bg-cyan-300/[0.12] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
+          className="flex min-h-11 w-full items-center gap-3 rounded-xl border border-accent/20 bg-accent/[0.07] px-3 text-left transition hover:bg-accent/[0.12] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
           aria-label="Open all settings"
           aria-expanded={mobileSettingsOpen}
           data-testid="mobile-settings-selector"
         >
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-cyan-300/10 text-cyan-200">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent">
             <LayoutGrid size={15} className="pointer-events-none" />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-[10px] font-black uppercase tracking-[0.16em] text-cyan-200/75">All settings</span>
+            <span className="block text-[10px] font-black uppercase tracking-[0.16em] text-accent/75">All settings</span>
             <span className="block truncate text-sm font-bold text-white">{SETTINGS_SECTIONS.find((s) => s.id === activeSection)?.label ?? "Overview"}</span>
           </span>
-          <ChevronRight size={16} className="shrink-0 text-cyan-200/80" />
+          <ChevronRight size={16} className="shrink-0 text-accent/80" />
         </button>
       </div>
 
@@ -358,7 +359,7 @@ function SettingsTabStrip({
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
               placeholder="Search settings…"
-              className="min-h-10 w-full rounded-xl border border-white/12 bg-black/40 py-2 pl-9 pr-3 text-sm text-white outline-none transition focus:border-cyan-300/60 focus:ring-2 focus:ring-cyan-300/20"
+              className="min-h-10 w-full rounded-xl border border-white/12 bg-black/40 py-2 pl-9 pr-3 text-sm text-white outline-none transition focus:border-accent/60 focus:ring-2 focus:ring-accent/20"
               aria-label="Search settings"
               data-testid="mobile-settings-search"
               autoFocus
@@ -462,7 +463,7 @@ function MobileSettingsSheet({
           <button
             type="button"
             onClick={onClose}
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-white/10 text-white/75 transition hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-white/10 text-white/75 transition hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
             aria-label="Close all settings"
           >
             <X size={17} className="pointer-events-none" />
@@ -484,23 +485,23 @@ function MobileSettingsSheet({
                 key={section.id}
                 type="button"
                 onClick={() => isLocked ? onModeChange(section.minMode) : onSectionClick(section.id)}
-                className="flex min-h-14 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
+                className="flex min-h-14 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
                 style={{
-                  borderColor: isActive ? "rgba(103,232,249,0.45)" : "rgba(255,255,255,0.1)",
-                  backgroundColor: isActive ? "rgba(34,211,238,0.1)" : "rgba(255,255,255,0.025)",
+                  borderColor: isActive ? "color-mix(in srgb, var(--color-accent) 45%, transparent)" : "rgba(255,255,255,0.1)",
+                  backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "rgba(255,255,255,0.025)",
                   opacity: isLocked ? 0.72 : 1,
                 }}
                 aria-current={isActive ? "page" : undefined}
                 aria-label={isLocked ? `${section.label} — switch to ${lockedMode.label} mode to unlock` : section.label}
               >
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-cyan-200/90">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-accent/90">
                   <Icon size={16} className="pointer-events-none" />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className={`block text-sm font-bold ${isActive ? "text-cyan-100" : "text-white/90"}`}>{section.label}</span>
+                  <span className={`block text-sm font-bold ${isActive ? "text-accent" : "text-white/90"}`}>{section.label}</span>
                   <span className="block truncate text-xs text-white/60">{section.description}</span>
                 </span>
-                {isLocked ? <span className="shrink-0 text-[10px] font-bold text-white/55">{lockedMode.label}</span> : isActive ? <Check size={16} className="shrink-0 text-cyan-200" /> : <ChevronRight size={15} className="shrink-0 text-white/45" />}
+                {isLocked ? <span className="shrink-0 text-[10px] font-bold text-white/55">{lockedMode.label}</span> : isActive ? <Check size={16} className="shrink-0 text-accent" /> : <ChevronRight size={15} className="shrink-0 text-white/45" />}
               </button>
             );
           })}
@@ -1012,6 +1013,7 @@ function AppearanceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColo
   ];
 
   const accentOptions: { id: string; label: string }[] = [
+    { id: "lime", label: "LiTT Lime (default)" },
     { id: "neon-green", label: "Neon Green" },
     { id: "hot-pink", label: "Hot Pink" },
     { id: "electric-blue", label: "Electric Blue" },
@@ -1256,7 +1258,7 @@ function WorkspaceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColor
               role="radio"
               aria-checked={selectedProfile === profile.name}
               aria-label={`${profile.name} workspace profile`}
-              className="relative rounded-xl border p-3 pr-10 text-left transition hover:border-cyan-200/45 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
+              className="relative rounded-xl border p-3 pr-10 text-left transition hover:border-accent/45 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
               style={{
                 borderColor: selectedProfile === profile.name ? `${T.accentColor}80` : "rgba(255,255,255,0.1)",
                 backgroundColor: selectedProfile === profile.name ? `${T.accentColor}12` : "rgba(255,255,255,0.02)",
@@ -1265,7 +1267,7 @@ function WorkspaceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColor
               <span className="text-xs font-black" style={{ color: selectedProfile === profile.name ? T.accentColor : "rgba(255,255,255,0.9)" }}>{profile.name}</span>
               <span className="mt-1 block text-[10px] leading-4 text-white/60">{profile.description}</span>
               {selectedProfile === profile.name && (
-                <span className="absolute right-3 top-3 grid h-5 w-5 place-items-center rounded-full bg-cyan-300/15 text-cyan-200" aria-hidden="true">
+                <span className="absolute right-3 top-3 grid h-5 w-5 place-items-center rounded-full bg-accent/15 text-accent" aria-hidden="true">
                   <Check size={12} />
                 </span>
               )}
@@ -1276,29 +1278,29 @@ function WorkspaceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColor
 
       <SettingsCard title="Studio defaults" description="What opens when you enter Studio" icon={<Briefcase size={16} />}>
         <div className="grid gap-4 sm:grid-cols-2">
-          <fieldset className="rounded-xl border border-cyan-300/15 bg-cyan-300/[0.03] p-3">
-            <legend className="px-1 text-[10px] font-black uppercase tracking-[0.14em] text-cyan-200/80">Default view</legend>
+          <fieldset className="rounded-xl border border-accent/15 bg-accent/[0.03] p-3">
+            <legend className="px-1 text-[10px] font-black uppercase tracking-[0.14em] text-accent/80">Default view</legend>
             <p className="mt-1 text-[11px] text-white/60">The workspace surface opened first.</p>
             <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label="Default view">
               {["chat", "code", "preview"].map((v) => (
                 <button key={v} type="button" onClick={() => setDefaults((current) => ({ ...current, defaultView: v }))}
                   role="radio" aria-checked={defaults.defaultView === v}
-                  className="rounded-lg border px-3 py-2 text-[10px] font-bold capitalize transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
+                  className="rounded-lg border px-3 py-2 text-[10px] font-bold capitalize transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
                   style={{ borderColor: defaults.defaultView === v ? T.accentColor : "rgba(255,255,255,0.12)", backgroundColor: defaults.defaultView === v ? `${T.accentColor}12` : "transparent", color: defaults.defaultView === v ? T.accentColor : "rgba(255,255,255,0.75)" }}>
                   {v}
                 </button>
               ))}
             </div>
           </fieldset>
-          <fieldset className="rounded-xl border border-purple-300/15 bg-purple-300/[0.03] p-3">
-            <legend className="px-1 text-[10px] font-black uppercase tracking-[0.14em] text-purple-200/80">Default tool</legend>
+          <fieldset className="rounded-xl border border-accent/15 bg-accent/[0.03] p-3">
+            <legend className="px-1 text-[10px] font-black uppercase tracking-[0.14em] text-accent/80">Default tool</legend>
             <p className="mt-1 text-[11px] text-white/60">The tool selected inside that surface.</p>
             <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label="Default tool">
               {["chat", "code", "agents"].map((v) => (
                 <button key={v} type="button" onClick={() => setDefaults((current) => ({ ...current, defaultTool: v }))}
                   role="radio" aria-checked={defaults.defaultTool === v}
-                  className="rounded-lg border px-3 py-2 text-[10px] font-bold capitalize transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300/70"
-                  style={{ borderColor: defaults.defaultTool === v ? "#c084fc" : "rgba(255,255,255,0.12)", backgroundColor: defaults.defaultTool === v ? "rgba(192,132,252,0.12)" : "transparent", color: defaults.defaultTool === v ? "#d8b4fe" : "rgba(255,255,255,0.75)" }}>
+                  className="rounded-lg border px-3 py-2 text-[10px] font-bold capitalize transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+                  style={{ borderColor: defaults.defaultTool === v ? "var(--color-accent)" : "rgba(255,255,255,0.12)", backgroundColor: defaults.defaultTool === v ? "color-mix(in srgb, var(--color-accent) 12%, transparent)" : "transparent", color: defaults.defaultTool === v ? "var(--color-accent)" : "rgba(255,255,255,0.75)" }}>
                   {v}
                 </button>
               ))}
@@ -1987,7 +1989,7 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
             Voice is powered by Inworld realtime API. Preview uses your browser&apos;s built-in speech synthesis for a rough demo — the actual voice in the Studio is Inworld&apos;s neural voice.
           </p>
           {[
-            { id: "litt" as const, name: "LiTT", style: "Deep · Calm · Precise", color: "#06b6d4", sample: "Connection established. I'm scanning the project now." },
+            { id: "litt" as const, name: "LiTT", style: "Deep · Calm · Precise", color: brand.primary.DEFAULT, sample: "Connection established. I'm scanning the project now." },
             { id: "spark" as const, name: "Spark", style: "Bright · Warm · Expressive", color: "#22c55e", sample: "Oh, that's clean. The preview is live." },
           ].map((agent) => (
             <div key={agent.id} className="flex items-center justify-between rounded-lg border px-3 py-2.5"
@@ -2342,8 +2344,18 @@ type BillingData = {
   } | null;
 };
 
+type UsageData = {
+  summary: {
+    totalCreditsUsed: number;
+    totalCreditsRefunded: number;
+    totalRuns: number;
+  };
+  modelUsage: Array<{ model: string; calls: number; credits: number }>;
+};
+
 function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
   const [data, setData] = useState<BillingData | null>(null);
+  const [usage, setUsage] = useState<UsageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [portalLoading, setPortalLoading] = useState(false);
 
@@ -2360,6 +2372,15 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
         // silent
       } finally {
         if (!cancelled) setLoading(false);
+      }
+      try {
+        const res = await fetch("/api/litt/usage?range=month", { cache: "no-store" });
+        if (res.ok) {
+          const json = await res.json();
+          if (!cancelled) setUsage(json);
+        }
+      } catch {
+        // silent
       }
     })();
     return () => { cancelled = true; };
@@ -2484,16 +2505,23 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
       {/* Usage */}
       <SettingsCard title="Usage" description="Model consumption and activity">
         <div className="space-y-2">
-          {[
-            { label: "Chat messages", value: "0 this month" },
-            { label: "Image generations", value: "0 this month" },
-            { label: "Agent tasks", value: "0 this month" },
-          ].map((u) => (
-            <div key={u.label} className="flex items-center justify-between rounded-lg border border-white/5 bg-white/2 px-3 py-2.5">
-              <span className="text-xs font-bold text-white/80">{u.label}</span>
-              <span className="text-[10px] text-white/40">{u.value}</span>
-            </div>
-          ))}
+          {(() => {
+            const modelCalls = usage?.modelUsage.reduce((s, m) => s + m.calls, 0) ?? 0;
+            const rows = [
+              { label: "LiTTBits used", value: usage ? `${usage.summary.totalCreditsUsed.toLocaleString()} this month` : "—" },
+              { label: "Model calls", value: usage ? `${modelCalls.toLocaleString()} this month` : "—" },
+              { label: "Agent runs", value: usage ? `${usage.summary.totalRuns.toLocaleString()} this month` : "—" },
+            ];
+            if (usage && usage.summary.totalCreditsRefunded > 0) {
+              rows.push({ label: "Refunded", value: `${usage.summary.totalCreditsRefunded.toLocaleString()} LiTTBits` });
+            }
+            return rows.map((u) => (
+              <div key={u.label} className="flex items-center justify-between rounded-lg border border-white/5 bg-white/2 px-3 py-2.5">
+                <span className="text-xs font-bold text-white/80">{u.label}</span>
+                <span className="text-[10px] text-white/40">{u.value}</span>
+              </div>
+            ));
+          })()}
         </div>
         <Link href="/pricing" className="mt-3 inline-block text-xs font-bold" style={{ color: T.accentColor }}>
           View plans and pricing →

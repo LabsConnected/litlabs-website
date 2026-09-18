@@ -16,9 +16,9 @@
 import type { ComponentType, CSSProperties } from "react";
 import { Activity, Film, FolderOpen, Hammer, Image as ImageIcon, Layout, Mic, Music, Play, Terminal } from "lucide-react";
 
-const CYAN = "#22d3ee";
+const ACCENT = "var(--color-accent)";
 const CARD_BORDER = "rgba(255,255,255,0.07)";
-const TOOLS_BG = "rgba(34,211,238,0.07)";
+const TOOLS_BG = "color-mix(in srgb, var(--color-accent) 7%, transparent)";
 
 export interface MobileToolsSheetProps {
   onOpenCode: () => void;
@@ -161,7 +161,7 @@ function ToolRowButton({
         color: "var(--text-main)",
       }}
     >
-      <Icon size={18} strokeWidth={2} className="pointer-events-none shrink-0" style={{ color: CYAN }} />
+      <Icon size={18} strokeWidth={2} className="pointer-events-none shrink-0" style={{ color: ACCENT }} />
       <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
         <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-main)" }}>{label}</span>
         <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{description}</span>
@@ -223,7 +223,7 @@ function CreateTileButton({
         color: "var(--text-main)",
       }}
     >
-      <Icon size={22} strokeWidth={2} className="pointer-events-none shrink-0" style={{ color: CYAN }} />
+      <Icon size={22} strokeWidth={2} className="pointer-events-none shrink-0" style={{ color: ACCENT }} />
       <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
         <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-main)" }}>{label}</span>
         <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{description}</span>

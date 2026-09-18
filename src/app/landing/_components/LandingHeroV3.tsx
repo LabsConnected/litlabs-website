@@ -147,16 +147,16 @@ export function LandingHeroV3() {
             <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row lg:items-start">
               <Link
                 href={primaryCtaHref}
-                className="group inline-flex h-[56px] items-center gap-2.5 rounded-2xl bg-white px-8 text-base font-black text-black shadow-[0_0_40px_rgba(168,85,247,0.25)] transition hover:shadow-[0_0_60px_rgba(168,85,247,0.45)] hover:scale-[1.02]"
+                className="group inline-flex h-[56px] items-center gap-2.5 rounded-2xl bg-accent px-8 text-base font-black text-on-accent shadow-accent-glow transition hover:bg-accent-strong hover:shadow-accent-glow-strong hover:scale-[1.02]"
               >
                 {primaryCtaLabel}
                 <ArrowRight size={18} className="transition-transform group-hover:translate-x-1" />
               </Link>
               <Link
                 href="#how"
-                className="inline-flex h-[56px] items-center gap-2.5 rounded-2xl border border-white/12 bg-white/5 px-7 text-base font-semibold text-white backdrop-blur-md transition hover:border-violet-400/30 hover:bg-white/8 hover:scale-[1.02]"
+                className="inline-flex h-[56px] items-center gap-2.5 rounded-2xl border border-white/12 bg-white/5 px-7 text-base font-semibold text-white backdrop-blur-md transition hover:border-accent/40 hover:bg-white/8 hover:scale-[1.02]"
               >
-                <Play size={16} className="text-violet-300" />
+                <Play size={16} className="text-accent" />
                 Watch LiTT Work
               </Link>
             </div>

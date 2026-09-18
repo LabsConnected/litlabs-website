@@ -4,6 +4,8 @@ import { getCreditBalances, adjustWalletBalance } from "@/lib/wallet-ledger";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { isBillingExempt, getActiveSimulation } from "@/lib/owner";
 import { GoogleGenAI, Modality } from "@google/genai";
+import { calculateRetailBits } from "@/lib/generation/cost-engine";
+import { buildChargeRating } from "@/lib/billing/canonical-pricing";
 
 // ── Route configuration ──────────────────────────────────────────
 export const runtime = "nodejs";
@@ -37,7 +39,11 @@ async function handler(req: NextRequest) {
       model = "lyria-3-clip-preview",
       imageBytes,
       mimeType,
+      requestId: clientRequestId,
     } = await req.json();
+    // Stable key for the debit — client retries with the same requestId
+    // can never double-charge.
+    const requestId = clientRequestId || crypto.randomUUID();
     if (!prompt?.trim())
       return NextResponse.json({ error: "Prompt required" }, { status: 400 });
 
@@ -80,13 +86,27 @@ async function handler(req: NextRequest) {
         musicBalance = null;
       }
     } else {
-      // Atomic debit via canonical ledger
+      // Atomic debit via canonical ledger — keyed on requestId.
+      const costResult = calculateRetailBits({
+        modality: "music",
+        provider: "google",
+        model,
+      });
       const reservation = await adjustWalletBalance({
         clerkId: userId,
         amount: -COST,
         type: "spend",
         reason: `Music: model=${model}`,
-        idempotencyKey: `music_${userId}_${Date.now()}`,
+        idempotencyKey: `music:charge:${requestId}`,
+        rating: buildChargeRating({
+          capability: "music",
+          provider: "google",
+          model,
+          providerCostMicros: costResult.providerCostCents * 10_000,
+          bitsCharged: COST,
+          billingClass: "flat",
+          lane: "flat",
+        }),
       });
       musicBalance = reservation.balance;
     }

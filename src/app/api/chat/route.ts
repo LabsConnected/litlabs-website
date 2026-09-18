@@ -37,7 +37,7 @@ async function handler(req: NextRequest) {
       }
 
       // Pre-charge LiTTBits (atomic, idempotent).
-      const idempotencyKey = `agentrun:${clerkId}:${agentSlug}:${Date.now()}`;
+      const idempotencyKey = `agentrun:${clerkId}:${agentSlug}:${body.requestId ?? crypto.randomUUID()}`;
       const charge = await chargeAgentRun({ clerkId, agentSlug, idempotencyKey });
       if (charge.error) {
         return NextResponse.json({ error: charge.error, code: "insufficient_credits" }, { status: 402 });

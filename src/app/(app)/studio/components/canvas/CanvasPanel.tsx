@@ -208,7 +208,7 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
         <div className="flex items-center gap-2 min-w-0">
           <button
             onClick={() => setShowSwitcher(!showSwitcher)}
-            className="text-sm font-medium text-white truncate hover:text-cyan-300 transition-colors"
+            className="text-sm font-medium text-white truncate hover:text-accent transition-colors"
           >
             {activeCanvas ? activeCanvas.title : "No canvas selected"}
           </button>
@@ -270,7 +270,7 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
                 className={cn(
                   "flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm transition-colors",
                   c.id === activeCanvasId
-                    ? "bg-cyan-500/10 text-cyan-300"
+                    ? "bg-accent/10 text-accent"
                     : "text-white/70 hover:bg-white/5",
                 )}
               >

@@ -64,7 +64,7 @@ export default function GameCard({
             e.stopPropagation();
             onClick?.();
           }}
-          className="mt-3 w-full rounded-xl bg-orange-500 py-2 text-xs font-black text-black hover:bg-orange-400 transition-colors"
+          className="mt-3 w-full rounded-xl bg-accent py-2 text-xs font-black text-on-accent hover:bg-accent-strong transition-colors"
         >
           Play
         </button>

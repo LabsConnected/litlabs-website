@@ -18,7 +18,7 @@ export function SettingsCard({
   return (
     <div className="rounded-2xl border border-white/10 bg-black/30 p-5">
       <div className="mb-3 flex items-center gap-2">
-        {icon && <span className="text-cyan-300">{icon}</span>}
+        {icon && <span className="text-accent">{icon}</span>}
         <div>
           <h3 className="text-sm font-bold text-white">{title}</h3>
           {description && <p className="mt-0.5 text-xs text-white/60">{description}</p>}
@@ -69,7 +69,7 @@ export function ToggleRow({
           <button
             type="button"
             onClick={onConfigure}
-            className="text-[9px] font-bold text-cyan-300 hover:text-cyan-200"
+            className="text-[9px] font-bold text-accent hover:text-accent-strong"
           >
             {configureLabel}
           </button>
@@ -79,7 +79,7 @@ export function ToggleRow({
           role="switch"
           aria-checked={checked}
           onClick={() => onChange(!checked)}
-          className={`relative h-5 w-9 shrink-0 rounded-full transition ${checked ? "bg-cyan-400" : "bg-white/15"}`}
+          className={`relative h-5 w-9 shrink-0 rounded-full transition ${checked ? "bg-accent" : "bg-white/15"}`}
         >
           <span
             className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${checked ? "left-4.5" : "left-0.5"}`}
@@ -111,7 +111,7 @@ export function SettingsInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none focus:border-cyan-300/40"
+        className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none focus:border-accent/40"
       />
     </label>
   );
@@ -136,10 +136,10 @@ export function SaveBar({
       {status === "error" && <span className="text-xs text-red-400">Save failed — try again</span>}
       {status === "idle" && (
         <>
-          <button onClick={onDiscard} className="rounded-lg px-3 py-1.5 text-xs font-bold text-white/65 hover:bg-white/8 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70">
+          <button onClick={onDiscard} className="rounded-lg px-3 py-1.5 text-xs font-bold text-white/65 hover:bg-white/8 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70">
             Discard
           </button>
-          <button onClick={onSave} className="rounded-lg bg-cyan-400 px-4 py-1.5 text-xs font-black text-slate-950">
+          <button onClick={onSave} className="rounded-lg bg-accent px-4 py-1.5 text-xs font-black text-on-accent hover:bg-accent-strong">
             Save changes
           </button>
         </>

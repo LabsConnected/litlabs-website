@@ -34,7 +34,7 @@ export default function LiTTChatBox() {
       </div>
 
       <textarea
-        className="w-full rounded-xl bg-black/70 border border-white/10 p-3 text-white outline-none focus:border-orange-500"
+        className="w-full rounded-xl bg-black/70 border border-white/10 p-3 text-white outline-none focus:border-accent"
         rows={5}
         value={message}
         onChange={(e) => setMessage(e.target.value)}
@@ -44,7 +44,7 @@ export default function LiTTChatBox() {
       <button
         onClick={send}
         disabled={loading}
-        className="rounded-xl bg-orange-500 px-4 py-2 font-bold text-black disabled:opacity-50"
+        className="rounded-xl bg-accent px-4 py-2 font-bold text-on-accent hover:bg-accent-strong disabled:opacity-50"
       >
         {loading ? "Thinking..." : "Ask LiTT"}
       </button>

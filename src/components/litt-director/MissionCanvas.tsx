@@ -61,17 +61,17 @@ const STATUS_CONFIG: Record<
   },
   listening: {
     label: "Listening",
-    dot: "bg-cyan-400 animate-pulse",
-    border: "border-cyan-500/30",
-    bg: "bg-cyan-500/10",
-    text: "text-cyan-300",
+    dot: "bg-accent animate-pulse",
+    border: "border-accent/30",
+    bg: "bg-accent/10",
+    text: "text-accent",
   },
   speaking: {
     label: "Speaking",
-    dot: "bg-cyan-400 animate-pulse",
-    border: "border-cyan-500/30",
-    bg: "bg-cyan-500/10",
-    text: "text-cyan-300",
+    dot: "bg-accent animate-pulse",
+    border: "border-accent/30",
+    bg: "bg-accent/10",
+    text: "text-accent",
   },
   thinking: {
     label: "Thinking",
@@ -168,9 +168,9 @@ export function MissionCanvas() {
                     onClick={() =>
                       handleStarter({ id: s.id, prompt: s.prompt })
                     }
-                    className="flex items-center gap-1.5 rounded-lg border border-neutral-800/60 bg-neutral-900/40 px-2.5 py-1.5 text-center transition hover:border-cyan-500/30 hover:bg-cyan-500/5"
+                    className="flex items-center gap-1.5 rounded-lg border border-neutral-800/60 bg-neutral-900/40 px-2.5 py-1.5 text-center transition hover:border-accent/30 hover:bg-accent/5"
                   >
-                    <Icon size={13} className="text-cyan-400" />
+                    <Icon size={13} className="text-accent" />
                     <span className="text-[10px] font-bold text-neutral-300">
                       {s.label}
                     </span>
@@ -217,12 +217,12 @@ export function MissionCanvas() {
               <div
                 key={step.id}
                 className={`flex gap-2.5 rounded-lg border border-neutral-800/60 p-2.5 ${
-                  step.role === "user" ? "bg-cyan-500/5" : "bg-neutral-900/40"
+                  step.role === "user" ? "bg-accent/5" : "bg-neutral-900/40"
                 }`}
               >
                 <div className="mt-0.5">
                   {step.role === "user" ? (
-                    <div className="h-5 w-5 rounded-full bg-cyan-500/20" />
+                    <div className="h-5 w-5 rounded-full bg-accent/20" />
                   ) : step.role === "plan" ? (
                     <Brain size={16} className="text-purple-400" />
                   ) : step.role === "tool" ? (
@@ -230,7 +230,7 @@ export function MissionCanvas() {
                   ) : step.role === "result" ? (
                     <CheckCircle2 size={16} className="text-green-400" />
                   ) : (
-                    <div className="h-5 w-5 rounded-full bg-cyan-400/20" />
+                    <div className="h-5 w-5 rounded-full bg-accent/20" />
                   )}
                 </div>
                 <div className="min-w-0 flex-1">

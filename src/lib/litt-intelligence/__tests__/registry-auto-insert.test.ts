@@ -14,6 +14,7 @@ import { maybeAutoInsertGeneratedImage } from "../tool-registry";
 const PNG_BYTES = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
   0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
 ]);
 
 function projectTransport(writeBinaryFile?: ReturnType<typeof vi.fn>) {
@@ -31,6 +32,7 @@ function generateResult() {
     downloadUrl: "https://cdn.example.com/gen-abc.png",
     title: "hero dog",
     markdown: "![hero](https://cdn.example.com/gen-abc.png)",
+    insertHint: "call project.insert_asset with this downloadUrl",
   };
 }
 
@@ -65,6 +67,11 @@ describe("maybeAutoInsertGeneratedImage", () => {
     expect(out.siteReference).toContain(out.sitePath as string);
     // Chat rendering is preserved alongside the project save.
     expect(out.downloadUrl).toBe("https://cdn.example.com/gen-abc.png");
+    // The save already happened — the result must not still tell the model
+    // to insert the image itself or hand it a payload to re-emit.
+    expect(out.insertHint).toBeUndefined();
+    expect(out.markdown).toBeUndefined();
+    expect(out.siteReference).toContain("do NOT call project.insert_asset");
     expect(writeBinaryFile).toHaveBeenCalledTimes(1);
   });
 

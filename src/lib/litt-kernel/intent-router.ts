@@ -106,6 +106,13 @@ const MODE_PATTERNS: ModePattern[] = [
       // redesign/revamp/restyle/overhaul and fix/repair are the same family:
       // "redesign my homepage", "fix the header on my site" are mutations.
       /\b(edit|update|change|modify|rename|replace|delete|redesign|revamp|restyle|overhaul|fix|repair)\b.*\b(site|website|web ?app|homepage|landing page|footer|header|nav|menu|section)\b/i,
+      // Placement commands use everyday verbs rather than edit-vocabulary —
+      // "put this image on my homepage", "add that picture to the hero",
+      // "insert the image into this page". Without this they fell into
+      // `create` (or `research` when a leading "Now…" matched the recency
+      // word list) and reached the text-only lane, where the model answered
+      // "I have no tool access" and no mutation ever ran.
+      /\b(put|add|place|insert|use|include|show|display|set)\b.*\b(site|website|web ?app|homepage|home ?page|landing ?page|web ?page|page|hero|section|header|footer|nav|menu)\b/i,
       /\b(run|execute)\b.*\b(tests?|builds?|lint|commands?|scripts?)\b/i,
     ],
     requiresProject: true,

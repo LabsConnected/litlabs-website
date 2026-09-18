@@ -743,6 +743,9 @@ export default function VideoTool() {
               {(error.includes("timed out") || error.includes("failed")) && (
                 <button onClick={handleGenerate} className="ml-auto rounded-lg px-2 py-0.5 text-[9px] font-bold transition hover:opacity-80" style={{ background: "rgba(239,68,68,0.2)" }}>Retry</button>
               )}
+              {error.startsWith("Need ") && (
+                <a href="/pricing" className="ml-auto rounded-lg px-2 py-0.5 text-[9px] font-bold transition hover:opacity-80" style={{ background: "rgba(239,68,68,0.2)" }}>Upgrade</a>
+              )}
             </div>
           )}
         </div>

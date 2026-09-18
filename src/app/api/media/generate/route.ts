@@ -29,6 +29,18 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/**
+ * Handled domain failures must never use gateway statuses (502/503/504).
+ * Those codes tell the edge "the application itself is unreachable" —
+ * Cloudflare/Railway then intercept the response and serve a branded HTML
+ * error page instead of this JSON body. Verified in production 2026-09-18:
+ * the app logged `status=502` with the structured PROVIDER_ERROR body, and
+ * the client received Cloudflare's HTML 502 page (no x-railway-request-id,
+ * i.e. edge-generated). The structured error never reached the user.
+ *
+ * Non-gateway statuses preserve both the failure signal (res.ok === false)
+ * and the machine-readable `code` field the client actually branches on.
+ */
 function statusForCode(result: ImageGenerationResult): number {
   if (result.success) return 200;
   switch (result.code) {
@@ -43,10 +55,15 @@ function statusForCode(result: ImageGenerationResult): number {
     case "DUPLICATE_IN_FLIGHT":
       return 409;
     case "NO_PROVIDER":
-      return 503;
+      // Provider/config condition — 422 keeps the JSON body reachable
+      // through edge proxies that substitute their own page on 503.
+      return 422;
     case "QUOTA_EXCEEDED":
+      return 429;
     case "PROVIDER_ERROR":
-      return 502;
+      // Upstream provider failure — NOT 502: an app-emitted 502 is
+      // indistinguishable from a real gateway failure at the edge.
+      return 422;
     default:
       return 500;
   }

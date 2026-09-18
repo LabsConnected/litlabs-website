@@ -485,6 +485,29 @@ export default function StudioPreviewPanel({
     return () => window.removeEventListener("message", handler);
   }, []);
 
+  // The terminal-server proxy serves an honest error page (instead of the
+  // backend's white "Cannot GET /") when the dev server 404s the entry
+  // path at proxy time, and that page postMessages us. Flip the badge
+  // immediately instead of waiting for the 30s status poll — the user
+  // must never see "Preview ready" over a dead iframe.
+  useEffect(() => {
+    if (!projectId || !previewUrl) return;
+    let previewOrigin: string | null = null;
+    try {
+      previewOrigin = new URL(previewUrl, window.location.href).origin;
+    } catch {
+      return;
+    }
+    const handler = (event: MessageEvent) => {
+      if (event.origin !== previewOrigin) return;
+      const data = event.data as { source?: unknown; type?: unknown } | null;
+      if (!data || data.source !== "litt-preview" || data.type !== "preview-entry-missing") return;
+      void loadStatus(true);
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [projectId, previewUrl, loadStatus]);
+
   // Listen for file change events from CodeWorkspace or other sources.
   // This covers the standalone Preview tab which doesn't receive refreshKey.
   // A file change while the preview is live marks it stale and re-checks

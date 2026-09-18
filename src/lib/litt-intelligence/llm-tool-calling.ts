@@ -754,6 +754,15 @@ function normalizeTextToolCalls<T extends { text: string; toolCalls: ToolCallReq
     return parsed;
   }
 
+  // A bare JSON envelope embedded mid-prose is a weak invocation signal —
+  // the model may be narrating rather than invoking. It is NEVER recovered
+  // into an executable call here; the hygiene pass strips it from the
+  // visible text. (Text-only lanes fail on any detector hit via
+  // findToolCallMarkup directly — that contract is unchanged.)
+  if (hit.kind === "bare_json_mid_prose") {
+    return parsed;
+  }
+
   const recovery = recoverTextToolCalls(parsed.text, knownIds);
 
   // Intent detected but not fully recoverable — incompatible protocol.
@@ -1517,16 +1526,53 @@ export async function callLLMWithTools(
 
 // ─── Format tool results for LLM ──────────────────────────────────
 
+/**
+ * Strip inline data: payloads from a tool result before it enters the
+ * model context. Free media providers return generated assets as data:
+ * URLs tens of KB long — the model cannot faithfully re-emit them, and
+ * when it tries (e.g. copying downloadUrl into project.insert_asset) the
+ * truncated payload decodes into a corrupt file that ships as a broken
+ * site asset. The full result object is untouched for storage and UI;
+ * only this model-facing copy is redacted.
+ */
+function redactInlineDataPayloads(value: unknown): unknown {
+  if (typeof value === "string") {
+    // Redact data: URLs wherever they appear — standalone fields and ones
+    // embedded in markdown (e.g. `![alt](data:image/png;base64,…)`).
+    return value.replace(
+      /data:[a-z0-9.+-]+\/[a-z0-9.+-]+(;base64)?,([a-z0-9+/=%_-]+)/gi,
+      (match, _b64: string, payload: string) =>
+        payload.length > 256
+          ? `[inline data payload omitted — ${match.length} chars; use the returned file path or URL fields instead]`
+          : match,
+    );
+  }
+  if (Array.isArray(value)) {
+    return value.map(redactInlineDataPayloads);
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = redactInlineDataPayloads(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 export function buildToolResultMessage(
   result: ToolCallResult,
 ): LLMMessage {
+  const modelResult = result.success
+    ? redactInlineDataPayloads(result.result)
+    : result.result;
   const content = result.success
-    ? JSON.stringify(result.result).slice(0, 10_000)
+    ? JSON.stringify(modelResult).slice(0, 10_000)
     : `Error: ${result.error ?? "Unknown error"}`;
 
   const underscoredName = result.toolId.replace(/\./g, "_");
   const geminiResponse = result.success
-    ? (result.result ?? null)
+    ? (modelResult ?? null)
     : { error: result.error ?? "Unknown error" };
 
   return {

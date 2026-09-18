@@ -1,3 +1,4 @@
+import { brand, color } from "@/lib/design/litt-tokens";
 import { SignUp } from "@clerk/nextjs";
 import Link from "next/link";
 import { SignupTracker } from "../SignupTracker";
@@ -42,8 +43,8 @@ export default function SignUpPage() {
                 rootBox: { width: "100%" },
                 cardBox: { width: "100%", maxWidth: "100%" },
                 formButtonPrimary: {
-                  backgroundColor: "#a8ff2f",
-                  color: "#03050a",
+                  backgroundColor: brand.primary.DEFAULT,
+                  color: color.text.onPrimary,
                   border: "none",
                   fontSize: "13px",
                   fontWeight: "bold",
@@ -55,7 +56,7 @@ export default function SignUpPage() {
                   color: "#e2e8f0",
                   borderRadius: "8px",
                 },
-                footerActionLink: { color: "#a8ff2f" },
+                footerActionLink: { color: brand.primary.DEFAULT },
                 headerTitle: { color: "#e2e8f0" },
                 headerSubtitle: { color: "#94a3b8" },
                 socialButtonsBlockButton: {
@@ -73,7 +74,7 @@ export default function SignUpPage() {
                 },
               },
               variables: {
-                colorPrimary: "#a8ff2f",
+                colorPrimary: brand.primary.DEFAULT,
                 colorBackground: "#1a1a24",
                 colorForeground: "#e2e8f0",
                 colorMutedForeground: "#94a3b8",

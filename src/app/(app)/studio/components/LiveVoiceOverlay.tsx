@@ -500,9 +500,9 @@ export default function LiveVoiceOverlay({
             disabled={!isLive && cameraDisplay !== "failed"}
             className="flex h-12 w-12 items-center justify-center rounded-full transition-all hover:bg-white/10 disabled:opacity-40"
             style={{
-              color: cameraOn ? "#22d3ee" : "rgba(255,255,255,0.4)",
-              backgroundColor: cameraOn ? "rgba(34,211,238,0.1)" : "transparent",
-              boxShadow: cameraOn ? "0 0 0 2px rgba(34,211,238,0.3)" : undefined,
+              color: cameraOn ? "var(--color-accent)" : "rgba(255,255,255,0.4)",
+              backgroundColor: cameraOn ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
+              boxShadow: cameraOn ? "0 0 0 2px color-mix(in srgb, var(--color-accent) 30%, transparent)" : undefined,
             }}
             aria-label={cameraOn ? "Turn camera off" : "Turn camera on"}
             title="Camera"
@@ -529,8 +529,8 @@ export default function LiveVoiceOverlay({
             disabled={!isLive}
             className="hidden h-12 w-12 items-center justify-center rounded-full transition-all hover:bg-white/10 disabled:opacity-40 md:flex"
             style={{
-              color: screenOn ? "#22d3ee" : "rgba(255,255,255,0.4)",
-              backgroundColor: screenOn ? "rgba(34,211,238,0.1)" : "transparent",
+              color: screenOn ? "var(--color-accent)" : "rgba(255,255,255,0.4)",
+              backgroundColor: screenOn ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
             }}
             aria-label={screenOn ? "Stop screen share" : "Share screen"}
             title="Screen share"
@@ -562,7 +562,7 @@ export default function LiveVoiceOverlay({
             <button
               type="button"
               onClick={interrupt}
-              className="flex h-12 w-12 items-center justify-center rounded-full text-cyan-300 transition-all hover:bg-white/10"
+              className="flex h-12 w-12 items-center justify-center rounded-full text-accent transition-all hover:bg-white/10"
               aria-label="Interrupt LiTT"
               title="Interrupt"
             >

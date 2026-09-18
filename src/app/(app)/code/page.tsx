@@ -496,8 +496,7 @@ export default function CodeScannerPage() {
           </p>
           <Link
             href="/sign-in?redirect_url=/code"
-            className="px-4 py-2 rounded-lg text-sm font-bold"
-            style={{ backgroundColor: "#a8ff2f", color: "#03050a" }}
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-bold text-on-accent transition-colors hover:bg-accent-strong"
           >
             Sign In
           </Link>
@@ -874,7 +873,7 @@ export default function CodeScannerPage() {
 
           {/* Resizer */}
           <div
-            className={`absolute top-0 bottom-0 w-1 cursor-col-resize hover:bg-cyan-500/30 transition-colors ${isResizing ? "bg-cyan-500/50" : ""}`}
+            className={`absolute top-0 bottom-0 w-1 cursor-col-resize hover:bg-accent/30 transition-colors ${isResizing ? "bg-accent/50" : ""}`}
             style={{ left: `calc(48px + ${sidebarWidth}px - 2px)` }}
             onMouseDown={handleResize}
           />

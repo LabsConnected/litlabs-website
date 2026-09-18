@@ -69,7 +69,7 @@ const DOCK_MAX_DVH = 65;
 const HEIGHT_STORAGE_KEY = "studio-dock-height";
 const OPEN_STORAGE_KEY = "studio-dock-open";
 
-const CYAN = "#22d3ee";
+const ACCENT = "var(--color-accent)";
 const AMBER = "#e3b341";
 
 type DockView = "collapsed" | "normal" | "maximized";
@@ -303,9 +303,9 @@ export default function StudioDock({
             aria-label="Open developer tools"
             data-testid="dock-collapsed-toggle"
           >
-            <PanelBottom size={13} className="pointer-events-none" style={{ color: CYAN }} />
+            <PanelBottom size={13} className="pointer-events-none" style={{ color: ACCENT }} />
             Developer tools
-            {activityPulse && <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: CYAN }} aria-label="Activity in progress" />}
+            {activityPulse && <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: ACCENT }} aria-label="Activity in progress" />}
             {terminalBadge && <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: AMBER }} aria-label="Terminal command failed" />}
           </button>
         ) : (
@@ -324,13 +324,13 @@ export default function StudioDock({
                   onClick={() => handleTabClick(t.id)}
                   className="flex h-full items-center gap-1.5 px-2.5 text-[11px] font-bold transition"
                   style={{
-                    color: isActive ? CYAN : "var(--text-muted)",
-                    borderBottom: isActive ? `2px solid ${CYAN}` : "2px solid transparent",
+                    color: isActive ? ACCENT : "var(--text-muted)",
+                    borderBottom: isActive ? `2px solid ${ACCENT}` : "2px solid transparent",
                   }}
                 >
                   <Icon size={13} className="pointer-events-none" />
                   {t.label}
-                  {t.id === "activity" && activityPulse && <span data-testid="dock-activity-pulse" className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: CYAN }} aria-label="Activity in progress" />}
+                  {t.id === "activity" && activityPulse && <span data-testid="dock-activity-pulse" className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: ACCENT }} aria-label="Activity in progress" />}
                   {t.id === "terminal" && terminalBadge && <span data-testid="dock-terminal-badge" className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: AMBER }} aria-label="Terminal command failed" />}
                 </button>
               );

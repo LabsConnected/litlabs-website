@@ -25,6 +25,7 @@ import { getSupabaseAdmin, supabaseAdmin } from "@/lib/supabase";
 import { getAgentDefinition } from "@/lib/agent-registry";
 import { hasPlanAccess, type PlanId } from "@/config/plans";
 import { isOwnerClerkId, getActiveSimulation, isBillingExempt, simulationToPlanId, type SimulatedPlan } from "@/lib/owner";
+import { buildChargeRating, recordChargeEvidence } from "@/lib/billing/canonical-pricing";
 
 /** Subscription statuses that grant plan-based agent access. */
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing"]);
@@ -305,6 +306,23 @@ export async function chargeAgentRun(params: {
   // success === false with zero balance means insufficient funds.
   if (row?.success === false && balance < amount) {
     return { charged: false, replayed: false, balance, error: "Insufficient LiTTBits" };
+  }
+
+  // Canonical pricing evidence — best-effort, never blocks the charge result.
+  if (!replayed) {
+    await recordChargeEvidence(admin, {
+      userId: user.id,
+      idempotencyKey: params.idempotencyKey,
+      rating: buildChargeRating({
+        capability: "agent_run",
+        provider: "internal",
+        model: params.agentSlug,
+        providerCostMicros: 0,
+        bitsCharged: amount,
+        billingClass: "flat",
+        lane: "flat",
+      }),
+    }).catch(() => {});
   }
 
   return { charged: true, replayed, balance };

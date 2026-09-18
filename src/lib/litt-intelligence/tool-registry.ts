@@ -75,14 +75,22 @@ export async function maybeAutoInsertGeneratedImage(
     const nameHint = typeof r.title === "string" && r.title.length > 0 ? r.title : undefined;
     const saved = await insertAssetFromUrl(r.downloadUrl, { nameHint }, t as WorkspaceTransport);
     if (saved.success) {
+      // The save already happened under this approval — drop the handler's
+      // insertHint/markdown, which still tell the model to call
+      // project.insert_asset with the raw downloadUrl. Free providers return
+      // multi-KB data: URLs the model can only re-emit truncated, which wrote
+      // a corrupt stub asset and got referenced by the site HTML in the
+      // 2026-09-18 acceptance run.
+      const { insertHint: _insertHint, markdown: _markdown, ...rest } = r;
       return {
-        ...r,
+        ...rest,
         savedToProject: true,
         projectPath: saved.path,
         sitePath: saved.sitePath,
         siteReference:
-          `The image is saved in the project. Reference it in the site's HTML as ` +
-          `<img src="${saved.sitePath}" /> — do NOT invent another path.`,
+          `The image is already saved in the project at ${saved.sitePath}. ` +
+          `Reference it in the site's HTML as <img src="${saved.sitePath}" /> — ` +
+          `do NOT call project.insert_asset again and do NOT invent another path.`,
       };
     }
     return {
@@ -814,7 +822,8 @@ export function registerInternalTools(): void {
         id: "project.insert_asset",
         name: "Insert Asset into Project",
         description:
-          "Download an image from a URL and save it into the project workspace (default public/assets/images/). " +
+          "Download an image from a URL and save it into the project workspace (defaults to the directory the " +
+          "site's web root serves: public/assets/images for framework projects, assets/images for static sites). " +
           "Use this right after image.generate to place a generated image into the website being built — " +
           "then reference the returned sitePath in the site's HTML. Never leave site images as chat-only renders.",
         source: "internal",
@@ -825,7 +834,7 @@ export function registerInternalTools(): void {
             projectId: { type: "string" },
             url: { type: "string", description: "Public HTTPS URL of the image (e.g. the downloadUrl from image.generate)" },
             name: { type: "string", description: "Optional filename hint, e.g. 'hero-sunset'" },
-            directory: { type: "string", description: "Optional workspace directory; defaults to public/assets/images" },
+            directory: { type: "string", description: "Optional workspace directory; defaults to the project's served asset directory" },
           },
           required: ["projectId", "url"],
         },
