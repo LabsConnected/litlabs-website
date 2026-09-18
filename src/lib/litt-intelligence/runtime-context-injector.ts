@@ -350,7 +350,7 @@ export function buildToolManifest(ctx: RuntimeContextSnapshot): ToolCapabilityMa
       id: "project.insert_asset",
       name: "Insert Asset into Project",
       description:
-        "Saves an image URL into the project workspace (public/assets/images/) and returns the site-relative path. " +
+        "Saves an image URL into the project workspace (the directory the site's web root serves) and returns the site-relative path. " +
         "Call after image.generate, then reference the returned sitePath in the site's HTML.",
       available: ctx.projectId !== null,
       unavailableReason: ctx.projectId === null ? "No active project selected" : undefined,

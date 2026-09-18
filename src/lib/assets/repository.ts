@@ -28,7 +28,7 @@ import { userMediaRowsToStudioAssets, type UserMediaRow } from "./adapters/user-
 import { generationJobsToStudioAssets } from "./adapters/generation-job";
 import { musicTracksToStudioAssets, type MusicTrackRow } from "./adapters/music-track";
 import type { AssetKind, StudioAsset } from "./types";
-import type { GenerationJob } from "@/lib/generation/types";
+import { rowToJob } from "@/lib/generation/jobs";
 
 export interface ListStudioAssetsOptions {
   /** Clerk user ID of the authenticated user. */
@@ -142,7 +142,14 @@ async function fetchGenerationJobs(
     .limit(limit);
 
   if (error || !data) return [];
-  const assets = generationJobsToStudioAssets(data as unknown as GenerationJob[]);
+  // Rows arrive snake_case — map through rowToJob (the canonical
+  // row→GenerationJob mapper) so camelCase fields like createdAt,
+  // littBitsCharged and requestId are populated. A raw cast leaves them
+  // undefined, which crashed the createdAt sort below once a user had
+  // more than one asset.
+  const assets = generationJobsToStudioAssets(
+    data.map((row) => rowToJob(row as Record<string, unknown>)),
+  );
 
   // When a projectId filter is active, exclude assets explicitly bound
   // to a DIFFERENT project. Assets with no project binding (null) are
@@ -304,9 +311,11 @@ export async function listStudioAssets(
     ? results.filter((a) => a.kind === opts.kind)
     : results;
 
-  // Sort newest-first by createdAt.
+  // Sort newest-first by createdAt. Null-safe: an adapter that produced
+  // a missing timestamp must not crash the whole listing (the generation
+  // job path did exactly that via an unmapped snake_case row).
   filtered.sort((a, b) => {
-    return b.createdAt.localeCompare(a.createdAt);
+    return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
   });
 
   // Apply overall limit.
@@ -391,7 +400,7 @@ export async function getStudioAsset(
     }
 
     const { generationJobToStudioAsset } = await import("./adapters/generation-job");
-    return { asset: generationJobToStudioAsset(data as unknown as GenerationJob), error: null };
+    return { asset: generationJobToStudioAsset(rowToJob(data as Record<string, unknown>)), error: null };
   }
 
   if (prefix === "music_track") {

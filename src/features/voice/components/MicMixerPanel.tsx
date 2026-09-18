@@ -21,11 +21,11 @@ import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { DEVICE_ID_STORAGE_KEY, readStoredDeviceId } from "@/features/voice/lib/mixer-settings";
 
 interface MicMixerPanelProps {
-  /** Accent color from the theme (defaults to cyan). */
+  /** Accent color from the theme (defaults to the brand accent). */
   accentColor?: string;
 }
 
-export function MicMixerPanel({ accentColor = "#06b6d4" }: MicMixerPanelProps) {
+export function MicMixerPanel({ accentColor = "var(--color-accent)" }: MicMixerPanelProps) {
   const inputGain = useMixerStore((s) => s.inputGain);
   const outputVolume = useMixerStore((s) => s.outputVolume);
   const muted = useMixerStore((s) => s.muted);
@@ -220,7 +220,7 @@ export function MicMixerPanel({ accentColor = "#06b6d4" }: MicMixerPanelProps) {
           onClick={toggleMuted}
           className="rounded-lg border px-3 py-1.5 text-xs font-bold transition-all hover:opacity-80"
           style={{
-            borderColor: muted ? "#ef444480" : `${accentColor}40`,
+            borderColor: muted ? "#ef444480" : `color-mix(in srgb, ${accentColor} 25%, transparent)`,
             color: muted ? "#ef4444" : accentColor,
           }}
         >
@@ -231,7 +231,7 @@ export function MicMixerPanel({ accentColor = "#06b6d4" }: MicMixerPanelProps) {
           onClick={playTestTone}
           className="rounded-lg border px-3 py-1.5 text-xs font-bold transition-all hover:opacity-80"
           style={{
-            borderColor: tonePlaying ? "#22c55e80" : `${accentColor}40`,
+            borderColor: tonePlaying ? "#22c55e80" : `color-mix(in srgb, ${accentColor} 25%, transparent)`,
             color: tonePlaying ? "#22c55e" : accentColor,
           }}
         >

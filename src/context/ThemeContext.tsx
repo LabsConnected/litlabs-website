@@ -44,6 +44,7 @@ export type ThemeMode = "dark" | "light" | "system";
 
 // Accent colors
 export type AccentColor =
+  | "lime"
   | "neon-green"
   | "hot-pink"
   | "electric-blue"
@@ -452,6 +453,13 @@ const accentOverrides: Record<
     headerColor: "#ddd6fe",
     accentColor: "#a855f7",
   },
+  // PR-G: canonical product accent (J1 PRIMARY_ACCENT_DECISION = lime, decided).
+  // brand.primary lime candidate #a8ff2f; link/header are lime-family tints.
+  lime: {
+    linkColor: "#bef264",
+    headerColor: "#d9f99d",
+    accentColor: "#a8ff2f",
+  },
 };
 
 // Visual pack — a complete preset that applies multiple theme settings at once
@@ -605,7 +613,7 @@ export const VISUAL_PACKS: VisualPack[] = [
 const defaultTheme: Theme = {
   mode: "dark",
   skin: "volcanic",
-  accent: "purple-haze",
+  accent: "lime",
   backgroundMode: "nebula",
   layoutStyle: "glass",
 };
@@ -856,6 +864,7 @@ export function useTheme() {
 }
 
 export const ACCENT_MAP: Record<AccentColor, { hex: string }> = {
+  "lime": { hex: "#a8ff2f" },
   "neon-green": { hex: "#06b6d4" },
   "hot-pink": { hex: "#ec4899" },
   "electric-blue": { hex: "#3b82f6" },
@@ -866,7 +875,7 @@ export const ACCENT_MAP: Record<AccentColor, { hex: string }> = {
   "purple-haze": { hex: "#a855f7" },
 };
 
-export { darkSkins, lightSkins, accentOverrides };
+export { darkSkins, lightSkins, accentOverrides, defaultTheme };
 
 /* ------------------------------------------------------------------ */
 /*  Global CRT Toggle — single source of truth for scanline overlay    */

@@ -55,8 +55,8 @@ export function ActionChips({ actions, onExecute }: ActionChipsProps) {
               isExecuted
                 ? "border-green-500/30 bg-green-500/10 text-green-300 cursor-default"
                 : isExecuting
-                  ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300 animate-pulse"
-                  : "border-white/10 bg-white/5 text-white/60 hover:border-cyan-500/30 hover:bg-cyan-500/10 hover:text-cyan-300",
+                  ? "border-accent/30 bg-accent/10 text-accent animate-pulse"
+                  : "border-white/10 bg-white/5 text-white/60 hover:border-accent/30 hover:bg-accent/10 hover:text-accent",
             )}
           >
             <span>{getActionIcon(action)}</span>

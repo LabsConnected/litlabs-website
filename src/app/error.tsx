@@ -48,7 +48,7 @@ export default function Error({
           <button
             onClick={reset}
             className="px-4 py-2 text-xs font-bold rounded-lg hover:opacity-90 transition-opacity cursor-pointer"
-            style={{ backgroundColor: "#a8ff2f", color: "#03050a" }}
+            style={{ backgroundColor: "var(--color-accent)", color: "var(--color-on-accent)" }}
           >
             Try Again
           </button>

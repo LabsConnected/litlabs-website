@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { resolveWorkspacePath } from "../workspace/WorkspaceSecurity";
+import { resolveWorkspacePath, validateWritePayload, MAX_BINARY_WRITE_SIZE } from "../workspace/WorkspaceSecurity";
 
 describe("resolveWorkspacePath", () => {
   let root: string;
@@ -83,5 +83,57 @@ describe("resolveWorkspacePath", () => {
     mkdirSync(join(root, "newdir"), { recursive: true });
     const target = resolveWorkspacePath(root, "newdir/created.txt");
     expect(target).toBe(join(root, "newdir", "created.txt"));
+  });
+});
+
+describe("validateWritePayload", () => {
+  it("accepts text writes under the 1MB cap", () => {
+    const check = validateWritePayload("utf-8", "hello world");
+    expect(check.ok).toBe(true);
+    if (check.ok) expect(check.binary).toBeNull();
+  });
+
+  it("rejects text writes over the 1MB cap with 413", () => {
+    const check = validateWritePayload("utf-8", "x".repeat(1024 * 1024 + 1));
+    expect(check.ok).toBe(false);
+    if (!check.ok) {
+      expect(check.status).toBe(413);
+      expect(check.error).toMatch(/max write size/i);
+    }
+  });
+
+  it("accepts a 2MB image: the binary cap is measured on decoded bytes, not the base64 string", () => {
+    // Regression: the old /ws-files/write route measured the base64 STRING
+    // against 1MB, silently rejecting every generated image over ~750KB —
+    // the 2026-09-17 acceptance P0 (broken hero image, file never saved).
+    const binary = Buffer.alloc(2 * 1024 * 1024, 0x89);
+    const check = validateWritePayload("base64", binary.toString("base64"));
+    expect(check.ok).toBe(true);
+    if (check.ok) {
+      expect(check.binary).toBeInstanceOf(Buffer);
+      expect(check.binary!.length).toBe(2 * 1024 * 1024);
+    }
+  });
+
+  it("accepts a binary write at exactly the 50MB advertised cap", () => {
+    const binary = Buffer.alloc(MAX_BINARY_WRITE_SIZE, 0x89);
+    const check = validateWritePayload("base64", binary.toString("base64"));
+    expect(check.ok).toBe(true);
+  });
+
+  it("rejects decoded binaries over the 50MB cap with 413", () => {
+    const binary = Buffer.alloc(MAX_BINARY_WRITE_SIZE + 1, 0x89);
+    const check = validateWritePayload("base64", binary.toString("base64"));
+    expect(check.ok).toBe(false);
+    if (!check.ok) {
+      expect(check.status).toBe(413);
+      expect(check.error).toMatch(/exceeds max write size/i);
+    }
+  });
+
+  it("rejects empty base64 payloads with 400", () => {
+    const check = validateWritePayload("base64", "");
+    expect(check.ok).toBe(false);
+    if (!check.ok) expect(check.status).toBe(400);
   });
 });

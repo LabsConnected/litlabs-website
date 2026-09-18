@@ -103,14 +103,13 @@ export default function LiTTPanel({
           <div
             className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg"
             style={{
-              background: "linear-gradient(135deg, rgba(34,211,238,0.2), rgba(34,211,238,0.08))",
+              background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 20%, transparent), color-mix(in srgb, var(--color-accent) 8%, transparent))",
               border: "1px solid rgba(255,255,255,0.13)",
             }}
             aria-hidden
           >
             <span
-              className="text-[9px] font-black"
-              style={{ color: "#22d3ee" }}
+              className="text-[9px] font-black text-accent"
             >
               L
             </span>
@@ -120,8 +119,8 @@ export default function LiTTPanel({
             onClick={() => onTabChange("chat")}
             className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
             style={{
-              color: activeTab === "chat" ? "#22d3ee" : "var(--text-muted)",
-              backgroundColor: activeTab === "chat" ? "rgba(34,211,238,0.1)" : "transparent",
+              color: activeTab === "chat" ? "var(--color-accent)" : "var(--text-muted)",
+              backgroundColor: activeTab === "chat" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
             }}
             aria-pressed={activeTab === "chat"}
             data-testid="litt-tab-chat"
@@ -134,8 +133,8 @@ export default function LiTTPanel({
             onClick={() => onTabChange("live")}
             className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
             style={{
-              color: activeTab === "live" ? "#22d3ee" : "var(--text-muted)",
-              backgroundColor: activeTab === "live" ? "rgba(34,211,238,0.1)" : "transparent",
+              color: activeTab === "live" ? "var(--color-accent)" : "var(--text-muted)",
+              backgroundColor: activeTab === "live" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
             }}
             aria-pressed={activeTab === "live"}
             data-testid="litt-tab-live"

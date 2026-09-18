@@ -1,5 +1,7 @@
 "use client";
 
+import { brand } from "@/lib/design/litt-tokens";
+
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -27,7 +29,7 @@ const MISSION_STEPS = [
 ] as const;
 
 const RUNTIME = [
-  { label: "Agent", value: "working", color: "#a8ff2f" },
+  { label: "Agent", value: "working", color: brand.primary.DEFAULT },
   { label: "Files", value: "12 changed", color: "#65f4ff" },
   { label: "Memory", value: "synced", color: "#b58cff" },
 ] as const;
@@ -52,8 +54,8 @@ export function LandingHeroV3() {
         <div className="relative z-10 max-w-3xl">
           <div className="litt-live-pill litt-hero-reveal litt-hero-step-1">
             <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#a8ff2f] opacity-60" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-[#a8ff2f]" />
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
             </span>
             LiTT is online
             <span className="h-3 w-px bg-white/15" />
@@ -92,7 +94,7 @@ export function LandingHeroV3() {
           <div className="litt-hero-reveal litt-hero-step-5 mt-7 flex flex-wrap gap-x-5 gap-y-2 text-[11px] font-bold text-white/38 sm:text-xs">
             {["Free starter plan", "No credit card required", "Connect GitHub", "Your files stay yours"].map((fact) => (
               <span key={fact} className="inline-flex items-center gap-1.5">
-                <Check size={12} className="text-[#a8ff2f]" /> {fact}
+                <Check size={12} className="text-accent" /> {fact}
               </span>
             ))}
           </div>
@@ -119,11 +121,11 @@ export function LandingHeroV3() {
               <div className="flex items-center gap-2">
                 <span className="h-2.5 w-2.5 rounded-full bg-[#ff6b6b]/75" />
                 <span className="h-2.5 w-2.5 rounded-full bg-[#ffd166]/75" />
-                <span className="h-2.5 w-2.5 rounded-full bg-[#a8ff2f]/75" />
+                <span className="h-2.5 w-2.5 rounded-full bg-accent/75" />
               </div>
               <div className="flex items-center gap-2 font-mono text-[9px] font-bold uppercase tracking-[0.16em] text-white/40 sm:text-[10px]">
                 Studio / Mission control
-                <span className="rounded-full border border-[#a8ff2f]/25 bg-[#a8ff2f]/8 px-2 py-0.5 text-[#a8ff2f]">Live</span>
+                <span className="rounded-full border border-accent/25 bg-accent/8 px-2 py-0.5 text-accent">Live</span>
               </div>
             </div>
 
@@ -144,14 +146,14 @@ export function LandingHeroV3() {
               <div className="absolute left-3 top-3 w-[47%] rounded-xl border border-white/12 bg-[#050810]/84 p-3 shadow-2xl backdrop-blur-xl sm:left-5 sm:top-5 sm:w-[42%] sm:p-4">
                 <div className="flex items-center justify-between">
                   <span className="font-mono text-[9px] font-black uppercase tracking-[0.16em] text-white/42">Current mission</span>
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#a8ff2f] shadow-[0_0_12px_#a8ff2f]" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-accent-glow" />
                 </div>
                 <p className="mt-2 text-xs font-black text-white sm:text-sm">Build the launch experience.</p>
                 <div className="mt-3 space-y-2">
                   {MISSION_STEPS.map((step, index) => (
                     <div key={step.label} className="flex items-center gap-2">
                       {step.state === "done" ? (
-                        <CheckCircle2 size={12} className="shrink-0 text-[#a8ff2f]" />
+                        <CheckCircle2 size={12} className="shrink-0 text-accent" />
                       ) : step.state === "active" ? (
                         <span className="relative flex h-3 w-3 shrink-0 items-center justify-center">
                           <span className="absolute h-3 w-3 animate-ping rounded-full bg-[#65f4ff]/35" />
@@ -186,13 +188,13 @@ export function LandingHeroV3() {
               <div className="absolute inset-x-3 bottom-3 rounded-xl border border-white/12 bg-[#03050a]/92 shadow-2xl backdrop-blur-xl sm:inset-x-5 sm:bottom-5">
                 <div className="flex items-center justify-between border-b border-white/8 px-3 py-2">
                   <div className="flex items-center gap-2 font-mono text-[9px] font-black uppercase tracking-[0.15em] text-white/38"><Terminal size={11} /> Terminal</div>
-                  <span className="font-mono text-[8px] font-bold text-[#a8ff2f]">exit 0</span>
+                  <span className="font-mono text-[8px] font-bold text-accent">exit 0</span>
                 </div>
                 <div className="litt-terminal-lines grid gap-1 px-3 py-3 font-mono text-[9px] sm:grid-cols-2 sm:text-[10px]">
                   <div className="text-white/55"><span className="text-[#65f4ff]">$</span> litt run mission</div>
-                  <div className="text-[#a8ff2f]">✓ workspace loaded</div>
-                  <div className="text-[#a8ff2f]">✓ components generated</div>
-                  <div className="text-[#a8ff2f]">✓ verification passed</div>
+                  <div className="text-accent">✓ workspace loaded</div>
+                  <div className="text-accent">✓ components generated</div>
+                  <div className="text-accent">✓ verification passed</div>
                 </div>
               </div>
             </div>
@@ -202,12 +204,12 @@ export function LandingHeroV3() {
             <FileCode2 size={14} className="text-[#65f4ff]" /> Real files
           </div>
           <div className="litt-floating-badge -left-5 bottom-[14%] hidden xl:flex">
-            <ShieldCheck size={14} className="text-[#a8ff2f]" /> Approval ready
+            <ShieldCheck size={14} className="text-accent" /> Approval ready
           </div>
         </div>
       </div>
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-linear-to-r from-transparent via-[#a8ff2f]/40 to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-linear-to-r from-transparent via-accent/40 to-transparent" />
     </section>
   );
 }

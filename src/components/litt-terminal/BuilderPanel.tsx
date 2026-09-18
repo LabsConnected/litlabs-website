@@ -94,8 +94,8 @@ export function BuilderPanel({
   return (
     <div className="flex h-full flex-col gap-4 rounded-2xl border border-neutral-800/60 bg-black/40 p-3 backdrop-blur-sm overflow-hidden">
       <div className="flex items-center gap-2">
-        <Hammer size={16} className="text-cyan-400" />
-        <span className="text-xs font-black uppercase tracking-widest text-cyan-300">
+        <Hammer size={16} className="text-accent" />
+        <span className="text-xs font-black uppercase tracking-widest text-accent">
           Builder
         </span>
       </div>
@@ -116,7 +116,7 @@ export function BuilderPanel({
           {scanning ? (
             <Loader2 size={14} className="animate-spin" />
           ) : (
-            <Folder size={14} className="text-cyan-300" />
+            <Folder size={14} className="text-accent" />
           )}
           Scan
         </button>
@@ -136,7 +136,7 @@ export function BuilderPanel({
           onClick={onDeployAction}
           className="flex flex-col items-center gap-1 rounded-xl border border-neutral-800/60 bg-neutral-900/40 p-2 text-[10px] font-bold text-neutral-200 transition hover:bg-white/5"
         >
-          <Rocket size={14} className="text-fuchsia-300" />
+          <Rocket size={14} className="text-accent" />
           Deploy
         </button>
       </div>
@@ -146,13 +146,13 @@ export function BuilderPanel({
         <div className="space-y-2 rounded-xl border border-neutral-800/60 bg-neutral-900/30 p-2.5">
           <div className="flex items-center justify-between text-[10px]">
             <span className="text-neutral-500">Files</span>
-            <span className="font-bold text-cyan-300">
+            <span className="font-bold text-accent">
               {scan.totalFiles ?? 0}
             </span>
           </div>
           <div className="flex items-center justify-between text-[10px]">
             <span className="text-neutral-500">Lines</span>
-            <span className="font-bold text-cyan-300">
+            <span className="font-bold text-accent">
               {scan.totalLines ?? 0}
             </span>
           </div>
@@ -194,13 +194,13 @@ export function BuilderPanel({
                   onClick={() => onSelectFileAction(f)}
                   className={`flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-[10px] transition ${
                     active
-                      ? "bg-cyan-500/10 text-cyan-200 border border-cyan-500/30"
+                      ? "bg-accent/10 text-accent border border-accent/30"
                       : "text-neutral-300 hover:bg-white/5 border border-transparent"
                   }`}
                 >
                   <FileCode
                     size={12}
-                    className={active ? "text-cyan-300" : "text-neutral-500"}
+                    className={active ? "text-accent" : "text-neutral-500"}
                   />
                   <span className="truncate">{f}</span>
                 </button>

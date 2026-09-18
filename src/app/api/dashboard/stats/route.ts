@@ -24,16 +24,20 @@ async function getHandler(req: NextRequest) {
 
     const sb = getAdminSupabase();
 
-    const [usersRes, postsRes, agentsRes, walletRes] = await Promise.all([
+    const [usersRes, postsRes, agentsRes, ledgerRes] = await Promise.all([
       sb.from("users").select("id", { count: "exact", head: true }),
       sb.from("posts").select("id", { count: "exact", head: true }),
       sb.from("agents").select("id", { count: "exact", head: true }),
-      sb.from("wallets").select("balance"),
+      // credit_ledger is the authoritative balance system — wallets is legacy.
+      sb.from("credit_ledger").select("amount, direction"),
     ]);
 
     let walletSum = 0;
-    if (walletRes.data) {
-      walletSum = walletRes.data.reduce((sum, w) => sum + (w.balance || 0), 0);
+    if (ledgerRes.data) {
+      walletSum = ledgerRes.data.reduce(
+        (sum, row) => sum + (row.direction === "debit" ? -(row.amount || 0) : (row.amount || 0)),
+        0,
+      );
     }
 
     return NextResponse.json({

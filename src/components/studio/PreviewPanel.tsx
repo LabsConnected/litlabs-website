@@ -14,7 +14,7 @@ export default function PreviewPanel({
   return (
     <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
       <div className="mb-2 flex items-center justify-between">
-        <p className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-300">Preview</p>
+        <p className="text-[9px] font-black uppercase tracking-[0.2em] text-accent">Preview</p>
         <button
           onClick={onRefresh}
           className="rounded-lg p-1 text-white/40 hover:bg-white/8 hover:text-white"

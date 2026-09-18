@@ -243,3 +243,94 @@ describe("describeDeploymentFailure", () => {
     expect(describeDeploymentFailure(new Error("index.html is required")).retryable).toBe(false);
   });
 });
+
+/* ── Local-asset integrity (2026-09-17 acceptance P0) ───────────────── */
+describe("validateArtifact local-asset integrity", () => {
+  const siteWithHero = (extraFiles: ArtifactFile[] = []) =>
+    validateArtifact([
+      html(
+        "index.html",
+        `<!doctype html><html><body><img src="/assets/images/hero-dog.png" alt="hero"></body></html>`,
+      ),
+      ...extraFiles,
+    ]);
+
+  it("rejects a site whose <img> points at a file that was never saved", () => {
+    const result = siteWithHero();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected validation to fail");
+    expect(result.error).toMatch(/missing file/i);
+    expect(result.error).toContain("index.html → assets/images/hero-dog.png");
+  });
+
+  it("accepts the site when the referenced asset is present", () => {
+    const result = siteWithHero([{ path: "assets/images/hero-dog.png", content: "PNG" }]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("resolves relative refs against the referencing file's directory", () => {
+    const result = validateArtifact([
+      html("index.html", `<img src="images/hero.png">`),
+      html("pages/about.html", `<img src="../images/hero.png">`),
+      { path: "images/hero.png", content: "PNG" },
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("catches missing stylesheets, scripts, and CSS url() references", () => {
+    const result = validateArtifact([
+      html(
+        "index.html",
+        `<link rel="stylesheet" href="styles.css"><script src="app.js"></script>` +
+          `<style>.hero{background:url("bg.jpg")}</style>`,
+      ),
+    ]);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected validation to fail");
+    expect(result.error).toContain("index.html → styles.css");
+    expect(result.error).toContain("index.html → app.js");
+    expect(result.error).toContain("index.html → bg.jpg");
+  });
+
+  it("ignores external URLs, data URIs, and navigation links", () => {
+    const result = validateArtifact([
+      html(
+        "index.html",
+        `<a href="about.html">about</a>` +
+          `<img src="https://cdn.example.com/x.png">` +
+          `<img src="//cdn.example.com/y.png">` +
+          `<img src="data:image/png;base64,AAA">` +
+          `<img src="/assets/images/local.png">`,
+      ),
+      { path: "assets/images/local.png", content: "PNG" },
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("parses srcset candidates individually", () => {
+    const missing = validateArtifact([
+      html("index.html", `<img srcset="a.png 1x, b.png 2x">`),
+      { path: "a.png", content: "PNG" },
+    ]);
+    expect(missing.ok).toBe(false);
+    if (missing.ok) throw new Error("expected validation to fail");
+    expect(missing.error).toContain("index.html → b.png");
+
+    const complete = validateArtifact([
+      html("index.html", `<img srcset="a.png 1x, b.png 2x">`),
+      { path: "a.png", content: "PNG" },
+      { path: "b.png", content: "PNG" },
+    ]);
+    expect(complete.ok).toBe(true);
+  });
+
+  it("checks url() references inside stylesheets", () => {
+    const result = validateArtifact([
+      html("index.html", `<link rel="stylesheet" href="styles.css">`),
+      { path: "styles.css", content: `.hero{background:url(/fonts/icon.woff2)}` },
+    ]);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected validation to fail");
+    expect(result.error).toContain("styles.css → fonts/icon.woff2");
+  });
+});

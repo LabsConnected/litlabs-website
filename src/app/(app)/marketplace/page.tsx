@@ -293,16 +293,33 @@ function MarketplaceInner() {
     const inst = installations.get(item.id);
     if (!inst) return;
     try {
-      await fetch(`/api/marketplace/installations/${inst.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/marketplace/installations/${inst.id}`, { method: "DELETE" });
+      if (res.ok) {
+        // Server confirmed deletion — state now follows the server truth.
+        setInstallations((prev) => {
+          const next = new Map(prev);
+          next.delete(item.id);
+          return next;
+        });
+        showToast(`${item.name} removed`, "success");
+      } else {
+        // Server refused the delete: keep the item installed so the list
+        // stays truthful, and let the user retry via the Remove button.
+        const data = await res.json().catch(() => ({}));
+        showToast(
+          data.error || `Could not remove ${item.name}. Please try again.`,
+          "error",
+        );
+      }
     } catch {
-      // silent
+      // Network failure: the install may still exist server-side, so keep
+      // the item in the list and surface a retryable error instead of a
+      // fake success.
+      showToast(
+        `Network error while removing ${item.name}. It is still installed — please try again.`,
+        "error",
+      );
     }
-    setInstallations((prev) => {
-      const next = new Map(prev);
-      next.delete(item.id);
-      return next;
-    });
-    showToast(`${item.name} removed`, "info");
   }, [installations]);
 
   const toggleEnabled = useCallback(async (item: MarketplaceItem) => {
@@ -442,7 +459,7 @@ function MarketplaceInner() {
           {/* LiTT and Spark explainer */}
           <div className="mt-5 flex flex-wrap gap-4 text-xs text-white/45">
             <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-cyan-400" />
+              <span className="h-2 w-2 rounded-full bg-accent" />
               LiTT uses installed engineering, research, automation, and project tools
             </span>
             <span className="flex items-center gap-1.5">
@@ -474,7 +491,7 @@ function MarketplaceInner() {
           <button
             onClick={() => setActiveTab("marketplace")}
             className={`border-b-2 px-4 py-3 text-sm font-bold transition ${
-              activeTab === "marketplace" ? "border-orange-500 text-orange-400" : "border-transparent text-white/40 hover:text-white/70"
+              activeTab === "marketplace" ? "border-accent text-accent" : "border-transparent text-white/40 hover:text-white/70"
             }`}
           >
             Browse
@@ -503,7 +520,7 @@ function MarketplaceInner() {
                     key={cat.id}
                     onClick={() => setSelectedCategory(cat.id)}
                     className={`rounded-lg border px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide transition ${
-                      selectedCategory === cat.id ? "border-orange-500/50 bg-orange-500/10 text-orange-400" : "border-white/10 text-white/45 hover:bg-white/5 hover:text-white/70"
+                      selectedCategory === cat.id ? "border-accent/40 bg-accent/10 text-accent" : "border-white/10 text-white/45 hover:bg-white/5 hover:text-white/70"
                     }`}
                   >
                     {cat.label}
@@ -519,13 +536,13 @@ function MarketplaceInner() {
                     placeholder="Search..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full rounded-xl border border-white/10 bg-white/5 py-2 pl-9 pr-3 text-sm text-white outline-none placeholder:text-white/25 focus:border-orange-500/40"
+                    className="w-full rounded-xl border border-white/10 bg-white/5 py-2 pl-9 pr-3 text-sm text-white outline-none placeholder:text-white/25 focus:border-accent/40"
                   />
                 </div>
                 <select
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value as SortOption)}
-                  className="rounded-xl border border-white/10 bg-white/5 py-2 pl-3 pr-7 text-xs font-bold text-white/70 outline-none focus:border-orange-500/40"
+                  className="rounded-xl border border-white/10 bg-white/5 py-2 pl-3 pr-7 text-xs font-bold text-white/70 outline-none focus:border-accent/40"
                   aria-label="Sort by"
                 >
                   {SORT_OPTIONS.map((opt) => (
@@ -565,7 +582,7 @@ function MarketplaceInner() {
           {/* Featured section (unique items only, excluded from main list) */}
           {featuredItems.length > 0 && !searchQuery && selectedCategory === "all" && (
             <div className="mb-8">
-              <p className="mb-3 text-[10px] font-black uppercase tracking-[.25em] text-orange-400">Featured</p>
+              <p className="mb-3 text-[10px] font-black uppercase tracking-[.25em] text-accent">Featured</p>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {featuredItems.map((item) => (
                   item.item_type === "agent" ? (
@@ -712,35 +729,35 @@ function MarketplaceInner() {
             </div>
 
             {/* Creator Beta */}
-            <div className="rounded-2xl border-2 border-cyan-400/30 bg-cyan-400/5 p-5">
-              <div className="text-xs font-black uppercase tracking-wider text-cyan-400">Creator Beta</div>
+            <div className="rounded-2xl border-2 border-accent/30 bg-accent/5 p-5">
+              <div className="text-xs font-black uppercase tracking-wider text-accent">Creator Beta</div>
               <div className="mt-1 text-2xl font-black text-white">$15/month</div>
               <div className="text-[10px] text-white/40">Beta pricing · later $25</div>
               <div className="mt-3 space-y-1">
                 {["5 active projects", "6,000 monthly AI credits", "GitHub connection", "Voice mode"].map((f) => (
                   <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
-                    <Check size={11} className="shrink-0 text-cyan-400" /> {f}
+                    <Check size={11} className="shrink-0 text-accent" /> {f}
                   </div>
                 ))}
               </div>
-              <Link href="/pricing" className="mt-4 flex w-full items-center justify-center rounded-xl bg-cyan-400 py-2 text-xs font-black text-black transition hover:scale-[1.02]">
+              <Link href="/pricing" className="mt-4 flex w-full items-center justify-center rounded-xl bg-accent py-2 text-xs font-black text-on-accent transition hover:scale-[1.02] hover:bg-accent-strong">
                 Subscribe
               </Link>
             </div>
 
             {/* Pro Builder Beta */}
-            <div className="rounded-2xl border-2 border-violet-400/30 bg-violet-400/5 p-5">
-              <div className="text-xs font-black uppercase tracking-wider text-violet-400">Pro Builder Beta</div>
+            <div className="rounded-2xl border-2 border-accent/30 bg-accent/5 p-5">
+              <div className="text-xs font-black uppercase tracking-wider text-accent">Pro Builder Beta</div>
               <div className="mt-1 text-2xl font-black text-white">$39/month</div>
               <div className="text-[10px] text-white/40">Beta pricing · later $49</div>
               <div className="mt-3 space-y-1">
                 {["25 active projects", "20,000 monthly AI credits", "Terminal runtime", "Vercel deployment"].map((f) => (
                   <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
-                    <Check size={11} className="shrink-0 text-violet-400" /> {f}
+                    <Check size={11} className="shrink-0 text-accent" /> {f}
                   </div>
                 ))}
               </div>
-              <Link href="/pricing" className="mt-4 flex w-full items-center justify-center rounded-xl bg-violet-400 py-2 text-xs font-black text-black transition hover:scale-[1.02]">
+              <Link href="/pricing" className="mt-4 flex w-full items-center justify-center rounded-xl bg-accent py-2 text-xs font-black text-on-accent transition hover:scale-[1.02] hover:bg-accent-strong">
                 Subscribe
               </Link>
             </div>
@@ -772,7 +789,7 @@ function MarketplaceInner() {
             <div className="mt-3 space-y-2">
               {[
                 { state: "Free", desc: "Core skills and tools — no charge", color: "text-emerald-300" },
-                { state: "Included", desc: "Included with Creator or Pro plan", color: "text-cyan-300" },
+                { state: "Included", desc: "Included with Creator or Pro plan", color: "text-accent" },
                 { state: "Credit usage", desc: "External-cost tools charge AI credits per use", color: "text-violet-300" },
                 { state: "Coming soon", desc: "Not yet available", color: "text-amber-300" },
               ].map((item) => (
@@ -789,7 +806,7 @@ function MarketplaceInner() {
             <div className="font-bold text-white">Beta Feedback</div>
             <p className="mt-1 text-xs text-white/45">Found a bug? Have a feature request? Let us know.</p>
             <div className="mt-4 flex justify-center gap-3">
-              <Link href="/studio?tool=chat" className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-4 py-2 text-sm font-bold text-black transition hover:bg-orange-400">
+              <Link href="/studio?tool=chat" className="inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-bold text-on-accent transition hover:bg-accent-strong">
                 <Sparkles size={14} /> Report via LiTT
               </Link>
               <a href="mailto:beta@litlabs.net" className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-sm font-bold text-white/60 transition hover:bg-white/5">
@@ -891,7 +908,7 @@ const MarketplaceCard = memo(function MarketplaceCard({
         <div className="mt-3 flex items-center gap-2 text-[10px]" style={{ color: textMuted }}>
           <span>Works with:</span>
           {item.compatible_assistants.includes("litt") && (
-            <span className="rounded-md bg-cyan-400/10 px-1.5 py-0.5 font-bold text-cyan-300">LiTT</span>
+            <span className="rounded-md bg-accent/10 px-1.5 py-0.5 font-bold text-accent">LiTT</span>
           )}
           {item.compatible_assistants.includes("spark") && (
             <span className="rounded-md bg-violet-400/10 px-1.5 py-0.5 font-bold text-violet-300">Spark</span>

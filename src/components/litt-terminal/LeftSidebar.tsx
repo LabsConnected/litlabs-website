@@ -46,10 +46,10 @@ export function LeftSidebar({ mobileOpen }: { mobileOpen?: boolean }) {
       }`}
     >
       <div className="mb-6 flex items-center gap-2 px-2">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-600 text-xs font-black">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-xs font-black text-on-accent">
           L
         </div>
-        <div className="text-orange-500 font-black tracking-wide">LiTT</div>
+        <div className="text-accent font-black tracking-wide">LiTT</div>
       </div>
 
       <nav className="flex-1 space-y-6 overflow-y-auto">
@@ -68,7 +68,7 @@ export function LeftSidebar({ mobileOpen }: { mobileOpen?: boolean }) {
                 href={item.href}
                 className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
                   active
-                    ? "bg-orange-600/20 text-orange-400 border border-orange-600/20"
+                    ? "bg-accent/10 text-accent border border-accent/30"
                     : "text-neutral-400 hover:bg-neutral-900 hover:text-white"
                 }`}
               >
@@ -117,7 +117,7 @@ export function LeftSidebar({ mobileOpen }: { mobileOpen?: boolean }) {
               <div className="truncate text-[10px] text-neutral-500">
                 {user.primaryEmailAddress?.emailAddress}
               </div>
-              <div className="text-[10px] uppercase tracking-wider text-orange-400">
+              <div className="text-[10px] uppercase tracking-wider text-accent">
                 {(user.publicMetadata as { role?: string } | undefined)?.role ||
                   "user"}
               </div>

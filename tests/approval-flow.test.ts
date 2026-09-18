@@ -36,10 +36,10 @@ describe("paused-run-store security", () => {
     expect(content).toMatch(/\.eq\("user_id", userId\)/);
   });
 
-  it("has 5-minute TTL for approvals", () => {
+  it("has 30-minute TTL for approvals", () => {
     const content = readFileSync(PAUSED_RUN_STORE_PATH, "utf-8");
     expect(content).toContain("APPROVAL_TTL_MS");
-    expect(content).toMatch(/5\s*\*\s*60\s*\*\s*1000/);
+    expect(content).toMatch(/30\s*\*\s*60\s*\*\s*1000/);
   });
 
   it("checks expiration after resolution", () => {

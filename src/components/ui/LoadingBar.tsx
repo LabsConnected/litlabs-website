@@ -31,8 +31,8 @@ export function LoadingBar({ label = "Loading" }: { label?: string }) {
           style={{ backgroundColor: "#1a1a24", border: "1px solid #2a2a3a" }}
         >
           <div
-            className="loading-bar h-full rounded-full"
-            style={{ backgroundColor: "#a8ff2f", width: "30%" }}
+            className="loading-bar h-full rounded-full bg-accent"
+            style={{ width: "30%" }}
             role="progressbar"
             aria-label={`${label} in progress`}
           />

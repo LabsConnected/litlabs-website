@@ -174,6 +174,9 @@ describe("runAgentLoopV2 — invalid apply_patch never reaches the approval gate
       content: "<footer>Ember Roast · 2024 · Handcrafted coffee.</footer>",
       size: 55,
     })),
+    // Required by the WorkspaceTransport contract; the loop creates the
+    // pre-mutation checkpoint BEFORE the approval pause.
+    createCheckpointBeforeMutation: vi.fn(async () => null),
   } as unknown as WorkspaceTransport;
 
   beforeEach(() => {

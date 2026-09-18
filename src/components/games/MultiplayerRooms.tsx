@@ -16,7 +16,7 @@ export default function MultiplayerRooms() {
               <p className="text-sm font-bold text-white">{name}</p>
               <p className="text-xs text-slate-400">{status}</p>
             </div>
-            <button className="rounded-lg bg-orange-500 px-3 py-1 text-xs font-black text-black hover:bg-orange-400 transition-colors">
+            <button className="rounded-lg bg-accent px-3 py-1 text-xs font-black text-on-accent hover:bg-accent-strong transition-colors">
               Join
             </button>
           </div>

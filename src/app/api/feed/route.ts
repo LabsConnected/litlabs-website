@@ -142,9 +142,9 @@ async function postHandler(req: NextRequest) {
           { status: 500 },
         );
       }
-      await sb
-        .from("wallets")
-        .insert({ user_id: user!.id, balance: 500, lifetime_earned: 500 });
+      // No wallets row: credit_ledger is the authoritative balance
+      // system. The Starter 500 grant is issued lazily by
+      // getCreditBalances with an idempotency key.
     }
 
     if (!user) {

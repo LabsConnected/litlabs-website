@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { findRetryResendText } from "@/lib/studio/retry-strategy";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { parseBuilderLocalCommand } from "../lib/builder-command-router";
-import { detectIntent, type IntentResult } from "../lib/studio-intent";
+import { buildIntentResponseMessage, detectIntent, dispatchStudioIntent } from "../lib/studio-intent";
 import { useConnectionSummary, type ConnectionCapabilities } from "./useConnectionSummary";
 import { useVoiceSession } from "@/app/(app)/studio/context/VoiceSessionContext";
 import {
@@ -138,6 +139,7 @@ export function useCanonicalConversation({
   onRouteToolAction,
   onRouteInspectorAction,
   onRunHealthChecks,
+  onOpenProjectNameDialog,
   serverProjectId,
   cameraState,
   previewSelection,
@@ -147,6 +149,8 @@ export function useCanonicalConversation({
   onRouteInspectorAction?: (tab: InspectorTab) => void;
   /** Triggered when LiTT should run all project health checks */
   onRunHealthChecks?: () => void;
+  /** Triggered when LiTT should open the new-project name dialog */
+  onOpenProjectNameDialog?: () => void;
   serverProjectId?: string | null;
   /** Camera dock state — passed to the LLM so it knows camera is available */
   cameraState?: { active: boolean; status: string };
@@ -933,22 +937,15 @@ export function useCanonicalConversation({
             regenerationOfMessageId: null,
           });
         }
-        if (intent.intent === "open_files" || intent.intent === "file_question") {
-          onRouteInspectorAction?.("files");
-        } else if (intent.intent === "open_preview" || intent.intent === "visual_output") {
-          onRouteInspectorAction?.("preview");
-        } else if (intent.intent === "project_health") {
-          onRouteInspectorAction?.("checks");
-          // Trigger real check execution — not just panel navigation
-          onRunHealthChecks?.();
-        } else if (intent.intent === "open_approvals") {
-          onRouteInspectorAction?.("approvals");
-        } else if (intent.tool) {
-          onRouteToolAction?.(intent.tool);
-        }
-        if (intent.intent === "connect_github" && typeof window !== "undefined") {
-          window.location.href = "/api/github/install";
-        }
+        dispatchStudioIntent(intent, {
+          onRouteToolAction,
+          onRouteInspectorAction,
+          onRunHealthChecks,
+          onOpenProjectNameDialog,
+          onNavigate: (url) => {
+            if (typeof window !== "undefined") window.location.href = url;
+          },
+        });
         return { accepted: true, persisted: true, reply: intentMessage };
       }
 
@@ -1581,7 +1578,7 @@ export function useCanonicalConversation({
         // keeps offering Stop and the UI keeps claiming "working".
       }
     },
-    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, selectedModel, activeAgentId, activeAgentMode, activeAgentInstanceId, executionMode, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError, reconcileAndApply],
+    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, onOpenProjectNameDialog, selectedModel, activeAgentId, activeAgentMode, activeAgentInstanceId, executionMode, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError, reconcileAndApply],
   );
 
   // Regenerate — calls canonical regenerate API
@@ -1598,6 +1595,16 @@ export function useCanonicalConversation({
       ? allMessages.find((m) => m.id === assistantMessageId && m.role === "assistant")
       : allMessages.findLast((m) => m.role === "assistant" && m.status === "completed");
     if (!target?.id) return;
+
+    // A failed turn means the work never completed — re-send the parent user
+    // message through the normal send pipeline so the turn is genuinely
+    // re-run (see findRetryResendText). Falls back to the regenerate API
+    // when there is no parent message to re-send.
+    const resendText = findRetryResendText(target, allMessages);
+    if (resendText) {
+      await send(resendText);
+      return;
+    }
 
     setBusy(true);
     getStore().setStreaming(true);
@@ -1655,7 +1662,7 @@ export function useCanonicalConversation({
       useExecutionStore.getState().endRun();
       setBusy(false);
     }
-  }, [busy, getStore, loadMessages, authHeaders, runtimeContext, setSendError]);
+  }, [busy, getStore, loadMessages, authHeaders, runtimeContext, setSendError, send]);
 
   // Explicit Stop. Ordering:
   //   1. POST the authenticated server-side cancellation FIRST — transport
@@ -1842,35 +1849,6 @@ export function useCanonicalConversation({
     clearRequiresReauth: () => setRequiresReauth(false),
     loadMessages,
   };
-}
-
-function buildIntentResponseMessage(
-  intent: IntentResult,
-  runtime: { terminalConnected: boolean },
-): string {
-  if (intent.intent === "open_terminal") {
-    return runtime.terminalConnected
-      ? "Opening Terminal."
-      : "The terminal is not connected yet. Use Workspace status → Open Terminal & Connect when you want to start it.";
-  }
-  if (intent.intent === "connect_github") {
-    return "Connecting GitHub. Redirecting to GitHub App installation...";
-  }
-  if (intent.intent === "start_blank_project") {
-    return "Starting a blank project. Workspace will be ready in a moment.";
-  }
-  if (intent.intent === "run_command") {
-    return "Opening Terminal to run that command.";
-  }
-  if (intent.intent === "generate_image") {
-    return "Opening the image generator.";
-  }
-  if (intent.intent === "project_health") {
-    return runtime.terminalConnected
-      ? "I'm running a complete project health check now — TypeScript, lint, tests, build, and security audit. Results will appear in the Project Health panel."
-      : "I'll run a complete project health check. The workspace is being resolved — results will stream into the Project Health panel once the terminal connects.";
-  }
-  return intent.message || "Done.";
 }
 
 function sanitizeErrorMessage(raw: string): string {

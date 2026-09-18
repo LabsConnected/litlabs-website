@@ -100,8 +100,8 @@ export default function GlobalError({
                   fontSize: "0.75rem",
                   fontWeight: "bold",
                   borderRadius: 8,
-                  backgroundColor: "#a8ff2f",
-                  color: "#03050a",
+                  backgroundColor: "var(--color-accent)",
+                  color: "var(--color-on-accent)",
                   border: "none",
                   cursor: "pointer",
                 }}

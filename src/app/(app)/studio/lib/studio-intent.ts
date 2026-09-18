@@ -1,4 +1,4 @@
-import type { StudioTool } from "./studio-destinations";
+import type { InspectorTab, StudioTool } from "./studio-destinations";
 
 export type StudioIntent =
   | "chat"
@@ -135,6 +135,7 @@ const INTENT_PATTERNS: IntentPattern[] = [
   },
   {
     intent: "generate_image",
+    tool: "image",
     patterns: [
       /\bgenerate?\b.*\bimage\b/i,
       /\bcreate\b.*\bimage\b/i,
@@ -221,7 +222,7 @@ function buildIntentResult(
     case "start_blank_project":
       return {
         intent,
-        message: "Starting a blank project. Workspace will be ready in a moment.",
+        message: "Opening the new-project dialog.",
       };
     case "open_settings":
       return { intent, message: "Opening Settings." };
@@ -232,10 +233,90 @@ function buildIntentResult(
         message: "Opening Terminal to run that command.",
       };
     case "generate_image":
-      return { intent, message: "" };
+      return { intent, tool, message: "" };
     case "generate_code":
       return { intent, message: "" };
     default:
       return null;
   }
+}
+
+export interface StudioIntentHandlers {
+  onRouteToolAction?: (tool: StudioTool) => void;
+  onRouteInspectorAction?: (tab: InspectorTab) => void;
+  /** Triggered when LiTT should run all project health checks */
+  onRunHealthChecks?: () => void;
+  /** Triggered when LiTT should open the new-project name dialog */
+  onOpenProjectNameDialog?: () => void;
+  /** Triggered when LiTT should navigate the browser (settings, GitHub install) */
+  onNavigate?: (url: string) => void;
+}
+
+/**
+ * Route a detected studio intent to its real surface.
+ *
+ * Hard rule (P1-1): every intent that produces a confirmation message MUST
+ * trigger a real action here. A confirmation message with no matching
+ * action is a dead flow — the chat claims something opened while nothing
+ * happens.
+ */
+export function dispatchStudioIntent(
+  intent: IntentResult,
+  handlers: StudioIntentHandlers,
+): void {
+  if (intent.intent === "open_files" || intent.intent === "file_question") {
+    handlers.onRouteInspectorAction?.("files");
+  } else if (intent.intent === "open_preview" || intent.intent === "visual_output") {
+    handlers.onRouteInspectorAction?.("preview");
+  } else if (intent.intent === "project_health") {
+    handlers.onRouteInspectorAction?.("checks");
+    // Trigger real check execution — not just panel navigation
+    handlers.onRunHealthChecks?.();
+  } else if (intent.intent === "open_approvals") {
+    handlers.onRouteInspectorAction?.("approvals");
+  } else if (intent.intent === "start_blank_project") {
+    // Real blank-project flow — opens the project-name dialog
+    handlers.onOpenProjectNameDialog?.();
+  } else if (intent.tool) {
+    handlers.onRouteToolAction?.(intent.tool);
+  }
+  if (intent.intent === "connect_github") {
+    handlers.onNavigate?.("/api/github/install");
+  }
+  if (intent.intent === "open_settings") {
+    handlers.onNavigate?.("/settings");
+  }
+}
+
+/**
+ * Assistant copy for a handled intent. Must describe what dispatchStudioIntent
+ * actually did — never promise an action that was not taken.
+ */
+export function buildIntentResponseMessage(
+  intent: IntentResult,
+  runtime: { terminalConnected: boolean },
+): string {
+  if (intent.intent === "open_terminal") {
+    return runtime.terminalConnected
+      ? "Opening Terminal."
+      : "The terminal is not connected yet. Use Workspace status → Open Terminal & Connect when you want to start it.";
+  }
+  if (intent.intent === "connect_github") {
+    return "Connecting GitHub. Redirecting to GitHub App installation...";
+  }
+  if (intent.intent === "start_blank_project") {
+    return "Opening the new-project dialog.";
+  }
+  if (intent.intent === "run_command") {
+    return "Opening Terminal to run that command.";
+  }
+  if (intent.intent === "generate_image") {
+    return "Opening the image generator.";
+  }
+  if (intent.intent === "project_health") {
+    return runtime.terminalConnected
+      ? "I'm running a complete project health check now — TypeScript, lint, tests, build, and security audit. Results will appear in the Project Health panel."
+      : "I'll run a complete project health check. The workspace is being resolved — results will stream into the Project Health panel once the terminal connects.";
+  }
+  return intent.message || "Done.";
 }

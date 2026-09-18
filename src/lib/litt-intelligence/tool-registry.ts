@@ -39,6 +39,74 @@ function workspaceTool(load: (mod: V2Module) => V2Handler): () => Promise<ToolHa
   };
 }
 
+/**
+ * Deterministic close of the generate → site loop.
+ *
+ * image.generate returns a downloadUrl for chat rendering, but the model
+ * demonstrably skips the follow-up project.insert_asset call and ships
+ * <img> tags pointing at files that were never saved (P0 found in the
+ * 2026-09-17 production acceptance run: broken hero image, agent claiming
+ * "deployment verified with a 200 response"). So when image.generate
+ * succeeds inside an active project workspace, the registry itself persists
+ * the image into public/assets/images/ and appends the sitePath to the
+ * result. The model then references a path that is guaranteed to exist.
+ *
+ * The save runs under the image.generate approval: generating "an image for
+ * my site" is one user-visible action and the asset file is its
+ * fulfillment. A failed save is reported loudly in the result — never
+ * swallowed — so the agent cannot claim success with a missing asset.
+ *
+ * Exported for unit tests.
+ */
+export async function maybeAutoInsertGeneratedImage(
+  toolId: string,
+  result: unknown,
+  transport: unknown,
+): Promise<unknown> {
+  if (toolId !== "image.generate") return result;
+  const r = result as Record<string, unknown> | null;
+  if (!r || r.success !== true || typeof r.downloadUrl !== "string") return result;
+  const t = transport as { projectId?: unknown; writeBinaryFile?: unknown } | null;
+  if (!t || typeof t.projectId !== "string" || !t.projectId || typeof t.writeBinaryFile !== "function") {
+    return result; // chat-only context: no project workspace to save into
+  }
+  try {
+    const { insertAssetFromUrl } = await import("./tool-handlers-v2");
+    const nameHint = typeof r.title === "string" && r.title.length > 0 ? r.title : undefined;
+    const saved = await insertAssetFromUrl(r.downloadUrl, { nameHint }, t as WorkspaceTransport);
+    if (saved.success) {
+      // The save already happened under this approval — drop the handler's
+      // insertHint/markdown, which still tell the model to call
+      // project.insert_asset with the raw downloadUrl. Free providers return
+      // multi-KB data: URLs the model can only re-emit truncated, which wrote
+      // a corrupt stub asset and got referenced by the site HTML in the
+      // 2026-09-18 acceptance run.
+      const { insertHint: _insertHint, markdown: _markdown, ...rest } = r;
+      return {
+        ...rest,
+        savedToProject: true,
+        projectPath: saved.path,
+        sitePath: saved.sitePath,
+        siteReference:
+          `The image is already saved in the project at ${saved.sitePath}. ` +
+          `Reference it in the site's HTML as <img src="${saved.sitePath}" /> — ` +
+          `do NOT call project.insert_asset again and do NOT invent another path.`,
+      };
+    }
+    return {
+      ...r,
+      savedToProject: false,
+      saveError: saved.error ?? "Failed to save image into project",
+    };
+  } catch (err) {
+    return {
+      ...r,
+      savedToProject: false,
+      saveError: err instanceof Error ? err.message : "Failed to save image into project",
+    };
+  }
+}
+
 const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
   // Workspace-scoped tools — workspace-transport handlers only.
   "project.scan": workspaceTool((m) => m.handleProjectScan),
@@ -352,7 +420,8 @@ class ToolRegistry {
         ? await (handlerEntry as () => Promise<(inputs: Record<string, unknown>, transport?: unknown) => Promise<unknown>>)()
         : handlerEntry as (inputs: Record<string, unknown>, transport?: unknown) => Promise<unknown>;
       const result = await handler(inputs, options.transport);
-      return { ok: true, result };
+      const finalResult = await maybeAutoInsertGeneratedImage(id, result, options.transport);
+      return { ok: true, result: finalResult };
     } catch (err) {
       return {
         ok: false,
@@ -734,7 +803,7 @@ export function registerInternalTools(): void {
         description: "Generate an image using the project's image generation provider",
         source: "internal",
         version: "1.0.0",
-        inputSchema: { type: "object", properties: { prompt: { type: "string" }, projectId: { type: "string" } }, required: ["prompt", "projectId"] },
+        inputSchema: { type: "object", properties: { prompt: { type: "string" }, projectId: { type: "string" } }, required: ["prompt"] },
         outputSchema: { type: "object" },
         requiredCapabilities: ["image_generation"],
         requiredPermissions: ["image:generate"],
@@ -753,7 +822,8 @@ export function registerInternalTools(): void {
         id: "project.insert_asset",
         name: "Insert Asset into Project",
         description:
-          "Download an image from a URL and save it into the project workspace (default public/assets/images/). " +
+          "Download an image from a URL and save it into the project workspace (defaults to the directory the " +
+          "site's web root serves: public/assets/images for framework projects, assets/images for static sites). " +
           "Use this right after image.generate to place a generated image into the website being built — " +
           "then reference the returned sitePath in the site's HTML. Never leave site images as chat-only renders.",
         source: "internal",
@@ -764,7 +834,7 @@ export function registerInternalTools(): void {
             projectId: { type: "string" },
             url: { type: "string", description: "Public HTTPS URL of the image (e.g. the downloadUrl from image.generate)" },
             name: { type: "string", description: "Optional filename hint, e.g. 'hero-sunset'" },
-            directory: { type: "string", description: "Optional workspace directory; defaults to public/assets/images" },
+            directory: { type: "string", description: "Optional workspace directory; defaults to the project's served asset directory" },
           },
           required: ["projectId", "url"],
         },

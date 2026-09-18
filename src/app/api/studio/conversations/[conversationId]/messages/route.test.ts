@@ -135,11 +135,17 @@ vi.mock("@/lib/litt-intelligence/workspace-transport", () => ({
   createWorkspaceTransport: vi.fn(),
 }));
 
-vi.mock("@/lib/litt-intelligence/paused-run-store", () => ({
-  createPausedRun: vi.fn(),
-  getPendingPausedRunForConversation: vi.fn(),
-  getLatestPausedRunForConversation: vi.fn(),
-}));
+vi.mock("@/lib/litt-intelligence/paused-run-store", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/litt-intelligence/paused-run-store")>();
+  return {
+    createPausedRun: vi.fn(),
+    getPendingPausedRunForConversation: vi.fn(),
+    getLatestPausedRunForConversation: vi.fn(),
+    // Use the real recency rule — these reconciliation tests must exercise
+    // the production gate logic, not bypass it.
+    pausedRunBelongsToMessage: actual.pausedRunBelongsToMessage,
+  };
+});
 
 vi.mock("@/lib/litt-intelligence/turn-resolver", () => ({
   resolveTurn: vi.fn(() => ({ resolved: "test message" })),
@@ -1220,7 +1226,7 @@ describe("GET /api/studio/conversations/[conversationId]/messages — approval r
 
   it("reconciles an awaiting_approval message whose gate expired server-side — no dead 'waiting for approval' card survives reload", async () => {
     vi.mocked(listMessages).mockResolvedValue([
-      { id: "m-exp", role: "assistant", content: "I need your approval to write files.", status: "awaiting_approval" },
+      { id: "m-exp", role: "assistant", content: "I need your approval to write files.", status: "awaiting_approval", createdAt: new Date(Date.now() - 10 * 60_000).toISOString() },
     ] as any);
     vi.mocked(getPendingPausedRunForConversation).mockResolvedValue(null);
     vi.mocked(getLatestPausedRunForConversation).mockResolvedValue({
@@ -1229,6 +1235,7 @@ describe("GET /api/studio/conversations/[conversationId]/messages — approval r
       toolId: "files.write",
       reason: "Mutation requires approval in ACT mode",
       inputs: {},
+      createdAt: new Date(Date.now() - 9 * 60_000).toISOString(),
     } as any);
     vi.mocked(updateMessageStatus).mockResolvedValue(true);
 
@@ -1249,7 +1256,7 @@ describe("GET /api/studio/conversations/[conversationId]/messages — approval r
 
   it("reconciles an awaiting_approval message whose gate was rejected but the writeback missed", async () => {
     vi.mocked(listMessages).mockResolvedValue([
-      { id: "m-rej", role: "assistant", content: "I need your approval.", status: "awaiting_approval" },
+      { id: "m-rej", role: "assistant", content: "I need your approval.", status: "awaiting_approval", createdAt: new Date(Date.now() - 10 * 60_000).toISOString() },
     ] as any);
     vi.mocked(getPendingPausedRunForConversation).mockResolvedValue(null);
     vi.mocked(getLatestPausedRunForConversation).mockResolvedValue({
@@ -1258,6 +1265,7 @@ describe("GET /api/studio/conversations/[conversationId]/messages — approval r
       toolId: "files.write",
       reason: "Mutation requires approval",
       inputs: {},
+      createdAt: new Date(Date.now() - 9 * 60_000).toISOString(),
     } as any);
     vi.mocked(updateMessageStatus).mockResolvedValue(true);
 
@@ -1277,7 +1285,7 @@ describe("GET /api/studio/conversations/[conversationId]/messages — approval r
 
   it("reconciles an awaiting_approval message whose approved run died mid-resume — no dead card after a process kill", async () => {
     vi.mocked(listMessages).mockResolvedValue([
-      { id: "m-died", role: "assistant", content: "I need your approval.", status: "awaiting_approval" },
+      { id: "m-died", role: "assistant", content: "I need your approval.", status: "awaiting_approval", createdAt: new Date(Date.now() - 10 * 60_000).toISOString() },
     ] as any);
     vi.mocked(getPendingPausedRunForConversation).mockResolvedValue(null);
     vi.mocked(getLatestPausedRunForConversation).mockResolvedValue({
@@ -1288,6 +1296,7 @@ describe("GET /api/studio/conversations/[conversationId]/messages — approval r
       toolId: "apply_patch",
       reason: "Mutation requires approval",
       inputs: {},
+      createdAt: new Date(Date.now() - 9 * 60_000).toISOString(),
     } as any);
     vi.mocked(updateMessageStatus).mockResolvedValue(true);
 
@@ -1309,7 +1318,7 @@ describe("GET /api/studio/conversations/[conversationId]/messages — approval r
 
   it("reconciles an awaiting_approval message whose approved run completed but the transcript writeback missed", async () => {
     vi.mocked(listMessages).mockResolvedValue([
-      { id: "m-done", role: "assistant", content: "I need your approval.", status: "awaiting_approval" },
+      { id: "m-done", role: "assistant", content: "I need your approval.", status: "awaiting_approval", createdAt: new Date(Date.now() - 10 * 60_000).toISOString() },
     ] as any);
     vi.mocked(getPendingPausedRunForConversation).mockResolvedValue(null);
     vi.mocked(getLatestPausedRunForConversation).mockResolvedValue({
@@ -1320,6 +1329,7 @@ describe("GET /api/studio/conversations/[conversationId]/messages — approval r
       toolId: "apply_patch",
       reason: "Mutation requires approval",
       inputs: {},
+      createdAt: new Date(Date.now() - 9 * 60_000).toISOString(),
     } as any);
     vi.mocked(updateMessageStatus).mockResolvedValue(true);
 
@@ -1339,7 +1349,7 @@ describe("GET /api/studio/conversations/[conversationId]/messages — approval r
 
   it("fails truthfully when the resumed run ended at a nested gate that was never persisted", async () => {
     vi.mocked(listMessages).mockResolvedValue([
-      { id: "m-lost", role: "assistant", content: "I need your approval.", status: "awaiting_approval" },
+      { id: "m-lost", role: "assistant", content: "I need your approval.", status: "awaiting_approval", createdAt: new Date(Date.now() - 10 * 60_000).toISOString() },
     ] as any);
     vi.mocked(getPendingPausedRunForConversation).mockResolvedValue(null);
     vi.mocked(getLatestPausedRunForConversation).mockResolvedValue({
@@ -1356,6 +1366,7 @@ describe("GET /api/studio/conversations/[conversationId]/messages — approval r
       toolId: "apply_patch",
       reason: "Mutation requires approval",
       inputs: {},
+      createdAt: new Date(Date.now() - 9 * 60_000).toISOString(),
     } as any);
     vi.mocked(updateMessageStatus).mockResolvedValue(true);
 

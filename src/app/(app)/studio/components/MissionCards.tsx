@@ -58,7 +58,7 @@ type IconType = ComponentType<{ size?: number; strokeWidth?: number; className?:
 
 const CARD_SURFACE = "rgba(16,12,26,0.92)";
 const CARD_BORDER = "rgba(255,255,255,0.07)";
-const CYAN = "#22d3ee";
+const ACCENT = "var(--color-accent)";
 const AMBER = "#e3b341";
 
 /* ── Phase meta (mirrors StudioPlanSurface) ─────────────────────── */
@@ -66,8 +66,8 @@ const AMBER = "#e3b341";
 
 export const PHASE_META: Record<ExecutionPhase, { label: string; color: string }> = {
   idle: { label: "Idle", color: "var(--text-muted)" },
-  planning: { label: "Planning", color: CYAN },
-  inspecting: { label: "Inspecting", color: CYAN },
+  planning: { label: "Planning", color: ACCENT },
+  inspecting: { label: "Inspecting", color: ACCENT },
   editing: { label: "Editing", color: "var(--litt-primary)" },
   testing: { label: "Testing", color: AMBER },
   verifying: { label: "Verifying", color: "var(--litt-primary)" },
@@ -105,7 +105,7 @@ function CardShell({
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <Icon size={14} strokeWidth={2} style={{ color: CYAN }} className="pointer-events-none" />
+        <Icon size={14} strokeWidth={2} style={{ color: ACCENT }} className="pointer-events-none" />
         <span
           style={{
             fontSize: 11,
@@ -187,12 +187,12 @@ function QuickAction({
         fontWeight: 500,
         borderRadius: 8,
         border: `1px solid ${CARD_BORDER}`,
-        backgroundColor: "rgba(34,211,238,0.07)",
+        backgroundColor: "color-mix(in srgb, var(--color-accent) 7%, transparent)",
         color: "var(--text-main)",
         cursor: "pointer",
       }}
     >
-      <Icon size={13} strokeWidth={2} className="pointer-events-none" style={{ color: CYAN }} />
+      <Icon size={13} strokeWidth={2} className="pointer-events-none" style={{ color: ACCENT }} />
       {label}
     </button>
   );
@@ -209,7 +209,7 @@ function HintsList({ hints, style }: { hints: string[]; style?: CSSProperties })
           key={hint}
           style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, color: "var(--text-secondary)" }}
         >
-          <span style={{ color: CYAN, lineHeight: 1.4 }}>•</span>
+          <span style={{ color: ACCENT, lineHeight: 1.4 }}>•</span>
           <span>{hint}</span>
         </div>
       ))}
@@ -324,7 +324,7 @@ export default function MissionCards({
         <MetaLine
           label="Status"
           value={
-            <span style={{ color: isRunning ? CYAN : "var(--text-muted)" }}>
+            <span style={{ color: isRunning ? ACCENT : "var(--text-muted)" }}>
               {isRunning ? `Step ${toolCalls.length + 1} in progress` : "Idle"}
             </span>
           }
@@ -398,13 +398,13 @@ export default function MissionCards({
                 fontWeight: 700,
                 borderRadius: 8,
                 border: `1px solid ${CARD_BORDER}`,
-                backgroundColor: "rgba(34,211,238,0.07)",
+                backgroundColor: "color-mix(in srgb, var(--color-accent) 7%, transparent)",
                 color: "var(--text-main)",
                 cursor: isRunning ? "not-allowed" : "pointer",
                 opacity: isRunning ? 0.4 : 1,
               }}
             >
-              <RotateCcw size={13} className="pointer-events-none" style={{ color: CYAN }} />
+              <RotateCcw size={13} className="pointer-events-none" style={{ color: ACCENT }} />
               Restore
             </button>
           </div>

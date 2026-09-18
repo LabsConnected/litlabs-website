@@ -180,7 +180,7 @@ export default function GamesPage() {
             <h1 className="mt-3 text-4xl font-black tracking-tight sm:text-5xl">Play instantly.</h1>
             <p className="mt-3 max-w-xl text-base text-white/65">Classic browser games. No install. Instant play. Bring games you legally own.</p>
             <div className="mt-6 flex flex-wrap gap-3">
-              <Link href="/games/retro" className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-sm font-black text-black transition-colors hover:bg-orange-400">
+              <Link href="/games/retro" className="inline-flex items-center gap-2 rounded-xl bg-accent px-5 py-3 text-sm font-black text-on-accent transition-colors hover:bg-accent-strong">
                 <Gamepad2 size={16} /> Open Retro Arcade
               </Link>
               <Link href="/games/dos" className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-black text-white transition-colors hover:bg-white/10">
@@ -203,12 +203,12 @@ export default function GamesPage() {
         {recentRetro && (
           <section className="mx-auto max-w-[1500px] px-4 pt-8 sm:px-6">
             <div className="mb-4">
-              <p className="text-[10px] font-black uppercase tracking-[.25em] text-orange-400">Continue Playing</p>
+              <p className="text-[10px] font-black uppercase tracking-[.25em] text-accent">Continue Playing</p>
               <h2 className="mt-1 text-xl font-black sm:text-2xl">Pick up where you left off</h2>
             </div>
-            <Link href={`/games/retro/play/${recentRetro.id}`} className="group relative flex min-h-32 items-center overflow-hidden rounded-2xl border border-orange-400/20 bg-linear-to-r from-orange-950 via-[#15100a] to-transparent p-5 transition-colors hover:border-orange-400/40">
+            <Link href={`/games/retro/play/${recentRetro.id}`} className="group relative flex min-h-32 items-center overflow-hidden rounded-2xl border border-accent/20 bg-linear-to-r from-accent/10 via-[#15100a] to-transparent p-5 transition-colors hover:border-accent/40">
               <div className="relative z-10 flex items-center gap-4">
-                <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-orange-500/20 text-orange-300">
+                <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-accent/20 text-accent">
                   <Gamepad2 size={24} />
                 </span>
                 <div>
@@ -234,7 +234,7 @@ export default function GamesPage() {
         {/* === PLAY-IN-LITT PROMISE === */}
         <section className="mx-auto max-w-[1500px] px-4 py-8 sm:px-6">
           <div className="mb-5">
-            <p className="text-[10px] font-black uppercase tracking-[.25em] text-cyan-400">The LiTT play promise</p>
+            <p className="text-[10px] font-black uppercase tracking-[.25em] text-accent">The LiTT play promise</p>
             <h2 className="mt-1 text-xl font-black sm:text-2xl">Less link-hopping. More playing.</h2>
           </div>
           <div className="grid gap-3 md:grid-cols-3">
@@ -260,7 +260,7 @@ export default function GamesPage() {
               <h2 className="mt-2 text-xl font-black sm:text-2xl">Game building is coming to Studio</h2>
               <p className="mt-2 max-w-md text-sm text-white/65">We&apos;re teaching LiTT&apos;s agents to design, code, and ship original mini-games — no engine setup required. Today, start with game art in the image tool.</p>
             </div>
-            <Link href="/studio?tool=image" className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-violet-500 px-5 py-3 text-sm font-black text-white transition-colors hover:bg-violet-400">
+            <Link href="/studio?tool=image" className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-accent px-5 py-3 text-sm font-black text-on-accent transition-colors hover:bg-accent-strong">
               <Wand2 size={16} /> Open Studio
             </Link>
           </div>
@@ -291,7 +291,7 @@ export default function GamesPage() {
                 placeholder="Search..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-white/5 py-2 pl-9 pr-3 text-sm text-white outline-none placeholder:text-white/50 focus:border-orange-500/40"
+                className="w-full rounded-xl border border-white/10 bg-white/5 py-2 pl-9 pr-3 text-sm text-white outline-none placeholder:text-white/50 focus:border-accent/40"
               />
             </div>
           </div>

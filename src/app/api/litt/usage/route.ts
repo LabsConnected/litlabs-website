@@ -36,12 +36,14 @@ export async function GET(request: NextRequest) {
   const days = range === "day" ? 1 : range === "month" ? 30 : 7;
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-  // Get current wallet balance
-  const { data: wallet } = await supabaseAdmin
-    .from("wallets")
-    .select("balance, currency")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  // Get current balance — credit_ledger is the authoritative system;
+  // the legacy wallets table is not a balance source.
+  const { data: balancesRaw } = await supabaseAdmin.rpc("get_user_balances", {
+    p_user_id: user.id,
+  });
+  const balances = (Array.isArray(balancesRaw) ? balancesRaw[0] : balancesRaw) as
+    | { total?: number }
+    | undefined;
 
   // Get recent credit ledger entries
   const { data: recentTransactions } = await supabaseAdmin
@@ -80,17 +82,19 @@ export async function GET(request: NextRequest) {
     .order("started_at", { ascending: false })
     .limit(20);
 
+  // credit_ledger records direction (credit|debit) + category — the
+  // previous t.type filter matched no rows, so both totals were always 0.
   const totalCreditsUsed = (recentTransactions ?? [])
-    .filter((t) => t.type === "debit" || t.type === "charge")
+    .filter((t) => t.direction === "debit")
     .reduce((sum, t) => sum + (t.amount ?? 0), 0);
 
   const totalCreditsRefunded = (recentTransactions ?? [])
-    .filter((t) => t.type === "refund" || t.type === "credit")
+    .filter((t) => t.direction === "credit" && t.category === "refund")
     .reduce((sum, t) => sum + (t.amount ?? 0), 0);
 
   return NextResponse.json({
-    balance: wallet?.balance ?? 0,
-    currency: wallet?.currency ?? "LiTTBits",
+    balance: balances?.total ?? 0,
+    currency: "LiTTBits",
     range,
     summary: {
       totalCreditsUsed,
@@ -115,7 +119,8 @@ export async function GET(request: NextRequest) {
     })),
     recentTransactions: (recentTransactions ?? []).map((t) => ({
       id: t.id,
-      type: t.type,
+      type: t.direction,
+      category: t.category,
       amount: t.amount,
       description: t.description,
       createdAt: t.created_at,

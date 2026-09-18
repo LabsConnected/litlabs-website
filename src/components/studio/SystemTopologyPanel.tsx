@@ -96,12 +96,12 @@ export default function SystemTopologyPanel({ compact = false, terminalHttpUrl }
     { label: "Preview", value: capMap.get("runtime.sandbox")?.status === "running" ? "Running" : "No server running", state: capToCheckState(capMap.get("runtime.sandbox")?.status ?? "not_configured"), icon: Rocket, action: () => router.push("/studio?tool=terminal"), actionLabel: "Start preview" },
     { label: "Logs", value: capMap.get("terminal")?.status === "running" ? "Streaming" : "Not started", state: capToCheckState(capMap.get("terminal")?.status ?? "not_configured"), icon: ExternalLink, action: () => router.push("/studio?tool=terminal"), actionLabel: "Open logs" },
   ];
-  const color: Record<CheckState, string> = { ready: "#22c55e", warning: "#f59e0b", offline: "#ef4444", checking: "#38bdf8" };
+  const color: Record<CheckState, string> = { ready: "#22c55e", warning: "#f59e0b", offline: "#ef4444", checking: "var(--color-accent)" };
 
   return (
     <section className="rounded-2xl border border-white/10 bg-black/35 p-3 text-white shadow-xl backdrop-blur-xl" aria-label="System topology">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div><p className="text-[9px] font-black uppercase tracking-[0.24em] text-cyan-300">Control Tower</p><h2 className="text-sm font-black">System topology</h2></div>
+        <div><p className="text-[9px] font-black uppercase tracking-[0.24em] text-accent">Control Tower</p><h2 className="text-sm font-black">System topology</h2></div>
         <button onClick={() => void refresh()} disabled={checking} className="flex items-center gap-1 rounded-lg border border-white/10 px-2 py-1 text-[10px] font-bold disabled:opacity-50"><RefreshCw size={11} className={checking ? "animate-spin" : ""} /> Refresh</button>
       </div>
       <div className={compact ? "grid grid-cols-2 gap-1.5" : "grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7"}>
@@ -110,7 +110,7 @@ export default function SystemTopologyPanel({ compact = false, terminalHttpUrl }
             <div className="mb-1 flex items-center gap-1.5"><span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: color[state], boxShadow: `0 0 7px ${color[state]}` }} /><Icon size={11} className="text-white/45" /><span className="truncate text-[9px] font-bold uppercase tracking-wider text-white/45">{label}</span></div>
             <p className="truncate text-[10px] font-bold">{value}</p>
             {action && actionLabel && state !== "ready" && (
-              <button onClick={action} className="mt-1 text-[8px] font-bold text-cyan-300 hover:text-cyan-200">{actionLabel} →</button>
+              <button onClick={action} className="mt-1 text-[8px] font-bold text-accent hover:text-accent-strong">{actionLabel} →</button>
             )}
           </div>
         ))}
@@ -133,7 +133,7 @@ export default function SystemTopologyPanel({ compact = false, terminalHttpUrl }
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button onClick={() => router.push("/studio?tool=plugins")} className="rounded-lg bg-cyan-400 px-2.5 py-1.5 text-[10px] font-black text-slate-950">Start a project</button>
+        <button onClick={() => router.push("/studio?tool=plugins")} className="rounded-lg bg-accent px-2.5 py-1.5 text-[10px] font-black text-on-accent hover:bg-accent-strong">Start a project</button>
         <button onClick={() => router.push("/studio?tool=terminal")} className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] font-bold">Open terminal</button>
         <button onClick={() => router.push("/studio?tool=build")} className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] font-bold">Open builder</button>
         {message && <span className="text-[10px] text-white/60">{message}</span>}

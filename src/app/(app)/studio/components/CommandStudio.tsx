@@ -291,6 +291,10 @@ function CommandStudioContent() {
     return 320;
   });
   const pendingApproval = useExecutionStore((s) => s.pendingApproval);
+  const approvalPhase = useExecutionStore((s) => s.approvalPhase);
+  const approvalError = useExecutionStore((s) => s.approvalError);
+  const approvalRetryable = useExecutionStore((s) => s.approvalRetryable);
+  const approvalExpired = useExecutionStore((s) => s.approvalExpired);
 
   const handleToggleDock = useCallback(() => setDockOpen((v) => !v), []);
   const handleOpenDockTab = useCallback((tab: StudioDockTab) => {
@@ -599,6 +603,18 @@ function CommandStudioContent() {
     setDestination(dest);
   }, []);
 
+  // New-project dialog state lives up here (not with the other project
+  // creation logic below) because the conversation controller references
+  // openProjectNameDialog and must be declared after it — same TDZ rule
+  // as handleRouteTool.
+  const [projectCreateError, setProjectCreateError] = useState<string | null>(null);
+  const [projectNameDialogOpen, setProjectNameDialogOpen] = useState(false);
+
+  const openProjectNameDialog = useCallback(() => {
+    setProjectCreateError(null);
+    setProjectNameDialogOpen(true);
+  }, []);
+
   // handleRouteTool must be declared before useStudioConversation so the
   // conversation controller can reference it without a TDZ error.
   const handleRouteTool = useCallback((tool: StudioTool, command = "") => {
@@ -652,6 +668,7 @@ function CommandStudioContent() {
       handleOpenContextInspector();
       setHealthRunTrigger((n) => n + 1);
     },
+    onOpenProjectNameDialog: openProjectNameDialog,
     serverProjectId: capabilities.projectId,
     cameraState: { active: cameraDock.open, status: cameraStatus },
     previewSelection,
@@ -895,12 +912,13 @@ function CommandStudioContent() {
     }
   }, [conversation, capabilities.projectId, refreshCapabilities, isMobileLitt]);
 
-  // Converge the UI once an approval gate settles — regardless of whether
-  // the decision came from this client's Approve/Reject click or from the
-  // watchApprovalResolution watcher below (another session/device, a reload
-  // while the resumed run was still executing, or server-side TTL expiry).
-  // The outcome is the same: clear the card, pull the authoritative
-  // transcript, and return the user to Chat so the composer is usable again.
+  // Approval decisions resume the SAME paused server-side execution — never
+  // a new run. The approval lifecycle only settles when the resumed run
+  // reaches a terminal state: the card stays mounted through submitting
+  // and executing, and a non-2xx POST or a failed run keeps the card
+  // visible with the backend error and a Retry affordance (re-POSTs the
+  // same pausedRunId; the server re-runs the same record). Nothing
+  // silently clears, nothing auto re-requests.
   // Exception: a resumed run that pauses on a NEW gate stays on Live so the
   // fresh Approve/Reject card is visible.
   const applyApprovalOutcome = useCallback((opts: {
@@ -908,17 +926,52 @@ function CommandStudioContent() {
     resolution: "approved" | "rejected" | "expired" | "gone";
     runResult?: ApprovalRunResult | null;
     runError?: string | null;
+    retryable?: boolean;
+    expired?: boolean;
   }) => {
     const exec = useExecutionStore.getState();
-    if (opts.resolution === "approved" || opts.resolution === "rejected") {
-      // Idempotent on the click path — pendingApproval is already null, so
-      // this clears state without logging a duplicate decision event.
-      exec.resolveApproval(opts.resolution);
-    } else {
-      // Expired/gone — the gate can no longer be actioned. Clear the stale
-      // card without logging a decision the user never made.
-      exec.endRun("cancelled");
+    if (opts.resolution === "rejected") {
+      if (opts.runError) {
+        // The rejection POST itself failed — keep the card with the error
+        // and a retry affordance instead of clearing a decision that never
+        // landed server-side.
+        exec.failApproval(opts.runError, opts.retryable);
+        return;
+      }
+      exec.resolveApproval("rejected");
+      // The resumed run's outcome was written back onto the conversation
+      // transcript server-side — pull it instead of fabricating anything.
+      void conversation.loadMessages(opts.conversationId);
+      setLittActiveTab("chat");
+      return;
     }
+    if (opts.resolution === "expired" || opts.resolution === "gone") {
+      // The gate can no longer be actioned — but the run is not dead. Keep
+      // the card mounted in the failed state with a "Request again"
+      // affordance: one tap re-issues the SAME gate with a fresh TTL via
+      // the re-request endpoint, instead of re-running the whole agent
+      // loop from scratch. No decision is logged — the user never made one.
+      exec.failApproval(
+        "This approval expired before a decision was made.",
+        true,
+        { expired: true },
+      );
+      return;
+    }
+    // resolution === "approved"
+    if (opts.runError) {
+      // The run failed AFTER approval — keep the card mounted with the
+      // backend error and a Retry affordance. The user re-approves the
+      // same record; the resumed execution replays instead of double-running.
+      // (An expiry failure keeps the card too, but retry re-requests a
+      // fresh gate instead of re-POSTing the dead pausedRunId.)
+      exec.failApproval(opts.runError, opts.retryable, { expired: opts.expired });
+      void conversation.loadMessages(opts.conversationId);
+      return;
+    }
+    // Idempotent on the click path — pendingApproval is already null, so
+    // this clears state without logging a duplicate decision event.
+    exec.resolveApproval("approved");
     // The resumed run's outcome was written back onto the conversation
     // transcript server-side — pull it instead of fabricating anything.
     void conversation.loadMessages(opts.conversationId);
@@ -938,9 +991,6 @@ function CommandStudioContent() {
       });
       return;
     }
-    if (opts.runError) {
-      conversation.reportSendError?.(opts.runError);
-    }
     setLittActiveTab("chat");
   }, [conversation, capabilities.projectId]);
 
@@ -948,11 +998,16 @@ function CommandStudioContent() {
   // a new run. When no pausedRunId exists (persistence failed or the paused
   // run expired), silently dropping the click would leave the user thinking
   // the work resumed while nothing ran — surface a truthful error instead.
+  //
+  // The card is NOT cleared on click: it stays mounted through submitting
+  // and executing so a non-2xx POST or a failed run surfaces visibly with
+  // a Retry affordance instead of silently clearing.
   const handleResolveApproval = useCallback((decision: "approved" | "rejected") => {
-    const pending = useExecutionStore.getState().pendingApproval;
+    const exec = useExecutionStore.getState();
+    const pending = exec.pendingApproval;
     const convId = conversation.selectedConversationId;
     if (pending?.pausedRunId && convId) {
-      useExecutionStore.getState().resolveApproval(decision);
+      exec.beginApprovalSubmit();
       submitApprovalAndPoll({
         conversationId: convId,
         pausedRunId: pending.pausedRunId,
@@ -962,16 +1017,20 @@ function CommandStudioContent() {
           // user lands back on the composer instead of a dead Live tab.
           if (decision === "rejected") {
             applyApprovalOutcome({ conversationId: convId, resolution: "rejected" });
+          } else {
+            exec.approvalAccepted();
           }
         },
         onCompleted: (result) => {
           applyApprovalOutcome({ conversationId: convId, resolution: decision, runResult: result });
         },
-        onFailed: (error) => {
+        onFailed: (error, info) => {
           applyApprovalOutcome({
             conversationId: convId,
             resolution: decision,
             runError: error || "The resumed run failed on the server.",
+            retryable: info?.retryable,
+            expired: info?.expired,
           });
         },
       });
@@ -992,14 +1051,65 @@ function CommandStudioContent() {
     }
   }, [conversation, capabilities.projectId, applyApprovalOutcome]);
 
+  // Re-request an EXPIRED approval gate: one tap issues a fresh pending run
+  // carrying the same frozen inputs/reason, with a new TTL — no new agent
+  // loop, no duplicate side effects (nothing executes until approved).
+  // Used when the card is in the failed-expired state; the card's Retry
+  // button routes here instead of re-POSTing the dead pausedRunId.
+  const handleReRequestApproval = useCallback(async () => {
+    const exec = useExecutionStore.getState();
+    const pending = exec.pendingApproval;
+    const convId = conversation.selectedConversationId;
+    if (!pending?.pausedRunId || !convId) return;
+    exec.beginApprovalSubmit();
+    try {
+      const token = await getToken?.();
+      const res = await fetch(
+        `/api/studio/conversations/${convId}/approvals/re-request`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ pausedRunId: pending.pausedRunId }),
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `Re-request failed (${res.status})`);
+      }
+      if (!data.pausedRunId) {
+        throw new Error("The server did not return a new approval gate.");
+      }
+      // Swap in the fresh gate — the card returns to pending and the
+      // watcher re-arms on the new pausedRunId.
+      exec.setPendingApproval({
+        toolId: data.toolId ?? pending.toolId,
+        reason: data.reason ?? pending.reason,
+        pausedRunId: data.pausedRunId,
+        inputs: pending.inputs,
+      });
+    } catch (err) {
+      exec.failApproval(
+        err instanceof Error ? err.message : "Could not re-request the approval.",
+        true,
+        { expired: true },
+      );
+    }
+  }, [conversation, getToken]);
+
   // An approval gate can settle without this client clicking anything:
   // approved/rejected on another device or session, a reload while the
   // resumed run was still executing (loadMessages rehydrates the gate), or
   // server-side TTL expiry. The card alone cannot converge in those cases —
   // watch the server-authoritative status and fold the outcome back into
-  // the store + transcript, returning the user to Chat. The click path is
-  // unaffected: resolveApproval clears pendingApproval on click, disarming
-  // this watcher before submitApprovalAndPoll's own polling begins.
+  // the store + transcript, returning the user to Chat. The click path keeps
+  // the card mounted through submitting/executing, so this watcher stays
+  // armed alongside submitApprovalAndPoll's own polling — applyApprovalOutcome
+  // is idempotent, so whichever path observes the terminal state first
+  // settles and the other converges quietly.
   const applyApprovalOutcomeRef = useRef(applyApprovalOutcome);
   useEffect(() => {
     applyApprovalOutcomeRef.current = applyApprovalOutcome;
@@ -1025,14 +1135,6 @@ function CommandStudioContent() {
       },
     });
   }, [watchPausedRunId, watchConversationId]);
-
-  const [projectCreateError, setProjectCreateError] = useState<string | null>(null);
-  const [projectNameDialogOpen, setProjectNameDialogOpen] = useState(false);
-
-  const openProjectNameDialog = useCallback(() => {
-    setProjectCreateError(null);
-    setProjectNameDialogOpen(true);
-  }, []);
 
   const handleStartBlank = useCallback(async (name: string) => {
     if (creatingProject) return;
@@ -1515,6 +1617,14 @@ function CommandStudioContent() {
             approval={pendingApproval}
             onResolve={handleResolveApproval}
             isDeploy={pendingApproval.toolId === "project.deploy"}
+            phase={approvalPhase}
+            error={approvalError}
+            retryable={approvalRetryable}
+            expired={approvalExpired}
+            // An expired gate's "Retry" re-requests a fresh gate — re-POSTing
+            // the dead pausedRunId would 409. Other failures retry the
+            // approval POST as before.
+            onRetry={approvalExpired ? handleReRequestApproval : () => handleResolveApproval("approved")}
           />
         </div>
       )}

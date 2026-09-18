@@ -62,20 +62,20 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
     <div className="min-h-screen bg-[#03050a] text-white">
       {/* Hero */}
       <section className="relative overflow-hidden px-5 pt-32 pb-16 lg:px-10">
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#a8ff2f]/5 to-transparent" />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-accent/5 to-transparent" />
         <MarketingFrame className="text-center">
-          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#a8ff2f]/30 bg-[#a8ff2f]/5 px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-[#a8ff2f]">
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-accent/30 bg-accent/5 px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-accent">
             <Sparkles size={12} /> Hire LiTTree LabStudios
           </div>
           <h1 className="text-4xl font-black tracking-tight sm:text-5xl lg:text-6xl">
-            Get it <span className="text-[#a8ff2f]">done</span> for you
+            Get it <span className="text-accent">done</span> for you
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg text-white/60">
             Don&apos;t want to DIY it? We&apos;ll build your site, set up your AI automation,
             or design your brand — then hand you the keys to LiTTree for ongoing work.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-3">
-            <a href="#offers" className="rounded-xl bg-[#a8ff2f] px-6 py-3 text-sm font-black text-black transition hover:scale-[1.02]">
+            <a href="#offers" className="rounded-xl bg-accent px-6 py-3 text-sm font-black text-on-accent shadow-accent-glow transition hover:scale-[1.02] hover:bg-accent-strong">
               See offers
             </a>
             <a href="#inquiry" className="rounded-xl border border-white/20 px-6 py-3 text-sm font-bold text-white transition hover:bg-white/5">
@@ -175,7 +175,7 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
                 { step: "4", title: "You get the keys", desc: "Ongoing edits via LiTTree — add a subscription anytime" },
               ].map((s) => (
                 <div key={s.step} className="text-center">
-                  <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-[#a8ff2f]/10 text-sm font-black text-[#a8ff2f]">
+                  <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 text-sm font-black text-accent">
                     {s.step}
                   </div>
                   <div className="text-sm font-bold">{s.title}</div>
@@ -197,9 +197,9 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
             </p>
 
             {submitted ? (
-              <div className="mt-6 rounded-xl border border-[#a8ff2f]/30 bg-[#a8ff2f]/5 p-6 text-center">
+              <div className="mt-6 rounded-xl border border-accent/30 bg-accent/5 p-6 text-center">
                 <div className="text-2xl">✅</div>
-                <div className="mt-2 font-bold text-[#a8ff2f]">Thanks — we&apos;ll be in touch within 24 hours.</div>
+                <div className="mt-2 font-bold text-accent">Thanks — we&apos;ll be in touch within 24 hours.</div>
                 <Link href="/" className="mt-4 inline-block text-xs text-white/50 hover:text-white">
                   Back to home
                 </Link>
@@ -213,7 +213,7 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
                     placeholder="Your name"
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-[#a8ff2f]/50"
+                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-accent/50"
                   />
                   <input
                     type="email"
@@ -221,7 +221,7 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
                     placeholder="Email address"
                     value={form.email}
                     onChange={(e) => setForm({ ...form, email: e.target.value })}
-                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-[#a8ff2f]/50"
+                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-accent/50"
                   />
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -230,20 +230,20 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
                     placeholder="Phone (optional)"
                     value={form.phone}
                     onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-[#a8ff2f]/50"
+                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-accent/50"
                   />
                   <input
                     type="text"
                     placeholder="Company (optional)"
                     value={form.company}
                     onChange={(e) => setForm({ ...form, company: e.target.value })}
-                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-[#a8ff2f]/50"
+                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-accent/50"
                   />
                 </div>
                 <select
                   value={form.serviceId}
                   onChange={(e) => setForm({ ...form, serviceId: e.target.value })}
-                  className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-[#a8ff2f]/50"
+                  className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-accent/50"
                 >
                   <option value="">Which service interests you? (optional)</option>
                   <option value="launch_sprint">LiTTree Launch Sprint ($449)</option>
@@ -255,12 +255,12 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
                   rows={4}
                   value={form.message}
                   onChange={(e) => setForm({ ...form, message: e.target.value })}
-                  className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-[#a8ff2f]/50"
+                  className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-accent/50"
                 />
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="w-full rounded-xl bg-[#a8ff2f] py-3 text-sm font-black text-black transition hover:scale-[1.01] disabled:opacity-50"
+                  className="w-full rounded-xl bg-accent py-3 text-sm font-black text-on-accent transition hover:bg-accent-strong hover:scale-[1.01] disabled:opacity-50"
                 >
                   {submitting ? "Sending..." : "Send inquiry"}
                 </button>

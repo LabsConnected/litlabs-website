@@ -17,6 +17,7 @@ import { Maximize2, Minimize2, Plug, RotateCcw, Trash2, AlertCircle, Copy, Check
 import "@xterm/xterm/css/xterm.css";
 import { copyToClipboard } from "@/lib/studio/message-copy";
 import { useVisualViewport } from "../../app/(app)/studio/hooks/useVisualViewport";
+import { TerminalFitController } from "./terminal-fit";
 
 const HEARTBEAT_INTERVAL_MS = 10_000;
 
@@ -46,7 +47,7 @@ export const TerminalPanel = forwardRef<
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
+  const fitControllerRef = useRef<TerminalFitController | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const commandBufferRef = useRef<string>("");
   const outputBufferRef = useRef<string>("");
@@ -72,18 +73,12 @@ export const TerminalPanel = forwardRef<
     if (inset === lastBottomInsetRef.current) return;
     lastBottomInsetRef.current = inset;
     const term = termRef.current;
-    const fit = fitAddonRef.current;
-    if (!term || !fit) return;
-    try {
-      fit.fit();
-      socketRef.current?.emit("terminal:resize", {
-        cols: term.cols,
-        rows: term.rows,
-      });
-      if (inset > 0) term.scrollToBottom();
-    } catch {
-      /* noop — terminal not ready */
-    }
+    if (!term) return;
+    // The keyboard-driven viewport shrink also resizes the container, so
+    // the ResizeObserver catches it too — requestFit coalesces both into
+    // a single frame and only emits terminal:resize when dims change.
+    fitControllerRef.current?.requestFit();
+    if (inset > 0) term.scrollToBottom();
   }, [vv.bottomInset]);
 
   // Refs for callback props — updated every render but NOT included in the
@@ -139,10 +134,40 @@ export const TerminalPanel = forwardRef<
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(containerRef.current);
-    fit.fit();
+
+    // Fit lifecycle owner: coalesces resize notifications into one refit
+    // per frame and only emits terminal:resize when cols/rows change.
+    const fitController = new TerminalFitController({
+      getContainer: () => containerRef.current,
+      fit: () => fit.fit(),
+      getDimensions: () => ({ cols: term.cols, rows: term.rows }),
+      emitResize: (cols, rows) =>
+        socketRef.current?.emit("terminal:resize", { cols, rows }),
+    });
+    fitControllerRef.current = fitController;
 
     termRef.current = term;
-    fitAddonRef.current = fit;
+
+    // Fit after mount, and again on the next frame once layout settles.
+    // No-op while the tab is display:none — the ResizeObserver below
+    // refits as soon as the container gets a real size again.
+    fitController.fitNow();
+    fitController.requestFit();
+
+    // Webfonts change cell metrics — JetBrains Mono arriving after the
+    // first fit leaves stale cols/rows. Refit once fonts are ready.
+    void document.fonts?.ready.then(() => {
+      if (!disposed) fitController.requestFit();
+    });
+
+    // Single source of truth for "container size changed": dock
+    // drag-resize, tab visibility (display:none → block), fullscreen
+    // toggle, and window resize all surface here.
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined" && containerRef.current) {
+      resizeObserver = new ResizeObserver(() => fitController.requestFit());
+      resizeObserver.observe(containerRef.current);
+    }
 
     // Clipboard-friendly key handling:
     //   Ctrl+V              → paste from clipboard
@@ -227,14 +252,6 @@ export const TerminalPanel = forwardRef<
         }
       }, CONNECTION_TIMEOUT_MS);
     };
-    const resize = () => {
-      fit.fit();
-      socketRef.current?.emit("terminal:resize", {
-        cols: term.cols,
-        rows: term.rows,
-      });
-    };
-
     let attemptedUnauthorizedRetry = false;
     let wsUrl = "";
 
@@ -325,6 +342,11 @@ export const TerminalPanel = forwardRef<
           setSessionInfo({ sessionId: sid, cwd, shell, workspaceId: wsId, projectId: sessProjectId });
           terminalStore.setVerifiedSession({ sessionId: sid, cwd, shell, workspaceId: wsId, projectId: sessProjectId });
           onConnectionChange?.(true);
+          // The server spawned this PTY with default dims (120×32) — force
+          // the next fit to re-emit our real cols/rows so the PTY matches
+          // what is actually rendered.
+          fitController.invalidateEmitted();
+          fitController.requestFit();
           term.writeln(`\x1b[36mℹ Session ready: ${sid.slice(0, 8)}...\x1b[0m`);
           if (wsId) term.writeln(`\x1b[36m   workspace: ${wsId}\x1b[0m`);
           if (sessProjectId) term.writeln(`\x1b[36m   project: ${sessProjectId}\x1b[0m`);
@@ -371,6 +393,8 @@ export const TerminalPanel = forwardRef<
                 setSessionInfo(readyData);
                 terminalStore.setVerifiedSession(readyData);
                 onConnectionChange?.(true);
+                fitController.invalidateEmitted();
+                fitController.requestFit();
               });
               retrySocket.on("connect", () => {
                 terminalStore.setStatus("connecting");
@@ -438,8 +462,7 @@ export const TerminalPanel = forwardRef<
           socketRef.current?.emit("terminal:input", data);
         });
 
-        window.addEventListener("resize", resize);
-        resize();
+        fitController.requestFit();
       })
       .catch((error) => {
         // WorkspaceNotReadyError → trigger workspace preparation, then retry
@@ -500,6 +523,8 @@ export const TerminalPanel = forwardRef<
                       setSessionInfo(readyData);
                       terminalStore.setVerifiedSession(readyData);
                       onConnectionChange?.(true);
+                      fitController.invalidateEmitted();
+                      fitController.requestFit();
                       term.writeln(`\x1b[36mℹ Session ready: ${readyData.sessionId.slice(0, 8)}...\x1b[0m`);
                       term.writeln(`\x1b[36m   cwd: ${readyData.cwd}\x1b[0m`);
                       onLog?.(`[SESSION] Ready ${readyData.sessionId.slice(0, 8)}... cwd=${readyData.cwd}`);
@@ -567,8 +592,7 @@ export const TerminalPanel = forwardRef<
                       socketRef.current?.emit("terminal:input", data);
                     });
 
-                    window.addEventListener("resize", resize);
-                    resize();
+                    fitController.requestFit();
                   });
                 }
                 // 409 PROVISIONING_IN_PROGRESS — wait and retry
@@ -610,7 +634,9 @@ export const TerminalPanel = forwardRef<
     return () => {
       disposed = true;
       connectionInProgressRef.current = false;
-      window.removeEventListener("resize", resize);
+      resizeObserver?.disconnect();
+      fitController.dispose();
+      fitControllerRef.current = null;
       if (connectTimeoutRef.current) {
         clearTimeout(connectTimeoutRef.current);
         connectTimeoutRef.current = null;
@@ -656,18 +682,11 @@ export const TerminalPanel = forwardRef<
   }, [isLoaded, isSignedIn]);
 
   useEffect(() => {
-    if ((visible || fullScreen) && termRef.current && fitAddonRef.current) {
-      // Delay slightly to allow the DOM transition/display update to complete
-      const timer = setTimeout(() => {
-        try {
-          fitAddonRef.current?.fit();
-          socketRef.current?.emit("terminal:resize", {
-            cols: termRef.current?.cols ?? 80,
-            rows: termRef.current?.rows ?? 24,
-          });
-        } catch { /* noop */ }
-      }, 80);
-      return () => clearTimeout(timer);
+    if (visible || fullScreen) {
+      // Becoming visible again (dock tab switch, fullscreen toggle) — the
+      // ResizeObserver also sees the 0→real size change; requestFit
+      // coalesces both signals into a single refit on the next frame.
+      fitControllerRef.current?.requestFit();
     }
   }, [visible, fullScreen]);
 
@@ -738,13 +757,15 @@ export const TerminalPanel = forwardRef<
   };
 
   return (
-    <div className={`flex h-full flex-col ${fullScreen ? "fixed inset-0 z-[10000] h-dvh w-screen bg-[#0d0916] p-4" : ""}`}>
-      <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2">
+    <div className={`flex h-full min-h-0 w-full min-w-0 flex-col ${fullScreen ? "fixed inset-0 z-[10000] h-dvh w-screen bg-[#0d0916] p-4" : ""}`}>
+      {/* flex-wrap: at narrow widths the action cluster drops to its own
+          line instead of squeezing/clipping the status text. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b border-neutral-800 px-4 py-2">
         <div className="min-w-0 flex-1 text-sm">
           {/* Connection state — only "connected" when PTY is verified */}
           {terminalStore.status === "error" ? (
             <div className="flex flex-col gap-1">
-              <span className="inline-flex items-center gap-1.5 rounded bg-red-500/20 px-2 py-1 text-[10px] font-bold text-red-400">
+              <span className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded bg-red-500/20 px-2 py-1 text-[10px] font-bold text-red-400">
                 <AlertCircle size={10} /> PTY connection failed
                 {terminalStore.failureStage && <span className="ml-1 text-[9px] text-red-300/70">({terminalStore.failureStage.replace(/_/g, " ")})</span>}
               </span>
@@ -762,28 +783,28 @@ export const TerminalPanel = forwardRef<
               </div>
             </div>
           ) : terminalStore.status === "auth_failed" ? (
-            <span className="inline-flex items-center gap-1.5 rounded bg-red-500/20 px-2 py-1 text-[10px] font-bold text-red-400">
+            <span className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded bg-red-500/20 px-2 py-1 text-[10px] font-bold text-red-400">
               <AlertCircle size={10} /> Authentication failed
             </span>
           ) : terminalStore.status === "unavailable" ? (
-            <span className="inline-flex items-center gap-1.5 rounded bg-red-500/20 px-2 py-1 text-[10px] font-bold text-red-400">
+            <span className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded bg-red-500/20 px-2 py-1 text-[10px] font-bold text-red-400">
               <AlertCircle size={10} /> PTY server unavailable
             </span>
           ) : terminalStore.status === "project_context_missing" ? (
-            <span className="inline-flex items-center gap-1.5 rounded bg-amber-500/15 px-2 py-1 text-[10px] font-bold text-amber-300">
+            <span className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded bg-amber-500/15 px-2 py-1 text-[10px] font-bold text-amber-300">
               <AlertCircle size={10} /> No project context
             </span>
           ) : terminalStore.status === "connecting" ? (
-            <span className="inline-flex items-center gap-1.5 rounded bg-blue-500/20 px-2 py-1 text-[10px] font-bold text-blue-400">
+            <span className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded bg-accent/20 px-2 py-1 text-[10px] font-bold text-accent">
               <Plug size={10} className="animate-pulse" /> Connecting to PTY…
             </span>
           ) : connected ? (
-            <span className="inline-flex items-center gap-1.5 rounded bg-green-500/20 px-2 py-1 text-[10px] font-bold text-green-400">
+            <span className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded bg-green-500/20 px-2 py-1 text-[10px] font-bold text-green-400">
               <Plug size={10} /> PTY connected (verified)
             </span>
           ) : (
             <div className="flex flex-col gap-1">
-              <span className="inline-flex items-center gap-1.5 rounded bg-amber-500/15 px-2 py-1 text-[10px] font-bold text-amber-300">
+              <span className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded bg-amber-500/15 px-2 py-1 text-[10px] font-bold text-amber-300">
                 <Plug size={10} /> PTY disconnected
                 {terminalStore.lastDisconnectReason && (
                   <span className="ml-1 text-[9px] text-amber-300/70">({terminalStore.lastDisconnectReason})</span>
@@ -825,7 +846,7 @@ export const TerminalPanel = forwardRef<
                   ) : connected ? (
                     <span className="text-green-400">issued</span>
                   ) : terminalStore.status === "connecting" ? (
-                    <span className="text-blue-400">fetching…</span>
+                    <span className="text-accent">fetching…</span>
                   ) : (
                     <span className="text-amber-400">none</span>
                   )}
@@ -842,7 +863,9 @@ export const TerminalPanel = forwardRef<
           )}
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        {/* ml-auto keeps the cluster right-aligned when it wraps to its
+            own line under the status text at narrow widths. */}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <button
             onClick={copyAllOutput}
             title={copiedAll ? "Copied!" : "Copy all output"}
@@ -897,13 +920,18 @@ export const TerminalPanel = forwardRef<
         </div>
       </div>
 
-      <div className="relative flex-1 overflow-hidden mt-2">
-        <div className="relative h-full w-full overflow-hidden rounded-xl border border-purple-500/20 terminal-glow">
+      <div className="relative mt-2 min-h-0 min-w-0 flex-1 overflow-hidden">
+        {/* The padding lives on THIS wrapper, not the xterm mount node.
+            FitAddon measures the mount node's computed height/width —
+            padding on the mount node itself is counted as usable space
+            (border-box), which over-counts rows/cols and clips the
+            bottom line + right edge of the terminal. */}
+        <div className="relative h-full w-full overflow-hidden rounded-xl border border-accent/20 bg-black p-3 terminal-glow">
           <style dangerouslySetInnerHTML={{ __html: `
             @keyframes terminal-pulse {
-              0% { box-shadow: 0 0 10px rgba(168, 85, 247, 0.15); border-color: rgba(168, 85, 247, 0.2); }
-              50% { box-shadow: 0 0 22px rgba(168, 85, 247, 0.35); border-color: rgba(168, 85, 247, 0.45); }
-              100% { box-shadow: 0 0 10px rgba(168, 85, 247, 0.15); border-color: rgba(168, 85, 247, 0.2); }
+              0% { box-shadow: 0 0 10px color-mix(in srgb, var(--color-accent) 15%, transparent); border-color: color-mix(in srgb, var(--color-accent) 20%, transparent); }
+              50% { box-shadow: 0 0 22px color-mix(in srgb, var(--color-accent) 35%, transparent); border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); }
+              100% { box-shadow: 0 0 10px color-mix(in srgb, var(--color-accent) 15%, transparent); border-color: color-mix(in srgb, var(--color-accent) 20%, transparent); }
             }
             @keyframes crt-flicker {
               0% { opacity: 0.992; }
@@ -928,7 +956,7 @@ export const TerminalPanel = forwardRef<
           <div className="crt-scanlines" />
           <div
             ref={containerRef}
-            className="h-full w-full p-3 bg-black"
+            className="h-full w-full"
           />
         </div>
       </div>

@@ -28,11 +28,13 @@ import {
 import { runAgentLoop } from "@/lib/litt-intelligence/agent-loop";
 import { runAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
 import { findToolCallMarkup, stripToolCallMarkupText } from "@/lib/litt-intelligence/tool-call-markup";
+import { withV1NoToolsDirective } from "@/lib/litt-intelligence/text-lane-guard";
+import { sanitizeTextLaneHistory } from "@/lib/litt-intelligence/toolless-lane-guard";
 import { runLaunchFlow, type LaunchFlowResult } from "@/lib/litt-intelligence/launch-flow";
 import { shouldEnableQualityLoop } from "@/lib/litt-intelligence/quality-loop-flow";
 import { ProgressEmitter, type ProgressEvent } from "@/lib/litt-intelligence/progress-events";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
-import { createPausedRun, getLatestPausedRunForConversation, getPendingPausedRunForConversation } from "@/lib/litt-intelligence/paused-run-store";
+import { createPausedRun, getLatestPausedRunForConversation, getPendingPausedRunForConversation, pausedRunBelongsToMessage } from "@/lib/litt-intelligence/paused-run-store";
 import { getActiveExecution, registerExecution, unregisterExecution } from "@/lib/studio/execution-registry";
 import { resolveTurn } from "@/lib/litt-intelligence/turn-resolver";
 import {
@@ -271,14 +273,22 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const allMessages = await listMessages(conversation.id, userId);
   const priorMessages = allMessages.filter((m) => m.id !== userMessage.id);
 
-  // 7. Build model history in chronological order
-  const history = priorMessages
-    .filter((m) => m.status === "completed" && (m.role === "user" || m.role === "assistant"))
-    .slice(-HISTORY_LIMIT)
-    .map((m) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-    }));
+  // 7. Build model history in chronological order.
+  // V1 text-lane hygiene: this lane calls the model with NO tools
+  // attached, so a pseudo tool call persisted by an earlier turn would
+  // re-prime the model to emit envelope markup again mid-conversation.
+  // Strip envelope markup from assistant turns before history reaches the
+  // prompt (user turns and backtick-quoted examples are preserved). The
+  // V2 native lane performs its own strip in buildAssistantToolCallMessage.
+  const history = sanitizeTextLaneHistory(
+    priorMessages
+      .filter((m) => m.status === "completed" && (m.role === "user" || m.role === "assistant"))
+      .slice(-HISTORY_LIMIT)
+      .map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      })),
+  );
 
   // 7.5. Resolve ambiguous references in the user message using conversation history.
   // Expands "it", "that", "same thing", "why", etc. into self-contained messages.
@@ -803,6 +813,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
 
           // If V2 paused for approval, persist the paused state and flag it
           let pausedRunId: string | undefined;
+          let pausedRunPersistFailed = false;
           if (v2Result?.pendingApproval) {
             try {
               const pausedRun = await createPausedRun({
@@ -822,9 +833,14 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               });
               pausedRunId = pausedRun.id;
             } catch (pausedErr) {
-              // If persistence fails, still send the approval event without a
-              // resume ID — but log it: without pausedRunId the client's
-              // Approve button cannot resume anything and becomes a dead end.
+              // If persistence fails, the gate cannot be resumed — there is
+              // no pausedRunId for the Approve button to act on. Emitting
+              // pending_approval anyway would mount a dead card that can
+              // never resolve (2026-09-18 defect: the transcript reconciler
+              // then attributed a stale expired run to this message and
+              // told the user the approval "expired before a decision was
+              // made" within seconds). Fail the turn honestly instead.
+              pausedRunPersistFailed = true;
               studioLog("message:paused_run_persist_failed", {
                 conversationId: conversation.id,
                 projectId: conversation.projectId,
@@ -834,26 +850,38 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               });
             }
 
-            safeEvent({
-              type: "pending_approval",
-              toolId: v2Result.pendingApproval.toolId,
-              reason: v2Result.pendingApproval.reason,
-              inputs: v2Result.pendingApproval.inputs,
-              pausedRunId,
-            });
+            if (!pausedRunPersistFailed) {
+              safeEvent({
+                type: "pending_approval",
+                toolId: v2Result.pendingApproval.toolId,
+                reason: v2Result.pendingApproval.reason,
+                inputs: v2Result.pendingApproval.inputs,
+                pausedRunId,
+              });
+            }
+          }
+
+          // An approval gate that could not be persisted is not actionable —
+          // surface it as a failed turn, never as a phantom approval card.
+          const actionableApproval = v2Result?.pendingApproval && !pausedRunPersistFailed
+            ? v2Result.pendingApproval
+            : undefined;
+          if (pausedRunPersistFailed) {
+            assistantText = "I needed your approval to continue, but the approval request couldn't be saved. Please send your request again and I'll ask for approval once more.";
           }
 
           // A run that produced no response text cannot be reported as
           // completed — empty provider output is a failure, not success.
+          // (A persist-failed approval is not "empty": it failed honestly.)
           const v2Empty = !launchFlowResult?.cancelled
-            && !v2Result?.pendingApproval
+            && !actionableApproval
             && !assistantText.trim();
 
           const finalMessageStatus: MessageStatus = launchFlowResult?.cancelled
             ? "cancelled"
-            : launchFlowResult?.pendingApproval
+            : actionableApproval
               ? "awaiting_approval"
-              : launchFlowResult?.success && !v2Empty
+              : launchFlowResult?.success && !v2Empty && !pausedRunPersistFailed
                 ? "completed"
                 : "failed";
 
@@ -943,7 +971,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             model: routedModel,
             latencyMs: launchLatencyMs,
             v2: true,
-            pendingApproval: v2Result?.pendingApproval ?? undefined,
+            pendingApproval: actionableApproval ?? undefined,
             launchStatus: launchFlowResult?.status ?? undefined,
             previewUrl: launchFlowResult?.previewUrl ?? undefined,
             productionUrl: launchFlowResult?.productionUrl ?? undefined,
@@ -968,10 +996,16 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           // loss never touches this signal.
           let cancelledV1 = executionAbort.signal.aborted;
           let r: Awaited<ReturnType<typeof streamText>> | null = null;
+          // The V1 text-only lane attaches NO tools to the model call, but
+          // the shared runtime-context block teaches tool-invocation tokens
+          // (files.write, path="index.html", …) that the model may echo as
+          // text — markup that can never execute here. State the constraint
+          // explicitly so the model answers in plain words instead.
+          const v1TextPrompt = withV1NoToolsDirective(finalPrompt);
           if (!cancelledV1) {
             try {
               r = await streamText(
-                finalPrompt,
+                v1TextPrompt,
                 (chunk) => {
                   // Suppress late provider callbacks after an abort — a
                   // cancelled run must not keep mutating the response or
@@ -1311,37 +1345,51 @@ async function getHandler(req: NextRequest, routeCtx: RouteParams) {
         // writeback (TTL expiry, or a decision writeback that missed).
         // Reconcile the message to a truthful terminal state instead of
         // leaving "Waiting for your approval" mounted forever.
+        //
+        // Precision guard: the latest run is only this message's gate when
+        // it was created after the message. Without this, a STALE run from
+        // the conversation's history (e.g. an approval that expired
+        // yesterday) is attributed to a fresh approval whenever the
+        // pending lookup misses — row persist failure, replication lag —
+        // and the user sees "expired before a decision was made" within
+        // seconds of the request (2026-09-18 defect). An unrelated run
+        // leaves the message alone instead of writing a bogus note.
         const latestRun = await getLatestPausedRunForConversation(conversation.id, userId);
-        if (latestRun?.status === "expired") {
+        const gateRun =
+          latestRun &&
+          pausedRunBelongsToMessage(latestRun.createdAt, lastAssistant.createdAt)
+            ? latestRun
+            : null;
+        if (gateRun?.status === "expired") {
           const note = `${lastAssistant.content || "Approval was required."}\n\nThis approval expired before a decision was made — send the request again to continue.`;
           const persisted = await updateMessageStatus(lastAssistant.id, userId, "cancelled", note);
           if (persisted !== false) {
             lastAssistant.status = "cancelled";
             lastAssistant.content = note;
           }
-        } else if (latestRun?.status === "rejected") {
+        } else if (gateRun?.status === "rejected") {
           const note = `${lastAssistant.content || "Approval was required."}\n\nDeclined — the gated action was not performed.`;
           const persisted = await updateMessageStatus(lastAssistant.id, userId, "completed", note);
           if (persisted !== false) {
             lastAssistant.status = "completed";
             lastAssistant.content = note;
           }
-        } else if (latestRun?.status === "approved" && latestRun.runStatus === "failed") {
+        } else if (gateRun?.status === "approved" && gateRun.runStatus === "failed") {
           // The resumed run died without a transcript writeback — the
           // process was killed mid-flight and the stale-run watchdog
           // marked it failed. Reconcile the dead approval card to a
           // truthful terminal state instead of leaving it mounted.
-          const note = `${lastAssistant.content || "Approval was required."}\n\nThe approved run failed before it could finish${latestRun.runError ? ` — ${latestRun.runError}` : ""}. Send the request again to retry.`;
+          const note = `${lastAssistant.content || "Approval was required."}\n\nThe approved run failed before it could finish${gateRun.runError ? ` — ${gateRun.runError}` : ""}. Send the request again to retry.`;
           const persisted = await updateMessageStatus(lastAssistant.id, userId, "failed", note);
           if (persisted !== false) {
             lastAssistant.status = "failed";
             lastAssistant.content = note;
           }
-        } else if (latestRun?.status === "approved" && latestRun.runStatus === "completed") {
+        } else if (gateRun?.status === "approved" && gateRun.runStatus === "completed") {
           // The resumed run finished but its transcript writeback missed.
           // Reconcile to the recorded outcome — a nested gate whose row
           // was never persisted is a dead card and must surface as failed.
-          const result = latestRun.runResult;
+          const result = gateRun.runResult;
           const note = result?.pendingApproval
             ? `${lastAssistant.content || "Approval was required."}\n\nThe run reached a follow-up approval that could not be persisted — send the request again to retry.`
             : result?.finalText?.trim() ||

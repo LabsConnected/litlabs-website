@@ -200,11 +200,11 @@ function ChecklistBlock({ block, onUpdate, readOnly }: BlockRendererProps) {
               className={cn(
                 "mt-0.5 h-4 w-4 shrink-0 rounded border transition-colors",
                 item.checked
-                  ? "border-cyan-400 bg-cyan-400/20"
+                  ? "border-accent bg-accent/20"
                   : "border-white/20 hover:border-white/40",
               )}
             >
-              {item.checked && <span className="text-cyan-400 text-xs">✓</span>}
+              {item.checked && <span className="text-accent text-xs">✓</span>}
             </button>
             <span
               className={cn(
@@ -236,7 +236,7 @@ function TaskBlock({ block, onUpdate, readOnly }: BlockRendererProps) {
 
   const statusColors: Record<string, string> = {
     todo: "bg-white/10 text-white/60",
-    in_progress: "bg-blue-500/20 text-blue-300",
+    in_progress: "bg-accent/20 text-accent",
     done: "bg-green-500/20 text-green-300",
     blocked: "bg-red-500/20 text-red-300",
   };

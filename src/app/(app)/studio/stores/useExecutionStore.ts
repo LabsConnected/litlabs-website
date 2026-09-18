@@ -95,6 +95,15 @@ export interface PendingApproval {
   inputs?: Record<string, unknown>;
 }
 
+/**
+ * Client-side phase of the approval lifecycle. The card stays mounted
+ * through every phase — it only unmounts when the run reaches a terminal
+ * state (completed/rejected/expired/gone) or a fresh gate replaces it.
+ * A non-2xx approval POST or a failed run lands in "failed" with the
+ * backend error visible and a Retry affordance; nothing silently clears.
+ */
+export type ApprovalPhase = "idle" | "submitting" | "executing" | "failed";
+
 export type MutationKind = "created" | "modified" | "deleted" | "renamed";
 
 export interface MutationSummary {
@@ -111,6 +120,18 @@ interface ExecutionStore {
   isRunning: boolean;
   currentStep: number;
   pendingApproval: PendingApproval | null;
+  /** Client-side approval lifecycle phase — the card stays mounted through all of them. */
+  approvalPhase: ApprovalPhase;
+  /** Backend error shown on the card when approvalPhase is "failed". */
+  approvalError: string | null;
+  /** Whether the failed approval may be retried (re-POST the same pausedRunId). */
+  approvalRetryable: boolean;
+  /**
+   * True when the failure was an expiry: the gate is gone server-side and
+   * "Retry" must re-request a fresh gate (re-request endpoint), not re-POST
+   * the dead pausedRunId (which would 409). Set by failApproval({expired}).
+   */
+  approvalExpired: boolean;
   checkpoint: { label: string; gitSha: string } | null;
   /** Tool calls in the current run */
   toolCalls: Array<{ toolId: string; success?: boolean; summary: string }>;
@@ -131,6 +152,16 @@ interface ExecutionStore {
   setPhase: (phase: ExecutionPhase) => void;
   setPendingApproval: (approval: PendingApproval | null) => void;
   resolveApproval: (decision: "approved" | "rejected") => void;
+  /** Approval POST submitted — card stays mounted, shows submitting state. */
+  beginApprovalSubmit: () => void;
+  /** Approval POST accepted (202) — card shows the run executing. */
+  approvalAccepted: () => void;
+  /**
+   * Approval POST failed (non-2xx) or the resumed run failed — keep the
+   * card mounted with the backend error and a Retry affordance. Never
+   * silently clears, never auto re-requests.
+   */
+  failApproval: (error: string, retryable?: boolean, opts?: { expired?: boolean }) => void;
   setCheckpoint: (checkpoint: { label: string; gitSha: string } | null) => void;
   collapseEvent: (id: string) => void;
   collapseLowLevel: () => void;
@@ -225,6 +256,10 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   isRunning: false,
   currentStep: 0,
   pendingApproval: null,
+  approvalPhase: "idle",
+  approvalError: null,
+  approvalRetryable: true,
+  approvalExpired: false,
   checkpoint: null,
   toolCalls: [],
   changesSummary: null,
@@ -238,6 +273,10 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       isRunning: true,
       currentStep: 0,
       pendingApproval: null,
+      approvalPhase: "idle",
+      approvalError: null,
+      approvalRetryable: true,
+      approvalExpired: false,
       checkpoint: null,
       toolCalls: [],
       changesSummary: null,
@@ -260,6 +299,10 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       phase: reason === "cancelled" ? "cancelled" : paused ? "awaiting_approval" : "done",
       events: updatedEvents,
       pendingApproval: paused ? state.pendingApproval : null,
+      approvalPhase: paused ? state.approvalPhase : "idle",
+      approvalError: paused ? state.approvalError : null,
+      approvalRetryable: paused ? state.approvalRetryable : true,
+      approvalExpired: paused ? state.approvalExpired : false,
     });
   },
 
@@ -308,7 +351,14 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   setPhase: (phase) => set({ phase }),
 
   setPendingApproval: (approval) => {
-    set({ pendingApproval: approval, phase: approval ? "awaiting_approval" : get().phase });
+    set({
+      pendingApproval: approval,
+      phase: approval ? "awaiting_approval" : get().phase,
+      approvalPhase: "idle",
+      approvalError: null,
+      approvalRetryable: true,
+      approvalExpired: false,
+    });
     if (approval) {
       get().addEvent({
         type: "approval_required",
@@ -328,7 +378,42 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
         success: decision === "approved",
       });
     }
-    set({ pendingApproval: null, phase: "editing" });
+    set({
+      pendingApproval: null,
+      phase: "editing",
+      approvalPhase: "idle",
+      approvalError: null,
+      approvalRetryable: true,
+      approvalExpired: false,
+    });
+  },
+
+  beginApprovalSubmit: () => {
+    set({ approvalPhase: "submitting", approvalError: null, approvalRetryable: true });
+  },
+
+  approvalAccepted: () => {
+    // Only advance out of submitting — a stale accepted callback must not
+    // overwrite a newer failed state.
+    if (get().approvalPhase === "submitting") {
+      set({ approvalPhase: "executing" });
+    }
+  },
+
+  failApproval: (error, retryable = true, opts) => {
+    set({
+      approvalPhase: "failed",
+      approvalError: error,
+      approvalRetryable: retryable,
+      approvalExpired: opts?.expired === true,
+      phase: "awaiting_approval",
+    });
+    get().addEvent({
+      type: "approval_resolved",
+      summary: `Approval failed: ${error.slice(0, 120)}`,
+      toolId: get().pendingApproval?.toolId,
+      success: false,
+    });
   },
 
   setCheckpoint: (checkpoint) => {
@@ -377,6 +462,10 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       isRunning: false,
       currentStep: 0,
       pendingApproval: null,
+      approvalPhase: "idle",
+      approvalError: null,
+      approvalRetryable: true,
+      approvalExpired: false,
       checkpoint: null,
       toolCalls: [],
       changesSummary: null,

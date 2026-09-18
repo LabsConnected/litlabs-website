@@ -180,8 +180,8 @@ export function LiTTAssistantPanel({
     <div className="flex h-full flex-col rounded-xl border border-neutral-800 bg-neutral-950">
       <div className="border-b border-neutral-800 p-4">
         <div className="mb-3 flex items-center gap-2">
-          <div className="rounded-lg bg-orange-600/20 p-1.5">
-            <Wrench className="h-4 w-4 text-orange-400" />
+          <div className="rounded-lg bg-accent/20 p-1.5">
+            <Wrench className="h-4 w-4 text-accent" />
           </div>
           <div>
             <h2 className="text-lg font-bold">LiTT Command Center</h2>
@@ -197,7 +197,7 @@ export function LiTTAssistantPanel({
                 key={chip.label}
                 className={`flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold ${
                   chip.active
-                    ? "border-orange-600/40 bg-orange-600/10 text-orange-400"
+                    ? "border-accent/40 bg-accent/10 text-accent"
                     : "border-neutral-800 bg-neutral-900 text-neutral-500"
                 }`}
               >
@@ -216,7 +216,7 @@ export function LiTTAssistantPanel({
             className={`rounded-lg border p-3 text-sm ${
               msg.role === "user"
                 ? "border-neutral-800 bg-neutral-900 text-neutral-200"
-                : "border-orange-900/30 bg-black text-neutral-300"
+                : "border-accent/30 bg-black text-neutral-300"
             }`}
           >
             <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-neutral-500">
@@ -224,7 +224,7 @@ export function LiTTAssistantPanel({
             </div>
             {msg.loading ? (
               <div className="flex items-center gap-2 text-neutral-400">
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-orange-500 border-t-transparent" />
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent" />
                 LiTT is thinking...
               </div>
             ) : (
@@ -239,7 +239,7 @@ export function LiTTAssistantPanel({
                   <button
                     key={action.label}
                     onClick={() => handleAction(action)}
-                    className="flex items-center gap-1.5 rounded-lg border border-orange-600/40 bg-orange-600/10 px-3 py-1.5 text-xs font-bold text-orange-400 hover:bg-orange-600 hover:text-white"
+                    className="flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-xs font-bold text-accent hover:bg-accent hover:text-on-accent"
                   >
                     <ActionIcon type={action.type} />
                     {action.label}
@@ -270,7 +270,7 @@ export function LiTTAssistantPanel({
                 }}
                 className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-neutral-300 hover:bg-neutral-900"
               >
-                <span className="font-bold text-orange-400">{cmd.label}</span>
+                <span className="font-bold text-accent">{cmd.label}</span>
                 <span className="text-neutral-500">{cmd.desc}</span>
               </button>
             ))}
@@ -286,12 +286,12 @@ export function LiTTAssistantPanel({
             }}
             onKeyDown={handleKeyDown}
             placeholder="Ask LiTT or type / for commands..."
-            className="h-24 w-full resize-none rounded-lg border border-neutral-800 bg-black p-3 pr-10 text-sm outline-none focus:border-orange-600"
+            className="h-24 w-full resize-none rounded-lg border border-neutral-800 bg-black p-3 pr-10 text-sm outline-none focus:border-accent"
           />
           <button
             onClick={() => askJarvis(prompt)}
             disabled={loading || !prompt.trim()}
-            className="absolute bottom-2 right-2 rounded-lg bg-orange-600 p-2 text-white disabled:opacity-50 hover:bg-orange-500"
+            className="absolute bottom-2 right-2 rounded-lg bg-accent p-2 text-on-accent disabled:opacity-50 hover:bg-accent-strong"
           >
             <Send className="h-4 w-4" />
           </button>
@@ -304,7 +304,7 @@ export function LiTTAssistantPanel({
               <button
                 key={item.label}
                 onClick={() => askJarvis(item.prompt)}
-                className="flex items-center gap-2 rounded-lg border border-neutral-800 px-3 py-2 text-left text-xs text-neutral-300 hover:border-orange-600 hover:text-orange-400"
+                className="flex items-center gap-2 rounded-lg border border-neutral-800 px-3 py-2 text-left text-xs text-neutral-300 hover:border-accent hover:text-accent"
               >
                 <Icon className="h-3.5 w-3.5" />
                 {item.label}

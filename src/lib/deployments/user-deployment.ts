@@ -45,7 +45,14 @@ export type PreviewStatus =
 /** One file in a deployable artifact. */
 export interface ArtifactFile {
   path: string;
+  /**
+   * File content. Text files are utf-8 source; binary files (images, fonts)
+   * are base64 — see `encoding`. Stored verbatim in the deployment-files
+   * table and decoded by the serving route based on content type.
+   */
   content: string;
+  /** "base64" marks binary payloads; absent means utf-8 text. */
+  encoding?: "utf-8" | "base64";
 }
 
 /**
@@ -80,7 +87,7 @@ const CONTENT_TYPES: Record<string, string> = {
   woff: "font/woff",
   woff2: "font/woff2",
   ttf: "font/ttf",
-  webmanifest: "application/manifest+json",
+  webmanifest: "application/manifest+json; charset=utf-8",
 };
 
 /**
@@ -94,6 +101,27 @@ export function contentTypeFor(path: string): string {
   const match = /\.([A-Za-z0-9]+)$/.exec(path);
   if (!match) return "application/octet-stream";
   return CONTENT_TYPES[match[1].toLowerCase()] ?? "application/octet-stream";
+}
+
+/**
+ * Whether an artifact of this content type is stored as base64.
+ *
+ * Text types (html/css/js/json/xml/svg/manifest) are stored as utf-8
+ * source. Everything else collectable — raster images, fonts, icons —
+ * is binary and round-trips through base64, because the workspace file
+ * API and the deployment-files table are text-shaped.
+ */
+export function isBinaryContentType(contentType: string): boolean {
+  if (contentType.startsWith("text/")) return false;
+  if (contentType === "image/svg+xml") return false;
+  return !contentType.includes("charset=utf-8");
+}
+
+/** Byte length of an artifact's payload after decoding. */
+export function artifactBytes(file: ArtifactFile): number {
+  return file.encoding === "base64"
+    ? Buffer.from(file.content, "base64").length
+    : Buffer.byteLength(file.content, "utf8");
 }
 
 /**
@@ -130,6 +158,90 @@ export type ArtifactValidation =
   | { ok: false; error: string };
 
 /**
+ * Extract local (non-external) subresource references from HTML/CSS source.
+ *
+ * Covers src=/srcset=/poster= attributes, <link> stylesheets/icons, and
+ * CSS url(...) references. External URLs, data:/blob:/mailto: URIs, and
+ * fragments/query strings are skipped. Root-relative refs ("/assets/x.png")
+ * map to artifact paths ("assets/x.png"); relative refs resolve against the
+ * referencing file's directory. Refs escaping the artifact root are ignored
+ * (path validation already rejects those files).
+ */
+function extractLocalAssetRefs(source: string, fromDir: string): string[] {
+  const refs: string[] = [];
+  const push = (raw: string | undefined | null) => {
+    if (!raw) return;
+    let ref = raw.trim();
+    if (!ref) return;
+    if (/^(https?:)?\/\//i.test(ref)) return; // absolute URL
+    if (/^(data|blob|mailto|tel):/i.test(ref)) return; // non-file schemes
+    ref = ref.replace(/[#?].*$/, ""); // strip fragment/query
+    if (!ref) return;
+    if (ref.startsWith("/")) {
+      ref = ref.slice(1);
+    } else {
+      const parts = [...fromDir.split("/").filter(Boolean), ...ref.split("/")];
+      const out: string[] = [];
+      for (const seg of parts) {
+        if (seg === "" || seg === ".") continue;
+        if (seg === "..") {
+          if (out.length === 0) return; // escapes artifact root
+          out.pop();
+          continue;
+        }
+        out.push(seg);
+      }
+      ref = out.join("/");
+    }
+    if (ref) refs.push(ref);
+  };
+
+  // src= / poster= attributes; srcset= may list several candidates.
+  const attrRe = /\b(src|srcset|poster)\s*=\s*["']([^"']+)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = attrRe.exec(source)) !== null) {
+    const name = m[1].toLowerCase();
+    const value = m[2];
+    if (name === "srcset") {
+      for (const candidate of value.split(",")) {
+        push(candidate.trim().split(/\s+/)[0]);
+      }
+    } else {
+      push(value);
+    }
+  }
+  // <link rel="stylesheet|icon" href="..."> — subresource, unlike <a> links.
+  const linkRe = /<link\b[^>]*>/gi;
+  while ((m = linkRe.exec(source)) !== null) {
+    const href = /href\s*=\s*["']([^"']+)["']/i.exec(m[0]);
+    if (href) push(href[1]);
+  }
+  // CSS url(...) in <style> blocks and stylesheets.
+  const urlRe = /url\(\s*["']?([^"')]+)["']?\s*\)/gi;
+  while ((m = urlRe.exec(source)) !== null) push(m[1]);
+  return refs;
+}
+
+/**
+ * Find subresource references in the artifact's HTML/CSS files that point at
+ * files missing from the artifact.
+ */
+function findMissingLocalAssets(files: ArtifactFile[], seen: Set<string>): string[] {
+  const missing: string[] = [];
+  for (const file of files) {
+    if (!/\.(html?|css)$/i.test(file.path)) continue;
+    const fromDir = file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : "";
+    for (const ref of extractLocalAssetRefs(file.content ?? "", fromDir)) {
+      const label = `${file.path} → ${ref}`;
+      if (!seen.has(ref) && !missing.includes(label)) {
+        missing.push(label);
+      }
+    }
+  }
+  return missing;
+}
+
+/**
  * Validate a collected artifact before anything is persisted or published.
  *
  * Requires an index.html entrypoint: without one there is nothing to serve
@@ -159,7 +271,7 @@ export function validateArtifact(files: ArtifactFile[]): ArtifactValidation {
     }
     seen.add(file.path);
 
-    const bytes = Buffer.byteLength(file.content ?? "", "utf8");
+    const bytes = artifactBytes(file);
     if (bytes > DEPLOYMENT_LIMITS.maxFileBytes) {
       return {
         ok: false,
@@ -177,6 +289,22 @@ export function validateArtifact(files: ArtifactFile[]): ArtifactValidation {
   }
   if (!seen.has("index.html")) {
     return { ok: false, error: "Deployment artifact must contain an index.html entrypoint." };
+  }
+
+  // Local-asset integrity: every subresource the site's HTML/CSS references
+  // must exist in the artifact. The 2026-09-17 acceptance run shipped a site
+  // whose hero <img> pointed at a file that was never saved, while deploy
+  // claimed "verified with a 200 response" — the root-URL liveness check
+  // cannot catch that. Fail the build instead of publishing broken pages.
+  const missing = findMissingLocalAssets(files, seen);
+  if (missing.length > 0) {
+    const preview = missing.slice(0, 5).join("; ");
+    return {
+      ok: false,
+      error:
+        `Deployment references ${missing.length} missing file(s): ${preview}` +
+        (missing.length > 5 ? "; …" : ""),
+    };
   }
 
   return { ok: true, files, totalBytes };
