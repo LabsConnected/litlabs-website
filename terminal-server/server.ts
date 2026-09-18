@@ -44,6 +44,7 @@ import {
 } from "./workspace/WorkspaceManager";
 import { resolveWorkspacePath as resolveWorkspacePathSecure, validateWritePayload } from "./workspace/WorkspaceSecurity";
 import { deleteResolvedPath } from "./workspace/FileService";
+import { replaceScaffoldingForWrite, SCAFFOLD_DIR_NAME } from "./workspace/scaffold";
 import { checkPreviewToken } from "./preview-auth";
 import { evaluateWorkspaceRoot } from "./workspace/durability";
 import {
@@ -1471,10 +1472,14 @@ app.get("/ws-files", (req: AuthenticatedRequest, res) => {
   const dirPath = String(req.query.path || ".");
   try {
     const target = resolveWorkspacePathSecure(req.workspaceRoot!, dirPath);
-    const entries = readdirSync(target, { withFileTypes: true }).map((entry) => ({
-      name: entry.name,
-      type: entry.isDirectory() ? "folder" : "file",
-    }));
+    const entries = readdirSync(target, { withFileTypes: true })
+      // The .litt system dir (scaffolding manifest, checkpoints) is
+      // platform state, not project content — keep it out of listings.
+      .filter((entry) => entry.name !== SCAFFOLD_DIR_NAME)
+      .map((entry) => ({
+        name: entry.name,
+        type: entry.isDirectory() ? "folder" : "file",
+      }));
     res.json({ entries, workspaceId: req.workspaceId });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to list files";
@@ -1507,7 +1512,7 @@ app.post("/ws-files/read", (req: AuthenticatedRequest, res) => {
   }
 });
 
-app.post("/ws-files/write", (req: AuthenticatedRequest, res) => {
+app.post("/ws-files/write", async (req: AuthenticatedRequest, res) => {
   const filePath = String(req.body.path || "");
   const content = String(req.body.content || "");
   const encoding = String(req.body.encoding || "utf-8");
@@ -1523,6 +1528,33 @@ app.post("/ws-files/write", (req: AuthenticatedRequest, res) => {
   }
   try {
     const target = resolveWorkspacePath(req.workspaceId!, req.terminalUserId!, filePath);
+    // ─── Starter-scaffolding replacement (brief §7) ─────────────────
+    // Deterministic complement to the prompt-text rule: the `scaffolded`
+    // manifest — not text matching — is the authority on whether this
+    // workspace is still on untouched starter scaffolding. A write that
+    // overwrites a scaffold file means a build is starting: checkpoint
+    // first, then remove the untouched scaffolding wholesale BEFORE this
+    // write lands, so the agent can never merge with it. Any other first
+    // write is a user-authored edit/addition: the flag is consumed and
+    // nothing is deleted (the page is preserved).
+    let scaffold: Awaited<ReturnType<typeof replaceScaffoldingForWrite>> | undefined;
+    try {
+      scaffold = await replaceScaffoldingForWrite(req.workspaceRoot!, filePath);
+      if (scaffold.acted) {
+        console.log(
+          `[Scaffold] replaced untouched starter scaffolding in workspace ${req.workspaceId} ` +
+            `(removed: ${scaffold.removedFiles.join(", ") || "none"}, ` +
+            `checkpoint: ${scaffold.checkpoint?.kind}:${scaffold.checkpoint?.ref ?? "none"})`,
+        );
+      }
+    } catch (scaffoldErr) {
+      // The scaffold check must never block a legitimate write: log and
+      // continue. The prompt-text rule remains as defense-in-depth.
+      console.warn(
+        "[Scaffold] replacement check failed:",
+        scaffoldErr instanceof Error ? scaffoldErr.message : scaffoldErr,
+      );
+    }
     mkdirSync(resolve(target, ".."), { recursive: true });
     if (sizeCheck.binary) {
       // Binary file write — used by the "Use asset in project" feature to
@@ -1531,7 +1563,11 @@ app.post("/ws-files/write", (req: AuthenticatedRequest, res) => {
     } else {
       writeFileSync(target, content, "utf-8");
     }
-    res.json({ saved: true, workspaceId: req.workspaceId });
+    res.json({
+      saved: true,
+      workspaceId: req.workspaceId,
+      ...(scaffold?.acted ? { scaffold } : {}),
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to write file";
     const status = fileErrorStatus(msg);
