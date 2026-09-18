@@ -1410,6 +1410,47 @@ describe("buildToolResultMessage", () => {
       { functionResponse: { name: "project_scan", response: { found: 1 } } },
     ]);
   });
+
+  it("redacts inline data: payloads so the model cannot re-emit a truncated copy", () => {
+    // Free media providers return generated assets as huge data: URLs. A
+    // model that re-emits a clipped copy into project.insert_asset writes a
+    // corrupt file — so the model-facing message must never carry the blob.
+    const dataUrl = `data:image/jpeg;base64,${"A".repeat(60_000)}`;
+    const toolResult = {
+      success: true,
+      downloadUrl: dataUrl,
+      sitePath: "/assets/images/hero-abc.jpeg",
+      nested: { markdown: `![hero](${dataUrl})`, note: "short" },
+    };
+    const msg = buildToolResultMessage({
+      toolCallId: "call_1",
+      toolId: "image.generate",
+      result: toolResult,
+      success: true,
+    });
+
+    expect(msg.content).not.toContain("AAAA");
+    expect(msg.content).toContain("inline data payload omitted");
+    expect(msg.content).toContain("/assets/images/hero-abc.jpeg");
+    const response = (msg.parts?.[0] as { functionResponse: { response: Record<string, unknown> } })
+      .functionResponse.response;
+    expect(response.downloadUrl).toContain("inline data payload omitted");
+    expect((response.nested as Record<string, unknown>).markdown).toContain(
+      "inline data payload omitted",
+    );
+    // The original result object is untouched — storage/UI keep real bytes.
+    expect(toolResult.downloadUrl).toBe(dataUrl);
+  });
+
+  it("leaves short data: strings and non-data values untouched", () => {
+    const msg = buildToolResultMessage({
+      toolCallId: "call_1",
+      toolId: "image.generate",
+      result: { downloadUrl: "data:,tiny", sitePath: "/x.png" },
+      success: true,
+    });
+    expect(msg.content).toBe(JSON.stringify({ downloadUrl: "data:,tiny", sitePath: "/x.png" }));
+  });
 });
 
 describe("buildAssistantToolCallMessage — envelope hygiene", () => {

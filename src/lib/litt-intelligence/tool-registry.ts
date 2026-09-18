@@ -75,14 +75,22 @@ export async function maybeAutoInsertGeneratedImage(
     const nameHint = typeof r.title === "string" && r.title.length > 0 ? r.title : undefined;
     const saved = await insertAssetFromUrl(r.downloadUrl, { nameHint }, t as WorkspaceTransport);
     if (saved.success) {
+      // The save already happened under this approval — drop the handler's
+      // insertHint/markdown, which still tell the model to call
+      // project.insert_asset with the raw downloadUrl. Free providers return
+      // multi-KB data: URLs the model can only re-emit truncated, which wrote
+      // a corrupt stub asset and got referenced by the site HTML in the
+      // 2026-09-18 acceptance run.
+      const { insertHint: _insertHint, markdown: _markdown, ...rest } = r;
       return {
-        ...r,
+        ...rest,
         savedToProject: true,
         projectPath: saved.path,
         sitePath: saved.sitePath,
         siteReference:
-          `The image is saved in the project. Reference it in the site's HTML as ` +
-          `<img src="${saved.sitePath}" /> — do NOT invent another path.`,
+          `The image is already saved in the project at ${saved.sitePath}. ` +
+          `Reference it in the site's HTML as <img src="${saved.sitePath}" /> — ` +
+          `do NOT call project.insert_asset again and do NOT invent another path.`,
       };
     }
     return {

@@ -48,6 +48,48 @@ function isSafeRelativePath(value: string): boolean {
     );
 }
 
+/**
+ * Structural completeness check for image payloads — mirrors
+ * insertAssetFromUrl in tool-handlers-v2. A truncated data: URL decodes
+ * into a corrupt file that ships as a broken site asset; verify head and
+ * tail markers for the formats we accept and let unknown types through.
+ */
+function imagePayloadLooksComplete(buffer: Buffer, contentType: string): boolean {
+  const mime = contentType.toLowerCase();
+  if (mime === "image/jpeg" || mime === "image/jpg") {
+    return (
+      buffer.length > 4 &&
+      buffer[0] === 0xff && buffer[1] === 0xd8 &&
+      buffer[buffer.length - 2] === 0xff && buffer[buffer.length - 1] === 0xd9
+    );
+  }
+  if (mime === "image/png") {
+    return (
+      buffer.length > 16 &&
+      buffer[0] === 0x89 && buffer[1] === 0x50 &&
+      buffer.subarray(-8).equals(
+        Buffer.from([0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]),
+      )
+    );
+  }
+  if (mime === "image/gif") {
+    return (
+      buffer.length > 7 &&
+      buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 &&
+      buffer[buffer.length - 1] === 0x3b
+    );
+  }
+  if (mime === "image/webp") {
+    return (
+      buffer.length > 20 &&
+      buffer.toString("ascii", 0, 4) === "RIFF" &&
+      buffer.toString("ascii", 8, 12) === "WEBP" &&
+      buffer.readUInt32LE(4) + 8 <= buffer.length
+    );
+  }
+  return true;
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> },
@@ -116,6 +158,13 @@ export async function POST(
       contentType = assetResp.headers.get("content-type") || "application/octet-stream";
       const arrayBuf = await assetResp.arrayBuffer();
       buffer = Buffer.from(arrayBuf);
+    }
+
+    if (contentType.startsWith("image/") && !imagePayloadLooksComplete(buffer, contentType)) {
+      return NextResponse.json(
+        { error: "Image data is truncated or corrupt" },
+        { status: 422 },
+      );
     }
 
     if (buffer.length > MAX_ASSET_SIZE) {

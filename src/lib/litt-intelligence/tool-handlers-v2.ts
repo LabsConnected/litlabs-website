@@ -637,6 +637,51 @@ export interface InsertAssetResult {
 }
 
 /**
+ * Structural completeness check for a binary image payload. A truncated
+ * data URL (e.g. a model re-emitting a clipped base64 blob it only saw a
+ * fragment of) still decodes "successfully" into a corrupt file that then
+ * ships as a broken site asset — the 2026-09-18 acceptance run produced a
+ * 1KB JPEG stub with no EOI marker. Verify the format's required head and
+ * tail markers for the formats we accept; unknown image types pass
+ * through rather than being over-rejected.
+ */
+function imagePayloadLooksComplete(buffer: Buffer, contentType: string): boolean {
+  const mime = contentType.toLowerCase();
+  if (mime === "image/jpeg" || mime === "image/jpg") {
+    return (
+      buffer.length > 4 &&
+      buffer[0] === 0xff && buffer[1] === 0xd8 &&
+      buffer[buffer.length - 2] === 0xff && buffer[buffer.length - 1] === 0xd9
+    );
+  }
+  if (mime === "image/png") {
+    return (
+      buffer.length > 16 &&
+      buffer[0] === 0x89 && buffer[1] === 0x50 &&
+      buffer.subarray(-8).equals(
+        Buffer.from([0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]),
+      )
+    );
+  }
+  if (mime === "image/gif") {
+    return (
+      buffer.length > 7 &&
+      buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 &&
+      buffer[buffer.length - 1] === 0x3b
+    );
+  }
+  if (mime === "image/webp") {
+    return (
+      buffer.length > 20 &&
+      buffer.toString("ascii", 0, 4) === "RIFF" &&
+      buffer.toString("ascii", 8, 12) === "WEBP" &&
+      buffer.readUInt32LE(4) + 8 <= buffer.length
+    );
+  }
+  return true;
+}
+
+/**
  * Decode a data:image/* URL into bytes + MIME without a network fetch.
  * The free image providers (pollinations, cloudflare) return generated
  * images inline as data URLs — the bytes are already server-side, so
@@ -705,6 +750,9 @@ export async function insertAssetFromUrl(
     }
     if (buffer.length === 0) {
       return { success: false, error: "Downloaded asset is empty" };
+    }
+    if (!imagePayloadLooksComplete(buffer, contentType)) {
+      return { success: false, error: "Image data is truncated or corrupt" };
     }
     if (buffer.length > MAX_INSERT_ASSET_BYTES) {
       return { success: false, error: `Asset exceeds max size (${MAX_INSERT_ASSET_BYTES} bytes)` };

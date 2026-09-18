@@ -13,6 +13,7 @@ import { handleProjectInsertAsset, insertAssetFromUrl } from "../tool-handlers-v
 const PNG_BYTES = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
   0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82, // IEND trailer
 ]);
 
 function mockImageResponse(opts?: {
@@ -254,7 +255,7 @@ describe("insertAssetFromUrl (shared core)", () => {
 
   it("derives the file extension from the data URL MIME type", async () => {
     const transport = spyTransport();
-    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00]);
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0xff, 0xd9]);
     const result = await insertAssetFromUrl(
       `data:image/jpeg;base64,${jpeg.toString("base64")}`,
       { nameHint: "hero" },
@@ -262,6 +263,21 @@ describe("insertAssetFromUrl (shared core)", () => {
     );
     expect(result.success).toBe(true);
     expect(result.sitePath).toMatch(/\.jpeg$/);
+  });
+
+  it("rejects a truncated image payload — decodes but is corrupt", async () => {
+    // A model re-emitting a clipped data: URL produces a JPEG with a valid
+    // header but no EOI marker — writing it ships a broken site asset.
+    const transport = spyTransport();
+    const truncatedJpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
+    const result = await insertAssetFromUrl(
+      `data:image/jpeg;base64,${truncatedJpeg.toString("base64")}`,
+      { nameHint: "hero" },
+      transport,
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/truncated|corrupt/i);
+    expect(transport.writeBinaryFile).not.toHaveBeenCalled();
   });
 
   it("rejects non-image data URLs", async () => {
