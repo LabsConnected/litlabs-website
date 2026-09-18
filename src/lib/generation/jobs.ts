@@ -219,7 +219,7 @@ export async function updateGenerationJobMetadata(
 
 // ─── Helpers ────────────────────────────────────────────────────
 
-function rowToJob(row: Record<string, unknown>): GenerationJob {
+export function rowToJob(row: Record<string, unknown>): GenerationJob {
   return {
     id: row.id as string,
     userId: row.user_id as string,
