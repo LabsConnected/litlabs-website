@@ -1484,9 +1484,9 @@ app.post("/ws-files/write", async (req: AuthenticatedRequest, res) => {
     // workspace is still on untouched starter scaffolding. A write that
     // overwrites a scaffold file means a build is starting: checkpoint
     // first, then remove the untouched scaffolding wholesale BEFORE this
-    // write lands, so the agent can never merge with it. Any other first
-    // write is a user-authored edit/addition: the flag is consumed and
-    // nothing is deleted (the page is preserved).
+    // write lands, so the agent can never merge with it. Non-scaffold
+    // writes (assets, CSS, JS, images) are no-ops — the flag stays
+    // active until the scaffold page itself is replaced.
     let scaffold: Awaited<ReturnType<typeof replaceScaffoldingForWrite>> | undefined;
     try {
       scaffold = await replaceScaffoldingForWrite(req.workspaceRoot!, filePath);

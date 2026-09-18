@@ -17,8 +17,8 @@
  *   a write that targets a scaffold file is a wholesale overwrite of the
  *   scaffolding (a build starting): checkpoint first, then remove the
  *   untouched scaffold files wholesale, then clear the flag. Any other
- *   first write is a user-authored edit/addition: the flag is consumed
- *   and nothing is deleted.
+ *   write (assets, CSS, JS, images, fonts, folders) is a no-op — the
+ *   scaffold flag stays active until the scaffold page itself is replaced.
  * - Files whose current bytes no longer match the seeded hash are
  *   user-edited and are NEVER deleted by this module.
  * - The in-file `WELCOME_SCREEN_MARKER` comment (welcome-screen.ts) is the
@@ -242,9 +242,9 @@ function checkpointScaffoldingToFiles(root: string): ScaffoldCheckpoint | null {
  * write with the workspace root and the workspace-relative write path.
  *
  * - Workspace not scaffolded (no/invalid manifest) → no-op.
- * - Write targets a path outside the manifest → first user-authored
- *   edit/addition: the flag is consumed, nothing is deleted, the page is
- *   preserved (brief §7: "add it to this page" keeps the page).
+ * - Write targets a path outside the manifest (assets, CSS, JS, images,
+ *   fonts, folders, supporting files) → no-op. The scaffold flag stays
+ *   active so the later scaffold-page write still knows to replace it.
  * - Write targets a scaffold file → wholesale overwrite of the
  *   scaffolding, i.e. a build starting: write the undo checkpoint first,
  *   remove every scaffold file still byte-identical to the seeded
@@ -263,10 +263,12 @@ export async function replaceScaffoldingForWrite(
   const target = normalizeScaffoldPath(writePath);
 
   if (!manifest.scaffoldFiles.includes(target)) {
-    clearScaffoldManifest(root);
     return {
-      ...NOT_SCAFFOLDED,
-      flagCleared: true,
+      acted: false,
+      flagCleared: false,
+      checkpoint: null,
+      removedFiles: [],
+      preservedEditedFiles: [],
       reason: "non-scaffold-write",
     };
   }

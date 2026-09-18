@@ -11,7 +11,7 @@
  * - a build write to a scaffold file replaces untouched scaffolding
  *   wholesale, after a git undo checkpoint
  * - user-edited content is NEVER deleted (hash mismatch ⇒ preserved)
- * - the first write outside scaffolding consumes the flag and deletes nothing
+ * - non-scaffold writes (assets, images, CSS) are no-ops — the flag stays
  * - the undo checkpoint restores the pre-build state (brief §15 "Undo")
  * - "Refresh mid-run": the flag lives on disk, so a second write is a no-op
  */
@@ -222,23 +222,21 @@ describe("replaceScaffoldingForWrite", { timeout: GIT_TIMEOUT_MS }, () => {
     expect(result.checkpoint).not.toBeNull();
   });
 
-  it("a first write outside scaffolding clears the flag and deletes nothing", async () => {
+  it("a non-scaffold write (asset) is a no-op — the flag stays active", async () => {
     writeTemplateFiles(ROOT, "blank-static");
     await seedGitRepo(ROOT);
 
-    // "Add an emblem to this page": the agent saves an asset first.
     const result = await replaceScaffoldingForWrite(
       ROOT,
       "public/assets/images/neon-lightning.svg",
     );
 
     expect(result.acted).toBe(false);
-    expect(result.flagCleared).toBe(true);
+    expect(result.flagCleared).toBe(false);
     expect(result.reason).toBe("non-scaffold-write");
-    // The page is preserved — brief §7: adding to the page keeps the page.
     expect(existsSync(join(ROOT, "index.html"))).toBe(true);
     expect(readFileSync(join(ROOT, "index.html"), "utf-8")).toContain("Welcome to LiTT");
-    expect(isScaffolded(ROOT)).toBe(false);
+    expect(isScaffolded(ROOT)).toBe(true);
     expect(result.checkpoint).toBeNull();
   });
 
@@ -297,6 +295,79 @@ describe("replaceScaffoldingForWrite", { timeout: GIT_TIMEOUT_MS }, () => {
     // Real structure is not scaffolding and is never touched.
     expect(existsSync(join(ROOT, "package.json"))).toBe(true);
     expect(existsSync(join(ROOT, "app", "layout.tsx"))).toBe(true);
+    expect(isScaffolded(ROOT)).toBe(false);
+  });
+
+  it("regression: asset write → scaffold page write replaces scaffolding (blank-static)", async () => {
+    // 1. Create fresh blank-static scaffold
+    writeTemplateFiles(ROOT, "blank-static");
+    await seedGitRepo(ROOT);
+
+    // 2. Write an asset (hero image)
+    const assetResult = await replaceScaffoldingForWrite(ROOT, "public/assets/images/hero.webp");
+    expect(assetResult.acted).toBe(false);
+    expect(assetResult.flagCleared).toBe(false);
+
+    // 3. Scaffold flag must still be active
+    expect(isScaffolded(ROOT)).toBe(true);
+
+    // 4. index.html still contains Welcome to LiTT
+    expect(existsSync(join(ROOT, "index.html"))).toBe(true);
+    expect(readFileSync(join(ROOT, "index.html"), "utf-8")).toContain("Welcome to LiTT");
+
+    // 5. Write/replace index.html (the scaffold page)
+    const pageResult = await replaceScaffoldingForWrite(ROOT, "index.html");
+
+    // 6. Untouched starter scaffolding removed wholesale
+    expect(pageResult.acted).toBe(true);
+    expect(pageResult.reason).toBe("scaffold-file-overwrite");
+    expect(existsSync(join(ROOT, "index.html"))).toBe(false);
+    expect(pageResult.removedFiles).toEqual(["index.html"]);
+
+    // 7. Scaffold manifest now cleared
+    expect(pageResult.flagCleared).toBe(true);
+    expect(isScaffolded(ROOT)).toBe(false);
+  });
+
+  it("regression: asset write → scaffold page write replaces scaffolding (nextjs)", async () => {
+    writeTemplateFiles(ROOT, "nextjs");
+    await seedGitRepo(ROOT);
+
+    // Asset write — scaffold stays
+    const assetResult = await replaceScaffoldingForWrite(ROOT, "public/images/hero.webp");
+    expect(assetResult.acted).toBe(false);
+    expect(isScaffolded(ROOT)).toBe(true);
+    expect(existsSync(join(ROOT, "app", "page.tsx"))).toBe(true);
+
+    // Multiple supporting files — scaffold still stays
+    for (const f of ["app/globals.css", "app/components/Header.tsx", "public/favicon.ico"]) {
+      const r = await replaceScaffoldingForWrite(ROOT, f);
+      expect(r.acted).toBe(false);
+      expect(r.flagCleared).toBe(false);
+    }
+    expect(isScaffolded(ROOT)).toBe(true);
+
+    // Now replace the scaffold page
+    const pageResult = await replaceScaffoldingForWrite(ROOT, "app/page.tsx");
+    expect(pageResult.acted).toBe(true);
+    expect(pageResult.removedFiles).toEqual(["app/page.tsx"]);
+    expect(isScaffolded(ROOT)).toBe(false);
+  });
+
+  it("regression: asset write → scaffold page write replaces scaffolding (react-vite)", async () => {
+    writeTemplateFiles(ROOT, "react-vite");
+    await seedGitRepo(ROOT);
+
+    // Asset write — scaffold stays
+    const assetResult = await replaceScaffoldingForWrite(ROOT, "src/assets/logo.svg");
+    expect(assetResult.acted).toBe(false);
+    expect(isScaffolded(ROOT)).toBe(true);
+    expect(existsSync(join(ROOT, "src", "App.tsx"))).toBe(true);
+
+    // Now replace the scaffold page
+    const pageResult = await replaceScaffoldingForWrite(ROOT, "src/App.tsx");
+    expect(pageResult.acted).toBe(true);
+    expect(pageResult.removedFiles).toEqual(["src/App.tsx"]);
     expect(isScaffolded(ROOT)).toBe(false);
   });
 
