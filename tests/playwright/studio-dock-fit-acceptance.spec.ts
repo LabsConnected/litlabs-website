@@ -15,8 +15,19 @@ import { test, expect, type Page } from "@playwright/test";
  * bypassCSP is used ONLY because local dev CSP whitelists the dev terminal
  * port (:4001) while this test stack runs the terminal-server on :4011.
  * The CSP itself is not under test.
+ *
+ * Requires a live stack: Next dev server + terminal-server + Clerk test
+ * auth. Filename avoids `terminal` so public-chromium's testMatch doesn't
+ * pick it up; it matches only authenticated-chromium (not run in CI).
+ * Opt in explicitly with PLAYWRIGHT_TERMINAL_ACCEPTANCE=1:
+ *   PLAYWRIGHT_TERMINAL_ACCEPTANCE=1 PLAYWRIGHT_BASE_URL=http://localhost:3011 \
+ *     npx playwright test studio-dock-fit-acceptance --project=authenticated-chromium --no-deps
  */
 test.use({ bypassCSP: true });
+test.skip(
+  !process.env.PLAYWRIGHT_TERMINAL_ACCEPTANCE,
+  "requires live terminal-server + auth stack; set PLAYWRIGHT_TERMINAL_ACCEPTANCE=1",
+);
 
 const VIEWPORTS = [
   { name: "mobile", width: 390, height: 844 },
