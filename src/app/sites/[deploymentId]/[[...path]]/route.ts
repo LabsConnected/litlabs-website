@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { readPublishedFile } from "@/lib/deployments/deployment-store";
-import { deploymentPublicPath } from "@/lib/deployments/user-deployment";
+import {
+  deploymentPublicPath,
+  isBinaryContentType,
+} from "@/lib/deployments/user-deployment";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,7 +68,14 @@ export async function GET(
     return new NextResponse("Not found", { status: 404 });
   }
 
-  let content = file.content;
+  let content: string | Uint8Array<ArrayBuffer> = file.content;
+  // Binary artifacts (images, fonts) are stored base64 — the files table
+  // is text-shaped — so decode them back to raw bytes before serving.
+  // The predicate is content-type-derived, so pre-existing text rows are
+  // unaffected.
+  if (isBinaryContentType(file.contentType)) {
+    content = new Uint8Array(Buffer.from(file.content, "base64"));
+  }
   // LiTT form wiring: static exports render forms with an empty
   // `deploymentId` hidden input (the id doesn't exist until the deploy
   // is created). At serve time the id is known from the URL, so fill it

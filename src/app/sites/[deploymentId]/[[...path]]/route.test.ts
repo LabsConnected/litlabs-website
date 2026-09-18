@@ -14,7 +14,8 @@ import { NextRequest } from "next/server";
 vi.mock("@/lib/deployments/deployment-store", () => ({
   readPublishedFile: vi.fn(),
 }));
-vi.mock("@/lib/deployments/user-deployment", () => ({
+vi.mock("@/lib/deployments/user-deployment", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/deployments/user-deployment")>()),
   deploymentPublicPath: vi.fn((_id: string, p: string) => p || "index.html"),
 }));
 
@@ -68,5 +69,22 @@ describe("sites route — form deploymentId injection", () => {
     const text = await res.text();
     expect(text).toContain('value="dep_other"');
     expect(text).not.toContain('value="dep_abc123"');
+  });
+
+  it("serves base64-stored binary artifacts as decoded bytes", async () => {
+    // Binary artifacts (images/fonts) are stored base64 in the text-shaped
+    // files table; the route must decode before serving or images corrupt.
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    mockRead.mockResolvedValue({
+      content: png.toString("base64"),
+      contentType: "image/png",
+    });
+    const res = await GET(req("/sites/dep_abc123"), {
+      params: Promise.resolve({ deploymentId: "dep_abc123" }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    const body = Buffer.from(await res.arrayBuffer());
+    expect(body).toEqual(png);
   });
 });

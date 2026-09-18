@@ -136,6 +136,8 @@ export interface WorkspaceTransport {
   // File operations
   listFiles(path: string): Promise<{ entries: Array<{ name: string; type: string }> }>;
   readFile(path: string): Promise<{ content: string; size: number }>;
+  /** Read a binary file; content is base64-encoded. */
+  readBinaryFile(path: string): Promise<{ content: string; size: number }>;
   writeFile(path: string, content: string): Promise<{ saved: boolean }>;
   writeBinaryFile(path: string, base64Content: string): Promise<{ saved: boolean }>;
   deleteFile(path: string): Promise<{ deleted: boolean }>;
@@ -247,10 +249,21 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
   }
 
   async readFile(path: string): Promise<{ content: string; size: number }> {
+    return this.readWorkspaceFile(path, "utf-8");
+  }
+
+  async readBinaryFile(path: string): Promise<{ content: string; size: number }> {
+    return this.readWorkspaceFile(path, "base64");
+  }
+
+  private async readWorkspaceFile(
+    path: string,
+    encoding: "utf-8" | "base64",
+  ): Promise<{ content: string; size: number }> {
     const resp = await fetch(`${terminalBase()}/ws-files/read`, {
       method: "POST",
       headers: this.wsFileHeaders,
-      body: JSON.stringify({ path }),
+      body: JSON.stringify({ path, encoding }),
     });
     if (!resp.ok) {
       const err = await resp.text().catch(() => "");

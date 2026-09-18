@@ -45,7 +45,14 @@ export type PreviewStatus =
 /** One file in a deployable artifact. */
 export interface ArtifactFile {
   path: string;
+  /**
+   * File content. Text files are utf-8 source; binary files (images, fonts)
+   * are base64 — see `encoding`. Stored verbatim in the deployment-files
+   * table and decoded by the serving route based on content type.
+   */
   content: string;
+  /** "base64" marks binary payloads; absent means utf-8 text. */
+  encoding?: "utf-8" | "base64";
 }
 
 /**
@@ -80,7 +87,7 @@ const CONTENT_TYPES: Record<string, string> = {
   woff: "font/woff",
   woff2: "font/woff2",
   ttf: "font/ttf",
-  webmanifest: "application/manifest+json",
+  webmanifest: "application/manifest+json; charset=utf-8",
 };
 
 /**
@@ -94,6 +101,27 @@ export function contentTypeFor(path: string): string {
   const match = /\.([A-Za-z0-9]+)$/.exec(path);
   if (!match) return "application/octet-stream";
   return CONTENT_TYPES[match[1].toLowerCase()] ?? "application/octet-stream";
+}
+
+/**
+ * Whether an artifact of this content type is stored as base64.
+ *
+ * Text types (html/css/js/json/xml/svg/manifest) are stored as utf-8
+ * source. Everything else collectable — raster images, fonts, icons —
+ * is binary and round-trips through base64, because the workspace file
+ * API and the deployment-files table are text-shaped.
+ */
+export function isBinaryContentType(contentType: string): boolean {
+  if (contentType.startsWith("text/")) return false;
+  if (contentType === "image/svg+xml") return false;
+  return !contentType.includes("charset=utf-8");
+}
+
+/** Byte length of an artifact's payload after decoding. */
+export function artifactBytes(file: ArtifactFile): number {
+  return file.encoding === "base64"
+    ? Buffer.from(file.content, "base64").length
+    : Buffer.byteLength(file.content, "utf8");
 }
 
 /**
@@ -243,7 +271,7 @@ export function validateArtifact(files: ArtifactFile[]): ArtifactValidation {
     }
     seen.add(file.path);
 
-    const bytes = Buffer.byteLength(file.content ?? "", "utf8");
+    const bytes = artifactBytes(file);
     if (bytes > DEPLOYMENT_LIMITS.maxFileBytes) {
       return {
         ok: false,
