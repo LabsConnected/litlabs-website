@@ -43,7 +43,7 @@ export function RealProductProof() {
 
   return (
     <section id="real-proof" className="litt-section relative overflow-hidden border-t border-white/8 bg-[#05070d]">
-      <div className="pointer-events-none absolute left-1/2 top-0 h-[380px] w-[680px] -translate-x-1/2 rounded-full bg-[#a8ff2f]/6 blur-[140px]" />
+      <div className="pointer-events-none absolute left-1/2 top-0 h-[380px] w-[680px] -translate-x-1/2 rounded-full bg-accent/6 blur-[140px]" />
       <div className="relative mx-auto max-w-[1500px] px-5 lg:px-8">
         <div data-reveal className="mx-auto max-w-3xl text-center">
           <div className="litt-eyebrow">
@@ -81,7 +81,7 @@ export function RealProductProof() {
             <div className="litt-video-placeholder">
               <div className="litt-video-placeholder-inner">
                 <div className="flex flex-col items-center gap-4 text-center">
-                  <div className="grid h-16 w-16 place-items-center rounded-2xl border border-[#a8ff2f]/24 bg-[#a8ff2f]/8 text-[#a8ff2f] shadow-[0_0_30px_rgba(168,255,47,.12)]">
+                  <div className="grid h-16 w-16 place-items-center rounded-2xl border border-accent/24 bg-accent/8 text-accent shadow-accent-glow">
                     <Play size={28} fill="currentColor" />
                   </div>
                   <div>
@@ -102,7 +102,7 @@ export function RealProductProof() {
                         key={step.label}
                         className="flex items-center gap-2.5 rounded-xl border border-white/8 bg-[#05070d] px-3 py-3"
                       >
-                        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-white/5 font-mono text-[10px] font-black text-[#a8ff2f]">
+                        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-white/5 font-mono text-[10px] font-black text-accent">
                           0{index + 1}
                         </span>
                         <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-white/58">

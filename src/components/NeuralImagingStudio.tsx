@@ -196,7 +196,7 @@ export default function NeuralImagingStudio() {
       )}
 
       {validating && (
-        <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-3 text-blue-300 text-sm flex items-center gap-2">
+        <div className="bg-accent/10 border border-accent/30 rounded-xl p-3 text-accent text-sm flex items-center gap-2">
           <span className="animate-spin">🔍</span>
           LiTT is checking the output…
         </div>
@@ -228,7 +228,7 @@ export default function NeuralImagingStudio() {
             <textarea
               value={prompt}
               onChange={handlePromptChange}
-              className="w-full h-32 bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none placeholder-slate-600"
+              className="w-full h-32 bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-accent resize-none placeholder-slate-600"
               placeholder="Describe the scene... (min 3 chars)"
               disabled={isGenerating}
             />
@@ -276,7 +276,7 @@ export default function NeuralImagingStudio() {
                   onClick={() => setSelectedProvider(provider.id)}
                   className={`w-full text-left p-2.5 rounded-lg border text-xs transition ${
                     selectedProvider === provider.id
-                      ? "bg-orange-500/20 border-orange-500"
+                      ? "bg-accent/20 border-accent"
                       : "bg-slate-900 border-slate-800 hover:border-slate-700"
                   }`}
                 >
@@ -316,7 +316,7 @@ export default function NeuralImagingStudio() {
                     onClick={() => setSelectedRatio(ratio.id)}
                     className={`px-3 py-1.5 text-xs rounded-lg border transition ${
                       selectedRatio === ratio.id
-                        ? "bg-orange-500 text-white border-orange-500"
+                        ? "bg-accent text-on-accent border-accent"
                         : "bg-slate-900 text-zinc-300 border-slate-800 hover:border-slate-700"
                     }`}
                   >
@@ -337,7 +337,7 @@ export default function NeuralImagingStudio() {
                     onClick={() => setBatchSize(size)}
                     className={`flex-1 px-3 py-1.5 text-xs rounded-lg border transition ${
                       batchSize === size
-                        ? "bg-orange-500 text-white border-orange-500"
+                        ? "bg-accent text-on-accent border-accent"
                         : "bg-slate-900 text-zinc-300 border-slate-800 hover:border-slate-700"
                     }`}
                   >
@@ -354,7 +354,7 @@ export default function NeuralImagingStudio() {
             disabled={!isValidPrompt || isGenerating}
             className={`w-full py-4 rounded-xl text-sm font-bold tracking-wider uppercase transition flex items-center justify-center gap-2 ${
               isValidPrompt && !isGenerating
-                ? "bg-orange-500 hover:bg-orange-400 text-white shadow-lg shadow-orange-500/20"
+                ? "bg-accent hover:bg-accent-strong text-on-accent shadow-lg shadow-accent-glow"
                 : "bg-slate-800 text-slate-500 cursor-not-allowed"
             }`}
           >
@@ -409,7 +409,7 @@ export default function NeuralImagingStudio() {
                   <button
                     key={idx}
                     onClick={() => setPreviewImage(img.url)}
-                    className="aspect-square rounded-lg overflow-hidden border-2 border-transparent hover:border-orange-500 transition"
+                    className="aspect-square rounded-lg overflow-hidden border-2 border-transparent hover:border-accent transition"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <Image

@@ -62,8 +62,8 @@ export function OutputPanel({
     <div className="flex h-full flex-col rounded-2xl border border-neutral-800/60 bg-black/40 backdrop-blur-sm overflow-hidden">
       <div className="flex items-center justify-between border-b border-neutral-800/60 px-3 py-2">
         <div className="flex items-center gap-1.5">
-          <Layers size={14} className="text-cyan-400" />
-          <span className="text-xs font-black uppercase tracking-widest text-cyan-300">
+          <Layers size={14} className="text-accent" />
+          <span className="text-xs font-black uppercase tracking-widest text-accent">
             Workspace Output
           </span>
         </div>
@@ -78,7 +78,7 @@ export function OutputPanel({
               onClick={() => setActive(tab.id)}
               className={`flex flex-1 items-center justify-center gap-1 py-2 text-[10px] font-bold uppercase transition-all ${
                 active === tab.id
-                  ? "bg-cyan-500/10 text-cyan-300 border-b-2 border-cyan-400"
+                  ? "bg-accent/10 text-accent border-b-2 border-accent"
                   : "text-neutral-500 hover:text-neutral-300"
               }`}
             >
@@ -188,7 +188,7 @@ export function OutputPanel({
                   onClick={() => onSelectFileAction?.(f)}
                   className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11px] font-medium transition ${
                     selectedFile === f
-                      ? "bg-cyan-500/10 text-cyan-300"
+                      ? "bg-accent/10 text-accent"
                       : "text-neutral-400 hover:bg-neutral-900/60 hover:text-neutral-200"
                   }`}
                 >

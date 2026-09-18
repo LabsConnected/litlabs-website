@@ -12,7 +12,7 @@ export type BadgeVariant =
 
 const variantClasses: Record<BadgeVariant, string> = {
   neutral: "bg-white/10 text-white/75 border-white/12",
-  primary: "bg-cyan-400/15 text-cyan-200 border-cyan-300/30",
+  primary: "bg-accent/15 text-accent border-accent/30",
   // Restrained violet — meaningful accents only (e.g. creative/spark states).
   violet: "bg-violet-400/15 text-violet-200 border-violet-400/30",
   success: "bg-emerald-400/15 text-emerald-200 border-emerald-400/30",

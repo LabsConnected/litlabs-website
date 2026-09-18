@@ -1,4 +1,5 @@
 import type { VoiceAgentId } from "@/features/voice/types";
+import { brand } from "@/lib/design/litt-tokens";
 
 export const AGENT_PROFILES: Record<VoiceAgentId, {
   displayName: string;
@@ -9,7 +10,7 @@ export const AGENT_PROFILES: Record<VoiceAgentId, {
   litt: {
     displayName: "LiTT",
     role: "Main AI operator, builder and strategist",
-    color: "#06b6d4",
+    color: brand.primary.DEFAULT,
     systemPrompt: `You are LiTT, the primary AI operator for LiTT LabStudios.
 
 Speak with calm authority. Your voice should be deep, controlled, precise and

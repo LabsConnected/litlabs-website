@@ -319,10 +319,10 @@ export default function CommandComposer({
       case "requesting_permission":
       case "connecting": return { icon: Loader2, color: "var(--text-muted)", disabled: true, onClick: undefined };
       case "listening":
-      case "user_speaking": return { icon: Mic, color: "#22d3ee", disabled: false, onClick: stopVoice };
-      case "processing": return { icon: Loader2, color: "#22d3ee", disabled: true, onClick: undefined };
-      case "transcript_ready": return { icon: Mic, color: "#72f238", disabled: false, onClick: startVoice };
-      case "sending": return { icon: Loader2, color: "#22d3ee", disabled: true, onClick: undefined };
+      case "user_speaking": return { icon: Mic, color: "var(--color-accent)", disabled: false, onClick: stopVoice };
+      case "processing": return { icon: Loader2, color: "var(--color-accent)", disabled: true, onClick: undefined };
+      case "transcript_ready": return { icon: Mic, color: "var(--color-accent)", disabled: false, onClick: startVoice };
+      case "sending": return { icon: Loader2, color: "var(--color-accent)", disabled: true, onClick: undefined };
       case "assistant_speaking": return { icon: Square, color: "#e3b341", disabled: false, onClick: interrupt };
       case "muted": return { icon: MicOff, color: "#e3b341", disabled: false, onClick: toggleMute };
       case "permission_denied": return { icon: MicOff, color: "#ef4444", disabled: false, onClick: startVoice };
@@ -680,8 +680,8 @@ export default function CommandComposer({
           onClick={() => setCameraPreviewOpen((v) => !v)}
           className="pointer-events-auto hidden sm:flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
           style={{
-            color: cameraPreviewOpen ? "#22d3ee" : "var(--text-muted)",
-            boxShadow: cameraPreviewOpen ? "0 0 0 2px rgba(34,211,238,0.3)" : undefined,
+            color: cameraPreviewOpen ? "var(--color-accent)" : "var(--text-muted)",
+            boxShadow: cameraPreviewOpen ? "0 0 0 2px color-mix(in srgb, var(--color-accent) 30%, transparent)" : undefined,
           }}
           aria-label={cameraPreviewOpen ? "Close camera preview" : "Open camera preview"}
           title="Camera — capture photo"
@@ -727,7 +727,7 @@ export default function CommandComposer({
             color: micState.color,
             boxShadow:
               voiceState === "listening" || voiceState === "user_speaking"
-                ? `0 0 0 2px rgba(34,211,238,0.3)`
+                ? "0 0 0 2px color-mix(in srgb, var(--color-accent) 30%, transparent)"
                 : undefined,
           }}
           aria-label={voiceState === "idle" ? "Start voice" : "Stop voice"}
@@ -754,8 +754,8 @@ export default function CommandComposer({
           <div
             className={`absolute inset-1 rounded-full ${busy ? "animate-spin" : ""}`}
             style={{
-              border: `2px solid ${busy ? "var(--litt-primary)" : "rgba(114,242,56,0.4)"}`,
-              borderTopColor: busy ? "transparent" : "rgba(114,242,56,0.8)",
+              border: `2px solid ${busy ? "var(--litt-primary)" : "color-mix(in srgb, var(--color-accent) 40%, transparent)"}`,
+              borderTopColor: busy ? "transparent" : "color-mix(in srgb, var(--color-accent) 80%, transparent)",
               transition: "border-color 0.3s ease",
             }}
           />
@@ -763,10 +763,10 @@ export default function CommandComposer({
           <div
             className="h-2 w-2 rounded-full transition-all"
             style={{
-              backgroundColor: busy ? "var(--litt-primary)" : "#72f238",
+              backgroundColor: busy ? "var(--litt-primary)" : "var(--color-accent)",
               boxShadow: busy
                 ? "0 0 8px var(--litt-primary), 0 0 16px var(--litt-primary)"
-                : "0 0 4px rgba(114,242,56,0.6)",
+                : "0 0 4px color-mix(in srgb, var(--color-accent) 60%, transparent)",
             }}
           />
         </div>
@@ -784,7 +784,7 @@ export default function CommandComposer({
             background: busy
               ? "rgba(227,179,65,0.18)"
               : value.trim() || snapshots.length || attachments.length
-                ? "linear-gradient(135deg, var(--litt-primary), #2eff4a)"
+                ? "linear-gradient(135deg, var(--litt-primary), var(--color-accent-strong))"
                 : "transparent",
             color: busy ? "#e3b341" : value.trim() || snapshots.length || attachments.length ? "#000" : "var(--text-muted)",
             boxShadow: value.trim() || snapshots.length || attachments.length ? "var(--studio-glow-green)" : "none",
@@ -821,7 +821,7 @@ export default function CommandComposer({
                 return (
                   <span
                     key={i}
-                    className="inline-block w-1 rounded-full bg-cyan-400 transition-all"
+                    className="inline-block w-1 rounded-full bg-accent transition-all"
                     style={{ height: `${height}px` }}
                   />
                 );
@@ -831,7 +831,7 @@ export default function CommandComposer({
 
           {/* Timer — mm:ss format */}
           {(voiceState === "listening" || voiceState === "user_speaking") && (
-            <span className="tabular-nums" style={{ color: "#22d3ee" }}>
+            <span className="tabular-nums text-accent">
               {String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:
               {String(recordingSeconds % 60).padStart(2, "0")}
             </span>
@@ -861,8 +861,7 @@ export default function CommandComposer({
             <button
               type="button"
               onClick={stopVoice}
-              className="rounded px-2.5 py-0.5 text-[10px] font-bold text-black"
-              style={{ backgroundColor: "#22d3ee" }}
+              className="rounded bg-accent px-2.5 py-0.5 text-[10px] font-bold text-on-accent"
               aria-label="Stop recording"
             >
               Stop
@@ -972,7 +971,7 @@ function TtsPopover({
           <span>Read replies aloud</span>
           <span
             className="inline-block h-2.5 w-2.5 rounded-full"
-            style={{ backgroundColor: ttsEnabled ? "#72f238" : "rgba(255,255,255,0.2)" }}
+            style={{ backgroundColor: ttsEnabled ? "var(--color-accent)" : "rgba(255,255,255,0.2)" }}
           />
         </button>
 
@@ -1001,7 +1000,7 @@ function TtsPopover({
           <span>Auto-send voice</span>
           <span
             className="inline-block h-2.5 w-2.5 rounded-full"
-            style={{ backgroundColor: autoSendEnabled ? "#72f238" : "rgba(255,255,255,0.2)" }}
+            style={{ backgroundColor: autoSendEnabled ? "var(--color-accent)" : "rgba(255,255,255,0.2)" }}
           />
         </button>
       </div>
@@ -1179,9 +1178,9 @@ function UnifiedSelectorPopover({
           type="button"
           onClick={() => onModelSelect(littAutoModel)}
           className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5"
-          style={{ backgroundColor: isLittAutoSelected ? "rgba(114,242,56,0.08)" : "transparent" }}
+          style={{ backgroundColor: isLittAutoSelected ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent" }}
         >
-          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-sm" style={{ backgroundColor: "rgba(114,242,56,0.15)" }}>
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-accent/15 text-sm">
             {littAutoModel.icon}
           </span>
           <div className="min-w-0 flex-1">
@@ -1218,7 +1217,7 @@ function UnifiedSelectorPopover({
             type="button"
             onClick={() => onModelSelect(m)}
             className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5"
-            style={{ backgroundColor: isActive ? "rgba(114,242,56,0.08)" : "transparent" }}
+            style={{ backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent" }}
           >
             <span className="text-base shrink-0">{m.icon}</span>
             <div className="min-w-0 flex-1">
@@ -1265,7 +1264,7 @@ function UnifiedSelectorPopover({
                 type="button"
                 onClick={() => onModelSelect(m)}
                 className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-white/5"
-                style={{ backgroundColor: isActive ? "rgba(114,242,56,0.08)" : "transparent" }}
+                style={{ backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent" }}
               >
                 <span className="text-sm shrink-0">{m.icon}</span>
                 <div className="min-w-0 flex-1">
@@ -1290,7 +1289,7 @@ function UnifiedSelectorPopover({
                 type="button"
                 onClick={() => onModelSelect(m)}
                 className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-white/5"
-                style={{ backgroundColor: isActive ? "rgba(114,242,56,0.08)" : "transparent" }}
+                style={{ backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent" }}
               >
                 <span className="text-sm shrink-0">{m.icon}</span>
                 <div className="min-w-0 flex-1">

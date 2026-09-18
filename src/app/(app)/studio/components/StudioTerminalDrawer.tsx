@@ -199,12 +199,7 @@ export default function StudioTerminalDrawer({ projectId, repositoryName, branch
                 try { localStorage.setItem("litt:terminalAutoStart", "1"); } catch {}
                 setTerminalSession("connecting");
               }}
-              className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-bold transition"
-              style={{
-                backgroundColor: "rgba(114,242,56,0.1)",
-                color: "#72f238",
-                border: "1px solid rgba(114,242,56,0.2)",
-              }}
+              className="flex items-center gap-1.5 rounded-md border border-accent/20 bg-accent/10 px-3 py-1.5 text-[11px] font-bold text-accent transition hover:bg-accent/20"
             >
               <Play size={12} />
               Start Terminal

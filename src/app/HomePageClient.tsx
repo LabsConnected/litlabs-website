@@ -170,7 +170,7 @@ function MissionDemo() {
           <div className="flex flex-wrap gap-2 lg:justify-end">
             {[{ icon: Mic2, label: "Talk" }, { icon: ImageIcon, label: "Create" }, { icon: Braces, label: "Build" }, { icon: Rocket, label: "Launch" }].map(({ icon: Icon, label }) => (
               <span key={label} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-bold text-white/60">
-                <Icon size={13} className="text-[#a8ff2f]" /> {label}
+                <Icon size={13} className="text-accent" /> {label}
               </span>
             ))}
           </div>
@@ -203,7 +203,7 @@ function LandingPage() {
   useViewportReveals(landingRef);
 
   return (
-    <main ref={landingRef} id="main-content" className="litt-landing min-h-dvh overflow-hidden bg-[#03050a] text-white selection:bg-[#a8ff2f] selection:text-[#03050a]">
+    <main ref={landingRef} id="main-content" className="litt-landing min-h-dvh overflow-hidden bg-[#03050a] text-white selection:bg-accent selection:text-on-accent">
       <LandingHeroV3 />
       <CapabilityStatus />
       <CapabilityGrid />

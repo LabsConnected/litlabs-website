@@ -252,12 +252,7 @@ export function ApprovalCard({
               type="button"
               data-testid="approval-retry"
               onClick={onRetry}
-              className="flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold transition hover:bg-white/10"
-              style={{
-                borderColor: "#22d3ee66",
-                backgroundColor: "#22d3ee12",
-                color: "#22d3ee",
-              }}
+              className="flex-1 rounded-lg border border-accent/40 bg-accent/10 px-2 py-1.5 text-[10px] font-bold text-accent transition hover:bg-accent/20"
             >
               Retry approval
             </button>
@@ -278,12 +273,7 @@ export function ApprovalCard({
               data-testid="approval-approve"
               onClick={() => onResolve?.("approved")}
               disabled={buttonsDisabled}
-              className="flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold transition hover:bg-white/10 disabled:opacity-40"
-              style={{
-                borderColor: "#22d3ee66",
-                backgroundColor: "#22d3ee12",
-                color: "#22d3ee",
-              }}
+              className="flex-1 rounded-lg border border-accent/40 bg-accent/10 px-2 py-1.5 text-[10px] font-bold text-accent transition hover:bg-accent/20 disabled:opacity-40"
             >
               {phase === "submitting" ? "Submitting…" : phase === "executing" ? "Running…" : "Approve"}
             </button>

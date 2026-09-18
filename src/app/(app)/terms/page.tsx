@@ -168,7 +168,7 @@ const sections = [
           Questions about these Terms? Email{" "}
           <SafeEmailLink
             email="support@litlabs.net"
-            className="font-bold text-[#a8ff2f] underline-offset-4 hover:underline"
+            className="font-bold text-accent underline-offset-4 hover:underline"
           />{" "}
           and we&apos;ll get back to you.
         </p>
@@ -184,7 +184,7 @@ export default function TermsPage() {
       <section className="relative border-b border-white/10 px-5 pt-28 pb-14 lg:px-10 lg:pt-32 lg:pb-16">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_30%,rgba(168,255,47,.12),transparent_32%),radial-gradient(circle_at_82%_60%,rgba(169,112,255,.14),transparent_34%)]" />
         <div className="relative mx-auto max-w-screen-2xl">
-          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#a8ff2f]/25 bg-[#a8ff2f]/8 px-4 py-2 text-xs font-black uppercase tracking-[.18em] text-[#a8ff2f]">
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-accent/25 bg-accent/8 px-4 py-2 text-xs font-black uppercase tracking-[.18em] text-accent">
             <Sparkles size={13} /> Terms
           </div>
           <h1 className="max-w-4xl text-4xl font-black leading-[.95] tracking-[-.045em] sm:text-5xl lg:text-6xl">
@@ -216,7 +216,7 @@ export default function TermsPage() {
                   <a
                     key={s.id}
                     href={`#${s.id}`}
-                    className="block rounded-lg px-3 py-2 text-white/55 transition hover:bg-white/5 hover:text-[#a8ff2f]"
+                    className="block rounded-lg px-3 py-2 text-white/55 transition hover:bg-white/5 hover:text-accent"
                   >
                     {s.title}
                   </a>
@@ -224,7 +224,7 @@ export default function TermsPage() {
               </nav>
               <Link
                 href="/sign-up"
-                className="mt-8 inline-flex items-center gap-2 rounded-xl bg-linear-to-r from-[#a8ff2f] to-[#62f6c4] px-4 py-3 text-sm font-black text-[#03050a] shadow-[0_0_28px_rgba(168,255,47,.2)] transition hover:scale-[1.02] hover:shadow-[0_0_38px_rgba(168,255,47,.35)]"
+                className="mt-8 inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-3 text-sm font-black text-on-accent shadow-accent-glow transition hover:scale-[1.02] hover:bg-accent-strong hover:shadow-accent-glow-strong"
               >
                 Create your free space <ArrowRight size={14} />
               </Link>
@@ -248,7 +248,7 @@ export default function TermsPage() {
               </section>
             ))}
 
-            <p className="rounded-2xl border border-[#a8ff2f]/20 bg-[#a8ff2f]/4 p-5 text-xs leading-6 text-white/45">
+            <p className="rounded-2xl border border-accent/20 bg-accent/4 p-5 text-xs leading-6 text-white/45">
               This document is a summary of the terms that govern use of LiTTree
               LabStudios. It is not legal advice. If something here conflicts with a
               signed agreement, that agreement controls where it applies.

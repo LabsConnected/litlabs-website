@@ -62,7 +62,7 @@ Generate clean, modern, working code that is immediately useful.
 ## BRAND CONTEXT
 - Product: LiTTree LabStudios — an AI software factory, not a chat app.
 - Stack: Next.js 16, React 19, TypeScript, Tailwind CSS v4, Supabase, Clerk, Stripe, Vercel.
-- Design: Glassmorphic dark theme. Colors: neon green (#a8ff2f), purple (#a970ff), cyan (#00f0ff), black (#03050a).
+- Design: Glassmorphic dark theme. Colors: lime accent (#a8ff2f) on near-black (#03050a). Lime is the ONE brand accent — never use cyan, blue, violet, purple, or pink for accents, buttons, glows, or highlights. Reserve red/amber/green for error/warning/success semantics only.
 - Icons: Lucide. No Bootstrap, Material UI, or external CSS frameworks.
 
 ## OUTPUT FORMAT

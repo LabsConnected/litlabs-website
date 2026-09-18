@@ -82,7 +82,7 @@ export function CommandHistory({
     <div className="flex h-full min-h-[200px] flex-col rounded-xl border border-neutral-800 bg-neutral-950 p-4">
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <History className="h-4 w-4 text-orange-400" />
+          <History className="h-4 w-4 text-accent" />
           <h2 className="font-bold">Command History</h2>
         </div>
         <button
@@ -104,7 +104,7 @@ export function CommandHistory({
             className="flex items-center justify-between rounded bg-black p-2 font-mono"
           >
             <div className="flex items-center gap-2 min-w-0">
-              <Terminal className="h-3 w-3 shrink-0 text-orange-500" />
+              <Terminal className="h-3 w-3 shrink-0 text-accent" />
               <span className="truncate">{item.command}</span>
             </div>
             <div className="flex shrink-0 items-center gap-2">

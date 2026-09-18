@@ -105,12 +105,7 @@ export function StudioErrorState({
               type="button"
               data-testid="studio-error-retry"
               onClick={onRetry}
-              className="rounded-lg border px-3 py-1.5 text-[11px] font-bold transition hover:bg-white/10"
-              style={{
-                borderColor: "#22d3ee66",
-                backgroundColor: "#22d3ee12",
-                color: "#22d3ee",
-              }}
+              className="rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-[11px] font-bold text-accent transition hover:bg-accent/20"
             >
               Retry
             </button>
@@ -179,13 +174,11 @@ export function StudioLoadingState({
                   {state === "done" ? (
                     <Check
                       size={14}
-                      style={{ color: "#22d3ee" }}
-                      className="pointer-events-none"
+                      className="pointer-events-none text-accent"
                     />
                   ) : state === "current" ? (
                     <span
-                      className="h-2.5 w-2.5 animate-pulse rounded-full"
-                      style={{ backgroundColor: "#22d3ee" }}
+                      className="h-2.5 w-2.5 animate-pulse rounded-full bg-accent"
                     />
                   ) : (
                     <span
@@ -214,8 +207,7 @@ export function StudioLoadingState({
         <>
           <Loader2
             size={24}
-            style={{ color: "#22d3ee" }}
-            className="pointer-events-none animate-spin"
+            className="pointer-events-none animate-spin text-accent"
           />
           <div
             className="text-[12px] font-medium"

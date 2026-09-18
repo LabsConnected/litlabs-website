@@ -1,5 +1,5 @@
 .litt-landing {
-  --litt-green: #a8ff2f;
+  --litt-green: var(--color-accent); /* PR-G: aliased to J1 accent token */
   --litt-cyan: #65f4ff;
   --litt-violet: #b58cff;
   --litt-ink: #03050a;
@@ -15,7 +15,7 @@
 
 .litt-landing a:focus-visible,
 .litt-landing button:focus-visible {
-  outline: 2px solid rgba(168, 255, 47, 0.55);
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
   outline-offset: 3px;
 }
 
@@ -122,19 +122,19 @@
 }
 
 .litt-primary-button {
-  border: 1px solid rgba(220, 255, 176, 0.72);
-  background: linear-gradient(135deg, #c7ff7d 0%, #a8ff2f 48%, #7fffd4 110%);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 60%, white);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 65%, white) 0%, var(--color-accent) 48%, #7fffd4 110%);
   color: #03050a;
   box-shadow:
-    0 14px 32px rgba(113, 255, 75, 0.14),
+    0 14px 32px color-mix(in srgb, var(--color-accent) 14%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.45);
 }
 
 .litt-primary-button:hover {
   transform: translateY(-2px);
   box-shadow:
-    0 18px 42px rgba(113, 255, 75, 0.22),
-    0 0 38px rgba(168, 255, 47, 0.12),
+    0 18px 42px color-mix(in srgb, var(--color-accent) 22%, transparent),
+    0 0 38px color-mix(in srgb, var(--color-accent) 12%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 
@@ -148,14 +148,14 @@
 
 .litt-secondary-button:hover {
   transform: translateY(-2px);
-  border-color: rgba(101, 244, 255, 0.28);
-  background: rgba(101, 244, 255, 0.07);
+  border-color: color-mix(in srgb, var(--color-accent) 28%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
   color: white;
 }
 
 .litt-primary-button:focus-visible,
 .litt-secondary-button:focus-visible {
-  outline: 2px solid rgba(168, 255, 47, 0.55);
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
   outline-offset: 3px;
 }
 
@@ -169,7 +169,7 @@
   background:
     radial-gradient(circle at 77% 28%, rgba(101, 244, 255, 0.15), transparent 24%),
     radial-gradient(circle at 66% 52%, rgba(181, 140, 255, 0.13), transparent 29%),
-    radial-gradient(circle at 18% 22%, rgba(168, 255, 47, 0.07), transparent 26%);
+    radial-gradient(circle at 18% 22%, color-mix(in srgb, var(--color-accent) 7%, transparent), transparent 26%);
   animation: litt-aurora-breathe 14s ease-in-out infinite alternate;
 }
 
@@ -222,11 +222,11 @@
   align-items: center;
   gap: 0.6rem;
   width: fit-content;
-  border: 1px solid rgba(168, 255, 47, 0.18);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 18%, transparent);
   border-radius: 999px;
-  background: rgba(168, 255, 47, 0.055);
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
   padding: 0.45rem 0.75rem;
-  color: rgba(215, 255, 172, 0.84);
+  color: color-mix(in srgb, var(--color-accent) 72%, white);
   font-size: 0.65rem;
   font-weight: 900;
   letter-spacing: 0.14em;
@@ -248,7 +248,7 @@
 
 .litt-hero-title-gradient,
 .litt-gradient-text {
-  background: linear-gradient(105deg, #d7ff9f 2%, #a8ff2f 30%, #65f4ff 62%, #c6a5ff 96%);
+  background: linear-gradient(105deg, color-mix(in srgb, var(--color-accent) 70%, white) 2%, var(--color-accent) 30%, #65f4ff 62%, #c6a5ff 96%);
   background-size: 180% 180%;
   background-clip: text;
   -webkit-background-clip: text;
@@ -287,8 +287,8 @@
 }
 
 .litt-outcome-chip:hover {
-  border-color: rgba(168, 255, 47, 0.2);
-  background: rgba(168, 255, 47, 0.05);
+  border-color: color-mix(in srgb, var(--color-accent) 20%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 5%, transparent);
   color: rgba(255, 255, 255, 0.82);
 }
 
@@ -356,7 +356,7 @@
 }
 
 .litt-command-deck:hover .litt-terminal-lines > div {
-  color: rgba(202, 255, 133, 0.9);
+  color: color-mix(in srgb, var(--color-accent) 78%, white);
   transform: translateX(2px);
 }
 
@@ -533,7 +533,7 @@
 }
 
 .litt-stage-tab.is-complete {
-  color: rgba(168, 255, 47, 0.72);
+  color: color-mix(in srgb, var(--color-accent) 72%, transparent);
 }
 
 .litt-stage-tab.is-active {
@@ -600,9 +600,9 @@
 }
 
 .litt-agent-card:hover .litt-tool-chip {
-  border-color: rgba(168, 255, 47, 0.19);
-  background: rgba(168, 255, 47, 0.055);
-  color: rgba(219, 255, 174, 0.76);
+  border-color: color-mix(in srgb, var(--color-accent) 19%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
+  color: color-mix(in srgb, var(--color-accent) 70%, white);
   transform: translateY(-2px);
 }
 
@@ -618,12 +618,12 @@
 
 .litt-agent-litt::before {
   background: linear-gradient(90deg, transparent, var(--litt-green), transparent);
-  filter: drop-shadow(0 0 6px rgba(168, 255, 47, 0.75));
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--color-accent) 75%, transparent));
 }
 
 .litt-agent-litt:hover {
-  border-color: rgba(168, 255, 47, 0.24);
-  box-shadow: 0 34px 90px rgba(0, 0, 0, 0.36), 0 0 45px rgba(168, 255, 47, 0.04);
+  border-color: color-mix(in srgb, var(--color-accent) 24%, transparent);
+  box-shadow: 0 34px 90px rgba(0, 0, 0, 0.36), 0 0 45px color-mix(in srgb, var(--color-accent) 4%, transparent);
   transform: translateY(-4px);
 }
 
@@ -657,8 +657,8 @@
 }
 
 .litt-project-card:hover {
-  border-color: rgba(101, 244, 255, 0.2);
-  box-shadow: 0 32px 74px rgba(0, 0, 0, 0.3), 0 0 34px rgba(101, 244, 255, 0.04);
+  border-color: color-mix(in srgb, var(--color-accent) 20%, transparent);
+  box-shadow: 0 32px 74px rgba(0, 0, 0, 0.3), 0 0 34px color-mix(in srgb, var(--color-accent) 4%, transparent);
   transform: translateY(-5px);
 }
 
@@ -924,9 +924,9 @@
   left: 24%;
   width: 52%;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(168, 255, 47, 0.8), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-accent) 80%, transparent), transparent);
   content: "";
-  filter: drop-shadow(0 0 7px rgba(168, 255, 47, 0.5));
+  filter: drop-shadow(0 0 7px color-mix(in srgb, var(--color-accent) 50%, transparent));
 }
 
 .litt-video-placeholder-inner {
@@ -982,8 +982,8 @@
 }
 
 .litt-trust-card:hover {
-  border-color: rgba(168, 255, 47, 0.2);
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.24), 0 0 34px rgba(168, 255, 47, 0.04);
+  border-color: color-mix(in srgb, var(--color-accent) 20%, transparent);
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.24), 0 0 34px color-mix(in srgb, var(--color-accent) 4%, transparent);
   transform: translateY(-4px);
 }
 
@@ -992,9 +992,9 @@
   width: 2.5rem;
   height: 2.5rem;
   place-items: center;
-  border: 1px solid rgba(168, 255, 47, 0.24);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 24%, transparent);
   border-radius: 0.7rem;
-  background: rgba(168, 255, 47, 0.09);
+  background: color-mix(in srgb, var(--color-accent) 9%, transparent);
   color: var(--litt-green);
   flex-shrink: 0;
 }
@@ -1010,7 +1010,7 @@
 }
 
 .litt-faq-item.is-open {
-  border-color: rgba(168, 255, 47, 0.2);
+  border-color: color-mix(in srgb, var(--color-accent) 20%, transparent);
   background: rgba(10, 14, 22, 0.9);
 }
 
@@ -1024,7 +1024,7 @@
 }
 
 .litt-faq-item button:focus-visible {
-  outline: 2px solid rgba(168, 255, 47, 0.55);
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
   outline-offset: -2px;
 }
 

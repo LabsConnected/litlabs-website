@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { brand } from "@/lib/design/litt-tokens";
 import { ArrowRight, GitBranch, Rocket, Sparkles, UserPlus } from "lucide-react";
 
 const STEPS = [
@@ -6,7 +7,7 @@ const STEPS = [
     icon: UserPlus,
     title: "Create your account",
     copy: "No credit card required. Start with the free Starter plan.",
-    accent: "#a8ff2f",
+    accent: brand.primary.DEFAULT,
   },
   {
     icon: GitBranch,
@@ -24,7 +25,7 @@ const STEPS = [
     icon: Rocket,
     title: "Watch LiTT work",
     copy: "LiTT plans, edits, creates, runs tools, and verifies progress.",
-    accent: "#a8ff2f",
+    accent: brand.primary.DEFAULT,
   },
   {
     icon: ArrowRight,

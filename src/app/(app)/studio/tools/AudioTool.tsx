@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { brand } from "@/lib/design/litt-tokens";
 import { motion, useReducedMotion } from "framer-motion";
 import { useWallet } from "@/context/WalletContext";
 import {
@@ -460,8 +461,8 @@ export default function AudioTool() {
       <Entrance delay={0}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "rgba(34,211,238,0.12)", border: "1px solid rgba(34,211,238,0.25)" }}>
-              <Mic size={18} style={{ color: "#22D3EE" }} />
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "color-mix(in srgb, var(--color-accent) 12%, transparent)", border: "1px solid color-mix(in srgb, var(--color-accent) 25%, transparent)" }}>
+              <Mic size={18} style={{ color: "var(--color-accent)" }} />
             </div>
             <div>
               <div className="text-sm font-black tracking-tight text-white">LiTT Audio Lab</div>
@@ -469,11 +470,11 @@ export default function AudioTool() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="rounded-full border px-2.5 py-1 text-[10px] font-black" style={{ borderColor: "rgba(114,242,56,0.3)", background: "rgba(114,242,56,0.08)", color: "#72F238" }}>
+            <span className="rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-[10px] font-black text-accent">
               {coinBalance ?? "—"} BITS
             </span>
-            <span className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black" style={{ borderColor: "rgba(255,255,255,0.08)", color: genStatus === "generating" ? "#F97316" : "#72F238" }}>
-              <span className="h-1.5 w-1.5 rounded-full" style={{ background: genStatus === "generating" ? "#F97316" : "#72F238" }} />
+            <span className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black" style={{ borderColor: "rgba(255,255,255,0.08)", color: genStatus === "generating" ? "#F97316" : "var(--color-accent)" }}>
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: genStatus === "generating" ? "#F97316" : "var(--color-accent)" }} />
               {genStatus === "generating" ? "RECORDING" : genStatus === "ready" ? "READY" : "READY"}
             </span>
           </div>
@@ -492,11 +493,11 @@ export default function AudioTool() {
               onClick={() => setMode(tab.id)}
               className="flex flex-col items-start rounded-xl border px-4 py-2.5 transition-all hover:scale-[1.02] active:scale-95"
               style={{
-                borderColor: mode === tab.id ? "rgba(34,211,238,0.5)" : "rgba(255,255,255,0.08)",
-                background: mode === tab.id ? "rgba(34,211,238,0.10)" : "rgba(255,255,255,0.02)",
+                borderColor: mode === tab.id ? "color-mix(in srgb, var(--color-accent) 50%, transparent)" : "rgba(255,255,255,0.08)",
+                background: mode === tab.id ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "rgba(255,255,255,0.02)",
               }}
             >
-              <span className="text-xs font-black" style={{ color: mode === tab.id ? "#22D3EE" : "rgba(255,255,255,0.6)" }}>{tab.label}</span>
+              <span className="text-xs font-black" style={{ color: mode === tab.id ? "var(--color-accent)" : "rgba(255,255,255,0.6)" }}>{tab.label}</span>
               <span className="text-[9px]" style={{ color: "rgba(255,255,255,0.35)" }}>{tab.desc}</span>
             </button>
           ))}
@@ -507,7 +508,7 @@ export default function AudioTool() {
       <Entrance delay={0.1}>
         <div className="relative overflow-hidden rounded-2xl border" style={{ borderColor: "rgba(255,255,255,0.08)", background: "#080710" }}>
           {/* Ambient bloom */}
-          <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(ellipse at 50% 50%, rgba(34,211,238,0.06) 0%, transparent 70%)" }} />
+          <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(ellipse at 50% 50%, color-mix(in srgb, var(--color-accent) 6%, transparent) 0%, transparent 70%)" }} />
 
           <div className="relative p-6" style={{ minHeight: 160 }}>
             {current?.audioUrl && genStatus === "ready" ? (
@@ -523,8 +524,8 @@ export default function AudioTool() {
                         className="w-1 rounded-full transition-colors duration-150"
                         style={{
                           height: `${Math.max(8, Math.min(64, height))}px`,
-                          background: active ? "#22D3EE" : "rgba(255,255,255,0.12)",
-                          boxShadow: active ? "0 0 4px rgba(34,211,238,0.4)" : "none",
+                          background: active ? "var(--color-accent)" : "rgba(255,255,255,0.12)",
+                          boxShadow: active ? "0 0 4px color-mix(in srgb, var(--color-accent) 40%, transparent)" : "none",
                         }}
                       />
                     );
@@ -544,14 +545,14 @@ export default function AudioTool() {
                     aria-valuemax={duration}
                     tabIndex={0}
                   >
-                    <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%`, background: "linear-gradient(90deg, #22D3EE, #8B5CF6)" }} />
+                    <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%`, background: "linear-gradient(90deg, var(--color-accent), var(--color-accent-strong))" }} />
                   </div>
                   <span className="text-[10px] font-mono text-white/40">{formatTime(duration)}</span>
                 </div>
 
                 {/* Controls */}
                 <div className="flex items-center gap-3">
-                  <button onClick={togglePlay} className="flex items-center gap-2 rounded-xl border px-4 py-2 text-xs font-bold transition hover:scale-105" style={{ borderColor: "rgba(34,211,238,0.3)", background: "rgba(34,211,238,0.08)", color: "#22D3EE", minHeight: 40 }}>
+                  <button onClick={togglePlay} className="flex items-center gap-2 rounded-xl border px-4 py-2 text-xs font-bold transition hover:scale-105" style={{ borderColor: "color-mix(in srgb, var(--color-accent) 30%, transparent)", background: "color-mix(in srgb, var(--color-accent) 8%, transparent)", color: "var(--color-accent)", minHeight: 40 }}>
                     {isPlaying ? <><Pause size={14} /> Pause</> : <><Play size={14} /> Play</>}
                   </button>
                   <button onClick={() => handleDownload(current.audioUrl!, "voice")} className="flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] font-bold transition hover:scale-105" style={{ borderColor: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.6)", minHeight: 40 }}>
@@ -563,7 +564,7 @@ export default function AudioTool() {
                   {/* Volume */}
                   <div className="ml-auto flex items-center gap-2">
                     <Volume2 size={14} className="text-white/30" />
-                    <input type="range" min={0} max={1} step={0.05} value={volume} onChange={handleVolume} className="w-20 accent-cyan-400" aria-label="Volume" />
+                    <input type="range" min={0} max={1} step={0.05} value={volume} onChange={handleVolume} className="w-20 accent-accent" aria-label="Volume" />
                   </div>
                 </div>
 
@@ -580,7 +581,7 @@ export default function AudioTool() {
                 <motion.div className="h-1 w-48 overflow-hidden rounded-full" style={{ background: "rgba(255,255,255,0.06)" }}>
                   <motion.div
                     className="h-full rounded-full"
-                    style={{ background: "linear-gradient(90deg, transparent, rgba(34,211,238,0.8), transparent)" }}
+                    style={{ background: "linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-accent) 80%, transparent), transparent)" }}
                     animate={{ x: ["-100%", "100%"] }}
                     transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
                   />
@@ -590,7 +591,7 @@ export default function AudioTool() {
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center gap-3" style={{ minHeight: 120 }}>
-                <Mic size={36} className="opacity-20" style={{ color: "#22D3EE" }} />
+                <Mic size={36} className="opacity-20" style={{ color: "var(--color-accent)" }} />
                 <p className="text-sm text-white/40">Your audio will appear here</p>
                 <p className="text-[10px] text-white/20">{voice} · ~{formatTime(estimatedDuration)} estimated</p>
               </div>
@@ -603,7 +604,7 @@ export default function AudioTool() {
       <Entrance delay={0.15}>
         <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(10,9,18,0.6)", backdropFilter: "blur(12px)" }}>
           <div className="flex items-center gap-2">
-            <Sparkles size={14} style={{ color: "#22D3EE" }} />
+            <Sparkles size={14} style={{ color: "var(--color-accent)" }} />
             <span className="text-[10px] font-black uppercase tracking-[.16em] text-white/50">What should LiTT say?</span>
           </div>
 
@@ -611,9 +612,9 @@ export default function AudioTool() {
             <div className="mt-3 space-y-2">
               <div className="flex gap-2">
                 <button onClick={() => setShowDirected(false)} className="rounded-full border px-3 py-1 text-[10px] font-bold" style={{ borderColor: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)" }}>Original</button>
-                <button onClick={() => setShowDirected(true)} className="rounded-full border px-3 py-1 text-[10px] font-bold" style={{ borderColor: "rgba(34,211,238,0.4)", background: "rgba(34,211,238,0.12)", color: "#22D3EE" }}>Directed</button>
+                <button onClick={() => setShowDirected(true)} className="rounded-full border px-3 py-1 text-[10px] font-bold" style={{ borderColor: "color-mix(in srgb, var(--color-accent) 40%, transparent)", background: "color-mix(in srgb, var(--color-accent) 12%, transparent)", color: "var(--color-accent)" }}>Directed</button>
               </div>
-              <div className="whitespace-pre-wrap rounded-xl border p-3 text-sm leading-relaxed" style={{ borderColor: "rgba(34,211,238,0.2)", background: "rgba(34,211,238,0.05)", color: "rgba(255,255,255,0.85)" }}>
+              <div className="whitespace-pre-wrap rounded-xl border p-3 text-sm leading-relaxed" style={{ borderColor: "color-mix(in srgb, var(--color-accent) 20%, transparent)", background: "color-mix(in srgb, var(--color-accent) 5%, transparent)", color: "rgba(255,255,255,0.85)" }}>
                 {showDirected ? directedText : originalText}
               </div>
               {showDirected && (
@@ -645,7 +646,7 @@ export default function AudioTool() {
               onClick={handleDirect}
               disabled={!text.trim() || isDirecting || isGenerating}
               className="flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[11px] font-bold transition hover:scale-[1.02] active:scale-95 disabled:opacity-40"
-              style={{ borderColor: "rgba(34,211,238,0.3)", background: "rgba(34,211,238,0.08)", color: "#22D3EE", minHeight: 40 }}
+              style={{ borderColor: "color-mix(in srgb, var(--color-accent) 30%, transparent)", background: "color-mix(in srgb, var(--color-accent) 8%, transparent)", color: "var(--color-accent)", minHeight: 40 }}
             >
               {isDirecting ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
               Direct with LiTT
@@ -653,8 +654,8 @@ export default function AudioTool() {
             <button
               onClick={handleGenerate}
               disabled={!text.trim() || !canAfford || isGenerating}
-              className="ml-auto flex items-center gap-2 rounded-xl px-5 py-2 text-xs font-black transition hover:scale-[1.02] active:scale-95 disabled:opacity-40"
-              style={{ background: "linear-gradient(135deg, #22D3EE, #8B5CF6)", color: "#050508", boxShadow: "0 0 24px rgba(34,211,238,0.25)", minHeight: 40 }}
+              className="ml-auto flex items-center gap-2 rounded-xl bg-accent px-5 py-2 text-xs font-black text-on-accent shadow-accent-glow transition hover:bg-accent-strong hover:scale-[1.02] active:scale-95 disabled:opacity-40"
+              style={{ minHeight: 40 }}
             >
               {isGenerating ? <><Loader2 size={14} className="animate-spin" /> Generating...</> : <><Sparkles size={14} /> Generate Voice · {COST} BITS</>}
             </button>
@@ -686,14 +687,14 @@ export default function AudioTool() {
                   disabled={isGenerating}
                   className="w-full rounded-xl border p-3 text-left transition-all hover:scale-[1.01] disabled:opacity-50"
                   style={{
-                    borderColor: voice === v.id ? "rgba(34,211,238,0.5)" : "rgba(255,255,255,0.06)",
-                    background: voice === v.id ? "rgba(34,211,238,0.10)" : "rgba(255,255,255,0.02)",
+                    borderColor: voice === v.id ? "color-mix(in srgb, var(--color-accent) 50%, transparent)" : "rgba(255,255,255,0.06)",
+                    background: voice === v.id ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "rgba(255,255,255,0.02)",
                   }}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full" style={{ background: voice === v.id ? "#22D3EE" : "rgba(255,255,255,0.2)" }} />
-                      <span className="text-sm font-black" style={{ color: voice === v.id ? "#22D3EE" : "rgba(255,255,255,0.8)" }}>{v.label}</span>
+                      <span className="h-2 w-2 rounded-full" style={{ background: voice === v.id ? "var(--color-accent)" : "rgba(255,255,255,0.2)" }} />
+                      <span className="text-sm font-black" style={{ color: voice === v.id ? "var(--color-accent)" : "rgba(255,255,255,0.8)" }}>{v.label}</span>
                     </div>
                     <span className="text-[9px] text-white/30">{v.desc}</span>
                   </div>
@@ -705,8 +706,8 @@ export default function AudioTool() {
 
           {/* Delivery controls */}
           <div className="space-y-4 rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(10,9,18,0.5)", backdropFilter: "blur(12px)" }}>
-            <ChipRow label="Delivery" options={DELIVERY_OPTIONS} selected={delivery} onSelect={setDelivery} accentColor="#8B5CF6" />
-            <ChipRow label="Pacing" options={PACING_OPTIONS} selected={pacing} onSelect={setPacing} accentColor="#22D3EE" />
+            <ChipRow label="Delivery" options={DELIVERY_OPTIONS} selected={delivery} onSelect={setDelivery} accentColor={brand.primary.DEFAULT} />
+            <ChipRow label="Pacing" options={PACING_OPTIONS} selected={pacing} onSelect={setPacing} accentColor={brand.primary.DEFAULT} />
 
             {/* Direction */}
             <div>
@@ -735,9 +736,9 @@ export default function AudioTool() {
                     <span className="text-white/40">Model</span>
                     <span className="font-bold text-white/60">Gemini TTS</span>
                   </div>
-                  <div className="flex items-center justify-between rounded-lg border px-3 py-2 text-[10px]" style={{ borderColor: "rgba(34,211,238,0.2)", background: "rgba(34,211,238,0.05)" }}>
+                  <div className="flex items-center justify-between rounded-lg border px-3 py-2 text-[10px]" style={{ borderColor: "color-mix(in srgb, var(--color-accent) 20%, transparent)", background: "color-mix(in srgb, var(--color-accent) 5%, transparent)" }}>
                     <span className="text-white/40">Cost</span>
-                    <span className="font-black" style={{ color: "#22D3EE" }}>{COST} BITS</span>
+                    <span className="font-black" style={{ color: "var(--color-accent)" }}>{COST} BITS</span>
                   </div>
                 </div>
               )}
@@ -792,7 +793,7 @@ export default function AudioTool() {
                         className="w-0.5 rounded-full"
                         style={{
                           height: `${20 + Math.sin(i * 0.8) * 8 + (i % 5) * 3}px`,
-                          background: g.status === "ready" ? "rgba(34,211,238,0.4)" : "rgba(255,255,255,0.1)",
+                          background: g.status === "ready" ? "color-mix(in srgb, var(--color-accent) 40%, transparent)" : "rgba(255,255,255,0.1)",
                         }}
                       />
                     ))}
@@ -809,7 +810,7 @@ export default function AudioTool() {
                     <button
                       onClick={() => { setCurrent(g); setGenStatus("ready"); if (g.audioUrl) playAudio(g.audioUrl); }}
                       className="mt-2 flex items-center gap-1 rounded-lg border px-2 py-1 text-[9px] font-bold transition hover:scale-105"
-                      style={{ borderColor: "rgba(34,211,238,0.2)", color: "#22D3EE" }}
+                      style={{ borderColor: "color-mix(in srgb, var(--color-accent) 20%, transparent)", color: "var(--color-accent)" }}
                     >
                       <Play size={9} /> Play
                     </button>

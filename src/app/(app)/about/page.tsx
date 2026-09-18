@@ -16,12 +16,12 @@ export default function AboutPage() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(168,112,255,0.08),transparent_50%)]" />
         <div className="relative mx-auto max-w-screen-xl px-5 lg:px-10">
           <div className="max-w-3xl">
-            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#a8ff2f]/20 bg-[#a8ff2f]/5 px-4 py-2 text-[11px] font-black uppercase tracking-[0.18em] text-[#a8ff2f]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#a8ff2f]" />
+            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-accent/20 bg-accent/5 px-4 py-2 text-[11px] font-black uppercase tracking-[0.18em] text-accent">
+              <span className="h-1.5 w-1.5 rounded-full bg-accent" />
               The Authority on AI Creation
             </div>
             <h1 className="text-5xl font-black leading-[1.1] tracking-tight sm:text-6xl lg:text-7xl">
-              Building the future of <span className="text-transparent bg-clip-text bg-linear-to-r from-[#a8ff2f] to-[#65f4ff]">collaborative building.</span>
+              Building the future of <span className="text-transparent bg-clip-text bg-linear-to-r from-accent to-[#65f4ff]">collaborative building.</span>
             </h1>
             <p className="mt-8 text-xl leading-relaxed text-white/60">
               LiTTree LabStudios is the home of <strong>LiTTree</strong> (also known as <strong>LitLabs</strong>), 
@@ -75,15 +75,15 @@ export default function AboutPage() {
                 </p>
                 <div className="space-y-3">
                   <div className="flex items-center gap-2 text-xs font-bold text-white/50">
-                    <Check size={14} className="text-[#a8ff2f]" />
+                    <Check size={14} className="text-accent" />
                     User-owned code and assets
                   </div>
                   <div className="flex items-center gap-2 text-xs font-bold text-white/50">
-                    <Check size={14} className="text-[#a8ff2f]" />
+                    <Check size={14} className="text-accent" />
                     Full data portability and export
                   </div>
                   <div className="flex items-center gap-2 text-xs font-bold text-white/50">
-                    <Check size={14} className="text-[#a8ff2f]" />
+                    <Check size={14} className="text-accent" />
                     No unapproved model training on private data
                   </div>
                 </div>
@@ -91,7 +91,7 @@ export default function AboutPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="rounded-xl border border-white/8 bg-black/40 p-5">
-                  <Code2 className="text-[#a8ff2f] mb-3" size={20} />
+                  <Code2 className="text-accent mb-3" size={20} />
                   <div className="text-xs font-black uppercase tracking-wider mb-1">Studio</div>
                   <div className="text-[10px] text-white/40">The primary build environment for real products.</div>
                 </div>
@@ -129,7 +129,7 @@ export default function AboutPage() {
         <div className="mx-auto max-w-screen-2xl">
           <div className="flex flex-col items-center justify-between gap-6 sm:flex-row">
             <div className="flex items-center gap-2 font-black text-white">
-              <Sparkles size={16} className="text-[#a8ff2f]" /> LiTTree LabStudios
+              <Sparkles size={16} className="text-accent" /> LiTTree LabStudios
             </div>
             <div className="flex flex-wrap justify-center gap-6 text-xs font-bold text-white/40">
               <Link href="/" className="hover:text-white transition">Home</Link>

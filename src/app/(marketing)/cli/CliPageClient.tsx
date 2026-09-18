@@ -43,17 +43,17 @@ function CodeBlock({ command, label }: { command: string; label: string }) {
 
 export default function CliPageClient() {
   return (
-    <main id="main-content" className="min-h-dvh bg-[#03050a] text-white selection:bg-[#a8ff2f] selection:text-[#03050a]">
+    <main id="main-content" className="min-h-dvh bg-[#03050a] text-white selection:bg-accent selection:text-on-accent">
       <section className="relative overflow-hidden pb-12 pt-[120px] lg:pt-[160px]">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(169,112,255,.12),transparent_40%),radial-gradient(circle_at_80%_100%,rgba(168,255,47,.08),transparent_40%)]" />
         <div className="relative mx-auto max-w-[1100px] px-5 lg:px-8">
-          <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-[#a8ff2f]/30 bg-[#a8ff2f]/10 px-3 py-1 text-xs font-bold text-[#a8ff2f]">
+          <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs font-bold text-accent">
             <Terminal size={12} />
             LiTT for your terminal
           </div>
           <h1 className="text-4xl font-black leading-[1.05] tracking-[-0.03em] sm:text-5xl lg:text-6xl">
             The same LiTT brain, <br className="hidden sm:block" />
-            <span className="text-transparent bg-clip-text bg-linear-to-r from-[#a8ff2f] to-[#a970ff]">
+            <span className="text-transparent bg-clip-text bg-linear-to-r from-accent to-[#a970ff]">
               in your terminal.
             </span>
           </h1>
@@ -65,7 +65,7 @@ export default function CliPageClient() {
           <div className="mt-12 grid gap-8 md:grid-cols-2">
             <div className="rounded-2xl border border-white/10 bg-[#090d1b]/70 p-6 shadow-[0_24px_70px_rgba(0,0,0,.35)]">
               <div className="mb-6 flex items-center gap-3">
-                <div className="grid h-10 w-10 place-items-center rounded-xl bg-[#a8ff2f]/10 text-[#a8ff2f]">
+                <div className="grid h-10 w-10 place-items-center rounded-xl bg-accent/10 text-accent">
                   <Download size={20} />
                 </div>
                 <h2 className="text-lg font-black">Install</h2>

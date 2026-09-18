@@ -19,10 +19,12 @@ describe("LoadingBar (VMA-006 / VMA-024)", () => {
     expect(container.querySelector('[aria-hidden="true"]')?.textContent).toBe("⚡");
   });
 
-  it("colors the bar with the locked lime accent", () => {
+  it("colors the bar with the J1 lime accent token, never a hardcoded hex", () => {
     render(<LoadingBar label="Loading" />);
     const bar = screen.getByRole("progressbar");
-    expect(bar.style.backgroundColor).toBe("rgb(168, 255, 47)"); // #a8ff2f
+    expect(bar.className).toContain("bg-accent");
+    expect(bar.style.backgroundColor).toBe("");
+    expect(bar.className).not.toContain("#a8ff2f");
   });
 
   it("drives the bar with the shared .loading-bar class (no inline <style> keyframes)", () => {
@@ -54,7 +56,8 @@ describe("RouteLoading legacy alias (VMA-006)", () => {
     expect(container.querySelectorAll("style").length).toBe(0);
     expect(container.querySelectorAll(".loading-bar").length).toBe(1);
     const bar = screen.getByRole("progressbar");
-    expect(bar.style.backgroundColor).toBe("rgb(168, 255, 47)");
+    expect(bar.className).toContain("bg-accent");
+    expect(bar.style.backgroundColor).toBe("");
   });
 
   it("defaults to 'Loading...'", () => {

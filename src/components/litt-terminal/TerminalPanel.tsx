@@ -774,7 +774,7 @@ export const TerminalPanel = forwardRef<
               <AlertCircle size={10} /> No project context
             </span>
           ) : terminalStore.status === "connecting" ? (
-            <span className="inline-flex items-center gap-1.5 rounded bg-blue-500/20 px-2 py-1 text-[10px] font-bold text-blue-400">
+            <span className="inline-flex items-center gap-1.5 rounded bg-accent/20 px-2 py-1 text-[10px] font-bold text-accent">
               <Plug size={10} className="animate-pulse" /> Connecting to PTY…
             </span>
           ) : connected ? (
@@ -825,7 +825,7 @@ export const TerminalPanel = forwardRef<
                   ) : connected ? (
                     <span className="text-green-400">issued</span>
                   ) : terminalStore.status === "connecting" ? (
-                    <span className="text-blue-400">fetching…</span>
+                    <span className="text-accent">fetching…</span>
                   ) : (
                     <span className="text-amber-400">none</span>
                   )}
@@ -898,12 +898,12 @@ export const TerminalPanel = forwardRef<
       </div>
 
       <div className="relative flex-1 overflow-hidden mt-2">
-        <div className="relative h-full w-full overflow-hidden rounded-xl border border-purple-500/20 terminal-glow">
+        <div className="relative h-full w-full overflow-hidden rounded-xl border border-accent/20 terminal-glow">
           <style dangerouslySetInnerHTML={{ __html: `
             @keyframes terminal-pulse {
-              0% { box-shadow: 0 0 10px rgba(168, 85, 247, 0.15); border-color: rgba(168, 85, 247, 0.2); }
-              50% { box-shadow: 0 0 22px rgba(168, 85, 247, 0.35); border-color: rgba(168, 85, 247, 0.45); }
-              100% { box-shadow: 0 0 10px rgba(168, 85, 247, 0.15); border-color: rgba(168, 85, 247, 0.2); }
+              0% { box-shadow: 0 0 10px color-mix(in srgb, var(--color-accent) 15%, transparent); border-color: color-mix(in srgb, var(--color-accent) 20%, transparent); }
+              50% { box-shadow: 0 0 22px color-mix(in srgb, var(--color-accent) 35%, transparent); border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); }
+              100% { box-shadow: 0 0 10px color-mix(in srgb, var(--color-accent) 15%, transparent); border-color: color-mix(in srgb, var(--color-accent) 20%, transparent); }
             }
             @keyframes crt-flicker {
               0% { opacity: 0.992; }

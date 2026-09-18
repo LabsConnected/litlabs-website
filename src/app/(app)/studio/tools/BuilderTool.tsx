@@ -124,7 +124,7 @@ export default function BuilderTool() {
       <div className="grid flex-1 gap-3 md:grid-cols-[minmax(0,1fr)_320px]">
         <section className="rounded-2xl border border-white/10 bg-black/30 p-4">
           <div className="mb-4 flex items-center gap-2">
-            <Code2 size={16} className="text-cyan-300" />
+            <Code2 size={16} className="text-accent" />
             <div>
               <p className="text-xs font-black uppercase tracking-wider">AI Studio</p>
               <p className="text-[10px] text-white/50">Prompt → assets → preview → review → repair</p>
@@ -139,7 +139,7 @@ export default function BuilderTool() {
               const I = Icon as typeof Code2;
               return (
                 <div key={String(title)} className="rounded-xl border border-white/10 bg-white/[0.035] p-3">
-                  <I size={15} className="mb-2 text-cyan-300" />
+                  <I size={15} className="mb-2 text-accent" />
                   <p className="text-xs font-bold">{String(title)}</p>
                   <p className="mt-1 text-[10px] text-white/50">{String(copy)}</p>
                 </div>
@@ -233,7 +233,7 @@ export default function BuilderTool() {
             <button
               onClick={launchBuild}
               disabled={loading || !projectId}
-              className="inline-flex w-fit rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-xs font-bold text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex w-fit rounded-lg border border-accent/30 bg-accent/10 px-4 py-2 text-xs font-bold text-accent disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loading ? "Building…" : "Run visual build"}
             </button>
@@ -253,7 +253,7 @@ export default function BuilderTool() {
         <aside className="space-y-3">
           <PreviewPanel status={buildStatus} previewUrl={previewUrl || null} onRefresh={() => undefined} />
           <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-300">Project</p>
+            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-accent">Project</p>
             <p className="mt-2 text-[10px] leading-relaxed text-white/55">Select a project source to start building.</p>
             <button
               onClick={() => {
@@ -273,7 +273,7 @@ export default function BuilderTool() {
       </div>
       <section className="rounded-2xl border border-white/10 bg-black/30 p-4">
         <div className="mb-4">
-          <p className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-300">Project source</p>
+          <p className="text-[9px] font-black uppercase tracking-[0.2em] text-accent">Project source</p>
           <h3 className="mt-1 text-sm font-black">Choose how to start your project</h3>
           <p className="mt-1 text-[10px] text-white/50">GitHub, upload, template, or blank — this is the real project source used by Studio.</p>
         </div>

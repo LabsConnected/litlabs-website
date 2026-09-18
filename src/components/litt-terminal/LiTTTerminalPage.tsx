@@ -86,12 +86,12 @@ function StudioChatComposer() {
           onKeyDown={handleKeyDown}
           placeholder="Ask LiTT..."
           disabled={loading}
-          className="flex-1 rounded-xl border border-neutral-800/60 bg-neutral-900/60 px-3 py-2 text-sm text-neutral-100 outline-none placeholder:text-neutral-500 focus:border-cyan-500/40"
+          className="flex-1 rounded-xl border border-neutral-800/60 bg-neutral-900/60 px-3 py-2 text-sm text-neutral-100 outline-none placeholder:text-neutral-500 focus:border-accent/40"
         />
         <button
           onClick={() => void handleSend()}
           disabled={loading || !input.trim()}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cyan-500/10 text-cyan-400 transition hover:bg-cyan-500/20 disabled:opacity-40"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent/10 text-accent transition hover:bg-accent/20 disabled:opacity-40"
           aria-label="Send"
         >
           {loading ? (
@@ -229,7 +229,7 @@ function LiTTTerminalPageInner() {
 
   return (
     <main
-      className="h-full min-h-0 overflow-x-hidden text-white selection:bg-cyan-500/30"
+      className="h-full min-h-0 overflow-x-hidden text-white selection:bg-accent/30"
       style={{
         backgroundColor: "#050505",
         ...wallpaperStyle,
@@ -241,8 +241,8 @@ function LiTTTerminalPageInner() {
       {/* Wallpaper overlay to keep workspace readable */}
       <div className="pointer-events-none fixed inset-0 z-0 bg-black/30" />
       <div className="pointer-events-none fixed inset-0 z-0">
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(34,211,238,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(34,211,238,0.03)_1px,transparent_1px)] bg-size-[40px_40px] mask-[radial-gradient(circle_at_center,black_30%,transparent_80%)]" />
-        <div className="absolute -top-40 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-cyan-500/10 blur-[120px]" />
+        <div className="absolute inset-0 bg-[linear-gradient(color-mix(in_srgb,var(--color-accent)_3%,transparent)_1px,transparent_1px),linear-gradient(90deg,color-mix(in_srgb,var(--color-accent)_3%,transparent)_1px,transparent_1px)] bg-size-[40px_40px] mask-[radial-gradient(circle_at_center,black_30%,transparent_80%)]" />
+        <div className="absolute -top-40 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-accent/10 blur-[120px]" />
         <div className="absolute bottom-0 right-0 h-96 w-96 rounded-full bg-fuchsia-500/10 blur-[120px]" />
       </div>
 
@@ -258,7 +258,7 @@ function LiTTTerminalPageInner() {
               <Menu size={18} />
             </button>
             <div className="min-w-0">
-              <div className="text-[10px] font-black uppercase tracking-[0.35em] text-cyan-400">
+              <div className="text-[10px] font-black uppercase tracking-[0.35em] text-accent">
                 Project Workspace
               </div>
               <h1 className="truncate text-base font-bold sm:text-lg">
@@ -278,7 +278,7 @@ function LiTTTerminalPageInner() {
                   onClick={() => setActiveTab(t.id)}
                   className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider transition sm:text-[11px] ${
                     activeTab === t.id
-                      ? "bg-cyan-500/10 text-cyan-300 ring-1 ring-cyan-500/30"
+                      ? "bg-accent/10 text-accent ring-1 ring-accent/30"
                       : "text-neutral-400 hover:bg-white/5 hover:text-neutral-200"
                   }`}
                 >
@@ -372,7 +372,7 @@ function LiTTTerminalPageInner() {
                   onClick={() => setRightTab("output")}
                   className={`flex-1 px-3 py-2 text-[10px] font-black uppercase tracking-widest transition ${
                     rightTab === "output"
-                      ? "bg-cyan-500/10 text-cyan-300"
+                      ? "bg-accent/10 text-accent"
                       : "text-neutral-400 hover:text-neutral-200"
                   }`}
                 >
@@ -382,7 +382,7 @@ function LiTTTerminalPageInner() {
                   onClick={() => setRightTab("context")}
                   className={`flex-1 px-3 py-2 text-[10px] font-black uppercase tracking-widest transition ${
                     rightTab === "context"
-                      ? "bg-cyan-500/10 text-cyan-300"
+                      ? "bg-accent/10 text-accent"
                       : "text-neutral-400 hover:text-neutral-200"
                   }`}
                 >
@@ -401,7 +401,7 @@ function LiTTTerminalPageInner() {
                 ) : (
                   <div className="flex h-full flex-col gap-3 overflow-y-auto text-xs text-neutral-400">
                     <div className="rounded-xl border border-neutral-800/60 p-3">
-                      <div className="mb-1 text-[10px] font-black uppercase tracking-widest text-cyan-300">
+                      <div className="mb-1 text-[10px] font-black uppercase tracking-widest text-accent">
                         Active Mission
                       </div>
                       <p>
@@ -410,7 +410,7 @@ function LiTTTerminalPageInner() {
                       </p>
                     </div>
                     <div className="rounded-xl border border-neutral-800/60 p-3">
-                      <div className="mb-1 text-[10px] font-black uppercase tracking-widest text-cyan-300">
+                      <div className="mb-1 text-[10px] font-black uppercase tracking-widest text-accent">
                         Connected Repos
                       </div>
                       <p>
@@ -420,7 +420,7 @@ function LiTTTerminalPageInner() {
                       </p>
                     </div>
                     <div className="rounded-xl border border-neutral-800/60 p-3">
-                      <div className="mb-1 text-[10px] font-black uppercase tracking-widest text-cyan-300">
+                      <div className="mb-1 text-[10px] font-black uppercase tracking-widest text-accent">
                         Agent
                       </div>
                       <p>LiTT</p>

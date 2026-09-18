@@ -37,7 +37,7 @@ function TerminalBlockView({
       : block.status === "failed"
         ? "#ef4444"
         : block.status === "running"
-          ? "#22d3ee"
+          ? "var(--color-accent)"
           : block.status === "queued"
             ? "#fbbf24"
             : "#64748b";
@@ -85,7 +85,7 @@ function TerminalBlockView({
         {onExpand && (
           <button
             onClick={onExpand}
-            className="mt-1 text-[10px] font-bold text-cyan-300 transition hover:text-cyan-200"
+            className="mt-1 text-[10px] font-bold text-accent transition hover:text-accent-strong"
           >
             Expand Terminal
           </button>
@@ -119,7 +119,7 @@ function ChatMessageBlockView({
       <div
         className={`flex max-w-[85%] flex-col gap-1 rounded-xl border p-2.5 text-sm ${
           isUser
-            ? "items-end border-cyan-400/20 bg-cyan-400/5"
+            ? "items-end border-accent/20 bg-accent/5"
             : "border-white/10 bg-white/5"
         }`}
         style={{ backgroundColor: "var(--studio-card)" }}
@@ -136,7 +136,7 @@ function ChatMessageBlockView({
               onClick={() =>
                 isSpeaking ? stopSpeaking?.() : onSpeak?.(block.content)
               }
-              className="text-[10px] font-bold text-cyan-300 transition hover:text-cyan-200"
+              className="text-[10px] font-bold text-accent transition hover:text-accent-strong"
               aria-label={isSpeaking ? "Stop speaking" : "Speak this message"}
               aria-pressed={isSpeaking}
             >
@@ -160,9 +160,9 @@ function ThinkingBlockView({ content }: { content?: string }) {
   return (
     <div className="flex items-center gap-2 px-4 py-2 text-xs text-white/50">
       <span className="flex gap-1">
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-400 [animation-delay:-0.3s]" />
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-400 [animation-delay:-0.15s]" />
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-400" />
+        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent [animation-delay:-0.3s]" />
+        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent [animation-delay:-0.15s]" />
+        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent" />
       </span>
       {content || "LiTT is working"}
     </div>
@@ -199,7 +199,7 @@ function MediaBlockView({
           <a
             href={block.url}
             download
-            className="text-[10px] font-bold text-cyan-300 transition hover:text-cyan-200"
+            className="text-[10px] font-bold text-accent transition hover:text-accent-strong"
           >
             Download
           </a>

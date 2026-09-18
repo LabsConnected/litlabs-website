@@ -117,14 +117,14 @@ export function TrustSection() {
             <div className="mt-8 grid gap-2 sm:grid-cols-2">
               {PRODUCT_FACTS.map((fact) => (
                 <div key={fact} className="flex items-start gap-2.5 text-xs font-semibold leading-5 text-white/46">
-                  <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md border border-[#a8ff2f]/18 bg-[#a8ff2f]/8 text-[#a8ff2f]"><Check size={11} /></span>
+                  <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md border border-accent/18 bg-accent/8 text-accent"><Check size={11} /></span>
                   {fact}
                 </div>
               ))}
             </div>
 
             <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] font-bold text-white/32">
-              <span className="inline-flex items-center gap-1.5 text-white/44"><ShieldCheck size={12} className="text-[#a8ff2f]" /> Built around your control</span>
+              <span className="inline-flex items-center gap-1.5 text-white/44"><ShieldCheck size={12} className="text-accent" /> Built around your control</span>
               <Link href="/privacy" className="transition hover:text-white">Privacy</Link>
               <Link href="/terms" className="transition hover:text-white">Terms</Link>
               <Link href="/pricing" className="transition hover:text-white">Pricing</Link>
@@ -141,8 +141,8 @@ export function TrustSection() {
               className="object-contain object-bottom px-4 pt-8 drop-shadow-[0_30px_80px_rgba(0,0,0,.6)] lg:px-0 lg:pt-14"
             />
             <div className="absolute inset-x-0 bottom-0 h-1/3 bg-linear-to-t from-[#070a10] to-transparent" />
-            <div className="absolute right-5 top-5 rounded-full border border-[#a8ff2f]/22 bg-[#05070d]/70 px-3 py-2 text-[10px] font-black uppercase tracking-[0.15em] text-[#caff85] backdrop-blur-xl lg:right-8 lg:top-8">
-              <span className="mr-2 inline-block h-1.5 w-1.5 rounded-full bg-[#a8ff2f] shadow-[0_0_9px_#a8ff2f]" /> LiTT online
+            <div className="absolute right-5 top-5 rounded-full border border-accent/22 bg-[#05070d]/70 px-3 py-2 text-[10px] font-black uppercase tracking-[0.15em] text-[#caff85] backdrop-blur-xl lg:right-8 lg:top-8">
+              <span className="mr-2 inline-block h-1.5 w-1.5 rounded-full bg-accent shadow-accent-glow" /> LiTT online
             </div>
           </div>
         </div>

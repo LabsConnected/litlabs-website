@@ -27,12 +27,12 @@ import { useExecutionStore, type ExecutionPhase } from "../../stores/useExecutio
 
 const PHASE_META: Record<ExecutionPhase, { label: string; icon: ComponentType<{ size?: number; strokeWidth?: number; className?: string; style?: CSSProperties }>; color: string }> = {
   idle: { label: "Idle", icon: Circle, color: "var(--text-muted)" },
-  planning: { label: "Planning", icon: Activity, color: "#3b82f6" },
-  inspecting: { label: "Inspecting", icon: Eye, color: "#3b82f6" },
-  editing: { label: "Editing", icon: Edit3, color: "#22d3ee" },
+  planning: { label: "Planning", icon: Activity, color: "var(--color-accent)" },
+  inspecting: { label: "Inspecting", icon: Eye, color: "var(--color-accent)" },
+  editing: { label: "Editing", icon: Edit3, color: "var(--color-accent)" },
   testing: { label: "Testing", icon: CheckCircle2, color: "#e3b341" },
-  verifying: { label: "Verifying", icon: Shield, color: "#22d3ee" },
-  done: { label: "Complete", icon: CheckCircle2, color: "#22d3ee" },
+  verifying: { label: "Verifying", icon: Shield, color: "var(--color-accent)" },
+  done: { label: "Complete", icon: CheckCircle2, color: "var(--color-accent)" },
   cancelled: { label: "Cancelled", icon: XCircle, color: "#ef4444" },
   awaiting_approval: { label: "Waiting for approval", icon: AlertTriangle, color: "#e3b341" },
 };
@@ -151,13 +151,11 @@ export default function StudioOperatorBar({
       {/* Running pulse — no fake percentage */}
       {isRunning && (
         <span
-          className="flex items-center gap-1"
-          style={{ color: "#22d3ee" }}
+          className="flex items-center gap-1 text-accent"
           aria-label="Run in progress"
         >
           <span
-            className="h-1.5 w-1.5 animate-pulse rounded-full"
-            style={{ backgroundColor: "#22d3ee" }}
+            className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent"
             aria-hidden
           />
           <span className="hidden sm:inline">Running</span>
@@ -170,12 +168,7 @@ export default function StudioOperatorBar({
           <button
             type="button"
             onClick={() => onResolveApproval("approved")}
-            className="rounded px-2 py-0.5 text-[10px] font-bold transition hover:bg-white/10"
-            style={{
-              backgroundColor: "rgba(34,211,238,0.1)",
-              color: "#22d3ee",
-              border: "1px solid rgba(34,211,238,0.2)",
-            }}
+            className="rounded border border-accent/20 bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent transition hover:bg-accent/20"
             aria-label="Approve"
           >
             Approve

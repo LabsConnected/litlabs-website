@@ -51,15 +51,15 @@ function StatusBadge({ status, progress, error: _error }: { status: Attachment["
   switch (status) {
     case "uploading":
       return (
-        <div className="flex items-center gap-1 text-[8px] font-bold" style={{ color: "#22d3ee" }}>
+        <div className="flex items-center gap-1 text-[8px] font-bold text-accent">
           <Loader2 size={8} className="pointer-events-none animate-spin" />
           {progress !== null ? `${progress}%` : "Uploading"}
         </div>
       );
     case "transcribing":
-      return <div className="text-[8px] font-bold" style={{ color: "#22d3ee" }}>Transcribing</div>;
+      return <div className="text-[8px] font-bold text-accent">Transcribing</div>;
     case "analyzing":
-      return <div className="text-[8px] font-bold" style={{ color: "#22d3ee" }}>Analyzing</div>;
+      return <div className="text-[8px] font-bold text-accent">Analyzing</div>;
     case "failed":
       return (
         <div className="flex items-center gap-0.5 text-[8px] font-bold" style={{ color: "#fca5a5" }}>
@@ -68,7 +68,7 @@ function StatusBadge({ status, progress, error: _error }: { status: Attachment["
         </div>
       );
     case "ready":
-      return <div className="text-[8px] font-bold" style={{ color: "#72f238" }}>Ready</div>;
+      return <div className="text-[8px] font-bold text-accent">Ready</div>;
     default:
       return null;
   }
@@ -125,8 +125,8 @@ function AttachmentCard({
           <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
             <div className="h-1 w-12 overflow-hidden rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.15)" }}>
               <div
-                className="h-full rounded-full transition-all"
-                style={{ width: `${progress}%`, backgroundColor: "#22d3ee" }}
+                className="h-full rounded-full bg-accent transition-all"
+                style={{ width: `${progress}%` }}
               />
             </div>
           </div>
@@ -271,7 +271,7 @@ export default function AttachmentPreviewStrip({
       <div className="flex items-center justify-between px-1">
         <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
           {attachments.length} attachment{attachments.length !== 1 ? "s" : ""}
-          {processingCount > 0 && <span style={{ color: "#22d3ee" }}> · {processingCount} processing</span>}
+          {processingCount > 0 && <span className="text-accent"> · {processingCount} processing</span>}
           {failedCount > 0 && <span style={{ color: "#fca5a5" }}> · {failedCount} failed</span>}
         </span>
         <button

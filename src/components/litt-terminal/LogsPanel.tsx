@@ -11,7 +11,7 @@ export function LogsPanel({ logs }: LogsPanelProps) {
     <div className="flex h-full min-h-[200px] flex-col rounded-xl border border-neutral-800 bg-neutral-950 p-4">
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <ScrollText className="h-4 w-4 text-orange-400" />
+          <ScrollText className="h-4 w-4 text-accent" />
           <h2 className="font-bold">Logs</h2>
         </div>
         <button className="text-neutral-500 hover:text-white">

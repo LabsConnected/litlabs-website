@@ -1332,7 +1332,7 @@ export default function ImageTool() {
         {/* Left: title + workspace tabs */}
         <div className="flex items-center gap-3 min-w-0 overflow-hidden">
           <div className="hidden md:flex items-center gap-1.5 shrink-0">
-            <Sparkles size={13} style={{ color: "#22d3ee" }} />
+            <Sparkles size={13} className="text-accent" />
             <span
               className="text-[11px] font-black uppercase tracking-widest"
               style={{ color: "var(--glass-text-1)" }}
@@ -1566,14 +1566,7 @@ export default function ImageTool() {
               <button
                 onClick={handleGenerate}
                 disabled={!promptValid || !canAfford || isWorking}
-                className="w-full min-h-[52px] rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed"
-                style={{
-                  background: isWorking
-                    ? "#155e75"
-                    : "linear-gradient(135deg, #22d3ee 0%, #3b82f6 100%)",
-                  color: "#04121a",
-                  boxShadow: isWorking ? "none" : "0 4px 24px #22d3ee45",
-                }}
+                className="w-full min-h-[52px] rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed bg-accent text-on-accent hover:bg-accent-strong shadow-accent-glow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
                 data-testid="generate-image-button"
               >
                 {isWorking ? (
@@ -1655,7 +1648,7 @@ export default function ImageTool() {
                   data-testid="image-generating-skeleton"
                 >
                   <div className="h-full w-full flex flex-col items-center justify-center gap-2 animate-pulse">
-                    <Loader2 size={28} className="animate-spin" style={{ color: "#22d3ee" }} />
+                    <Loader2 size={28} className="animate-spin text-accent" />
                     <span className="text-xs font-bold" style={{ color: T.textMuted }}>
                       Forging your image…
                     </span>
@@ -2118,8 +2111,7 @@ export default function ImageTool() {
                   }}
                   disabled={useInProjectState[previewGen.id] === "saving"}
                   data-testid="use-in-project-button"
-                  className="min-h-[48px] rounded-xl font-bold text-[12px] flex items-center justify-center gap-2 text-white disabled:opacity-40"
-                  style={{ backgroundColor: "rgba(34,211,238,.16)", border: "1px solid rgba(34,211,238,.4)", color: "#22d3ee" }}
+                  className="min-h-[48px] rounded-xl font-bold text-[12px] flex items-center justify-center gap-2 text-on-accent disabled:opacity-40 bg-accent hover:bg-accent-strong border border-accent"
                 >
                   {useInProjectState[previewGen.id] === "saving"
                     ? <Loader2 size={14} className="animate-spin" />
@@ -3286,14 +3278,7 @@ export default function ImageTool() {
             <button
               onClick={handleGenerate}
               disabled={!promptValid || !canAfford || isWorking}
-              className="w-full h-11 rounded-xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all hover:scale-[1.01] disabled:opacity-40 disabled:cursor-not-allowed"
-              style={{
-                background: isWorking
-                  ? "rgba(139,92,246,0.4)"
-                  : "linear-gradient(135deg, var(--glass-green) 0%, rgba(139,92,246,0.9) 100%)",
-                color: "#07050d",
-                boxShadow: isWorking ? "none" : "0 0 24px rgba(156,255,59,0.2)",
-              }}
+              className="w-full h-11 rounded-xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all hover:scale-[1.01] disabled:opacity-40 disabled:cursor-not-allowed bg-accent text-on-accent hover:bg-accent-strong shadow-accent-glow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
               data-testid="generate-image-button"
             >
               {isWorking ? (

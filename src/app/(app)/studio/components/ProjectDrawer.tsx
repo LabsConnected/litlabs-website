@@ -52,7 +52,7 @@ export default function ProjectDrawer({
         {activeProjectId ? (
           <button
             onClick={() => onSelect(activeProjectId)}
-            className="mt-4 w-full rounded-xl border border-cyan-400/20 bg-cyan-400/5 p-3 text-left text-xs text-cyan-200 transition hover:border-cyan-400/40"
+            className="mt-4 w-full rounded-xl border border-accent/20 bg-accent/5 p-3 text-left text-xs text-accent transition hover:border-accent/40"
           >
             Current project &middot; {activeProjectId}
           </button>
@@ -64,7 +64,7 @@ export default function ProjectDrawer({
 
         <Link
           href="/projects"
-          className="mt-4 inline-flex text-xs font-bold text-cyan-300 transition hover:text-cyan-200"
+          className="mt-4 inline-flex text-xs font-bold text-accent transition hover:text-accent-strong"
         >
           Browse all projects &rarr;
         </Link>

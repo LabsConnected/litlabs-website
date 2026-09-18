@@ -13,7 +13,7 @@ import { PROJECT_LIST } from "./projects";
 export default function PublicShowcaseGallery() {
   return (
     <div className="mx-auto w-full max-w-5xl px-4 pb-20 pt-10 sm:px-6">
-      <p className="mb-3 text-xs font-bold uppercase tracking-[0.28em] text-[#a8ff2f]">
+      <p className="mb-3 text-xs font-bold uppercase tracking-[0.28em] text-accent">
         Showcase
       </p>
       <h1 className="mb-4 text-4xl font-black tracking-tight text-white md:text-6xl">
@@ -75,7 +75,7 @@ export default function PublicShowcaseGallery() {
         })}
       </div>
 
-      <div className="mt-12 rounded-2xl border border-white/10 bg-gradient-to-br from-[#a8ff2f]/10 to-[#65f4ff]/10 p-8 text-center">
+      <div className="mt-12 rounded-2xl border border-white/10 bg-gradient-to-br from-accent/10 to-[#65f4ff]/10 p-8 text-center">
         <h2 className="mb-2 text-2xl font-black text-white">
           Ready to run your own mission?
         </h2>
@@ -85,7 +85,7 @@ export default function PublicShowcaseGallery() {
         </p>
         <Link
           href="/sign-up"
-          className="inline-flex items-center gap-2 rounded-xl bg-[#a8ff2f] px-6 py-3 text-sm font-black text-[#03050a] transition-transform hover:scale-[1.02]"
+          className="inline-flex items-center gap-2 rounded-xl bg-accent px-6 py-3 text-sm font-black text-on-accent transition-transform hover:scale-[1.02]"
         >
           Start building free <ArrowRight size={15} />
         </Link>

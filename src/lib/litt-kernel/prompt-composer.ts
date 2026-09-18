@@ -33,7 +33,7 @@ const BRAND_CONTEXT = `LiTTree LabStudios — Brand & Technical Context:
 - Product: LiTTree LabStudios (litlabs.net) — an AI software factory, not a chat app.
 - Mascot: LiTT (the AI operating system). Spark is the creative companion.
 - Stack: Next.js 16, React 19, TypeScript, Tailwind CSS v4, Supabase, Clerk, Stripe, Vercel.
-- UI: Glassmorphic dark theme. Primary colors: neon green (#a8ff2f), purple (#a970ff), cyan (#00f0ff), black (#03050a).
+- UI: Glassmorphic dark theme. Primary colors: lime accent (#a8ff2f) on near-black (#03050a). Lime is the ONE brand accent — never use cyan, blue, violet, purple, or pink for accents, buttons, glows, or highlights. Reserve red/amber/green for error/warning/success semantics only.
 - Icons: Lucide. Animation: Motion. Components: custom glass cards, no shadcn/ui.
 - Design language: Apple + Linear + Raycast + Arc Browser — minimal, premium, dense, fast.
 - Agents: LiTT (lead), Spark (creative), Researcher, Writer, Marketer, Coder, Analyst — each specialist handles its domain.

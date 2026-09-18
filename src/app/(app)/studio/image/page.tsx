@@ -10,7 +10,7 @@ export default function StudioImagePage() {
   }, [router]);
   return (
     <div className="min-h-screen bg-[#050505] flex items-center justify-center">
-      <div className="text-orange-500 animate-pulse text-sm">
+      <div className="text-accent animate-pulse text-sm">
         Redirecting to Studio…
       </div>
     </div>

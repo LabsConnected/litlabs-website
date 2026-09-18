@@ -23,7 +23,7 @@ const MODES: {
     id: "command",
     label: "Command",
     icon: Monitor,
-    accent: "#00ffff",
+    accent: "var(--color-accent)",
     desc: "Default all-purpose home base",
   },
   {
@@ -44,7 +44,7 @@ const MODES: {
     id: "agent",
     label: "Agent Ops",
     icon: Bot,
-    accent: "#22d3ee",
+    accent: "var(--color-accent)",
     desc: "Agents, queues, runs, cost",
   },
   {
@@ -93,9 +93,9 @@ export default function StudioModeSwitcher({
             onClick={() => onChange(m.id)}
             className="flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[10px] font-black uppercase tracking-[0.15em] transition-all"
             style={{
-              backgroundColor: isActive ? m.accent + "18" : "transparent",
+              backgroundColor: isActive ? `color-mix(in srgb, ${m.accent} 10%, transparent)` : "transparent",
               color: isActive ? m.accent : T.textMuted,
-              boxShadow: isActive ? `inset 0 0 0 1px ${m.accent}40` : "none",
+              boxShadow: isActive ? `inset 0 0 0 1px color-mix(in srgb, ${m.accent} 25%, transparent)` : "none",
             }}
             title={m.desc}
             aria-label={`${m.label} mode`}
