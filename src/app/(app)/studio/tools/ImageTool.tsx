@@ -425,7 +425,7 @@ const VISUAL_STYLE_CARDS = [
 
 export default function ImageTool() {
   const { resolvedColors: T } = useTheme();
-  const { setActiveAssetId } = useStudioContext();
+  const { setActiveAssetId, projectId } = useStudioContext();
 
   /* ── Prompt state ── */
   const [prompt, setPrompt] = useState("");
@@ -540,6 +540,9 @@ export default function ImageTool() {
   const [imageHovered, setImageHovered] = useState(false);
   // Mobile: which generation is open in the full-screen preview (null = closed)
   const [previewGen, setPreviewGen] = useState<Generation | null>(null);
+  // "Use in Project" save state per generation id (idle entries are absent)
+  const [useInProjectState, setUseInProjectState] = useState<Record<string, "saving" | "saved" | "error">>({});
+  const [useInProjectError, setUseInProjectError] = useState<Record<string, string>>({});
   // Mobile: which design section is expanded (accordion — one at a time)
   const [designOpen, setDesignOpen] = useState<"style" | "mood" | "ratio" | null>(null);
 
@@ -1214,6 +1217,63 @@ export default function ImageTool() {
     },
     [addLog],
   );
+
+  /* ── "Use in Project": save the generated image into the real project
+   * workspace via POST /api/studio-projects/[projectId]/assets/insert, which
+   * downloads the asset server-side and writes it as a binary file under
+   * public/assets/images/. Returns true only when the image actually landed.
+   * Callers must NOT close previews or claim success unless this returns true.
+   */
+  const handleUseInProject = useCallback(async (
+    url: string,
+    genId: string,
+    name: string,
+  ): Promise<boolean> => {
+    if (!url) return false;
+    const fail = (message: string, level: LogEntry["level"] = "error") => {
+      setUseInProjectState((prev) => ({ ...prev, [genId]: "error" }));
+      setUseInProjectError((prev) => ({ ...prev, [genId]: message }));
+      addLog(level, message);
+      return false;
+    };
+    if (!projectId) {
+      return fail("No project open — open a Studio project to save this image into it.", "warn");
+    }
+    if (!url.startsWith("https://")) {
+      return fail("This image has no public URL, so it can't be saved into the project.");
+    }
+    setUseInProjectState((prev) => ({ ...prev, [genId]: "saving" }));
+    setUseInProjectError((prev) => {
+      const next = { ...prev };
+      delete next[genId];
+      return next;
+    });
+    const safeName =
+      (name || "litt-image")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 40) || "litt-image";
+    const urlExt = (url.split(".").pop()?.split("?")[0] || "").toLowerCase();
+    const ext = urlExt && urlExt.length <= 5 && /^[a-z0-9]+$/.test(urlExt) ? urlExt : "png";
+    const targetPath = `public/assets/images/${safeName}-${genId.slice(0, 8)}.${ext}`;
+    try {
+      const res = await fetch(`/api/studio-projects/${projectId}/assets/insert`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, path: targetPath, kind: "image", name }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setUseInProjectState((prev) => ({ ...prev, [genId]: "saved" }));
+      addLog("success", `Saved to project: ${targetPath}`);
+      notifyAssetsChanged();
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to save image into the project.";
+      return fail(`Use in Project failed: ${message}`);
+    }
+  }, [projectId, addLog]);
 
   const handleClaimBonus = useCallback(async () => {
     setClaiming(true);
@@ -2043,19 +2103,28 @@ export default function ImageTool() {
               <p className="shrink-0 px-1 py-2 text-[11px] line-clamp-2 text-white/70">
                 {previewGen.prompt}
               </p>
+              {useInProjectError[previewGen.id] && (
+                <p className="shrink-0 px-1 pb-1 text-[11px] font-semibold text-red-300" role="alert" data-testid="use-in-project-error">
+                  Couldn&apos;t save to project: {useInProjectError[previewGen.id]} — tap Use in Project to retry.
+                </p>
+              )}
               <div className="shrink-0 grid grid-cols-2 gap-2">
                 <button
-                  onClick={() => {
-                    if (previewGen.fileUrl) {
-                      window.dispatchEvent(new CustomEvent("canvas:add-image", { detail: { url: previewGen.fileUrl } }));
-                      addLog("info", "Sent to project canvas");
-                    }
-                    setPreviewGen(null);
+                  onClick={async () => {
+                    if (!previewGen.fileUrl) return;
+                    // Only close the preview when the image REALLY landed in the project.
+                    const ok = await handleUseInProject(previewGen.fileUrl, previewGen.id, previewGen.prompt);
+                    if (ok) setPreviewGen(null);
                   }}
-                  className="min-h-[48px] rounded-xl font-bold text-[12px] flex items-center justify-center gap-2 text-white"
+                  disabled={useInProjectState[previewGen.id] === "saving"}
+                  data-testid="use-in-project-button"
+                  className="min-h-[48px] rounded-xl font-bold text-[12px] flex items-center justify-center gap-2 text-white disabled:opacity-40"
                   style={{ backgroundColor: "rgba(34,211,238,.16)", border: "1px solid rgba(34,211,238,.4)", color: "#22d3ee" }}
                 >
-                  <Palette size={14} /> Use in Project
+                  {useInProjectState[previewGen.id] === "saving"
+                    ? <Loader2 size={14} className="animate-spin" />
+                    : <Palette size={14} />}
+                  {useInProjectState[previewGen.id] === "saving" ? "Saving…" : "Use in Project"}
                 </button>
                 <button
                   onClick={() => { if (previewGen.fileUrl) handleDownload(previewGen.fileUrl, previewGen.prompt); }}
@@ -3529,7 +3598,7 @@ export default function ImageTool() {
                               { label: "Upscale", icon: Maximize2, onClick: () => handleQuickAction(", 4k upscale, ultra high resolution, enhanced details") },
                               { label: "Remove BG", icon: Eraser, onClick: () => handleQuickAction(", remove background, transparent background, isolated subject") },
                               { label: "Use as Ref", icon: Layers, onClick: () => handleUseAsReference(currentResult.fileUrl!) },
-                              { label: "Canvas", icon: Palette, onClick: () => window.dispatchEvent(new CustomEvent("canvas:add-image", { detail: { url: currentResult.fileUrl } })) },
+                              { label: useInProjectState[currentResult.id] === "saving" ? "Saving…" : "Use in Project", icon: Palette, onClick: () => { if (currentResult.fileUrl) void handleUseInProject(currentResult.fileUrl, currentResult.id, currentResult.prompt); } },
                               { label: "Delete", icon: Trash2, onClick: () => deleteGeneration(currentResult.id) },
                             ].map((action) => (
                               <button
@@ -3550,6 +3619,11 @@ export default function ImageTool() {
                               </button>
                             ))}
                           </div>
+                          {useInProjectError[currentResult.id] && (
+                            <p className="text-[10px] font-semibold text-red-300" role="alert" data-testid="use-in-project-error-desktop">
+                              Couldn&apos;t save to project: {useInProjectError[currentResult.id]}
+                            </p>
+                          )}
                         </div>
                       )}
                     </div>
