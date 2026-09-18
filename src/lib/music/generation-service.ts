@@ -54,6 +54,8 @@ import type {
 } from "@/types/music";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { adjustWalletBalance } from "@/lib/wallet-ledger";
+import { calculateRetailBits } from "@/lib/generation/cost-engine";
+import { buildChargeRating } from "@/lib/billing/canonical-pricing";
 import { uploadAudio, getSignedAudioUrl, getPublicAudioUrl, deleteAudio } from "@/lib/r2";
 import { getActiveProvider, createProvider } from "./providers/factory";
 import { fetchWithTimeout } from "./providers/http";
@@ -206,6 +208,20 @@ export async function createGeneration(
       type: "spend",
       reason: `Music generation: ${input.prompt.slice(0, 60)}`,
       idempotencyKey: chargeKey,
+      rating: buildChargeRating({
+        capability: "music",
+        provider: provider.name,
+        model: provider.name,
+        providerCostMicros:
+          calculateRetailBits({
+            modality: "music",
+            provider: provider.name,
+            model: provider.name,
+          }).providerCostCents * 10_000,
+        bitsCharged: lbcCost,
+        lane: "generation",
+      }),
+      usage: { audioSeconds: input.durationSeconds ?? 0 },
     });
     charged = true;
     void charge; // balance result not needed here

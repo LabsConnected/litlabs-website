@@ -1,5 +1,10 @@
 import "server-only";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import {
+  recordChargeEvidence,
+  type ChargeRating,
+  type ChargeUsage,
+} from "@/lib/billing/canonical-pricing";
 
 export type WalletAdjustment = {
   balance: number;
@@ -95,6 +100,14 @@ export async function adjustWalletBalance(params: {
   type: "earn" | "spend" | "refund" | "correction" | "purchase";
   reason: string;
   idempotencyKey: string;
+  /**
+   * Canonical pricing evidence for debits. When provided, the charge is
+   * stamped with the pricing version + provider cost and a
+   * usage_events/rating_events evidence chain is written. Omit for
+   * grants/refunds/adjustments (they are not rated charges).
+   */
+  rating?: ChargeRating;
+  usage?: ChargeUsage;
 }): Promise<WalletAdjustment> {
   const admin = getSupabaseAdmin();
   if (!admin) throw new Error("Wallet service is not configured");
@@ -128,6 +141,20 @@ export async function adjustWalletBalance(params: {
   if (isDebit && row.success === false && balance < Math.abs(params.amount)) {
     throw new Error("Insufficient balance");
   }
+  const replayed = isDebit
+    ? row.success === true && balance === before.total && Math.abs(params.amount) > 0
+    : row.granted === false;
+
+  // Stamp canonical pricing evidence on real (non-replayed) debits.
+  if (isDebit && params.rating && !replayed) {
+    await recordChargeEvidence(admin, {
+      userId,
+      idempotencyKey: params.idempotencyKey,
+      rating: params.rating,
+      usage: params.usage,
+    });
+  }
+
   return {
     balance,
     previousBalance: before.total,
@@ -135,8 +162,6 @@ export async function adjustWalletBalance(params: {
     // but the balance doesn't change. Detect replay by checking if the debit
     // was a no-op (balance unchanged AND success=true AND amount > 0).
     // For grants: grant_credits returns granted=false on replay.
-    replayed: isDebit
-      ? row.success === true && balance === before.total && Math.abs(params.amount) > 0
-      : row.granted === false,
+    replayed,
   };
 }

@@ -7,6 +7,7 @@ import {
   getVideoTier,
   type VideoAspectRatio,
 } from "@/config/video-tiers";
+import { buildChargeRating } from "@/lib/billing/canonical-pricing";
 
 // ── Idempotency (P1-3) ─────────────────────────────────────────────
 // Minimal keyed dedupe scoped to this route. A client-supplied idempotency
@@ -205,6 +206,15 @@ async function handler(req: NextRequest) {
           type: "spend",
           reason: `Video: ${tier.name} — ${tier.maxDuration}s clip`,
           idempotencyKey: ledgerKey,
+          rating: buildChargeRating({
+            capability: "video",
+            provider: "fal",
+            model: tier.model,
+            providerCostMicros: Math.round(tier.providerCostPerSecCents * tier.maxDuration * 10_000),
+            bitsCharged: tier.priceLiTTBits,
+            lane: "generation",
+          }),
+          usage: { videoSeconds: tier.maxDuration },
         });
 
         if (adjustment.replayed) {

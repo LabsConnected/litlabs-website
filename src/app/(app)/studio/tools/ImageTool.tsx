@@ -1239,7 +1239,11 @@ export default function ImageTool() {
     if (!projectId) {
       return fail("No project open — open a Studio project to save this image into it.", "warn");
     }
-    if (!url.startsWith("https://")) {
+    // Free providers return generated images as inline data:image/* URLs —
+    // the bytes are already available to the server, so they insert the same
+    // way as a public https URL.
+    const isDataImage = /^data:image\//i.test(url);
+    if (!url.startsWith("https://") && !isDataImage) {
       return fail("This image has no public URL, so it can't be saved into the project.");
     }
     setUseInProjectState((prev) => ({ ...prev, [genId]: "saving" }));
@@ -1254,8 +1258,13 @@ export default function ImageTool() {
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-+|-+$/g, "")
         .slice(0, 40) || "litt-image";
+    const dataMimeExt = isDataImage
+      ? (/^data:image\/([a-z0-9]+)/i.exec(url)?.[1] ?? "").toLowerCase()
+      : "";
     const urlExt = (url.split(".").pop()?.split("?")[0] || "").toLowerCase();
-    const ext = urlExt && urlExt.length <= 5 && /^[a-z0-9]+$/.test(urlExt) ? urlExt : "png";
+    const ext =
+      dataMimeExt ||
+      (urlExt && urlExt.length <= 5 && /^[a-z0-9]+$/.test(urlExt) ? urlExt : "png");
     const targetPath = `public/assets/images/${safeName}-${genId.slice(0, 8)}.${ext}`;
     try {
       const res = await fetch(`/api/studio-projects/${projectId}/assets/insert`, {
