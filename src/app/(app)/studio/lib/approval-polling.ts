@@ -72,7 +72,7 @@ export function submitApprovalAndPoll(opts: {
    * re-POSTing the same pausedRunId is meaningful — the server re-runs the
    * same record (no new approval, no double billing).
    */
-  onFailed?: (error: string, info?: { retryable: boolean }) => void;
+  onFailed?: (error: string, info?: { retryable: boolean; expired?: boolean }) => void;
   onPolling?: () => void;
   /** Test hooks — production callers use the real fetch/timers. */
   fetchImpl?: typeof fetch;
@@ -176,10 +176,12 @@ export function submitApprovalAndPoll(opts: {
         }
 
         // The gate itself settled without producing a run — surface the
-        // honest state instead of polling into a timeout. Not retryable:
-        // the gate is gone.
+        // honest state instead of polling into a timeout. Retryable, but
+        // as a RE-REQUEST: the gate is gone server-side, so retry must
+        // issue a fresh gate via the re-request endpoint rather than
+        // re-POST the dead pausedRunId (which would 409).
         if (status.status === "expired") {
-          onFailed?.("This approval expired before it could be resumed. Please resend your request.", { retryable: false });
+          onFailed?.("This approval expired before a decision was made.", { retryable: true, expired: true });
           return;
         }
         if (status.status === "rejected") {

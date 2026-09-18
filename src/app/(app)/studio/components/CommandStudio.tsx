@@ -294,6 +294,7 @@ function CommandStudioContent() {
   const approvalPhase = useExecutionStore((s) => s.approvalPhase);
   const approvalError = useExecutionStore((s) => s.approvalError);
   const approvalRetryable = useExecutionStore((s) => s.approvalRetryable);
+  const approvalExpired = useExecutionStore((s) => s.approvalExpired);
 
   const handleToggleDock = useCallback(() => setDockOpen((v) => !v), []);
   const handleOpenDockTab = useCallback((tab: StudioDockTab) => {
@@ -926,6 +927,7 @@ function CommandStudioContent() {
     runResult?: ApprovalRunResult | null;
     runError?: string | null;
     retryable?: boolean;
+    expired?: boolean;
   }) => {
     const exec = useExecutionStore.getState();
     if (opts.resolution === "rejected") {
@@ -944,11 +946,16 @@ function CommandStudioContent() {
       return;
     }
     if (opts.resolution === "expired" || opts.resolution === "gone") {
-      // The gate can no longer be actioned. Clear the stale card without
-      // logging a decision the user never made.
-      exec.endRun("cancelled");
-      void conversation.loadMessages(opts.conversationId);
-      setLittActiveTab("chat");
+      // The gate can no longer be actioned — but the run is not dead. Keep
+      // the card mounted in the failed state with a "Request again"
+      // affordance: one tap re-issues the SAME gate with a fresh TTL via
+      // the re-request endpoint, instead of re-running the whole agent
+      // loop from scratch. No decision is logged — the user never made one.
+      exec.failApproval(
+        "This approval expired before a decision was made.",
+        true,
+        { expired: true },
+      );
       return;
     }
     // resolution === "approved"
@@ -956,7 +963,9 @@ function CommandStudioContent() {
       // The run failed AFTER approval — keep the card mounted with the
       // backend error and a Retry affordance. The user re-approves the
       // same record; the resumed execution replays instead of double-running.
-      exec.failApproval(opts.runError, opts.retryable);
+      // (An expiry failure keeps the card too, but retry re-requests a
+      // fresh gate instead of re-POSTing the dead pausedRunId.)
+      exec.failApproval(opts.runError, opts.retryable, { expired: opts.expired });
       void conversation.loadMessages(opts.conversationId);
       return;
     }
@@ -1021,6 +1030,7 @@ function CommandStudioContent() {
             resolution: decision,
             runError: error || "The resumed run failed on the server.",
             retryable: info?.retryable,
+            expired: info?.expired,
           });
         },
       });
@@ -1040,6 +1050,55 @@ function CommandStudioContent() {
       setLittActiveTab("chat");
     }
   }, [conversation, capabilities.projectId, applyApprovalOutcome]);
+
+  // Re-request an EXPIRED approval gate: one tap issues a fresh pending run
+  // carrying the same frozen inputs/reason, with a new TTL — no new agent
+  // loop, no duplicate side effects (nothing executes until approved).
+  // Used when the card is in the failed-expired state; the card's Retry
+  // button routes here instead of re-POSTing the dead pausedRunId.
+  const handleReRequestApproval = useCallback(async () => {
+    const exec = useExecutionStore.getState();
+    const pending = exec.pendingApproval;
+    const convId = conversation.selectedConversationId;
+    if (!pending?.pausedRunId || !convId) return;
+    exec.beginApprovalSubmit();
+    try {
+      const token = await getToken?.();
+      const res = await fetch(
+        `/api/studio/conversations/${convId}/approvals/re-request`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ pausedRunId: pending.pausedRunId }),
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `Re-request failed (${res.status})`);
+      }
+      if (!data.pausedRunId) {
+        throw new Error("The server did not return a new approval gate.");
+      }
+      // Swap in the fresh gate — the card returns to pending and the
+      // watcher re-arms on the new pausedRunId.
+      exec.setPendingApproval({
+        toolId: data.toolId ?? pending.toolId,
+        reason: data.reason ?? pending.reason,
+        pausedRunId: data.pausedRunId,
+        inputs: pending.inputs,
+      });
+    } catch (err) {
+      exec.failApproval(
+        err instanceof Error ? err.message : "Could not re-request the approval.",
+        true,
+        { expired: true },
+      );
+    }
+  }, [conversation, getToken]);
 
   // An approval gate can settle without this client clicking anything:
   // approved/rejected on another device or session, a reload while the
@@ -1561,7 +1620,11 @@ function CommandStudioContent() {
             phase={approvalPhase}
             error={approvalError}
             retryable={approvalRetryable}
-            onRetry={() => handleResolveApproval("approved")}
+            expired={approvalExpired}
+            // An expired gate's "Retry" re-requests a fresh gate — re-POSTing
+            // the dead pausedRunId would 409. Other failures retry the
+            // approval POST as before.
+            onRetry={approvalExpired ? handleReRequestApproval : () => handleResolveApproval("approved")}
           />
         </div>
       )}

@@ -98,7 +98,7 @@ async function writeResumedResultToTranscript(opts: {
  * Security:
  * - Never accepts replacement tool arguments
  * - Never trusts client-supplied paused state
- * - Approvals are single-use and expiring (5 min TTL)
+ * - Approvals are single-use and expiring (30 min TTL)
  * - Re-verifies workspace ownership on resume
  * - Idempotent: repeated approval requests return 202 without
  *   launching duplicate executions
