@@ -26,15 +26,17 @@ export async function POST(req: NextRequest) {
       // Clerk API unavailable — proceed with placeholder
     }
 
-    // getOrCreateUser uses admin client server-side (bypasses RLS)
-    // and inserts wallet with 500 LiTTBits on first create
+    // getOrCreateUser uses admin client server-side (bypasses RLS).
+    // The Starter 500 grant lives in credit_ledger, issued lazily by
+    // getCreditBalances below — idempotent via starter:{userId}.
     const { user, isNew } = await getOrCreateUser(clerkId, email, name);
 
     if (!user) {
       return NextResponse.json({ error: "Failed to create user" }, { status: 500 });
     }
 
-    // Also ensure wallet exists (idempotent — getUserWallet auto-creates if missing)
+    // Canonical balance from credit_ledger (also issues the one-time
+    // Starter grant on first call)
     const wallet = await getUserWallet(clerkId);
 
     return NextResponse.json({
