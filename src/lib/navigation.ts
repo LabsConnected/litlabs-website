@@ -13,7 +13,6 @@ import {
   Layers,
   FileText,
   Star,
-  Code2,
   Workflow,
   FolderKanban,
   Gamepad2 as GamesIcon,
@@ -90,15 +89,12 @@ export const APP_NAV_SECONDARY: NavSection[] = [
     items: [
       { label: "Files", href: "/library/files", icon: FileText },
       { label: "Saved", href: "/library/saved", icon: Bookmark },
-      { label: "Code Workspace", href: "/code", icon: Code2 },
     ],
   },
   {
     id: "devtools",
     label: "Developer Tools",
     items: [
-      { label: "CLI", href: "/cli", icon: Terminal },
-      { label: "Terminal", href: "/studio?tool=terminal", icon: Terminal },
       { label: "Connections", href: "/settings/connections", icon: Layers },
       { label: "Docs", href: "/docs", icon: FileText },
     ],
