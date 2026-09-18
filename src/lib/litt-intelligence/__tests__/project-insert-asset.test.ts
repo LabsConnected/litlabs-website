@@ -315,7 +315,9 @@ describe("insertAssetFromUrl (shared core)", () => {
   it("writes to root-level assets/ in a static workspace — the sitePath must resolve under `serve -s .`", async () => {
     // Static sites have no package.json and PreviewManager serves the
     // WORKSPACE ROOT — public/ is not the web root there, so the same
-    // /assets/images/x sitePath only resolves from root-level assets/.
+    // assets/images/x path only resolves from root-level assets/.
+    // sitePath is RELATIVE here: a leading slash would escape the
+    // /preview/ws-id/ and /sites/{deploymentId}/ mounts and 404.
     const transport = spyTransport();
     (transport as { listFiles: unknown }).listFiles = vi.fn(async () => ({
       entries: [
@@ -329,9 +331,9 @@ describe("insertAssetFromUrl (shared core)", () => {
       transport,
     );
     expect(result.success).toBe(true);
-    expect(result.sitePath).toMatch(/^\/assets\/images\/hero-[a-z0-9]+\.png$/);
+    expect(result.sitePath).toMatch(/^assets\/images\/hero-[a-z0-9]+\.png$/);
     const [writtenPath] = transport.writeBinaryFile.mock.calls[0];
-    expect(writtenPath).toBe((result.sitePath as string).slice(1));
+    expect(writtenPath).toBe(result.sitePath);
   });
 
   it("keeps the public/ convention in a framework workspace", async () => {

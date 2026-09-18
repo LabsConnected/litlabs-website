@@ -823,10 +823,16 @@ export async function insertAssetFromUrl(
       await transport.writeBinaryFile(path, base64);
     }
 
-    // Site-relative URL: framework projects serve public/ as the site
-    // root (strip the prefix); static workspaces serve the workspace
-    // root, where root-level assets/ already resolves as /assets/.
-    const sitePath = `/${path.replace(/^public\//, "")}`;
+    // Site path the model embeds in HTML. Framework projects serve
+    // public/ at the site root, so a root-relative "/assets/x" is right.
+    // Static sites are served from the workspace root — but under a
+    // path mount (/preview/ws-id/, /sites/{deploymentId}/) a leading
+    // slash escapes the mount and 404s, so static assets must be
+    // RELATIVE ("assets/images/x"), which resolves correctly from a
+    // root index.html at any mount depth.
+    const sitePath = path.startsWith("public/")
+      ? `/${path.slice("public/".length)}`
+      : path;
     return { success: true, path, sitePath, contentType, sizeBytes: buffer.length };
   } catch (err) {
     return {
