@@ -148,6 +148,76 @@ describe("findToolCallMarkup — prose that must not be flagged", () => {
   });
 });
 
+describe("findToolCallMarkup — mid-prose bare JSON (evasion shape)", () => {
+  it("flags a bare JSON envelope embedded mid-prose", () => {
+    const hit = findToolCallMarkup(
+      'I need to call {"name": "files.write", "arguments": {"path": "index.html"}} to save this.',
+      TOOLS,
+    );
+    expect(hit).toMatchObject({ kind: "bare_json_mid_prose", toolId: "files.write" });
+  });
+
+  it("flags a mid-prose action envelope naming a known tool", () => {
+    const hit = findToolCallMarkup('Let me run {"action": "files.read", "path": "index.html"} on it.', TOOLS);
+    expect(hit).toMatchObject({ kind: "bare_json_mid_prose", toolId: "files.read" });
+  });
+
+  it("ignores mid-prose JSON that names no known tool", () => {
+    expect(
+      findToolCallMarkup('I mentioned {"name": "not-a-tool", "arguments": {}} but never called anything.', TOOLS),
+    ).toBeNull();
+  });
+
+  it("ignores mid-prose JSON quoted inside inline code", () => {
+    expect(
+      findToolCallMarkup('Models sometimes emit `{"name": "files.write", "arguments": {}}` as text.', TOOLS),
+    ).toBeNull();
+  });
+
+  it("ignores plain chat containing braces", () => {
+    expect(findToolCallMarkup('The config { "theme": "dark" } looks fine.', TOOLS)).toBeNull();
+  });
+});
+
+describe("findToolCallMarkup — antml:-namespaced envelopes", () => {
+  it("flags <antml:invoke> envelopes with a tool name attribute", () => {
+    const hit = findToolCallMarkup(
+      '<antml:invoke name="files.write"><antml:parameter name="path">index.html</antml:parameter></antml:invoke>',
+      TOOLS,
+    );
+    expect(hit?.kind).toBe("envelope");
+    expect(hit).not.toBeNull();
+  });
+
+  it("flags nested <antml:function_calls> envelopes", () => {
+    const hit = findToolCallMarkup(
+      'Sure thing. <antml:function_calls><antml:invoke name="files.write"><antml:parameter name="path">index.html</antml:parameter></antml:invoke></antml:function_calls> Done.',
+      TOOLS,
+    );
+    expect(hit?.kind).toBe("envelope");
+    expect(hit).not.toBeNull();
+  });
+
+  it("flags a truncated antml: envelope", () => {
+    const hit = findToolCallMarkup("Reading now.\n<antml:tool_call>terminal\n<arg_key>command", TOOLS);
+    expect(hit).toMatchObject({ kind: "truncated_envelope" });
+  });
+
+  it("ignores antml: envelopes with no tool mention or arg structure", () => {
+    expect(findToolCallMarkup("<antml:tool_call>hello</antml:tool_call>", TOOLS)).toBeNull();
+  });
+
+  it("ignores antml: envelopes quoted inside inline code", () => {
+    expect(
+      findToolCallMarkup('Models emit `<antml:invoke name="files.read">x</antml:invoke>` sometimes.', TOOLS),
+    ).toBeNull();
+  });
+
+  it("hasToolCallEnvelope sees antml: envelopes too", () => {
+    expect(hasToolCallEnvelope('<antml:invoke name="nope">x</antml:invoke>')).toBe(true);
+  });
+});
+
 describe("hasToolCallEnvelope — intent-free envelopes are still tool attempts", () => {
   // Production 2026-09-16: the model emitted
   // `<dots_function_call>find ./src -type f</dots_function_call>` amid
