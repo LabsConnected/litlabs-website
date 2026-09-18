@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { MockInstance } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import ImageTool from "./ImageTool";
 
@@ -78,7 +79,7 @@ function openPreview() {
 const EXPECTED_PATH = "public/assets/images/a-test-image-gen-1.png";
 
 describe("ImageTool 'Use in Project'", () => {
-  let fetchMock: ReturnType<typeof vi.spyOn>;
+  let fetchMock: MockInstance<typeof fetch>;
 
   beforeEach(() => {
     vi.clearAllMocks();
