@@ -293,16 +293,33 @@ function MarketplaceInner() {
     const inst = installations.get(item.id);
     if (!inst) return;
     try {
-      await fetch(`/api/marketplace/installations/${inst.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/marketplace/installations/${inst.id}`, { method: "DELETE" });
+      if (res.ok) {
+        // Server confirmed deletion — state now follows the server truth.
+        setInstallations((prev) => {
+          const next = new Map(prev);
+          next.delete(item.id);
+          return next;
+        });
+        showToast(`${item.name} removed`, "success");
+      } else {
+        // Server refused the delete: keep the item installed so the list
+        // stays truthful, and let the user retry via the Remove button.
+        const data = await res.json().catch(() => ({}));
+        showToast(
+          data.error || `Could not remove ${item.name}. Please try again.`,
+          "error",
+        );
+      }
     } catch {
-      // silent
+      // Network failure: the install may still exist server-side, so keep
+      // the item in the list and surface a retryable error instead of a
+      // fake success.
+      showToast(
+        `Network error while removing ${item.name}. It is still installed — please try again.`,
+        "error",
+      );
     }
-    setInstallations((prev) => {
-      const next = new Map(prev);
-      next.delete(item.id);
-      return next;
-    });
-    showToast(`${item.name} removed`, "info");
   }, [installations]);
 
   const toggleEnabled = useCallback(async (item: MarketplaceItem) => {
