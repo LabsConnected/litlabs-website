@@ -119,31 +119,32 @@ export default function StudioTerminalDrawer({ projectId, repositoryName, branch
         style={{ height: 32, borderColor: "var(--studio-border)", backgroundColor: "rgba(255,255,255,0.02)" }}
       >
         {repositoryName && (
-          <span className="truncate text-[10px] font-medium" style={{ color: "var(--text-secondary)", maxWidth: 200 }} title={repositoryName}>
+          <span className="min-w-0 truncate text-[10px] font-medium" style={{ color: "var(--text-secondary)", maxWidth: 200 }} title={repositoryName}>
             {repositoryName}
           </span>
         )}
         {branch && (
           <>
-            <span style={{ color: "var(--studio-border-strong)" }}>·</span>
-            <span className="shrink-0 text-[10px] font-medium" style={{ color: "var(--text-muted)" }}>{branch}</span>
+            <span className="shrink-0" style={{ color: "var(--studio-border-strong)" }}>·</span>
+            <span className="min-w-0 truncate text-[10px] font-medium" style={{ color: "var(--text-muted)", maxWidth: 120 }} title={branch}>{branch}</span>
           </>
         )}
         <div className="flex-1" />
-        {/* Workspace status */}
-        <span className="flex shrink-0 items-center gap-1 text-[10px] font-medium" style={{ color: "var(--text-muted)" }}>
-          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: wsColor }} />
-          {wsLabel}
+        {/* Workspace status — label truncates with ellipsis rather than
+            clipping when the drawer is narrow; full text stays in title. */}
+        <span className="flex min-w-0 items-center gap-1 text-[10px] font-medium" style={{ color: "var(--text-muted)" }} title={wsLabel}>
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: wsColor }} />
+          <span className="truncate">{wsLabel}</span>
         </span>
         {/* Terminal session status — separate from workspace */}
-        <span className="flex shrink-0 items-center gap-1 text-[10px] font-medium" style={{ color: "var(--text-muted)" }}>
-          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: termColor }} />
-          {termLabel}
+        <span className="flex min-w-0 items-center gap-1 text-[10px] font-medium" style={{ color: "var(--text-muted)" }} title={termLabel}>
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: termColor }} />
+          <span className="truncate">{termLabel}</span>
         </span>
         <button
           type="button"
           onClick={handleRetry}
-          className="grid h-5 w-5 place-items-center rounded transition hover:bg-white/8"
+          className="grid h-5 w-5 shrink-0 place-items-center rounded transition hover:bg-white/8"
           style={{ color: "var(--text-muted)" }}
           aria-label="Restart workspace"
           title="Restart workspace"

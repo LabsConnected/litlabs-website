@@ -829,7 +829,7 @@ export default function AgentsTerminalTool() {
               </div>
 
               {/* Real PTY terminal */}
-              <div className="flex-1 min-h-0 p-2">
+              <div className="min-h-0 min-w-0 flex-1 p-2">
                 {selectedProjectId && workspaceStatus === "ready" ? (
                   <TerminalPanel
                     projectId={selectedProjectId}
