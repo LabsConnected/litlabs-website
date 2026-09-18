@@ -65,13 +65,13 @@ export default function ScreenTool() {
         {status === "idle" && (
           <button
             onClick={startScreen}
-            className="flex items-center gap-2 rounded-full border border-cyan-400/40 bg-cyan-400/10 px-3 py-2 text-xs font-bold text-cyan-300"
+            className="flex items-center gap-2 rounded-full border border-accent/40 bg-accent/10 px-3 py-2 text-xs font-bold text-accent"
           >
             <MonitorUp size={14} /> Start screen capture
           </button>
         )}
         {status === "requesting" && (
-          <div className="flex items-center gap-2 text-xs text-cyan-300">
+          <div className="flex items-center gap-2 text-xs text-accent">
             <Loader2 size={16} className="animate-spin" /> Requesting screen access…
           </div>
         )}

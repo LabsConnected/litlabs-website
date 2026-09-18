@@ -42,11 +42,11 @@ const SIZE_MAP: Record<LiTTPresenceVariant, Record<LiTTPresenceSize, { w: number
 };
 
 const STATE_COLORS: Record<LiTTState, { ring: string; glow: string }> = {
-  idle: { ring: "rgba(114,242,56,0.3)", glow: "rgba(114,242,56,0.15)" },
-  listening: { ring: "rgba(34,211,238,0.5)", glow: "rgba(34,211,238,0.2)" },
+  idle: { ring: "color-mix(in srgb, var(--color-accent) 30%, transparent)", glow: "color-mix(in srgb, var(--color-accent) 15%, transparent)" },
+  listening: { ring: "color-mix(in srgb, var(--color-accent) 50%, transparent)", glow: "color-mix(in srgb, var(--color-accent) 20%, transparent)" },
   thinking: { ring: "rgba(167,139,250,0.5)", glow: "rgba(167,139,250,0.2)" },
-  working: { ring: "rgba(114,242,56,0.6)", glow: "rgba(114,242,56,0.25)" },
-  success: { ring: "rgba(114,242,56,0.8)", glow: "rgba(114,242,56,0.3)" },
+  working: { ring: "color-mix(in srgb, var(--color-accent) 60%, transparent)", glow: "color-mix(in srgb, var(--color-accent) 25%, transparent)" },
+  success: { ring: "color-mix(in srgb, var(--color-accent) 80%, transparent)", glow: "color-mix(in srgb, var(--color-accent) 30%, transparent)" },
   error: { ring: "rgba(239,68,68,0.5)", glow: "rgba(245,158,11,0.2)" },
 };
 
@@ -151,7 +151,7 @@ export default function LiTTPresence({
           height: dims.h,
           border: `1px solid ${colors.ring}`,
           boxShadow: `0 0 16px ${colors.glow}`,
-          backgroundColor: "rgba(114,242,56,0.06)",
+          backgroundColor: "color-mix(in srgb, var(--color-accent) 6%, transparent)",
           overflow: "hidden",
         }}
         aria-label={`LiTT ${state}`}
@@ -190,9 +190,9 @@ export default function LiTTPresence({
         className="litt-ambient-grid absolute inset-0 rounded-[inherit] opacity-50"
         style={{
           backgroundImage: [
-            "radial-gradient(circle at 50% 80%, rgba(114,242,56,0.22), transparent 52%)",
-            "linear-gradient(rgba(114,242,56,0.08) 1px, transparent 1px)",
-            "linear-gradient(90deg, rgba(114,242,56,0.08) 1px, transparent 1px)",
+            "radial-gradient(circle at 50% 80%, color-mix(in srgb, var(--color-accent) 22%, transparent), transparent 52%)",
+            "linear-gradient(color-mix(in srgb, var(--color-accent) 8%, transparent) 1px, transparent 1px)",
+            "linear-gradient(90deg, color-mix(in srgb, var(--color-accent) 8%, transparent) 1px, transparent 1px)",
           ].join(", "),
           backgroundSize: "100% 100%, 28px 28px, 28px 28px",
           backgroundPosition: "0 0, 0 0, 0 0",

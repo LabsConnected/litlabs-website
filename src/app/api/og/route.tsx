@@ -1,6 +1,10 @@
 import { ImageResponse } from "next/og";
+import { brand } from "@/lib/design/litt-tokens";
 
 export const runtime = "nodejs";
+
+// Brand mark gradient consumes the J1 canonical accent (lime, decided).
+const LOGO_GRADIENT = `linear-gradient(135deg, ${brand.primary.DEFAULT} 0%, #8b5cf6 100%)`;
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -39,7 +43,7 @@ export async function GET(request: Request) {
                 width: "80px",
                 height: "80px",
                 borderRadius: "20px",
-                background: "linear-gradient(135deg, #06b6d4 0%, #8b5cf6 100%)",
+                background: LOGO_GRADIENT,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",

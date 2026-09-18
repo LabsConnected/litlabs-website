@@ -64,13 +64,13 @@ export function LiTTMessageAvatar({ size = 32 }: { size?: number }) {
 
   return (
     <div
-      className="grid shrink-0 place-items-center overflow-hidden rounded-xl border border-cyan-300/25 font-black text-cyan-100"
+      className="grid shrink-0 place-items-center overflow-hidden rounded-xl border border-accent/25 font-black text-accent"
       style={{
         width: size,
         height: size,
         minWidth: size,
-        background: "radial-gradient(circle at 30% 30%, #0f3d3e, #051a1a 70%)",
-        boxShadow: "0 0 16px rgba(34,211,238,.2)",
+        background: "radial-gradient(circle at 30% 30%, #2a3d0f, #101a05 70%)",
+        boxShadow: "0 0 16px rgba(168,255,47,.2)",
         fontSize: Math.max(9, Math.round(size * 0.34)),
       }}
       aria-label="LiTT avatar"

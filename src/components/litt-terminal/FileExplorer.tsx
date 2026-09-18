@@ -157,7 +157,7 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
             {isFolder ? (
               <>
                 {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
-                <Folder className="h-4 w-4 shrink-0 text-orange-400" />
+                <Folder className="h-4 w-4 shrink-0 text-accent" />
               </>
             ) : (
               <>

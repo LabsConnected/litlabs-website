@@ -19,7 +19,7 @@ import { useStudioAgentStore, AGENT_META } from "../../stores/useStudioAgentStor
 
 const CARD_SURFACE = "rgba(16,12,26,0.92)";
 const CARD_BORDER = "rgba(255,255,255,0.07)";
-const CYAN = "#22d3ee";
+const ACCENT = "var(--color-accent)";
 const AMBER = "#e3b341";
 
 export interface MobileBuildStatusBarProps {
@@ -104,7 +104,7 @@ export default function MobileBuildStatusBar({ open, onOpen }: MobileBuildStatus
             width: 8,
             height: 8,
             borderRadius: "50%",
-            backgroundColor: CYAN,
+            backgroundColor: ACCENT,
             flexShrink: 0,
           }}
         />

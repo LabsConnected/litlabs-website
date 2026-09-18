@@ -1,5 +1,6 @@
 "use client";
 
+import { brand } from "@/lib/design/litt-tokens";
 import { useState, useRef, useCallback, type CSSProperties } from "react";
 import { Check, CircleDot, FileCode, Folder, GitBranch, Play, Rocket, Send, Sparkles, Terminal } from "lucide-react";
 
@@ -16,12 +17,12 @@ type DemoStage = "mission" | "plan" | "build" | "preview" | "approval" | "launch
 interface StageDef { id: DemoStage; label: string; icon: typeof Send; accent: string; description: string; }
 
 const STAGES: StageDef[] = [
-  { id: "mission", label: "Mission", icon: Sparkles, accent: "#a8ff2f", description: "LiTT turns your prompt into a structured mission with a clear goal." },
+  { id: "mission", label: "Mission", icon: Sparkles, accent: brand.primary.DEFAULT, description: "LiTT turns your prompt into a structured mission with a clear goal." },
   { id: "plan", label: "Plan", icon: CircleDot, accent: "#65f4ff", description: "A step-by-step execution plan appears before any work begins." },
   { id: "build", label: "Build", icon: FileCode, accent: "#65f4ff", description: "Files, code, and assets are created in your project workspace." },
   { id: "preview", label: "Preview", icon: Play, accent: "#b58cff", description: "See the result as it's being built." },
   { id: "approval", label: "Approval", icon: Check, accent: "#b58cff", description: "Sensitive actions require your explicit approval before proceeding." },
-  { id: "launch", label: "Launch", icon: Rocket, accent: "#a8ff2f", description: "Prepare the finished project for deployment when you're ready." },
+  { id: "launch", label: "Launch", icon: Rocket, accent: brand.primary.DEFAULT, description: "Prepare the finished project for deployment when you're ready." },
 ];
 
 export function InteractiveProductDemo() {
@@ -101,8 +102,8 @@ export function InteractiveProductDemo() {
       <div id="demo-stage-panel" role="tabpanel" aria-labelledby={`demo-tab-${active}`} aria-live="polite" className="overflow-hidden rounded-2xl border border-white/12 bg-[#0a0d14] shadow-[0_30px_80px_rgba(0,0,0,.5)]">
         <div className="flex items-center gap-2 border-b border-white/8 bg-[#0d1018] px-4 py-3">
           <span className="h-3 w-3 rounded-full bg-red-400/60" /><span className="h-3 w-3 rounded-full bg-amber-400/60" /><span className="h-3 w-3 rounded-full bg-green-400/60" />
-          <div className="ml-3 flex items-center gap-2 text-xs font-bold text-white/40"><span className="grid h-5 w-5 place-items-center rounded bg-[#a8ff2f]/15 text-[10px] text-[#a8ff2f]">L</span>LiTTree Studio &mdash;{" "}{current.label}</div>
-          <div className="ml-auto flex items-center gap-1.5 text-[10px] font-bold text-white/30"><span className="h-1.5 w-1.5 rounded-full bg-[#a8ff2f]" />Connected</div>
+          <div className="ml-3 flex items-center gap-2 text-xs font-bold text-white/40"><span className="grid h-5 w-5 place-items-center rounded bg-accent/15 text-[10px] text-accent">L</span>LiTTree Studio &mdash;{" "}{current.label}</div>
+          <div className="ml-auto flex items-center gap-1.5 text-[10px] font-bold text-white/30"><span className="h-1.5 w-1.5 rounded-full bg-accent" />Connected</div>
         </div>
 
         <div className="flex min-h-[360px]">
@@ -118,7 +119,7 @@ export function InteractiveProductDemo() {
             <div className="mt-4 border-t border-white/8 pt-3">
               <div className="mb-2 text-[10px] font-black uppercase tracking-wider text-white/30">History</div>
               <div className="space-y-1.5">
-                <div className="flex items-center gap-2 text-[10px] text-white/30"><GitBranch size={10} className="text-[#a8ff2f]/50" />Initial commit</div>
+                <div className="flex items-center gap-2 text-[10px] text-white/30"><GitBranch size={10} className="text-accent/50" />Initial commit</div>
                 {active !== "mission" && <div className="flex items-center gap-2 text-[10px] text-white/30"><GitBranch size={10} className="text-[#65f4ff]/50" />Checkpoint 1</div>}
                 {(active === "launch" || active === "approval") && <div className="flex items-center gap-2 text-[10px] text-white/30"><GitBranch size={10} className="text-[#b58cff]/50" />Deploy checkpoint</div>}
               </div>
@@ -156,8 +157,8 @@ function DemoStageContent({
       return (
         <div className="space-y-3">
           <div className="rounded-xl border border-white/10 bg-black/30 p-4"><div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-white/30">User prompt</div><div className="text-sm text-white/80">Build a premium launch page for an independent music artist named After Midnight.</div></div>
-          <div className="rounded-xl border border-[#a8ff2f]/20 bg-[#a8ff2f]/5 p-4">
-            <div className="mb-2 flex items-center gap-2"><Sparkles size={14} className="text-[#a8ff2f]" /><span className="text-[10px] font-black uppercase tracking-wider text-[#a8ff2f]">Mission</span></div>
+          <div className="rounded-xl border border-accent/20 bg-accent/5 p-4">
+            <div className="mb-2 flex items-center gap-2"><Sparkles size={14} className="text-accent" /><span className="text-[10px] font-black uppercase tracking-wider text-accent">Mission</span></div>
             <div className="text-sm font-bold text-white/90">After Midnight &mdash; Artist Launch Page</div>
             <div className="mt-2 space-y-1 text-xs text-white/50"><div>&bull; Visual direction with brand colors</div><div>&bull; Release copy and artist bio</div><div>&bull; Organized project files</div><div>&bull; Responsive preview</div><div>&bull; Deployment preparation with approval</div></div>
           </div>
@@ -169,7 +170,7 @@ function DemoStageContent({
           {["Create visual direction for After Midnight", "Write release copy and artist bio", "Organize project files (HTML, CSS, assets)", "Produce responsive preview", "Request approval before deployment", "Prepare for deployment on approval"].map((step, i) => (
             <div key={step} className="flex items-center gap-3 rounded-lg border border-white/8 bg-white/3 px-3 py-2.5">
               <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-[#65f4ff]/10 text-[10px] font-black text-[#65f4ff]">{i + 1}</span>
-              <span className="text-xs text-white/70">{step}</span><Check size={12} className="ml-auto shrink-0 text-[#a8ff2f]" />
+              <span className="text-xs text-white/70">{step}</span><Check size={12} className="ml-auto shrink-0 text-accent" />
             </div>
           ))}
         </div>
@@ -180,7 +181,7 @@ function DemoStageContent({
           <div className="rounded-lg border border-white/8 bg-black/40 p-3 font-mono text-xs leading-5 text-white/60">
             <div className="text-[#65f4ff]">$ Creating workspace files...</div>
             <div className="text-white/40">  index.html &mdash; hero, bio, release section</div><div className="text-white/40">  styles.css &mdash; responsive layout, brand colors</div><div className="text-white/40">  assets/ &mdash; cover art, social images</div>
-            <div className="mt-2 flex items-center gap-1.5 text-[#a8ff2f]"><Check size={11} /> Project files organized</div>
+            <div className="mt-2 flex items-center gap-1.5 text-accent"><Check size={11} /> Project files organized</div>
           </div>
           <div className="grid grid-cols-3 gap-2">{["index.html", "styles.css", "assets/"].map((f) => (<div key={f} className="rounded-lg border border-white/8 bg-white/3 p-2.5"><FileCode size={14} className="mb-1.5 text-[#65f4ff]/60" /><div className="text-[10px] font-bold text-white/60">{f}</div></div>))}</div>
         </div>
@@ -215,15 +216,15 @@ function DemoStageContent({
       return (
         <div className="space-y-3">
           <div className="rounded-lg border border-white/8 bg-black/40 p-3 font-mono text-xs leading-5 text-white/60">
-            <div className="text-[#a8ff2f]">$ Preparing for deployment...</div>
+            <div className="text-accent">$ Preparing for deployment...</div>
             <div className="text-white/40">  Building production bundle</div><div className="text-white/40">  Verifying build output</div><div className="text-white/40">  Ready for deployment</div>
-            <div className="mt-2 flex items-center gap-1.5"><Terminal size={11} className="text-[#a8ff2f]" /><span className="text-[#a8ff2f]">Deployment preparation complete</span></div>
+            <div className="mt-2 flex items-center gap-1.5"><Terminal size={11} className="text-accent" /><span className="text-accent">Deployment preparation complete</span></div>
           </div>
-          <div className="flex flex-col items-center rounded-xl border border-[#a8ff2f]/20 bg-[#a8ff2f]/5 py-6 text-center">
-            <div className="mb-3 grid h-14 w-14 place-items-center rounded-2xl border border-[#a8ff2f]/30 bg-[#a8ff2f]/10 shadow-[0_0_30px_rgba(168,255,47,.15)]"><GitBranch size={24} className="text-[#a8ff2f]" /></div>
+          <div className="flex flex-col items-center rounded-xl border border-accent/20 bg-accent/5 py-6 text-center">
+            <div className="mb-3 grid h-14 w-14 place-items-center rounded-2xl border border-accent/30 bg-accent/10 shadow-accent-glow"><GitBranch size={24} className="text-accent" /></div>
             <div className="text-xl font-black text-white">Ready for Deployment.</div>
             <div className="mt-1 text-xs text-white/50">The After Midnight launch page is built and ready to deploy when you are.</div>
-            <div className="mt-3 inline-flex items-center gap-2 rounded-lg border border-[#a8ff2f]/25 bg-[#a8ff2f]/8 px-4 py-2 text-xs font-bold text-[#a8ff2f]"><span className="h-1.5 w-1.5 rounded-full bg-[#a8ff2f]" /> Project saved in your workspace</div>
+            <div className="mt-3 inline-flex items-center gap-2 rounded-lg border border-accent/25 bg-accent/8 px-4 py-2 text-xs font-bold text-accent"><span className="h-1.5 w-1.5 rounded-full bg-accent" /> Project saved in your workspace</div>
           </div>
         </div>
       );

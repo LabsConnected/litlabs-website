@@ -744,8 +744,7 @@ export function CodeWorkspace({
                     type="button"
                     onClick={() => void saveFile(activeTab)}
                     disabled={saving || conflictPaths.has(activeTab)}
-                    className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-[10px] font-bold transition hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-40"
-                    style={{ color: "#72f238" }}
+                    className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-[10px] font-bold text-accent transition hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-40"
                     title={conflictPaths.has(activeTab) ? "LiTT changed this file — reload first" : "Save (Ctrl+S)"}
                   >
                     {saving ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}

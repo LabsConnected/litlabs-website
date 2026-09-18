@@ -1,3 +1,4 @@
+import { brand } from "@/lib/design/litt-tokens";
 import {
   BrainCircuit,
   Download,
@@ -13,7 +14,7 @@ const ITEMS = [
     title: "Project memory",
     copy: "Goals, decisions, style, and context carry forward across sessions, so the next conversation starts where the work left off.",
     label: "Persistent",
-    accent: "#a8ff2f",
+    accent: brand.primary.DEFAULT,
   },
   {
     icon: FileCode2,
@@ -34,7 +35,7 @@ const ITEMS = [
     title: "Version history",
     copy: "Project checkpoints preserve progress and provide a practical path back when the direction changes.",
     label: "Recoverable",
-    accent: "#a8ff2f",
+    accent: brand.primary.DEFAULT,
   },
   {
     icon: Download,

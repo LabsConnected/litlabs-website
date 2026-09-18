@@ -79,8 +79,10 @@
   --studio-card: rgba(20, 15, 31, 0.72);
   --studio-border: rgba(155, 77, 255, 0.12);
   --studio-border-strong: rgba(155, 77, 255, 0.22);
-  --litt-primary: #4dff62;
-  --litt-primary-strong: #2eff4a;
+  /* J1 legacyReplacements: --litt-primary maps to brand.primary (lime, decided).
+     Aliased to the canonical @theme accent tokens above — one definition. */
+  --litt-primary: var(--color-accent);
+  --litt-primary-strong: var(--color-accent-strong);
   --spark-primary: #9b4dff;
   --spark-primary-strong: #7c3aed;
   --purple-accent: #9b4dff;
@@ -1341,7 +1343,7 @@ a:hover {
    SELECTION
    ============================================================ */
 ::selection {
-  background: rgba(168, 255, 47, 0.25);
+  background: color-mix(in srgb, var(--color-accent) 25%, transparent);
   color: var(--text-color);
 }
 
@@ -2465,7 +2467,7 @@ main {
    Larry's locked accent decision: lime #a8ff2f.
    ============================================================ */
 :focus-visible {
-  outline: 2px solid rgba(168, 255, 47, 0.55);
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -2978,6 +2980,28 @@ main {
   --font-mono: var(--font-code), "JetBrains Mono", "Fira Code", monospace;
   --font-display: var(--font-display), "Sora", sans-serif;
   --font-retro: var(--font-retro), "Pixelify Sans", monospace;
+}
+
+/* ── J1 canonical accent tokens ────────────────────────────────────
+   Single source of truth: src/lib/design/litt-tokens.ts
+   (PRIMARY_ACCENT_DECISION.status = "decided", current = "lime",
+   decided by Larry 2026-09-16).
+   Values below MUST equal brand.primary (lime candidate),
+   color.text.onPrimary, and the lime candidate's glow pair.
+   src/lib/design/__tests__/accent-token-parity.test.ts asserts parity —
+   update the token file and this block together, never one side alone.
+   Consume via utilities: bg-accent, text-accent, border-accent,
+   ring-accent, from-accent / to-accent-deep, text-on-accent,
+   shadow-accent-glow. Use opacity modifiers for tints
+   (bg-accent/10, border-accent/40, ring-accent/50) instead of
+   one-off rgba values. */
+@theme {
+  --color-accent: #a8ff2f;
+  --color-accent-strong: #8fe31f;
+  --color-accent-deep: #65b30e;
+  --color-on-accent: #04262e;
+  --shadow-accent-glow: 0 0 24px rgba(168, 255, 47, 0.35);
+  --shadow-accent-glow-strong: 0 0 40px rgba(168, 255, 47, 0.5);
 }
 
 /* Neon Arcade pack */

@@ -248,7 +248,7 @@ export default function MediaRecorderPanel({ mode, onClose, onComplete }: MediaR
                     className="w-1 rounded-full transition-all"
                     style={{
                       height: state.recording ? `${20 + Math.sin(Date.now() / 200 + i) * 15 + Math.random() * 10}px` : "4px",
-                      backgroundColor: state.recording ? "#22d3ee" : "var(--text-muted)",
+                      backgroundColor: state.recording ? "var(--color-accent)" : "var(--text-muted)",
                     }}
                   />
                 ))}

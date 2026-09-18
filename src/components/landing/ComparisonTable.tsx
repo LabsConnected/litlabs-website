@@ -49,7 +49,7 @@ export function ComparisonTable() {
             <div className="flex items-center gap-2 px-5 py-4 text-sm font-black text-white/40 sm:px-7">
               <X size={16} className="text-white/30" /> AI chat
             </div>
-            <div className="flex items-center gap-2 px-5 py-4 text-sm font-black text-[#a8ff2f] sm:px-7">
+            <div className="flex items-center gap-2 px-5 py-4 text-sm font-black text-accent sm:px-7">
               <Check size={16} /> LiTT
             </div>
           </div>
@@ -63,7 +63,7 @@ export function ComparisonTable() {
                 <span>{row.chat}</span>
               </div>
               <div className="flex items-start gap-2.5 border-l border-white/6 px-5 py-4 text-sm font-semibold text-white/72 sm:px-7">
-                <Check size={14} className="mt-0.5 shrink-0 text-[#a8ff2f]" />
+                <Check size={14} className="mt-0.5 shrink-0 text-accent" />
                 <span>{row.litt}</span>
               </div>
             </div>

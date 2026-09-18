@@ -1,5 +1,6 @@
 "use client";
 
+import { brand } from "@/lib/design/litt-tokens";
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Image from "next/image";
 import Link from "next/link";
@@ -104,7 +105,7 @@ const STORAGE_KEY = "litlabs-mission-forge-v1";
 
 const STARTER_NODES: MissionNode[] = [
   { id: "brief", type: "input", title: "Mission brief", subtitle: "Your goal and constraints", color: "#65f4ff", x: 54, y: 118, config: {} },
-  { id: "litt", type: "assistant", title: "LiTT", subtitle: "Plans, builds, and directs", color: "#a8ff2f", x: 306, y: 76, assistantId: "litt", config: { mode: "plan_and_coordinate", model: "auto", approval: "before_writes" } },
+  { id: "litt", type: "assistant", title: "LiTT", subtitle: "Plans, builds, and directs", color: brand.primary.DEFAULT, x: 306, y: 76, assistantId: "litt", config: { mode: "plan_and_coordinate", model: "auto", approval: "before_writes" } },
   { id: "spark", type: "assistant", title: "Spark", subtitle: "Explores creative directions", color: "#a970ff", x: 306, y: 232, assistantId: "spark", config: { mode: "creative", model: "auto" } },
   { id: "approval", type: "approval", title: "Approval gate", subtitle: "You review before shipping", color: "#ffca5c", x: 558, y: 154, config: { approval_type: "user_approval" } },
 ];
@@ -137,7 +138,7 @@ const STATIC_LIBRARY: LibraryCategory[] = [
   {
     label: "Assistants",
     items: [
-      { type: "assistant", title: "LiTT", subtitle: "Copilot + builder", color: "#a8ff2f", icon: Brain, assistantId: "litt", keywords: ["litt", "ai", "agent", "code", "build", "plan"] },
+      { type: "assistant", title: "LiTT", subtitle: "Copilot + builder", color: brand.primary.DEFAULT, icon: Brain, assistantId: "litt", keywords: ["litt", "ai", "agent", "code", "build", "plan"] },
       { type: "assistant", title: "Spark", subtitle: "Creative explorer", color: "#a970ff", icon: Sparkles, assistantId: "spark", keywords: ["spark", "creative", "image", "brand", "writing"] },
     ],
   },
@@ -167,9 +168,9 @@ const STATIC_LIBRARY: LibraryCategory[] = [
   {
     label: "Outputs",
     items: [
-      { type: "output", title: "Save Artifact", subtitle: "Store result", color: "#a8ff2f", icon: Package, keywords: ["save", "artifact", "store", "output"] },
-      { type: "output", title: "Ship Result", subtitle: "Deploy or publish", color: "#a8ff2f", icon: Zap, keywords: ["ship", "deploy", "publish", "output", "result"] },
-      { type: "output", title: "Notify User", subtitle: "Send notification", color: "#a8ff2f", icon: MessageSquare, keywords: ["notify", "notification", "alert", "output"] },
+      { type: "output", title: "Save Artifact", subtitle: "Store result", color: brand.primary.DEFAULT, icon: Package, keywords: ["save", "artifact", "store", "output"] },
+      { type: "output", title: "Ship Result", subtitle: "Deploy or publish", color: brand.primary.DEFAULT, icon: Zap, keywords: ["ship", "deploy", "publish", "output", "result"] },
+      { type: "output", title: "Notify User", subtitle: "Send notification", color: brand.primary.DEFAULT, icon: MessageSquare, keywords: ["notify", "notification", "alert", "output"] },
     ],
   },
 ];
@@ -351,7 +352,7 @@ export default function MissionForge() {
           type: "capability" as MissionNodeType,
           title: display?.title ?? c.name,
           subtitle: capDef?.requiredConnections?.length ? `Needs: ${capDef.requiredConnections.join(", ")}` : "Ready",
-          color: assistant === "spark" ? "#a970ff" : "#22d3ee",
+          color: assistant === "spark" ? "#a970ff" : brand.primary.DEFAULT,
           icon: display?.icon ?? Package,
           capabilityKey: c.capability_key,
           assistantId: assistant,
@@ -623,16 +624,16 @@ export default function MissionForge() {
 
     /* Detect capabilities */
     if (lowered.match(/review|code review|pull request/)) {
-      detected.push({ type: "capability", title: "Code Review", subtitle: "Needs: github", color: "#22d3ee", icon: Code2, capabilityKey: "github.code_review" });
+      detected.push({ type: "capability", title: "Code Review", subtitle: "Needs: github", color: brand.primary.DEFAULT, icon: Code2, capabilityKey: "github.code_review" });
     }
     if (lowered.match(/build|test|deploy/)) {
-      detected.push({ type: "capability", title: "Build and Test", subtitle: "Needs: terminal", color: "#22d3ee", icon: Zap, capabilityKey: "workflow.build_test" });
+      detected.push({ type: "capability", title: "Build and Test", subtitle: "Needs: terminal", color: brand.primary.DEFAULT, icon: Zap, capabilityKey: "workflow.build_test" });
     }
     if (lowered.match(/social|campaign|post/)) {
       detected.push({ type: "capability", title: "Social Content Planner", subtitle: "Ready", color: "#a970ff", icon: MessageSquare, capabilityKey: "content.social_plan" });
     }
     if (lowered.match(/research|web|find/)) {
-      detected.push({ type: "capability", title: "Landing Page", subtitle: "Ready", color: "#22d3ee", icon: Globe, capabilityKey: "workflow.landing_page" });
+      detected.push({ type: "capability", title: "Landing Page", subtitle: "Ready", color: brand.primary.DEFAULT, icon: Globe, capabilityKey: "workflow.landing_page" });
     }
 
     /* Detect actions */
@@ -668,7 +669,7 @@ export default function MissionForge() {
               type,
               title,
               subtitle: (n.subtitle as string) || "",
-              color: n.assistantId === "spark" ? "#a970ff" : type === "trigger" ? "#fbbf24" : type === "input" ? "#65f4ff" : type === "approval" ? "#ffca5c" : type === "output" ? "#a8ff2f" : type === "capability" ? "#22d3ee" : "#34d399",
+              color: n.assistantId === "spark" ? "#a970ff" : type === "trigger" ? "#fbbf24" : type === "input" ? "#65f4ff" : type === "approval" ? "#ffca5c" : type === "output" ? brand.primary.DEFAULT : type === "capability" ? brand.primary.DEFAULT : "#34d399",
               x: 70 + (i % 3) * 220,
               y: 80 + Math.floor(i / 3) * 120,
               assistantId: n.assistantId as "litt" | "spark" | undefined,
@@ -727,7 +728,7 @@ export default function MissionForge() {
   /* Status colors */
   const statusColor = (status?: NodeRunStatus) => {
     switch (status) {
-      case "running": return "#22d3ee";
+      case "running": return "var(--color-accent)";
       case "completed": return "#34d399";
       case "failed": return "#fb7185";
       case "waiting": return "#ffca5c";
@@ -840,7 +841,7 @@ export default function MissionForge() {
         {/* Header */}
         <div className="flex items-center justify-between px-4 h-12 border-b shrink-0" style={{ borderColor: T.borderColor + "15", backgroundColor: T.boxBg + "50" }}>
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="grid h-7 w-7 place-items-center rounded-lg border" style={{ borderColor: "#a8ff2f30", backgroundColor: "#a8ff2f10", color: "#a8ff2f" }}>
+            <div className="grid h-7 w-7 place-items-center rounded-lg border" style={{ borderColor: `${brand.primary.DEFAULT}30`, backgroundColor: `${brand.primary.DEFAULT}10`, color: brand.primary.DEFAULT }}>
               <Workflow size={14} />
             </div>
             <div className="min-w-0">
@@ -866,7 +867,7 @@ export default function MissionForge() {
               onClick={() => void runWorkflow()}
               disabled={running || nodes.length < 2}
               className="flex items-center gap-1 text-[9px] px-3 py-1 rounded font-bold transition-all disabled:opacity-40"
-              style={{ backgroundColor: "#a8ff2f", color: "#03050a" }}
+              style={{ backgroundColor: brand.primary.DEFAULT, color: "#03050a" }}
             >
               {running ? <Loader2 size={10} className="animate-spin" /> : <Play size={10} fill="currentColor" />} Simulate
             </button>
@@ -888,7 +889,7 @@ export default function MissionForge() {
             <button onClick={() => setMobileSheet("inspector")} className="md:hidden p-1 rounded border" style={{ borderColor: T.borderColor + "20", color: T.textMuted }}>
               <Settings size={12} />
             </button>
-            <button onClick={() => setCopilotOpen(true)} className="p-1 rounded border transition-all hover:opacity-80" style={{ borderColor: "#a8ff2f30", color: "#a8ff2f" }}>
+            <button onClick={() => setCopilotOpen(true)} className="p-1 rounded border transition-all hover:opacity-80" style={{ borderColor: `${brand.primary.DEFAULT}30`, color: brand.primary.DEFAULT }}>
               <Brain size={12} />
             </button>
           </div>
@@ -1034,7 +1035,7 @@ export default function MissionForge() {
             <span className="text-[8px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>Execution Log</span>
             <div className="flex items-center gap-2">
               <button onClick={() => setLogs(["[SYS] Log cleared."])} className="text-[8px] opacity-50 hover:opacity-100" style={{ color: T.textMuted }}>Clear</button>
-              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: running ? "#22d3ee" : T.borderColor, boxShadow: running ? "0 0 6px #22d3ee" : "none" }} />
+              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: running ? "var(--color-accent)" : T.borderColor, boxShadow: running ? "0 0 6px var(--color-accent)" : "none" }} />
             </div>
           </div>
           <div className="flex-1 overflow-y-auto px-3 py-1.5 font-mono text-[9px] space-y-0.5">
@@ -1293,7 +1294,7 @@ export default function MissionForge() {
           <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm h-full flex flex-col" style={{ backgroundColor: T.boxBg, borderLeft: `1px solid ${T.borderColor}30` }}>
             <div className="flex items-center justify-between px-4 py-3 border-b shrink-0" style={{ borderColor: T.borderColor + "15" }}>
               <div className="flex items-center gap-2">
-                <Brain size={14} style={{ color: "#a8ff2f" }} />
+                <Brain size={14} style={{ color: brand.primary.DEFAULT }} />
                 <span className="text-xs font-bold" style={{ color: T.textColor }}>Forge Copilot</span>
               </div>
               <button onClick={() => setCopilotOpen(false)} style={{ color: T.textMuted }}><X size={16} /></button>
@@ -1327,7 +1328,7 @@ export default function MissionForge() {
                   type="submit"
                   disabled={copilotLoading || !copilotPrompt.trim()}
                   className="w-full py-2 text-[11px] font-bold rounded-lg disabled:opacity-40 transition-all"
-                  style={{ backgroundColor: "#a8ff2f", color: "#03050a" }}
+                  style={{ backgroundColor: brand.primary.DEFAULT, color: "#03050a" }}
                 >
                   {copilotLoading ? <Loader2 size={12} className="animate-spin mx-auto" /> : "Generate draft with LiTT"}
                 </button>
@@ -1405,7 +1406,7 @@ export default function MissionForge() {
               {mobileSheet === "copilot" && (
                 <form onSubmit={(e) => { void handleCopilot(e); setMobileSheet(null); }} className="space-y-2">
                   <textarea value={copilotPrompt} onChange={(e) => setCopilotPrompt(e.target.value)} placeholder="Describe a Mission…" rows={3} className="w-full rounded-lg px-3 py-2 text-[11px] outline-none resize-none" style={{ background: T.bgColor, border: `1px solid ${T.borderColor}30`, color: T.textColor }} />
-                  <button type="submit" disabled={copilotLoading || !copilotPrompt.trim()} className="w-full py-2 text-[11px] font-bold rounded-lg disabled:opacity-40" style={{ backgroundColor: "#a8ff2f", color: "#03050a" }}>
+                  <button type="submit" disabled={copilotLoading || !copilotPrompt.trim()} className="w-full py-2 text-[11px] font-bold rounded-lg disabled:opacity-40" style={{ backgroundColor: brand.primary.DEFAULT, color: "#03050a" }}>
                     {copilotLoading ? "Generating..." : "Generate with LiTT"}
                   </button>
                 </form>

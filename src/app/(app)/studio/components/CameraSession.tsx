@@ -249,7 +249,7 @@ export default function CameraSession({
       <div className="flex flex-col gap-2 p-3">
         <button
           onClick={() => void startCamera()}
-          className="flex items-center gap-2 rounded-full border border-cyan-400/40 bg-cyan-400/10 px-3 py-2 text-xs font-bold text-cyan-300 transition-all hover:bg-cyan-400/20"
+          className="flex items-center gap-2 rounded-full border border-accent/40 bg-accent/10 px-3 py-2 text-xs font-bold text-accent transition-all hover:bg-accent/20"
         >
           <Camera size={14} /> Start camera
         </button>
@@ -263,7 +263,7 @@ export default function CameraSession({
   // ── Requesting permission ──
   if (status === "requesting_permission") {
     return (
-      <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/60 px-4 py-3 text-xs text-cyan-300">
+      <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/60 px-4 py-3 text-xs text-accent">
         <Aperture size={16} className="animate-spin" />
         Requesting camera permission…
       </div>
@@ -312,7 +312,7 @@ export default function CameraSession({
   const isStarting = status === "starting";
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-cyan-400/30 bg-black/80 shadow-2xl">
+    <div className="relative overflow-hidden rounded-2xl border border-accent/30 bg-black/80 shadow-2xl">
       {/* Header overlay — honest status */}
       <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-linear-to-b from-black/80 to-transparent px-3 py-2">
         <div className="flex items-center gap-2">
@@ -347,7 +347,7 @@ export default function CameraSession({
       {/* Starting overlay */}
       {isStarting && (
         <div className="absolute inset-0 z-5 flex items-center justify-center bg-black/60">
-          <div className="flex items-center gap-2 text-xs text-cyan-300">
+          <div className="flex items-center gap-2 text-xs text-accent">
             <Aperture size={16} className="animate-spin" />
             Starting camera…
           </div>
@@ -360,7 +360,7 @@ export default function CameraSession({
           <button
             onClick={capture}
             disabled={!isLive}
-            className="flex items-center gap-1.5 rounded-full bg-cyan-500 px-3 py-2 text-xs font-black text-black transition-all hover:bg-cyan-400 disabled:opacity-40"
+            className="flex items-center gap-1.5 rounded-full bg-accent px-3 py-2 text-xs font-black text-on-accent transition-all hover:bg-accent-strong disabled:opacity-40"
             title="Capture snapshot"
           >
             <Zap size={14} /> Snapshot

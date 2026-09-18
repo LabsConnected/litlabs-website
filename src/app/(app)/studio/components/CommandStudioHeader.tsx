@@ -45,7 +45,7 @@ export type StudioTopBarDockTab = "activity" | "files" | "terminal" | "inspector
 const MODE_META: { id: StudioTopBarMode; label: string; desc: string; color: string; tint: string; border: string }[] = [
   { id: "plan", label: "PLAN", desc: "Inspect and explain; do not change files", color: "#3b82f6", tint: "rgba(59,130,246,0.12)", border: "rgba(59,130,246,0.35)" },
   { id: "act", label: "ACT", desc: "Make changes; approvals may be required", color: "#8b5cf6", tint: "rgba(139,92,246,0.12)", border: "rgba(139,92,246,0.35)" },
-  { id: "auto", label: "AUTO", desc: "LiTT chooses when to plan and when to act", color: "#22d3ee", tint: "rgba(34,211,238,0.10)", border: "rgba(34,211,238,0.32)" },
+  { id: "auto", label: "AUTO", desc: "LiTT chooses when to plan and when to act", color: "var(--color-accent)", tint: "color-mix(in srgb, var(--color-accent) 10%, transparent)", border: "color-mix(in srgb, var(--color-accent) 32%, transparent)" },
 ];
 
 /**
@@ -192,7 +192,7 @@ export default function CommandStudioHeader({
               ? "Runtime verified"
               : "Runtime verified · provider degraded";
   const statusColor = statusLabel === "Runtime verified"
-    ? "#22d3ee"
+    ? "var(--color-accent)"
     : runtimeLoading || modelHealth === undefined
       ? "#e3b341"
       : runtime.phase === "error" || runtime.phase === "unauthenticated" || modelHealth === "unavailable"
@@ -204,7 +204,7 @@ export default function CommandStudioHeader({
   const pill = approvalPending
     ? { label: "Approval needed", short: "Approval", color: "#e3b341", pulse: true }
     : busy
-      ? { label: "Agent working", short: "Working", color: "#22d3ee", pulse: true }
+      ? { label: "Agent working", short: "Working", color: "var(--color-accent)", pulse: true }
       : {
           label: statusLabel,
           short: statusLabel === "Runtime verified" ? "Ready"
@@ -232,16 +232,16 @@ export default function CommandStudioHeader({
         <div
           className="grid h-7 w-7 place-items-center rounded-lg"
           style={{
-            background: "linear-gradient(135deg, rgba(34,211,238,0.25), rgba(139,92,246,0.18))",
-            border: "1px solid rgba(34,211,238,0.35)",
-            boxShadow: "0 0 12px rgba(34,211,238,0.25)",
+            background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 25%, transparent), color-mix(in srgb, var(--color-accent) 8%, transparent))",
+            border: "1px solid color-mix(in srgb, var(--color-accent) 35%, transparent)",
+            boxShadow: "0 0 12px color-mix(in srgb, var(--color-accent) 25%, transparent)",
           }}
           aria-hidden="true"
         >
-          <span className="text-[11px] font-black" style={{ color: "#22d3ee" }}>L</span>
+          <span className="text-[11px] font-black text-accent">L</span>
         </div>
         <span className="hidden text-[13px] font-bold tracking-tight text-white md:inline">
-          LiTT <span style={{ color: "#22d3ee" }}>Studio</span>
+          LiTT <span className="text-accent">Studio</span>
         </span>
       </div>
 
@@ -305,12 +305,7 @@ export default function CommandStudioHeader({
         <button
           type="button"
           onClick={onPreviewAction}
-          className="hidden shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-all active:scale-95 sm:flex"
-          style={{
-            background: "linear-gradient(135deg, rgba(34,211,238,0.9), rgba(59,130,246,0.9))",
-            color: "#04121a",
-            boxShadow: "0 0 14px rgba(34,211,238,0.35)",
-          }}
+          className="hidden shrink-0 items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-[11px] font-bold text-on-accent shadow-accent-glow transition-all hover:bg-accent-strong active:scale-95 sm:flex"
           title="Open the live preview"
           aria-label="Preview"
           data-testid="preview-quick-action"
@@ -325,12 +320,7 @@ export default function CommandStudioHeader({
         type="button"
         onClick={onNewChatAction}
         disabled={busy}
-        className="flex shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[11px] font-bold transition-all hover:bg-white/5 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
-        style={{
-          borderColor: "rgba(34,211,238,0.30)",
-          color: "#22d3ee",
-          backgroundColor: "rgba(34,211,238,0.06)",
-        }}
+        className="flex shrink-0 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/10 px-2 py-1.5 text-[11px] font-bold text-accent transition-all hover:bg-accent/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
         aria-label="New chat"
         title="Start a new chat"
       >
@@ -363,9 +353,9 @@ export default function CommandStudioHeader({
         onClick={onToggleDockAction}
         className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-bold transition-all hover:bg-white/5 active:scale-95"
         style={{
-          borderColor: dockOpen ? "rgba(34,211,238,0.45)" : "rgba(255,255,255,0.07)",
-          color: dockOpen ? "#22d3ee" : "var(--text-secondary)",
-          backgroundColor: dockOpen ? "rgba(34,211,238,0.08)" : "transparent",
+          borderColor: dockOpen ? "color-mix(in srgb, var(--color-accent) 45%, transparent)" : "rgba(255,255,255,0.07)",
+          color: dockOpen ? "var(--color-accent)" : "var(--text-secondary)",
+          backgroundColor: dockOpen ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent",
         }}
         title="Toggle the dock — activity, files, terminal, inspector, media"
         aria-label={dockOpen ? "Close dock" : "Open dock"}
@@ -434,7 +424,7 @@ function StatusRow({
   detail?: string;
 }) {
   const Icon = ok ? CircleCheck : warn ? CircleAlert : CircleDot;
-  const color = ok ? "#22d3ee" : warn ? "#e3b341" : "var(--text-muted)";
+  const color = ok ? "var(--color-accent)" : warn ? "#e3b341" : "var(--text-muted)";
   return (
     <div className="flex items-start gap-2.5 px-3 py-2">
       <Icon size={13} className="mt-0.5 shrink-0" style={{ color }} />
@@ -530,8 +520,8 @@ function WorkspaceStatusPopover({
         <span
           className="h-1.5 w-1.5 rounded-full"
           style={{
-            backgroundColor: providerCount ? "#22d3ee" : "var(--text-muted)",
-            boxShadow: providerCount ? "0 0 4px #22d3ee" : "none",
+            backgroundColor: providerCount ? "var(--color-accent)" : "var(--text-muted)",
+            boxShadow: providerCount ? "0 0 4px var(--color-accent)" : "none",
           }}
           aria-hidden
         />
@@ -573,12 +563,7 @@ function WorkspaceStatusPopover({
                 onClose();
                 onOpenTerminalAction();
               }}
-              className="flex w-full items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition hover:bg-white/5"
-              style={{
-                borderColor: "rgba(34,211,238,0.30)",
-                color: "#22d3ee",
-                backgroundColor: "rgba(34,211,238,0.06)",
-              }}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-accent/30 bg-accent/10 px-2.5 py-1.5 text-[11px] font-bold text-accent transition hover:bg-accent/20"
             >
               <Terminal size={12} aria-hidden />
               Open Terminal & Connect
@@ -685,7 +670,7 @@ function OverflowMenu({
         className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-white/5"
         style={{ color: "var(--text-primary)" }}
       >
-        <Plus size={13} className="pointer-events-none" style={{ color: "#22d3ee" }} />
+        <Plus size={13} className="pointer-events-none text-accent" />
         New Chat
       </button>
       <button
@@ -762,7 +747,7 @@ function OverflowMenu({
           style={{ color: "var(--text-primary)" }}
           title="Ask LiTT to deploy this project to a live public URL"
         >
-          <Rocket size={13} className="pointer-events-none" style={{ color: "#22d3ee" }} />
+          <Rocket size={13} className="pointer-events-none text-accent" />
           Deploy…
         </button>
       )}

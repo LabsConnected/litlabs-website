@@ -78,7 +78,7 @@ export function RevisionHistory({ canvasId, onRestore, onClose }: RevisionHistor
           {revisions.length > 1 && (
             <button
               onClick={() => void handleUndo()}
-              className="text-xs text-cyan-300 hover:text-cyan-200 transition-colors px-2 py-1 rounded hover:bg-cyan-500/10"
+              className="text-xs text-accent hover:text-accent-strong transition-colors px-2 py-1 rounded hover:bg-accent/10"
               title="Undo last change"
             >
               ↶ Undo
@@ -122,13 +122,13 @@ export function RevisionHistory({ canvasId, onRestore, onClose }: RevisionHistor
                   onClick={() => setSelectedVersion(isSelected ? null : rev.version)}
                   className={cn(
                     "flex w-full items-start gap-3 px-4 py-3 text-left transition-colors",
-                    isSelected ? "bg-cyan-500/5" : "hover:bg-white/[0.02]",
+                    isSelected ? "bg-accent/5" : "hover:bg-white/[0.02]",
                   )}
                 >
                   {/* Version number */}
                   <div className={cn(
                     "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
-                    isLatest ? "bg-cyan-500/20 text-cyan-300" : "bg-white/5 text-white/40",
+                    isLatest ? "bg-accent/20 text-accent" : "bg-white/5 text-white/40",
                   )}>
                     {rev.version}
                   </div>
@@ -137,7 +137,7 @@ export function RevisionHistory({ canvasId, onRestore, onClose }: RevisionHistor
                     <div className="flex items-center gap-2">
                       <span className={cn(
                         "text-[10px] font-medium uppercase",
-                        rev.actor === "user" && "text-cyan-300",
+                        rev.actor === "user" && "text-accent",
                         rev.actor === "litt" && "text-violet-300",
                         rev.actor === "spark" && "text-pink-300",
                         rev.actor === "system" && "text-white/40",
@@ -145,7 +145,7 @@ export function RevisionHistory({ canvasId, onRestore, onClose }: RevisionHistor
                         {rev.actor}
                       </span>
                       {isLatest && (
-                        <span className="text-[9px] text-cyan-300/60">LATEST</span>
+                        <span className="text-[9px] text-accent/60">LATEST</span>
                       )}
                     </div>
                     <div className="text-sm text-white/80 mt-0.5 truncate">
@@ -171,7 +171,7 @@ export function RevisionHistory({ canvasId, onRestore, onClose }: RevisionHistor
           <div className="space-y-1.5">
             {selectedRev.operations.map((op, i) => (
               <div key={i} className="text-xs text-white/60 font-mono">
-                <span className="text-cyan-300">{op.op}</span>
+                <span className="text-accent">{op.op}</span>
                 {"blockId" in op && (
                   <span className="text-white/30"> → {op.blockId.slice(0, 8)}...</span>
                 )}

@@ -30,7 +30,7 @@ export function DeployButton() {
       <button
         onClick={deploy}
         disabled={loading}
-        className="flex items-center gap-2 rounded-lg bg-orange-600 px-5 py-2 font-bold text-white hover:bg-orange-500 disabled:opacity-50"
+        className="flex items-center gap-2 rounded-lg bg-accent px-5 py-2 font-bold text-on-accent hover:bg-accent-strong disabled:opacity-50"
       >
         {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
         {loading ? "Deploying..." : "Deploy"}

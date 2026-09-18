@@ -7,9 +7,9 @@ export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "viol
 export type ButtonSize = "sm" | "md" | "lg" | "icon";
 
 const variantClasses: Record<ButtonVariant, string> = {
-  // The ONE dominant action per surface. Dark text on cyan for contrast.
+  // The ONE dominant action per surface. Dark text on lime for contrast (text-on-accent, 12.9:1).
   primary:
-    "bg-cyan-400 text-[#04262e] font-semibold hover:bg-cyan-300 active:bg-cyan-500 shadow-[0_0_24px_rgba(34,211,238,0.35)]",
+    "bg-accent text-on-accent font-semibold hover:bg-accent-strong active:bg-accent-strong shadow-accent-glow hover:shadow-accent-glow-strong",
   secondary:
     "bg-white/10 text-white border border-white/12 hover:bg-white/15 active:bg-white/20",
   ghost: "text-white/80 hover:text-white hover:bg-white/10 active:bg-white/15",
@@ -58,7 +58,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       className={cn(
         "inline-flex items-center justify-center gap-2 select-none cursor-pointer",
         "transition-colors duration-200 motion-reduce:transition-none",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(168,255,47,0.55)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#07080c]",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#07080c]",
         "disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none",
         variantClasses[variant],
         sizeClasses[size],

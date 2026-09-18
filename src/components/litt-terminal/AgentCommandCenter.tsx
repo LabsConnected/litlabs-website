@@ -55,7 +55,7 @@ const COMMANDS: CommandItem[] = [
 ];
 
 const STATUS_DOT: Record<string, string> = {
-  live: "bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]",
+  live: "bg-accent shadow-accent-glow",
   building: "bg-orange-400 shadow-[0_0_8px_rgba(251,146,60,0.8)] animate-pulse",
   published: "bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.8)]",
   pending: "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]",
@@ -74,12 +74,12 @@ export function AgentCommandCenter({
   return (
     <div className="flex h-full flex-col gap-4 border-r border-neutral-800/60 bg-[#060606] p-3">
       <div className="flex items-center gap-2 px-2 py-1">
-        <div className="relative flex h-8 w-8 items-center justify-center rounded-lg bg-linear-to-br from-cyan-500/20 to-fuchsia-500/20 border border-cyan-500/30">
-          <Terminal size={16} className="text-cyan-300" />
-          <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(34,211,238,0.9)]" />
+        <div className="relative flex h-8 w-8 items-center justify-center rounded-lg bg-linear-to-br from-accent/20 to-fuchsia-500/20 border border-accent/30">
+          <Terminal size={16} className="text-accent" />
+          <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-accent shadow-accent-glow" />
         </div>
         <div>
-          <div className="text-xs font-black tracking-wider text-cyan-300">
+          <div className="text-xs font-black tracking-wider text-accent">
             LiTT CODE
           </div>
           <div className="text-[9px] font-bold text-neutral-500 uppercase tracking-widest">
@@ -103,7 +103,7 @@ export function AgentCommandCenter({
               }}
               className={`group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-all ${
                 isActive
-                  ? "bg-cyan-500/10 border border-cyan-500/30 shadow-[0_0_12px_rgba(34,211,238,0.12)]"
+                  ? "bg-accent/10 border border-accent/30 shadow-accent-glow"
                   : "hover:bg-white/5 border border-transparent"
               }`}
             >
@@ -114,17 +114,17 @@ export function AgentCommandCenter({
                 size={15}
                 className={
                   isActive
-                    ? "text-cyan-300"
+                    ? "text-accent"
                     : "text-neutral-400 group-hover:text-neutral-200"
                 }
               />
               <span
-                className={`flex-1 text-xs font-semibold ${isActive ? "text-cyan-100" : "text-neutral-300 group-hover:text-neutral-100"}`}
+                className={`flex-1 text-xs font-semibold ${isActive ? "text-accent" : "text-neutral-300 group-hover:text-neutral-100"}`}
               >
                 {cmd.label}
               </span>
               {cmd.badge ? (
-                <span className="rounded-md bg-orange-500/20 px-1.5 py-0.5 text-[9px] font-black text-orange-300">
+                <span className="rounded-md bg-accent/20 px-1.5 py-0.5 text-[9px] font-black text-accent">
                   {cmd.badge}
                 </span>
               ) : null}
@@ -175,7 +175,9 @@ function AgentRow({
   progress: number;
 }) {
   const colorMap: Record<string, string> = {
-    cyan: "bg-cyan-400",
+    // Director (lead agent) carries the brand accent; other agents keep
+    // their identity colors (in-progress legend, not chrome).
+    cyan: "bg-accent",
     orange: "bg-orange-400",
     fuchsia: "bg-fuchsia-400",
     blue: "bg-blue-400",

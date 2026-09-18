@@ -220,7 +220,7 @@ export default function GameCloudHome() {
                   </div>
                   <button
                     onClick={() => openGameExternally(selectedGame)}
-                    className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-4 py-2 text-sm font-black text-black hover:bg-orange-400 transition-colors"
+                    className="inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-black text-on-accent hover:bg-accent-strong transition-colors"
                   >
                     <ExternalLink size={14} /> Open Game
                   </button>

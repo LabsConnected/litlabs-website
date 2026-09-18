@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { brand } from "@/lib/design/litt-tokens";
 import {
   Brain,
   AlertTriangle,
@@ -33,7 +34,7 @@ const AGENTS: AgentState[] = [
   {
     name: "Director",
     role: "Orchestrator",
-    color: "#22d3ee",
+    color: brand.primary.DEFAULT, // lead agent carries the brand accent
     status: "thinking",
     progress: 82,
     model: "GPT-5.5",
@@ -143,7 +144,7 @@ export function AIIntelligencePanel() {
               }
               className={`rounded-xl border p-2.5 text-left transition-all hover:scale-[1.02] ${
                 selected === agent.name
-                  ? "border-cyan-500/40 bg-cyan-500/10"
+                  ? "border-accent/40 bg-accent/10"
                   : "border-neutral-800/60 bg-neutral-900/40"
               }`}
             >
@@ -202,7 +203,7 @@ export function AIIntelligencePanel() {
                     tool.state === "connected"
                       ? "text-green-400"
                       : tool.state === "running"
-                        ? "text-cyan-400"
+                        ? "text-accent"
                         : "text-neutral-500"
                   }`}
                 >
@@ -225,7 +226,7 @@ export function AIIntelligencePanel() {
               key={i}
               className="flex items-center justify-between text-[10px]"
             >
-              <span className="font-semibold text-cyan-300">{event.agent}</span>
+              <span className="font-semibold text-accent">{event.agent}</span>
               <span className="text-neutral-400">{event.action}</span>
               <span className="text-neutral-600">{event.time}</span>
             </div>

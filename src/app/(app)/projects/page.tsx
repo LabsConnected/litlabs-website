@@ -276,7 +276,7 @@ export default function ProjectsPage() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search projects..."
-                  className="h-9 w-64 rounded-xl border bg-black/20 pl-9 pr-3 text-xs outline-none focus:border-cyan-300/40"
+                  className="h-9 w-64 rounded-xl border bg-black/20 pl-9 pr-3 text-xs outline-none focus:border-accent/40"
                   style={{ borderColor: `${T.borderColor}55`, color: T.textColor }}
                 />
               </div>
@@ -382,7 +382,7 @@ export default function ProjectsPage() {
                     href={selectMode ? "#" : `/studio?project=${encodeURIComponent(project.id)}`}
                     onClick={selectMode ? (e) => { e.preventDefault(); toggleSelect(project.id); } : undefined}
                     aria-pressed={selectMode ? isSelected : undefined}
-                    className={`group relative flex flex-col gap-3 rounded-2xl border p-4 transition-transform hover:-translate-y-0.5 ${selectMode && isSelected ? "ring-2 ring-cyan-300/60" : ""}`}
+                    className={`group relative flex flex-col gap-3 rounded-2xl border p-4 transition-transform hover:-translate-y-0.5 ${selectMode && isSelected ? "ring-2 ring-accent/60" : ""}`}
                     style={{ backgroundColor: `${T.boxBg}b8`, borderColor: `${T.borderColor}45` }}
                   >
                     {selectMode && (
