@@ -23,8 +23,20 @@ import "server-only";
  * Image Generate handler — calls the shared media generation API.
  * Uses auto-free mode (Pollinations) by default to avoid wallet requirements.
  * Returns a downloadUrl that can be rendered inline in chat.
+ *
+ * Server-to-server auth: the agent loop has no Clerk session, so a bare
+ * self-fetch to /api/media/generate is rejected (401 "Sign in to generate
+ * media") and every approved image.generate run died with "The approved
+ * workspace operation failed". The registry passes the workspace transport
+ * as the second argument; it carries the approving user's ID. When the
+ * internal service key is configured, the call is authenticated with it and
+ * attributed to that user for billing/rate-limiting exactly as a direct
+ * call would be.
  */
-export async function handleImageGenerate(inputs: Record<string, unknown>): Promise<unknown> {
+export async function handleImageGenerate(
+  inputs: Record<string, unknown>,
+  transport?: unknown,
+): Promise<unknown> {
   const prompt = inputs.prompt as string;
   const providerId = inputs.providerId as string | undefined;
 
@@ -35,10 +47,21 @@ export async function handleImageGenerate(inputs: Record<string, unknown>): Prom
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   const url = baseUrl.startsWith("http") ? baseUrl : `https://${baseUrl}`;
 
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const agentUserId =
+    transport && typeof transport === "object"
+      ? (transport as { userId?: unknown }).userId
+      : undefined;
+  const internalKey = process.env.TERMINAL_INTERNAL_SERVICE_KEY;
+  if (internalKey && typeof agentUserId === "string" && agentUserId) {
+    headers["X-Internal-Service-Key"] = internalKey;
+    headers["X-Agent-User-Id"] = agentUserId;
+  }
+
   try {
     const response = await fetch(`${url}/api/media/generate`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({
         prompt,
         format: "image",
