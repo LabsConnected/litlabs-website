@@ -70,10 +70,11 @@ export interface PausedRunRecord {
   executionMode: "plan" | "act" | "auto";
   systemPrompt: string;
   checkpointId: string | null;
-  status: "pending" | "approved" | "rejected" | "expired";
+  status: "pending" | "approved" | "executing" | "completed" | "failed" | "rejected" | "expired";
   createdAt: string;
   expiresAt: string;
   resolvedAt: string | null;
+  error: string | null;
   // Async execution tracking (null when not yet started)
   runStatus: RunStatus;
   runResult: RunResult | null;
@@ -101,6 +102,7 @@ interface PausedRunRow {
   created_at: string;
   expires_at: string;
   resolved_at: string | null;
+  error: string | null;
   run_status: string | null;
   run_result: RunResult | null;
   run_error: string | null;
@@ -128,6 +130,7 @@ function rowToRecord(row: PausedRunRow): PausedRunRecord {
     createdAt: row.created_at,
     expiresAt: row.expires_at,
     resolvedAt: row.resolved_at,
+    error: row.error ?? null,
     runStatus: (row.run_status as RunStatus) ?? null,
     runResult: row.run_result ?? null,
     runError: row.run_error ?? null,
@@ -218,7 +221,7 @@ async function expireIfStale(record: PausedRunRecord): Promise<PausedRunRecord> 
  * runStatus still null long after resolvedAt).
  */
 async function recoverStaleRun(record: PausedRunRecord): Promise<PausedRunRecord> {
-  if (!supabaseAdmin || record.status !== "approved") return record;
+  if (!supabaseAdmin || (record.status !== "approved" && record.status !== "executing")) return record;
 
   let staleError: string | null = null;
   if (record.runStatus === "processing" && record.runStartedAt) {
@@ -318,21 +321,25 @@ export async function getLatestPausedRunForConversation(
 export async function resolvePausedRun(
   pausedRunId: string,
   userId: string,
-  decision: "approved" | "rejected",
+  _decision: "approved" | "rejected",
+  retry = false,
 ): Promise<PausedRunRecord | null> {
   if (!supabaseAdmin) throw new Error("Database not available");
 
-  // Single-use: only update if still pending
+  // Claim atomically before executing. The record remains non-terminal while
+  // the frozen tool operation runs, so duplicate approvals cannot execute it twice.
   const now = new Date().toISOString();
   const { data, error } = await supabaseAdmin
     .from(TABLE)
     .update({
-      status: decision,
-      resolved_at: now,
+      status: _decision === "rejected" ? "rejected" : "executing",
+      resolved_at: _decision === "rejected" ? now : null,
+      error: null,
+      ...(retry ? { run_status: null, run_result: null, run_error: null, run_started_at: null, run_completed_at: null } : {}),
     })
     .eq("id", pausedRunId)
     .eq("user_id", userId)
-    .eq("status", "pending")
+    .or(retry ? "status.eq.pending,status.eq.failed" : "status.eq.pending")
     .select()
     .maybeSingle();
 
@@ -352,13 +359,35 @@ export async function resolvePausedRun(
     // Mark as expired instead
     await supabaseAdmin
       .from(TABLE)
-      .update({ status: "expired", resolved_at: now })
+      .update({ status: "expired", resolved_at: now, error: "Approval expired" })
       .eq("id", pausedRunId)
-      .eq("status", decision);
+      .eq("status", "executing");
     return null;
   }
 
   return record;
+}
+
+export async function completePausedRun(pausedRunId: string, userId: string): Promise<void> {
+  if (!supabaseAdmin) throw new Error("Database not available");
+  const { error } = await supabaseAdmin
+    .from(TABLE)
+    .update({ status: "completed", resolved_at: new Date().toISOString(), error: null })
+    .eq("id", pausedRunId)
+    .eq("user_id", userId)
+    .eq("status", "executing");
+  if (error) throw new Error(`Failed to complete paused run: ${error.message}`);
+}
+
+export async function failPausedRun(pausedRunId: string, userId: string, failureMessage?: string): Promise<void> {
+  if (!supabaseAdmin) throw new Error("Database not available");
+  const { error } = await supabaseAdmin
+    .from(TABLE)
+    .update({ status: "failed", resolved_at: new Date().toISOString(), error: failureMessage?.slice(0, 1000) ?? "Approval execution failed" })
+    .eq("id", pausedRunId)
+    .eq("user_id", userId)
+    .eq("status", "executing");
+  if (error) throw new Error(`Failed to fail paused run: ${error.message}`);
 }
 
 /**

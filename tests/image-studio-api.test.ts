@@ -47,11 +47,20 @@ vi.mock("@/lib/generation/cost-engine", () => ({
     retailLiTTBits: 1,
   })),
 }));
+vi.mock("@/lib/generation/identity", () => ({
+  resolveInternalUserId: vi.fn(async () => "internal-user-1"),
+}));
+
 vi.mock("@/lib/generation/jobs", () => ({
+  claimGenerationJob: vi.fn(async (input: { id: string }) => ({
+    claimed: true,
+    job: { id: input.id },
+  })),
   createGenerationJob: vi.fn(async () => null),
   completeGenerationJob: vi.fn(async () => {}),
   failGenerationJob: vi.fn(async () => {}),
   getGenerationJobByRequestId: vi.fn(async () => null),
+  updateGenerationJobMetadata: vi.fn(async () => {}),
   updateGenerationJobStatus: vi.fn(async () => {}),
 }));
 

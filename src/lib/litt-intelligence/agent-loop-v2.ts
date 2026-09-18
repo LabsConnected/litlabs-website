@@ -57,6 +57,8 @@ export interface AgentLoopConfig {
   systemPrompt: string;
   enableBuildFix: boolean;
   evalMetadata?: LLMCallMetadata;
+  /** Authenticated identity used by server-side tools; never client supplied. */
+  userId?: string;
   /** Upstream/client AbortSignal propagated to all provider calls. */
   signal?: AbortSignal;
   /**
@@ -206,6 +208,17 @@ function toPermissionInfo(tool: LiTTToolDefinition): ToolPermissionInfo {
     // whose capability is unavailable is never advertised or approved.
     requiredCapabilities: tool.requiredCapabilities,
   };
+}
+
+function authenticatedToolInputs(
+  toolId: string,
+  inputs: Record<string, unknown>,
+  operationId?: string,
+  retry = false,
+): Record<string, unknown> {
+  return toolId === "image.generate" && operationId
+    ? { ...inputs, requestId: `agent:${operationId}`, ...(retry ? { retry: true } : {}) }
+    : inputs;
 }
 
 // ─── Quality loop hooks ───────────────────────────────────────────
@@ -701,7 +714,7 @@ export async function runAgentLoopV2(
 
       try {
         // Use the registry's execute method, passing transport for V2 handlers
-        const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {
+        const execResult = await toolRegistry.execute(toolCall.toolId, authenticatedToolInputs(toolCall.toolId, toolCall.inputs, toolCall.toolCallId), {
           hasApproval: !permResult.requiresApproval,
           availableCapabilities,
           transport,
@@ -1099,7 +1112,7 @@ export async function resumeAgentLoopV2(
 
     let result: ToolCallResult;
     try {
-      const execResult = await toolRegistry.execute(resume.toolId, resume.inputs, {
+      const execResult = await toolRegistry.execute(resume.toolId, authenticatedToolInputs(resume.toolId, resume.inputs, resume.toolCallId, true), {
         hasApproval: true,
         availableCapabilities,
         transport,
@@ -1401,7 +1414,7 @@ export async function resumeAgentLoopV2(
 
       let result: ToolCallResult;
       try {
-        const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {
+        const execResult = await toolRegistry.execute(toolCall.toolId, authenticatedToolInputs(toolCall.toolId, toolCall.inputs, toolCall.toolCallId), {
           hasApproval: !permResult.requiresApproval,
           availableCapabilities,
           transport,
@@ -1580,7 +1593,7 @@ export function createAutonomousRepairCallback(
           if (!toolDef) continue;
 
           try {
-            const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {
+            const execResult = await toolRegistry.execute(toolCall.toolId, authenticatedToolInputs(toolCall.toolId, toolCall.inputs, toolCall.toolCallId), {
               hasApproval: true,
               availableCapabilities,
               transport,

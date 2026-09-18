@@ -68,6 +68,59 @@ export async function createGenerationJob(
 }
 
 /**
+ * Claim the durable idempotency key before invoking a provider. A unique
+ * (user_id, request_id) constraint makes concurrent callers converge on one
+ * owner; failed work may only be reclaimed explicitly.
+ */
+export async function claimGenerationJob(
+  input: CreateGenerationJobInput,
+  retryFailed = false,
+): Promise<{ job: GenerationJob | null; claimed: boolean }> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return { job: null, claimed: false };
+
+  if (retryFailed) {
+    const { data, error } = await admin
+      .from("generation_jobs")
+      .update({ status: "generating", error: null, completed_at: null })
+      .eq("user_id", input.userId)
+      .eq("request_id", input.requestId)
+      .eq("status", "failed")
+      .select("*")
+      .maybeSingle();
+    if (data && !error) return { job: rowToJob(data), claimed: true };
+  }
+
+  const { data, error } = await admin
+    .from("generation_jobs")
+    .insert({
+      id: input.id,
+      user_id: input.userId,
+      modality: input.modality,
+      provider: input.provider,
+      model: input.model,
+      status: "generating",
+      prompt: input.prompt.slice(0, 2000),
+      request_id: input.requestId,
+      provider_job_id: null,
+      actual_provider_cost_cents: null,
+      littbits_charged: input.littBitsCharged,
+      refund_status: "none",
+      asset_id: null,
+      error: null,
+      metadata: input.metadata ?? {},
+    })
+    .select("*")
+    .maybeSingle();
+
+  if (!error && data) return { job: rowToJob(data), claimed: true };
+  if (error?.code === "23505") {
+    return { job: await getGenerationJobByRequestId(input.userId, input.requestId), claimed: false };
+  }
+  return { job: null, claimed: false };
+}
+
+/**
  * Get a generation job by ID.
  */
 export async function getGenerationJob(jobId: string): Promise<GenerationJob | null> {

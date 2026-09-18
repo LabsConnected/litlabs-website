@@ -4,6 +4,8 @@ import { auth } from "@/lib/auth";
 import {
   getPausedRun,
   resolvePausedRun,
+  completePausedRun,
+  failPausedRun,
   markRunProcessing,
   markRunCompleted,
   markRunFailed,
@@ -113,7 +115,7 @@ export async function POST(
 
   const { conversationId, pausedRunId } = await params;
 
-  let body: { decision?: string; reason?: string };
+  let body: { decision?: string; reason?: string; retry?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -133,24 +135,20 @@ export async function POST(
     return NextResponse.json({ error: "Approval not found or expired" }, { status: 404 });
   }
 
-  if (pausedRun.status !== "pending") {
-    // Already resolved — check if the execution is still running
-    // This is the idempotent path: a repeated approval request returns 202
-    // with the current run status instead of launching a duplicate.
-    if (pausedRun.status === "approved" || pausedRun.status === "rejected") {
+  const retryingFailedApproval = pausedRun.status === "failed" && body.retry === true;
+  if (pausedRun.status !== "pending" && !retryingFailedApproval) {
+    if (["executing", "completed", "failed", "approved", "rejected"].includes(pausedRun.status)) {
       return NextResponse.json({
         resolved: true,
-        decision: pausedRun.status,
-        status: pausedRun.runStatus ?? "processing",
+        decision: pausedRun.status === "rejected" ? "rejected" : "approved",
+        status: pausedRun.status,
         pausedRunId,
         runStatus: pausedRun.runStatus,
-        runError: pausedRun.runError,
-      }, { status: 202 });
+        runError: pausedRun.error ?? pausedRun.runError,
+        retryable: pausedRun.status === "failed",
+      }, { status: pausedRun.status === "failed" ? 409 : 202 });
     }
-    return NextResponse.json(
-      { error: `Approval already ${pausedRun.status}` },
-      { status: 409 },
-    );
+    return NextResponse.json({ error: `Approval already ${pausedRun.status}` }, { status: 409 });
   }
 
   // 2. Verify conversation ownership
@@ -159,7 +157,7 @@ export async function POST(
   }
 
   // 3. Resolve the approval (single-use, atomic)
-  const resolved = await resolvePausedRun(pausedRunId, userId, body.decision);
+  const resolved = await resolvePausedRun(pausedRunId, userId, body.decision, retryingFailedApproval);
   if (!resolved) {
     return NextResponse.json(
       { error: "Approval could not be resolved (expired or already resolved)" },
@@ -193,13 +191,15 @@ export async function POST(
   try {
     transport = await createWorkspaceTransport(resolved.projectId, userId);
   } catch {
+    await failPausedRun(pausedRunId, userId, "Workspace is no longer available").catch(() => undefined);
     await markRunFailed(pausedRunId, userId, "Workspace is no longer available");
     return NextResponse.json(
       {
         error:
-          "Workspace is no longer available or you no longer have access. The approval has been recorded but the operation cannot proceed.",
-        resolved: true,
+          "Workspace is no longer available or you no longer have access. The operation failed and can be retried.",
+        resolved: false,
         status: "failed",
+        retryable: true,
         pausedRunId,
       },
       { status: 409 },
@@ -210,22 +210,25 @@ export async function POST(
   try {
     const verified = await verifyProjectWorkspace(resolved.projectId, userId);
     if (verified.workspaceId !== resolved.workspaceId) {
+      await failPausedRun(pausedRunId, userId, "Workspace changed since approval").catch(() => undefined);
       await markRunFailed(pausedRunId, userId, "Workspace changed since approval");
       return NextResponse.json(
         {
           error:
-            "Workspace has changed since the approval was requested. Please retry the operation.",
-          resolved: true,
+            "Workspace has changed since the approval was requested. The operation failed and can be retried.",
+          resolved: false,
           status: "failed",
+          retryable: true,
           pausedRunId,
         },
         { status: 409 },
       );
     }
   } catch {
+    await failPausedRun(pausedRunId, userId, "Workspace verification failed on resume").catch(() => undefined);
     await markRunFailed(pausedRunId, userId, "Workspace verification failed on resume");
     return NextResponse.json(
-      { error: "Workspace verification failed on resume", resolved: true, status: "failed" },
+      { error: "Workspace verification failed on resume", resolved: false, status: "failed", retryable: true },
       { status: 500 },
     );
   }
@@ -252,6 +255,7 @@ export async function POST(
     systemPrompt: resolved.systemPrompt,
     executionMode: resolved.executionMode,
     enableBuildFix: true,
+    userId,
     // Quality loop: resume with a fresh evidence session so the resumed
     // run is gated the same way (agent markers re-harvest from history).
     // AUTO resumes opt in too — an AUTO run pauses for deploy approval,
@@ -330,6 +334,7 @@ export async function POST(
           status: "failed",
           content: resumeArtifactError,
         });
+        await failPausedRun(pausedRunId, userId, resumeArtifactError).catch(() => undefined);
         await markRunFailed(pausedRunId, userId, resumeArtifactError);
         return;
       }
@@ -441,6 +446,7 @@ export async function POST(
           : undefined,
         qualityLoopState,
       };
+      await completePausedRun(pausedRunId, userId).catch(() => undefined);
       return markRunCompleted(pausedRunId, userId, runResult);
     })
     .catch(async (err) => {
@@ -453,6 +459,7 @@ export async function POST(
         status: "failed",
         content: `The resumed run failed: ${message}`,
       });
+      await failPausedRun(pausedRunId, userId, message).catch(() => undefined);
       return markRunFailed(pausedRunId, userId, message);
     });
 
@@ -497,6 +504,8 @@ export async function GET(
     inputs: pausedRun.inputs,
     reason: pausedRun.reason,
     status: pausedRun.status,
+    error: pausedRun.error ?? pausedRun.runError,
+    retryable: pausedRun.status === "failed",
     expiresAt: pausedRun.expiresAt,
     createdAt: pausedRun.createdAt,
     runStatus: pausedRun.runStatus,

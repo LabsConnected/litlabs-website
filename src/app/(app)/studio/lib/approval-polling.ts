@@ -64,6 +64,7 @@ export function submitApprovalAndPoll(opts: {
   conversationId: string;
   pausedRunId: string;
   decision: "approved" | "rejected";
+  retry?: boolean;
   onAccepted?: () => void;
   onCompleted?: (result: ApprovalRunResult) => void;
   onFailed?: (error: string) => void;
@@ -99,7 +100,7 @@ export function submitApprovalAndPoll(opts: {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ decision }),
+          body: JSON.stringify({ decision, ...(opts.retry ? { retry: true } : {}) }),
         },
       );
 
@@ -115,9 +116,15 @@ export function submitApprovalAndPoll(opts: {
         status?: string;
         runStatus?: string;
         runError?: string;
+        error?: string;
         resolved?: boolean;
         runResult?: ApprovalRunResult;
       } | null;
+
+      if (postResp.status === 409 && (postBody?.status === "failed" || postBody?.runStatus === "failed")) {
+        onFailed?.(postBody?.runError ?? postBody?.error ?? "The approval execution failed. Retry when ready.");
+        return;
+      }
 
       // For rejected approvals nothing runs server-side — settle now.
       // (An APPROVED decision that lands on an already-completed detached

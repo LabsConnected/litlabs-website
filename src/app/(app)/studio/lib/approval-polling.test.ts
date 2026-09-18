@@ -354,6 +354,30 @@ describe("submitApprovalAndPoll — detached resume", () => {
     expect(result.failed[0]).toContain("expired");
   });
 
+  it("keeps a failed approval retryable without losing the error", async () => {
+    const fetchImpl = queueHttp(
+      jsonResp({ error: "provider unavailable", status: "failed" }, 409),
+    );
+    const { settle, cbs } = watch();
+    submitApprovalAndPoll({
+      conversationId: "conv-1",
+      pausedRunId: "run-1",
+      decision: "approved",
+      retry: true,
+      ...cbs,
+      fetchImpl,
+      sleep: noSleep,
+    });
+
+    const result = await settledClick(settle);
+    expect(result.completed).toHaveLength(0);
+    expect(result.failed).toEqual(["provider unavailable"]);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      expect.stringContaining("/approvals/run-1"),
+      expect.objectContaining({ body: JSON.stringify({ decision: "approved", retry: true }) }),
+    );
+  });
+
   it("a rejection settles immediately — nothing resumes server-side", async () => {
     const fetchImpl = queueHttp(
       jsonResp({ resolved: true, decision: "rejected", status: "completed" }),

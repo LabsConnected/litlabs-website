@@ -18,20 +18,18 @@
  */
 
 import "server-only";
+import { generateMediaForUser } from "@/lib/media/image-generation-service";
+import type { WorkspaceTransport } from "./workspace-transport";
+import type { MediaProviderId } from "@/lib/media";
 
 /**
- * Image Generate handler — calls the shared media generation API.
+ * Image Generate handler — calls the shared media generation service.
  * Uses auto-free mode (Pollinations) by default to avoid wallet requirements.
  * Returns a downloadUrl that can be rendered inline in chat.
  *
- * Server-to-server auth: the agent loop has no Clerk session, so a bare
- * self-fetch to /api/media/generate is rejected (401 "Sign in to generate
- * media") and every approved image.generate run died with "The approved
- * workspace operation failed". The registry passes the workspace transport
- * as the second argument; it carries the approving user's ID. When the
- * internal service key is configured, the call is authenticated with it and
- * attributed to that user for billing/rate-limiting exactly as a direct
- * call would be.
+ * Identity comes only from the verified WorkspaceTransport. The handler calls
+ * the shared server-side service directly, so it never forwards browser
+ * cookies or relies on an internal HTTP self-fetch.
  */
 export async function handleImageGenerate(
   inputs: Record<string, unknown>,
@@ -39,49 +37,35 @@ export async function handleImageGenerate(
 ): Promise<unknown> {
   const prompt = inputs.prompt as string;
   const providerId = inputs.providerId as string | undefined;
+  const executionContext = transport as WorkspaceTransport | undefined;
+  const userId = executionContext?.userId ?? null;
 
   if (!prompt || prompt.length < 3) {
     return { success: false, error: "Prompt must be at least 3 characters" };
   }
-
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  const url = baseUrl.startsWith("http") ? baseUrl : `https://${baseUrl}`;
-
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  const agentUserId =
-    transport && typeof transport === "object"
-      ? (transport as { userId?: unknown }).userId
-      : undefined;
-  const internalKey = process.env.TERMINAL_INTERNAL_SERVICE_KEY;
-  if (internalKey && typeof agentUserId === "string" && agentUserId) {
-    headers["X-Internal-Service-Key"] = internalKey;
-    headers["X-Agent-User-Id"] = agentUserId;
+  if (!userId) {
+    return { success: false, error: "Authenticated execution context is required" };
+  }
+  const projectId = typeof inputs.projectId === "string" ? inputs.projectId : undefined;
+  if (projectId && projectId !== executionContext?.projectId) {
+    return { success: false, error: "Project is not owned by the authenticated workspace" };
   }
 
   try {
-    const response = await fetch(`${url}/api/media/generate`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        prompt,
-        format: "image",
-        generationMode: "auto-free",
-        ...(providerId ? { providerId, generationMode: "manual" } : {}),
-      }),
+    const response = await generateMediaForUser(userId, {
+      prompt,
+      format: "image",
+      requestId: typeof inputs.requestId === "string" ? inputs.requestId : undefined,
+      generationMode: "auto-free",
+      ...(providerId ? { providerId: providerId as MediaProviderId, generationMode: "manual" } : {}),
     });
-
     const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
-
-    if (!response.ok || !payload) {
-      const error = typeof payload?.error === "string" ? payload.error : `Generation failed (${response.status})`;
-      return { success: false, error };
+    if (!response.ok || !payload || payload.success !== true) {
+      return {
+        success: false,
+        error: typeof payload?.error === "string" ? payload.error : `Generation failed (${response.status})`,
+      };
     }
-
-    if (payload.success !== true) {
-      const error = typeof payload.error === "string" ? payload.error : "Generation failed";
-      return { success: false, error };
-    }
-
     return {
       success: true,
       downloadUrl: payload.downloadUrl,
@@ -92,8 +76,6 @@ export async function handleImageGenerate(
       cost: payload.cost ?? 0,
       free: payload.free ?? true,
       markdown: `![${prompt}](${payload.downloadUrl})`,
-      // Tell the model how to place this image into the website project
-      // instead of leaving it as a chat-only render.
       insertHint: "To place this image into the active website project, call project.insert_asset with this downloadUrl, then reference the returned sitePath in the site's HTML.",
     };
   } catch (err) {

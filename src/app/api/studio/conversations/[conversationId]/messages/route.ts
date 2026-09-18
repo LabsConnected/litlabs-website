@@ -499,6 +499,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
       executionMode: canonicalCtx.executionMode,
       enableBuildFix: true,
+      userId,
       model: typeof body.model === "string" ? body.model : undefined,
       // Quality loop: gate serious ACT/AUTO-mode builds through the
       // UNDERSTAND→VERIFY evidence stages + visual-quality judge.
