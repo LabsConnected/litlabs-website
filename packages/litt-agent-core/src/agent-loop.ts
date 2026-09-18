@@ -1619,12 +1619,17 @@ export async function runAgentLoop(
       //   successful read-only tool. A clean diff after a mutation
       //   request means NON-COMPLETION.
       //
-      //   This check ONLY applies when NO verification gate is configured.
-      //   When a gate is configured, the gate is the truth boundary — it
-      //   will catch the missing mutation itself. Applying the mutation
-      //   check before the gate would prevent the gate from running and
-      //   break the gate-driven repair loop.
-      if (!options.verificationGate && mutationRequested && mutationFailed && !mutationSucceeded) {
+      //   This check applies whether or not a verification gate is
+      //   configured. The gate proves the project's CHECKS pass — it does
+      //   NOT prove the requested mutation happened. A green typecheck on
+      //   an UNCHANGED repository must not "prove" a request that asked
+      //   for an edit: when every mutation attempt was denied or failed,
+      //   the full gate can still return proven on a no-op repo — a fake
+      //   completion. Checking the mutation requirement first does not
+      //   break the gate-driven repair loop: it only fires while the
+      //   required mutation is unsatisfied, and once a mutation succeeds
+      //   the gate runs exactly as before.
+      if (mutationRequested && mutationFailed && !mutationSucceeded) {
         // A required mutation failed and was never recovered. Feed the
         // real failure back to the model — do not silently continue as
         // if successful.
@@ -1654,7 +1659,7 @@ export async function runAgentLoop(
         continue;
       }
 
-      if (!options.verificationGate && mutationRequested && !mutationSucceeded && !mutationFailed) {
+      if (mutationRequested && !mutationSucceeded && !mutationFailed) {
         // The user asked for a mutation but no mutation tool was even
         // attempted. The model gave a final answer without making the
         // requested edit. This is NON-COMPLETION.

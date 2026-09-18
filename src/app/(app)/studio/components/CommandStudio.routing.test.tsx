@@ -233,8 +233,16 @@ vi.mock("../stores/useStudioAgentStore", () => ({
   ],
 }));
 
+// Captures the options object CommandStudio passes to
+// useCanonicalConversation on each render — used to assert serverProjectId
+// resolution prefers the URL's explicit ?project= over the async
+// capabilities.projectId (the fresh-conversation "stale revision" 409 race).
+let capturedConversationOptions: { serverProjectId?: string | null } | null = null;
+
 vi.mock("../hooks/useCanonicalConversation", () => ({
-  useCanonicalConversation: () => ({
+  useCanonicalConversation: (options: { serverProjectId?: string | null }) => {
+    capturedConversationOptions = options;
+    return {
     messages: [],
     busy: false,
     send: vi.fn().mockResolvedValue({ accepted: true }),
@@ -254,7 +262,8 @@ vi.mock("../hooks/useCanonicalConversation", () => ({
     selectedConversationId: null,
     conversations: [],
     loading: false,
-  }),
+    };
+  },
 }));
 
 vi.mock("../stores/useStudioModelStore", () => ({
@@ -384,6 +393,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     currentSearchParams = new URLSearchParams("tool=chat");
     mockCapabilities = defaultCapabilities();
     mockRuntime = undefined;
+    capturedConversationOptions = null;
     // The dock persists open/tab/height in sessionStorage (intentional
     // product behavior); clear it so each test starts from a closed dock.
     sessionStorage.clear();
@@ -407,6 +417,37 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     // Preview tab is active by default (preview is the primary surface)
     const previewBtn = screen.getByTestId("workspace-tab-preview");
     expect(previewBtn.className).toContain("glass-active");
+  });
+
+  describe("serverProjectId resolution (fresh-conversation 409 race)", () => {
+    // Regression coverage for the fresh-account "stale revision" 409 on
+    // message #1: capabilities.projectId resolves via an async fetch that
+    // can still be in flight — or can have resolved to the WRONG project
+    // (resolveCurrentProject's most-recently-updated fallback) — when the
+    // first message is sent. Attaching the new conversation to that wrong
+    // project desyncs the flat (non-per-conversation) revision counter and
+    // surfaces as a 409. The URL's explicit ?project= is synchronously
+    // authoritative and must win whenever it is present.
+    it("prefers the URL's explicit ?project= over capabilities.projectId", async () => {
+      currentSearchParams = new URLSearchParams("tool=chat&project=url-project-123");
+      mockCapabilities = { ...defaultCapabilities(), projectId: "capabilities-project-999" };
+      await renderCommandStudio();
+      expect(capturedConversationOptions?.serverProjectId).toBe("url-project-123");
+    });
+
+    it("prefers ?project= even while capabilities.projectId is still null (in-flight fetch)", async () => {
+      currentSearchParams = new URLSearchParams("tool=chat&project=url-project-123");
+      mockCapabilities = { ...defaultCapabilities(), projectId: null };
+      await renderCommandStudio();
+      expect(capturedConversationOptions?.serverProjectId).toBe("url-project-123");
+    });
+
+    it("falls back to capabilities.projectId when no ?project= is named in the URL", async () => {
+      currentSearchParams = new URLSearchParams("tool=chat");
+      mockCapabilities = { ...defaultCapabilities(), projectId: "capabilities-project-999" };
+      await renderCommandStudio();
+      expect(capturedConversationOptions?.serverProjectId).toBe("capabilities-project-999");
+    });
   });
 
   it("routes to builder surface when ?tool=build via studio:switch-tool event", async () => {

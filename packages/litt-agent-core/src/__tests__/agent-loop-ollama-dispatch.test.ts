@@ -972,3 +972,156 @@ describe("P. Max rounds guard", () => {
     assert.ok(result.rounds <= 3, "must not exceed max rounds");
   });
 });
+
+// ─── Q. Mutation requirement still applies when a gate is wired ───
+
+describe("Q. Mutation requirement with a configured verification gate", () => {
+  // Regression coverage for the fake-completion hole: when a
+  // verificationGate is configured, the mutation checks used to be
+  // skipped entirely ("the gate is the truth boundary"). But the gate
+  // proves the project's CHECKS pass — not that the requested mutation
+  // happened. A mutation-required request whose every mutation attempt
+  // failed (or was denied) could still terminate "complete" because the
+  // full gate proves a no-op repo's checks are green.
+  it("failed mutation + proving gate → NOT complete (gate cannot prove a missing mutation)", async () => {
+    const shell = new NodeShellExecutor(process.cwd());
+    const store = new RuntimeStore(() => {});
+    const tools = new ToolRegistry({
+      "project.run": {
+        definition: {
+          id: "project.run",
+          name: "run",
+          description: "Run a command",
+          inputSchema: {
+            type: "object",
+            properties: {
+              command: { type: "string", description: "Command" },
+              args: { type: "array", items: { type: "string" }, description: "Args" },
+            },
+            required: ["command"],
+          },
+          readOnly: true,
+        },
+        handler: async () => ({
+          status: "failed",
+          success: false,
+          message: "edit denied: approval required",
+          data: {},
+        }),
+        metadata: { projectScoped: false, mutating: false, readOnly: true },
+      },
+      "project.read_file": {
+        definition: {
+          id: "project.read_file",
+          name: "read_file",
+          description: "Read a file",
+          inputSchema: {
+            type: "object",
+            properties: { path: { type: "string" } },
+            required: ["path"],
+          },
+          readOnly: true,
+        },
+        handler: async () => ({
+          status: "success",
+          success: true,
+          message: "File read successfully",
+          data: { content: "file content" },
+        }),
+        metadata: { projectScoped: false, mutating: false, readOnly: true },
+      },
+    });
+    // Model: attempts the edit (denied/failed), then claims done. The
+    // proving gate would happily "verify" the unchanged repo — the loop
+    // must refuse before the gate is ever consulted.
+    const model = makeMockModel([
+      '```tool_call\n{ "tool": "project.run", "inputs": { "command": "sed", "args": ["-i", "s/old/new/", "src/index.ts"] } }\n```',
+      "The fix is applied. Done.",
+      "The fix is applied. Done.",
+      "The fix is applied. Done.",
+    ]);
+
+    const result = await runAgentLoop("Edit src/index.ts to change old to new.", {
+      model, tools, shell, store, cwd: process.cwd(),
+      maxRounds: 3,
+      verificationGate: makeProvingGate(),
+    });
+
+    assert.notEqual(result.termination, "complete",
+      "a proving gate must not convert a failed mutation into a fake completion");
+    assert.ok(
+      result.termination === "failed" || result.termination === "max_rounds" || result.termination === "verification_failed",
+      "must terminate truthfully, not complete",
+    );
+  });
+
+  it("mutation never attempted + proving gate → NOT complete", async () => {
+    const shell = new NodeShellExecutor(process.cwd());
+    const store = new RuntimeStore(() => {});
+    const tools = createDefaultRegistry();
+    // Model reads once then claims done — no mutation was ever attempted.
+    const model = makeMockModel([
+      '```tool_call\n{ "tool": "project.read_file", "inputs": { "path": "package.json" } }\n```',
+      "Done — the field is added.",
+      "Done — the field is added.",
+      "Done — the field is added.",
+    ]);
+
+    const result = await runAgentLoop("Edit package.json to add a description field.", {
+      model, tools, shell, store, cwd: process.cwd(),
+      maxRounds: 3,
+      verificationGate: makeProvingGate(),
+    });
+
+    assert.notEqual(result.termination, "complete",
+      "no mutation evidence + a proving gate must not report complete");
+  });
+
+  it("successful mutation + proving gate → still completes (guard does not block the honest path)", async () => {
+    const shell = new NodeShellExecutor(process.cwd());
+    const store = new RuntimeStore(() => {});
+    let editRan = false;
+    const tools = new ToolRegistry({
+      "project.run": {
+        definition: {
+          id: "project.run",
+          name: "run",
+          description: "Run a command",
+          inputSchema: {
+            type: "object",
+            properties: {
+              command: { type: "string", description: "Command" },
+              args: { type: "array", items: { type: "string" }, description: "Args" },
+            },
+            required: ["command"],
+          },
+          readOnly: true,
+        },
+        handler: async () => {
+          editRan = true;
+          return {
+            status: "success",
+            success: true,
+            message: "File edited",
+            data: {},
+          };
+        },
+        metadata: { projectScoped: false, mutating: false, readOnly: true },
+      },
+    });
+    const model = makeMockModel([
+      '```tool_call\n{ "tool": "project.run", "inputs": { "command": "sed", "args": ["-i", "s/old/new/", "src/index.ts"] } }\n```',
+      "Done — the edit is applied and verified.",
+    ]);
+
+    const result = await runAgentLoop("Edit src/index.ts to change old to new.", {
+      model, tools, shell, store, cwd: process.cwd(),
+      maxRounds: 3,
+      verificationGate: makeProvingGate(),
+    });
+
+    assert.equal(editRan, true, "the mutation tool ran");
+    assert.equal(result.termination, "complete",
+      "a real successful mutation proven by the gate must still complete");
+  });
+});

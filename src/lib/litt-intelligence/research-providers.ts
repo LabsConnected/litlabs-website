@@ -9,6 +9,7 @@
  */
 
 import { randomUUID } from "crypto";
+import { safeFetch } from "@litt/agent-core";
 import type {
   ResearchQuery,
   SearchResult,
@@ -73,18 +74,19 @@ export class GitHubSearchProvider implements ResearchProvider {
 
   async fetch(source: ResearchSource): Promise<FetchedSource | null> {
     try {
-      const res = await fetch(source.url, {
+      // source.url is externally-sourced (search results) — route through
+      // the SSRF-safe fetch boundary rather than the raw global fetch.
+      const res = await safeFetch(source.url, {
         headers: { Accept: "text/html" },
-        signal: AbortSignal.timeout(8000),
+        timeoutMs: 8000,
       });
       if (!res.ok) return null;
 
-      const content = await res.text();
       return {
         url: source.url,
         title: source.title ?? source.url,
-        content: content.slice(0, 50000),
-        contentType: res.headers.get("content-type") ?? "text/html",
+        content: res.content.slice(0, 50000),
+        contentType: res.contentType,
         fetchedAt: new Date().toISOString(),
         statusCode: res.status,
       };
@@ -154,12 +156,10 @@ export class WebSearchProvider implements ResearchProvider {
 
     try {
       const url = `${this.searchEndpoint}/search?q=${encodeURIComponent(query.text)}&format=json`;
-      const res = await fetch(url, {
-        signal: AbortSignal.timeout(8000),
-      });
+      const res = await safeFetch(url, { timeoutMs: 8000 });
 
       if (res.ok) {
-        const data = await res.json() as { results?: Array<{ url: string; title: string; content: string; engine?: string }> };
+        const data = JSON.parse(res.content) as { results?: Array<{ url: string; title: string; content: string; engine?: string }> };
         for (const item of data.results ?? []) {
           results.push({
             id: `web-${randomUUID()}`,
@@ -181,18 +181,20 @@ export class WebSearchProvider implements ResearchProvider {
 
   async fetch(source: ResearchSource): Promise<FetchedSource | null> {
     try {
-      const res = await fetch(source.url, {
-        signal: AbortSignal.timeout(8000),
+      // source.url comes from a general web search result — arbitrary,
+      // potentially adversarial external content. Route through the
+      // SSRF-safe fetch boundary, not the raw global fetch.
+      const res = await safeFetch(source.url, {
+        timeoutMs: 8000,
         headers: { "User-Agent": "LiTT-Research/1.0" },
       });
       if (!res.ok) return null;
 
-      const content = await res.text();
       return {
         url: source.url,
         title: source.title ?? source.url,
-        content: content.slice(0, 50000),
-        contentType: res.headers.get("content-type") ?? "text/html",
+        content: res.content.slice(0, 50000),
+        contentType: res.contentType,
         fetchedAt: new Date().toISOString(),
         statusCode: res.status,
       };
@@ -432,17 +434,16 @@ export class OpenAPIDirectoryProvider implements ResearchProvider {
 
   async fetch(source: ResearchSource): Promise<FetchedSource | null> {
     try {
-      const res = await fetch(source.url, {
-        signal: AbortSignal.timeout(8000),
-      });
+      // specUrl is sourced from the apis.guru catalog, third-party content
+      // — route through the SSRF-safe fetch boundary, not the raw fetch.
+      const res = await safeFetch(source.url, { timeoutMs: 8000 });
       if (!res.ok) return null;
 
-      const content = await res.text();
       return {
         url: source.url,
         title: source.title ?? source.url,
-        content: content.slice(0, 50000),
-        contentType: res.headers.get("content-type") ?? "application/json",
+        content: res.content.slice(0, 50000),
+        contentType: res.contentType,
         fetchedAt: new Date().toISOString(),
         statusCode: res.status,
       };
