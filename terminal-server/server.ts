@@ -1484,6 +1484,10 @@ app.get("/ws-files", (req: AuthenticatedRequest, res) => {
 
 app.post("/ws-files/read", (req: AuthenticatedRequest, res) => {
   const filePath = String(req.body.path || "");
+  const encoding = String(req.body.encoding || "utf-8");
+  if (encoding !== "utf-8" && encoding !== "base64") {
+    return res.status(400).json({ error: `Unsupported encoding: ${encoding}` });
+  }
   try {
     const target = resolveWorkspacePath(req.workspaceId!, req.terminalUserId!, filePath);
     const stats = statSync(target);
@@ -1493,8 +1497,9 @@ app.post("/ws-files/read", (req: AuthenticatedRequest, res) => {
     if (stats.size > MAX_READ_SIZE) {
       return res.status(413).json({ error: `File exceeds max read size (${MAX_READ_SIZE} bytes)` });
     }
-    const content = readFileSync(target, "utf-8");
-    res.json({ content, workspaceId: req.workspaceId });
+    const raw = readFileSync(target);
+    const content = encoding === "base64" ? raw.toString("base64") : raw.toString("utf-8");
+    res.json({ content, size: stats.size, workspaceId: req.workspaceId });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to read file";
     const status = fileErrorStatus(msg);
