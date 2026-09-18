@@ -1358,35 +1358,29 @@ export async function resumeAgentLoopV2(
       if (permResult.requiresApproval) {
         localProgress.emit({ type: "approval_required", toolId: toolCall.toolId, reason: permResult.reason ?? "Approval required" });
 
-        if (cfg.executionMode === "act") {
-          return {
-            finalText: `I need your approval to run \`${toolCall.toolId}\`. ${permResult.reason ?? "This operation requires explicit approval in ACT mode."}`,
-            stepsUsed,
-            totalDurationMs: Date.now() - startTime,
-            toolCalls: toolCallLog,
-            cancelled: false,
-            events,
-            checkpoint: checkpoint ?? undefined,
-            pendingApproval: {
-              toolId: toolCall.toolId,
-              toolCallId: toolCall.toolCallId,
-              inputs: toolCall.inputs,
-              reason: permResult.reason ?? "Approval required in ACT mode",
-              pausedMessages: [...llmMessages],
-              qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
-            },
-          };
-        }
-
-        const result: ToolCallResult = {
-          toolCallId: toolCall.toolCallId,
-          toolId: toolCall.toolId,
-          result: null,
-          success: false,
-          error: "Approval required — this operation is not in the AUTO-approve safe set",
+        // Pause for approval in AUTO as well as ACT — the same contract as
+        // the initial loop. A resumed run that reaches a second gated tool
+        // must produce a resumable paused run; the previous AUTO branch
+        // fed the model an "approval required" tool error instead, so the
+        // run "completed" with text asking for an approval that had no
+        // button — a dead end the user could never answer.
+        return {
+          finalText: `I need your approval to run \`${toolCall.toolId}\`. ${permResult.reason ?? "This operation requires explicit approval."}`,
+          stepsUsed,
+          totalDurationMs: Date.now() - startTime,
+          toolCalls: toolCallLog,
+          cancelled: false,
+          events,
+          checkpoint: checkpoint ?? undefined,
+          pendingApproval: {
+            toolId: toolCall.toolId,
+            toolCallId: toolCall.toolCallId,
+            inputs: toolCall.inputs,
+            reason: permResult.reason ?? "Approval required",
+            pausedMessages: [...llmMessages],
+            qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
+          },
         };
-        llmMessages.push(buildToolResultMessage(result));
-        continue;
       }
 
       // Loop detection

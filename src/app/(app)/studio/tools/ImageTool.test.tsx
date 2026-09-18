@@ -256,4 +256,42 @@ describe("ImageTool 'Use in Project'", () => {
       expect.anything(),
     );
   });
+
+  it("data:image/* fileUrl — the free-provider shape — saves via assets/insert", async () => {
+    const dataUrl = `data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, 0xff]).toString("base64")}`;
+    localStorage.setItem(
+      "litlabs-generate-history",
+      JSON.stringify([
+        {
+          id: "gen-data-1",
+          prompt: "a data image",
+          negativePrompt: "",
+          provider: "auto-free",
+          fileUrl: dataUrl,
+          status: "succeeded",
+          createdAt: Date.now(),
+          cost: 0,
+        },
+      ]),
+    );
+
+    render(<ImageTool />);
+    fireEvent.click(screen.getByLabelText("Preview: a data image"));
+    fireEvent.click(screen.getByTestId("use-in-project-button"));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/studio-projects/${PROJECT_ID}/assets/insert`,
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    const [, init] = fetchMock.mock.calls.find(([url]) => String(url).includes("/assets/insert"))!;
+    const payload = JSON.parse((init as RequestInit).body as string);
+    expect(payload.url).toBe(dataUrl);
+    // Extension comes from the data URL MIME type, not the URL text.
+    expect(payload.path).toBe("public/assets/images/a-data-image-gen-data.jpeg");
+    await waitFor(() => {
+      expect(screen.queryByTestId("image-preview")).not.toBeInTheDocument();
+    });
+  });
 });

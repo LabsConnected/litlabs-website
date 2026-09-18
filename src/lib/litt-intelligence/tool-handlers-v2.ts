@@ -596,7 +596,8 @@ export const handleProjectDeploy: ToolHandler = async (_inputs, transport) => {
  * as a chat-only render.
  *
  * Mirrors the guards of POST /api/studio-projects/[projectId]/assets/insert:
- * https-only URLs, 30s download timeout, 50MB cap, image/* content types.
+ * https or data:image/* URLs only, 30s download timeout, 50MB cap,
+ * image/* content types.
  */
 const MAX_INSERT_ASSET_BYTES = 50 * 1024 * 1024;
 const DEFAULT_INSERT_DIR = "public/assets/images";
@@ -636,6 +637,29 @@ export interface InsertAssetResult {
 }
 
 /**
+ * Decode a data:image/* URL into bytes + MIME without a network fetch.
+ * The free image providers (pollinations, cloudflare) return generated
+ * images inline as data URLs — the bytes are already server-side, so
+ * rejecting them for not being https:// dead-ended the default free
+ * generation path: auto-insert failed and "Use in project" could never
+ * write the asset.
+ */
+function decodeDataImageUrl(
+  url: string,
+): { buffer: Buffer; contentType: string } | { error: string } {
+  const match = /^data:(image\/[a-z0-9.+-]+)(;base64)?,([\s\S]*)$/i.exec(url);
+  if (!match) return { error: "Malformed data:image URL" };
+  try {
+    const buffer = match[2]
+      ? Buffer.from(match[3], "base64")
+      : Buffer.from(decodeURIComponent(match[3]), "utf8");
+    return { buffer, contentType: match[1].toLowerCase() };
+  } catch {
+    return { error: "Malformed data:image URL" };
+  }
+}
+
+/**
  * Download an image URL and save it into the project workspace as a binary
  * file. Shared core behind the project.insert_asset tool AND the automatic
  * post-generation save in the tool registry: after image.generate succeeds
@@ -650,23 +674,35 @@ export async function insertAssetFromUrl(
   transport: WorkspaceTransport,
 ): Promise<InsertAssetResult> {
   const directory = opts.directory ?? DEFAULT_INSERT_DIR;
-  if (!url.startsWith("https://")) {
-    return { success: false, error: "Asset URL must be a public HTTPS URL" };
+  const isDataImage = /^data:image\//i.test(url);
+  if (!isDataImage && !url.startsWith("https://")) {
+    return { success: false, error: "Asset URL must be a public HTTPS URL or a data:image/* URL" };
   }
   if (!isSafeInsertDir(directory)) {
     return { success: false, error: "Invalid directory: must be a safe relative path" };
   }
 
   try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-    if (!resp.ok) {
-      return { success: false, error: `Failed to download asset: HTTP ${resp.status}` };
+    let buffer: Buffer;
+    let contentType: string;
+    if (isDataImage) {
+      const decoded = decodeDataImageUrl(url);
+      if ("error" in decoded) {
+        return { success: false, error: decoded.error };
+      }
+      buffer = decoded.buffer;
+      contentType = decoded.contentType;
+    } else {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+      if (!resp.ok) {
+        return { success: false, error: `Failed to download asset: HTTP ${resp.status}` };
+      }
+      contentType = resp.headers.get("content-type") || "application/octet-stream";
+      buffer = Buffer.from(await resp.arrayBuffer());
     }
-    const contentType = resp.headers.get("content-type") || "application/octet-stream";
     if (!contentType.startsWith("image/")) {
       return { success: false, error: `Not an image (content-type: ${contentType})` };
     }
-    const buffer = Buffer.from(await resp.arrayBuffer());
     if (buffer.length === 0) {
       return { success: false, error: "Downloaded asset is empty" };
     }
@@ -676,7 +712,16 @@ export async function insertAssetFromUrl(
 
     const filename = sanitizeAssetName(opts.nameHint, contentType);
     const path = `${directory}/${filename}`;
-    await transport.writeBinaryFile(path, buffer.toString("base64"));
+    // Transient workspace errors (a volume blip or mid-prepare window can
+    // briefly ENOENT the workspace root) must not lose the generated
+    // asset — retry the write once before reporting saveError.
+    const base64 = buffer.toString("base64");
+    try {
+      await transport.writeBinaryFile(path, base64);
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await transport.writeBinaryFile(path, base64);
+    }
 
     // Site-relative URL: the public/ directory is served as the site root.
     const sitePath = `/${path.replace(/^public\//, "")}`;

@@ -123,6 +123,46 @@ describe("resumeAgentLoopV2 — approved mutation executes", () => {
     expect(toolMsg?.content).toContain(MKDIR_PATH);
   });
 
+  it("pauses a nested approval gate in AUTO mode instead of dead-ending", async () => {
+    // Production 2026-09-18: an AUTO run resumed after an approved
+    // image.generate tried to save the asset via project.insert_asset —
+    // a gated mutation outside the AUTO safe set. The resumed loop fed
+    // the model an "approval required" tool error instead of pausing, so
+    // the run completed with text asking for an approval that had no
+    // button — a dead end the user could never answer.
+    const { transport } = makeTransport();
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "Saving the image into the project.",
+      toolCalls: [
+        {
+          toolId: "project.insert_asset",
+          toolCallId: "tc-insert-1",
+          inputs: { projectId: "p-test", url: "https://example.com/a.png" },
+        },
+      ],
+      finishReason: "tool_calls",
+      model: "test-model",
+    });
+
+    const result = await resumeAgentLoopV2(
+      makePausedInput({
+        config: {
+          systemPrompt: "You are LiTT.",
+          executionMode: "auto",
+          enableBuildFix: false,
+        },
+      }),
+      transport,
+    );
+
+    expect(result.pendingApproval).toBeDefined();
+    expect(result.pendingApproval?.toolId).toBe("project.insert_asset");
+    expect(result.pendingApproval?.toolCallId).toBe("tc-insert-1");
+    expect(result.pendingApproval?.inputs).toEqual({ projectId: "p-test", url: "https://example.com/a.png" });
+    expect(result.cancelled).toBe(false);
+    expect(result.finalText).toContain("project.insert_asset");
+  });
+
   it("records a handler-level failure ({success:false}) as a failed call, not a mutation", async () => {
     // The workspace transport is unreachable: the handler catches the
     // throw and returns { success: false, error } as a normal value.

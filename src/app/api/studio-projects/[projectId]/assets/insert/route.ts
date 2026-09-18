@@ -15,7 +15,8 @@ import { getTerminalServerUrl } from "@/lib/terminal-url";
  * directly into their project without manually copying URLs.
  *
  * Body: {
- *   url: string,         // durable asset URL (https://...)
+ *   url: string,         // durable asset URL (https://... or data:image/* — the
+ *                        // free providers return generated images inline)
  *   path: string,        // target workspace path (e.g. "public/assets/images/bg.png")
  *   kind?: string,       // asset kind for logging (image, audio, video, music)
  *   name?: string,       // asset name for logging
@@ -24,8 +25,8 @@ import { getTerminalServerUrl } from "@/lib/terminal-url";
  * Security:
  *   - Authenticated users only.
  *   - Project ownership verified server-side via verifyProjectWorkspace.
- *   - URL must be https:// (no file://, no data: — those can't be downloaded
- *     server-side safely and would fail anyway).
+ *   - URL must be https:// or data:image/* (no file:// or other schemes;
+ *     data: URLs carry their bytes inline and are decoded server-side).
  *   - Path must be a safe relative path (no .. traversal, no absolute paths).
  *   - File operations are audit-logged.
  */
@@ -69,10 +70,13 @@ export async function POST(
     return NextResponse.json({ error: "Missing url or path" }, { status: 400 });
   }
 
-  // URL must be https:// — no file://, data:, or other schemes
-  if (!url.startsWith("https://")) {
+  // URL must be https:// or data:image/* — no file:// or other schemes.
+  // data: URLs carry their bytes inline (free providers return generated
+  // images this way), so they decode server-side without a fetch.
+  const isDataImage = /^data:image\//i.test(url);
+  if (!url.startsWith("https://") && !isDataImage) {
     return NextResponse.json(
-      { error: "Asset URL must be a public HTTPS URL" },
+      { error: "Asset URL must be a public HTTPS URL or a data:image/* URL" },
       { status: 400 },
     );
   }
@@ -82,20 +86,37 @@ export async function POST(
   }
 
   try {
-    // 1. Download the asset binary
-    const assetResp = await fetch(url, {
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!assetResp.ok) {
-      return NextResponse.json(
-        { error: `Failed to download asset: HTTP ${assetResp.status}` },
-        { status: 502 },
-      );
-    }
+    // 1. Obtain the asset binary — inline decode for data:, HTTP fetch for https://
+    let buffer: Buffer;
+    let contentType: string;
+    if (isDataImage) {
+      const match = /^data:([^;,]+)(;base64)?,([\s\S]*)$/i.exec(url);
+      if (!match) {
+        return NextResponse.json({ error: "Malformed data: URL" }, { status: 400 });
+      }
+      contentType = match[1];
+      try {
+        buffer = match[2]
+          ? Buffer.from(match[3], "base64")
+          : Buffer.from(decodeURIComponent(match[3]), "utf8");
+      } catch {
+        return NextResponse.json({ error: "Malformed data: URL" }, { status: 400 });
+      }
+    } else {
+      const assetResp = await fetch(url, {
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!assetResp.ok) {
+        return NextResponse.json(
+          { error: `Failed to download asset: HTTP ${assetResp.status}` },
+          { status: 502 },
+        );
+      }
 
-    const contentType = assetResp.headers.get("content-type") || "application/octet-stream";
-    const arrayBuf = await assetResp.arrayBuffer();
-    const buffer = Buffer.from(arrayBuf);
+      contentType = assetResp.headers.get("content-type") || "application/octet-stream";
+      const arrayBuf = await assetResp.arrayBuffer();
+      buffer = Buffer.from(arrayBuf);
+    }
 
     if (buffer.length > MAX_ASSET_SIZE) {
       return NextResponse.json(

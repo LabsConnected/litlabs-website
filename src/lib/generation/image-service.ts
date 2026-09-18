@@ -565,7 +565,8 @@ async function handleHuggingFaceVideo(
   };
 }
 
-async function handlePollinationsImage(
+// Exported for unit tests.
+export async function handlePollinationsImage(
   prompt: string,
   negativePrompt: string,
   seed: number,
@@ -586,6 +587,7 @@ async function handlePollinationsImage(
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25_000);
+  let errorEnvelope: { contentType: string; rateLimited: boolean } | null = null;
   try {
     const res = await fetch(url, {
       signal: controller.signal,
@@ -593,19 +595,37 @@ async function handlePollinationsImage(
     });
     clearTimeout(timer);
     if (res.ok) {
-      const ct = res.headers.get("content-type") || "image/jpeg";
-      const buf = await res.arrayBuffer();
-      const b64 = arrayBufferToBase64(buf);
-      return {
-        downloadUrl: `data:${ct};base64,${b64}`,
-        id: `pollinations_${Date.now()}`,
-        status: "complete",
-        title: prompt.slice(0, 60),
-        format: "image",
+      const ct = res.headers.get("content-type") || "";
+      if (ct.startsWith("image/")) {
+        const buf = await res.arrayBuffer();
+        const b64 = arrayBufferToBase64(buf);
+        return {
+          downloadUrl: `data:${ct};base64,${b64}`,
+          id: `pollinations_${Date.now()}`,
+          status: "complete",
+          title: prompt.slice(0, 60),
+          format: "image",
+        };
+      }
+      // A 200 that isn't an image is an upstream error envelope (rate-limit
+      // JSON, etc.) — not a generated image. Record it so the call fails
+      // honestly instead of shipping a JSON blob as a "successful" render.
+      const body = await res.text().catch(() => "");
+      errorEnvelope = {
+        contentType: ct || "unknown",
+        rateLimited: /429|rate.?limit|quota/i.test(body),
       };
     }
   } catch {
     clearTimeout(timer);
+  }
+
+  if (errorEnvelope) {
+    throw new Error(
+      errorEnvelope.rateLimited
+        ? "Pollinations upstream rate limit (429)"
+        : `Pollinations returned a non-image response (content-type: ${errorEnvelope.contentType})`,
+    );
   }
 
   return {

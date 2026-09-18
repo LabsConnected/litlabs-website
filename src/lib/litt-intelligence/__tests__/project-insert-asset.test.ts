@@ -83,6 +83,20 @@ describe("handleProjectInsertAsset", () => {
     expect(t.writeBinaryFile).not.toHaveBeenCalled();
   });
 
+  it("saves a data:image/* URL — the free-provider downloadUrl shape", async () => {
+    const t = spyTransport();
+    const res = await handleProjectInsertAsset(
+      { url: `data:image/png;base64,${PNG_BYTES.toString("base64")}`, name: "hero-sunset" },
+      t,
+    );
+    expect(res.success).toBe(true);
+    expect(t.writeBinaryFile).toHaveBeenCalledTimes(1);
+    const [path, base64] = t.writeBinaryFile.mock.calls[0];
+    expect(path).toMatch(/^public\/assets\/images\/hero-sunset-[a-z0-9]+\.png$/);
+    expect(Buffer.from(base64, "base64")).toEqual(PNG_BYTES);
+    expect(res.sitePath).toBe(`/${(path as string).replace(/^public\//, "")}`);
+  });
+
   it("rejects a missing url", async () => {
     const t = spyTransport();
     const res = await handleProjectInsertAsset({}, t);
@@ -218,6 +232,54 @@ describe("insertAssetFromUrl (shared core)", () => {
     const result = await insertAssetFromUrl("http://cdn.example.com/hero.png", {}, transport);
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/HTTPS/i);
+    expect(transport.writeBinaryFile).not.toHaveBeenCalled();
+  });
+
+  it("saves a data:image/* URL inline — no network fetch", async () => {
+    const fetchSpy = vi.fn(async () => mockImageResponse());
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    const transport = spyTransport();
+    const result = await insertAssetFromUrl(
+      `data:image/png;base64,${PNG_BYTES.toString("base64")}`,
+      { nameHint: "hero" },
+      transport,
+    );
+    expect(result.success).toBe(true);
+    expect(result.sitePath).toMatch(/^\/assets\/images\/hero-[a-z0-9]+\.png$/);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const [writtenPath, b64] = transport.writeBinaryFile.mock.calls[0];
+    expect(writtenPath).toBe(`public${result.sitePath}`);
+    expect(Buffer.from(b64 as string, "base64")).toEqual(PNG_BYTES);
+  });
+
+  it("derives the file extension from the data URL MIME type", async () => {
+    const transport = spyTransport();
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00]);
+    const result = await insertAssetFromUrl(
+      `data:image/jpeg;base64,${jpeg.toString("base64")}`,
+      { nameHint: "hero" },
+      transport,
+    );
+    expect(result.success).toBe(true);
+    expect(result.sitePath).toMatch(/\.jpeg$/);
+  });
+
+  it("rejects non-image data URLs", async () => {
+    const transport = spyTransport();
+    const result = await insertAssetFromUrl(
+      `data:text/html;base64,${Buffer.from("<html></html>").toString("base64")}`,
+      {},
+      transport,
+    );
+    expect(result.success).toBe(false);
+    expect(transport.writeBinaryFile).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed data:image URLs", async () => {
+    const transport = spyTransport();
+    const result = await insertAssetFromUrl("data:image/png", {}, transport);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/Malformed/i);
     expect(transport.writeBinaryFile).not.toHaveBeenCalled();
   });
 

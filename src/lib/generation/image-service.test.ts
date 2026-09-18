@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /**
  * Unit tests for the shared image generation service
@@ -44,6 +44,7 @@ vi.mock("@/lib/generation/cost-engine", () => ({
 
 import {
   generateImage,
+  handlePollinationsImage,
   type ImageServiceDeps,
   type ImageGenerationInput,
 } from "./image-service";
@@ -264,5 +265,75 @@ describe("generateImage", () => {
     }
     expect(calls.dispatch).toBe(1);
     expect(calls.debit).toHaveLength(0);
+  });
+});
+
+describe("handlePollinationsImage", () => {
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  function mockPollinationsResponse(opts: {
+    status?: number;
+    contentType?: string;
+    body?: string;
+    bytes?: Buffer;
+  }) {
+    const body = opts.body ?? "";
+    const bytes = opts.bytes ?? Buffer.from(body, "utf8");
+    globalThis.fetch = vi.fn(async () => ({
+      ok: (opts.status ?? 200) < 300,
+      status: opts.status ?? 200,
+      headers: {
+        get: (name: string) =>
+          name.toLowerCase() === "content-type" ? (opts.contentType ?? null) : null,
+      },
+      text: async () => body,
+      arrayBuffer: async () =>
+        bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    })) as unknown as typeof fetch;
+  }
+
+  it("returns an inline data:image/* downloadUrl for a real image response", async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    mockPollinationsResponse({ contentType: "image/png", bytes: png });
+    const result = await handlePollinationsImage("a red apple", "", 1, 512, 512);
+    expect(result.status).toBe("complete");
+    expect(result.downloadUrl).toMatch(/^data:image\/png;base64,/);
+    expect(Buffer.from(result.downloadUrl.split(",")[1], "base64")).toEqual(png);
+  });
+
+  it("a 200 JSON error envelope throws — never becomes a fake image", async () => {
+    mockPollinationsResponse({
+      contentType: "application/json",
+      body: '{"error":"Internal Server Error","message":"429: rate limit"}',
+    });
+    await expect(
+      handlePollinationsImage("a red apple", "", 1, 512, 512),
+    ).rejects.toThrow(/rate limit/i);
+  });
+
+  it("a 200 non-image response without a rate-limit marker still throws", async () => {
+    mockPollinationsResponse({
+      contentType: "text/html",
+      body: "<html>oops</html>",
+    });
+    await expect(
+      handlePollinationsImage("a red apple", "", 1, 512, 512),
+    ).rejects.toThrow(/non-image/i);
+  });
+
+  it("a network failure falls back to the lazy pollinations URL", async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error("socket hangup");
+    }) as unknown as typeof fetch;
+    const result = await handlePollinationsImage("a red apple", "", 1, 512, 512);
+    expect(result.downloadUrl).toMatch(/^https:\/\/image\.pollinations\.ai\//);
   });
 });
