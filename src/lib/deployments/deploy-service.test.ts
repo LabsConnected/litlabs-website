@@ -101,6 +101,14 @@ const reachableFetch = vi.fn(async () => new Response("<h1>Ember Roast</h1>", { 
 
 const BASE = "https://litlabs.example";
 
+/** A LiTT Hosting backend fake: the live URL is resolved from "infrastructure". */
+function fakeHosting(baseUrl: string = BASE): import("./litt-hosting").HostingBackend {
+  return {
+    isConfigured: () => ({ ok: true }),
+    resolveBaseUrl: async () => baseUrl,
+  };
+}
+
 /* ── Artifact collection ────────────────────────────────────────── */
 
 describe("collectStaticArtifact", () => {
@@ -143,7 +151,7 @@ describe("A. static project deploys and returns a verified live URL", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl });
 
     expect(result.ok).toBe(true);
@@ -163,7 +171,7 @@ describe("A. static project deploys and returns a verified live URL", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -184,7 +192,7 @@ describe("A. static project deploys and returns a verified live URL", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store: spied, fetchImpl: reachableFetch });
 
     expect(seen).toEqual(["deploying", "ready"]);
@@ -196,7 +204,7 @@ describe("A. static project deploys and returns a verified live URL", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
     const serialized = JSON.stringify(result);
     expect(serialized).not.toMatch(/service[-_]?key|secret|password|bearer|sk-/i);
@@ -213,7 +221,7 @@ describe("M. in-flight duplicate deploy is reused, not republished", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
@@ -242,7 +250,7 @@ describe("M. in-flight duplicate deploy is reused, not republished", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     expect(second.ok).toBe(true);
@@ -261,7 +269,7 @@ describe("M. in-flight duplicate deploy is reused, not republished", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
@@ -280,7 +288,7 @@ describe("M. in-flight duplicate deploy is reused, not republished", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     expect(second.ok).toBe(true);
@@ -309,7 +317,7 @@ describe("L. live URL must be independently verified before success", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: fetchImpl as unknown as typeof fetch });
 
     expect(calls).toHaveLength(1);
@@ -331,7 +339,7 @@ describe("L. live URL must be independently verified before success", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: fetchImpl as unknown as typeof fetch });
 
     expect(result.ok).toBe(true);
@@ -347,7 +355,7 @@ describe("L. live URL must be independently verified before success", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: fetchImpl as unknown as typeof fetch });
 
     expect(result.ok).toBe(false);
@@ -367,7 +375,7 @@ describe("L. live URL must be independently verified before success", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: fetchImpl as unknown as typeof fetch });
 
     expect(result.ok).toBe(false);
@@ -394,7 +402,7 @@ describe("C. a failed deployment never reports live", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport,
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     expect(result.ok).toBe(false);
@@ -416,7 +424,7 @@ describe("C. a failed deployment never reports live", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport,
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
     expect(store.files.size).toBe(0);
   });
@@ -431,7 +439,7 @@ describe("D. deployment is rejected for the wrong user", () => {
       userId: "user_attacker",
       projectId: "proj_ember",
       transport: fakeTransport({ userId: "user_owner" }),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     expect(result.ok).toBe(false);
@@ -448,7 +456,7 @@ describe("D. deployment is rejected for the wrong user", () => {
         userId,
         projectId: "proj_ember",
         transport: fakeTransport(),
-        publicBaseUrl: BASE,
+        hosting: fakeHosting(),
       }, { store, fetchImpl: reachableFetch });
       expect(result.ok).toBe(false);
     }
@@ -465,7 +473,7 @@ describe("E. deployment is rejected on project/workspace mismatch", () => {
       userId: "user_owner",
       projectId: "proj_someone_else",
       transport: fakeTransport({ projectId: "proj_ember" }),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     expect(result.ok).toBe(false);
@@ -481,7 +489,7 @@ describe("E. deployment is rejected on project/workspace mismatch", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport({ workspaceId: "" }),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
     expect(result.ok).toBe(false);
     expect(store.rows).toHaveLength(0);
@@ -493,7 +501,7 @@ describe("E. deployment is rejected on project/workspace mismatch", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport({ workspaceId: "ws_specific" }),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
     expect(result.ok).toBe(true);
     expect(store.rows[0].workspaceId).toBe("ws_specific");
@@ -511,7 +519,7 @@ describe("G. the user deploy path cannot target LiTT infrastructure", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
       railwayServiceId: "litt-production-service",
       provider: "railway",
       target: "railway",
@@ -536,7 +544,7 @@ describe("G. the user deploy path cannot target LiTT infrastructure", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: fetchImpl as unknown as typeof fetch });
 
     for (const url of urls) {
@@ -555,7 +563,7 @@ describe("J. a duplicate deploy of identical content does not republish", () => 
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     };
 
     const first = await deployUserProject(request, { store, fetchImpl: reachableFetch });
@@ -576,7 +584,7 @@ describe("J. a duplicate deploy of identical content does not republish", () => 
     const base = {
       userId: "user_owner",
       projectId: "proj_ember",
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     };
     const first = await deployUserProject(
       { ...base, transport: fakeTransport() },
@@ -608,14 +616,14 @@ describe("J. a duplicate deploy of identical content does not republish", () => 
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     const other = await deployUserProject({
       userId: "user_owner",
       projectId: "proj_other",
       transport: fakeTransport({ projectId: "proj_other" }),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     expect(other.ok).toBe(true);
@@ -631,14 +639,14 @@ describe("J. a duplicate deploy of identical content does not republish", () => 
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: failing as unknown as typeof fetch });
 
     const retry = await deployUserProject({
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     expect(retry.ok).toBe(true);
@@ -669,7 +677,7 @@ describe("publish gates", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport,
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     expect(result.ok).toBe(false);
@@ -692,9 +700,119 @@ describe("publish gates", () => {
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
-      publicBaseUrl: BASE,
+      hosting: fakeHosting(),
     }, { store, fetchImpl: reachableFetch });
 
     expect(result.ok).toBe(true);
+  });
+});
+
+/* ── LiTT Hosting: infra-resolved live URL, honest failures ───────── */
+
+describe("LiTT Hosting backend", () => {
+  it("unconfigured hosting fails BEFORE any deployment row exists", async () => {
+    const store = fakeStore();
+    const unconfigured: import("./litt-hosting").HostingBackend = {
+      isConfigured: () => ({ ok: false, reason: "LiTT Hosting isn't set up on this workspace yet." }),
+      resolveBaseUrl: async () => {
+        throw new Error("must not be called when unconfigured");
+      },
+    };
+    const result = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport: fakeTransport(),
+      hosting: unconfigured,
+    }, { store, fetchImpl: reachableFetch });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.status).toBe("failed");
+    expect(result.publicUrl).toBe(null);
+    expect(result.deploymentId).toBe(null);
+    // Honest, user-safe, and provider-agnostic.
+    expect(result.message).toContain("LiTT Hosting");
+    expect(result.message).not.toMatch(/railway|vercel/i);
+    // No row was created — there is nothing to misreport as deployed.
+    expect(store.rows).toHaveLength(0);
+  });
+
+  it("infrastructure URL-resolution failure marks the deployment failed with the real error", async () => {
+    const store = fakeStore();
+    const broken: import("./litt-hosting").HostingBackend = {
+      isConfigured: () => ({ ok: true }),
+      resolveBaseUrl: async () => {
+        throw new Error("Hosting infrastructure error: service not found.");
+      },
+    };
+    const result = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport: fakeTransport(),
+      hosting: broken,
+    }, { store, fetchImpl: reachableFetch });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.publicUrl).toBe(null);
+    // The REAL infrastructure error surfaces — no fake URL, no fake success.
+    expect(result.message).toContain("service not found");
+    expect(store.rows).toHaveLength(1);
+    expect(store.rows[0].status).toBe("failed");
+    expect(store.rows[0].publicUrl).toBe(null);
+    expect(store.rows[0].urlVerified).toBe(false);
+    expect(store.rows[0].errorMessage).toContain("service not found");
+  });
+
+  it("persists the infrastructure-resolved live URL and verifies it", async () => {
+    const store = fakeStore();
+    const fetchImpl = vi.fn(async (_url: RequestInfo | URL): Promise<Response> => new Response("<h1>Ember Roast</h1>", { status: 200 }));
+    const result = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport: fakeTransport(),
+      hosting: fakeHosting("https://infra-resolved.example"),
+    }, { store, fetchImpl });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The URL comes from the backend's resolved infrastructure base —
+    // never from caller input.
+    expect(result.publicUrl).toContain("https://infra-resolved.example");
+    expect(result.publicUrl).toContain(result.deploymentId);
+    expect(result.urlVerified).toBe(true);
+    const row = store.rows.find((r) => r.id === result.deploymentId);
+    expect(row?.publicUrl).toBe(result.publicUrl);
+    expect(row?.urlVerified).toBe(true);
+    expect(row?.target).toBe("litt-static");
+    // Verification actually fetched the resolved URL.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls[0][0]).toBe(result.publicUrl);
+  });
+
+  it("retry of identical content reuses the verified deployment (idempotent)", async () => {
+    const store = fakeStore();
+    const first = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport: fakeTransport(),
+      hosting: fakeHosting(),
+    }, { store, fetchImpl: reachableFetch });
+    expect(first.ok).toBe(true);
+
+    const second = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport: fakeTransport(),
+      hosting: fakeHosting("https://other-infra.example"),
+    }, { store, fetchImpl: reachableFetch });
+
+    expect(second.ok).toBe(true);
+    if (!second.ok || !first.ok) return;
+    // Same deployment reused — the second backend's base never leaks in.
+    expect(second.deploymentId).toBe(first.deploymentId);
+    expect(second.publicUrl).toBe(first.publicUrl);
+    expect(second.publicUrl).not.toContain("other-infra");
+    expect(store.rows).toHaveLength(1);
   });
 });

@@ -3,8 +3,15 @@
  *
  * The one path by which a user's generated project becomes publicly
  * reachable. It collects the workspace's static output, persists it as an
- * immutable snapshot, publishes it at a public URL, and verifies that URL
- * over HTTP before reporting success.
+ * immutable snapshot, publishes it on LiTT Hosting, and verifies the live
+ * URL over HTTP before reporting success.
+ *
+ * The publishing model knows ONLY "LiTT Hosting" (deploy target
+ * "litt-static"). The real public URL is resolved from the actual
+ * infrastructure at publish time through the HostingBackend abstraction
+ * (./litt-hosting) — never from caller input, never from a guess, and
+ * never naming an infrastructure provider. Infrastructure can change
+ * without touching this service.
  *
  * Authorization model — nothing here is taken from the model:
  *
@@ -17,11 +24,6 @@
  *   This service then re-checks that the requested userId and projectId
  *   match the transport's own, so a mismatch is refused rather than
  *   silently deploying the wrong thing.
- *
- * The deployment target is fixed server-side ("litt-static"). There is no
- * provider, account, or service input, so this path cannot be pointed at
- * LiTT's own Railway service — the admin-only /api/deploy/trigger remains
- * the only way to do that, and the agent cannot reach it.
  */
 
 import { createHash } from "node:crypto";
@@ -36,9 +38,20 @@ import {
   type DeploymentStatus,
 } from "./user-deployment";
 import { runPublishGates } from "../publish/publish-gates";
+import {
+  HOSTING_TARGET,
+  getHostingBackend,
+  type HostingBackend,
+} from "./litt-hosting";
 
-/** The only deployment target in V1. Never caller-selectable. */
-export const DEPLOY_TARGET = "litt-static" as const;
+/**
+ * The only deployment target in V1 — LiTT Hosting's static tier.
+ * Formalized here (not replaced): the publishing model targets LiTT
+ * Hosting, and infrastructure stays behind the HostingBackend abstraction.
+ * Never caller-selectable, and no provider/account/service input exists,
+ * so this path cannot be pointed at anything but LiTT Hosting.
+ */
+export const DEPLOY_TARGET = HOSTING_TARGET;
 
 /**
  * The workspace capabilities this service needs.
@@ -103,8 +116,13 @@ export interface DeployRequest {
   projectId: string;
   /** Server-built, already-authorized workspace transport. */
   transport: DeploySourceTransport;
-  /** Origin the published site will be served from. */
-  publicBaseUrl: string;
+  /**
+   * LiTT Hosting backend. Defaults to the canonical backend, which
+   * resolves the live URL from the actual infrastructure. Tests inject a
+   * fake. There is intentionally no base-URL input: the public URL is
+   * never caller-supplied.
+   */
+  hosting?: HostingBackend;
 }
 
 export interface DeployDeps {
@@ -296,6 +314,17 @@ export async function deployUserProject(
     return failure(null, new Error("Forbidden: workspace mismatch — no workspace bound to this project."));
   }
 
+  // ── Hosting: LiTT Hosting must be configured before any work happens ──
+  // The live URL is resolved from the actual infrastructure at publish
+  // time — never from caller input. When hosting is not configured this
+  // fails here, honestly, before any deployment row exists: there is no
+  // fake "deployed" state to report.
+  const hosting = request.hosting ?? getHostingBackend();
+  const hostingCheck = hosting.isConfigured();
+  if (!hostingCheck.ok) {
+    return failure(null, new Error(hostingCheck.reason));
+  }
+
   // ── Build: collect and validate the artifact ──
   let artifact: ArtifactFile[];
   try {
@@ -406,7 +435,31 @@ export async function deployUserProject(
       })),
     );
 
-    const publicUrl = buildPublicUrl(request.publicBaseUrl, record.id);
+    // ── Resolve the live URL from LiTT Hosting's infrastructure ──
+    // The URL comes from the actual infrastructure (never caller input,
+    // never a guess). A resolution failure marks the deployment failed
+    // with the REAL infrastructure error — never a fake URL.
+    let publicUrl: string;
+    try {
+      const baseUrl = await hosting.resolveBaseUrl();
+      publicUrl = `${baseUrl.replace(/\/+$/, "")}/sites/${record.id}/`;
+    } catch (err) {
+      const described = describeDeploymentFailure(err);
+      await store.update(record.id, {
+        status: "failed",
+        errorClass: described.errorClass,
+        errorMessage: described.message,
+      });
+      return {
+        ok: false,
+        deploymentId: record.id,
+        status: "failed",
+        publicUrl: null,
+        errorClass: described.errorClass,
+        message: described.message,
+        retryable: described.retryable,
+      };
+    }
 
     await store.update(record.id, {
       status: "deploying",
@@ -485,10 +538,4 @@ export async function deployUserProject(
       });
     return failure(record.id, err);
   }
-}
-
-/** The public URL a deployment is served at. */
-export function buildPublicUrl(baseUrl: string, deploymentId: string): string {
-  const base = (baseUrl || "").replace(/\/+$/, "");
-  return `${base}/sites/${deploymentId}/`;
 }
