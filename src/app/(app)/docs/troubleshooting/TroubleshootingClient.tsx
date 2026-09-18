@@ -69,11 +69,12 @@ export default function TroubleshootingClient() {
       <DocH2 id="terminal-disconnected">Terminal disconnected</DocH2>
       <DocP>
         If the terminal shows as disconnected or never starts, open the{" "}
-        <strong>Terminal</strong>{" "}drawer and reconnect it from there. LiTT
-        needs a connected terminal to install dependencies, run builds, and
-        execute commands — without it, build steps will stall. If
-        reconnecting fails repeatedly, refresh the page: Studio
-        re-establishes the session and your files are safe.
+        <strong>Terminal</strong>{" "}drawer and reconnect it from there. The
+        terminal is only the visible console — LiTT installs dependencies, runs
+        builds, and executes commands through the server, so chat and builds
+        keep working while it&apos;s disconnected. If reconnecting fails
+        repeatedly, refresh the page: Studio re-establishes the session and
+        your files are safe.
       </DocP>
 
       <DocH2 id="deployment-approval">Deployment waiting for approval</DocH2>

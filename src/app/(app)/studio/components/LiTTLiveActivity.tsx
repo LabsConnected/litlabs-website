@@ -25,6 +25,7 @@ import {
   type ExecutionPhase,
 } from "../stores/useExecutionStore";
 import { useStudioRuntime } from "../context/LiTTRuntimeContext";
+import { runtimeFreshnessLabel } from "@/lib/projects/runtime-state";
 
 /* ─────────────────────────────────────────────────────────────────
  * LiTTLiveActivity — right-side panel showing real agent execution.
@@ -335,11 +336,13 @@ export default function LiTTLiveActivity({
               }}
               aria-hidden
             />
+            {/* Human-readable status-feed freshness — the socket is a status
+                feed, not the build pipe, so the label says what still works. */}
             <span
-              className="text-[8px] font-bold uppercase tracking-wider"
+              className="text-[8px] font-bold tracking-wider"
               style={{ color: "var(--text-muted)" }}
             >
-              {freshness}
+              {runtimeFreshnessLabel(freshness)}
               {runtimeHeartbeat && ` · hb:${runtimeHeartbeat.seq}`}
             </span>
           </div>

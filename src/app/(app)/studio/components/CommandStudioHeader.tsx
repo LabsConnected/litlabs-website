@@ -197,7 +197,11 @@ export default function CommandStudioHeader({
       ? "#e3b341"
       : runtime.phase === "error" || runtime.phase === "unauthenticated" || modelHealth === "unavailable"
         ? "#ef4444"
-        : "#e3b341";
+        : runtime.phase === "terminal_disconnected"
+          // Neutral, ready-adjacent: the workspace is ready and builds run
+          // server-side — only the visible terminal PTY is unattached.
+          ? "#9ca3af"
+          : "#e3b341";
 
   // Status pill: approval gates and agent work take precedence over the
   // ambient runtime label — both are truthful, derived from live state.
