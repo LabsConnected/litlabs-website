@@ -124,8 +124,10 @@ async function handler(req: NextRequest) {
     if (isHappyHorse) {
       if (!isAlibabaConfigured())
         return NextResponse.json(
+          // 422, not 503: gateway statuses make the edge serve branded HTML
+          // instead of this JSON body (verified in production).
           { error: "Alibaba video not configured. Set ALIBABA_DASHSCOPE_API_KEY and ALIBABA_MODELSTUDIO_WORKSPACE_ID." },
-          { status: 503 },
+          { status: 422 },
         );
       if (!imageUrl)
         return NextResponse.json(

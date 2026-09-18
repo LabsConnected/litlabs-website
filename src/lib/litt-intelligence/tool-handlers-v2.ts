@@ -126,7 +126,16 @@ export const handleFilesMkdir: ToolHandler = async (inputs, transport) => {
     await transport.mkdir(path);
     return { success: true, path, created: true };
   } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : "Failed to create directory" };
+    // mkdir is naturally idempotent — the caller wants the directory to
+    // exist, and a 409/already-exists means it already does. Reporting a
+    // hard failure aborts the whole resumed run (the acceptance run died
+    // exactly here: auto-insert had already created assets/, the model's
+    // defensive mkdir then 409'd and the run was marked failed).
+    const msg = err instanceof Error ? err.message : "Failed to create directory";
+    if (/already exists|EEXIST|\b409\b/i.test(msg)) {
+      return { success: true, path, created: false, alreadyExists: true };
+    }
+    return { success: false, error: msg };
   }
 };
 
@@ -601,6 +610,7 @@ export const handleProjectDeploy: ToolHandler = async (_inputs, transport) => {
  */
 const MAX_INSERT_ASSET_BYTES = 50 * 1024 * 1024;
 const DEFAULT_INSERT_DIR = "public/assets/images";
+const STATIC_INSERT_DIR = "assets/images";
 
 function sanitizeAssetName(raw: string | undefined, contentType: string | null): string {
   const ext = contentType?.split("/")[1]?.split("+")[0]?.replace(/[^a-z0-9]/gi, "") || "png";
@@ -705,6 +715,48 @@ function decodeDataImageUrl(
 }
 
 /**
+ * Resolve the workspace directory an inserted asset is written to. The
+ * sitePath convention (/assets/images/x) only resolves if the file lands
+ * under the directory the preview/deploy server treats as the web root —
+ * and that root differs by project shape:
+ *   - Framework projects (package.json with a next/vite toolchain) serve
+ *     public/ at /, so assets belong in public/assets/images.
+ *   - Static sites are served from the WORKSPACE ROOT (`serve -s .` in
+ *     PreviewManager) — public/ is not special there, so the same sitePath
+ *     only resolves when the file lives at root-level assets/images.
+ * The 2026-09-18 acceptance run proved the mismatch: a generated image
+ * saved under public/ produced an <img> that got serve's SPA HTML
+ * fallback instead of the bytes. Detection mirrors PreviewManager's
+ * framework rules; an explicit opts.directory always wins.
+ */
+async function resolveInsertDirectory(
+  opts: InsertAssetOptions,
+  transport: WorkspaceTransport,
+): Promise<string> {
+  if (opts.directory) return opts.directory;
+  try {
+    const { entries } = await transport.listFiles(".");
+    const names = new Set(entries.map((e) => e.name));
+    if (!names.has("package.json")) return STATIC_INSERT_DIR;
+    const hasFrameworkConfig = [
+      "next.config.js", "next.config.mjs", "next.config.ts",
+      "vite.config.js", "vite.config.mjs", "vite.config.ts",
+    ].some((n) => names.has(n));
+    if (hasFrameworkConfig) return DEFAULT_INSERT_DIR;
+    const { content } = await transport.readFile("package.json");
+    const pkg = JSON.parse(content) as { scripts?: Record<string, string> };
+    const dev = String(pkg?.scripts?.dev ?? "");
+    if (dev.includes("next") || dev.includes("vite")) return DEFAULT_INSERT_DIR;
+    // package.json with no framework dev script + a root index.html still
+    // falls back to `serve -s .` in PreviewManager — workspace-root serve.
+    if (!dev && names.has("index.html")) return STATIC_INSERT_DIR;
+    return DEFAULT_INSERT_DIR;
+  } catch {
+    return DEFAULT_INSERT_DIR;
+  }
+}
+
+/**
  * Download an image URL and save it into the project workspace as a binary
  * file. Shared core behind the project.insert_asset tool AND the automatic
  * post-generation save in the tool registry: after image.generate succeeds
@@ -718,7 +770,7 @@ export async function insertAssetFromUrl(
   opts: InsertAssetOptions,
   transport: WorkspaceTransport,
 ): Promise<InsertAssetResult> {
-  const directory = opts.directory ?? DEFAULT_INSERT_DIR;
+  const directory = await resolveInsertDirectory(opts, transport);
   const isDataImage = /^data:image\//i.test(url);
   if (!isDataImage && !url.startsWith("https://")) {
     return { success: false, error: "Asset URL must be a public HTTPS URL or a data:image/* URL" };
@@ -771,7 +823,9 @@ export async function insertAssetFromUrl(
       await transport.writeBinaryFile(path, base64);
     }
 
-    // Site-relative URL: the public/ directory is served as the site root.
+    // Site-relative URL: framework projects serve public/ as the site
+    // root (strip the prefix); static workspaces serve the workspace
+    // root, where root-level assets/ already resolves as /assets/.
     const sitePath = `/${path.replace(/^public\//, "")}`;
     return { success: true, path, sitePath, contentType, sizeBytes: buffer.length };
   } catch (err) {
@@ -785,7 +839,7 @@ export async function insertAssetFromUrl(
 export const handleProjectInsertAsset: ToolHandler = async (inputs, transport) => {
   const url = inputs.url as string | undefined;
   const nameHint = inputs.name as string | undefined;
-  const directory = (inputs.directory as string | undefined) ?? DEFAULT_INSERT_DIR;
+  const directory = inputs.directory as string | undefined;
 
   if (!url || typeof url !== "string") {
     return { success: false, error: "url is required" };

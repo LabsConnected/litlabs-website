@@ -312,6 +312,61 @@ describe("insertAssetFromUrl (shared core)", () => {
     expect(transport.writeBinaryFile).not.toHaveBeenCalled();
   });
 
+  it("writes to root-level assets/ in a static workspace — the sitePath must resolve under `serve -s .`", async () => {
+    // Static sites have no package.json and PreviewManager serves the
+    // WORKSPACE ROOT — public/ is not the web root there, so the same
+    // /assets/images/x sitePath only resolves from root-level assets/.
+    const transport = spyTransport();
+    (transport as { listFiles: unknown }).listFiles = vi.fn(async () => ({
+      entries: [
+        { name: "index.html", type: "file" },
+        { name: "style.css", type: "file" },
+      ],
+    }));
+    const result = await insertAssetFromUrl(
+      `data:image/png;base64,${PNG_BYTES.toString("base64")}`,
+      { nameHint: "hero" },
+      transport,
+    );
+    expect(result.success).toBe(true);
+    expect(result.sitePath).toMatch(/^\/assets\/images\/hero-[a-z0-9]+\.png$/);
+    const [writtenPath] = transport.writeBinaryFile.mock.calls[0];
+    expect(writtenPath).toBe((result.sitePath as string).slice(1));
+  });
+
+  it("keeps the public/ convention in a framework workspace", async () => {
+    const transport = spyTransport();
+    (transport as { listFiles: unknown }).listFiles = vi.fn(async () => ({
+      entries: [
+        { name: "package.json", type: "file" },
+        { name: "next.config.ts", type: "file" },
+      ],
+    }));
+    const result = await insertAssetFromUrl(
+      `data:image/png;base64,${PNG_BYTES.toString("base64")}`,
+      { nameHint: "hero" },
+      transport,
+    );
+    expect(result.success).toBe(true);
+    const [writtenPath] = transport.writeBinaryFile.mock.calls[0];
+    expect(writtenPath).toBe(`public${result.sitePath}`);
+  });
+
+  it("an explicit directory still wins over workspace detection", async () => {
+    const transport = spyTransport();
+    (transport as { listFiles: unknown }).listFiles = vi.fn(async () => ({
+      entries: [{ name: "index.html", type: "file" }],
+    }));
+    const result = await insertAssetFromUrl(
+      `data:image/png;base64,${PNG_BYTES.toString("base64")}`,
+      { nameHint: "hero", directory: "media" },
+      transport,
+    );
+    expect(result.success).toBe(true);
+    const [writtenPath] = transport.writeBinaryFile.mock.calls[0];
+    expect(writtenPath).toMatch(/^media\/hero-[a-z0-9]+\.png$/);
+  });
+
   it("rejects non-image content types", async () => {
     globalThis.fetch = vi.fn(
       async () => mockImageResponse({ contentType: "text/html" }),

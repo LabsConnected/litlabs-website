@@ -60,7 +60,9 @@ async function handler(req: NextRequest) {
     // 1. Download the source image
     const imgResp = await fetch(imageUrl, { signal: AbortSignal.timeout(30_000) });
     if (!imgResp.ok)
-      return NextResponse.json({ error: `Failed to download source image: HTTP ${imgResp.status}` }, { status: 502 });
+      // 422, not 502: a gateway status makes the edge serve its own HTML
+      // error page instead of this JSON body (verified in production).
+      return NextResponse.json({ error: `Failed to download source image: HTTP ${imgResp.status}` }, { status: 422 });
 
     const contentType = imgResp.headers.get("content-type") || "image/png";
     if (!contentType.startsWith("image/"))

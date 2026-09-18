@@ -542,7 +542,10 @@ describe("Image Studio API — billing", () => {
     const { POST } = await import("@/app/api/media/generate/route");
     const req = makeRequest({ prompt: "test", providerId: "gemini" });
     const res = await POST(req);
-    expect(res.status).toBe(502);
+    // 422, not 502: gateway statuses let the edge swap this JSON body for
+    // a branded HTML error page. Handled provider failures use a stable
+    // non-gateway status so the structured error reaches the client.
+    expect(res.status).toBe(422);
     const data = await res.json();
     expect(data.success).toBe(false);
 

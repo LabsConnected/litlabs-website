@@ -822,7 +822,8 @@ export function registerInternalTools(): void {
         id: "project.insert_asset",
         name: "Insert Asset into Project",
         description:
-          "Download an image from a URL and save it into the project workspace (default public/assets/images/). " +
+          "Download an image from a URL and save it into the project workspace (defaults to the directory the " +
+          "site's web root serves: public/assets/images for framework projects, assets/images for static sites). " +
           "Use this right after image.generate to place a generated image into the website being built — " +
           "then reference the returned sitePath in the site's HTML. Never leave site images as chat-only renders.",
         source: "internal",
@@ -833,7 +834,7 @@ export function registerInternalTools(): void {
             projectId: { type: "string" },
             url: { type: "string", description: "Public HTTPS URL of the image (e.g. the downloadUrl from image.generate)" },
             name: { type: "string", description: "Optional filename hint, e.g. 'hero-sunset'" },
-            directory: { type: "string", description: "Optional workspace directory; defaults to public/assets/images" },
+            directory: { type: "string", description: "Optional workspace directory; defaults to the project's served asset directory" },
           },
           required: ["projectId", "url"],
         },
