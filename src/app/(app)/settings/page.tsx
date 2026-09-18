@@ -2342,8 +2342,18 @@ type BillingData = {
   } | null;
 };
 
+type UsageData = {
+  summary: {
+    totalCreditsUsed: number;
+    totalCreditsRefunded: number;
+    totalRuns: number;
+  };
+  modelUsage: Array<{ model: string; calls: number; credits: number }>;
+};
+
 function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
   const [data, setData] = useState<BillingData | null>(null);
+  const [usage, setUsage] = useState<UsageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [portalLoading, setPortalLoading] = useState(false);
 
@@ -2360,6 +2370,15 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
         // silent
       } finally {
         if (!cancelled) setLoading(false);
+      }
+      try {
+        const res = await fetch("/api/litt/usage?range=month", { cache: "no-store" });
+        if (res.ok) {
+          const json = await res.json();
+          if (!cancelled) setUsage(json);
+        }
+      } catch {
+        // silent
       }
     })();
     return () => { cancelled = true; };
@@ -2484,16 +2503,23 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
       {/* Usage */}
       <SettingsCard title="Usage" description="Model consumption and activity">
         <div className="space-y-2">
-          {[
-            { label: "Chat messages", value: "0 this month" },
-            { label: "Image generations", value: "0 this month" },
-            { label: "Agent tasks", value: "0 this month" },
-          ].map((u) => (
-            <div key={u.label} className="flex items-center justify-between rounded-lg border border-white/5 bg-white/2 px-3 py-2.5">
-              <span className="text-xs font-bold text-white/80">{u.label}</span>
-              <span className="text-[10px] text-white/40">{u.value}</span>
-            </div>
-          ))}
+          {(() => {
+            const modelCalls = usage?.modelUsage.reduce((s, m) => s + m.calls, 0) ?? 0;
+            const rows = [
+              { label: "LiTTBits used", value: usage ? `${usage.summary.totalCreditsUsed.toLocaleString()} this month` : "—" },
+              { label: "Model calls", value: usage ? `${modelCalls.toLocaleString()} this month` : "—" },
+              { label: "Agent runs", value: usage ? `${usage.summary.totalRuns.toLocaleString()} this month` : "—" },
+            ];
+            if (usage && usage.summary.totalCreditsRefunded > 0) {
+              rows.push({ label: "Refunded", value: `${usage.summary.totalCreditsRefunded.toLocaleString()} LiTTBits` });
+            }
+            return rows.map((u) => (
+              <div key={u.label} className="flex items-center justify-between rounded-lg border border-white/5 bg-white/2 px-3 py-2.5">
+                <span className="text-xs font-bold text-white/80">{u.label}</span>
+                <span className="text-[10px] text-white/40">{u.value}</span>
+              </div>
+            ));
+          })()}
         </div>
         <Link href="/pricing" className="mt-3 inline-block text-xs font-bold" style={{ color: T.accentColor }}>
           View plans and pricing →
