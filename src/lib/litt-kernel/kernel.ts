@@ -62,7 +62,9 @@ export type KernelResult =
  */
 export function routeKernel(request: KernelRequest): KernelResult {
   // 1. Classify intent
-  const intent: IntentClassification = classifyIntent(request.message);
+  const intent: IntentClassification = classifyIntent(request.message, {
+    hasProject: !!request.projectId,
+  });
 
   // 2. Resolve context
   const _context = resolveContext({
@@ -89,6 +91,7 @@ export function routeKernel(request: KernelRequest): KernelResult {
       requiresCurrentInformation: intent.requiresCurrentInformation,
       requiresPrivateData: intent.requiresPrivateData,
       requiresExecution: intent.requiresExecution,
+      anaphoricFollowUp: intent.anaphoricFollowUp,
     },
     epistemics: {
       expectedTruthClasses: intent.requiresCurrentInformation

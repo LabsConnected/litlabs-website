@@ -58,13 +58,12 @@ const MODE_PATTERNS: ModePattern[] = [
       // Inspector-originated edits often name the UI target rather than a
       // source file. They are still real mutations and must enter the V2
       // structured-tool lane.
-      /\b(change|edit|update|modify|rename|replace|delete)\b.*\b(selected|button|element|cta|label|visible text|text)\b/i,
-      /\b(selected|button|element|cta)\b.*\b(change|edit|update|modify|rename|replace|delete)\b/i,
+      /\b(change|edit|update|modify|rename|replace|delete|make|set)\b.*\b(selected|button|element|cta|label|visible text|text)\b/i,
+      /\b(selected|button|element|cta)\b.*\b(change|edit|update|modify|rename|replace|delete|make|set)\b/i,
       /\b(implement|build|write|create|edit|update|fix|refactor|add|remove|delete|change)\b.*\b(file|component|function|code|api|route|page|endpoint|class|module|test|config|readme|package)\b/i,
       // Site/app artifacts. Without these, "build me a website" fell through
       // to `think` mode with requiresExecution:false, so the request reached
       // only the read-only loop — it could be discussed but never built.
-      /\b(build|create|make|generate|scaffold|set up)\b.*\b(website|web ?site|web ?app|site|landing site|landing page|homepage|web page|webpage|blog|portfolio|store|shop|dashboard|app)\b/i,
       // Desire-driven artifact requests ("I want a landing page …", "I need
       // a website for …") express build intent without a leading imperative
       // verb. Without this they fell into `create`'s bare artifact-noun
@@ -75,13 +74,38 @@ const MODE_PATTERNS: ModePattern[] = [
       // `create`; it also excludes bare "site"/"store"/"shop" to avoid
       // catching "site visit" / "I want to shop".
       /\b(want|need|would like|looking for|get me|give me)\b.*\b(landing page|landing site|website|web ?site|web ?app|home ?page|web ?page|blog|portfolio|dashboard|app)\b/i,
+      // "gimme" is colloquial "give me" — "gimme a portfolio site" is a build.
+      /\b(build|create|make|generate|scaffold|set up|gimme)\b.*\b(website|web ?site|web ?app|site|landing site|landing page|homepage|web page|webpage|blog|portfolio|store|shop|dashboard|app)\b/i,
+      // Question-form desire: "what about a landing page for my barbershop?"
+      // has no build verb, so it fell through to create's bare artifact-noun
+      // pattern — a chat reply, nothing built.
+      /\b(what about|how about|can we|let's)\b.*\b(landing page|website|web ?site|blog|portfolio|dashboard|app)\b/i,
+      // Follow-up continuations: "now add a contact section". The leading
+      // temporal word hijacked these into research ("now"); match the verb
+      // pair first so they enter the execution lane.
+      /\b(now|then|also|next)\s+(add|build|create|make|edit|update|fix|remove|delete|change)\b/i,
+      // Terse imperatives: "landing page. puppet master theme. go."
+      // Site-artifact noun (never media nouns: image/logo/video) + imperative
+      // cue. Note: a [^.] gap cannot work here — the example itself has a
+      // period right after the artifact noun. "do it"/"build it"/"make it"
+      // may appear anywhere within ~60 chars; the weak bare "go" cue only
+      // counts sentence-final (mid-sentence "go" over-matches chat like
+      // "You should go see it").
+      /\b(landing page|website|web ?site|web ?app|home ?page|blog|portfolio|dashboard|app)\b.{0,60}\b(do it|build it|make it)\b/i,
+      /\b(landing page|website|web ?site|web ?app|home ?page|blog|portfolio|dashboard|app)\b[\s\S]{0,80}[.!?]\s*go[.!]?\s*$/i,
+      // Media added to an existing target: "add images ... to my project".
+      // The project/site target keeps this in the execution lane; a bare
+      // "make me a logo" (no project target) still falls through to create.
+      /\b(add|upload|generate)\b.*\b(images?|photos?|pictures?|media|gallery)\b.*\b(project|site|website|page|section)\b/i,
       /\b(add|implement|support)\b.*\b(dark mode|feature|endpoint|route|page)\b/i,
       /\b(fix|debug|resolve|patch)\b.*\b(bug|error|issue|crash|fail)\b/i,
       /\b(edit|update|change|modify|rename|delete)\b.*\b(file|readme|config|code|component)\b/i,
       // Existing product edits often describe the user-facing target rather
       // than naming a source file. They still require the executable V2 lane;
       // routing them to text-only chat silently drops the requested mutation.
-      /\b(edit|update|change|modify|rename|replace|delete)\b.*\b(site|website|web ?app|homepage|landing page|footer|header|nav|menu|section)\b/i,
+      // redesign/revamp/restyle/overhaul and fix/repair are the same family:
+      // "redesign my homepage", "fix the header on my site" are mutations.
+      /\b(edit|update|change|modify|rename|replace|delete|redesign|revamp|restyle|overhaul|fix|repair)\b.*\b(site|website|web ?app|homepage|landing page|footer|header|nav|menu|section)\b/i,
       // Placement commands use everyday verbs rather than edit-vocabulary —
       // "put this image on my homepage", "add that picture to the hero",
       // "insert the image into this page". Without this they fell into
@@ -192,6 +216,16 @@ const PRIVATE_DATA_PATTERNS = [
   /\b(show me|what.*do i have|list my|my projects|my files|my account)\b/i,
 ];
 
+// ─── Anaphoric follow-up detection ─────────────────────────────
+// "build it", "do that thing again but lime" — the user refers to prior
+// context instead of naming a target. Flag these so callers with a project
+// in context can ask a targeted clarification instead of dumping a generic
+// chat reply. Only messages with NO artifact noun qualify (a named target
+// is unambiguous even alongside "that").
+const SITE_ARTIFACT_NOUN =
+  /\b(landing page|website|web ?site|web ?app|home ?page|blog|portfolio|dashboard|app|button|element|cta|header|footer|nav|menu|section|file|component|function|code|api|route|endpoint|image|logo|video)\b/i;
+const ANAPHORIC_WORD = /\b(it|that|those|these|again)\b/i;
+
 // ─── Main classifier ────────────────────────────────────────────
 
 /**
@@ -199,8 +233,14 @@ const PRIVATE_DATA_PATTERNS = [
  *
  * This is deterministic (no LLM call) in Phase 1. The blueprint allows
  * a lightweight LLM fallback for ambiguous cases, but that comes later.
+ *
+ * @param opts.hasProject - whether the request already has project context
+ *   (passed through from the Kernel). Used to annotate anaphoric follow-ups.
  */
-export function classifyIntent(message: string): IntentClassification {
+export function classifyIntent(
+  message: string,
+  opts?: { hasProject?: boolean },
+): IntentClassification {
   const trimmed = message.trim();
   if (!trimmed) {
     return {
@@ -212,6 +252,7 @@ export function classifyIntent(message: string): IntentClassification {
       requiresExecution: false,
       confidence: 0.3,
       reasoning: "Empty message — defaulting to think mode.",
+      anaphoricFollowUp: false,
     };
   }
 
@@ -246,6 +287,10 @@ export function classifyIntent(message: string): IntentClassification {
     ? `Matched ${matchedMode} mode pattern. Domains: ${domains.join(", ") || "none"}.`
     : `No explicit pattern matched — defaulting to think mode. Domains: ${domains.join(", ") || "none"}.`;
 
+  // Anaphoric follow-up marker (see detection block above).
+  const anaphoricFollowUp =
+    !SITE_ARTIFACT_NOUN.test(trimmed) && ANAPHORIC_WORD.test(trimmed);
+
   return {
     mode: matchedMode,
     domains,
@@ -254,6 +299,9 @@ export function classifyIntent(message: string): IntentClassification {
     requiresPrivateData,
     requiresExecution,
     confidence,
-    reasoning,
+    reasoning: anaphoricFollowUp
+      ? `${reasoning} Anaphoric follow-up (no artifact noun)${opts?.hasProject ? " with project context — caller should clarify the target." : "."}`
+      : reasoning,
+    anaphoricFollowUp,
   };
 }
