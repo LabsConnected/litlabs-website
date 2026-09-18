@@ -27,11 +27,11 @@ describe("litt-tokens", () => {
     expect(hits).toEqual([]);
   });
 
-  it("flags the primary accent as a pending, swappable decision", () => {
-    expect(PRIMARY_ACCENT_DECISION.status).toBe("pending");
-    expect(PRIMARY_ACCENT_DECISION.current).toBe("cyan-blue");
-    // Default follows the brief: electric cyan/blue, not lime.
-    expect(littTokens.brand.primary.DEFAULT).toBe("#22d3ee");
+  it("pins the primary accent decision: lime, decided", () => {
+    expect(PRIMARY_ACCENT_DECISION.status).toBe("decided");
+    expect(PRIMARY_ACCENT_DECISION.current).toBe("lime");
+    // brand.primary resolves to the decided lime candidate.
+    expect(littTokens.brand.primary.DEFAULT).toBe("#a8ff2f");
     expect(littTokens.brand.candidates.lime.DEFAULT).toBe("#a8ff2f");
   });
 

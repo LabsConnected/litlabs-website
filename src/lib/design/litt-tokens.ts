@@ -12,13 +12,13 @@
  * existing components in this batch.
  *
  * ┌────────────────────────────────────────────────────────────────────┐
- * │ ⚠️  PENDING PRODUCT DECISION — PRIMARY ACCENT                     │
+ * │ ✅ DECIDED — PRIMARY ACCENT (2026-09-16)                           │
  * │                                                                    │
- * │ `brand.primary` is a swappable alias. It currently points at the   │
- * │ brief's direction (electric cyan/blue). The shipped site uses lime.│
- * │ Larry has NOT decided which wins. Batch 6 (primary migration) is  │
- * │ blocked on his call. When he decides, change ONLY the alias       │
- * │ target in `brand.primary` — everything downstream follows.         │
+ * │ On 2026-09-16 ~14:52 EDT Larry explicitly approved "lime as the   │
+ * │ brand accent", superseding earlier uncertainty. `brand.primary`   │
+ * │ therefore resolves to the lime candidate (#a8ff2f). If the        │
+ * │ decision ever changes, change ONLY the alias target in           │
+ * │ `brand.primary` — everything downstream follows.                  │
  * └────────────────────────────────────────────────────────────────────┘
  *
  * Rules baked into this map:
@@ -32,12 +32,17 @@
  */
 
 export const PRIMARY_ACCENT_DECISION = {
-  status: "pending" as const,
+  status: "decided" as const,
   decidedBy: "Larry",
+  decidedAt: "2026-09-16",
   briefDirection: "electric cyan/blue",
   shippedDirection: "lime (#a8ff2f)",
-  /** Change this value — and nothing else — when the decision lands. */
-  current: "cyan-blue" as "cyan-blue" | "lime",
+  /**
+   * Decision record: on 2026-09-16 ~14:52 EDT Larry explicitly approved
+   * "lime as the brand accent", superseding earlier uncertainty — so
+   * `brand.primary` now resolves to the lime candidate.
+   */
+  current: "lime" as "cyan-blue" | "lime",
   blocksBatch: 6,
 } as const;
 
