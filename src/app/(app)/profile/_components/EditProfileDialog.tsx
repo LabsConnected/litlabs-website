@@ -8,14 +8,16 @@ interface Props {
   open: boolean;
   profile: UserProfile;
   saving: boolean;
+  saveError: string | null;
   onClose: () => void;
-  onSave: (updates: Partial<UserProfile>) => Promise<void>;
+  onSave: (updates: Partial<UserProfile>) => Promise<boolean>;
 }
 
 export function EditProfileDialog({
   open,
   profile,
   saving,
+  saveError,
   onClose,
   onSave,
 }: Props) {
@@ -186,32 +188,53 @@ export function EditProfileDialog({
             padding: "16px 24px",
             borderTop: "1px solid rgba(255,255,255,0.06)",
             display: "flex",
+            flexDirection: "column",
             gap: "10px",
             flexShrink: 0,
           }}
         >
-          <button
-            onClick={onClose}
-            style={{
-              flex: 1,
-              minHeight: "42px",
-              borderRadius: "12px",
-              border: "1px solid rgba(255,255,255,0.14)",
-              background: "rgba(255,255,255,0.035)",
-              color: "#f5f5f7",
-              fontSize: "13px",
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            disabled={saving}
-            onClick={async () => {
-              await onSave(form);
-              onClose();
-            }}
+          {saveError && (
+            <p
+              role="alert"
+              style={{
+                fontSize: "12px",
+                fontWeight: 600,
+                color: "#fca5a5",
+                background: "rgba(248,113,113,0.08)",
+                border: "1px solid rgba(248,113,113,0.25)",
+                borderRadius: "10px",
+                padding: "10px 12px",
+              }}
+            >
+              {saveError}
+            </p>
+          )}
+          <div style={{ display: "flex", gap: "10px" }}>
+            <button
+              onClick={onClose}
+              style={{
+                flex: 1,
+                minHeight: "42px",
+                borderRadius: "12px",
+                border: "1px solid rgba(255,255,255,0.14)",
+                background: "rgba(255,255,255,0.035)",
+                color: "#f5f5f7",
+                fontSize: "13px",
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              disabled={saving}
+              onClick={async () => {
+                // Only close on a server-confirmed save. On failure the
+                // dialog stays open with the error shown so the user can
+                // retry instead of being told it worked.
+                const ok = await onSave(form);
+                if (ok) onClose();
+              }}
             style={{
               flex: 2,
               minHeight: "42px",
@@ -237,6 +260,7 @@ export function EditProfileDialog({
             )}
             {saving ? "Saving…" : "Save changes"}
           </button>
+          </div>
         </div>
       </div>
     </>
