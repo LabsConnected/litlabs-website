@@ -298,3 +298,136 @@ describe("paused-run-store — resetRunForRetry", () => {
     expect(row.run_status).toBe("failed");
   });
 });
+
+describe("paused-run-store — 30-minute approval TTL (2026-09-18)", () => {
+  beforeEach(() => {
+    rows.length = 0;
+  });
+
+  it("APPROVAL_TTL is 30 minutes", async () => {
+    const { APPROVAL_TTL } = await import("@/lib/litt-intelligence/paused-run-store");
+    expect(APPROVAL_TTL).toBe(30 * 60 * 1000);
+  });
+
+  it("new paused runs get a ~30-minute expiry", async () => {
+    const { createPausedRun } = await import("@/lib/litt-intelligence/paused-run-store");
+    const before = Date.now();
+    const rec = await createPausedRun({
+      userId: USER,
+      conversationId: CONV,
+      projectId: "proj_1",
+      workspaceId: "ws_1",
+      toolId: "files.write",
+      toolCallId: "tc_ttl",
+      inputs: { path: "a.txt" },
+      reason: "Mutation requires approval",
+      pausedMessages: [],
+      executionMode: "act",
+      systemPrompt: "sys",
+      checkpointId: null,
+    });
+    const ttlMs = Date.parse(rec.expiresAt) - before;
+    expect(ttlMs).toBeGreaterThan(29 * 60 * 1000);
+    expect(ttlMs).toBeLessThanOrEqual(30 * 60 * 1000 + 5_000);
+  });
+});
+
+describe("paused-run-store — reconciler recency rule (2026-09-18)", () => {
+  it("attributes a run created after the message", async () => {
+    const { pausedRunBelongsToMessage } = await import("@/lib/litt-intelligence/paused-run-store");
+    const msgAt = new Date("2026-09-18T10:58:00.000Z").toISOString();
+    const runAt = new Date("2026-09-18T10:58:30.000Z").toISOString();
+    expect(pausedRunBelongsToMessage(runAt, msgAt)).toBe(true);
+  });
+
+  it("tolerates a run created seconds before the message (clock skew)", async () => {
+    const { pausedRunBelongsToMessage } = await import("@/lib/litt-intelligence/paused-run-store");
+    const msgAt = new Date("2026-09-18T10:58:00.000Z").toISOString();
+    const runAt = new Date("2026-09-18T10:57:30.000Z").toISOString();
+    expect(pausedRunBelongsToMessage(runAt, msgAt)).toBe(true);
+  });
+
+  it("REJECTS a stale run from the conversation's history (the production defect)", async () => {
+    const { pausedRunBelongsToMessage } = await import("@/lib/litt-intelligence/paused-run-store");
+    // An approval that expired yesterday cannot be the gate for a message
+    // created seconds ago — this misattribution is what told Larry an
+    // approval "expired before a decision was made" within the same minute.
+    const staleRunAt = new Date("2026-09-17T09:00:00.000Z").toISOString();
+    const freshMsgAt = new Date("2026-09-18T10:58:00.000Z").toISOString();
+    expect(pausedRunBelongsToMessage(staleRunAt, freshMsgAt)).toBe(false);
+  });
+
+  it("rejects a run more than the tolerance before the message", async () => {
+    const { pausedRunBelongsToMessage } = await import("@/lib/litt-intelligence/paused-run-store");
+    const msgAt = new Date("2026-09-18T10:58:00.000Z").toISOString();
+    const runAt = new Date("2026-09-18T10:56:59.000Z").toISOString(); // 61s before
+    expect(pausedRunBelongsToMessage(runAt, msgAt)).toBe(false);
+  });
+
+  it("returns false when the run timestamp is missing", async () => {
+    const { pausedRunBelongsToMessage } = await import("@/lib/litt-intelligence/paused-run-store");
+    expect(pausedRunBelongsToMessage(null, new Date().toISOString())).toBe(false);
+    expect(pausedRunBelongsToMessage(undefined, new Date().toISOString())).toBe(false);
+  });
+
+  it("keeps the old behavior when the message timestamp is missing or unparseable", async () => {
+    const { pausedRunBelongsToMessage } = await import("@/lib/litt-intelligence/paused-run-store");
+    const runAt = new Date().toISOString();
+    expect(pausedRunBelongsToMessage(runAt, null)).toBe(true);
+    expect(pausedRunBelongsToMessage(runAt, "not-a-date")).toBe(true);
+  });
+});
+
+describe("paused-run-store — reRequestExpiredRun (2026-09-18)", () => {
+  beforeEach(() => {
+    rows.length = 0;
+  });
+
+  it("re-issues an expired gate as a fresh pending run with identical inputs", async () => {
+    const { reRequestExpiredRun } = await import("@/lib/litt-intelligence/paused-run-store");
+    const expired = seedRow({
+      status: "expired",
+      tool_id: "files.write",
+      tool_call_id: "tc_9",
+      inputs: { path: "a.txt", content: "hello" },
+      reason: "Mutation requires approval",
+      expires_at: new Date(Date.now() - 60_000).toISOString(),
+    });
+    const fresh = await reRequestExpiredRun(expired.id as string, USER);
+    expect(fresh).not.toBeNull();
+    expect(fresh!.id).not.toBe(expired.id);
+    expect(fresh!.status).toBe("pending");
+    expect(fresh!.toolId).toBe("files.write");
+    expect(fresh!.toolCallId).toBe("tc_9");
+    expect(fresh!.inputs).toEqual({ path: "a.txt", content: "hello" });
+    expect(fresh!.reason).toBe("Mutation requires approval");
+    expect(fresh!.conversationId).toBe(CONV);
+    // Fresh TTL — ~30 minutes, not the dead expiry
+    expect(Date.parse(fresh!.expiresAt) - Date.now()).toBeGreaterThan(29 * 60 * 1000);
+  });
+
+  it("refuses to re-request a still-pending run", async () => {
+    const { reRequestExpiredRun } = await import("@/lib/litt-intelligence/paused-run-store");
+    const pending = seedRow({ status: "pending" });
+    expect(await reRequestExpiredRun(pending.id as string, USER)).toBeNull();
+    // No duplicate row created
+    expect(rows.length).toBe(1);
+  });
+
+  it("refuses to re-request approved/rejected runs", async () => {
+    const { reRequestExpiredRun } = await import("@/lib/litt-intelligence/paused-run-store");
+    const approved = seedRow({ status: "approved" });
+    const rejected = seedRow({ status: "rejected" });
+    expect(await reRequestExpiredRun(approved.id as string, USER)).toBeNull();
+    expect(await reRequestExpiredRun(rejected.id as string, USER)).toBeNull();
+    expect(rows.length).toBe(2);
+  });
+
+  it("returns null for an unknown run or another user's run", async () => {
+    const { reRequestExpiredRun } = await import("@/lib/litt-intelligence/paused-run-store");
+    const other = seedRow({ status: "expired", user_id: "user_2" });
+    expect(await reRequestExpiredRun("nope", USER)).toBeNull();
+    expect(await reRequestExpiredRun(other.id as string, USER)).toBeNull();
+    expect(rows.length).toBe(1);
+  });
+});

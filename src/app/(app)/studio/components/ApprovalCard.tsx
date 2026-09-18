@@ -23,13 +23,19 @@ export interface ApprovalCardProps {
    * every phase: "submitting" disables the buttons, "executing" shows the
    * run in progress, and "failed" shows the backend error with a Retry
    * affordance (re-POSTs the same pausedRunId — no silent clear, no auto
-   * re-request).
+   * re-request; when `expired` is set the retry re-requests a fresh gate).
    */
   phase?: "idle" | "submitting" | "executing" | "failed";
   /** Backend error shown when phase is "failed". */
   error?: string | null;
   /** Whether the failed approval may be retried. Defaults to true. */
   retryable?: boolean;
+  /**
+   * True when the failure was an expiry: the retry affordance re-requests
+   * a fresh gate, so the button reads "Request again" instead of
+   * "Retry approval".
+   */
+  expired?: boolean;
   /** Re-submits the approval decision for the same paused run. */
   onRetry?: () => void;
 }
@@ -138,6 +144,7 @@ export function ApprovalCard({
   phase = "idle",
   error = null,
   retryable = true,
+  expired = false,
   onRetry,
 }: ApprovalCardProps) {
   const toolLabel = approval.toolId.replace(/_/g, " ");
@@ -254,7 +261,7 @@ export function ApprovalCard({
               onClick={onRetry}
               className="flex-1 rounded-lg border border-accent/40 bg-accent/10 px-2 py-1.5 text-[10px] font-bold text-accent transition hover:bg-accent/20"
             >
-              Retry approval
+              {expired ? "Request again" : "Retry approval"}
             </button>
           ) : (
             <div

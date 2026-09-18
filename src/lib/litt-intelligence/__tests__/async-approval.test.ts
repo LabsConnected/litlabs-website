@@ -221,8 +221,8 @@ describe("Async Approval: Security invariants preserved", () => {
     expect(new Date(expiredTime).getTime()).toBeLessThan(Date.now());
   });
 
-  it("TTL is still 5 minutes", () => {
-    expect(APPROVAL_TTL).toBe(5 * 60 * 1000);
+  it("TTL is 30 minutes (humane window for phone approvals)", () => {
+    expect(APPROVAL_TTL).toBe(30 * 60 * 1000);
   });
 });
 

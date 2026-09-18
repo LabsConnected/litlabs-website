@@ -24,7 +24,16 @@ import { supabaseAdmin } from "@/lib/supabase";
 import type { LLMMessage } from "./llm-tool-calling";
 import type { QualityFinale, QualityLoopSnapshot } from "./quality-loop-flow";
 
-const APPROVAL_TTL_MS = 5 * 60 * 1000; // 5 minutes
+/**
+ * How long a human has to decide on an approval gate.
+ *
+ * 30 minutes: generous on purpose. Approvals arrive on a phone — the user
+ * may be mid-task, on a call, or away from the screen. A 5-minute TTL
+ * expired gates before people could act, and every expiry dead-ended the
+ * run ("send the request again"). The gate stays single-use and
+ * server-authoritative; only the decision window is humane.
+ */
+const APPROVAL_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const TABLE = "agent_paused_runs";
 
 /** A run that has been "processing" longer than this is considered stale
@@ -449,6 +458,79 @@ export async function expireStaleRuns(): Promise<number> {
 }
 
 export const APPROVAL_TTL = APPROVAL_TTL_MS;
+
+/**
+ * Recency rule for transcript reconciliation: a paused-run row can only be
+ * the gate for a message that already existed when the row was created.
+ *
+ * The messages GET reconciler falls back to "the conversation's latest
+ * paused run" when no pending run is found. Without a recency bound, a
+ * STALE run (e.g. an approval that expired yesterday) is attributed to a
+ * FRESH "awaiting_approval" message whenever the pending lookup misses —
+ * row persist failure, replication lag, or any lookup mismatch — and the
+ * user sees "this approval expired before a decision was made" within
+ * seconds of the request. That is the 2026-09-18 production defect.
+ *
+ * The row is always created after the message it gates (the assistant
+ * message is inserted when the stream starts; the pause happens later in
+ * the same run), so a run that predates the message cannot be its gate.
+ * `toleranceMs` absorbs clock skew between app servers and the DB.
+ *
+ * When the message timestamp is missing or unparseable we keep the old
+ * behavior (attribute the run) rather than risk leaving an approval card
+ * mounted forever.
+ */
+export function pausedRunBelongsToMessage(
+  runCreatedAt: string | null | undefined,
+  messageCreatedAt: string | null | undefined,
+  toleranceMs = 60_000,
+): boolean {
+  if (!runCreatedAt) return false;
+  if (!messageCreatedAt) return true;
+  const runAt = Date.parse(runCreatedAt);
+  const msgAt = Date.parse(messageCreatedAt);
+  if (!Number.isFinite(runAt)) return false;
+  if (!Number.isFinite(msgAt)) return true;
+  return runAt >= msgAt - toleranceMs;
+}
+
+/**
+ * Re-request a dead approval gate.
+ *
+ * An expired approval used to dead-end the run: the transcript said "send
+ * the request again", which re-ran the whole agent loop from scratch and
+ * lost the frozen tool call the user was asked to approve. Re-requesting
+ * creates a FRESH pending run carrying the same frozen inputs/reason, so
+ * the user decides on the identical gate with a new TTL — no new agent
+ * loop, no duplicate side effects (the gate still needs approval before
+ * anything executes).
+ *
+ * Only an `expired` run can be re-requested. Pending/approved/rejected
+ * runs return null (409 to the caller).
+ */
+export async function reRequestExpiredRun(
+  pausedRunId: string,
+  userId: string,
+): Promise<PausedRunRecord | null> {
+  const existing = await getPausedRun(pausedRunId, userId);
+  if (!existing || existing.status !== "expired") return null;
+
+  return createPausedRun({
+    userId,
+    conversationId: existing.conversationId,
+    projectId: existing.projectId,
+    workspaceId: existing.workspaceId,
+    toolId: existing.toolId,
+    toolCallId: existing.toolCallId,
+    inputs: existing.inputs,
+    reason: existing.reason,
+    pausedMessages: existing.pausedMessages,
+    executionMode: existing.executionMode,
+    systemPrompt: existing.systemPrompt,
+    checkpointId: existing.checkpointId,
+    qualityLoopState: existing.qualityLoopState,
+  });
+}
 
 /**
  * Reset a failed approved run for a controlled retry.
