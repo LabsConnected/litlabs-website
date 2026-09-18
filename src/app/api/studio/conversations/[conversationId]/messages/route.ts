@@ -57,6 +57,15 @@ interface RouteParams {
 // "LiTT is thinking" bubble on the next load.
 const STALE_STREAMING_MESSAGE_MS = 2 * 60 * 1000;
 
+// Anaphoric follow-ups ("build it", "do that again but lime") name no target.
+// With a project in context, steer the model to ask a short, targeted
+// clarification about what to do on the project instead of a generic chat reply.
+const ANAPHORIC_CLARIFICATION_NUDGE =
+  "The user's latest message is an anaphoric follow-up — it references prior " +
+  "context (words like 'it', 'that', or 'again') and names no explicit target. " +
+  "Do not give a generic chat reply. Ask one short, targeted clarification " +
+  "question about what specifically they want built or changed on their project.";
+
 /**
  * POST /api/studio/conversations/[conversationId]/messages
  *
@@ -529,6 +538,11 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       v2Transport ?? undefined,
     );
     finalPrompt = v1Result.enrichedPrompt;
+    // Anaphoric follow-up with a project in context: don't let this fall
+    // through to a generic chat reply — nudge toward a targeted clarification.
+    if (conversation.projectId && built.kernelResult.decision.routing.anaphoricFollowUp) {
+      finalPrompt = `${ANAPHORIC_CLARIFICATION_NUDGE}\n\n${finalPrompt}`;
+    }
   }
 
   // 11. Insert pending assistant message
