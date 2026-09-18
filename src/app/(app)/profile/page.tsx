@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 import { useState, useCallback, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useProfile } from "@/context/ProfileContext";
+import type { UserProfile } from "@/context/ProfileContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import Link from "next/link";
 
@@ -14,6 +15,40 @@ import { ProfileOverview } from "./_components/ProfileOverview";
 import { ProfileRightRail } from "./_components/ProfileRightRail";
 import { EditProfileDialog } from "./_components/EditProfileDialog";
 import { CreatorActionPanel } from "./_components/CreatorActionPanel";
+
+/**
+ * The server is the source of truth for persisted profile data.
+ * Maps the POST /api/settings/profile response `user` object onto the
+ * client-side UserProfile shape, falling back to the last confirmed values
+ * for fields the server did not return.
+ */
+function mapServerUserToProfile(
+  user: Record<string, unknown>,
+  prev: UserProfile,
+): Partial<UserProfile> {
+  return {
+    displayName:
+      typeof user.name === "string" && user.name
+        ? user.name
+        : prev.displayName,
+    username:
+      typeof user.username === "string" && user.username
+        ? user.username
+        : prev.username,
+    bio: typeof user.bio === "string" ? user.bio : prev.bio,
+    location:
+      typeof user.location === "string" ? user.location : prev.location,
+    website: typeof user.website === "string" ? user.website : prev.website,
+    avatarUrl:
+      user.avatar_url === null || typeof user.avatar_url === "string"
+        ? user.avatar_url
+        : prev.avatarUrl,
+    coverUrl:
+      user.cover_url === null || typeof user.cover_url === "string"
+        ? user.cover_url
+        : prev.coverUrl,
+  };
+}
 
 function ProfilePageInner() {
   const { isLoaded, isSignedIn } = useClerkAuth();
@@ -28,6 +63,7 @@ function ProfilePageInner() {
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) {
@@ -42,15 +78,30 @@ function ProfilePageInner() {
       const res = await fetch("/api/upload", { method: "POST", body: form });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.url) throw new Error(data.error || "Upload failed");
-      if (field === "avatar_url") updateProfile({ avatarUrl: data.url });
-      if (field === "cover_url") updateProfile({ coverUrl: data.url });
-      await fetch("/api/settings/profile", {
+      // The upload is only "saved" if the profile record was persisted too.
+      // Check the response before touching the UI, so a failed save can never
+      // masquerade as success.
+      const saveRes = await fetch("/api/settings/profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ [field]: data.url }),
       });
+      const saveData = await saveRes.json().catch(() => ({}));
+      if (!saveRes.ok || !saveData?.user) {
+        throw new Error(
+          typeof saveData?.error === "string" && saveData.error
+            ? saveData.error
+            : "Profile save failed",
+        );
+      }
+      updateProfile(
+        mapServerUserToProfile(
+          saveData.user as Record<string, unknown>,
+          profile,
+        ),
+      );
     },
-    [updateProfile],
+    [updateProfile, profile],
   );
 
   const handleAvatarSelect = useCallback((file: File) => {
@@ -69,12 +120,14 @@ function ProfilePageInner() {
     setUploadError(null);
     try {
       await uploadAndSave(avatarFile, "avatar_url");
+      // Only dismiss the preview once the save is confirmed persisted.
+      setAvatarFile(null);
+      setAvatarPreview(null);
     } catch {
-      setUploadError("Avatar upload failed — not saved. Try again.");
+      // Keep the file/preview so the user can retry without re-selecting.
+      setUploadError("Avatar save failed — not saved. Try again.");
     }
     setSaving(false);
-    setAvatarFile(null);
-    setAvatarPreview(null);
   }, [avatarFile, uploadAndSave]);
 
   const confirmCoverUpload = useCallback(async () => {
@@ -83,35 +136,59 @@ function ProfilePageInner() {
     setUploadError(null);
     try {
       await uploadAndSave(coverFile, "cover_url");
+      setCoverFile(null);
+      setCoverPreview(null);
     } catch {
-      setUploadError("Cover upload failed — not saved. Try again.");
+      setUploadError("Cover save failed — not saved. Try again.");
     }
     setSaving(false);
-    setCoverFile(null);
-    setCoverPreview(null);
   }, [coverFile, uploadAndSave]);
 
+  // Returns true only when the server confirmed the save. The UI is updated
+  // exclusively from the server-returned profile data — never optimistically —
+  // so the user can never see values that were not persisted.
   const handleSaveProfile = useCallback(
-    async (updates: Partial<typeof profile>) => {
+    async (updates: Partial<UserProfile>): Promise<boolean> => {
       setSaving(true);
+      setSaveError(null);
       try {
-        updateProfile(updates);
         const body: Record<string, unknown> = {};
         if (updates.displayName !== undefined) body.name = updates.displayName;
         if (updates.username !== undefined) body.username = updates.username;
         if (updates.bio !== undefined) body.bio = updates.bio;
         if (updates.location !== undefined) body.location = updates.location;
         if (updates.website !== undefined) body.website = updates.website;
-        await fetch("/api/settings/profile", {
+        const res = await fetch("/api/settings/profile", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data?.user) {
+          setSaveError(
+            typeof data?.error === "string" && data.error
+              ? `Save failed: ${data.error}`
+              : "Save failed — your changes were not saved. Try again.",
+          );
+          return false;
+        }
+        updateProfile(
+          mapServerUserToProfile(
+            data.user as Record<string, unknown>,
+            profile,
+          ),
+        );
+        return true;
+      } catch {
+        setSaveError(
+          "Save failed — couldn't reach the server. Your changes were not saved.",
+        );
+        return false;
       } finally {
         setSaving(false);
       }
     },
-    [updateProfile],
+    [updateProfile, profile],
   );
 
   const activeTab = searchParams.get("tab") || "overview";
@@ -198,7 +275,10 @@ function ProfilePageInner() {
             setAvatarPreview(null);
             setUploadError(null);
           }}
-          onEditProfile={() => setEditOpen(true)}
+          onEditProfile={() => {
+            setSaveError(null);
+            setEditOpen(true);
+          }}
         />
 
         <div style={{ marginTop: "24px" }}>
@@ -241,7 +321,11 @@ function ProfilePageInner() {
         open={editOpen}
         profile={profile}
         saving={saving}
-        onClose={() => setEditOpen(false)}
+        saveError={saveError}
+        onClose={() => {
+          setEditOpen(false);
+          setSaveError(null);
+        }}
         onSave={handleSaveProfile}
       />
 
