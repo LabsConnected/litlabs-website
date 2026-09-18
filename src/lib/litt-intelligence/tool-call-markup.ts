@@ -64,7 +64,13 @@ const ARG_SIGNATURE_RE = /^\s*(?:[a-z_][a-z0-9_]*\s*=|["'`{[])/i;
 
 export interface ToolCallMarkupHit {
   /** Which surface produced the hit — for diagnostics, never secrets. */
-  kind: "envelope" | "fenced_json" | "bare_json" | "truncated_envelope" | "function_call_syntax";
+  kind:
+    | "envelope"
+    | "fenced_json"
+    | "bare_json"
+    | "bare_json_mid_prose"
+    | "truncated_envelope"
+    | "function_call_syntax";
   /** The matched tool id when one was recognized. */
   toolId?: string;
 }
@@ -197,6 +203,12 @@ export function findToolCallMarkup(
   // inside inline code are examples, not invocations. The whole-payload
   // span was already handled above; nested spans inside it still get a
   // pass.
+  //
+  // The hit kind is distinct from whole-payload "bare_json" on purpose:
+  // a mid-prose envelope is a weak invocation signal. Text-only lanes
+  // (V1 chat, /regenerate) still fail on any hit, but the agent loop
+  // treats this kind as strip-only — it must NEVER become an executable
+  // call (a narrated pseudo-call is not an invocation).
   for (let i = 0; i < text.length; i++) {
     if (text[i] !== "{") continue;
     const span = balancedBraceSpan(text, i);
@@ -206,7 +218,7 @@ export function findToolCallMarkup(
     const quoted = text[i - 1] === "`" && text[end] === "`";
     if (!isWholePayload && !quoted) {
       const toolId = jsonPayloadToolId(span, candidates);
-      if (toolId) return { kind: "bare_json", toolId };
+      if (toolId) return { kind: "bare_json_mid_prose", toolId };
     }
     i = end - 1;
   }

@@ -154,12 +154,12 @@ describe("findToolCallMarkup — mid-prose bare JSON (evasion shape)", () => {
       'I need to call {"name": "files.write", "arguments": {"path": "index.html"}} to save this.',
       TOOLS,
     );
-    expect(hit).toMatchObject({ kind: "bare_json", toolId: "files.write" });
+    expect(hit).toMatchObject({ kind: "bare_json_mid_prose", toolId: "files.write" });
   });
 
   it("flags a mid-prose action envelope naming a known tool", () => {
     const hit = findToolCallMarkup('Let me run {"action": "files.read", "path": "index.html"} on it.', TOOLS);
-    expect(hit).toMatchObject({ kind: "bare_json", toolId: "files.read" });
+    expect(hit).toMatchObject({ kind: "bare_json_mid_prose", toolId: "files.read" });
   });
 
   it("ignores mid-prose JSON that names no known tool", () => {

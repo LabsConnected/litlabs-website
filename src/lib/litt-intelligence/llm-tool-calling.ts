@@ -754,6 +754,15 @@ function normalizeTextToolCalls<T extends { text: string; toolCalls: ToolCallReq
     return parsed;
   }
 
+  // A bare JSON envelope embedded mid-prose is a weak invocation signal —
+  // the model may be narrating rather than invoking. It is NEVER recovered
+  // into an executable call here; the hygiene pass strips it from the
+  // visible text. (Text-only lanes fail on any detector hit via
+  // findToolCallMarkup directly — that contract is unchanged.)
+  if (hit.kind === "bare_json_mid_prose") {
+    return parsed;
+  }
+
   const recovery = recoverTextToolCalls(parsed.text, knownIds);
 
   // Intent detected but not fully recoverable — incompatible protocol.
