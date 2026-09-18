@@ -602,6 +602,18 @@ function CommandStudioContent() {
     setDestination(dest);
   }, []);
 
+  // New-project dialog state lives up here (not with the other project
+  // creation logic below) because the conversation controller references
+  // openProjectNameDialog and must be declared after it — same TDZ rule
+  // as handleRouteTool.
+  const [projectCreateError, setProjectCreateError] = useState<string | null>(null);
+  const [projectNameDialogOpen, setProjectNameDialogOpen] = useState(false);
+
+  const openProjectNameDialog = useCallback(() => {
+    setProjectCreateError(null);
+    setProjectNameDialogOpen(true);
+  }, []);
+
   // handleRouteTool must be declared before useStudioConversation so the
   // conversation controller can reference it without a TDZ error.
   const handleRouteTool = useCallback((tool: StudioTool, command = "") => {
@@ -655,6 +667,7 @@ function CommandStudioContent() {
       handleOpenContextInspector();
       setHealthRunTrigger((n) => n + 1);
     },
+    onOpenProjectNameDialog: openProjectNameDialog,
     serverProjectId: capabilities.projectId,
     cameraState: { active: cameraDock.open, status: cameraStatus },
     previewSelection,
@@ -1063,14 +1076,6 @@ function CommandStudioContent() {
       },
     });
   }, [watchPausedRunId, watchConversationId]);
-
-  const [projectCreateError, setProjectCreateError] = useState<string | null>(null);
-  const [projectNameDialogOpen, setProjectNameDialogOpen] = useState(false);
-
-  const openProjectNameDialog = useCallback(() => {
-    setProjectCreateError(null);
-    setProjectNameDialogOpen(true);
-  }, []);
 
   const handleStartBlank = useCallback(async (name: string) => {
     if (creatingProject) return;
