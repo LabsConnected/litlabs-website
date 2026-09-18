@@ -22,6 +22,9 @@ const IGNORED_DIRS = new Set([
   "coverage",
   ".nuxt",
   ".output",
+  // LiTT platform state (scaffolding manifest, checkpoints) — not project
+  // content. Kept out of file listings and code search.
+  ".litt",
 ]);
 
 export interface WorkspaceRoot {

@@ -7,6 +7,7 @@ import {
   buildWelcomeNextJs,
   buildWelcomeReactVite,
 } from "./welcome-screen";
+import { writeScaffoldManifest } from "./scaffold";
 
 
 export interface WorkspaceDescriptor {
@@ -389,8 +390,8 @@ export async function prepareBlankWorkspace(input: {
   return prepareManagedWorkspace(input);
 }
 
-/** Write initial template files for blank projects. */
-function writeTemplateFiles(root: string, templateId: string): void {
+/** Write initial template files for blank projects. Exported for tests. */
+export function writeTemplateFiles(root: string, templateId: string): void {
   if (templateId === "empty-static") {
     // The agent must create the first application artifact through the normal
     // approved tool gateway; do not seed a starter file here.
@@ -401,6 +402,9 @@ function writeTemplateFiles(root: string, templateId: string): void {
     // the builder itself, not project content — the agent replaces it with
     // the user's real files as soon as it starts building.
     writeFileSync(join(root, "index.html"), buildWelcomeHtml(), "utf-8");
+    // Machine-readable scaffolding flag (brief §7): the manifest — not a
+    // text match — is the authority on "still on starter scaffolding".
+    writeScaffoldManifest(root, templateId, ["index.html"]);
     return;
   }
 
@@ -427,6 +431,7 @@ function writeTemplateFiles(root: string, templateId: string): void {
     mkdirSync(join(root, "app"), { recursive: true });
     // Polished LiTT Studio welcome / blank-state (see blank-static above).
     writeFileSync(join(root, "app", "page.tsx"), buildWelcomeNextJs(), "utf-8");
+    writeScaffoldManifest(root, templateId, ["app/page.tsx"]);
     writeFileSync(
       join(root, "app", "layout.tsx"),
       `export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -496,6 +501,7 @@ createRoot(document.getElementById("root")!).render(<App />);
     );
     // Polished LiTT Studio welcome / blank-state (see blank-static above).
     writeFileSync(join(root, "src", "App.tsx"), buildWelcomeReactVite(), "utf-8");
+    writeScaffoldManifest(root, templateId, ["src/App.tsx"]);
     return;
   }
 
