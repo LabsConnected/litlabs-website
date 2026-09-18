@@ -192,6 +192,8 @@ SELECT has_column('public', 'user_project_deployment_files', 'path',
     'user_project_deployment_files.path exists');
 SELECT has_column('public', 'user_project_deployment_files', 'content_type',
     'user_project_deployment_files.content_type exists');
+SELECT has_column('public', 'user_project_deployment_files', 'encoding',
+    'user_project_deployment_files.encoding exists');
 SELECT fk_ok(
     'public', 'user_project_deployment_files', 'deployment_id',
     'public', 'user_project_deployments', 'id',

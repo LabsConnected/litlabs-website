@@ -101,7 +101,13 @@ export interface DeploymentStore {
   update(id: string, patch: Partial<DeploymentRecord>): Promise<DeploymentRecord>;
   putFiles(
     id: string,
-    files: Array<{ path: string; content: string; contentType: string; bytes: number }>,
+    files: Array<{
+      path: string;
+      content: string;
+      contentType: string;
+      encoding: "utf-8" | "base64";
+      bytes: number;
+    }>,
   ): Promise<void>;
 }
 
@@ -420,6 +426,7 @@ export async function deployUserProject(
         path: file.path,
         content: file.content,
         contentType: contentTypeFor(file.path),
+        encoding: file.encoding ?? "utf-8",
         bytes: artifactBytes(file),
       })),
     );

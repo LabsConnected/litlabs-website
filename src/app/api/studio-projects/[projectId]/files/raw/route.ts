@@ -70,7 +70,13 @@ export async function GET(
     const { workspaceId } = await verifyProjectWorkspace(projectId, userId);
     const { token } = createTerminalToken(userId);
 
-    // Fetch the raw file from the terminal server's ws-files endpoint
+    const mime = getMimeType(filePath);
+    const binaryMime = mime !== "application/octet-stream" &&
+      !mime.startsWith("text/") && mime !== "image/svg+xml" &&
+      !mime.includes("charset");
+
+    // Fetch the raw file from the terminal server's ws-files endpoint.
+    // Binary types are requested as base64 — a utf-8 decode corrupts them.
     const resp = await fetch(
       `${TERMINAL_BASE()}/ws-files/read`,
       {
@@ -80,7 +86,7 @@ export async function GET(
           Authorization: `Bearer ${token}`,
           "X-Workspace-Id": workspaceId,
         },
-        body: JSON.stringify({ path: filePath }),
+        body: JSON.stringify({ path: filePath, encoding: binaryMime ? "base64" : "utf-8" }),
       },
     );
 
@@ -95,13 +101,27 @@ export async function GET(
 
     // If the terminal server returned JSON, it's a text file read
     if (contentType.includes("application/json")) {
-      const data = await resp.json().catch(() => null) as { content?: string; error?: string; size?: number } | null;
+      const data = await resp.json().catch(() => null) as { content?: string; error?: string; size?: number; encoding?: string } | null;
       if (!data || data.error) {
         return NextResponse.json({ error: data?.error ?? "Failed to read file" }, { status: 500 });
       }
 
+      // Binary read honored: decode base64 and serve the real bytes.
+      if (binaryMime && data.encoding === "base64" && typeof data.content === "string") {
+        const bytes = new Uint8Array(Buffer.from(data.content, "base64"));
+        const fileName = filePath.split("/").pop() ?? filePath;
+        return new NextResponse(bytes, {
+          status: 200,
+          headers: {
+            "Content-Type": mime,
+            "Cache-Control": "no-store",
+            "Content-Disposition": `inline; filename="${fileName}"`,
+            "X-File-Size": String(data.size ?? bytes.length),
+          },
+        });
+      }
+
       // For SVG and HTML, return the content directly with proper content type
-      const mime = getMimeType(filePath);
       if (mime === "image/svg+xml" || mime === "text/html") {
         return new NextResponse(data.content ?? "", {
           status: 200,
@@ -128,7 +148,6 @@ export async function GET(
       return NextResponse.json({ error: "File exceeds 50MB limit" }, { status: 413 });
     }
 
-    const mime = getMimeType(filePath);
     const fileName = filePath.split("/").pop() ?? filePath;
     const headers = new Headers({
       "Content-Type": mime,

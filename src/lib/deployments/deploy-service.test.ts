@@ -189,6 +189,36 @@ describe("collectStaticArtifact", () => {
     const artifact = await collectStaticArtifact(transport);
     expect(artifact.find((f) => f.path === "assets/hero.png")).toBeUndefined();
   });
+
+  it("collects the full set of generated-site binary types", async () => {
+    const names = ["hero.avif", "doc.pdf", "mod.wasm", "font.otf", "img.bmp", "bundle.zip"];
+    const transport = fakeTransport({
+      async listFiles(path: string) {
+        if (path === "." || path === "") {
+          return {
+            entries: [
+              { name: "index.html", type: "file" },
+              { name: "assets", type: "folder" },
+            ],
+          };
+        }
+        if (path === "assets") {
+          return { entries: names.map((name) => ({ name, type: "file" })) };
+        }
+        return { entries: [] };
+      },
+      async readBinaryFile() {
+        const content = Buffer.from([0xde, 0xad, 0xbe, 0xef]).toString("base64");
+        return { content, size: 4 };
+      },
+    });
+    const artifact = await collectStaticArtifact(transport);
+    for (const name of names) {
+      const file = artifact.find((f) => f.path === `assets/${name}`);
+      expect(file, `assets/${name} should be collected`).toBeDefined();
+      expect(file!.encoding).toBe("base64");
+    }
+  });
 });
 
 /* ── Case A: successful deployment of a static project ──────────── */
@@ -258,6 +288,89 @@ describe("A. static project deploys and returns a verified live URL", () => {
     }, { store, fetchImpl: reachableFetch });
     const serialized = JSON.stringify(result);
     expect(serialized).not.toMatch(/service[-_]?key|secret|password|bearer|sk-/i);
+  });
+
+  it("stores each file with its explicit storage encoding", async () => {
+    // The 22P05 "unsupported Unicode escape sequence" failure happened
+    // because binary content reached a text-shaped insert. Files must be
+    // persisted with an explicit encoding so serving can decode correctly.
+    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const transport = fakeTransport({
+      async listFiles(path: string) {
+        if (path === "." || path === "") {
+          return {
+            entries: [
+              { name: "index.html", type: "file" },
+              { name: "assets", type: "folder" },
+            ],
+          };
+        }
+        if (path === "assets") return { entries: [{ name: "hero.png", type: "file" }] };
+        return { entries: [] };
+      },
+      async readBinaryFile() {
+        return { content: pngBytes.toString("base64"), size: pngBytes.length };
+      },
+    });
+    const store = fakeStore();
+    const result = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport,
+      publicBaseUrl: BASE,
+    }, { store, fetchImpl: reachableFetch });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const stored = store.files.get(result.deploymentId) as Array<{
+      path: string; content: string; encoding: string; bytes: number;
+    }>;
+    const htmlRow = stored.find((f) => f.path === "index.html")!;
+    const pngRow = stored.find((f) => f.path === "assets/hero.png")!;
+    expect(htmlRow.encoding).toBe("utf-8");
+    expect(pngRow.encoding).toBe("base64");
+    // The stored payload decodes back to the exact source bytes.
+    expect(Buffer.from(pngRow.content, "base64")).toEqual(pngBytes);
+    expect(pngRow.bytes).toBe(pngBytes.length);
+  });
+
+  it("fails cleanly before persisting when binary content arrives corrupted", async () => {
+    // A transport that returns a utf-8 decode labeled as binary (e.g. an
+    // older terminal ignoring encoding=base64) must not reach the insert —
+    // the content contains NULs that Postgres rejects with 22P05.
+    const utf8Jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]).toString("utf-8");
+    const transport = fakeTransport({
+      async listFiles(path: string) {
+        if (path === "." || path === "") {
+          return {
+            entries: [
+              { name: "index.html", type: "file" },
+              { name: "assets", type: "folder" },
+            ],
+          };
+        }
+        if (path === "assets") return { entries: [{ name: "x.jpeg", type: "file" }] };
+        return { entries: [] };
+      },
+      async readBinaryFile() {
+        // Dishonored contract: utf-8 content masquerading as base64.
+        return { content: utf8Jpeg, size: 6 };
+      },
+    });
+    const store = fakeStore();
+    const result = await deployUserProject({
+      userId: "user_owner",
+      projectId: "proj_ember",
+      transport,
+      publicBaseUrl: BASE,
+    }, { store, fetchImpl: reachableFetch });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errorClass).toBe("validation");
+    expect(result.message).toContain("assets/x.jpeg");
+    // Nothing was persisted — no half-written deployment.
+    expect(store.rows).toHaveLength(0);
   });
 });
 

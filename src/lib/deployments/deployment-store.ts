@@ -154,16 +154,28 @@ export const supabaseDeploymentStore: DeploymentStore = {
     const { error: deleteError } = await db.from(FILES_TABLE).delete().eq("deployment_id", id);
     if (deleteError) throw new Error(`Deployment file reset failed: ${deleteError.message}`);
 
-    const { error } = await db.from(FILES_TABLE).insert(
-      files.map((file) => ({
-        deployment_id: id,
-        path: file.path,
-        content: file.content,
-        content_type: file.contentType,
-        bytes: file.bytes,
-      })),
-    );
-    if (error) throw new Error(`Deployment file write failed: ${error.message}`);
+    const rows = files.map((file) => ({
+      deployment_id: id,
+      path: file.path,
+      content: file.content,
+      content_type: file.contentType,
+      encoding: file.encoding,
+      bytes: file.bytes,
+    }));
+    const { error } = await db.from(FILES_TABLE).insert(rows);
+    if (error?.code === "PGRST204") {
+      // The encoding column migration may not be applied yet — retry without
+      // it. Binary content is still canonical base64 text; serving falls back
+      // to content-type inference for such rows.
+      const { error: retryError } = await db
+        .from(FILES_TABLE)
+        .insert(rows.map(({ encoding: _encoding, ...rest }) => rest));
+      if (retryError) {
+        throw new Error(`Deployment file write failed: ${retryError.message}`);
+      }
+    } else if (error) {
+      throw new Error(`Deployment file write failed: ${error.message}`);
+    }
   },
 };
 
@@ -171,6 +183,8 @@ export const supabaseDeploymentStore: DeploymentStore = {
 export interface PublishedFile {
   content: string;
   contentType: string;
+  /** Storage kind written at deploy time: "utf-8" text or "base64" binary. Absent on rows predating the column. */
+  encoding?: string | null;
 }
 
 /**
@@ -193,16 +207,26 @@ export async function readPublishedFile(
   if (deploymentError || !deployment) return null;
   if ((deployment as { status: string }).status !== "ready") return null;
 
-  const { data, error } = await supabaseAdmin
+  let { data, error } = await supabaseAdmin
     .from(FILES_TABLE)
-    .select("content,content_type")
+    .select("content,content_type,encoding")
     .eq("deployment_id", deploymentId)
     .eq("path", path)
     .maybeSingle();
+  if (error?.code === "PGRST204") {
+    // Encoding column not yet applied — read without it and let the serving
+    // route infer binary payloads from the content type.
+    ({ data, error } = await supabaseAdmin
+      .from(FILES_TABLE)
+      .select("content,content_type")
+      .eq("deployment_id", deploymentId)
+      .eq("path", path)
+      .maybeSingle());
+  }
   if (error || !data) return null;
 
-  const row = data as { content: string; content_type: string };
-  return { content: row.content, contentType: row.content_type };
+  const row = data as { content: string; content_type: string; encoding?: string | null };
+  return { content: row.content, contentType: row.content_type, encoding: row.encoding };
 }
 
 /**

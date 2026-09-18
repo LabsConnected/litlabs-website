@@ -18,6 +18,9 @@ import {
   DEPLOYMENT_LIMITS,
   isSafeArtifactPath,
   contentTypeFor,
+  isBinaryContentType,
+  isCanonicalBase64,
+  isStorableUtf8,
   validateArtifact,
   isDeploymentTransitionValid,
   isDeploymentTerminal,
@@ -98,6 +101,91 @@ describe("contentTypeFor", () => {
 
   it("is case-insensitive on the extension", () => {
     expect(contentTypeFor("INDEX.HTML")).toBe("text/html; charset=utf-8");
+  });
+
+  it("recognizes the binary asset types a generated site can carry", () => {
+    const binaryTypes: Array<[string, string]> = [
+      ["photo.jpg", "image/jpeg"],
+      ["photo.jpeg", "image/jpeg"],
+      ["icon.png", "image/png"],
+      ["anim.gif", "image/gif"],
+      ["hero.webp", "image/webp"],
+      ["hero.avif", "image/avif"],
+      ["favicon.ico", "image/x-icon"],
+      ["doc.pdf", "application/pdf"],
+      ["mod.wasm", "application/wasm"],
+      ["bundle.zip", "application/zip"],
+      ["font.woff", "font/woff"],
+      ["font.woff2", "font/woff2"],
+      ["font.ttf", "font/ttf"],
+      ["font.otf", "font/otf"],
+      ["img.bmp", "image/bmp"],
+    ];
+    for (const [path, type] of binaryTypes) {
+      expect(contentTypeFor(path)).toBe(type);
+      expect(isBinaryContentType(contentTypeFor(path))).toBe(true);
+    }
+  });
+
+  it("keeps text-bearing types on the utf-8 path", () => {
+    for (const path of ["index.html", "styles.css", "app.js", "data.json", "icon.svg", "site.webmanifest"]) {
+      expect(isBinaryContentType(contentTypeFor(path))).toBe(false);
+    }
+  });
+});
+
+/* ── Storage safety (Postgres 22P05 regression) ─────────────────── */
+
+describe("storage-safe content", () => {
+  it("canonical base64 round-trips", () => {
+    expect(isCanonicalBase64(Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64"))).toBe(true);
+    expect(isCanonicalBase64("")).toBe(true);
+    // A utf-8 decode of binary bytes is not base64 — this is exactly what
+    // a terminal that ignores encoding=base64 hands back.
+    const utf8Jpeg = Buffer.from([0xff, 0xd8, 0xff, 0x00, 0x10, 0x4a]).toString("utf-8");
+    expect(isCanonicalBase64(utf8Jpeg)).toBe(false);
+    expect(isCanonicalBase64("not base64!!")).toBe(false);
+    expect(isCanonicalBase64("QUJD\n")).toBe(false);
+  });
+
+  it("utf-8 with NULs or lone surrogates is not storable", () => {
+    expect(isStorableUtf8("plain text")).toBe(true);
+    expect(isStorableUtf8("émoji 🐶 café 日本語 “quotes”")).toBe(true);
+    expect(isStorableUtf8("bad\u0000text")).toBe(false);
+    expect(isStorableUtf8("lone surrogate \ud800 here")).toBe(false);
+    expect(isStorableUtf8("trailing \udfff")).toBe(false);
+  });
+
+  it("rejects a text artifact whose content cannot be stored", () => {
+    // Regression: a utf-8-decoded JPEG contains real U+0000 chars; when it
+    // reached Postgres inside the insert JSON the deploy died with
+    // "unsupported Unicode escape sequence" (22P05) — after a deployment
+    // row already existed. Validation must refuse it earlier, naming the file.
+    const result = validateArtifact([
+      html("index.html"),
+      { path: "assets/images/x.jpeg", content: "\u0000\u0000corrupted" },
+    ]);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected validation to fail");
+    expect(result.error).toContain("assets/images/x.jpeg");
+    expect(describeDeploymentFailure(new Error(result.error)).errorClass).toBe("validation");
+  });
+
+  it("rejects a base64 artifact whose content is not canonical base64", () => {
+    const result = validateArtifact([
+      html("index.html"),
+      { path: "assets/x.png", content: "ÿØÿ not base64", encoding: "base64" },
+    ]);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected validation to fail");
+    expect(result.error).toContain("assets/x.png");
+  });
+
+  it("accepts real Unicode text unchanged", () => {
+    const content = "<!doctype html><p>émoji 🐶 café 日本語 “quotes” — café</p>";
+    const result = validateArtifact([html("index.html", content)]);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.files[0].content).toBe(content);
   });
 });
 

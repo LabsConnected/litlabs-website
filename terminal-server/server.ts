@@ -1499,7 +1499,10 @@ app.post("/ws-files/read", (req: AuthenticatedRequest, res) => {
     }
     const raw = readFileSync(target);
     const content = encoding === "base64" ? raw.toString("base64") : raw.toString("utf-8");
-    res.json({ content, size: stats.size, workspaceId: req.workspaceId });
+    // Echo the encoding actually applied so callers can detect a terminal
+    // build that ignored it — a utf-8 decode of binary bytes otherwise
+    // masquerades as base64 and corrupts anything that stores it as text.
+    res.json({ content, size: stats.size, encoding, workspaceId: req.workspaceId });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to read file";
     const status = fileErrorStatus(msg);

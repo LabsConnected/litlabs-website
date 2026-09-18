@@ -194,7 +194,7 @@ export async function POST(
         Authorization: `Bearer ${token.token}`,
         "X-Workspace-Id": workspaceId,
       },
-      body: JSON.stringify({ path, newPath: action === "rename" ? newPath : undefined, content: body.content }),
+      body: JSON.stringify({ path, newPath: action === "rename" ? newPath : undefined, content: body.content, encoding: body.encoding }),
     });
 
     // Stale workspace recovery for POST operations
@@ -211,7 +211,7 @@ export async function POST(
               Authorization: `Bearer ${token.token}`,
               "X-Workspace-Id": workspaceId,
             },
-            body: JSON.stringify({ path, newPath: action === "rename" ? newPath : undefined, content: body.content }),
+            body: JSON.stringify({ path, newPath: action === "rename" ? newPath : undefined, content: body.content, encoding: body.encoding }),
           });
         }
       } catch (recoveryErr) {
