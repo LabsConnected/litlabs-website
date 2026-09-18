@@ -54,6 +54,10 @@ import {
   getPreviewStatus,
   getPreviewLogs,
   verifyPreviewHealth,
+  decideProxiedEntryResponse,
+  markPreviewRootRouteMissing,
+  markPreviewBackendUnreachable,
+  buildPreviewErrorPage,
   type PreviewStatus,
 } from "./preview/PreviewManager";
 import {
@@ -1201,7 +1205,8 @@ app.use("/preview/:workspaceId", async (req: AuthenticatedRequest, res: Response
   }
 
   // Proxy the request to localhost:<port>
-  const targetUrl = `http://127.0.0.1:${status.port}${req.url.replace(/^\/preview\/[^/]+/, "")}`;
+  const strippedPath = req.url.replace(/^\/preview\/[^/]+/, "");
+  const targetUrl = `http://127.0.0.1:${status.port}${strippedPath}`;
   try {
     const proxyResp = await fetch(targetUrl, {
       method: req.method,
@@ -1212,6 +1217,25 @@ app.use("/preview/:workspaceId", async (req: AuthenticatedRequest, res: Response
       body: ["GET", "HEAD"].includes(req.method) ? undefined : (req as any),
       redirect: "manual",
     });
+
+    // Entry-path servability guard (2026-09-18): a 404 on / means the
+    // process on the preview port is not serving the app. The old code
+    // forwarded the backend's white "Cannot GET /" while the UI still
+    // said "Preview ready". Flip the runtime to failed and serve an
+    // honest error page instead — never the raw backend 404.
+    if (decideProxiedEntryResponse(strippedPath, proxyResp.status) === "entry_route_missing") {
+      markPreviewRootRouteMissing(workspaceId);
+      res.status(502).setHeader("content-type", "text/html; charset=utf-8");
+      res.send(buildPreviewErrorPage({
+        heading: "Preview isn't serving the app",
+        message: "The preview server answered, but the app entry route (/) returned 404 — the process on the preview port is not serving your project. This is usually a stale or wrong dev server holding the port.",
+        command: status.command,
+        framework: status.framework,
+        errorCode: "preview_root_route_missing",
+        workspaceId,
+      }));
+      return;
+    }
 
     // Successful HTML documents get the inspector bridge injected so the
     // Studio iframe can offer element selection across origins.
@@ -1245,8 +1269,20 @@ app.use("/preview/:workspaceId", async (req: AuthenticatedRequest, res: Response
     }
     res.send(Buffer.from(body));
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    res.status(502).json({ error: "Preview proxy error", detail: message });
+    // The backend died between the status check and the proxy (or was
+    // never reachable). An iframe showing raw JSON next to a green
+    // "Preview ready" badge is the same lie as the white 404 — flip the
+    // runtime and serve the honest error page instead.
+    markPreviewBackendUnreachable(workspaceId);
+    res.status(502).setHeader("content-type", "text/html; charset=utf-8");
+    res.send(buildPreviewErrorPage({
+      heading: "Preview dev server unreachable",
+      message: "The preview proxy could not reach the dev server — it may have crashed after reporting ready.",
+      command: status.command,
+      framework: status.framework,
+      errorCode: "preview_dev_server_failed",
+      workspaceId,
+    }));
   }
 });
 
