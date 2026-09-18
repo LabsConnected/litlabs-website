@@ -795,7 +795,7 @@ export function registerInternalTools(): void {
         description: "Generate an image using the project's image generation provider",
         source: "internal",
         version: "1.0.0",
-        inputSchema: { type: "object", properties: { prompt: { type: "string" }, projectId: { type: "string" } }, required: ["prompt", "projectId"] },
+        inputSchema: { type: "object", properties: { prompt: { type: "string" }, projectId: { type: "string" } }, required: ["prompt"] },
         outputSchema: { type: "object" },
         requiredCapabilities: ["image_generation"],
         requiredPermissions: ["image:generate"],

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
 import { auth } from "@/lib/auth";
 import { getCreditBalances, adjustWalletBalance } from "@/lib/wallet-ledger";
 import { withRateLimit } from "@/lib/rate-limiter";
@@ -52,6 +53,29 @@ type GeminiImageModel =
   | "gemini-2.5-flash-image";
 
 type ImageGenerationMode = "auto-free" | "auto-quality" | "manual";
+
+/**
+ * Server-to-server agent authentication for the image.generate tool path.
+ *
+ * The Studio agent loop runs without a Clerk session, so its self-fetch to
+ * this route cannot present a session cookie or Bearer JWT. When the
+ * request carries a valid internal service key plus an explicit agent user
+ * ID, that user ID is trusted as the caller (the agent already enforced the
+ * user's explicit approval before executing). Returns null when the headers
+ * are absent or the key does not match — callers then fall through to the
+ * normal Clerk auth path.
+ */
+export function resolveAgentServiceUser(req: NextRequest): string | null {
+  const expectedKey = process.env.TERMINAL_INTERNAL_SERVICE_KEY;
+  if (!expectedKey) return null;
+  const providedKey = req.headers.get("X-Internal-Service-Key");
+  const agentUserId = req.headers.get("X-Agent-User-Id");
+  if (!providedKey || !agentUserId) return null;
+  const a = Buffer.from(providedKey);
+  const b = Buffer.from(expectedKey);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  return agentUserId;
+}
 
 type MediaRequest = {
   prompt?: string;
@@ -879,7 +903,15 @@ async function handler(req: NextRequest) {
   // The client should send the same requestId on retries to avoid double-charging.
   let requestId: string = "";
 
-  const { userId } = await auth(req);
+  // Server-to-server agent calls (e.g. the Studio agent loop's image.generate
+  // tool) carry no Clerk session — a bare self-fetch would 401 here and the
+  // approved run would die with "The approved workspace operation failed".
+  // Accept the internal service key with an explicit agent user ID instead.
+  // The key is server-side only (never exposed to clients); the call is
+  // attributed to that user for identity, wallet, and rate-limiting exactly
+  // as a direct call would be.
+  const agentUserId = resolveAgentServiceUser(req);
+  const { userId } = agentUserId ? { userId: agentUserId } : await auth(req);
   if (!userId) {
     return NextResponse.json(
       {
