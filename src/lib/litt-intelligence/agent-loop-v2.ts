@@ -693,6 +693,14 @@ export async function runAgentLoopV2(
         break;
       }
 
+      // Stop must also stop in-flight tool work: never start a tool call
+      // once the caller has aborted.
+      if (cfg.signal?.aborted) {
+        cancelled = true;
+        cancelReason = "Cancelled by user";
+        break;
+      }
+
       // Execute the tool
       localProgress.emit({ type: "tool_start", toolId: toolCall.toolId, summary: `${toolCall.toolId}` });
 
@@ -803,7 +811,7 @@ export async function runAgentLoopV2(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode),
     });
   }
 
@@ -1098,7 +1106,19 @@ export async function resumeAgentLoopV2(
     localProgress.emit({ type: "tool_start", toolId: resume.toolId, summary: `${resume.toolId} (approved)` });
 
     let result: ToolCallResult;
-    try {
+    if (cfg.signal?.aborted) {
+      // The run was stopped while awaiting approval: the approved tool
+      // must not execute. Surface cancelled without running it.
+      cancelled = true;
+      cancelReason = "Cancelled by user";
+      result = {
+        toolCallId: resume.toolCallId,
+        toolId: resume.toolId,
+        result: null,
+        success: false,
+        error: "Cancelled by user",
+      };
+    } else try {
       const execResult = await toolRegistry.execute(resume.toolId, resume.inputs, {
         hasApproval: true,
         availableCapabilities,
@@ -1206,7 +1226,7 @@ export async function resumeAgentLoopV2(
   }
 
   // Continue the loop
-  while (stepsUsed < cfg.maxSteps) {
+  while (stepsUsed < cfg.maxSteps && !cancelled) {
     const elapsed = Date.now() - startTime;
     if (elapsed > cfg.maxRuntimeMs) {
       cancelled = true;
@@ -1391,6 +1411,14 @@ export async function resumeAgentLoopV2(
         break;
       }
 
+      // Stop must also stop in-flight tool work: never start a tool call
+      // once the caller has aborted.
+      if (cfg.signal?.aborted) {
+        cancelled = true;
+        cancelReason = "Cancelled by user";
+        break;
+      }
+
       localProgress.emit({ type: "tool_start", toolId: toolCall.toolId, summary: `${toolCall.toolId}` });
 
       let result: ToolCallResult;
@@ -1402,7 +1430,17 @@ export async function resumeAgentLoopV2(
         });
 
         if (execResult.ok) {
-          result = { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: execResult.result, success: true };
+          // Same domain-failure normalization as the other execute sites:
+          // a handler returning { success: false } is a failed mutation,
+          // never a success.
+          const handlerError = handlerFailureError(execResult.result);
+          result = {
+            toolCallId: toolCall.toolCallId,
+            toolId: toolCall.toolId,
+            result: execResult.result,
+            success: handlerError === null,
+            ...(handlerError !== null ? { error: handlerError } : {}),
+          };
         } else {
           result = { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: null, success: false, error: execResult.error };
         }
@@ -1451,7 +1489,7 @@ export async function resumeAgentLoopV2(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode),
     });
   }
 
@@ -1537,11 +1575,13 @@ export function createAutonomousRepairCallback(
   toolDefs: ToolDefinition[],
   deadlineMs?: number,
   signal?: AbortSignal,
+  executionMode: ExecutionMode = "act",
   // Capability set for repair-loop tool execution. Defaults to the resolved
   // deployment set so repair tools (files.patch, checkpoint.*) cannot fail
   // closed as "incapable" — the same unified-gate guarantee as the main loop.
   availableCapabilities: string[] = resolveAvailableCapabilities({ transport }),
 ): (attempt: number, errors: string) => Promise<boolean> {
+  const permissionEngine = new PermissionEngine();
   return async (attempt: number, errors: string) => {
     // Feed the error output to the LLM and let it repair
     const repairMessages: LLMMessage[] = [
@@ -1568,10 +1608,39 @@ export function createAutonomousRepairCallback(
 
         repairMessages.push(buildAssistantToolCallMessage(response.toolCalls, response.text, response.rawParts));
 
-        // Execute each tool call
+        // Execute each tool call — routed through the same permission
+        // check the main loop uses. Repair is autonomous: there is no
+        // user to approve a gated call, so a denied or
+        // approval-requiring call fails closed (the model sees the gate
+        // and must work around it) instead of executing silently with
+        // hasApproval: true.
         for (const toolCall of response.toolCalls) {
+          // Stop must also stop repair work: never start a tool call once
+          // the caller has aborted.
+          if (signal?.aborted) {
+            return false;
+          }
+
           const toolDef = toolRegistry.get(toolCall.toolId);
           if (!toolDef) continue;
+
+          const repairPermResult = permissionEngine.check(
+            toPermissionInfo(toolDef),
+            toolCall.inputs,
+            executionMode,
+          );
+          if (!repairPermResult.allowed || repairPermResult.requiresApproval) {
+            repairMessages.push(buildToolResultMessage({
+              toolCallId: toolCall.toolCallId,
+              toolId: toolCall.toolId,
+              result: null,
+              success: false,
+              error: repairPermResult.requiresApproval
+                ? `Permission gate: ${repairPermResult.reason ?? "this operation requires explicit approval"} — approval cannot be granted during autonomous repair, so the call was not executed.`
+                : `${repairPermResult.reason ?? "Permission denied"} — the call was not executed.`,
+            }));
+            continue;
+          }
 
           try {
             const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {
@@ -1580,8 +1649,18 @@ export function createAutonomousRepairCallback(
               transport,
             });
 
+            // Same domain-failure normalization as the main loop: a
+            // handler returning { success: false } is a failed repair
+            // step, never a success.
+            const handlerError = execResult.ok ? handlerFailureError(execResult.result) : null;
             const result: ToolCallResult = execResult.ok
-              ? { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: execResult.result, success: true }
+              ? {
+                  toolCallId: toolCall.toolCallId,
+                  toolId: toolCall.toolId,
+                  result: execResult.result,
+                  success: handlerError === null,
+                  ...(handlerError !== null ? { error: handlerError } : {}),
+                }
               : { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: null, success: false, error: execResult.error };
 
             repairMessages.push(buildToolResultMessage(result));
