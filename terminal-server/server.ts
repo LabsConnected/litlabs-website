@@ -65,6 +65,7 @@ import {
   injectInspector as injectInspectorScript,
   INSPECTOR_DROPPED_HEADERS,
 } from "./preview/inspector";
+import { rewritePreviewAssetUrls } from "./preview/asset-urls";
 import { registerWorkspaceRoutes } from "./workspace-routes";
 import { dispatchCommand } from "./command-bridge";
 import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manager";
@@ -1264,7 +1265,15 @@ app.use("/preview/:workspaceId", async (req: AuthenticatedRequest, res: Response
 
     const body = await proxyResp.arrayBuffer();
     if (injectInspector) {
-      res.send(injectInspectorScript(Buffer.from(body).toString("utf8")));
+      // Rewrite document-local URLs so subresources stay inside the
+      // /preview/:workspaceId mount and carry the preview token —
+      // root-relative refs ("/assets/x", "/_next/...") otherwise escape
+      // the mount (404) and relative refs lose auth (401).
+      const rewritten = rewritePreviewAssetUrls(
+        Buffer.from(body).toString("utf8"),
+        { workspaceId, token: previewToken, pagePath: strippedPath },
+      );
+      res.send(injectInspectorScript(rewritten));
       return;
     }
     res.send(Buffer.from(body));
