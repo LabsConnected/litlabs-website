@@ -541,7 +541,7 @@ describe("submitApprovalAndPoll — failure visibility and retryability", () => 
     expect(failed[0].info?.retryable).toBe(true);
   });
 
-  it("an expired gate is not retryable — the gate is gone", async () => {
+  it("an expired gate is retryable via Request again — expiry no longer dead-ends the run", async () => {
     const fetchImpl = queueHttp(
       jsonResp({ error: "Approval could not be resolved (expired or already resolved)" }, 409),
       jsonResp({ status: "expired", runStatus: null }),
@@ -550,7 +550,8 @@ describe("submitApprovalAndPoll — failure visibility and retryability", () => 
 
     expect(failed).toHaveLength(1);
     expect(failed[0].error).toContain("expired");
-    expect(failed[0].info?.retryable).toBe(false);
+    expect(failed[0].info?.retryable).toBe(true);
+    expect(failed[0].info?.expired).toBe(true);
   });
 });
 
