@@ -36,8 +36,23 @@ export interface ApprovalCardProps {
    * "Retry approval".
    */
   expired?: boolean;
-  /** Re-submits the approval decision for the same paused run. */
+  /**
+   * Re-submits the approval decision for the same paused run.
+   */
   onRetry?: () => void;
+  /**
+   * The agent execution mode in effect when the approval was raised
+   * ("plan" | "act" | "auto"). Rendered as a pill in the header so the
+   * user can see which lane they are approving into. Optional: when
+   * absent no pill renders — the card never guesses the mode.
+   *
+   * Honesty note: this is the client's selected mode at render time,
+   * passed down by the Studio surface. Binding the mode into the
+   * server-side approval request is separate work (mode-pill honesty
+   * track); until then the pill reflects the user's current selection,
+   * not a server-attested lane.
+   */
+  mode?: "plan" | "act" | "auto";
 }
 
 /* ── Helpers ──────────────────────────────────────────────────────── */
@@ -132,6 +147,38 @@ function countAffectedFiles(inputs?: Record<string, unknown>): number | null {
   return found ? count : null;
 }
 
+/** Keys whose string values are plausibly an image attached to the request. */
+const IMAGE_URL_KEY = /(image|picture|photo|thumbnail|download.?url|image.?url)$/i;
+
+/** First https URL in the inputs that is plausibly an image, else null. */
+function findAttachedImageUrl(inputs?: Record<string, unknown>): string | null {
+  if (!inputs) return null;
+  for (const [key, value] of Object.entries(inputs)) {
+    if (typeof value !== "string") continue;
+    const v = value.trim();
+    if (!/^https?:\/\//i.test(v)) continue;
+    if (IMAGE_URL_KEY.test(key) || /\.(png|jpe?g|webp|gif|avif)(\?|#|$)/i.test(v)) {
+      return v;
+    }
+  }
+  return null;
+}
+
+/** Short scalar params (size, style, …) to show as chips; prompt handled separately. */
+function imageRequestParams(inputs?: Record<string, unknown>): Array<{ key: string; value: string }> {
+  if (!inputs) return [];
+  const out: Array<{ key: string; value: string }> = [];
+  for (const [key, value] of Object.entries(inputs)) {
+    if (key.toLowerCase() === "prompt") continue;
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      const s = String(value).trim();
+      if (s.length === 0 || s.length > 48 || /^https?:\/\//i.test(s)) continue;
+      out.push({ key, value: s });
+    }
+  }
+  return out.slice(0, 6);
+}
+
 /* ── Component ────────────────────────────────────────────────────── */
 
 export function ApprovalCard({
@@ -146,9 +193,17 @@ export function ApprovalCard({
   retryable = true,
   expired = false,
   onRetry,
+  mode,
 }: ApprovalCardProps) {
   const toolLabel = approval.toolId.replace(/_/g, " ");
   const affectedCount = countAffectedFiles(approval.inputs);
+  const isImageRequest = approval.toolId === "image.generate";
+  const imagePrompt =
+    isImageRequest && typeof approval.inputs?.prompt === "string"
+      ? approval.inputs.prompt.trim()
+      : null;
+  const imageParams = isImageRequest ? imageRequestParams(approval.inputs) : [];
+  const attachedImageUrl = isImageRequest ? findAttachedImageUrl(approval.inputs) : null;
   // Once a decision is submitted the gate is consumed server-side — the
   // buttons must not be clickable again while submitting/executing, and a
   // failed gate offers Retry (same paused run) instead of a second decision.
@@ -178,6 +233,27 @@ export function ApprovalCard({
         >
           {isDeploy ? "Deploy approval — always requires you" : "Approval required"}
         </span>
+        {mode && (
+          <span
+            data-testid="approval-mode"
+            className={
+              mode === "act"
+                ? "ml-auto rounded-full border border-accent/40 bg-accent/10 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-accent"
+                : "ml-auto rounded-full border px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider"
+            }
+            style={
+              mode === "act"
+                ? undefined
+                : {
+                    color: "var(--text-muted)",
+                    borderColor: "rgba(255,255,255,0.12)",
+                    backgroundColor: "rgba(255,255,255,0.04)",
+                  }
+            }
+          >
+            {mode === "act" ? "Act" : mode === "plan" ? "Plan" : "Auto"}
+          </span>
+        )}
       </div>
 
       {/* Body */}
@@ -208,6 +284,80 @@ export function ApprovalCard({
           </div>
         )}
       </div>
+
+      {/* Image request — honest preview. A real attached image renders as
+          a thumbnail; otherwise the prompt + params show instead of faked
+          pixels. Nothing here claims an image was generated. */}
+      {isImageRequest && (
+        <div
+          data-testid="approval-image-request"
+          className="mb-2 rounded-lg border px-2 py-1.5"
+          style={{
+            borderColor: "rgba(255,255,255,0.08)",
+            backgroundColor: "rgba(255,255,255,0.03)",
+          }}
+        >
+          <div
+            className="pb-1 text-[9px] font-black uppercase tracking-wider"
+            style={{ color: "var(--text-muted)" }}
+          >
+            Image request
+          </div>
+          {attachedImageUrl && (
+            <>
+              {/* Plain <img>: attached URLs are arbitrary user-supplied values
+                  (data:/blob:), which next/image cannot optimize. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={attachedImageUrl}
+                alt="Image attached to this approval request"
+                data-testid="approval-image-thumbnail"
+                className="max-h-40 w-full rounded-md object-cover"
+              />
+              <div
+                className="pt-1 text-[9px]"
+                style={{ color: "var(--text-muted)" }}
+              >
+                Attached image — came with the request, not generated.
+              </div>
+            </>
+          )}
+          {imagePrompt && (
+            <div
+              data-testid="approval-image-prompt"
+              className="pt-1 text-[11px] italic leading-snug"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              &ldquo;{imagePrompt}&rdquo;
+            </div>
+          )}
+          {imageParams.length > 0 && (
+            <div className="flex flex-wrap gap-1 pt-1">
+              {imageParams.map(({ key, value }) => (
+                <span
+                  key={key}
+                  className="rounded-full border px-1.5 py-0.5 text-[9px] font-bold"
+                  style={{
+                    borderColor: "rgba(255,255,255,0.1)",
+                    backgroundColor: "rgba(255,255,255,0.04)",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  {key}: {value}
+                </span>
+              ))}
+            </div>
+          )}
+          {!attachedImageUrl && (
+            <div
+              className="pt-1 text-[9px]"
+              style={{ color: "var(--text-muted)" }}
+            >
+              No image generated yet — approving runs the generation.
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Status line — submitting / executing / failed */}
       {phase === "submitting" && (
