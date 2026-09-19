@@ -22,6 +22,9 @@ vi.mock("@/lib/litt-intelligence/paused-run-store", () => ({
   markRunCompleted: vi.fn(() => Promise.resolve()),
   markRunFailed: vi.fn(() => Promise.resolve()),
   createPausedRun: vi.fn(),
+  renewRunLease: vi.fn(() => Promise.resolve(true)),
+  RUN_HEARTBEAT_MS: 30_000,
+  resetRunForRetry: vi.fn(() => Promise.resolve(false)),
 }));
 
 const mkdirCalls: string[] = [];
