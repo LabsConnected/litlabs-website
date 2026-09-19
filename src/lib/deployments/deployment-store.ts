@@ -213,9 +213,12 @@ export async function readPublishedFile(
     .eq("deployment_id", deploymentId)
     .eq("path", path)
     .maybeSingle();
-  if (error?.code === "PGRST204") {
+  if (error?.code === "PGRST204" || error?.code === "42703") {
     // Encoding column not yet applied — read without it and let the serving
-    // route infer binary payloads from the content type.
+    // route infer binary payloads from the content type. PostgREST surfaces
+    // a missing select column as the passthrough Postgres code 42703
+    // (PGRST204 is only produced for unknown insert payload keys) — both
+    // mean exactly "the column is absent" and nothing else.
     ({ data, error } = await supabaseAdmin
       .from(FILES_TABLE)
       .select("content,content_type")

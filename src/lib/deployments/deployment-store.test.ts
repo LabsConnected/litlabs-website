@@ -243,25 +243,44 @@ describe("readPublishedFile — public serving read path", () => {
     expect(calls.find((c) => c.table === FILES)).toBeUndefined();
   });
 
-  it("re-reads without encoding when the column is not applied yet", async () => {
-    let fileReads = 0;
+  // PostgREST emits PGRST204 for an unknown INSERT payload key but the
+  // passthrough Postgres code 42703 for an unknown SELECT column — the
+  // missing-encoding compatibility path must accept both.
+  it.each(["PGRST204", "42703"])(
+    "re-reads without encoding when the column is not applied yet (%s)",
+    async (code) => {
+      let fileReads = 0;
+      handler = (table) => {
+        if (table === DEPLOYMENTS) return { data: readyRow, error: null };
+        if (table === FILES) {
+          fileReads += 1;
+          if (fileReads === 1) {
+            return { data: null, error: { code, message: "column 'encoding' not found" } };
+          }
+          return { data: { content: "<h1>x</h1>", content_type: "text/html" }, error: null };
+        }
+        return { data: null, error: null };
+      };
+      const file = await readPublishedFile("dep-1", "index.html");
+      expect(file).toEqual({ content: "<h1>x</h1>", contentType: "text/html", encoding: undefined });
+      const fileCalls = calls.filter((c) => c.table === FILES);
+      expect(fileCalls).toHaveLength(2);
+      expect(fileCalls[0].payload).toContain("encoding");
+      expect(fileCalls[1].payload).not.toContain("encoding");
+    },
+  );
+
+  it("does not retry the encoding read on unrelated storage errors", async () => {
     handler = (table) => {
       if (table === DEPLOYMENTS) return { data: readyRow, error: null };
       if (table === FILES) {
-        fileReads += 1;
-        if (fileReads === 1) {
-          return { data: null, error: { code: "PGRST204", message: "column 'encoding' not found" } };
-        }
-        return { data: { content: "<h1>x</h1>", content_type: "text/html" }, error: null };
+        return { data: null, error: { code: "XX000", message: "connection reset" } };
       }
       return { data: null, error: null };
     };
-    const file = await readPublishedFile("dep-1", "index.html");
-    expect(file).toEqual({ content: "<h1>x</h1>", contentType: "text/html", encoding: undefined });
-    const fileCalls = calls.filter((c) => c.table === FILES);
-    expect(fileCalls).toHaveLength(2);
-    expect(fileCalls[0].payload).toContain("encoding");
-    expect(fileCalls[1].payload).not.toContain("encoding");
+    expect(await readPublishedFile("dep-1", "index.html")).toBeNull();
+    // A genuine failure is not a schema-compat signal — no retry, no serve.
+    expect(calls.filter((c) => c.table === FILES)).toHaveLength(1);
   });
 });
 
