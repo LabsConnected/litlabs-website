@@ -1456,7 +1456,7 @@ function AIModelsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors
   );
 }
 
-/* ── LiTT & Spark ──────────────────────────────────────────────────── */
+/* ── LiTT ──────────────────────────────────────────────────────────── */
 
 const AGENT_DEFAULT_SETTINGS = {
   defaultAgent: "litt",
@@ -1541,7 +1541,6 @@ function AgentsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"]
         <div className="grid grid-cols-2 gap-2">
           {[
             { id: "litt", name: "LiTT", desc: "Operating agent" },
-            { id: "spark", name: "Spark", desc: "Creative agent" },
           ].map((a) => (
             <button key={a.id} type="button" onClick={() => updateSetting("defaultAgent", a.id)}
               className="rounded-xl border p-3 text-left transition-all"
@@ -1550,24 +1549,6 @@ function AgentsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"]
               <div className="text-[10px] text-white/40">{a.desc}</div>
             </button>
           ))}
-        </div>
-      </SettingsCard>
-
-      <SettingsCard title="Agent visibility" description="Show or hide built-in agents">
-        <div className="space-y-3">
-          <ToggleRow
-            title="Show Spark"
-            description="Spark is built-in and can't be uninstalled — hide it instead"
-            checked={!settings.hiddenAgents.includes("spark")}
-            onChange={(v) =>
-              updateSetting(
-                "hiddenAgents",
-                v
-                  ? settings.hiddenAgents.filter((id) => id !== "spark")
-                  : [...settings.hiddenAgents.filter((id) => id !== "spark"), "spark"],
-              )
-            }
-          />
         </div>
       </SettingsCard>
 
@@ -1770,12 +1751,10 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
     };
   }, []);
 
-  const previewVoice = useCallback(async (agentId: "litt" | "spark") => {
+  const previewVoice = useCallback(async (agentId: "litt") => {
     setVoicePreviewing(agentId);
     try {
-      const sampleText = agentId === "litt"
-        ? "Connection established. I'm scanning the project now."
-        : "Oh, that's clean. The preview is live.";
+      const sampleText = "Connection established. I'm scanning the project now.";
 
       // Use browser speechSynthesis for preview — the real voice is Inworld's
       // live realtime API, which can't be previewed with a simple TTS call.
@@ -1983,14 +1962,13 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
       </SettingsCard>
 
       {/* Agent voice */}
-      <SettingsCard title="Agent voice" description="LiTT and Spark voice identity" icon={<Volume2 size={16} />}>
+      <SettingsCard title="Agent voice" description="LiTT voice identity" icon={<Volume2 size={16} />}>
         <div className="space-y-3">
           <p className="text-[10px] text-white/40">
             Voice is powered by Inworld realtime API. Preview uses your browser&apos;s built-in speech synthesis for a rough demo — the actual voice in the Studio is Inworld&apos;s neural voice.
           </p>
           {[
             { id: "litt" as const, name: "LiTT", style: "Deep · Calm · Precise", color: brand.primary.DEFAULT, sample: "Connection established. I'm scanning the project now." },
-            { id: "spark" as const, name: "Spark", style: "Bright · Warm · Expressive", color: "#22c55e", sample: "Oh, that's clean. The preview is live." },
           ].map((agent) => (
             <div key={agent.id} className="flex items-center justify-between rounded-lg border px-3 py-2.5"
               style={{ borderColor: `${agent.color}30`, backgroundColor: `${agent.color}08` }}>
@@ -2016,13 +1994,12 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
               <div className="mt-1.5 space-y-1 text-[10px] text-white/60">
                 <div>API Key: <span className={inworldStatus.apiKey ? "text-emerald-400" : "text-red-400"}>{inworldStatus.apiKey ? "Set" : "Missing"}</span></div>
                 <div>LiTT Voice: <span className={inworldStatus.littVoice ? "text-emerald-400" : "text-red-400"}>{inworldStatus.littVoice ? "Set" : "Missing"}</span></div>
-                <div>Spark Voice: <span className={inworldStatus.sparkVoice ? "text-emerald-400" : "text-red-400"}>{inworldStatus.sparkVoice ? "Set" : "Missing"}</span></div>
                 <div>WebSocket URL: <span className={inworldStatus.wsUrl ? "text-emerald-400" : "text-red-400"}>{inworldStatus.wsUrl ? "Set" : "Missing"}</span></div>
                 {inworldStatus.configured ? (
                   <div className="mt-1.5 text-emerald-400">Inworld realtime voice is configured and ready.</div>
                 ) : (
                   <div className="mt-1.5 text-amber-400">
-                    Inworld is not configured. Set INWORLD_API_KEY, INWORLD_LITT_VOICE, and INWORLD_SPARK_VOICE in Vercel env.
+                    Inworld is not configured. Set INWORLD_API_KEY and INWORLD_LITT_VOICE in Vercel env.
                   </div>
                 )}
               </div>

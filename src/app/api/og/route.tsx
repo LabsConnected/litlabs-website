@@ -11,7 +11,7 @@ export async function GET(request: Request) {
   const title = searchParams.get("title") || "LiTTree Lab Studios";
   const description =
     searchParams.get("description") ||
-    "AI creative studio powered by LiTT and Spark";
+    "AI creative studio powered by LiTT";
 
   try {
     return new ImageResponse(

@@ -94,12 +94,12 @@ describe("marketplace agent-registry", () => {
   });
 
   describe("getStudioAgents", () => {
-    it("includes only LiTT and Spark (2 agents)", () => {
+    it("includes only LiTT (Spark is hidden from the Studio selector)", () => {
       const studioAgents = getStudioAgents();
-      expect(studioAgents).toHaveLength(2);
+      expect(studioAgents).toHaveLength(1);
       const slugs = studioAgents.map((a) => a.id);
       expect(slugs).toContain("litt");
-      expect(slugs).toContain("spark");
+      expect(slugs).not.toContain("spark");
       expect(slugs).not.toContain("researcher");
       expect(slugs).not.toContain("coder");
     });
@@ -110,10 +110,8 @@ describe("marketplace agent-registry", () => {
       expect(litt?.role).toMatch(/Researcher/i);
     });
 
-    it("Spark role includes Creative Companion and Designer", () => {
-      const spark = getStudioAgents().find((a) => a.id === "spark");
-      expect(spark?.role).toMatch(/Creative Companion/i);
-      expect(spark?.role).toMatch(/Designer/i);
+    it("Spark is hidden from the Studio selector (legacy, internal-only)", () => {
+      expect(getStudioAgents().find((a) => a.id === "spark")).toBeUndefined();
     });
   });
 

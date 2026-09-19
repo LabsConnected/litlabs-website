@@ -164,7 +164,7 @@ export default function DocsOverviewClient() {
       <DocH2 id="chat-agents">Chat & agents</DocH2>
       <DocP>
         You drive LiTT by chatting. Pick a specialist for the job —{" "}
-        <InlineCode>LiTT</InlineCode>, <InlineCode>Spark</InlineCode>{" "}(creative),{" "}
+        <InlineCode>LiTT</InlineCode>,{" "}
         <InlineCode>Coder</InlineCode>{" "}(engineering), <InlineCode>Writer</InlineCode>,{" "}
         <InlineCode>Researcher</InlineCode>, <InlineCode>Marketer</InlineCode>,{" "}
         <InlineCode>Analyst</InlineCode>, <InlineCode>Nova</InlineCode>,{" "}

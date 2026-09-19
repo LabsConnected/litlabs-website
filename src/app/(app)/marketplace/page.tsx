@@ -433,7 +433,7 @@ function MarketplaceInner() {
             <span className="rounded-md border border-rose-400/30 bg-rose-400/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-rose-300">Beta</span>
           </div>
           <p className="mt-2 max-w-xl text-sm text-white/55">
-            Extend LiTT and Spark with real tools, workflows, integrations, and creative packs.
+            Extend LiTT with real tools, workflows, integrations, and creative packs.
           </p>
 
           {/* Stats row — only show "Installed" for signed-in users */}
@@ -456,15 +456,11 @@ function MarketplaceInner() {
             })}
           </div>
 
-          {/* LiTT and Spark explainer */}
+          {/* LiTT explainer */}
           <div className="mt-5 flex flex-wrap gap-4 text-xs text-white/45">
             <span className="flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-accent" />
-              LiTT uses installed engineering, research, automation, and project tools
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-violet-400" />
-              Spark uses installed creative, media, branding, and content tools
+              LiTT uses installed engineering, research, automation, creative, and project tools
             </span>
           </div>
 
@@ -717,7 +713,7 @@ function MarketplaceInner() {
               <div className="mt-1 text-2xl font-black text-white">Free</div>
               <div className="text-[10px] text-white/40">Free forever</div>
               <div className="mt-3 space-y-1">
-                {["1 active project", "500 starter AI credits", "LiTT and Spark", "Basic tools"].map((f) => (
+                {["1 active project", "500 starter AI credits", "LiTT", "Basic tools"].map((f) => (
                   <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
                     <Check size={11} className="shrink-0 text-emerald-400" /> {f}
                   </div>
@@ -909,9 +905,6 @@ const MarketplaceCard = memo(function MarketplaceCard({
           <span>Works with:</span>
           {item.compatible_assistants.includes("litt") && (
             <span className="rounded-md bg-accent/10 px-1.5 py-0.5 font-bold text-accent">LiTT</span>
-          )}
-          {item.compatible_assistants.includes("spark") && (
-            <span className="rounded-md bg-violet-400/10 px-1.5 py-0.5 font-bold text-violet-300">Spark</span>
           )}
         </div>
 

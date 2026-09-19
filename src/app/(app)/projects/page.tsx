@@ -37,7 +37,7 @@ const QUICK_ACTIONS = [
   },
   {
     label: "Mission Forge",
-    description: "Build reusable Missions by connecting LiTT, Spark, tools, approvals, and outputs.",
+    description: "Build reusable Missions by connecting LiTT, tools, approvals, and outputs.",
     href: "/studio?tool=workflows",
     icon: Bot,
   },

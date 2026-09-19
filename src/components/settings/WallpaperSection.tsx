@@ -203,13 +203,13 @@ export function WallpaperSection() {
         )}
       </div>
 
-      {/* ── Generate with Spark ──────────────────────────────────────── */}
+      {/* ── Generate with LiTT ───────────────────────────────────────── */}
       <Link
         href="/studio?tool=image&intent=wallpaper"
         className="flex items-center justify-center gap-2 rounded-xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-xs font-bold text-amber-300 transition-all hover:bg-amber-400/10"
       >
         <Sparkles size={14} className="pointer-events-none" />
-        Generate wallpaper with Spark
+        Generate wallpaper with LiTT
       </Link>
 
       {/* ── Ambient & Minimal — collapsed by default ─────────────────── */}

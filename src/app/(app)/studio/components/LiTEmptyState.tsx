@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import {
   AlertCircle,
   ArrowRight,
@@ -9,7 +8,6 @@ import {
 } from "lucide-react";
 import LiTTPresence from "./LiTTPresence";
 import RecentConversations from "./RecentConversations";
-import type { AgentId } from "../stores/useStudioAgentStore";
 import type {
   FirstMissionActionId,
   FirstMissionFact,
@@ -27,13 +25,11 @@ const FACT_META: Record<
 };
 
 export default function LiTEmptyState({
-  activeAgentId = "litt",
   displayName,
   launchpadState,
   onPrimaryAction,
   onSelectConversation,
 }: {
-  activeAgentId?: AgentId;
   displayName?: string | null;
   launchpadState: FirstMissionLaunchpadState;
   onPrimaryAction: (action: FirstMissionActionId) => void;
@@ -53,28 +49,15 @@ export default function LiTEmptyState({
     >
       <div className="relative mx-auto flex w-full max-w-3xl flex-col items-center gap-5">
         <div className="relative grid min-h-[180px] place-items-center" style={{ overflow: "visible" }}>
-          {activeAgentId === "litt" ? (
-            <LiTTPresence state="idle" variant="empty-state" size="xl" />
-          ) : (
-            <div
-              className="relative grid h-36 w-36 place-items-center overflow-hidden rounded-full border"
-              style={{
-                borderColor: "rgba(244,114,182,.45)",
-                background: "radial-gradient(circle, rgba(244,114,182,.2), transparent 70%)",
-                boxShadow: "0 0 36px rgba(244,114,182,.25)",
-              }}
-            >
-              <Image src="/brand/spark-agent-portrait.png" alt="Spark" fill sizes="144px" className="object-contain p-1" />
-            </div>
-          )}
+          <LiTTPresence state="idle" variant="empty-state" size="xl" />
           <span
             className="glass-status-pill absolute -bottom-2"
             style={{
-              borderColor: activeAgentId === "spark" ? "rgba(244,114,182,.45)" : "var(--glass-border-green)",
-              color: activeAgentId === "spark" ? "var(--spark-primary)" : "var(--glass-green)",
+              borderColor: "var(--glass-border-green)",
+              color: "var(--glass-green)",
             }}
           >
-            {activeAgentId === "spark" ? "Spark · Creative" : "LiTT · Operating"}
+            LiTT · Operating
           </span>
         </div>
 

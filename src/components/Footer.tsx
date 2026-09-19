@@ -165,7 +165,7 @@ export default function Footer() {
             >
               LiTTree LabStudios™
             </span>
-            <span className="text-xs opacity-60">© 2026 · LiTT™ · Spark™</span>
+            <span className="text-xs opacity-60">© 2026 · LiTT™</span>
           </div>
           <div className="flex items-center gap-1.5 text-xs opacity-60">
             <span

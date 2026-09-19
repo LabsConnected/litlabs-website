@@ -63,10 +63,11 @@ describe("buildSpokenSummarySystemPrompt", () => {
     expect(prompt).toMatch(/spoken/i);
   });
 
-  it("uses the Spark persona for spark", () => {
+  it("uses the creative voice persona for spark without naming Spark", () => {
     const prompt = buildSpokenSummarySystemPrompt("spark");
-    expect(prompt).toContain("Spark");
+    expect(prompt).not.toContain("Spark");
     expect(prompt).not.toContain("lead AI copilot");
+    expect(prompt).toMatch(/bright, warm, expressive/i);
   });
 });
 

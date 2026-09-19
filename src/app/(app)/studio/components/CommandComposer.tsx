@@ -529,7 +529,7 @@ export default function CommandComposer({
             style={{ backgroundColor: `${agentAccent}20`, color: agentAccent }}
           >
             <Image
-              src={activeAgentId === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt-mascot-avatar.png"}
+              src="/brand/litt-mascot-avatar.png"
               alt={agentMeta.displayName}
               fill
               sizes="20px"
@@ -982,7 +982,6 @@ function planLabel(plan: string): string {
 /** MODE items — the main assistant modes. */
 const MODE_ITEMS: { id: AgentId; label: string; description: string }[] = [
   { id: "litt", label: "LiTT", description: "Normal main assistant" },
-  { id: "spark", label: "Spark", description: "Creative mode" },
 ];
 
 /** MODEL items — BYOK engines shown in the MODEL section. */
@@ -1097,7 +1096,7 @@ function UnifiedSelectorPopover({
               >
                 {unlocked ? (
                   <Image
-                    src={item.id === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt-mascot-avatar.png"}
+                    src="/brand/litt-mascot-avatar.png"
                     alt={meta.displayName}
                     fill
                     sizes="28px"

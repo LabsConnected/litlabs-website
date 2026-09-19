@@ -2561,7 +2561,6 @@ function StudioWorkSurface({
       {isEmpty ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <LiTEmptyState
-            activeAgentId={activeAgentId}
             launchpadState={launchpadState}
             displayName={displayName}
             onPrimaryAction={onFirstMissionAction}

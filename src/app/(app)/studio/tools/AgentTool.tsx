@@ -45,7 +45,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import {
-  CORE_PERSONALITIES,
+  getStudioAgents,
   type AgentDefinition,
 } from "@/lib/agent-registry";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
@@ -221,16 +221,18 @@ export default function AgentTool() {
   /* ─── Filter agents by search ──────────────────────────────────────── */
 
   const filteredAgents = useMemo(() => {
+    // Only studio-visible core personalities (LiTT) are listed; hidden legacy
+    // profiles (e.g. Spark) stay out of My AI Crew.
+    const studioAgents = getStudioAgents();
     const base = !searchQuery.trim()
-      ? CORE_PERSONALITIES
-      : CORE_PERSONALITIES.filter(
+      ? studioAgents
+      : studioAgents.filter(
           (a) =>
             a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
             a.role.toLowerCase().includes(searchQuery.toLowerCase()) ||
             a.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
             a.domains.some((d) => d.includes(searchQuery.toLowerCase())),
         );
-    // Built-in agents the user hid (e.g. Spark) stay out of My AI Crew.
     return visibleAgents(base, hiddenAgents);
   }, [searchQuery, hiddenAgents]);
 

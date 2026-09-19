@@ -4,11 +4,10 @@ import Image from "next/image";
 
 export function LiTTPresenceCard({
   status = "online",
-  activeAgent = "litt",
   onCloseAction,
 }: {
   status?: "online" | "offline" | "busy";
-  activeAgent?: "litt" | "spark";
+  activeAgent?: "litt";
   onCloseAction?: () => void;
 }) {
   const statusColor =
@@ -32,7 +31,7 @@ export function LiTTPresenceCard({
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-xs font-black text-white">
-          {activeAgent === "spark" ? "Spark" : "LiTT"}
+          LiTT
         </p>
         <p className="truncate text-[9px] text-white/40">
           {status === "online" ? "Ready to help" : status === "busy" ? "Working…" : "Offline"}

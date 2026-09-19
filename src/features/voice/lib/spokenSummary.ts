@@ -49,7 +49,7 @@ export function truncateToSpokenFallback(text: string): string {
 export function buildSpokenSummarySystemPrompt(agentId: SpokenAgentId): string {
   const persona =
     agentId === "spark"
-      ? "Spark, LiTT's playful creative companion: bright, warm, expressive."
+      ? "LiTT's creative voice: bright, warm, expressive."
       : "LiTT, the lead AI copilot: deep, calm, precise, mid-thirties energy.";
   return `You are ${persona}
 
