@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { getLiveSessionStatus } from "@/lib/litt-intelligence/browser-session-manager";
+import { getBurnSnapshot } from "@/lib/litt-intelligence/browser-billing";
 
 export const runtime = "nodejs";
 
@@ -19,6 +20,12 @@ export const runtime = "nodejs";
  * Stagehand instance is genuinely present in this process's registry
  * with fresh activity inside the idle TTL. The chip must never show
  * "live" on any other basis.
+ *
+ * Phase 4: when a session is present, attaches `burn` — the real
+ * accumulator reading ({ billableMinutes, modelCalls, bits, live }).
+ * The chip renders it (e.g. "Browser · Live · 3 min · 135 BITS"). When
+ * nothing is known, burn is null and the chip shows no burn rather
+ * than a fake number.
  */
 async function handler(req: NextRequest) {
   const { userId } = await auth(req);
@@ -31,7 +38,11 @@ async function handler(req: NextRequest) {
 
   try {
     const status = await getLiveSessionStatus(userId, conversationId);
-    return NextResponse.json(status);
+    let burn: Awaited<ReturnType<typeof getBurnSnapshot>> = null;
+    if (status.sessionId) {
+      burn = await getBurnSnapshot(status.sessionId, userId);
+    }
+    return NextResponse.json({ ...status, burn });
   } catch (err) {
     return NextResponse.json(
       { error: "Internal server error", detail: err instanceof Error ? err.message : String(err) },

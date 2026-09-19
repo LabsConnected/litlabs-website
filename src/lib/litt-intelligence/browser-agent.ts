@@ -34,10 +34,18 @@ import "server-only";
 import { isOwnerClerkId } from "@/lib/owner";
 import { normalizeBrowserUrl } from "./browser-url-policy";
 import {
+  preflightBrowserStart,
+  getDailyBrowserMinutesUsed,
+  DAILY_BROWSER_MINUTES_QUOTA,
+  QUOTA_PAUSED_MESSAGE,
+  type BrowserStartRefusal,
+} from "./browser-billing";
+import {
   startSession,
   closeSession,
   closeIdleSessions,
   getStagehand,
+  pauseSession,
   dbGetActiveSessions,
   type BrowserSession,
 } from "./browser-session-manager";
@@ -139,14 +147,20 @@ export type StartAgentBrowserSessionResult =
   | { ok: true; session: BrowserSession; message: string; reused: boolean }
   | {
       ok: false;
-      error: "beta_only" | "unavailable" | "start_failed";
+      error:
+        | "beta_only"
+        | "unavailable"
+        | "start_failed"
+        | BrowserStartRefusal;
       message: string;
     };
 
 /**
- * Start an agent browser session for a user, enforcing the beta gate.
+ * Start an agent browser session for a user, enforcing the beta gate
+ * then the Phase 4 BITS preflight (fail closed: no balance → no
+ * session; caps/quota → honest refusal before any vendor cost accrues).
  * Returns a discriminated result — never throws for expected failures
- * (beta gate, missing API key) so callers can report them honestly.
+ * so callers can report them honestly.
  */
 export async function startAgentBrowserSession(
   options: StartAgentBrowserSessionOptions,
@@ -157,6 +171,15 @@ export async function startAgentBrowserSession(
       error: "beta_only",
       message: BROWSER_BETA_ONLY_MESSAGE,
     };
+  }
+
+  // Phase 4 — budget preflight BEFORE any provider session exists.
+  const preflight = await preflightBrowserStart(
+    options.userId,
+    (await dbGetActiveSessions(options.userId).catch(() => [])).length,
+  );
+  if (!preflight.ok) {
+    return { ok: false, error: preflight.error, message: preflight.message };
   }
 
   try {
@@ -172,6 +195,7 @@ export async function startAgentBrowserSession(
       reused: false,
       message:
         "Browser session started — fresh clean profile, no logins. " +
+        "Browser time costs 45 LiTTBits per started minute. " +
         `I'll announce what I'm doing with it. (session ${session.id})`,
     };
   } catch (err) {
@@ -258,6 +282,21 @@ export async function getOrReuseAgentBrowserSession(
 
   const existing = await getActiveSession(options.userId, options.conversationId);
   if (existing) {
+    // Phase 4: on reuse, re-check ONLY the daily quota (a balance check
+    // here is redundant with per-action gating + settle; the quota is the
+    // per-action guard; the rate limit and session cap apply to NEW
+    // starts, not reuse). Quota-exhausted → pause now with the
+    // plain-English message instead of handing back a session that
+    // would pause on its next action anyway.
+    const dailyMinutes = await getDailyBrowserMinutesUsed(options.userId);
+    if (dailyMinutes >= DAILY_BROWSER_MINUTES_QUOTA) {
+      await pauseSession(existing.id, options.userId).catch(() => {});
+      return {
+        ok: false,
+        error: "quota_exhausted",
+        message: QUOTA_PAUSED_MESSAGE,
+      };
+    }
     return {
       ok: true,
       session: existing,
@@ -279,7 +318,8 @@ export type OneShotScreenshotError =
   | "invalid_url"
   | "navigation_failed"
   | "screenshot_failed"
-  | "start_failed";
+  | "start_failed"
+  | BrowserStartRefusal;
 
 export interface OneShotScreenshotResult {
   ok: boolean;

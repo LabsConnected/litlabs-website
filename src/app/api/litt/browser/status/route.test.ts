@@ -21,12 +21,20 @@ vi.mock("@/lib/litt-intelligence/browser-session-manager", () => ({
   getLiveSessionStatus: vi.fn(),
 }));
 
+// Phase 4 — the burn number comes from the real accumulator via
+// getBurnSnapshot; the route attaches it when a session is present.
+vi.mock("@/lib/litt-intelligence/browser-billing", () => ({
+  getBurnSnapshot: vi.fn(),
+}));
+
 import { auth } from "@/lib/auth";
 import { getLiveSessionStatus } from "@/lib/litt-intelligence/browser-session-manager";
+import { getBurnSnapshot } from "@/lib/litt-intelligence/browser-billing";
 import { GET } from "./route";
 
 const mockAuth = vi.mocked(auth);
 const mockStatus = vi.mocked(getLiveSessionStatus);
+const mockBurn = vi.mocked(getBurnSnapshot);
 
 function req(url: string) {
   return new NextRequest(url);
@@ -35,6 +43,7 @@ function req(url: string) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockAuth.mockResolvedValue({ userId: "owner_clerk_123" } as never);
+  mockBurn.mockResolvedValue(null);
 });
 
 describe("GET /api/litt/browser/status", () => {
@@ -96,5 +105,47 @@ describe("GET /api/litt/browser/status", () => {
     expect(res.status).toBe(500);
     const json = await res.json();
     expect(json.state).toBeUndefined();
+  });
+
+  it("attaches the real burn snapshot when a session is present (Phase 4)", async () => {
+    mockStatus.mockResolvedValue({
+      state: "live",
+      sessionId: "session-1",
+      controller: "agent",
+      sessionStatus: "active",
+      lastActivityAt: new Date().toISOString(),
+    });
+    mockBurn.mockResolvedValue({
+      billableMinutes: 3,
+      modelCalls: 2,
+      bits: 155,
+      live: true,
+    });
+
+    const res = await GET(req("http://localhost/api/litt/browser/status"));
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.burn).toEqual({
+      billableMinutes: 3,
+      modelCalls: 2,
+      bits: 155,
+      live: true,
+    });
+    expect(mockBurn).toHaveBeenCalledWith("session-1", "owner_clerk_123");
+  });
+
+  it("reports burn: null (no fake number) when nothing is known", async () => {
+    mockStatus.mockResolvedValue({
+      state: "disconnected",
+      sessionId: null,
+      controller: null,
+      sessionStatus: null,
+      lastActivityAt: null,
+    });
+    const res = await GET(req("http://localhost/api/litt/browser/status"));
+    const json = await res.json();
+    expect(json.burn).toBeNull();
+    expect(mockBurn).not.toHaveBeenCalled();
   });
 });

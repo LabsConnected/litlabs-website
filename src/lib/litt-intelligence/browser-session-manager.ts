@@ -24,6 +24,15 @@ import "server-only";
 import { randomUUID } from "crypto";
 import { Stagehand } from "@browserbasehq/stagehand";
 import { supabaseAdmin } from "@/lib/supabase";
+// Phase 4 — BITS metering: gates consulted per action, settlement on
+// close. Type-only in the other direction (browser-billing imports
+// BrowserSession as a type), so there is no runtime import cycle.
+import {
+  checkActionGate,
+  recordBrowserAction,
+  billingMetadata,
+  settleBrowserSession,
+} from "./browser-billing";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -60,6 +69,13 @@ export interface BrowserActionResult {
   error?: string;
   screenshotUrl?: string;
   durationMs: number;
+  /**
+   * Phase 4: number of Stagehand MODEL calls (act()/extract()) this
+   * action made. Only set by handlers that use the model-fallback path;
+   * successful actions accrue BROWSER_MODEL_CALL_BITS each via the
+   * billing accumulator. Failed actions accrue 0 (P1-3 precedent).
+   */
+  modelCalls?: number;
 }
 
 export interface StartSessionOptions {
@@ -416,12 +432,18 @@ export async function returnControl(
 
 /**
  * Close a browser session and clean up resources.
+ *
+ * Phase 4: settling BITS is part of closing. The accrued burn is
+ * debited ONCE (idempotency key browser:settle:<sessionId>) after the
+ * provider session is torn down. Settle is best-effort and never blocks
+ * the close — a settle failure is returned, never thrown.
  */
 export async function closeSession(
   sessionId: string,
   userId: string,
 ): Promise<void> {
   const active = activeSessions.get(sessionId);
+  const inMemorySession = active?.session ?? null;
   if (active) {
     await active.stagehand.close().catch(() => {});
     activeSessions.delete(sessionId);
@@ -431,6 +453,11 @@ export async function closeSession(
     status: "closed",
     closed_at: new Date().toISOString(),
   });
+
+  const session = inMemorySession ?? (await dbGetSession(sessionId, userId));
+  if (session) {
+    await settleBrowserSession(session).catch(() => {});
+  }
 }
 
 /**
@@ -490,6 +517,29 @@ export async function executeBrowserAction(
     };
   }
 
+  // Phase 4 — abuse gates, checked before every action:
+  // per-session action cap (the 101st action is refused) and the daily
+  // minute quota (quota exceeded → the session PAUSES with a
+  // plain-English message, never a silent stall). Fail-open if the gate
+  // itself errors: metering must never break the browser's ability to
+  // run — the ledger is the billing backstop. (Fail-closed is only for
+  // session START via preflightBrowserStart.)
+  const gate = await checkActionGate(
+    sessionId,
+    userId,
+    session.createdAt,
+  ).catch((): { allowed: true } => ({ allowed: true }));
+  if (!gate.allowed) {
+    if (gate.pause) {
+      await pauseSession(sessionId, userId).catch(() => {});
+    }
+    return {
+      success: false,
+      error: gate.message,
+      durationMs: 0,
+    };
+  }
+
   const stagehand = getStagehand(sessionId);
   if (!stagehand) {
     return {
@@ -515,6 +565,15 @@ export async function executeBrowserAction(
     result.durationMs = Date.now() - start;
   }
 
+  // Phase 4 — accumulate burn for the session: attempts (success or
+  // failure) count toward the per-session action cap; only successful
+  // results accrue model-call surcharges (provider failure = 0 BITS for
+  // that action — P1-3 precedent).
+  recordBrowserAction(sessionId, {
+    success: result.success,
+    modelCalls: result.modelCalls ?? 0,
+  });
+
   // Log to audit trail
   await dbInsertAction({
     sessionId,
@@ -529,8 +588,11 @@ export async function executeBrowserAction(
     durationMs: result.durationMs,
   });
 
-  // Update session activity
-  await dbUpdateSession(sessionId, { updated_at: new Date().toISOString() });
+  // Update session activity (+ persist the billing accumulator snapshot
+  // into metadata in the same write — forensic backup for the meter).
+  await dbUpdateSession(sessionId, {
+    metadata: { ...(session.metadata ?? {}), billing: billingMetadata(sessionId) },
+  });
 
   return result;
 }
@@ -572,6 +634,10 @@ export async function closeIdleSessions(): Promise<number> {
         status: "closed",
         closed_at: new Date().toISOString(),
       });
+      // Phase 4: idle-TTL close settles BITS too (one ledger write,
+      // idempotent — a later explicit close of the same session
+      // settles 0 and replays nothing).
+      await settleBrowserSession(active.session).catch(() => {});
       closed++;
     }
   }
@@ -593,6 +659,8 @@ export async function closeAllUserSessions(userId: string): Promise<number> {
         status: "closed",
         closed_at: new Date().toISOString(),
       });
+      // Phase 4: settle BITS on close, same as closeSession.
+      await settleBrowserSession(active.session).catch(() => {});
       closed++;
     }
   }
