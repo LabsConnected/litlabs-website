@@ -60,6 +60,12 @@ export interface AgentLoopConfig {
   /** Upstream/client AbortSignal propagated to all provider calls. */
   signal?: AbortSignal;
   /**
+   * The authenticated user's ID. Injected server-side into user-scoped
+   * tools (browser.*) at execution time — the model must never supply
+   * userId itself. When absent, browser tools fail closed on validation.
+   */
+  userId?: string;
+  /**
    * Opt-in to the LiTT quality loop (gated UNDERSTAND→VERIFY stages +
    * visual-quality judge). When enabled, the loop records stage evidence
    * from tool events and agent declarations, runs one visual inspection
@@ -210,6 +216,24 @@ function toToolDefinition(tool: LiTTToolDefinition): ToolDefinition {
     description: tool.description,
     inputSchema: tool.inputSchema as Record<string, unknown>,
   };
+}
+
+/**
+ * Browser tools are user-scoped: the session manager keys every session by
+ * the authenticated user, and sessions must never be addressable across
+ * users. The model must never supply userId itself (it would hallucinate
+ * it) — the server injects the real authenticated userId here, overriding
+ * anything the model passed.
+ */
+function withUserScopeForBrowserTools(
+  toolId: string,
+  inputs: Record<string, unknown>,
+  userId: string | undefined,
+): Record<string, unknown> {
+  if (userId && toolId.startsWith("browser.")) {
+    return { ...inputs, userId };
+  }
+  return inputs;
 }
 
 function toPermissionInfo(tool: LiTTToolDefinition): ToolPermissionInfo {
@@ -734,7 +758,7 @@ export async function runAgentLoopV2(
 
       try {
         // Use the registry's execute method, passing transport for V2 handlers
-        const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {
+        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId), {
           hasApproval: !permResult.requiresApproval,
           availableCapabilities,
           transport,
@@ -1094,6 +1118,11 @@ export interface DeferredToolBatchContext {
   /** Upstream/client abort signal. Deferred execution must honor the same stop request as the resumed loop. */
   signal?: AbortSignal;
   state: DeferredToolBatchState;
+  /**
+   * Authenticated user id — injected into user-scoped tools (browser.*)
+   * at execution time. The model never supplies userId itself.
+   */
+  userId?: string;
 }
 
 export interface DeferredToolBatchResult {
@@ -1271,7 +1300,7 @@ export async function executeDeferredToolCalls(
 
     let result: ToolCallResult;
     try {
-      const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {
+      const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, ctx.userId), {
         hasApproval: !permResult.requiresApproval,
         transport: ctx.transport,
       });
@@ -1426,7 +1455,7 @@ export async function resumeAgentLoopV2(
         error: "Cancelled by user",
       };
     } else try {
-      const execResult = await toolRegistry.execute(resume.toolId, resume.inputs, {
+      const execResult = await toolRegistry.execute(resume.toolId, withUserScopeForBrowserTools(resume.toolId, resume.inputs, cfg.userId), {
         hasApproval: true,
         availableCapabilities,
         transport,
@@ -1563,6 +1592,7 @@ export async function resumeAgentLoopV2(
       maxOutputChars: cfg.maxOutputChars,
       signal: cfg.signal,
       state: deferredState,
+      userId: cfg.userId,
     });
     hasInterveningMutation = deferredState.hasInterveningMutation;
     cancelled = deferredState.cancelled;
@@ -1789,7 +1819,7 @@ export async function resumeAgentLoopV2(
 
       let result: ToolCallResult;
       try {
-        const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {
+        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId), {
           hasApproval: !permResult.requiresApproval,
           availableCapabilities,
           transport,

@@ -142,6 +142,22 @@ describe("LiTT Tool Executor — Intent Detection", () => {
   it("detectToolIntent returns null for normal chat", () => {
     expect(detectToolIntent("Write me a song")).toBeNull();
   });
+
+  it("detectToolIntent returns browser_screenshot for screenshot requests", () => {
+    expect(detectToolIntent("screenshot example.com")).toEqual({
+      tool: "browser_screenshot",
+    });
+    expect(
+      detectToolIntent("take a screenshot of https://example.com"),
+    ).toEqual({ tool: "browser_screenshot" });
+  });
+
+  it("detectToolIntent does not steal weather/search messages", () => {
+    expect(detectToolIntent("What's the weather?")?.tool).toBe("weather");
+    expect(detectToolIntent("search for electric bikes")?.tool).toBe(
+      "web_search",
+    );
+  });
 });
 
 describe("LiTT Tool Executor — detectAndExecuteTool", () => {

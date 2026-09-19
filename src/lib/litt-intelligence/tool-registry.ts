@@ -202,6 +202,16 @@ const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
     const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.close"];
     return ((inputs: Record<string, unknown>) => h({ sessionId: inputs.sessionId as string, userId: inputs.userId as string }, inputs)) as ToolHandler;
   },
+  // browser.start_session is the entry point: it provisions the sessionId
+  // the other browser.* tools require. Beta-gated inside the handler.
+  "browser.start_session": async () => {
+    const m = await import("./browser-agent");
+    return (async (inputs: Record<string, unknown>) => {
+      const userId = inputs.userId as string;
+      const task = typeof inputs.task === "string" ? inputs.task : undefined;
+      return m.startAgentBrowserSession({ userId, task });
+    }) as ToolHandler;
+  },
   // ─── Realtime internet tools — delegate to @litt/agent-core ──
   // The ONE shared implementation (SSRF-safe fetch, NWS weather, DuckDuckGo
   // search). Surfaces adapt it; they never reimplement the network logic.
@@ -1550,6 +1560,40 @@ export function registerInternalTools(): void {
       handler: lazyHandlers["deploy.verify"],
     },
     // ─── Browser Agent Mode tools ─────────────────────────────
+    // browser.start_session is the entry point: call it FIRST before any
+    // other browser.* tool — they all require the sessionId it returns.
+    {
+      tool: {
+        id: "browser.start_session",
+        name: "Browser Start Session",
+        description:
+          "Start a new agent browser session (fresh clean profile: no cookies, no logins, no extensions). Returns a sessionId for the other browser.* tools. Private beta: only the owner's account may start sessions; other accounts get an honest error. After starting, announce in chat what you are about to do with the browser. The session auto-closes after 10 idle minutes; close it yourself with browser.close when done.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            userId: { type: "string" },
+            task: {
+              type: "string",
+              description: "What the browser session is for, e.g. 'screenshot example.com'",
+            },
+          },
+          required: ["userId"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["browser:control"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 60000,
+        idempotent: false,
+        readOnly: true,
+        permissionLevel: "read",
+        enabled: true,
+      },
+      handler: lazyHandlers["browser.start_session"],
+    },
     // Read-only browser tools (auto-approved)
     {
       tool: {

@@ -25,11 +25,16 @@ import {
   type WebSearchToolResponse,
 } from "./web-search-tool";
 import { isWebSearchAvailable } from "./web-search-provider";
+import {
+  runOneShotScreenshot,
+  detectScreenshotIntent,
+  extractScreenshotUrl,
+} from "./browser-agent";
 import type { ConversationTurn } from "./turn-resolver";
 
 /* ── Types ──────────────────────────────────────────────────────── */
 
-export type ToolId = "weather" | "web_search" | "none";
+export type ToolId = "weather" | "web_search" | "browser_screenshot" | "none";
 
 /* ── Explicit location extraction ──────────────────────────────── */
 
@@ -236,6 +241,12 @@ export function detectToolIntent(
     return { tool: "web_search" };
   }
 
+  // Check for browser screenshot intent ("screenshot example.com").
+  // Runs after weather/web-search so those keep priority on overlap.
+  if (detectScreenshotIntent(message)) {
+    return { tool: "browser_screenshot" };
+  }
+
   // Check for weather follow-up with temporal keywords (no explicit weather word)
   if (history && history.length > 0) {
     const lower = message.toLowerCase();
@@ -300,6 +311,10 @@ export async function detectAndExecuteTool(
 
   if (intent.tool === "web_search") {
     return executeWebSearchTool(userId, message, options?.headers);
+  }
+
+  if (intent.tool === "browser_screenshot") {
+    return executeBrowserScreenshotTool(userId, message);
   }
 
   return {
@@ -451,5 +466,56 @@ async function executeWebSearchTool(
     text: result.error,
     metadata,
     raw: result,
+  };
+}
+
+/**
+ * Executes the agent-browser one-shot screenshot for a user.
+ * Honest by design: every failure (beta gate, missing API key, bad URL,
+ * navigation failure) returns the real cause as text — never an image.
+ * On success the screenshot is embedded as a data URL; the Studio client
+ * already routes data:image message content to the Media tab.
+ */
+async function executeBrowserScreenshotTool(
+  userId: string,
+  message: string,
+): Promise<ToolExecutionResult> {
+  const metadata: ToolMetadata = {
+    tool: "browser_screenshot",
+    provider: "browserbase",
+    realtime: true,
+    location: null,
+  };
+
+  const rawUrl = extractScreenshotUrl(message);
+  if (!rawUrl) {
+    return {
+      executed: true,
+      toolId: "browser_screenshot",
+      text: 'Which site should I screenshot? Send a URL, like "screenshot example.com".',
+      metadata,
+    };
+  }
+
+  const result = await runOneShotScreenshot(userId, rawUrl);
+  if (!result.ok || !result.screenshotDataUrl) {
+    return {
+      executed: true,
+      toolId: "browser_screenshot",
+      text: result.message,
+      metadata,
+    };
+  }
+
+  const label = result.pageTitle
+    ? `${result.url} ("${result.pageTitle}")`
+    : result.url;
+  return {
+    executed: true,
+    toolId: "browser_screenshot",
+    text:
+      `Here's a snapshot of ${label} — captured just now (a snapshot, not a live view):\n\n` +
+      `![screenshot of ${result.url}](${result.screenshotDataUrl})`,
+    metadata,
   };
 }
