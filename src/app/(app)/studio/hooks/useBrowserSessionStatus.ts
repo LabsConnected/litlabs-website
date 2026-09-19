@@ -53,6 +53,11 @@ export function useBrowserSessionStatus(conversationId?: string) {
   const [status, setStatus] = useState<BrowserSessionStatus>(UNKNOWN);
   const [error, setError] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
+  // Phase 3 — cooperative control: busy flag for take control / resume,
+  // plus the session's live view URL (fetched on session change) so the
+  // human can actually drive the browser after taking control.
+  const [controlBusy, setControlBusy] = useState(false);
+  const [liveViewUrl, setLiveViewUrl] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
   const fetchStatus = useCallback(async () => {
@@ -120,5 +125,80 @@ export function useBrowserSessionStatus(conversationId?: string) {
     }
   }, [status.sessionId, stopping, fetchStatus]);
 
-  return { status, error, stopping, refresh: fetchStatus, stop };
+  // Fetch the session's live view URL whenever the active session changes.
+  // The human opens this after taking control to actually drive the
+  // browser (sign in, solve a CAPTCHA); the agent never drives through it.
+  useEffect(() => {
+    const sessionId = status.sessionId;
+    if (!sessionId) {
+      setLiveViewUrl(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/litt/browser/session?sessionId=${encodeURIComponent(sessionId)}`,
+          { credentials: "same-origin", cache: "no-store" },
+        );
+        if (!res.ok) return;
+        const json = await res.json();
+        const url = (json?.session as Record<string, unknown> | undefined)?.liveViewUrl;
+        if (!cancelled && mountedRef.current) {
+          setLiveViewUrl(typeof url === "string" && url ? url : null);
+        }
+      } catch {
+        // Non-fatal: the control buttons still work without the live view.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [status.sessionId]);
+
+  // Phase 3 — cooperative control. POST take_control / return_control and
+  // re-poll: the chip flips only when the server confirms the transfer.
+  const postControl = useCallback(
+    async (action: "take_control" | "return_control") => {
+      const sessionId = status.sessionId;
+      if (!sessionId || controlBusy) return;
+      setControlBusy(true);
+      try {
+        const res = await fetch("/api/litt/browser/session", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, sessionId }),
+        });
+        if (!res.ok) throw new Error(`${action} ${res.status}`);
+        await fetchStatus();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : `${action} failed`);
+      } finally {
+        if (mountedRef.current) setControlBusy(false);
+      }
+    },
+    [status.sessionId, controlBusy, fetchStatus],
+  );
+
+  const takeControl = useCallback(
+    () => postControl("take_control"),
+    [postControl],
+  );
+  const returnControl = useCallback(
+    () => postControl("return_control"),
+    [postControl],
+  );
+
+  return {
+    status,
+    error,
+    stopping,
+    refresh: fetchStatus,
+    stop,
+    controlBusy,
+    liveViewUrl,
+    takeControl,
+    returnControl,
+  };
 }
