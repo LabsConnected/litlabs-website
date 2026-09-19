@@ -1639,6 +1639,11 @@ function CommandStudioContent() {
             error={approvalError}
             retryable={approvalRetryable}
             expired={approvalExpired}
+            // Mode pill: the client's currently selected execution mode.
+            // This is display-only — the mode is not yet bound into the
+            // server-side approval request (mode-pill honesty track), so
+            // the card shows the user's selection, never a guessed lane.
+            mode={executionMode}
             // An expired gate's "Retry" re-requests a fresh gate — re-POSTing
             // the dead pausedRunId would 409. Other failures retry the
             // approval POST as before.
