@@ -124,50 +124,28 @@ export type InspectorTab = "plan" | "changes" | "files" | "preview" | "checks" |
 export type DrawerTab = "activity" | "terminal" | "media";
 
 /**
- * LiTT Mode — what LiTT is about to create. This is the canonical
- * "mode" query parameter that travels alongside `tool=chat&agent=litt`.
+ * Creative-tool surface mapping (private).
  *
- * Instead of navigating to separate tool pages (Image, Music, Video),
- * the user stays in the LiTT chat conversation and switches mode.
- * The composer adapts its placeholder and quick-actions to the mode,
- * and the workspace panel shows the relevant artifact surface.
+ * Legacy creative `?tool=` values (image, video, music, code) normalize to
+ * the canonical LiTT chat surface. There is no user-facing mode choice —
+ * the router always behaves as auto — so this mapping only selects the
+ * workspace surface, never a mode.
  *
- *   auto     — default, LiTT decides based on the prompt
- *   image    — image generation
- *   video    — video generation
- *   music    — music generation
- *   code     — code editing (opens code workspace)
- *   website  — website/builder mode
+ * Returns the StudioMode surface to open, or null when the tool has its
+ * own dedicated mapping in mapLegacyToolToDestination below.
  */
-export type LiTTMode = "auto" | "image" | "video" | "music" | "code" | "website";
-
-/** All valid LiTTMode values for validation. */
-export const LITT_MODES: LiTTMode[] = ["auto", "image", "video", "music", "code", "website"];
-
-/**
- * Map a legacy `?tool=` value to a LiTT mode. Returns null if the tool
- * doesn't map to a LiTT mode (e.g. "agents", "assets", "plugins").
- *
- * This is used to normalize old URLs like `?tool=image` into the
- * canonical `?tool=chat&mode=image` form.
- */
-export function legacyToolToLiTTMode(tool: string | null): LiTTMode | null {
+function creativeToolWorkspaceSurface(
+  tool: string | null,
+): "code" | "work" | null {
   switch (tool) {
     case "image":
     case "color":
-      return "image";
     case "video":
-      return "video";
     case "music":
     case "audio":
-      return "music";
+      return "work";
     case "code":
       return "code";
-    // build/canvas/design are workspace stages, not LiTT creation modes.
-    // They fall through to the switch in mapLegacyToolToDestination which
-    // sets the correct legacyTool and mode (files/design/work). Canvas and
-    // design carry littMode "website"; build carries "auto" so the
-    // LiTT-mode→stage sync does not stomp the Builder surface.
     default:
       return null;
   }
@@ -185,44 +163,28 @@ export interface DestinationState {
   openDrawer?: DrawerTab;
   /** Open the right inspector on this tab (e.g. workflows legacy URL). */
   openInspector?: InspectorTab;
-  /**
-   * LiTT mode — what LiTT is about to create. When the canonical URL
-   * is `?tool=chat&mode=image`, this is "image". Normalized from old
-   * `?tool=image` URLs via legacyToolToLiTTMode.
-   */
-  littMode?: LiTTMode;
 }
 
 /**
  * Map a legacy `?tool=` query value (or any StudioTool) to a Command
  * Studio destination. ALL old tool URLs now canonicalize to the LiTT
- * chat surface with a mode parameter. The user never leaves the
- * conversation — image/music/video/code/website are LiTT modes, not
- * separate Studio experiences.
+ * chat surface. The user never leaves the conversation.
  *
- * Canonical route: ?tool=chat&mode=<mode>
- * Old routes like ?tool=image become ?tool=chat&mode=image
+ * Canonical route: ?tool=chat (auto — LiTT routes the work itself)
+ * Old creative routes like ?tool=image become ?tool=chat (work surface)
  */
 export function mapLegacyToolToDestination(
   tool: StudioTool | string | null,
   command?: string,
 ): DestinationState {
-  // ── LiTT mode normalization ──
-  // ALL creative tools (image/video/music/code/website) normalize to
+  // ── Creative-tool normalization ──
+  // ALL creative tools (image/video/music/code) normalize to
   // the canonical LiTT chat surface. The conversation is permanent and
-  // primary; modes change the composer + workspace, not the destination.
-  const littMode = legacyToolToLiTTMode(tool);
-  if (littMode && littMode !== "auto") {
-    // Code and Website modes open their respective workspace stages
-    // but the conversation remains the primary surface.
-    if (littMode === "code") {
-      return { destination: "studio", legacyTool: "chat", mode: "code", littMode };
-    }
-    if (littMode === "website") {
-      return { destination: "studio", legacyTool: "chat", mode: "work", littMode, command };
-    }
-    // Image/Video/Music → stay in chat, mode drives the composer + workspace
-    return { destination: "studio", legacyTool: "chat", mode: "work", littMode };
+  // primary; the mapping only selects the workspace surface — there is
+  // no mode choice, the router always behaves as auto.
+  const creativeSurface = creativeToolWorkspaceSurface(tool);
+  if (creativeSurface) {
+    return { destination: "studio", legacyTool: "chat", mode: creativeSurface };
   }
 
   switch (tool) {
@@ -230,42 +192,29 @@ export function mapLegacyToolToDestination(
     // Preview is the default workspace surface; chat lives in the LiTT panel.
     case "home":
     case "chat":
-      return { destination: "studio", legacyTool: "chat", mode: "preview", littMode: "auto" };
+      return { destination: "studio", legacyTool: "chat", mode: "preview" };
     // Studio / Files — the Canvas surface
     case "canvas":
-      return { destination: "studio", legacyTool: "canvas", mode: "files", littMode: "website" };
+      return { destination: "studio", legacyTool: "canvas", mode: "files" };
     // Studio / Design — freeform design canvas
     case "design":
-      return { destination: "studio", legacyTool: "design", mode: "design", littMode: "website" };
-    // Studio / Code — the code surface
-    case "code":
-      return { destination: "studio", legacyTool: "code", mode: "code", littMode: "code" };
+      return { destination: "studio", legacyTool: "design", mode: "design" };
     // Studio / Preview — the app preview surface
     case "preview":
-      return { destination: "studio", legacyTool: "preview", mode: "preview", littMode: "auto" };
+      return { destination: "studio", legacyTool: "preview", mode: "preview" };
     // Studio / Work but rendering the Builder adapter (not ChatTool).
-    // littMode is "auto" — Builder is a workspace surface, not a LiTT
-    // creation mode. Mapping it to "website" made the LiTT-mode→stage
-    // sync stomp studioMode to "files" on every ?tool=build load.
+    // Builder is a workspace surface, not a creation mode.
     case "build":
-      return { destination: "studio", legacyTool: "build", mode: "work", littMode: "auto", command };
+      return { destination: "studio", legacyTool: "build", mode: "work", command };
     // Studio / Work with the bottom drawer open on Terminal
     case "terminal":
-      return { destination: "studio", legacyTool: "terminal", mode: "work", littMode: "auto", command, openDrawer: "terminal" };
+      return { destination: "studio", legacyTool: "terminal", mode: "work", command, openDrawer: "terminal" };
 
-    // ── Old creative tool URLs — ALL canonicalize to LiTT chat + mode ──
-    // These are caught by legacyToolToLiTTMode above, but we keep them
-    // here as a safety net so they NEVER reach the old Create destination.
-    case "image":
-    case "color":
-      return { destination: "studio", legacyTool: "chat", mode: "work", littMode: "image" };
-    case "video":
-      return { destination: "studio", legacyTool: "chat", mode: "work", littMode: "video" };
-    case "audio":
-    case "music":
-      return { destination: "studio", legacyTool: "chat", mode: "work", littMode: "music" };
+    // ── Old creative tool URLs — handled by the normalization block ──
+    // above (they NEVER reach the old Create destination). "game" is
+    // not a creative tool; it canonicalizes to the chat surface here.
     case "game":
-      return { destination: "studio", legacyTool: "chat", mode: "work", littMode: "auto" };
+      return { destination: "studio", legacyTool: "chat", mode: "work" };
 
     // Assets
     case "assets":
@@ -277,13 +226,13 @@ export function mapLegacyToolToDestination(
 
     // Camera → Studio + camera action (capture, not a destination)
     case "camera":
-      return { destination: "studio", legacyTool: "camera", mode: "work", littMode: "auto" };
+      return { destination: "studio", legacyTool: "camera", mode: "work" };
     // Screen → Studio + screen action (capture, not a destination)
     case "screen":
-      return { destination: "studio", legacyTool: "screen", mode: "work", littMode: "auto" };
+      return { destination: "studio", legacyTool: "screen", mode: "work" };
     // Space → LiTT chat with auto mode (skybox is a LiTT capability)
     case "space":
-      return { destination: "studio", legacyTool: "chat", mode: "work", littMode: "auto" };
+      return { destination: "studio", legacyTool: "chat", mode: "work" };
     // Mission Forge → Missions destination
     case "workflows":
     case "pipeline":
@@ -296,7 +245,7 @@ export function mapLegacyToolToDestination(
     // Unknown / default → Studio with Preview as the primary surface.
     // Chat lives in the LiTT panel (left); Preview gets the main workspace.
     default:
-      return { destination: "studio", legacyTool: "chat", mode: "preview", littMode: "auto" };
+      return { destination: "studio", legacyTool: "chat", mode: "preview" };
   }
 }
 
@@ -310,11 +259,10 @@ export type WorkSurface = "conversation" | "builder";
 /**
  * Reverse mapping: given a destination + mode (+ work surface), produce
  * the canonical `?tool=` value to write back to the URL. The canonical
- * route is always `tool=chat` — modes travel as `?mode=<mode>`.
+ * route is always `tool=chat` — LiTT routes the work itself (auto).
  *
  * The only exceptions are workspace stages that have their own URL
- * (code, canvas, preview, build) for deep-linking — but even those
- * preserve the LiTT mode in the URL.
+ * (code, canvas, preview, build) for deep-linking.
  */
 export function destinationToLegacyTool(
   destination: StudioDestination,

@@ -18,13 +18,11 @@ describe("studio-destinations", () => {
         destination: "studio",
         legacyTool: "chat",
         mode: "preview",
-        littMode: "auto",
       });
       expect(mapLegacyToolToDestination("chat")).toEqual({
         destination: "studio",
         legacyTool: "chat",
         mode: "preview",
-        littMode: "auto",
       });
     });
 
@@ -42,14 +40,13 @@ describe("studio-destinations", () => {
       expect(result.command).toBe("next build");
     });
 
-    it("build maps littMode=auto — Builder is a surface, not a creation mode", () => {
-      // Regression: littMode "website" made the LiTT-mode→stage sync
-      // stomp studioMode to "files" on every ?tool=build load, which
-      // canonicalized the URL to tool=canvas. The Builder must not claim
-      // a creation mode.
+    it("build carries no creation mode — Builder is a surface", () => {
+      // Regression: a creation mode on the Builder mapping used to make
+      // the mode→stage sync stomp studioMode to "files" on every
+      // ?tool=build load, which canonicalized the URL to tool=canvas.
+      // The Builder must not claim a creation mode.
       const result = mapLegacyToolToDestination("build");
-      expect(result.littMode).toBe("auto");
-      expect(result.littMode).not.toBe("website");
+      expect(result).not.toHaveProperty("littMode");
     });
 
     it("maps code to Studio/Code", () => {
@@ -77,20 +74,21 @@ describe("studio-destinations", () => {
       expect(result.mode).toBe("forge");
     });
 
-    it("maps image/video/audio to Studio with LiTT modes (canonical chat surface)", () => {
+    it("maps image/video/audio to Studio chat surface (no mode choice)", () => {
       expect(mapLegacyToolToDestination("image")).toEqual({
         destination: "studio",
         legacyTool: "chat",
         mode: "work",
-        littMode: "image",
       });
-      expect(mapLegacyToolToDestination("video").littMode).toBe("video");
-      expect(mapLegacyToolToDestination("audio").littMode).toBe("music");
+      expect(mapLegacyToolToDestination("video").mode).toBe("work");
+      expect(mapLegacyToolToDestination("audio").mode).toBe("work");
+      // No creation mode is ever exposed on the mapping.
+      expect(mapLegacyToolToDestination("image")).not.toHaveProperty("littMode");
     });
 
-    it("maps legacy color to Studio/Image LiTT mode (color tool removed)", () => {
+    it("maps legacy color to Studio work surface (color tool removed)", () => {
       expect(mapLegacyToolToDestination("color").destination).toBe("studio");
-      expect(mapLegacyToolToDestination("color").littMode).toBe("image");
+      expect(mapLegacyToolToDestination("color").mode).toBe("work");
     });
 
     it("maps assets to Assets", () => {

@@ -802,7 +802,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expectBuilderSurfaceActive();
     });
 
-    it("an explicit ?mode= on a tool-less URL applies the LiTT mode (stage follows mode)", async () => {
+    it("an explicit ?mode= is ignored — no mode choice is exposed", async () => {
       setUrl("tool=build");
       const view = await renderCommandStudio();
       await waitFor(() => expect(currentTool()).toBe("build"));
@@ -811,12 +811,9 @@ describe("CommandStudio — mounted Work-surface routing", () => {
         setUrl("mode=image&project=proj-1");
         view.rerender(<CommandStudio />);
       });
-      // ?mode=image is an explicit creation-mode assertion. Media is now a
-      // contextual developer-drawer surface rather than a fourth primary
-      // workspace tab, so the primary row stays reduced while the mode is
-      // preserved in the URL.
-      expect(screen.queryByTestId("workspace-tab-media")).toBeNull();
-      await waitFor(() => expect(currentMode()).toBe("image"));
+      // ?mode= no longer asserts a creation mode: the Builder surface
+      // must not be ejected and no mode-driven stage change happens.
+      expectBuilderSurfaceActive();
     });
 
     it("?tool=terminal navigation preserves Builder like the drawer-overlay route", async () => {

@@ -347,35 +347,33 @@ describe("CommandComposer — mobile input sizing (Phase 1 #8)", () => {
   });
 });
 
-describe("CommandComposer — PR-1 honesty placeholders", () => {
-  const renderComposer = (littMode: "video" | "music" | "image") =>
+describe("CommandComposer — mode pills removed (auto is permanent)", () => {
+  const renderComposer = () =>
     render(
       <CommandComposer
         value=""
         onChange={vi.fn()}
         onSend={vi.fn()}
         busy={false}
-        littMode={littMode}
       />,
     );
 
-  it("video mode placeholder does not promise chat generation", () => {
-    renderComposer("video");
-    const input = screen.getByTestId("studio-command-input") as HTMLTextAreaElement;
-    expect(input.placeholder).not.toMatch(/want LiTT to create/i);
-    expect(input.placeholder).toMatch(/video tool/i);
-  });
+  it.each(["Auto", "Image", "Music", "Video", "Code", "Website"])(
+    "does not render a %s mode pill",
+    (label) => {
+      renderComposer();
+      expect(
+        screen.queryByRole("button", { name: `LiTT ${label} mode` }),
+      ).toBeNull();
+    },
+  );
 
-  it("music mode placeholder does not promise chat generation", () => {
-    renderComposer("music");
+  it("placeholder is the default agent placeholder — never mode-specific", () => {
+    renderComposer();
     const input = screen.getByTestId("studio-command-input") as HTMLTextAreaElement;
-    expect(input.placeholder).not.toMatch(/want LiTT to create/i);
-    expect(input.placeholder).toMatch(/music tool/i);
-  });
-
-  it("image mode placeholder still promises image creation (it exists)", () => {
-    renderComposer("image");
-    const input = screen.getByTestId("studio-command-input") as HTMLTextAreaElement;
-    expect(input.placeholder).toMatch(/image you want LiTT to create/i);
+    expect(input.placeholder.length).toBeGreaterThan(0);
+    expect(input.placeholder).not.toMatch(
+      /video tool|music tool|image you want LiTT to create|what website or app to build|what code to write/i,
+    );
   });
 });

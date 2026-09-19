@@ -57,8 +57,6 @@ import {
   mapLegacyToolToDestination,
   destinationToLegacyTool,
   workspaceStageToMode,
-  legacyToolToLiTTMode,
-  LITT_MODES,
   type StudioDestination,
   type StudioMode,
   type CreateMode,
@@ -66,7 +64,6 @@ import {
   type MissionMode,
   type InspectorTab,
   type WorkspaceStage,
-  type LiTTMode,
   type StudioTool,
 } from "../lib/studio-destinations";
 import {
@@ -196,19 +193,14 @@ function CommandStudioContent() {
   const modelHealth = providerHealth[selectedModel.provider] ?? providerHealth[selectedModel.apiProvider ?? ""];
   const modelLabel = selectedModel.label;
   // Resolve initial destination from legacy ?tool= query.
-  // Also read the canonical ?mode= query param (LiTT mode).
+  // There is no user-facing mode choice: the router always behaves as
+  // auto, so ?mode= (if present) is ignored.
   const initial = useMemo(() => {
     const fromUrl = searchParams.get("tool");
     if (fromUrl === "pipeline") {
       return mapLegacyToolToDestination("workflows");
     }
-    const mapped = mapLegacyToolToDestination(fromUrl, searchParams.get("mission") ?? undefined);
-    // If the URL has an explicit ?mode= param, it overrides the derived littMode.
-    const explicitMode = searchParams.get("mode") as LiTTMode | null;
-    if (explicitMode && LITT_MODES.includes(explicitMode)) {
-      return { ...mapped, littMode: explicitMode };
-    }
-    return mapped;
+    return mapLegacyToolToDestination(fromUrl, searchParams.get("mission") ?? undefined);
   }, [searchParams]);
 
   const [destination, setDestination] = useState<StudioDestination>(initial.destination);
@@ -235,8 +227,6 @@ function CommandStudioContent() {
   const [missionMode, setMissionMode] = useState<MissionMode>(
     initial.destination === "missions" ? (initial.mode as MissionMode) ?? "overview" : "overview",
   );
-  // LiTT mode — what LiTT is about to create. Canonical URL: ?tool=chat&mode=image
-  const [littMode, setLittMode] = useState<LiTTMode>(initial.littMode ?? "auto");
   const [, setPendingCommand] = useState<string>(initial.command ?? "");
   const [composerValue, setComposerValue] = useState("");
   // Split preview is an explicit, user-triggered layout. Studio never
@@ -335,25 +325,16 @@ function CommandStudioContent() {
     // churn from other writers, or a partial shared link). Mapping it
     // through the default case would force (studio, preview, conversation)
     // and eject Builder — or bounce any active stage — for no reason.
-    // Only an explicit `tool` value is an authoritative surface change;
-    // an explicit `?mode=` still applies as a LiTT mode assertion.
+    // Only an explicit `tool` value is an authoritative surface change.
+    // ?mode= is ignored: there is no user-facing mode choice.
     // A fully bare /studio still means "default Studio surface".
     if (fromUrl === null && navKey !== "") {
-      const explicitOnly = searchParams.get("mode") as LiTTMode | null;
-      if (explicitOnly && LITT_MODES.includes(explicitOnly)) {
-        setLittMode((cur) => (cur === explicitOnly ? cur : explicitOnly));
-      }
       return;
     }
     const mapped = mapLegacyToolToDestination(
       fromUrl === "pipeline" ? "workflows" : fromUrl,
       searchParams.get("mission") ?? undefined,
     );
-    // Read explicit ?mode= param (canonical LiTT mode)
-    const explicitMode = searchParams.get("mode") as LiTTMode | null;
-    const effectiveLittMode = explicitMode && LITT_MODES.includes(explicitMode)
-      ? explicitMode
-      : mapped.littMode ?? "auto";
 
     setDestination((cur) => (cur === mapped.destination ? cur : mapped.destination));
     if (mapped.destination === "studio") {
@@ -378,7 +359,6 @@ function CommandStudioContent() {
       const newMode = (mapped.mode as MissionMode) ?? "overview";
       setMissionMode((cur) => (cur === newMode ? cur : newMode));
     }
-    setLittMode((cur) => (cur === effectiveLittMode ? cur : effectiveLittMode));
   }, [searchParams]);
 
   // ── Phase D.1: track the last workspace stage when in Studio ──────
@@ -637,7 +617,6 @@ function CommandStudioContent() {
     }
     const mapped = mapLegacyToolToDestination(tool, command);
     setDestination(mapped.destination);
-    if (mapped.littMode) setLittMode(mapped.littMode);
     if (mapped.destination === "studio") {
       setStudioMode((mapped.mode as StudioMode) ?? "work");
       // Explicit Build route → builder surface. Routes that only open a
@@ -713,11 +692,11 @@ function CommandStudioContent() {
   // ── LiTT Live realtime session ──
   const liveSession = useLiTTRealtimeSession();
 
-  // Sync destination -> URL ?tool= + ?mode= (canonical: tool=chat).
-  // The canonical route is always ?tool=chat&mode=<mode>. Workspace
-  // stages (code, canvas, preview) get their own ?tool= value for
-  // deep-linking, but creative modes (image/video/music) always
-  // write tool=chat with ?mode= carrying the mode.
+  // Sync destination -> URL ?tool= (canonical: tool=chat).
+  // The canonical route is always ?tool=chat — LiTT routes the work
+  // itself (auto). Workspace stages (code, canvas, preview) get their
+  // own ?tool= value for deep-linking. Any stray ?mode= is dropped:
+  // there is no user-facing mode choice.
   useEffect(() => {
     const activeMode =
       destination === "studio" ? studioMode :
@@ -730,19 +709,15 @@ function CommandStudioContent() {
     } catch {
       // ignore
     }
-    // Build the target URL with both ?tool= and ?mode=
+    // Build the target URL with ?tool=
     const params = new URLSearchParams(searchParams.toString());
-  
+
   // Canonical: always tool=chat for the LiTT conversation surface.
     // Workspace stages (code/canvas/preview) get their own tool value.
     params.set("tool", legacyTool);
-    // Write the LiTT mode to the URL when it's not "auto" (auto is the default,
-    // no need to clutter the URL). Also preserve agent and conversation params.
-    if (littMode && littMode !== "auto") {
-      params.set("mode", littMode);
-    } else {
-      params.delete("mode");
-    }
+    // Drop any ?mode=: the router always behaves as auto, and mode is
+    // never a user-facing choice. Also preserve agent and conversation params.
+    params.delete("mode");
     // Preserve agent param if present
     const agent = searchParams.get("agent");
     if (agent) params.set("agent", agent);
@@ -755,7 +730,7 @@ function CommandStudioContent() {
       router.replace(target, { scroll: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [destination, studioMode, createMode, moreMode, littMode, workSurface, pathname, router]);
+  }, [destination, studioMode, createMode, moreMode, workSurface, pathname, router]);
 
   // Handle legacy "studio:switch-tool" events emitted from inside tools.
   useEffect(() => {
@@ -782,32 +757,6 @@ function CommandStudioContent() {
   }, []);
 
   const [creatingProject, setCreatingProject] = useState(false);
-
-  // ── LiTT mode → workspace stage sync ──────────────────────────────
-  // When the user picks a LiTT mode from the composer pills, switch the
-  // workspace to show the relevant surface. The conversation stays
-  // primary — this just updates what the workspace panel shows.
-  useEffect(() => {
-    // A mode-driven stage change is an authoritative surface change —
-    // leaving the Work stage must also clear the Builder surface so
-    // (studio, work, builder) stays the only Builder identity.
-    if (littMode === "code") {
-      setDestination("studio");
-      setStudioMode("code");
-      setWorkSurface("conversation");
-    } else if (littMode === "website") {
-      setDestination("studio");
-      setStudioMode("files");
-      setWorkSurface("conversation");
-    } else if (littMode === "image" || littMode === "video" || littMode === "music") {
-      // Creative modes open the Media tab so generated artifacts have
-      // somewhere to appear. The conversation is still primary.
-      setDestination("studio");
-      setStudioMode("media" as StudioMode);
-      setWorkSurface("conversation");
-    }
-    // auto: don't change the workspace — LiTT decides based on the prompt
-  }, [littMode]);
 
   // Auto-reveal the dock Activity tab when LiTT starts executing,
   // without stealing focus. This does NOT call .focus() on any
@@ -1668,8 +1617,6 @@ function CommandStudioContent() {
         onClearSelectedElement={() => setPreviewSelection(null)}
         executionMode={executionMode}
         onExecutionModeChange={setExecutionMode}
-        littMode={littMode}
-        onLittModeChange={setLittMode}
         executionHint={executionHint}
       />
     </>
@@ -1963,16 +1910,10 @@ function CommandStudioContent() {
                 ) : isMedia ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-auto pb-28 lg:pb-0">
                     <MediaWorkspacePanel
-                      littMode={littMode}
                       projectId={capabilities.projectId}
                       onOpenCreate={() => {
                         setDestination("create");
-                        setCreateMode(
-                          littMode === "image" ? "image"
-                          : littMode === "video" ? "video"
-                          : littMode === "music" ? "music"
-                          : "image",
-                        );
+                        setCreateMode("image");
                       }}
                     />
                   </div>
@@ -2434,19 +2375,13 @@ export { describeSourceRows };
 
 /* ── Media workspace panel — generated images, video, music, audio ── */
 function MediaWorkspacePanel({
-  littMode,
   projectId,
   onOpenCreate,
 }: {
-  littMode: LiTTMode;
   projectId: string | null;
   onOpenCreate: () => void;
 }) {
-  const modeLabel =
-    littMode === "image" ? "Image" :
-    littMode === "video" ? "Video" :
-    littMode === "music" ? "Music" :
-    "Media";
+  const modeLabel = "Media";
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
