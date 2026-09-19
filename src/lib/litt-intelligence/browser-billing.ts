@@ -130,6 +130,41 @@ export function __resetBrowserBillingForTest(): void {
   startTimestamps.clear();
 }
 
+/**
+ * Phase 5 — seed this process's accumulator from the persisted row
+ * snapshot after a cross-instance re-attach. Without this, a re-attach
+ * resets the meter: the new process's accumulator starts at zero, and
+ * the next per-action metadata persist OVERWRITES the row's forensic
+ * billing snapshot — silently losing the dead owner's usage.
+ *
+ * Seeding rules (same honesty as the row-snapshot settle):
+ *  - actionCount/modelCalls carry over verbatim. Audited usage is
+ *    audited usage — it does not reset on process loss.
+ *  - billableFromMs: the minute meter starts at the first successful
+ *    action (P1-3 grace). The snapshot can't prove an action succeeded,
+ *    but actionCount > 0 means provider work was attempted — matching
+ *    settleBrowserSessionFromRow, bill the wall clock from creation when
+ *    any action was recorded, else keep the grace (0 BITS).
+ *  - Never overwrites a live accumulator (it is authoritative).
+ */
+export function seedAccumulatorFromRow(
+  sessionId: string,
+  createdAtIso: string,
+  billing: { actionCount?: number; modelCalls?: number },
+): void {
+  if (accumulators.has(sessionId)) return;
+  const actionCount = Math.max(0, Math.floor(billing.actionCount ?? 0));
+  const modelCalls = Math.max(0, Math.floor(billing.modelCalls ?? 0));
+  if (actionCount === 0 && modelCalls === 0) return;
+  const created = new Date(createdAtIso).getTime();
+  accumulators.set(sessionId, {
+    actionCount,
+    modelCalls,
+    billableFromMs:
+      actionCount > 0 && !Number.isNaN(created) ? created : null,
+  });
+}
+
 // ─── Pure rating math (unit-testable) ─────────────────────────────
 
 /**
@@ -506,46 +541,114 @@ export async function settleBrowserSession(
   // The accumulator is done either way — settle is terminal.
   accumulators.delete(session.id);
 
-  const base = {
-    bits,
+  return settleLedgerWrite({
+    sessionId: session.id,
+    userId: session.userId,
     billableMinutes: billableMins,
     modelCalls,
+    bits,
+  });
+}
+
+/**
+ * Phase 5 — settle from the persisted DB row when the live accumulator
+ * is gone (owning process died, or a different instance is closing the
+ * row). The row's metadata carries the forensic billing snapshot
+ * ({modelCalls, actionCount}) that executeBrowserAction persisted per
+ * action, so the meter survives process loss.
+ *
+ * Honesty rules (same as the live path):
+ *  - No recorded action → 0 BITS (P1-3 precedent: no provider output,
+ *    no debit). The snapshot only proves actions were ATTEMPTED, so
+ *    wall-clock minutes from creation are billed only when at least one
+ *    action was recorded.
+ *  - Same idempotency key `browser:settle:<sessionId>` — if the owning
+ *    process already settled, this is a replay (replayed: true), never
+ *    a double-charge.
+ *  - Billing-exempt owners are metered, never debited.
+ *
+ * If the live accumulator still exists (this process owns the session),
+ * it is authoritative — delegate to settleBrowserSession instead.
+ */
+export async function settleBrowserSessionFromRow(
+  session: Pick<BrowserSession, "id" | "userId" | "createdAt" | "metadata">,
+): Promise<SettleBrowserSessionResult> {
+  if (accumulators.has(session.id)) {
+    return settleBrowserSession(session);
+  }
+
+  const billing = (session.metadata?.billing ?? {}) as {
+    modelCalls?: number;
+    actionCount?: number;
+  };
+  const actionCount = Math.max(0, Math.floor(billing.actionCount ?? 0));
+  const modelCalls = Math.max(0, Math.floor(billing.modelCalls ?? 0));
+  const billableMins =
+    actionCount > 0 ? wallMinutesForSession(session.createdAt, Date.now()) : 0;
+  const bits = bitsForSession(billableMins, modelCalls);
+
+  return settleLedgerWrite({
+    sessionId: session.id,
+    userId: session.userId,
+    billableMinutes: billableMins,
+    modelCalls,
+    bits,
+  });
+}
+
+/**
+ * The single ledger write both settle paths share: one
+ * adjustWalletBalance call, idempotency key `browser:settle:<sessionId>`,
+ * 0 BITS → no write, exempt owners metered-but-never-debited, failures
+ * returned (never thrown).
+ */
+async function settleLedgerWrite(args: {
+  sessionId: string;
+  userId: string;
+  billableMinutes: number;
+  modelCalls: number;
+  bits: number;
+}): Promise<SettleBrowserSessionResult> {
+  const base = {
+    bits: args.bits,
+    billableMinutes: args.billableMinutes,
+    modelCalls: args.modelCalls,
     debited: false,
     replayed: false,
     exempt: false,
   };
 
   // Provider failure / never used → 0 BITS, no ledger write.
-  if (bits <= 0) return base;
+  if (args.bits <= 0) return base;
 
-  const exempt = isBillingExempt(session.userId);
+  const exempt = isBillingExempt(args.userId);
   if (exempt) {
     // Metered, never debited (video-route precedent for the owner).
     return { ...base, exempt: true };
   }
 
   try {
-    const idempotencyKey = `browser:settle:${session.id}`;
+    const idempotencyKey = `browser:settle:${args.sessionId}`;
     const adjustment = await adjustWalletBalance({
-      clerkId: session.userId,
-      amount: -bits,
+      clerkId: args.userId,
+      amount: -args.bits,
       type: "spend",
       reason:
-        `Agent browser session — ${billableMins} min × ${BROWSER_MINUTE_BITS} BITS` +
-        (modelCalls > 0
-          ? ` + ${modelCalls} model calls × ${BROWSER_MODEL_CALL_BITS} BITS`
+        `Agent browser session — ${args.billableMinutes} min × ${BROWSER_MINUTE_BITS} BITS` +
+        (args.modelCalls > 0
+          ? ` + ${args.modelCalls} model calls × ${BROWSER_MODEL_CALL_BITS} BITS`
           : ""),
       idempotencyKey,
       rating: buildChargeRating({
         capability: "browser",
         provider: "browserbase",
         model: "stagehand/gemini-2.5-flash",
-        providerCostMicros: providerCostMicrosFor(billableMins),
-        bitsCharged: bits,
+        providerCostMicros: providerCostMicrosFor(args.billableMinutes),
+        bitsCharged: args.bits,
         billingClass: "standard",
         lane: "generation",
       }),
-      usage: { computeMs: billableMins * 60_000 },
+      usage: { computeMs: args.billableMinutes * 60_000 },
     });
     return {
       ...base,
