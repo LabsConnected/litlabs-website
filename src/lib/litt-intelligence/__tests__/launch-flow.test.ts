@@ -189,6 +189,151 @@ describe("Launch Flow: approval pause runs preview", () => {
   });
 });
 
+// ─── Tests: approval pause before any mutation ────────────────────
+// A run that pauses on a gated tool before writing files (e.g.
+// image.generate on an empty static workspace) has nothing to serve.
+// Starting a preview there fails as preview_no_dev_command and masks the
+// pause behind a misleading "Launch failed" — the pause must be returned
+// directly. Regression coverage for the golden-acceptance failure where
+// the agent's first mutation was approval-gated.
+
+describe("Launch Flow: approval pause before any mutation", () => {
+  beforeEach(() => {
+    toolRegistry.clear();
+    registerInternalTools();
+  });
+
+  it("returns the pause without attempting a preview when no files exist yet", async () => {
+    const progressEvents: Array<{ type: string }> = [];
+    const progress = { emit: (e: { type: string }) => progressEvents.push(e) };
+    const runAgentLoop = vi.fn().mockResolvedValue(successAgentResult({
+      toolCalls: [{ toolId: "files.list", success: true, summary: "listed .", mutating: false }],
+      pendingApproval: {
+        toolId: "image.generate",
+        toolCallId: "tc-img",
+        inputs: {},
+        reason: "Mutation requires approval",
+        pausedMessages: [],
+      },
+    }));
+    const transport = createMockTransport();
+    const options = makeOptions({
+      requiresExecution: true,
+      runAgentLoop,
+      transport,
+      progress: progress as never,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(result.pendingApproval?.toolId).toBe("image.generate");
+    expect(result.finalText).toContain("approval");
+    expect(result.finalText).not.toContain("Launch failed");
+    expect(transport.startPreview).not.toHaveBeenCalled();
+    expect(progressEvents.some((e) => e.type === "preview_start")).toBe(false);
+    // The reprompt must not fire while a run is paused for approval.
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+  });
+
+  it("still attempts the preview when a pause lands after a mutation", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(successAgentResult({
+      toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
+      pendingApproval: {
+        toolId: "image.generate",
+        toolCallId: "tc-img",
+        inputs: {},
+        reason: "Mutation requires approval",
+        pausedMessages: [],
+      },
+    }));
+    const transport = createMockTransport();
+    const options = makeOptions({ requiresExecution: true, runAgentLoop, transport });
+
+    const result = await runLaunchFlow(options);
+
+    expect(transport.startPreview).toHaveBeenCalled();
+    expect(result.status).toBe("preview_ready");
+    expect(result.pendingApproval?.toolId).toBe("image.generate");
+  });
+});
+
+// ─── Tests: rejected preview start ────────────────────────────────
+// transport.startPreview() rejects when the terminal-server refuses the
+// start (500 preview_no_dev_command et al.). That rejection is a normal
+// "failed" outcome — it must flow through the runtime-repair loop rather
+// than escaping as a generic "Launch failed" that also hides a pending
+// approval.
+
+describe("Launch Flow: rejected preview start", () => {
+  beforeEach(() => {
+    toolRegistry.clear();
+    registerInternalTools();
+  });
+
+  it("routes a rejected preview start through the repair loop instead of crashing the launch", async () => {
+    const startPreview = vi.fn()
+      .mockRejectedValueOnce(new Error('Preview start failed (500): {"errorCode":"preview_no_dev_command"}'))
+      .mockResolvedValue({
+        workspaceId: "ws-test", status: "starting", port: 4101, framework: "static", command: "npx serve", startedAt: Date.now(),
+      });
+    const transport = createMockTransport({ startPreview });
+    let callCount = 0;
+    const runAgentLoop = vi.fn().mockImplementation(async (message: string) => {
+      callCount++;
+      if (callCount > 1) expect(message).toContain("preview server failed");
+      return successAgentResult();
+    });
+    const options = makeOptions({ transport, runAgentLoop, maxRuntimeRepairAttempts: 2 });
+
+    const result = await runLaunchFlow(options);
+
+    expect(result.status).toBe("preview_ready");
+    expect(result.runtimeRepairAttempts).toBe(1);
+    expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    expect(startPreview).toHaveBeenCalledTimes(2);
+  });
+
+  it("surfaces the pending approval — not a launch crash — when preview start rejects while paused", async () => {
+    const startPreview = vi.fn().mockRejectedValue(
+      new Error('Preview start failed (500): {"errorCode":"preview_dev_server_failed"}'),
+    );
+    const getPreviewStatus = vi.fn().mockResolvedValue({
+      status: "failed", port: null, framework: null, command: null, startedAt: null,
+      lastHealthCheck: null, error: "dev server crashed", errorCode: "preview_dev_server_failed", logs: [],
+    });
+    const transport = createMockTransport({ startPreview, getPreviewStatus });
+    // Pause after a mutation so the preview phase still runs; the repair
+    // pass returns a normal result but the re-start still rejects, so the
+    // repair budget exhausts and the pending approval must surface.
+    let callCount = 0;
+    const runAgentLoop = vi.fn().mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return successAgentResult({
+          toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
+          pendingApproval: {
+            toolId: "project.deploy",
+            toolCallId: "tc-deploy",
+            inputs: {},
+            reason: "Sensitive action — requires explicit approval",
+            pausedMessages: [],
+          },
+        });
+      }
+      return successAgentResult({
+        toolCalls: [{ toolId: "files.write", success: true, summary: "fixed", mutating: true }],
+      });
+    });
+    const options = makeOptions({ transport, runAgentLoop, maxRuntimeRepairAttempts: 1 });
+
+    const result = await runLaunchFlow(options);
+
+    expect(result.pendingApproval?.toolId).toBe("project.deploy");
+    expect(result.finalText).toContain("approval");
+    expect(result.finalText).not.toContain("Launch failed");
+  });
+});
+
 // ─── Tests: prompt → preview ──────────────────────────────────────
 
 describe("Launch Flow: prompt → preview", () => {

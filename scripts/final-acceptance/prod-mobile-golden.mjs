@@ -469,8 +469,15 @@ async function main() {
     const writeEvents = toolEvents.filter((e) =>
       e.success === true &&
       /^(files\.write|files\.mkdir|files\.rename|files\.delete|apply_patch)$/.test(String(e.toolId)));
-    step("files_written", writeEvents.length > 0 || (await page.evaluate(() => (window.__littFilesChanged || []).length)) > 0,
-      `${writeEvents.length} write-ish tool events, ${await page.evaluate(() => (window.__littFilesChanged || []).length)} files-changed events`);
+    // A run paused on an approval gate has legitimately not mutated yet —
+    // the mutation lands in the resumed run driven below, and the durable
+    // proof stays file_content_exact. Deferral is not failure.
+    const streamApprovalPause = events.some((e) => e.type === "pending_approval");
+    const filesChangedCount = await page.evaluate(() => (window.__littFilesChanged || []).length);
+    step("files_written", writeEvents.length > 0 || filesChangedCount > 0 || streamApprovalPause,
+      streamApprovalPause && writeEvents.length === 0 && filesChangedCount === 0
+        ? "no writes in initial stream — run paused on an approval gate; mutation proof deferred to file_content_exact"
+        : `${writeEvents.length} write-ish tool events, ${filesChangedCount} files-changed events`);
     verdict.filesChangedEvents = await page.evaluate(() => window.__littFilesChanged || []);
 
     const responseShapeEvents = events.filter((e) => e.type === "model_response");
@@ -480,33 +487,43 @@ async function main() {
         ? responseShapeEvents.map((e) => `${e.provider}/${e.model} toolCalls=${e.toolCalls.length}`).join("; ")
         : "no redacted provider response-shape event was streamed");
 
-    // Resolve the real deploy approval as soon as the paused-run event is
-    // available. Preview is independent from deployment, but waiting through
-    // its recovery budget before approving can consume the five-minute server
-    // approval TTL and turn a valid pause into a misleading expiry failure.
+    // Resolve the first paused run as soon as the event is available —
+    // whichever gated tool the run stopped on. Preview is independent from
+    // the approval chain, but waiting through its recovery budget before
+    // approving can consume the server approval TTL and turn a valid pause
+    // into a misleading expiry failure.
     const approvalEvents = events.filter((e) => e.type === "pending_approval");
-    const deployApproval = approvalEvents.find((e) => e.toolId === "project.deploy");
+    const firstPause = approvalEvents[0] ?? null;
     let deployResult = events.find((e) => e.type === "deploy_result");
     const deployVerify = events.find((e) => e.type === "deploy_verify");
     let productionUrl = deployResult?.productionUrl || deployVerify?.url || null;
     const convId = (messagesApiSeen?.url ?? "").match(/conversations\/([^/]+)\/messages/)?.[1];
-    let deployApprovalResponse = null;
-    let deployApprovalBody = null;
-    if (DEPLOY_REQUESTED && deployApproval?.pausedRunId && convId) {
-      deployApprovalResponse = await page.request.post(
-        `${BASE}/api/studio/conversations/${convId}/approvals/${deployApproval.pausedRunId}`,
+    let firstApprovalResponse = null;
+    let firstApprovalBody = null;
+    if (DEPLOY_REQUESTED && firstPause?.pausedRunId && convId) {
+      firstApprovalResponse = await page.request.post(
+        `${BASE}/api/studio/conversations/${convId}/approvals/${firstPause.pausedRunId}`,
         { data: { decision: "approved" }, timeout: 30_000 },
       ).catch(() => null);
-      deployApprovalBody = deployApprovalResponse
-        ? await deployApprovalResponse.json().catch(() => null)
+      firstApprovalBody = firstApprovalResponse
+        ? await firstApprovalResponse.json().catch(() => null)
         : null;
-      writeFileSync(path.join(ARTIFACT_DIR, "deploy-approval-response.json"), JSON.stringify(deployApprovalBody, null, 2));
+      writeFileSync(path.join(ARTIFACT_DIR, "first-approval-response.json"), JSON.stringify(firstApprovalBody, null, 2));
     }
 
     const previewResult = events.find((e) => e.type === "preview_result");
     const previewStart = events.find((e) => e.type === "preview_start");
     const previewUrl = previewResult?.previewUrl || null;
-    step("preview_event", !!(previewStart || previewResult), previewResult ? `success=${previewResult.success}` : "no preview_result event");
+    // A run that paused before the preview phase emits no preview events —
+    // preview arrives later through the approval-resume boundary and is
+    // proven by the iframe/status checks below, not by stream events.
+    const pausedBeforePreview = !previewStart && !previewResult && !!firstPause;
+    step("preview_event", !!(previewStart || previewResult) || pausedBeforePreview,
+      previewResult
+        ? `success=${previewResult.success}`
+        : pausedBeforePreview
+          ? `no stream preview event — run paused on ${firstPause?.toolId} before the preview phase; preview arrives via approval resume`
+          : "no preview_result event");
 
     const doneEvt = events.find((e) => e.type === "done");
     const finalText = events.filter((e) => e.type === "text").map((e) => e.text).join("");
@@ -581,47 +598,50 @@ async function main() {
     // ── Step 7: deploy — approval gate, resumed execution, live URL ──
     // project.deploy is a sensitive action: the run MUST pause for explicit
     // approval even in AUTO mode. A deployment that executed without a
-    // pending_approval pause would mean the gate was bypassed. The golden
-    // then approves through the real server-authoritative endpoint and reads
-    // the resumed run's toolCalls for the deployment outcome.
+    // pending_approval pause would mean the gate was bypassed.
+    //
+    // The run may pause on ANY gated tool before it reaches project.deploy
+    // (e.g. image.generate fired before the first file write). Each resumed
+    // run can pause again — the server persists the follow-up gate as
+    // runResult.pendingApproval.pausedRunId — so the harness drives the
+    // whole chain exactly like a user clicking Approve on each card, then
+    // reads the deploy hop's toolCalls for the deployment outcome.
     if (DEPLOY_REQUESTED) {
-      step("deploy_approval_gate", !!deployApproval, deployApproval
-        ? `pausedRunId=${deployApproval.pausedRunId ?? "none"} reason=${String(deployApproval.reason ?? "").slice(0, 120)}`
-        : approvalEvents.length > 0
-          ? `paused on ${approvalEvents.map((e) => e.toolId).join(",")} — not project.deploy`
-          : deployResult ? "deploy executed with NO approval pause — gate bypassed" : "no pending_approval event in stream");
+      const chainDeadline = Date.now() + 15 * 60 * 1000; // covers every hop
+      const pauseChain = approvalEvents.map((e) => e.toolId);
+      let currentPause = firstPause;
+      let pendingResponse = firstApprovalResponse;
+      let pendingBody = firstApprovalBody;
+      let deployApprovalMeta = null;
+      let chainError = null;
+      let hops = 0;
 
-      if (deployApproval?.pausedRunId) {
+      while (currentPause?.pausedRunId && convId && hops < 8 && Date.now() < chainDeadline) {
+        hops++;
         // Async approval contract: POST returns 202 immediately, then poll
         // GET for the resumed execution result. This avoids the Cloudflare
         // 524 timeout that occurred when the approval endpoint synchronously
         // awaited the full resumed agent loop (deploy + model continuation).
-        const reusedEarlyApproval = deployApprovalResponse !== null;
-        const approval = deployApprovalResponse ?? (convId
-          ? await page.request.post(
-              `${BASE}/api/studio/conversations/${convId}/approvals/${deployApproval.pausedRunId}`,
-              { data: { decision: "approved" }, timeout: 30_000 },
-            ).catch(() => null)
-          : null);
-        const approvalBody = deployApprovalBody ?? (approval ? await approval.json().catch(() => null) : null);
-        deployApprovalResponse = approval;
-        deployApprovalBody = approvalBody;
-        if (!reusedEarlyApproval) {
+        const approval = pendingResponse ?? await page.request.post(
+          `${BASE}/api/studio/conversations/${convId}/approvals/${currentPause.pausedRunId}`,
+          { data: { decision: "approved" }, timeout: 30_000 },
+        ).catch(() => null);
+        const approvalBody = pendingBody ?? (approval ? await approval.json().catch(() => null) : null);
+        pendingResponse = null;
+        pendingBody = null;
+        if (currentPause.toolId === "project.deploy") {
+          deployApprovalMeta = { status: approval?.status() ?? null, body: approvalBody };
           writeFileSync(path.join(ARTIFACT_DIR, "deploy-approval-response.json"), JSON.stringify(approvalBody, null, 2));
         }
-        step("deploy_approved", (approval?.status() === 202 || approval?.status() === 200) && approvalBody?.resolved === true,
-          `HTTP ${approval?.status() ?? "no-request"} resolved=${approvalBody?.resolved} status=${approvalBody?.status ?? "none"}`);
 
-        // Poll GET for the resumed execution result
         let runResult = approvalBody?.runResult ?? null;
         let runError = approvalBody?.runError ?? null;
-        const runStatus = approvalBody?.runStatus ?? approvalBody?.status ?? "processing";
-        if (!runResult && runStatus === "processing" && convId) {
-          const pollDeadline = Date.now() + 15 * 60 * 1000; // 15 min budget (deploy + model continuation can take 10+ min)
-          while (Date.now() < pollDeadline) {
+        const seedStatus = approvalBody?.runStatus ?? approvalBody?.status ?? "processing";
+        if (!runResult && !runError && seedStatus === "processing") {
+          while (Date.now() < chainDeadline) {
             await page.waitForTimeout(3000);
             const statusResp = await page.request.get(
-              `${BASE}/api/studio/conversations/${convId}/approvals/${deployApproval.pausedRunId}`,
+              `${BASE}/api/studio/conversations/${convId}/approvals/${currentPause.pausedRunId}`,
               { timeout: 15_000 },
             ).catch(() => null);
             if (!statusResp || !statusResp.ok()) continue;
@@ -639,8 +659,7 @@ async function main() {
           }
         }
 
-        const resumedCalls = runResult?.toolCalls ?? [];
-        const deployCall = resumedCalls.find((c) => c.toolId === "project.deploy");
+        const deployCall = (runResult?.toolCalls ?? []).find((c) => c.toolId === "project.deploy");
         if (deployCall) {
           // summarizeToolResult JSON-encodes object results; publicUrl may be
           // truncated at 200 chars, so fall back to constructing the URL from
@@ -657,12 +676,35 @@ async function main() {
             error: String(summary).slice(0, 200),
           };
         }
-        if (runResult?.pendingApproval) {
-          verdict.notes.push(`resumed run paused again on ${runResult.pendingApproval.toolId}; a second-stage pause is not resumable via this endpoint`);
+
+        const nested = runResult?.pendingApproval ?? null;
+        if (nested?.pausedRunId) {
+          currentPause = { toolId: nested.toolId, pausedRunId: nested.pausedRunId, reason: nested.reason };
+          pauseChain.push(nested.toolId);
+          continue;
         }
-        if (runError && !deployResult) {
-          deployResult = { success: false, productionUrl: null, error: runError };
+        if (nested && !nested.pausedRunId) {
+          verdict.notes.push(`resumed run paused again on ${nested.toolId} but no pausedRunId was persisted — the gate is unresumable`);
         }
+        if (runError) chainError = runError;
+        break;
+      }
+
+      const deployGateSeen = pauseChain.includes("project.deploy");
+      step("deploy_approval_gate", deployGateSeen, deployGateSeen
+        ? `approval chain: ${pauseChain.join(" → ")}`
+        : pauseChain.length > 0
+          ? `paused on ${pauseChain.join(",")} — never reached project.deploy`
+          : deployResult ? "deploy executed with NO approval pause — gate bypassed" : "no pending_approval event in stream");
+
+      if (deployApprovalMeta) {
+        step("deploy_approved",
+          (deployApprovalMeta.status === 202 || deployApprovalMeta.status === 200) && deployApprovalMeta.body?.resolved === true,
+          `HTTP ${deployApprovalMeta.status ?? "no-request"} resolved=${deployApprovalMeta.body?.resolved} status=${deployApprovalMeta.body?.status ?? "none"}`);
+      }
+
+      if (!deployResult && chainError) {
+        deployResult = { success: false, productionUrl: null, error: chainError };
       }
 
       if (deployResult) {
