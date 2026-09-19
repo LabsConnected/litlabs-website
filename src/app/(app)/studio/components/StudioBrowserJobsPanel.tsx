@@ -6,7 +6,9 @@
  * Shows:
  *   - List of recent browser jobs with status badges and progress bars
  *   - Selected job detail with step-by-step progress
- *   - Live Browserbase view (iframe when available)
+ *   - Live browser view with a deterministic availability rule (Phase 6:
+ *     owner-checked /live-view endpoint; honest labeled-snapshot
+ *     fallback, never a broken iframe)
  *   - Live activity log from SSE event stream (/api/browser/jobs/:id/events)
  *   - Action controls: Cancel (queued/awaiting), Approve (awaiting_approval)
  *   - Error and result display
@@ -24,7 +26,6 @@ import {
   Clock,
   ShieldCheck,
   AlertTriangle,
-  ExternalLink,
   Play,
   Square,
   RefreshCw,
@@ -38,6 +39,7 @@ import {
 } from "lucide-react";
 import { useBrowserJobs, type BrowserJob, type BrowserJobStep } from "../hooks/useBrowserJobs";
 import { useBrowserJobEvents, type AgentJobEvent } from "../hooks/useBrowserJobEvents";
+import BrowserJobLiveView from "./BrowserJobLiveView";
 
 const ACTIVE_STATUSES = new Set(["queued", "running", "awaiting_approval", "approved"]);
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
@@ -249,9 +251,17 @@ function EventItem({ event }: { event: AgentJobEvent }) {
 }
 
 // ─── Activity Log ─────────────────────────────────────────────
-
-function ActivityLog({ jobId }: { jobId: string }) {
-  const { events, connected, error } = useBrowserJobEvents(jobId);
+// Presentational: the SSE subscription lives in JobDetail so the live
+// view and the log share one event stream (one EventSource per job).
+function ActivityLog({
+  events,
+  connected,
+  error,
+}: {
+  events: AgentJobEvent[];
+  connected: boolean;
+  error: string | null;
+}) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-scroll to bottom when new events arrive
@@ -318,6 +328,9 @@ function JobDetail({
   const risk = riskBadge(job.riskLevel);
   const canCancel = job.status === "queued" || job.status === "awaiting_approval";
   const canApprove = job.status === "awaiting_approval";
+  // One SSE subscription per selected job, shared by the live view
+  // (snapshot timeline) and the activity log.
+  const { events, connected, error: eventsError } = useBrowserJobEvents(job.jobId);
 
   return (
     <div className="flex h-full flex-col">
@@ -365,35 +378,10 @@ function JobDetail({
         </div>
       )}
 
-      {/* Live View */}
-      {job.liveViewUrl && (
-        <div className="shrink-0 px-3 pt-2">
-          <div className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
-            <Globe size={10} />
-            Live Browser View
-          </div>
-          <div className="mt-1 overflow-hidden rounded-lg border" style={{ borderColor: "var(--studio-border)" }}>
-            <iframe
-              src={job.liveViewUrl}
-              className="w-full"
-              style={{ height: 200, border: "none", backgroundColor: "#0a0b10" }}
-              title="Browserbase live view"
-              allow="clipboard-read; clipboard-write"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-            />
-          </div>
-          <a
-            href={job.liveViewUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-1 inline-flex items-center gap-1 text-[9px] font-bold hover:underline"
-            style={{ color: "var(--litt-primary)" }}
-          >
-            <ExternalLink size={9} />
-            Open in new tab
-          </a>
-        </div>
-      )}
+      {/* Live View — Phase 6: deterministic availability rule backed by
+          the owner-checked /live-view endpoint; honest snapshot fallback,
+          never a broken iframe. */}
+      <BrowserJobLiveView job={job} events={events} />
 
       {/* Steps */}
       {progress.steps.length > 0 && (
@@ -409,8 +397,8 @@ function JobDetail({
         </div>
       )}
 
-      {/* Live Activity Log (SSE) */}
-      <ActivityLog jobId={job.jobId} />
+      {/* Live Activity Log (SSE) — the step stream backing the fallback */}
+      <ActivityLog events={events} connected={connected} error={eventsError} />
 
       {/* Error */}
       {job.error && job.status === "failed" && (

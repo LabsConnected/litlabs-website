@@ -175,9 +175,21 @@ export function useBrowserSessionStatus(conversationId?: string) {
         );
         if (!res.ok) return;
         const json = await res.json();
-        const url = (json?.session as Record<string, unknown> | undefined)?.liveViewUrl;
+        const sess = (json?.session ?? {}) as Record<string, unknown>;
+        const meta = (sess.metadata ?? {}) as Record<string, unknown>;
+        // Phase 6 — prefer the embeddable debugger URL (navbar hidden)
+        // for the human's drive-it-yourself tab; fall back to the
+        // dashboard session page. Both are owner-scoped server-side.
+        const embed = meta.liveEmbedUrl;
+        const url = sess.liveViewUrl;
+        const picked =
+          typeof embed === "string" && embed
+            ? embed
+            : typeof url === "string" && url
+              ? url
+              : null;
         if (!cancelled && mountedRef.current) {
-          setLiveViewUrl(typeof url === "string" && url ? url : null);
+          setLiveViewUrl(picked);
         }
       } catch {
         // Non-fatal: the control buttons still work without the live view.

@@ -337,10 +337,15 @@ export async function inspectGhlWorkflow(
       // Not authenticated — return needs_login status with live view URL
       progress = advanceProgress(progress, 2, "completed", "Needs login");
       await updateJobProgress(jobId, progress);
-      await emitJobEvent({ jobId, type: "observation", step: 2, message: "Not authenticated — GHL login required", metadata: { needsLogin: true, liveViewUrl: session.liveViewUrl } });
+
+      const screenshot = await takeScreenshot(session.id, userId);
+      // Phase 6 — attach the snapshot to the event stream so the
+      // Studio snapshot timeline has a labeled, timestamped entry.
+      // The liveViewUrl in metadata is owner-scoped (the SSE stream
+      // only serves the job owner).
+      await emitJobEvent({ jobId, type: "observation", step: 2, message: "Not authenticated — GHL login required", metadata: { needsLogin: true, liveViewUrl: session.liveViewUrl, screenshotUrl: screenshot ?? undefined } });
       await emitJobEvent({ jobId, type: "approval.required", message: "Manual login required via live view", metadata: { liveViewUrl: session.liveViewUrl } });
 
-      const screenshot = await takeScreenshot(session.id);
       return {
         workflow: workflowName,
         status: "needs_login",
@@ -501,9 +506,13 @@ export async function inspectGhlWorkflow(
     await emitJobEvent({ jobId, type: "step.started", step: 9, message: "Returning structured result" });
 
     // Step 10: Return structured result
-    const screenshot = await takeScreenshot(session.id);
+    const screenshot = await takeScreenshot(session.id, userId);
     progress = advanceProgress(progress, 9, "completed");
     await updateJobProgress(jobId, progress);
+    // Phase 6 — final snapshot into the event stream (labeled,
+    // timestamped) so the Studio snapshot timeline shows it even after
+    // the session closes.
+    await emitJobEvent({ jobId, type: "observation", step: 9, message: "Final state snapshot", metadata: { screenshotUrl: screenshot ?? undefined } });
 
     return {
       workflow: workflowName,
