@@ -32,6 +32,8 @@ import {
   recordBrowserAction,
   billingMetadata,
   settleBrowserSession,
+  settleBrowserSessionFromRow,
+  seedAccumulatorFromRow,
 } from "./browser-billing";
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -334,6 +336,11 @@ export async function startSession(
 /**
  * Get the active Stagehand instance for a session.
  * Returns null if the session is not in this process's memory.
+ *
+ * Phase 5: this is the FAST path only. Callers that can tolerate an
+ * async hop should use getOrReattachStagehand() instead, which
+ * transparently re-attaches to the provider session from THIS process
+ * when the in-memory registry misses (multi-instance safety).
  */
 export function getStagehand(sessionId: string): Stagehand | null {
   const active = activeSessions.get(sessionId);
@@ -355,6 +362,251 @@ export async function getSession(
     return active.session;
   }
   return dbGetSession(sessionId, userId);
+}
+
+// ─── Phase 5 — Multi-instance-safe sessions (reconnect) ──────────
+// The in-memory registry only knows sessions THIS process started.
+// Railway runs multiple web-service instances and redeploys wipe the
+// registry, so a session whose DB row is still active-like may have no
+// live Stagehand here. getOrReattachStagehand() closes that gap: on a
+// registry miss it re-attaches to the stored provider session
+// (browserbaseSessionId) from the current instance via
+// `new Stagehand({ env: "BROWSERBASE", browserbaseSessionID })` +
+// init() — the documented @browserbasehq/stagehand@3.7.1 resume path
+// (lib/v3/launch/browserbase.js: resumeSessionId → bb.sessions.retrieve
+// → connectUrl → CDP; a missing/expired provider session rejects).
+// The caller cannot tell a reconnect happened except via the
+// `browser.reconnect` event in the browser_actions audit log.
+//
+// Concurrency (V1 choice, documented per the plan):
+//  - In-process: an in-flight re-attach map dedupes concurrent callers
+//    for the same session — one Stagehand.init(), single winner.
+//  - Cross-instance: the DB row is the coordination point. Re-attach
+//    only starts when the row is still active-like, and after init() a
+//    second row read verifies the session wasn't closed mid-flight (a
+//    lost race drops OUR connection and reports closed — never drives a
+//    session the DB says is done). Two instances CAN end up with
+//    separate CDP links to the same provider browser; the provider
+//    tolerates that, and no DB state can corrupt because every write is
+//    status-gated (dbCloseSessionIfActive) or idempotent (the
+//    `browser:settle:<sessionId>` key). Full single-winner across
+//    instances would need a DB claim column — deferred past V1.
+
+/** Statuses under which a session may be re-attached (not terminal). */
+const ACTIVE_LIKE_STATUSES: ReadonlySet<SessionStatus> = new Set([
+  "active",
+  "paused",
+  "human_control",
+  "agent_control",
+]);
+
+/**
+ * Plain-English outcome for a provider-side expiry. Shown to the agent
+ * so it can start a fresh session — never a silent stall, never a
+ * faked success.
+ */
+export const SESSION_EXPIRED_PLAIN_MESSAGE =
+  "The browser session expired on the provider side, so it can't be resumed. " +
+  "Start a new session to continue — the actions already taken are still in the audit log.";
+
+export type ReattachOutcome = "attached" | "not_found" | "closed" | "expired";
+
+export interface ReattachResult {
+  stagehand: Stagehand | null;
+  outcome: ReattachOutcome;
+  /**
+   * Set when outcome === "expired": the plain-English message for the
+   * agent layer ("session expired on the provider — starting fresh").
+   */
+  message?: string;
+}
+
+/** Re-attach attempts currently in flight, keyed by session ID. */
+const reattachInFlight = new Map<string, Promise<ReattachResult>>();
+
+function metadataString(
+  metadata: Record<string, unknown> | undefined,
+  key: string,
+  fallback: string,
+): string {
+  const v = metadata?.[key];
+  return typeof v === "string" && v.length > 0 ? v : fallback;
+}
+
+/**
+ * Build the Stagehand config for a re-attach. Mirrors startSession's
+ * config (same logger/disablePino/browserSettings) but passes
+ * browserbaseSessionID so Stagehand RESUMES the stored provider session
+ * instead of creating a new one. Model/proxy preferences come from the
+ * session's own metadata so the resumed browser behaves identically.
+ */
+function buildReattachConfig(session: BrowserSession): {
+  env: "BROWSERBASE";
+  browserbaseSessionID: string;
+  model: string;
+  browserbaseSessionCreateParams: {
+    proxies: boolean;
+    browserSettings: { blockAds: boolean };
+  };
+  disablePino: boolean;
+  logger: () => void;
+} {
+  return {
+    env: "BROWSERBASE",
+    browserbaseSessionID: session.browserbaseSessionId as string,
+    model: metadataString(session.metadata, "model", "google/gemini-2.5-flash"),
+    browserbaseSessionCreateParams: {
+      proxies: session.metadata?.useProxies === true,
+      browserSettings: { blockAds: true },
+    },
+    // Disable pino-pretty transport — it uses worker threads that fail
+    // in Vercel serverless environments. Use a no-op external logger instead.
+    disablePino: true,
+    logger: () => {},
+  };
+}
+
+function isIdleExpiredMs(updatedAtIso: string): boolean {
+  const t = new Date(updatedAtIso).getTime();
+  if (Number.isNaN(t)) return true;
+  return Date.now() - t > SESSION_IDLE_TIMEOUT_MS;
+}
+
+/**
+ * Get a drivable Stagehand for a session, re-attaching from this
+ * process when the in-memory registry misses.
+ *
+ * Transparent on success (the only trace is the `browser.reconnect`
+ * audit event). Honest on failure:
+ *  - "not_found": no such session for this user (or no provider ID).
+ *  - "closed": the DB row is in a terminal status.
+ *  - "expired": the provider-side session is gone (or the row is past
+ *    the idle TTL) — the row is marked closed and settled, and the
+ *    agent gets the plain-English fresh-start message.
+ */
+export async function getOrReattachStagehand(
+  sessionId: string,
+  userId: string,
+): Promise<ReattachResult> {
+  // Fast path: live in this process.
+  const active = activeSessions.get(sessionId);
+  if (active) {
+    active.lastActivity = Date.now();
+    return { stagehand: active.stagehand, outcome: "attached" };
+  }
+
+  // Concurrency: share the in-flight attempt — one Stagehand.init(),
+  // every concurrent caller gets the same result.
+  const inFlight = reattachInFlight.get(sessionId);
+  if (inFlight) return inFlight;
+
+  const attempt = doReattachStagehand(sessionId, userId).finally(() => {
+    reattachInFlight.delete(sessionId);
+  });
+  reattachInFlight.set(sessionId, attempt);
+  return attempt;
+}
+
+async function doReattachStagehand(
+  sessionId: string,
+  userId: string,
+): Promise<ReattachResult> {
+  // The DB row is the coordination point: only re-attach while it is
+  // still active-like, and only for the owning user (dbGetSession
+  // scopes by user_id).
+  const session = await dbGetSession(sessionId, userId).catch(() => null);
+  if (!session) return { stagehand: null, outcome: "not_found" };
+  if (!ACTIVE_LIKE_STATUSES.has(session.status)) {
+    return { stagehand: null, outcome: "closed" };
+  }
+  if (!session.browserbaseSessionId) {
+    return { stagehand: null, outcome: "not_found" };
+  }
+
+  // Past the idle TTL the session is honestly expired — the lifecycle
+  // contract says TTL closes it. Close the row (compare-and-set, settle
+  // from the persisted row) and hand the agent the fresh-start message
+  // instead of resurrecting a dead browser.
+  if (isIdleExpiredMs(session.updatedAt)) {
+    await closeExpiredSessionRow(session).catch(() => {});
+    return {
+      stagehand: null,
+      outcome: "expired",
+      message: SESSION_EXPIRED_PLAIN_MESSAGE,
+    };
+  }
+
+  let stagehand: Stagehand;
+  try {
+    // NOTE: construction is inside the try — any throw during
+    // construction or init() lands on the honest expiry path below.
+    stagehand = new Stagehand(buildReattachConfig(session));
+    await stagehand.init();
+  } catch {
+    // Provider-side expiry (BrowserbaseSessionNotFoundError, a missing
+    // connectUrl, or a network failure during resume). Do NOT fake it:
+    // mark the row closed/error, settle from the persisted row, and
+    // surface the clean fresh-start outcome.
+    await closeExpiredSessionRow(session).catch(() => {});
+    return {
+      stagehand: null,
+      outcome: "expired",
+      message: SESSION_EXPIRED_PLAIN_MESSAGE,
+    };
+  }
+
+  // Post-init race check: if another instance closed the row while we
+  // were connecting, drop OUR connection and report closed — never
+  // drive a session the DB says is done.
+  const fresh = await dbGetSession(sessionId, userId).catch(() => null);
+  if (!fresh || !ACTIVE_LIKE_STATUSES.has(fresh.status)) {
+    await stagehand.close().catch(() => {});
+    return { stagehand: null, outcome: "closed" };
+  }
+
+  // In-process re-check (defensive; the in-flight map normally makes
+  // this unreachable): prefer the already-registered instance.
+  const existing = activeSessions.get(sessionId);
+  if (existing) {
+    await stagehand.close().catch(() => {});
+    existing.lastActivity = Date.now();
+    return { stagehand: existing.stagehand, outcome: "attached" };
+  }
+
+  activeSessions.set(sessionId, {
+    stagehand,
+    session: fresh,
+    lastActivity: Date.now(),
+  });
+
+  // Phase 5: seed this process's meter from the row's forensic billing
+  // snapshot — without this the re-attach would reset the accumulator
+  // to zero and the next action's metadata persist would overwrite the
+  // dead owner's usage. The live burn chip and the final settle now
+  // agree with what the sweeper would have settled.
+  seedAccumulatorFromRow(
+    sessionId,
+    fresh.createdAt,
+    (fresh.metadata?.billing ?? {}) as {
+      actionCount?: number;
+      modelCalls?: number;
+    },
+  );
+
+  // Audit: the caller sees a working browser; the audit log sees the
+  // truth — this action ran after a cross-process reconnect.
+  await dbInsertAction({
+    sessionId,
+    userId,
+    actor: "agent",
+    action: "browser.reconnect",
+    inputs: { browserbaseSessionId: session.browserbaseSessionId },
+    success: true,
+    result: "Re-attached to the provider browser session from a new process",
+    durationMs: 0,
+  }).catch(() => {});
+
+  return { stagehand, outcome: "attached" };
 }
 
 /**
@@ -456,7 +708,14 @@ export async function closeSession(
 
   const session = inMemorySession ?? (await dbGetSession(sessionId, userId));
   if (session) {
-    await settleBrowserSession(session).catch(() => {});
+    // Phase 5: settle from the row when the live accumulator is gone
+    // (this process never owned the session — the owning instance died
+    // or is a different replica). The row carries the forensic billing
+    // snapshot; the `browser:settle:<sessionId>` idempotency key makes a
+    // double-settle a replay, never a double-charge.
+    const row =
+      (await dbGetSession(sessionId, userId).catch(() => null)) ?? session;
+    await settleBrowserSessionFromRow(row).catch(() => {});
   }
 }
 
@@ -540,14 +799,28 @@ export async function executeBrowserAction(
     };
   }
 
-  const stagehand = getStagehand(sessionId);
-  if (!stagehand) {
+  // Phase 5 — multi-instance-safe sessions: on an in-memory miss,
+  // transparently re-attach to the stored provider session from THIS
+  // process. A reconnect is invisible to the caller except for the
+  // `browser.reconnect` audit event; a provider-side expiry returns the
+  // plain-English fresh-start message so the agent starts a new session
+  // instead of stalling.
+  const attach = await getOrReattachStagehand(sessionId, userId);
+  if (!attach.stagehand) {
+    if (attach.outcome === "expired") {
+      return {
+        success: false,
+        error: attach.message ?? SESSION_EXPIRED_PLAIN_MESSAGE,
+        durationMs: Date.now() - start,
+      };
+    }
     return {
       success: false,
       error: "Browser session is not active in this process. Start a new session.",
       durationMs: 0,
     };
   }
+  const stagehand = attach.stagehand;
 
   let result: BrowserActionResult;
   try {
@@ -617,6 +890,10 @@ export async function takeScreenshot(sessionId: string): Promise<string | null> 
 }
 
 // ─── Cleanup ─────────────────────────────────────────────────────
+// Phase 5: closeIdleSessions handles sessions live in THIS process.
+// sweepIdleBrowserSessions() (below) additionally closes DB rows no
+// local process owns — the multi-instance case — and is the body of the
+// scheduled sweeper route (POST /api/litt/browser/sessions/sweep).
 
 /**
  * Close idle sessions that have exceeded the timeout.
@@ -666,6 +943,137 @@ export async function closeAllUserSessions(userId: string): Promise<number> {
   }
 
   return closed;
+}
+
+// ─── Phase 5 — scheduled sweeper (multi-instance) ─────────────────
+
+/**
+ * Compare-and-set close of a DB row: marks the session closed ONLY if
+ * it is still in an active-like status. Returns true when THIS caller
+ * won the race (exactly one closer wins); losers get false and must
+ * not write further state for the session. The in-memory mirror is
+ * untouched — callers of this helper own no live Stagehand (that's why
+ * the row is being closed from the DB side).
+ */
+async function dbCloseSessionIfActive(sessionId: string): Promise<boolean> {
+  if (!supabaseAdmin) return false;
+  const now = new Date().toISOString();
+  const { data, error } = await supabaseAdmin
+    .from("browser_sessions")
+    .update({ status: "closed", closed_at: now, updated_at: now })
+    .eq("id", sessionId)
+    .in("status", ["active", "paused", "human_control", "agent_control"])
+    .select("id");
+  if (error) return false;
+  return Array.isArray(data) && data.length > 0;
+}
+
+/**
+ * DB rows in an active-like status whose last activity is past the
+ * idle TTL — sessions no local process will ever drive again (the
+ * owning instance is gone or never heartbeats here). Bounded to 100
+ * per sweep so a backlog can't wedge the job.
+ */
+async function dbGetIdleActiveSessions(): Promise<BrowserSession[]> {
+  if (!supabaseAdmin) return [];
+  const cutoff = new Date(Date.now() - SESSION_IDLE_TIMEOUT_MS).toISOString();
+  const { data, error } = await supabaseAdmin
+    .from("browser_sessions")
+    .select("*")
+    .in("status", ["active", "paused", "human_control", "agent_control"])
+    .lt("updated_at", cutoff)
+    .order("updated_at", { ascending: true })
+    .limit(100);
+  if (error || !data) return [];
+  return (data as Record<string, unknown>[]).map(rowToSession);
+}
+
+/**
+ * Close a session whose row is stale (idle TTL passed or the provider
+ * session is gone) from a process that owns no live Stagehand for it.
+ *
+ * 1. Conditional DB close (compare-and-set — one winner).
+ * 2. Best-effort provider cleanup: re-attach + close the Browserbase
+ *    session so nothing leaks on the vendor side. If the provider
+ *    session is already gone, that IS the goal — skip quietly.
+ * 3. Settle BITS from the persisted row snapshot (the live accumulator
+ *    died with the owning process); the `browser:settle:<sessionId>`
+ *    idempotency key makes a double-settle a replay, never a
+ *    double-charge.
+ *
+ * Returns true when this caller closed the row.
+ */
+async function closeExpiredSessionRow(
+  session: BrowserSession,
+): Promise<{ closed: boolean; bits: number }> {
+  const won = await dbCloseSessionIfActive(session.id);
+  if (!won) return { closed: false, bits: 0 };
+
+  if (session.browserbaseSessionId && hasApiKey()) {
+    try {
+      const cleanup = new Stagehand({
+        env: "BROWSERBASE",
+        browserbaseSessionID: session.browserbaseSessionId,
+        disablePino: true,
+        logger: () => {},
+      });
+      await cleanup.init();
+      await cleanup.close().catch(() => {});
+    } catch {
+      // Provider session already gone — nothing to clean up.
+    }
+  }
+
+  const settled = await settleBrowserSessionFromRow(session).catch(() => null);
+  return { closed: true, bits: settled && !settled.replayed ? settled.bits : 0 };
+}
+
+export interface SweepIdleResult {
+  /** In-memory sessions closed on this instance (accumulator settle). */
+  localClosed: number;
+  /** DB-side rows closed (no local process owned them). */
+  dbClosed: number;
+  /** BITS newly settled by the DB-side closes (0 on idempotent replays). */
+  settledBits: number;
+}
+
+/**
+ * Phase 5 scheduled sweeper — the body of
+ * POST /api/litt/browser/sessions/sweep (external scheduler +
+ * CRON_SECRET; see that route). Closes every idle-expired session and
+ * settles its BITS so nothing leaks:
+ *
+ *  - in-memory idle sessions on this instance (existing
+ *    closeIdleSessions, accumulator-based settle);
+ *  - DB rows in an active-like status past the idle TTL that NO local
+ *    process owns (the owning instance died or is a different Railway
+ *    replica): conditional close + best-effort provider cleanup +
+ *    row-snapshot settle.
+ *
+ * Idempotent and safe to run often: conditional closes elect a single
+ * winner and settle carries the session-scoped idempotency key.
+ */
+export async function sweepIdleBrowserSessions(): Promise<SweepIdleResult> {
+  const localClosed = await closeIdleSessions().catch(() => 0);
+
+  const rows = await dbGetIdleActiveSessions().catch(() => []);
+  let dbClosed = 0;
+  let settledBits = 0;
+  for (const row of rows) {
+    // A local Stagehand may have been registered since the query ran —
+    // this instance's closeIdleSessions owns that case.
+    if (activeSessions.has(row.id)) continue;
+    const { closed, bits } = await closeExpiredSessionRow(row).catch(() => ({
+      closed: false,
+      bits: 0,
+    }));
+    if (closed) {
+      dbClosed++;
+      settledBits += bits;
+    }
+  }
+
+  return { localClosed, dbClosed, settledBits };
 }
 
 // ─── Live status (Phase 2: backs the Studio status chip) ──────────
