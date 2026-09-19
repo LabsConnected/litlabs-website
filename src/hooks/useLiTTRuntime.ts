@@ -130,6 +130,79 @@ function getSharedSocket(url: string, token?: string | null): Socket {
   return sharedSocket;
 }
 
+// ─── Shared relay poller ───────────────────────────────────────────
+// Same-origin status feed: one poller shared across all hook instances.
+// Polls GET /api/runtime-feed (the web server proxies the identical
+// terminal-server snapshot over the internal service connection), so the
+// browser never needs a direct WebSocket URL to the terminal server.
+
+interface RelaySubscriber {
+  onSnapshot: (snapshot: RuntimeState) => void;
+  onStatus: (connected: boolean, error: string | null) => void;
+}
+
+const relaySubscribers = new Set<RelaySubscriber>();
+let relayTimer: ReturnType<typeof setInterval> | null = null;
+let relayRefCount = 0;
+
+async function pollRelayOnce(): Promise<void> {
+  try {
+    const resp = await fetch("/api/runtime-feed", {
+      credentials: "same-origin",
+    });
+    if (!resp.ok) {
+      // Read the honest machine-readable code when available, but never
+      // surface raw bodies — they may contain infra details.
+      let code = `relay HTTP ${resp.status}`;
+      try {
+        const body = (await resp.json()) as { code?: string };
+        if (body && typeof body.code === "string") code = body.code;
+      } catch {
+        /* ignore body parse failures */
+      }
+      throw new Error(code);
+    }
+    const body = (await resp.json()) as { snapshot?: RuntimeState | null };
+    const snapshot = body?.snapshot ?? null;
+    if (snapshot) {
+      lastSnapshot = snapshot;
+      for (const sub of relaySubscribers) {
+        sub.onSnapshot(snapshot);
+        sub.onStatus(true, null);
+      }
+    } else {
+      throw new Error("relay returned no snapshot");
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "relay failed";
+    for (const sub of relaySubscribers) {
+      sub.onStatus(false, message);
+    }
+  }
+}
+
+function subscribeRelay(subscriber: RelaySubscriber, pollMs: number): void {
+  relaySubscribers.add(subscriber);
+  relayRefCount++;
+  if (!relayTimer) {
+    // Poll immediately so the feed resolves on mount, then on interval.
+    void pollRelayOnce();
+    relayTimer = setInterval(() => {
+      void pollRelayOnce();
+    }, pollMs);
+  }
+}
+
+function unsubscribeRelay(subscriber: RelaySubscriber): void {
+  relaySubscribers.delete(subscriber);
+  relayRefCount--;
+  if (relayRefCount <= 0 && relayTimer) {
+    clearInterval(relayTimer);
+    relayTimer = null;
+    relayRefCount = 0;
+  }
+}
+
 // ─── Freshness computation ─────────────────────────────────────────
 
 function computeFreshness(
@@ -156,11 +229,24 @@ function computeFreshness(
 // ─── Hook ──────────────────────────────────────────────────────────
 
 export function useLiTTRuntime(options?: {
+  /** Explicit Socket.IO URL (dev harness override). Implies socket transport. */
   url?: string;
-  /** Auth token for terminal server. undefined = not yet loaded (wait). null = no auth. string = auth. */
+  /**
+   * Transport for the status feed.
+   * - "relay" (default): same-origin GET /api/runtime-feed polling. Works
+   *   everywhere the web app works — no NEXT_PUBLIC build-time URL, no
+   *   public wss domain, no CORS knobs. The server proxies the identical
+   *   terminal-server snapshot over the internal service connection.
+   * - "socket": direct Socket.IO to the terminal server (dev harness /
+   *   explicit override). Needs a reachable WS URL.
+   */
+  transport?: "relay" | "socket";
+  /** Auth token for terminal server (socket transport only). undefined = not yet loaded (wait). null = no auth. string = auth. */
   token?: string | null | undefined;
   pollIntervalMs?: number;
 }): UseLiTTRuntimeResult {
+  const transport = options?.transport ?? (options?.url ? "socket" : "relay");
+
   const wsUrl =
     options?.url ??
     process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
@@ -177,11 +263,37 @@ export function useLiTTRuntime(options?: {
 
   const socketRef = useRef<Socket | null>(null);
 
+  // ── Relay transport: shared same-origin poller ────────────────────
+  useEffect(() => {
+    if (transport !== "relay") return;
+
+    const subscriber = {
+      onSnapshot: (snapshot: RuntimeState) => {
+        lastSnapshot = snapshot;
+        setState(snapshot);
+      },
+      onStatus: (ok: boolean, err: string | null) => {
+        setConnected(ok);
+        setError(err);
+      },
+    };
+    subscribeRelay(subscriber, pollMs);
+    // Sync immediately if a snapshot is already known
+    if (lastSnapshot) setState(lastSnapshot);
+
+    return () => {
+      unsubscribeRelay(subscriber);
+    };
+  }, [transport, pollMs]);
+
+  // ── Socket transport: direct Socket.IO (unchanged legacy path) ────
   // Connect / disconnect
   // Wait for token before connecting — connecting without auth causes 401s.
   // If no token is provided (null), we still connect (for test/dev without auth).
   // If a token is explicitly undefined, we skip connection.
   useEffect(() => {
+    if (transport !== "socket") return;
+
     // If token was explicitly set to undefined (vs null), don't connect yet
     // null = "no token provided, connect anyway" (for dev without auth)
     // undefined = "token not yet loaded, wait"
@@ -262,7 +374,7 @@ export function useLiTTRuntime(options?: {
       }
       socketRef.current = null;
     };
-  }, [wsUrl, token]);
+  }, [wsUrl, token, transport]);
 
   // Freshness tick — recompute periodically based on wall clock
   useEffect(() => {

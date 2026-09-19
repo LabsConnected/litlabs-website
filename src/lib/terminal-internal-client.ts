@@ -74,6 +74,7 @@ export const TERMINAL_TIMEOUTS = {
   getPreviewStatus: 20_000,
   stopPreview: 20_000,
   getPreviewLogs: 20_000,
+  runtimeSnapshot: 10_000,
 } as const;
 
 /**
@@ -405,4 +406,43 @@ export function buildPreviewProxyUrl(workspaceId: string): string {
   }
 
   return candidate;
+}
+
+/**
+ * Fetch the canonical runtime snapshot from the terminal server's
+ * /internal/runtime endpoint (same state the Socket.IO feed broadcasts).
+ *
+ * Used by the same-origin /api/runtime-feed relay so browsers never need
+ * a direct WebSocket URL to the terminal server — the web server proxies
+ * the status feed over the already-proven internal service connection.
+ */
+export async function getRuntimeSnapshotInternal(): Promise<unknown> {
+  const key = INTERNAL_KEY();
+  if (key.length < 32) {
+    throw new Error("TERMINAL_INTERNAL_SERVICE_KEY not configured");
+  }
+
+  const base = TERMINAL_BASE();
+  if (!base) {
+    throw new Error("Terminal server URL not configured");
+  }
+
+  const resp = await fetchWithTimeout(
+    `${base}/internal/runtime`,
+    {
+      method: "GET",
+      headers: {
+        "X-Internal-Service-Key": key,
+      },
+    },
+    TERMINAL_TIMEOUTS.runtimeSnapshot,
+    "GET /internal/runtime",
+  );
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "Unknown error");
+    throw new Error(`Runtime snapshot failed (${resp.status}): ${text}`);
+  }
+
+  return (await resp.json()) as unknown;
 }
