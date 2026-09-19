@@ -293,6 +293,9 @@ export async function POST(
     systemPrompt: resolved.systemPrompt,
     executionMode: resolved.executionMode,
     enableBuildFix: true,
+    // Conversation scope — injected into browser.start_session so the
+    // resumed run reuses the live browser session from before the pause.
+    conversationId,
     // Quality loop: resume with a fresh evidence session so the resumed
     // run is gated the same way (agent markers re-harvest from history).
     // AUTO resumes opt in too — an AUTO run pauses for deploy approval,
