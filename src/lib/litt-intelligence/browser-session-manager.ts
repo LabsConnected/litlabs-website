@@ -300,6 +300,14 @@ export async function startSession(
     ? `https://www.browserbase.com/sessions/${browserbaseSessionId}`
     : null;
 
+  // Phase 6 — best-effort fetch of the iframe-embeddable live view URL
+  // (Debug API `debuggerFullscreenUrl`, navbar hidden). Fail-soft:
+  // null here means the panel falls back to snapshots, never a broken
+  // iframe. Stored in metadata so no schema migration is needed.
+  const liveEmbedUrl = await fetchLiveEmbedUrl(browserbaseSessionId).catch(
+    () => null,
+  );
+
   const session: BrowserSession = {
     id: sessionId,
     userId: options.userId,
@@ -314,6 +322,7 @@ export async function startSession(
     metadata: {
       model: options.model ?? "google/gemini-2.5-flash",
       useProxies: options.useProxies ?? false,
+      liveEmbedUrl,
     },
     createdAt: now,
     updatedAt: now,
@@ -351,6 +360,11 @@ export function getStagehand(sessionId: string): Stagehand | null {
 
 /**
  * Get the browser session from memory (fast) or database (fallback).
+ *
+ * Phase 6 — the in-memory fast path is owner-checked: the registry
+ * bypass must never serve another user's session (its liveViewUrl is a
+ * capability URL). A caller that doesn't own the session gets null,
+ * exactly as if the session didn't exist.
  */
 export async function getSession(
   sessionId: string,
@@ -358,6 +372,7 @@ export async function getSession(
 ): Promise<BrowserSession | null> {
   const active = activeSessions.get(sessionId);
   if (active) {
+    if (active.session.userId !== userId) return null;
     active.lastActivity = Date.now();
     return active.session;
   }
@@ -872,10 +887,20 @@ export async function executeBrowserAction(
 
 /**
  * Take a screenshot of the current page.
+ *
+ * Phase 6 — owner check: when `userId` is provided, a caller that
+ * doesn't own the session gets null (never another user's browser
+ * pixels). Client-serving routes must always pass the authenticated
+ * userId; internal agent paths are already gated by
+ * executeBrowserAction's session check.
  */
-export async function takeScreenshot(sessionId: string): Promise<string | null> {
+export async function takeScreenshot(
+  sessionId: string,
+  userId?: string,
+): Promise<string | null> {
   const active = activeSessions.get(sessionId);
   if (!active) return null;
+  if (userId !== undefined && active.session.userId !== userId) return null;
 
   try {
     const page = active.stagehand.context.pages()[0];
@@ -884,6 +909,46 @@ export async function takeScreenshot(sessionId: string): Promise<string | null> 
     // Return as base64 data URL — the Studio UI can display this directly
     const base64 = Buffer.from(screenshot as Uint8Array).toString("base64");
     return `data:image/png;base64,${base64}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch the iframe-embeddable live view URL for a Browserbase session.
+ *
+ * Per Browserbase's docs, the embeddable live view is the Debug API's
+ * `debuggerFullscreenUrl` (GET /v1/sessions/{id}/debug) — NOT the
+ * `browserbase.com/sessions/<id>` dashboard page, which can render a
+ * login wall inside an iframe (a broken frame). The navbar is hidden
+ * because our own UI already provides context.
+ *
+ * Fail-soft by design: returns null on any failure (no key, network,
+ * dead session) — callers fall back to the snapshot view, never a
+ * broken iframe. Never logs the URL (capability URL).
+ */
+export async function fetchLiveEmbedUrl(
+  browserbaseSessionId: string | null,
+): Promise<string | null> {
+  const apiKey = process.env.BROWSERBASE_API_KEY?.trim();
+  if (!apiKey || !browserbaseSessionId) return null;
+  try {
+    const res = await fetch(
+      `https://api.browserbase.com/v1/sessions/${encodeURIComponent(browserbaseSessionId)}/debug`,
+      {
+        headers: { "X-BB-API-Key": apiKey },
+        // Avoid hanging session start on the debug endpoint.
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as { debuggerFullscreenUrl?: unknown };
+    const url =
+      typeof json.debuggerFullscreenUrl === "string" && json.debuggerFullscreenUrl
+        ? json.debuggerFullscreenUrl
+        : null;
+    if (!url) return null;
+    return url.includes("?") ? `${url}&navbar=false` : `${url}?navbar=false`;
   } catch {
     return null;
   }
