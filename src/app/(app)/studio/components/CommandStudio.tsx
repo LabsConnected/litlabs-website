@@ -28,7 +28,6 @@ import MissionCards from "./MissionCards";
 import PersistentMusicPlayer from "./PersistentMusicPlayer";
 import { MobileCommandNav } from "./CommandStudioNav";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
-import StudioBrowserStatusChip from "./StudioBrowserStatusChip";
 import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
 import LiTTLiveActivity from "./LiTTLiveActivity";
@@ -44,7 +43,7 @@ import AssetsPanel from "./context/AssetsPanel";
 import { StudioContextProvider } from "../context/StudioContext";
 import { deriveCreator, deriveWorkspaceStage } from "../context/derive-studio-context";
 import { StudioCreatorHost } from "./creators/StudioCreatorHost";
-import { useViewportTier, useDesktopSplit } from "../hooks/useViewportTier";
+import { useViewportTier } from "../hooks/useViewportTier";
 import ResizeHandle from "./shell/ResizeHandle";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { useExecutionStore, type MutationSummary } from "../stores/useExecutionStore";
@@ -230,9 +229,9 @@ function CommandStudioContent() {
   );
   const [, setPendingCommand] = useState<string>(initial.command ?? "");
   const [composerValue, setComposerValue] = useState("");
-  // Split preview is an explicit, user-triggered layout. Studio never
-  // reserves a second preview column just because the viewport is wide.
-  const [splitPreviewOpen, setSplitPreviewOpen] = useState(false);
+  // Canvas-first 2-zone layout: the live preview is the Preview workspace
+  // tab's StudioPreviewPanel, consuming the full workspace width. Studio
+  // never reserves canvas width for a second preview column.
   const [previewSelection, setPreviewSelection] = useState<PreviewSelection | null>(null);
   const [completion, setCompletion] = useState<{ changes: MutationSummary; previewUpdated: boolean; repaired: boolean } | null>(null);
 
@@ -412,7 +411,6 @@ function CommandStudioContent() {
   // null until the first client measurement (SSR-safe — see hook docs).
   const viewportTier = useViewportTier();
   const isMobileLitt = viewportTier === "mobile";
-  const isDesktopSplit = useDesktopSplit();
   const [mobileLittOpen, setMobileLittOpen] = useState(false);
   // Mobile density redesign: progressive-disclosure sheet state. Both sheets
   // render only while the mobile chat sheet is open (see mounts below).
@@ -460,15 +458,6 @@ function CommandStudioContent() {
     maxWidth: 320,
     direction: "right",
   });
-  // Phase 1: permanent right-side Preview column — resizable, dominant width.
-  const previewResize = useResizableWidth({
-    storageKey: "littree:studio:preview-width",
-    defaultWidth: 600,
-    minWidth: 400,
-    maxWidth: 1200,
-    direction: "right",
-  });
-
   // Context Drawer — left-of-center contextual panel (Phase 1 reorientation).
   // Default CLOSED; users open it via the Files/Inspector/Work workspace tabs.
   // The choice persists across reloads.
@@ -1457,9 +1446,9 @@ function CommandStudioContent() {
   const isCode = destination === "studio" && studioMode === "code";
   const isPreview = destination === "studio" && studioMode === "preview";
   const isMedia = destination === "studio" && studioMode === "media";
-  // The second preview is opt-in. The normal Studio layout always has one
-  // primary workspace, even on large displays.
-  const permanentPreviewVisible = splitPreviewOpen && isDesktopSplit;
+  // Canvas-first 2-zone layout: exactly one primary workspace surface at a
+  // time. The live preview is the Preview workspace tab — never a second
+  // column beside the workspace.
 
   // Primary workspace tabs. Plan and Media remain available through their
   // existing routes/drawers, but Design / Code / Preview are the only
@@ -1479,6 +1468,8 @@ function CommandStudioContent() {
   // LiTTPanel, or the mobile overlay via LiTTMobileSheet). Exactly one of
   // those two ever renders at a time (gated by viewportTier), so there is
   // never a second CommandComposer / LiTTLiveActivity instance (Phase C2.1).
+  // On mobile the sheet stays mounted and toggles via display:none so chat
+  // state survives Chat <-> Canvas switching.
   // Shared MissionCards wiring — used by the desktop rail and by the mobile
   // Build status sheet (showActions={false}). One definition, no duplication.
   const missionCardsHandlers = {
@@ -1597,12 +1588,6 @@ function CommandStudioContent() {
           />
         </div>
       )}
-      {/* Agent browser session chip (Phase 2): live/disconnected state is
-          probed server-side; the Stop button closes the session. Pinned
-          directly above the composer so it is visible during any session. */}
-      <StudioBrowserStatusChip
-        conversationId={conversation.selectedConversationId ?? undefined}
-      />
       <CommandComposer
         value={composerValue}
         onChange={setComposerValue}
@@ -1744,12 +1729,15 @@ function CommandStudioContent() {
           onExecutionModeChange={setExecutionMode}
         />
 
-        {/* Body: Context Drawer (left) | LiTT (center) | Workspace+Preview (right).
-            Phase 1: shell geometry reorientation.
-              - ContextDrawer moved from right to left-of-center (contextual panel)
-              - LiTTPanel moved from left to center (LiTT conversation/execution)
-              - StudioPreviewPanel promoted from center workspace tab to permanent
-                right column (dominant live preview)
+        {/* Body: LiTT (left) | Workspace (right) — canvas-first 2-zone layout.
+            - LiTTPanel is the collapsible chat zone (expanded: resizable
+              Chat/Live tabs; collapsed: 64px ambient HUD rail).
+            - The workspace <main> is the canvas zone: Design / Code /
+              Preview tabs consume ALL remaining width. No permanent
+              secondary columns are ever reserved.
+            - Files, Terminal, Inspector, Assets, Media live in the
+              toggleable bottom StudioDock; advanced tools open as
+              drawers/sheets/overlays.
             Mobile behavior is unchanged: ContextDrawer is a right-side fixed
             overlay, LiTTPanel is a mobile sheet, Preview is a workspace tab. */}
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -1796,8 +1784,8 @@ function CommandStudioContent() {
 
           <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden overflow-x-hidden">
             {/* Persistent primary workspace switcher. The main workspace has
-                one mode at a time; Preview is not mounted beside it unless
-                the user explicitly enables split preview. */}
+                one mode at a time; the Preview tab is the live preview —
+                it always consumes the full workspace width. */}
             <div
               className="glass-shell flex shrink-0 items-center gap-0.5 border-b px-2"
               style={{
@@ -1846,8 +1834,9 @@ function CommandStudioContent() {
                   toggled from the top command bar. */}
             </div>
 
-            {/* Workspace content. Optional split preview adds a second pane
-                only after the user explicitly requests it. */}
+            {/* Workspace content — a single primary surface. No second pane
+                is ever reserved beside it; the canvas zone takes all
+                remaining width whether chat is expanded or collapsed. */}
             <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
               <div
                 className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
@@ -1879,40 +1868,24 @@ function CommandStudioContent() {
                       branch={capabilities.activeBranch}
                       workspaceStatus={capabilities.workspaceStatus ?? null}
                       writeAccess={capabilities.writeAccess ?? true}
-                      externalPreviewActive={permanentPreviewVisible}
                     />
                   </div>
                 ) : isPreview ? (
-                  /* Preview is the primary workspace by default. When the
-                     user explicitly enables split preview, the conversation
-                     remains in the main pane and Preview moves to the side. */
+                  /* Preview is the primary workspace tab — the live preview
+                     consumes the full workspace width. No second preview
+                     column is ever mounted beside it (canvas-first 2-zone
+                     layout). */
                   <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-                    {!permanentPreviewVisible ? (
-                      <StudioPreviewPanel
-                        projectId={capabilities.projectId}
-                        projectName={capabilities.projectName}
-                        repositoryName={capabilities.repositoryName}
-                        branch={capabilities.activeBranch}
-                        sourceKind={capabilities.sourceKind}
-                        sourceStatus={capabilities.sourceStatus}
-                        versionControl={capabilities.versionControl}
-                        workspaceStatus={capabilities.workspaceStatus ?? null}
-                        onToggleSplitPreview={() => setSplitPreviewOpen((value) => !value)}
-                        splitPreviewOpen={false}
-                      />
-                    ) : (
-                      <StudioPlanSurface
-                        capabilities={capabilities}
-                        modelLabel={modelLabel}
-                        onOpenCode={() => { setDestination("studio"); setStudioMode("code"); }}
-                        onOpenCanvas={() => { setDestination("studio"); setStudioMode("files"); }}
-                        onOpenPreview={() => { setDestination("studio"); setStudioMode("preview"); }}
-                        onOpenTerminal={handleOpenTerminal}
-                        onOpenActivity={() => handleOpenDockTab("activity")}
-                        onOpenFiles={handleOpenContextFiles}
-                        onRollback={handleRollback}
-                      />
-                    )}
+                    <StudioPreviewPanel
+                      projectId={capabilities.projectId}
+                      projectName={capabilities.projectName}
+                      repositoryName={capabilities.repositoryName}
+                      branch={capabilities.activeBranch}
+                      sourceKind={capabilities.sourceKind}
+                      sourceStatus={capabilities.sourceStatus}
+                      versionControl={capabilities.versionControl}
+                      workspaceStatus={capabilities.workspaceStatus ?? null}
+                    />
                   </div>
                 ) : isMedia ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-auto pb-28 lg:pb-0">
@@ -1942,48 +1915,6 @@ function CommandStudioContent() {
                   />
                 )}
               </div>
-
-              {/* Optional Live Preview — RIGHT column. It is never mounted
-                  by viewport size alone; only the explicit split-preview
-                  action can open it. */}
-              {permanentPreviewVisible && (
-                <>
-                  <ResizeHandle
-                    onDragStart={previewResize.onDragStart}
-                    onReset={previewResize.reset}
-                    isDragging={previewResize.isDragging}
-                    direction="right"
-                    ariaLabel="Resize preview panel"
-                    testId="preview-resize-handle"
-                  />
-                  <div
-                    className="flex min-h-0 flex-col overflow-hidden border-l"
-                    style={{
-                      width: `clamp(280px, ${previewResize.width}px, min(1200px, 26.5vw))`,
-                      minWidth: 260,
-                      maxWidth: "38vw",
-                      borderColor: "var(--studio-border)",
-                      backgroundColor: "var(--studio-card)",
-                    }}
-                    data-testid="permanent-preview-column"
-                  >
-                    <StudioPreviewPanel
-                      projectId={capabilities.projectId}
-                      projectName={capabilities.projectName}
-                      repositoryName={capabilities.repositoryName}
-                      branch={capabilities.activeBranch}
-                      sourceKind={capabilities.sourceKind}
-                      sourceStatus={capabilities.sourceStatus}
-                      versionControl={capabilities.versionControl}
-                      workspaceStatus={capabilities.workspaceStatus ?? null}
-                      refreshKey={workspaceRevision}
-                      onSelectionChange={setPreviewSelection}
-                      onToggleSplitPreview={() => setSplitPreviewOpen(false)}
-                      splitPreviewOpen
-                    />
-                  </div>
-                </>
-              )}
             </div>
 
             {/* Studio dock — bottom (P2/P3). Replaces the old bottom
@@ -2160,14 +2091,61 @@ function CommandStudioContent() {
         {/* Mobile bottom nav — 5 destinations */}
         <MobileCommandNav active={destination} onSelect={handleSelectDestination} />
 
-        {/* Mobile LiTT access (<1024px) — Phase C2.1.
-            The desktop/laptop rail above is not rendered on this tier at
-            all, so this trigger + sheet is the ONLY way to reach LiTT on
-            mobile. The sheet reuses the exact same littChatContent /
-            littLiveContent used by the desktop rail — never both at once.
-            Hidden while the dock, context drawer, canvas overlay, or live
-            voice overlay is open: at z-[10015] the FAB would float over
-            their scrims and cover tool action buttons. */}
+        {/* Mobile LiTT FAB trigger (<1024px) — Phase C2.1. Secondary
+            affordance now: the Chat|Canvas segmented switcher above is the
+            primary fast path. The sheet reuses the exact same
+            littChatContent / littLiveContent used by the desktop rail —
+            never both at once. Hidden while the dock, context drawer,
+            canvas overlay, or live voice overlay is open: at z-[10015]
+            the FAB would float over their scrims and cover tool action
+            buttons. */}
+        {/* Mobile Chat|Canvas fast switcher — canvas-first 2-zone layout.
+            One primary surface dominates at a time on mobile; this compact
+            segmented control is the primary fast path between Chat and
+            Canvas, always thumb-reachable just above the bottom nav on the
+            canvas view. Both surfaces stay mounted and toggle via
+            visibility/display (same pattern as LiTTPanel's display:none
+            collapse), so SSE connections, scroll position, and unsent
+            composer drafts survive switching. Hidden while the dock,
+            context drawer, canvas overlay, or live voice overlay owns the
+            screen (same gate as the FAB trigger below). The segmented
+            control is a tablist: the active segment marks the visible
+            surface; tapping the other surface switches to it. */}
+        {isMobileLitt && !mobileLittOpen && !dockOpen && !contextDrawerOpen && !canvasOpen && !livePanelOpen && (
+          <div
+            className="fixed left-1/2 z-[10015] flex -translate-x-1/2 items-center gap-0.5 rounded-full border p-1 shadow-lg"
+            style={{
+              bottom: "calc(var(--studio-mobile-bottom-h) + env(safe-area-inset-bottom) + 12px)",
+              backgroundColor: "var(--studio-surface)",
+              borderColor: "var(--studio-border-strong)",
+              backdropFilter: "blur(12px)",
+            }}
+            role="tablist"
+            aria-label="Switch between chat and canvas"
+            data-testid="mobile-surface-switcher"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={false}
+              onClick={() => setMobileLittOpen(true)}
+              className="min-h-[40px] rounded-full px-4 text-[12px] font-bold transition active:scale-95"
+              style={{ color: "var(--text-muted)" }}
+              data-testid="mobile-switch-chat"
+            >
+              Chat
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={true}
+              className="min-h-[40px] rounded-full bg-accent/15 px-4 text-[12px] font-bold text-accent transition"
+              data-testid="mobile-switch-canvas"
+            >
+              Canvas
+            </button>
+          </div>
+        )}
         {isMobileLitt && !mobileLittOpen && !dockOpen && !contextDrawerOpen && !canvasOpen && !livePanelOpen && (
           <button
             type="button"
@@ -2196,17 +2174,29 @@ function CommandStudioContent() {
             </span>
           </button>
         )}
-        {isMobileLitt && mobileLittOpen && (
-          <LiTTMobileSheet
-            activeTab={littActiveTab}
-            onTabChange={setLittActiveTab}
-            onClose={() => { setMobileLittOpen(false); setMobileBuildOpen(false); setMobileToolsOpen(false); }}
-            chatContent={littChatContent}
-            liveContent={littLiveContent}
-            projectName={capabilities.projectName}
-            branch={capabilities.activeBranch}
-            onOpenTools={() => setMobileToolsOpen(true)}
-          />
+        {/* Mobile Chat surface — stays MOUNTED on the mobile tier and
+            toggles via display (same pattern as LiTTPanel's display:none
+            collapse), so SSE connections, scroll position, and unsent
+            composer drafts survive Chat <-> Canvas switching. The backdrop
+            and sheet are fixed-position, so the display:none wrapper hides
+            the whole overlay without affecting layout. */}
+        {isMobileLitt && (
+          <div
+            style={{ display: mobileLittOpen ? undefined : "none" }}
+            data-testid="litt-mobile-sheet-mount"
+            aria-hidden={!mobileLittOpen}
+          >
+            <LiTTMobileSheet
+              activeTab={littActiveTab}
+              onTabChange={setLittActiveTab}
+              onClose={() => { setMobileLittOpen(false); setMobileBuildOpen(false); setMobileToolsOpen(false); }}
+              chatContent={littChatContent}
+              liveContent={littLiveContent}
+              projectName={capabilities.projectName}
+              branch={capabilities.activeBranch}
+              onOpenTools={() => setMobileToolsOpen(true)}
+            />
+          </div>
         )}
         {/* Mobile density redesign: Build status sheet — the existing
             MissionCards with the actions card hidden (actions live in the
