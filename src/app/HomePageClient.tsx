@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { track } from "@/lib/analytics";
@@ -17,16 +18,44 @@ import {
   Workflow,
 } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+// Above-the-fold sections stay in the main bundle.
 import { LandingHeroV3 } from "@/components/landing/LandingHeroV3";
-import { InteractiveProductDemo } from "@/components/landing/InteractiveProductDemo";
 import { CapabilityStatus } from "@/components/landing/CapabilityStatus";
-import { AgentCrew } from "@/components/landing/AgentCrew";
-import { RealCreations } from "@/components/landing/RealCreations";
-import { TrustSection } from "@/components/landing/TrustSection";
-import { RealProductProof } from "@/components/landing/RealProductProof";
-import { OnboardingSteps } from "@/components/landing/OnboardingSteps";
-import { ComparisonTable } from "@/components/landing/ComparisonTable";
-import { FAQSection } from "@/components/landing/FAQSection";
+// Below-the-fold sections are code-split (ssr: true keeps them in the
+// server-rendered HTML for SEO; the client JS loads on demand). This
+// keeps the initial homepage JS payload to hero + status + grid.
+const InteractiveProductDemo = dynamic(
+  () => import("@/components/landing/InteractiveProductDemo").then((m) => m.InteractiveProductDemo),
+  { ssr: true },
+);
+const AgentCrew = dynamic(
+  () => import("@/components/landing/AgentCrew").then((m) => m.AgentCrew),
+  { ssr: true },
+);
+const RealCreations = dynamic(
+  () => import("@/components/landing/RealCreations").then((m) => m.RealCreations),
+  { ssr: true },
+);
+const TrustSection = dynamic(
+  () => import("@/components/landing/TrustSection").then((m) => m.TrustSection),
+  { ssr: true },
+);
+const RealProductProof = dynamic(
+  () => import("@/components/landing/RealProductProof").then((m) => m.RealProductProof),
+  { ssr: true },
+);
+const OnboardingSteps = dynamic(
+  () => import("@/components/landing/OnboardingSteps").then((m) => m.OnboardingSteps),
+  { ssr: true },
+);
+const ComparisonTable = dynamic(
+  () => import("@/components/landing/ComparisonTable").then((m) => m.ComparisonTable),
+  { ssr: true },
+);
+const FAQSection = dynamic(
+  () => import("@/components/landing/FAQSection").then((m) => m.FAQSection),
+  { ssr: true },
+);
 import { useViewportReveals } from "@/components/landing/useViewportReveals";
 
 const CAPABILITIES = [
