@@ -18,6 +18,18 @@ const TARGET_SAMPLE_RATE = 24000;
 const CHUNK_SIZE = 2048;
 const FADE_SAMPLES = 48;
 
+/**
+ * Inworld TTS-2 delivery steering. The realtime WebSocket API has no
+ * request-level `instruction` field, so delivery is steered with a single
+ * inline tag at the start of the spoken text — one tag covers the whole
+ * passage (it stays in force for the context until changed or [reset]).
+ * The voice NAME still comes from the INWORLD_LITT_VOICE /
+ * INWORLD_SPARK_VOICE env vars (conn.littVoice / conn.sparkVoice) —
+ * never hardcoded here.
+ */
+const LITT_TTS_STYLE_TAG = "[deep, calm, and precise with a controlled delivery]";
+const SPARK_TTS_STYLE_TAG = "[bright, warm, and expressive with a lively pace]";
+
 interface UseInworldSessionOptions {
   onTranscript?: (text: string, final: boolean, metadata?: TranscriptMetadata) => void;
   onAgentText?: (text: string) => void;
@@ -59,6 +71,13 @@ interface UseInworldSessionReturn {
   interrupt: () => void;
   /** Speak text via TTS. Connects transport if needed. Does NOT touch the mic. */
   speakText: (text: string) => Promise<void>;
+  /**
+   * Whether the most recent speakText call produced any audible audio.
+   * Lets the caller decide if a fallback TTS may re-speak — if Inworld
+   * already played part of the reply before failing, re-speaking from the
+   * start would double-speak.
+   */
+  didLastTtsPlayAudio: () => boolean;
   /**
    * Trigger an agent response without sending a new conversation item.
    * Used after VAD commits the audio buffer and transcription completes
@@ -110,6 +129,9 @@ export function useInworldSession(
   const isPlayingRef = useRef(false);
   const interruptedRef = useRef(false);
   const explicitTtsRef = useRef(false);
+  /** Set the moment the first explicit-TTS audio chunk is decoded for
+   * playback. Reset at the start of every speakText call. */
+  const ttsAudioPlayedRef = useRef(false);
   const animationFrameRef = useRef<number | null>(null);
 
   // ── Client-side VAD ──
@@ -677,6 +699,7 @@ export function useInworldSession(
                 // when not interrupted (auto-response cancellation).
                 if (explicitTtsRef.current && !interruptedRef.current && data.delta) {
                   if (process.env.NODE_ENV !== "production") console.debug("[Voice Pipeline] TTS audio received", { chunkSize: data.delta.length });
+                  ttsAudioPlayedRef.current = true;
                   const buffer = decodePcm16ToAudioBuffer(data.delta);
                   if (buffer) {
                     playbackQueueRef.current.push(buffer);
@@ -985,6 +1008,9 @@ export function useInworldSession(
       stopPlayback();
       interruptedRef.current = false;
       explicitTtsRef.current = true;
+      // Reset the audio-played flag — the caller uses it to decide whether a
+      // fallback TTS may re-speak (double-speak guard).
+      ttsAudioPlayedRef.current = false;
 
       try {
         // Ensure the transport is connected. This connects the WebSocket
@@ -1009,12 +1035,20 @@ export function useInworldSession(
 
         // Inworld TTS rejects text longer than 1000 characters with
         // "tts_invalid_argument: text length should not exceed 1000 characters".
-        // Split the text into sentence-boundary chunks under 900 chars
-        // (leaving headroom) and send each as its own conversation item +
-        // response.create. The audio chunks arrive sequentially and are
-        // played back in order by the playback queue.
+        // Spoken summaries are 1–2 sentences, so this is normally a SINGLE
+        // chunk → a single response.create, synthesized in one pass with
+        // natural prosody (no stitched chunk-boundary pauses). The
+        // multi-chunk path below is a safety net for unexpectedly long text.
+        //
+        // ── TTS-2 delivery steering ──
+        // A single inline style tag at the start steers the whole passage
+        // (the WebSocket API has no request-level instruction field). The
+        // voice itself is unchanged — it still comes from the
+        // INWORLD_LITT_VOICE / INWORLD_SPARK_VOICE env vars.
         const MAX_CHUNK = 900;
         const cleanText = text.replace(/\s+/g, " ").trim();
+        const activeAgent = useVoiceStore.getState().activeAgent;
+        const styleTag = activeAgent === "spark" ? SPARK_TTS_STYLE_TAG : LITT_TTS_STYLE_TAG;
         const chunks: string[] = [];
 
         if (cleanText.length <= MAX_CHUNK) {
@@ -1042,6 +1076,12 @@ export function useInworldSession(
             }
           }
           if (current) chunks.push(current);
+        }
+
+        // Steer delivery for the whole passage with one leading tag. The tag
+        // stays in force for the context, so later chunks need no re-tagging.
+        if (chunks.length > 0) {
+          chunks[0] = `${styleTag} ${chunks[0]}`;
         }
 
         // Send each chunk sequentially. Each conversation.item.create +
@@ -1155,6 +1195,8 @@ export function useInworldSession(
 
   const getLastSpeechDurationMs = useCallback(() => vadSpeechDurationRef.current, []);
 
+  const didLastTtsPlayAudio = useCallback(() => ttsAudioPlayedRef.current, []);
+
   return {
     connect,
     disconnect,
@@ -1169,6 +1211,7 @@ export function useInworldSession(
     isMicPaused,
     getVadState,
     getLastSpeechDurationMs,
+    didLastTtsPlayAudio,
     isConnected,
     isListening,
     error,
