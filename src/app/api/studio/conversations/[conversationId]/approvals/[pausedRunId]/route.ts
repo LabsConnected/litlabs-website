@@ -9,9 +9,12 @@ import {
   markRunCompleted,
   markRunFailed,
   createPausedRun,
+  renewRunLease,
+  RUN_HEARTBEAT_MS,
   type PausedRunRecord,
   type RunResult,
 } from "@/lib/litt-intelligence/paused-run-store";
+import { ProgressEmitter } from "@/lib/litt-intelligence/progress-events";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { resumeAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
 import { resolveAvailableCapabilities } from "@/lib/litt-intelligence/capabilities";
@@ -272,7 +275,11 @@ export async function POST(
   }
 
   // 7. Mark the run as "processing" (atomic — prevents duplicate executions)
-  const started = await markRunProcessing(pausedRunId, userId);
+  // The claim mints this executor's fencing token: renewals and terminal
+  // writes below are conditioned on it, so a superseded or stale-marked
+  // executor can never overwrite the truth this claim owns.
+  const executionToken = randomUUID();
+  const started = await markRunProcessing(pausedRunId, userId, executionToken);
   if (!started) {
     // Another request already started the execution — return current status
     const current = await getPausedRun(pausedRunId, userId);
@@ -289,10 +296,39 @@ export async function POST(
   // Railway's long-running Node process keeps this promise alive after
   // the response is sent. The result is persisted to the DB so the client
   // can poll GET for completion.
+  //
+  // Lease + fence: the executor renews its lease every RUN_HEARTBEAT_MS,
+  // carrying its last observed progress on the same write. If the renewal
+  // reports the claim lost (stale/stall detector marked it, or a retry
+  // claimed it), this executor is fenced — it aborts the loop at the next
+  // step boundary and leaves the outcome to whoever owns the truth. A
+  // thrown renewal is a transient DB error, not a fence: keep working.
+  const abortController = new AbortController();
+  let fenced = false;
+  let lastProgressAt = new Date().toISOString();
+  const heartbeat = setInterval(() => {
+    void renewRunLease(pausedRunId, userId, executionToken, lastProgressAt)
+      .then((alive) => {
+        if (!alive) {
+          fenced = true;
+          abortController.abort();
+        }
+      })
+      .catch(() => undefined);
+  }, RUN_HEARTBEAT_MS);
+  (heartbeat as NodeJS.Timeout).unref?.();
+  // Zero-cost progress signal: every loop event refreshes the timestamp
+  // the next heartbeat persists. A wedged loop stops producing events —
+  // that is what separates "slow but working" from "alive but stalled".
+  const runProgress = new ProgressEmitter(() => {
+    lastProgressAt = new Date().toISOString();
+  });
+
   const resumeConfig: Partial<AgentLoopConfig> = {
     systemPrompt: resolved.systemPrompt,
     executionMode: resolved.executionMode,
     enableBuildFix: true,
+    signal: abortController.signal,
     // Conversation scope — injected into browser.start_session so the
     // resumed run reuses the live browser session from before the pause.
     conversationId,
@@ -344,8 +380,19 @@ export async function POST(
       availableCapabilities: resolveAvailableCapabilities({ transport }),
     },
     transport,
+    runProgress,
   )
     .then(async (result) => {
+      if (fenced) {
+        // Another owner marked the truth (stale/stall detector, or a
+        // superseding claim). Whatever this loop produced is not the
+        // record — write nothing, let the recorded outcome stand.
+        return;
+      }
+      // The loop produced a result — that is progress. Reset the stall
+      // window for the settlement tail (preview verify, transcript write,
+      // nested-gate persist); the heartbeat keeps the lease alive through it.
+      lastProgressAt = new Date().toISOString();
       // Approval resume is a separate execution path from the initial
       // launch. Prove that an approved mutation really landed in the bound
       // workspace and restart/verify preview before marking the resumed run
@@ -390,7 +437,7 @@ export async function POST(
           status: "failed",
           content: resumeFailure,
         });
-        await markRunFailed(pausedRunId, userId, resumeFailure);
+        await markRunFailed(pausedRunId, userId, resumeFailure, executionToken);
         return;
       }
 
@@ -440,7 +487,7 @@ export async function POST(
             status: "failed",
             content: nestedPersistError,
           });
-          await markRunFailed(pausedRunId, userId, nestedPersistError);
+          await markRunFailed(pausedRunId, userId, nestedPersistError, executionToken);
           return;
         }
       }
@@ -520,9 +567,10 @@ export async function POST(
           : undefined,
         qualityLoopState,
       };
-      return markRunCompleted(pausedRunId, userId, runResult);
+      return markRunCompleted(pausedRunId, userId, runResult, executionToken);
     })
     .catch(async (err) => {
+      if (fenced) return;
       const message = err instanceof Error ? err.message : "Resume failed";
       await writeResumedResultToTranscript({
         conversationId,
@@ -532,7 +580,12 @@ export async function POST(
         status: "failed",
         content: `The resumed run failed: ${message}`,
       });
-      return markRunFailed(pausedRunId, userId, message);
+      return markRunFailed(pausedRunId, userId, message, executionToken);
+    })
+    .finally(() => {
+      // The executor's work — loop and settlement tail — is done either
+      // way; stop proving liveness. A fenced executor dies here too.
+      clearInterval(heartbeat);
     });
 
   // 9. Return 202 Accepted immediately — the execution continues in the background

@@ -14,8 +14,16 @@
  * - After approval, the resumed agent loop runs detached from the HTTP
  *   request. Its state is persisted in run_status / run_result / run_error
  *   so the client can poll the GET endpoint for completion.
- * - Stale runs (processing > RUN_STALE_TIMEOUT_MS) are marked failed on
- *   read to recover from process restarts.
+ * - A claimed run is lease-owned: the executor renews lease_expires_at
+ *   every RUN_HEARTBEAT_MS and carries its last observed progress on the
+ *   same write. A dead process provably lapses in ≤ RUN_LEASE_MS; a live
+ *   process working past the old age wall is never condemned.
+ * - Terminal writes are fenced on execution_token, so a superseded or
+ *   stale-marked executor cannot overwrite the truth — and a fenced
+ *   executor learns it lost the claim on its next beat and aborts.
+ * - Runs that provably died (lease expired) or genuinely stalled
+ *   (RUN_STALL_MS without progress) are marked failed on read; only a
+ *   run whose lease has lapsed may be reset and re-driven.
  */
 
 import "server-only";
@@ -38,8 +46,33 @@ const APPROVAL_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const TABLE = "agent_paused_runs";
 
 /** A run that has been "processing" longer than this is considered stale
- *  (the process likely restarted). The GET endpoint marks it as failed. */
+ *  (the process likely restarted). The GET endpoint marks it as failed.
+ *  Only applies to rows with no lease — lease-bearing executors prove
+ *  liveness continuously and are judged by lease expiry + progress, not age. */
 export const RUN_STALE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+/**
+ * Executor lease for a resumed run. The detached executor renews
+ * lease_expires_at = now + RUN_LEASE_MS every RUN_HEARTBEAT_MS, so a live
+ * process keeps its lease ~3 beats ahead. A dead process stops renewing and
+ * the lease lapses in ≤90s — provable death, an order of magnitude faster
+ * than the legacy 10-minute age guess.
+ */
+export const RUN_LEASE_MS = 90_000;
+export const RUN_HEARTBEAT_MS = 30_000;
+
+/**
+ * Genuine-stall detector: the executor's lease can stay fresh (process
+ * alive, event loop healthy) while the agent loop itself is wedged — a hung
+ * provider call, a repair-loop livelock. Progress events update
+ * last_progress_at on every heartbeat; if it stops advancing for this long
+ * while the lease is fresh, the run is stalled, not working.
+ *
+ * Sized ABOVE DEFAULT_LOOP_CONFIG.maxRuntimeMs (10 min): the loop's own
+ * graceful runtime budget must always win over the stall detector, so this
+ * only fires when something escaped the budget entirely.
+ */
+export const RUN_STALL_MS = 12 * 60 * 1000;
 
 export type RunStatus = "processing" | "completed" | "failed" | null;
 
@@ -90,6 +123,19 @@ export interface PausedRunRecord {
   runError: string | null;
   runStartedAt: string | null;
   runCompletedAt: string | null;
+  /**
+   * Fencing token minted at claim time. Renewals and terminal writes are
+   * conditioned on it, so a superseded executor (or a stale-marked zombie)
+   * can never overwrite the truth owned by the current claim.
+   */
+  executionToken: string | null;
+  /** Executor-owned deadline — renewed while the process is alive. */
+  leaseExpiresAt: string | null;
+  /**
+   * Last time the executor observed real progress (a step/tool event),
+   * carried on each heartbeat. Fresh lease + frozen progress = wedged loop.
+   */
+  lastProgressAt: string | null;
   qualityLoopState?: QualityLoopSnapshot;
   /**
    * The unexecuted remainder of the tool batch that hit the approval gate,
@@ -126,6 +172,9 @@ interface PausedRunRow {
   run_error: string | null;
   run_started_at: string | null;
   run_completed_at: string | null;
+  execution_token?: string | null;
+  lease_expires_at?: string | null;
+  last_progress_at?: string | null;
   quality_loop_state?: QualityLoopSnapshot | null;
   deferred_tool_calls?: DeferredToolCall[] | null;
   steps_used?: number | null;
@@ -156,6 +205,9 @@ function rowToRecord(row: PausedRunRow): PausedRunRecord {
     runError: row.run_error ?? null,
     runStartedAt: row.run_started_at ?? null,
     runCompletedAt: row.run_completed_at ?? null,
+    executionToken: row.execution_token ?? null,
+    leaseExpiresAt: row.lease_expires_at ?? null,
+    lastProgressAt: row.last_progress_at ?? null,
     qualityLoopState: row.quality_loop_state ?? undefined,
     deferredToolCalls: row.deferred_tool_calls ?? undefined,
     stepsUsed: row.steps_used ?? undefined,
@@ -254,9 +306,30 @@ async function recoverStaleRun(record: PausedRunRecord): Promise<PausedRunRecord
 
   let staleError: string | null = null;
   if (record.runStatus === "processing" && record.runStartedAt) {
-    const startedAt = Date.parse(record.runStartedAt);
-    if (Number.isFinite(startedAt) && Date.now() - startedAt > RUN_STALE_TIMEOUT_MS) {
-      staleError = "Execution timed out (process may have restarted)";
+    if (record.leaseExpiresAt) {
+      // Lease-bearing executor: judge by liveness, not age. A run doing
+      // legitimate work renews its lease ~3 heartbeats ahead — it can run
+      // well past the old 10-minute wall without being condemned.
+      const leaseAt = Date.parse(record.leaseExpiresAt);
+      if (Number.isFinite(leaseAt) && leaseAt < Date.now()) {
+        // Heartbeats stopped → the process is provably gone.
+        staleError = "Execution lost (worker may have restarted)";
+      } else if (record.lastProgressAt) {
+        // Process alive but the loop produced nothing for RUN_STALL_MS —
+        // wedged, not working. Deliberately longer than the loop's own
+        // maxRuntimeMs so the graceful timeout always wins first.
+        const progressAt = Date.parse(record.lastProgressAt);
+        if (Number.isFinite(progressAt) && Date.now() - progressAt > RUN_STALL_MS) {
+          staleError = "Execution stalled (no progress)";
+        }
+      }
+    } else {
+      // Row claimed before leases existed (e.g. mid-deploy): the legacy
+      // age rule is the only signal available.
+      const startedAt = Date.parse(record.runStartedAt);
+      if (Number.isFinite(startedAt) && Date.now() - startedAt > RUN_STALE_TIMEOUT_MS) {
+        staleError = "Execution timed out (process may have restarted)";
+      }
     }
   } else if (record.runStatus === null && record.resolvedAt) {
     const resolvedAt = Date.parse(record.resolvedAt);
@@ -266,12 +339,29 @@ async function recoverStaleRun(record: PausedRunRecord): Promise<PausedRunRecord
   }
   if (!staleError) return record;
 
-  await markRunFailed(record.id, record.userId, staleError);
+  // Guarded write: only flip the state this read actually saw. A racing
+  // executor that just wrote a terminal state must never be clobbered.
+  const failedAt = new Date().toISOString();
+  const update = supabaseAdmin
+    .from(TABLE)
+    .update({
+      run_status: "failed",
+      run_error: staleError,
+      run_completed_at: failedAt,
+    })
+    .eq("id", record.id)
+    .eq("user_id", record.userId);
+  if (record.runStatus === "processing") {
+    update.eq("run_status", "processing");
+  } else {
+    update.is("run_status", null);
+  }
+  await update;
   return {
     ...record,
     runStatus: "failed",
     runError: staleError,
-    runCompletedAt: new Date().toISOString(),
+    runCompletedAt: failedAt,
   };
 }
 
@@ -397,19 +487,28 @@ export async function resolvePausedRun(
  * Mark a run as "processing" — the resumed execution has started.
  * Only transitions from null (not yet started) to "processing".
  * This is idempotent: if already processing, it's a no-op.
+ *
+ * The claim mints the fencing token and the first lease + progress mark.
+ * From here the executor proves liveness by renewal; nothing else may
+ * write terminal state without presenting this token.
  */
 export async function markRunProcessing(
   pausedRunId: string,
   userId: string,
+  executionToken: string,
 ): Promise<boolean> {
   if (!supabaseAdmin) return false;
 
-  const now = new Date().toISOString();
+  const now = new Date();
+  const nowIso = now.toISOString();
   const { data, error } = await supabaseAdmin
     .from(TABLE)
     .update({
       run_status: "processing",
-      run_started_at: now,
+      run_started_at: nowIso,
+      execution_token: executionToken,
+      lease_expires_at: new Date(now.getTime() + RUN_LEASE_MS).toISOString(),
+      last_progress_at: nowIso,
     })
     .eq("id", pausedRunId)
     .eq("user_id", userId)
@@ -422,17 +521,63 @@ export async function markRunProcessing(
 }
 
 /**
+ * Executor heartbeat. Renews the lease and carries the executor's latest
+ * observed progress timestamp in one write.
+ *
+ * Returns true only when this token still owns a live claim. False means
+ * fenced — the run was marked failed/completed by someone else (stale
+ * detector, stall detector, or a newer claim) — and the executor must
+ * abort. A thrown error (transient DB failure) is NOT a fence: the caller
+ * should keep working and retry the next beat; if the DB stays down the
+ * lease will lapse and a later successful beat will report the fence.
+ */
+export async function renewRunLease(
+  pausedRunId: string,
+  userId: string,
+  executionToken: string,
+  lastProgressAt: string,
+): Promise<boolean> {
+  if (!supabaseAdmin) return false;
+
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .update({
+      lease_expires_at: new Date(Date.now() + RUN_LEASE_MS).toISOString(),
+      last_progress_at: lastProgressAt,
+    })
+    .eq("id", pausedRunId)
+    .eq("user_id", userId)
+    .eq("execution_token", executionToken)
+    .eq("run_status", "processing")
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    // Transient failure is not proof of fencing — surface it so the caller
+    // can distinguish "you lost the claim" from "the DB hiccuped".
+    throw new Error(`Failed to renew run lease: ${error.message}`);
+  }
+  return !!data;
+}
+
+/**
  * Mark a run as "completed" — the resumed execution finished successfully.
+ *
+ * When the caller presents its execution token, the write is fenced: it
+ * only lands while that token still owns a live "processing" claim. A
+ * stale-marked zombie or a superseded executor gets false and must not
+ * treat its result as the record of truth.
  */
 export async function markRunCompleted(
   pausedRunId: string,
   userId: string,
   result: RunResult,
-): Promise<void> {
-  if (!supabaseAdmin) return;
+  executionToken?: string,
+): Promise<boolean> {
+  if (!supabaseAdmin) return false;
 
   const now = new Date().toISOString();
-  await supabaseAdmin
+  const update = supabaseAdmin
     .from(TABLE)
     .update({
       run_status: "completed",
@@ -441,20 +586,33 @@ export async function markRunCompleted(
     })
     .eq("id", pausedRunId)
     .eq("user_id", userId);
+  if (executionToken) {
+    update
+      .eq("execution_token", executionToken)
+      .eq("run_status", "processing");
+  }
+  const { data, error } = await update.select("id");
+  if (error) return false;
+  return (data?.length ?? 0) > 0;
 }
 
 /**
  * Mark a run as "failed" — the resumed execution threw or returned an error.
+ *
+ * Same fencing contract as markRunCompleted when a token is presented.
+ * Callers without a token (pre-claim failures, internal recovery paths)
+ * keep the legacy unconditional write.
  */
 export async function markRunFailed(
   pausedRunId: string,
   userId: string,
   error: string,
+  executionToken?: string,
 ): Promise<void> {
   if (!supabaseAdmin) return;
 
   const now = new Date().toISOString();
-  await supabaseAdmin
+  const update = supabaseAdmin
     .from(TABLE)
     .update({
       run_status: "failed",
@@ -463,6 +621,12 @@ export async function markRunFailed(
     })
     .eq("id", pausedRunId)
     .eq("user_id", userId);
+  if (executionToken) {
+    update
+      .eq("execution_token", executionToken)
+      .eq("run_status", "processing");
+  }
+  await update;
 }
 
 export async function expireStaleRuns(): Promise<number> {
@@ -576,6 +740,23 @@ export async function resetRunForRetry(
 ): Promise<boolean> {
   if (!supabaseAdmin) return false;
 
+  // Lease gate: a failed run whose lease is still fresh may have a live
+  // (but fenced, e.g. stall-marked) executor still tearing down — respawning
+  // now would run two mutating executors concurrently. A lease can only
+  // move toward expiry while failed (the dead executor's renewals are
+  // rejected by the run_status guard), so an expired lease is stable proof
+  // that nothing is running. Legacy rows have no lease — the old failed
+  // state alone is the gate, exactly as before.
+  const { data: row, error: readError } = await supabaseAdmin
+    .from(TABLE)
+    .select("lease_expires_at")
+    .eq("id", pausedRunId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (readError || !row) return false;
+  const lease = (row as { lease_expires_at?: string | null }).lease_expires_at;
+  if (lease && Date.parse(lease) > Date.now()) return false;
+
   const { data, error } = await supabaseAdmin
     .from(TABLE)
     .update({
@@ -583,6 +764,9 @@ export async function resetRunForRetry(
       run_error: null,
       run_started_at: null,
       run_completed_at: null,
+      execution_token: null,
+      lease_expires_at: null,
+      last_progress_at: null,
     })
     .eq("id", pausedRunId)
     .eq("user_id", userId)

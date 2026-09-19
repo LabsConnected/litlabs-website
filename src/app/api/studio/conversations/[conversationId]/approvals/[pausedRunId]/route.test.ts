@@ -34,6 +34,9 @@ vi.mock("@/lib/litt-intelligence/paused-run-store", () => ({
   markRunCompleted: vi.fn(() => Promise.resolve()),
   markRunFailed: vi.fn(() => Promise.resolve()),
   createPausedRun: vi.fn(),
+  renewRunLease: vi.fn(() => Promise.resolve(true)),
+  RUN_HEARTBEAT_MS: 30_000,
+  resetRunForRetry: vi.fn(() => Promise.resolve(false)),
 }));
 
 vi.mock("@/lib/litt-intelligence/workspace-transport", () => ({
@@ -213,6 +216,7 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
       PAUSED_ID,
       "user_123",
       "LiTT couldn't complete this request because all currently available AI routes were unavailable or reached their limits.",
+      expect.any(String),
     );
     expect(updateMessageStatus).toHaveBeenCalledWith(
       "msg-assistant-1",
