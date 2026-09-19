@@ -45,7 +45,11 @@ const INTENTS: IntentCard[] = [
   {
     label: "Image",
     description: "Generate and edit images, then drop them into a project.",
-    href: "/studio?tool=chat&mode=image",
+    // Deep-link straight into the Image Studio creator surface. (NOT
+    // ?tool=chat&mode=image: ?mode= is ignored by the Studio router, and
+    // legacy ?tool=image normalizes to the chat surface by design —
+    // neither opens the image generator. P1-1.)
+    href: "/studio?creator=image",
     icon: ImageIcon,
   },
   {

@@ -56,6 +56,13 @@ export interface SendResult {
   reply?: string;
   errorKind?: SendErrorKind;
   pendingApproval?: { toolId: string; reason: string; pausedRunId?: string; inputs?: Record<string, unknown> } | null;
+  /**
+   * P1-1: when true, the composer must NOT render the "Done · No files
+   * changed" completion card for this send. Used by intents whose real
+   * action is opening a surface (the Image Studio) rather than running
+   * the agent — the card would read as a fake generation success.
+   */
+  suppressCompletion?: boolean;
 }
 
 const ACTIVE_PROJECT_KEY_PREFIX = "litt:active-project-id";
@@ -140,6 +147,7 @@ export function useCanonicalConversation({
   onRouteInspectorAction,
   onRunHealthChecks,
   onOpenProjectNameDialog,
+  onOpenImageStudio,
   serverProjectId,
   cameraState,
   previewSelection,
@@ -151,6 +159,8 @@ export function useCanonicalConversation({
   onRunHealthChecks?: () => void;
   /** Triggered when LiTT should open the new-project name dialog */
   onOpenProjectNameDialog?: () => void;
+  /** P1-1: open the real Image Studio surface with the prompt prefilled */
+  onOpenImageStudio?: (prompt: string) => void;
   serverProjectId?: string | null;
   /** Camera dock state — passed to the LLM so it knows camera is available */
   cameraState?: { active: boolean; status: string };
@@ -942,11 +952,20 @@ export function useCanonicalConversation({
           onRouteInspectorAction,
           onRunHealthChecks,
           onOpenProjectNameDialog,
+          onOpenImageStudio,
           onNavigate: (url) => {
             if (typeof window !== "undefined") window.location.href = url;
           },
         });
-        return { accepted: true, persisted: true, reply: intentMessage };
+        return {
+          accepted: true,
+          persisted: true,
+          reply: intentMessage,
+          // P1-1: the image intent opens the Image Studio surface — it is
+          // not an agent run, so the "Done · No files changed" completion
+          // card must not render (it would fake a generation success).
+          suppressCompletion: intent.intent === "generate_image",
+        };
       }
 
       // 3. Ensure we have a conversation
@@ -1578,7 +1597,7 @@ export function useCanonicalConversation({
         // keeps offering Stop and the UI keeps claiming "working".
       }
     },
-    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, onOpenProjectNameDialog, selectedModel, activeAgentId, activeAgentMode, activeAgentInstanceId, executionMode, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError, reconcileAndApply],
+    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, onOpenProjectNameDialog, onOpenImageStudio, selectedModel, activeAgentId, activeAgentMode, activeAgentInstanceId, executionMode, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError, reconcileAndApply],
   );
 
   // Regenerate — calls canonical regenerate API

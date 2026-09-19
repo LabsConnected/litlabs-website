@@ -56,6 +56,7 @@ import { MediaUtilityDock } from "@/components/media/MediaUtilityDock";
 import {
   mapLegacyToolToDestination,
   destinationToLegacyTool,
+  resolveCreatorDestination,
   workspaceStageToMode,
   type StudioDestination,
   type StudioMode,
@@ -195,7 +196,11 @@ function CommandStudioContent() {
   // Resolve initial destination from legacy ?tool= query.
   // There is no user-facing mode choice: the router always behaves as
   // auto, so ?mode= (if present) is ignored.
+  // An explicit ?creator= deep-link (e.g. /studio?creator=image from the
+  // Create hub) is authoritative and wins over ?tool=.
   const initial = useMemo(() => {
+    const creatorDest = resolveCreatorDestination(searchParams.get("creator"));
+    if (creatorDest) return creatorDest;
     const fromUrl = searchParams.get("tool");
     if (fromUrl === "pipeline") {
       return mapLegacyToolToDestination("workflows");
@@ -229,6 +234,13 @@ function CommandStudioContent() {
   );
   const [, setPendingCommand] = useState<string>(initial.command ?? "");
   const [composerValue, setComposerValue] = useState("");
+  /**
+   * P1-1: prompt prefilled into the Image Studio when the chat image
+   * intent fires ("generate an image of X" → the real ImageTool opens
+   * with this prompt). Cleared whenever we leave the create destination
+   * so a stale prompt never prefills a later visit.
+   */
+  const [imageStudioPrompt, setImageStudioPrompt] = useState<string | null>(null);
   // Canvas-first 2-zone layout: the live preview is the Preview workspace
   // tab's StudioPreviewPanel, consuming the full workspace width. Studio
   // never reserves canvas width for a second preview column.
@@ -317,6 +329,17 @@ function CommandStudioContent() {
     const navKey = searchParams.toString();
     if (navKey === lastWrittenUrlRef.current) {
       lastWrittenUrlRef.current = null;
+      return;
+    }
+    // An explicit ?creator= deep-link (e.g. /studio?creator=image from the
+    // Create hub, or the chat image intent's surface) is an authoritative
+    // surface change — it wins over ?tool= and over the param-only guard
+    // below (a creator URL legitimately carries no ?tool=).
+    const creatorDest = resolveCreatorDestination(searchParams.get("creator"));
+    if (creatorDest) {
+      setDestination((cur) => (cur === "create" ? cur : "create"));
+      const newMode = (creatorDest.mode as CreateMode) ?? "image";
+      setCreateMode((cur) => (cur === newMode ? cur : newMode));
       return;
     }
     const fromUrl = searchParams.get("tool");
@@ -633,6 +656,25 @@ function CommandStudioContent() {
     setPendingCommand(command);
   }, [capabilities.terminalStatus, handleOpenContextInspector]);
 
+  // P1-1: the chat image intent ("generate an image of X") opens the REAL
+  // Image Studio — the create destination's ImageTool — with the user's
+  // prompt prefilled. This is what "Opening the image generator." promises.
+  // Deliberately separate from handleRouteTool: the legacy "image" tool id
+  // normalizes to the chat surface, not the creator.
+  const handleOpenImageStudio = useCallback((prompt: string) => {
+    setImageStudioPrompt(prompt || null);
+    setCreateMode("image");
+    setDestination("create");
+  }, []);
+
+  // A prefilled image prompt only lives while the create destination is
+  // active — leaving clears it so a later Image Studio visit starts clean.
+  useEffect(() => {
+    if (destination !== "create") {
+      setImageStudioPrompt(null);
+    }
+  }, [destination]);
+
   // The single conversation controller — calls canonical V12 API.
   const conversation = useCanonicalConversation({
     onRouteToolAction: handleRouteTool,
@@ -647,6 +689,7 @@ function CommandStudioContent() {
       setHealthRunTrigger((n) => n + 1);
     },
     onOpenProjectNameDialog: openProjectNameDialog,
+    onOpenImageStudio: handleOpenImageStudio,
     // The URL's explicit ?project= is authoritative the instant it's present —
     // capabilities.projectId is resolved by an async fetch that can still be
     // in flight (or, if it started before the URL param was readable, can
@@ -704,7 +747,17 @@ function CommandStudioContent() {
 
   // Canonical: always tool=chat for the LiTT conversation surface.
     // Workspace stages (code/canvas/preview) get their own tool value.
-    params.set("tool", legacyTool);
+    // The create destination (Image Studio et al) is deep-linkable via
+    // ?creator=<mode> — the ONLY URL route into the creator surfaces.
+    // Writing ?tool=image here would NOT round-trip: legacy creative
+    // tool URLs normalize to the chat surface on load by design.
+    if (destination === "create") {
+      params.delete("tool");
+      params.set("creator", createMode);
+    } else {
+      params.set("tool", legacyTool);
+      params.delete("creator");
+    }
     // Drop any ?mode=: the router always behaves as auto, and mode is
     // never a user-facing choice. Also preserve agent and conversation params.
     params.delete("mode");
@@ -846,6 +899,11 @@ function CommandStudioContent() {
           } else {
             setLittCollapsed(false);
           }
+        } else if (result.suppressCompletion) {
+          // P1-1: the image intent opened the Image Studio surface — this
+          // send was not an agent run, so no completion card. Rendering
+          // "Done · No files changed" here would fake a generation success.
+          setLittActiveTab("chat");
         } else {
           setCompletion({ changes, previewUpdated: previewReady, repaired });
           setContextDrawerOpen(false);
@@ -1901,10 +1959,16 @@ function CommandStudioContent() {
                   <div className="min-h-0 min-w-0 flex-1 overflow-auto pb-28 lg:pb-0">
                     {studioCreator ? (
                       <StudioCreatorHost>
-                        <WorkspaceComponent projectId={capabilities.projectId} />
+                        <WorkspaceComponent
+                          projectId={capabilities.projectId}
+                          initialPrompt={imageStudioPrompt}
+                        />
                       </StudioCreatorHost>
                     ) : (
-                      <WorkspaceComponent projectId={capabilities.projectId} />
+                      <WorkspaceComponent
+                        projectId={capabilities.projectId}
+                        initialPrompt={imageStudioPrompt}
+                      />
                     )}
                   </div>
                 ) : (
