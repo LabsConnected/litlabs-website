@@ -70,6 +70,19 @@ async function getBrowserStateWithScreenshot(
 }
 
 /**
+ * Current page URL for a session (Phase 3: names the site on in-chat
+ * approval cards, e.g. `Click "Buy now" on example.com`). Null when the
+ * session has no live page in this process — callers treat a null as
+ * "site unknown", never as a failure.
+ */
+export async function getBrowserPageUrl(
+  sessionId: string,
+): Promise<string | null> {
+  const state = await getBrowserState(sessionId);
+  return state?.url ?? null;
+}
+
+/**
  * Resolve a selector using the priority chain:
  * 1. CSS/DOM selector (if provided)
  * 2. Accessibility attributes (role, aria-label, data-testid)
