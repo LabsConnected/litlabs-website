@@ -15,12 +15,6 @@ import {
   X,
   Volume2,
   VolumeX,
-  Image as ImageIcon,
-  Music,
-  Video,
-  Code,
-  Globe,
-  Sparkles,
 } from "lucide-react";
 import {
   useVoiceSession,
@@ -85,9 +79,6 @@ interface CommandComposerProps {
   /** Execution mode selector: plan (read-only), act (approval for mutations), auto (autonomous) */
   executionMode?: "plan" | "act" | "auto";
   onExecutionModeChange?: (mode: "plan" | "act" | "auto") => void;
-  /** LiTT creation mode — what LiTT is about to create (image, video, music, code, website, auto) */
-  littMode?: import("../lib/studio-destinations").LiTTMode;
-  onLittModeChange?: (mode: import("../lib/studio-destinations").LiTTMode) => void;
   /** Hide the workspace/repo/branch context line (mobile: it moves into the sheet header) */
   hideContextLine?: boolean;
   /** Slimmer composer chrome for mobile: tighter padding, smaller min-height */
@@ -112,8 +103,6 @@ export default function CommandComposer({
   onClearSelectedElement,
   executionMode = "act",
   onExecutionModeChange,
-  littMode = "auto",
-  onLittModeChange,
   hideContextLine = false,
   compact = false,
   executionHint = null,
@@ -390,42 +379,6 @@ export default function CommandComposer({
         </div>
       )}
 
-      {/* LiTT mode quick-select — Image / Music / Video / Code / Website
-          These don't navigate away from the conversation. They tell LiTT
-          what to create, and the composer placeholder adapts accordingly. */}
-      {onLittModeChange && (
-        <div className="flex min-w-0 items-center gap-1 px-1 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-          {([
-            { id: "auto", icon: Sparkles, label: "Auto" },
-            { id: "image", icon: ImageIcon, label: "Image" },
-            { id: "music", icon: Music, label: "Music" },
-            { id: "video", icon: Video, label: "Video" },
-            { id: "code", icon: Code, label: "Code" },
-            { id: "website", icon: Globe, label: "Website" },
-          ] as const).map(({ id, icon: Icon, label }) => {
-            const isActive = littMode === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => onLittModeChange(id)}
-                className={`flex shrink-0 items-center gap-1 rounded-lg px-2.5 ${compact ? "py-0.5" : "py-1"} text-[11px] font-bold transition-all ${isActive ? "" : "hover:bg-white/5"}`}
-                style={{
-                  backgroundColor: isActive ? "rgba(168,85,247,0.15)" : "rgba(255,255,255,0.03)",
-                  color: isActive ? "#c4b5fd" : "var(--text-muted)",
-                  border: isActive ? "1px solid rgba(168,85,247,0.3)" : "1px solid transparent",
-                }}
-                aria-label={`LiTT ${label} mode`}
-                aria-pressed={isActive}
-              >
-                <Icon size={12} className="pointer-events-none shrink-0" />
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
       {/* Attachment previews — universal system */}
       <AttachmentPreviewStrip
         attachments={attachments}
@@ -638,17 +591,7 @@ export default function CommandComposer({
           placeholder={
             (voiceState === "listening" || voiceState === "user_speaking") && interimTranscript
               ? interimTranscript
-              : littMode === "image"
-                ? "Describe the image you want LiTT to create…"
-                : littMode === "video"
-                  ? "Describe your video idea… (generate it in the Video tool)"
-                  : littMode === "music"
-                    ? "Describe your music idea… (generate it in the Music tool)"
-                    : littMode === "code"
-                      ? "Tell LiTT what code to write or debug…"
-                      : littMode === "website"
-                        ? "Tell LiTT what website or app to build…"
-                        : agentMeta.placeholder
+              : agentMeta.placeholder
           }
           className={`studio-command-input order-first w-full flex-none resize-none bg-transparent px-1 ${compact ? "py-2" : "py-2.5"} outline-none`}
           style={{

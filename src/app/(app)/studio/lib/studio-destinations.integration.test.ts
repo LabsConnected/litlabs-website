@@ -64,28 +64,30 @@ describe("Phase 1.1 — Legacy routing integration", () => {
       expect(r.mode).toBe("forge");
     });
 
-    it("?tool=image → Studio / LiTT image mode (canonical chat surface)", () => {
+    it("?tool=image → Studio work surface (no mode choice)", () => {
       const r = mapLegacyToolToDestination("image");
       expect(r.destination).toBe("studio");
-      expect(r.littMode).toBe("image");
+      expect(r.legacyTool).toBe("chat");
+      expect(r.mode).toBe("work");
+      expect(r).not.toHaveProperty("littMode");
     });
 
-    it("?tool=video → Studio / LiTT video mode", () => {
+    it("?tool=video → Studio work surface", () => {
       const r = mapLegacyToolToDestination("video");
       expect(r.destination).toBe("studio");
-      expect(r.littMode).toBe("video");
+      expect(r.mode).toBe("work");
     });
 
-    it("?tool=audio → Studio / LiTT music mode", () => {
+    it("?tool=audio → Studio work surface", () => {
       const r = mapLegacyToolToDestination("audio");
       expect(r.destination).toBe("studio");
-      expect(r.littMode).toBe("music");
+      expect(r.mode).toBe("work");
     });
 
-    it("?tool=color → Studio / LiTT image mode (color tool removed, legacy redirect)", () => {
+    it("?tool=color → Studio work surface (color tool removed, legacy redirect)", () => {
       const r = mapLegacyToolToDestination("color");
       expect(r.destination).toBe("studio");
-      expect(r.littMode).toBe("image");
+      expect(r.mode).toBe("work");
     });
 
     it("?tool=assets → Assets", () => {

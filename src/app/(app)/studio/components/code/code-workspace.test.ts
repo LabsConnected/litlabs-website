@@ -19,7 +19,7 @@ describe("Studio Code/Preview URL separation", () => {
     const r = mapLegacyToolToDestination("code");
     expect(r.destination).toBe("studio");
     expect(r.mode).toBe("code");
-    // Code canonicalizes to the LiTT chat surface with littMode=code
+    // Code canonicalizes to the LiTT chat surface (legacyTool=chat)
     expect(r.legacyTool).toBe("chat");
   });
 
