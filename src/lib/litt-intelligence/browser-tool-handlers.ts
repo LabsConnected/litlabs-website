@@ -19,6 +19,7 @@
 import "server-only";
 import {
   executeBrowserAction,
+  closeSession,
   getStagehand,
   takeScreenshot,
   logBlockedBrowserNavigation,
@@ -747,12 +748,20 @@ export async function browserReload(
 
 /**
  * browser.close — Close the browser session
+ *
+ * Phase 5: closing goes through the full lifecycle. The action itself
+ * runs via executeBrowserAction (multi-instance re-attach + audit
+ * trail), then closeSession closes the DB row and settles BITS
+ * immediately. A raw stagehand.close() alone left the row active-like
+ * and never settled the meter — the Phase 4 gap this closes. Settle is
+ * idempotent via `browser:settle:<sessionId>`, so this can never
+ * double-charge, even if the agent closes twice.
  */
 export async function browserClose(
   ctx: BrowserToolContext,
   _inputs: Record<string, unknown>,
 ): Promise<BrowserActionResult> {
-  return executeBrowserAction(
+  const result = await executeBrowserAction(
     ctx.sessionId,
     ctx.userId,
     "browser.close",
@@ -766,6 +775,11 @@ export async function browserClose(
       };
     },
   );
+  // Close the row + settle even when the action couldn't attach (the
+  // provider session may already be gone) — settle is a no-op replay
+  // when this process already settled it.
+  await closeSession(ctx.sessionId, ctx.userId).catch(() => {});
+  return result;
 }
 
 // ─── Tool handler registry ───────────────────────────────────────
