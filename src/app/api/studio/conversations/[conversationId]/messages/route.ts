@@ -518,6 +518,12 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       executionMode: canonicalCtx.executionMode,
       enableBuildFix: true,
       model: typeof body.model === "string" ? body.model : undefined,
+      // Authenticated user — injected server-side into user-scoped tools
+      // (browser.*) at execution time; the model never supplies userId.
+      userId,
+      // Conversation scope — injected into browser.start_session so the
+      // agent reuses its live browser session across chat turns.
+      conversationId: conversation.id,
       // Quality loop: gate serious ACT/AUTO-mode builds through the
       // UNDERSTAND→VERIFY evidence stages + visual-quality judge.
       qualityLoop: shouldEnableQualityLoop(canonicalCtx.executionMode, conversation.projectId)

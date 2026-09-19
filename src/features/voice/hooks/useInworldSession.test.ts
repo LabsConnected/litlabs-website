@@ -323,6 +323,81 @@ describe("useInworldSession — TTS state machine", () => {
     expect(ws.sent.length).toBe(sentBefore);
   });
 
+  it("speakText prepends the TTS-2 style steering tag to the spoken text", async () => {
+    const { result } = renderHook(() => useInworldSession({}));
+    const ws = await connectAndWait(result);
+
+    const speakPromise = act(async () => {
+      const p = result.current.speakText("Hello, world.");
+      await Promise.resolve();
+      await Promise.resolve();
+      const itemCreate = ws.sent.find((m) => m.type === "conversation.item.create") as {
+        item: { content: Array<{ text: string }> };
+      };
+      const spoken = itemCreate.item.content[0].text;
+      expect(spoken.startsWith("[deep, calm")).toBe(true);
+      expect(spoken).toContain("Hello, world.");
+      ws.__fireMessage({ type: "response.done" });
+      await p;
+    });
+    await speakPromise;
+  });
+
+  it("speakText sends a single response.create for short text (no chunk stitching)", async () => {
+    const { result } = renderHook(() => useInworldSession({}));
+    const ws = await connectAndWait(result);
+
+    const speakPromise = act(async () => {
+      const p = result.current.speakText("Short spoken summary.");
+      await Promise.resolve();
+      await Promise.resolve();
+      const responseCreates = ws.sent.filter((m) => m.type === "response.create");
+      expect(responseCreates).toHaveLength(1);
+      ws.__fireMessage({ type: "response.done" });
+      await p;
+    });
+    await speakPromise;
+  });
+
+  it("didLastTtsPlayAudio is false when no audio was played", async () => {
+    const { result } = renderHook(() => useInworldSession({}));
+    const ws = await connectAndWait(result);
+
+    expect(result.current.didLastTtsPlayAudio()).toBe(false);
+    const speakPromise = act(async () => {
+      const p = result.current.speakText("Hello, world.");
+      await Promise.resolve();
+      await Promise.resolve();
+      ws.__fireMessage({ type: "response.done" });
+      await p;
+    });
+    await speakPromise;
+    expect(result.current.didLastTtsPlayAudio()).toBe(false);
+  });
+
+  it("didLastTtsPlayAudio is true after an audio delta arrives", async () => {
+    const { result } = renderHook(() => useInworldSession({}));
+    const ws = await connectAndWait(result);
+
+    const speakPromise = act(async () => {
+      const p = result.current.speakText("Hello, world.");
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(result.current.didLastTtsPlayAudio()).toBe(false);
+      // Two silent PCM16 samples, base64-encoded
+      ws.__fireMessage({
+        type: "response.output_audio.delta",
+        delta: btoa("\x00\x00\x01\x00"),
+      });
+      await Promise.resolve();
+      expect(result.current.didLastTtsPlayAudio()).toBe(true);
+      ws.__fireMessage({ type: "response.done" });
+      await p;
+    });
+    await speakPromise;
+    expect(result.current.didLastTtsPlayAudio()).toBe(true);
+  });
+
   it("errors from the server set state to 'error' and call onError", async () => {
     const onError = vi.fn();
     const { result } = renderHook(() => useInworldSession({ onError }));

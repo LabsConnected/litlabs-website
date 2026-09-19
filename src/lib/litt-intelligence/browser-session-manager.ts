@@ -24,6 +24,15 @@ import "server-only";
 import { randomUUID } from "crypto";
 import { Stagehand } from "@browserbasehq/stagehand";
 import { supabaseAdmin } from "@/lib/supabase";
+// Phase 4 — BITS metering: gates consulted per action, settlement on
+// close. Type-only in the other direction (browser-billing imports
+// BrowserSession as a type), so there is no runtime import cycle.
+import {
+  checkActionGate,
+  recordBrowserAction,
+  billingMetadata,
+  settleBrowserSession,
+} from "./browser-billing";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -60,6 +69,13 @@ export interface BrowserActionResult {
   error?: string;
   screenshotUrl?: string;
   durationMs: number;
+  /**
+   * Phase 4: number of Stagehand MODEL calls (act()/extract()) this
+   * action made. Only set by handlers that use the model-fallback path;
+   * successful actions accrue BROWSER_MODEL_CALL_BITS each via the
+   * billing accumulator. Failed actions accrue 0 (P1-3 precedent).
+   */
+  modelCalls?: number;
 }
 
 export interface StartSessionOptions {
@@ -217,6 +233,31 @@ export async function dbGetActions(
 
   if (error || !data) return [];
   return data as Record<string, unknown>[];
+}
+
+/**
+ * Log a navigation that the URL policy blocked — before the browser ever
+ * saw it. Kept in the same `browser_actions` audit table as executed
+ * actions (success: false), so the audit trail records every navigation
+ * host the agent attempted, not just the ones that ran.
+ */
+export async function logBlockedBrowserNavigation(
+  sessionId: string,
+  userId: string,
+  url: string,
+  reason: string,
+): Promise<void> {
+  await dbInsertAction({
+    sessionId,
+    userId,
+    actor: "agent",
+    action: "browser.navigate",
+    inputs: { url, blockedByPolicy: true },
+    success: false,
+    result: null,
+    error: `Navigation blocked by URL policy: ${reason}`,
+    durationMs: 0,
+  }).catch(() => {});
 }
 
 // ─── Session lifecycle ───────────────────────────────────────────
@@ -391,12 +432,18 @@ export async function returnControl(
 
 /**
  * Close a browser session and clean up resources.
+ *
+ * Phase 4: settling BITS is part of closing. The accrued burn is
+ * debited ONCE (idempotency key browser:settle:<sessionId>) after the
+ * provider session is torn down. Settle is best-effort and never blocks
+ * the close — a settle failure is returned, never thrown.
  */
 export async function closeSession(
   sessionId: string,
   userId: string,
 ): Promise<void> {
   const active = activeSessions.get(sessionId);
+  const inMemorySession = active?.session ?? null;
   if (active) {
     await active.stagehand.close().catch(() => {});
     activeSessions.delete(sessionId);
@@ -406,6 +453,11 @@ export async function closeSession(
     status: "closed",
     closed_at: new Date().toISOString(),
   });
+
+  const session = inMemorySession ?? (await dbGetSession(sessionId, userId));
+  if (session) {
+    await settleBrowserSession(session).catch(() => {});
+  }
 }
 
 /**
@@ -465,6 +517,29 @@ export async function executeBrowserAction(
     };
   }
 
+  // Phase 4 — abuse gates, checked before every action:
+  // per-session action cap (the 101st action is refused) and the daily
+  // minute quota (quota exceeded → the session PAUSES with a
+  // plain-English message, never a silent stall). Fail-open if the gate
+  // itself errors: metering must never break the browser's ability to
+  // run — the ledger is the billing backstop. (Fail-closed is only for
+  // session START via preflightBrowserStart.)
+  const gate = await checkActionGate(
+    sessionId,
+    userId,
+    session.createdAt,
+  ).catch((): { allowed: true } => ({ allowed: true }));
+  if (!gate.allowed) {
+    if (gate.pause) {
+      await pauseSession(sessionId, userId).catch(() => {});
+    }
+    return {
+      success: false,
+      error: gate.message,
+      durationMs: 0,
+    };
+  }
+
   const stagehand = getStagehand(sessionId);
   if (!stagehand) {
     return {
@@ -490,6 +565,15 @@ export async function executeBrowserAction(
     result.durationMs = Date.now() - start;
   }
 
+  // Phase 4 — accumulate burn for the session: attempts (success or
+  // failure) count toward the per-session action cap; only successful
+  // results accrue model-call surcharges (provider failure = 0 BITS for
+  // that action — P1-3 precedent).
+  recordBrowserAction(sessionId, {
+    success: result.success,
+    modelCalls: result.modelCalls ?? 0,
+  });
+
   // Log to audit trail
   await dbInsertAction({
     sessionId,
@@ -504,8 +588,11 @@ export async function executeBrowserAction(
     durationMs: result.durationMs,
   });
 
-  // Update session activity
-  await dbUpdateSession(sessionId, { updated_at: new Date().toISOString() });
+  // Update session activity (+ persist the billing accumulator snapshot
+  // into metadata in the same write — forensic backup for the meter).
+  await dbUpdateSession(sessionId, {
+    metadata: { ...(session.metadata ?? {}), billing: billingMetadata(sessionId) },
+  });
 
   return result;
 }
@@ -547,6 +634,10 @@ export async function closeIdleSessions(): Promise<number> {
         status: "closed",
         closed_at: new Date().toISOString(),
       });
+      // Phase 4: idle-TTL close settles BITS too (one ledger write,
+      // idempotent — a later explicit close of the same session
+      // settles 0 and replays nothing).
+      await settleBrowserSession(active.session).catch(() => {});
       closed++;
     }
   }
@@ -568,9 +659,137 @@ export async function closeAllUserSessions(userId: string): Promise<number> {
         status: "closed",
         closed_at: new Date().toISOString(),
       });
+      // Phase 4: settle BITS on close, same as closeSession.
+      await settleBrowserSession(active.session).catch(() => {});
       closed++;
     }
   }
 
   return closed;
+}
+
+// ─── Live status (Phase 2: backs the Studio status chip) ──────────
+
+export type BrowserLiveState = "live" | "idle" | "disconnected";
+
+export interface BrowserLiveStatus {
+  /** "live": a Stagehand is driving in this process. "idle": a session
+   *  exists but is not currently drivable (paused, human-controlled, or
+   *  recorded active without a live Stagehand here). "disconnected": none. */
+  state: BrowserLiveState;
+  sessionId: string | null;
+  controller: Controller | null;
+  sessionStatus: SessionStatus | null;
+  /** ISO timestamp of the last known activity, if any. */
+  lastActivityAt: string | null;
+}
+
+/**
+ * Honest liveness check for the Studio status chip.
+ *
+ * Never assumes: "live" requires a Stagehand instance present in THIS
+ * process's registry with fresh activity inside the idle TTL. The check
+ * reads the in-memory registry directly (without refreshing heartbeats —
+ * a status poll must not resurrect an idle session) and falls back to
+ * the DB row for "idle" (a session exists but isn't drivable here).
+ * Sessions whose last activity is past the TTL are reported as
+ * "disconnected", not "idle".
+ */
+export async function getLiveSessionStatus(
+  userId: string,
+  conversationId?: string,
+): Promise<BrowserLiveStatus> {
+  const now = Date.now();
+
+  const inProcess = [...activeSessions.values()]
+    .filter((a) => a.session.userId === userId)
+    .filter((a) =>
+      conversationId ? a.session.conversationId === conversationId : true,
+    )
+    .filter((a) => now - a.lastActivity <= SESSION_IDLE_TIMEOUT_MS)
+    .sort((a, b) => b.lastActivity - a.lastActivity)[0];
+
+  if (inProcess) {
+    const { session } = inProcess;
+    if (session.status === "active" || session.status === "agent_control") {
+      return {
+        state: "live",
+        sessionId: session.id,
+        controller: session.controller,
+        sessionStatus: session.status,
+        lastActivityAt: new Date(inProcess.lastActivity).toISOString(),
+      };
+    }
+    // Paused or human-controlled: a session exists, but the agent is not
+    // driving it right now.
+    return {
+      state: "idle",
+      sessionId: session.id,
+      controller: session.controller,
+      sessionStatus: session.status,
+      lastActivityAt: new Date(inProcess.lastActivity).toISOString(),
+    };
+  }
+
+  // DB fallback: a recorded-active session with no live Stagehand in this
+  // process. Report "idle" (it exists; the agent can re-acquire it) unless
+  // it is past the idle TTL, in which case it is honestly "disconnected".
+  const dbSessions = await dbGetActiveSessions(userId).catch(() => []);
+  const dbCandidate = dbSessions
+    .filter((s) =>
+      conversationId ? s.conversationId === conversationId : true,
+    )
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+
+  if (dbCandidate) {
+    const lastActivityMs = new Date(dbCandidate.updatedAt).getTime();
+    const lastActivityAt = Number.isNaN(lastActivityMs)
+      ? null
+      : new Date(lastActivityMs).toISOString();
+    if (!Number.isNaN(lastActivityMs) && now - lastActivityMs <= SESSION_IDLE_TIMEOUT_MS) {
+      return {
+        state: "idle",
+        sessionId: dbCandidate.id,
+        controller: dbCandidate.controller,
+        sessionStatus: dbCandidate.status,
+        lastActivityAt,
+      };
+    }
+  }
+
+  return {
+    state: "disconnected",
+    sessionId: null,
+    controller: null,
+    sessionStatus: null,
+    lastActivityAt: null,
+  };
+}
+
+// ─── Test seams ───────────────────────────────────────────────────
+// The in-memory registry is module-private by design; these helpers exist
+// so TTL-expiry and liveness behavior can be tested without a live
+// Browserbase account. Never used in production code paths.
+
+export interface TestActiveSessionEntry {
+  stagehand: Stagehand;
+  session: BrowserSession;
+  lastActivity: number;
+}
+
+/** Register a session directly in the in-memory registry (tests only). */
+export function __registerActiveSessionForTest(
+  entry: TestActiveSessionEntry,
+): void {
+  activeSessions.set(entry.session.id, entry);
+}
+
+/** Number of sessions currently in the in-memory registry (tests only). */
+export function __activeSessionCountForTest(): number {
+  return activeSessions.size;
+}
+
+/** Clear the in-memory registry without touching the provider (tests only). */
+export function __resetActiveSessionsForTest(): void {
+  activeSessions.clear();
 }

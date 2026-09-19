@@ -21,8 +21,10 @@ import {
   executeBrowserAction,
   getStagehand,
   takeScreenshot,
+  logBlockedBrowserNavigation,
   type BrowserActionResult,
 } from "./browser-session-manager";
+import { normalizeBrowserUrl, checkBrowserUrlPolicy } from "./browser-url-policy";
 
 // Playwright-compatible page interface (Stagehand's Page type is narrower)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -68,6 +70,19 @@ async function getBrowserStateWithScreenshot(
 }
 
 /**
+ * Current page URL for a session (Phase 3: names the site on in-chat
+ * approval cards, e.g. `Click "Buy now" on example.com`). Null when the
+ * session has no live page in this process — callers treat a null as
+ * "site unknown", never as a failure.
+ */
+export async function getBrowserPageUrl(
+  sessionId: string,
+): Promise<string | null> {
+  const state = await getBrowserState(sessionId);
+  return state?.url ?? null;
+}
+
+/**
  * Resolve a selector using the priority chain:
  * 1. CSS/DOM selector (if provided)
  * 2. Accessibility attributes (role, aria-label, data-testid)
@@ -105,21 +120,57 @@ function resolveSelector(inputs: {
 
 /**
  * browser.navigate — Navigate to a URL
+ *
+ * Navigate-time URL policy (§5.3) applies BEFORE the browser is touched:
+ * loopback/link-local/metadata IPs, non-http(s) schemes, and phishing
+ * patterns are blocked and the attempt is logged to the audit trail.
+ * The blocked navigation never reaches the page.
  */
 export async function browserNavigate(
   ctx: BrowserToolContext,
   inputs: { url: string; waitUntil?: "load" | "domcontentloaded" | "networkidle" },
 ): Promise<BrowserActionResult> {
+  const raw = typeof inputs.url === "string" ? inputs.url : "";
+  const normalized = normalizeBrowserUrl(raw);
+  if (!normalized) {
+    await logBlockedBrowserNavigation(
+      ctx.sessionId,
+      ctx.userId,
+      raw,
+      `"${raw}" is not a valid web address`,
+    );
+    return {
+      success: false,
+      error: `Navigation blocked: "${raw}" is not a valid web address.`,
+      durationMs: 0,
+    };
+  }
+
+  const policy = checkBrowserUrlPolicy(normalized);
+  if (!policy.allowed) {
+    await logBlockedBrowserNavigation(
+      ctx.sessionId,
+      ctx.userId,
+      normalized,
+      policy.reason ?? "blocked by URL policy",
+    );
+    return {
+      success: false,
+      error: `Navigation blocked: ${policy.reason}.`,
+      durationMs: 0,
+    };
+  }
+
   return executeBrowserAction(
     ctx.sessionId,
     ctx.userId,
     "browser.navigate",
-    inputs,
+    { ...inputs, url: normalized },
     async (stagehand) => {
       const page = stagehand.context.pages()[0];
       if (!page) return { success: false, error: "No page available", durationMs: 0 };
 
-      await page.goto(inputs.url, {
+      await page.goto(normalized, {
         waitUntil: inputs.waitUntil ?? "domcontentloaded",
       });
       const state = await getBrowserStateWithScreenshot(ctx.sessionId);
@@ -247,6 +298,7 @@ export async function browserClick(
       const page = stagehand.context.pages()[0] as PlaywrightPage;
       if (!page) return { success: false, error: "No page available", durationMs: 0 };
 
+      let modelCalls = 0;
       // Coordinate fallback
       if (inputs.x !== undefined && inputs.y !== undefined) {
         await page.mouse.click(inputs.x, inputs.y);
@@ -261,9 +313,11 @@ export async function browserClick(
         }
 
         if (selector.startsWith("text=")) {
-          // Use Stagehand's act() for text-based interaction
+          // Use Stagehand's act() for text-based interaction — this is a
+          // MODEL call (Phase 4: accrues the per-action model surcharge).
           const text = selector.slice(5);
           await stagehand.act(`Click the element with text "${text}"`);
+          modelCalls = 1;
         } else {
           await page.click(selector, { timeout: 10000 as number });
         }
@@ -276,6 +330,7 @@ export async function browserClick(
       return {
         success: true,
         data: state,
+        modelCalls,
         durationMs: 0,
       };
     },
@@ -306,6 +361,7 @@ export async function browserType(
       const page = stagehand.context.pages()[0] as PlaywrightPage;
       if (!page) return { success: false, error: "No page available", durationMs: 0 };
 
+      let modelCalls = 0;
       const selector = resolveSelector(inputs);
       if (!selector) {
         return {
@@ -316,8 +372,10 @@ export async function browserType(
       }
 
       if (selector.startsWith("text=")) {
+        // Stagehand act() = model call (Phase 4 surcharge).
         const text = selector.slice(5);
         await stagehand.act(`Find the input field near "${text}" and type "${inputs.value}"`);
+        modelCalls = 1;
       } else {
         if (inputs.clear !== false) {
           await page.fill(selector, "").catch(() => {});
@@ -330,6 +388,7 @@ export async function browserType(
       return {
         success: true,
         data: state,
+        modelCalls,
         durationMs: 0,
       };
     },
@@ -358,6 +417,7 @@ export async function browserSelect(
       const page = stagehand.context.pages()[0] as PlaywrightPage;
       if (!page) return { success: false, error: "No page available", durationMs: 0 };
 
+      let modelCalls = 0;
       const selector = resolveSelector(inputs);
       if (!selector) {
         return {
@@ -368,8 +428,10 @@ export async function browserSelect(
       }
 
       if (selector.startsWith("text=")) {
+        // Stagehand act() = model call (Phase 4 surcharge).
         const text = selector.slice(5);
         await stagehand.act(`Find the select dropdown near "${text}" and select "${inputs.label ?? inputs.value}"`);
+        modelCalls = 1;
       } else {
         await page.selectOption(selector, inputs.value, { timeout: 10000 as number });
       }
@@ -379,6 +441,7 @@ export async function browserSelect(
       return {
         success: true,
         data: state,
+        modelCalls,
         durationMs: 0,
       };
     },
@@ -537,6 +600,8 @@ export async function browserExtract(
 
       return {
         success: true,
+        // stagehand.extract() is model-driven (Phase 4 surcharge).
+        modelCalls: 1,
         data: { ...state, extracted: result },
         durationMs: 0,
       };

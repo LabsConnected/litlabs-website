@@ -202,6 +202,20 @@ const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
     const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.close"];
     return ((inputs: Record<string, unknown>) => h({ sessionId: inputs.sessionId as string, userId: inputs.userId as string }, inputs)) as ToolHandler;
   },
+  // browser.start_session is the entry point: it provisions the sessionId
+  // the other browser.* tools require. Beta-gated inside the handler.
+  // Phase 2: get-or-reuse — an existing live session for this conversation
+  // is reused instead of starting a new one (multi-turn browsing).
+  "browser.start_session": async () => {
+    const m = await import("./browser-agent");
+    return (async (inputs: Record<string, unknown>) => {
+      const userId = inputs.userId as string;
+      const task = typeof inputs.task === "string" ? inputs.task : undefined;
+      const conversationId =
+        typeof inputs.conversationId === "string" ? inputs.conversationId : undefined;
+      return m.getOrReuseAgentBrowserSession({ userId, task, conversationId });
+    }) as ToolHandler;
+  },
   // ─── Realtime internet tools — delegate to @litt/agent-core ──
   // The ONE shared implementation (SSRF-safe fetch, NWS weather, DuckDuckGo
   // search). Surfaces adapt it; they never reimplement the network logic.
@@ -1550,6 +1564,45 @@ export function registerInternalTools(): void {
       handler: lazyHandlers["deploy.verify"],
     },
     // ─── Browser Agent Mode tools ─────────────────────────────
+    // browser.start_session is the entry point: call it FIRST before any
+    // other browser.* tool — they all require the sessionId it returns.
+    {
+      tool: {
+        id: "browser.start_session",
+        name: "Browser Start Session",
+        description:
+          "Start a new agent browser session (fresh clean profile: no cookies, no logins, no extensions). Returns a sessionId for the other browser.* tools. If you already have a live session for this conversation it is REUSED (reused: true) instead of starting a new one — keep using the returned sessionId across turns. Private beta: only the owner's account may start sessions; other accounts get an honest error. After starting, announce in chat what you are about to do with the browser. The session auto-closes after 10 idle minutes; close it yourself with browser.close when done. " +
+          "If a page needs a login, CAPTCHA, MFA, or anything else you cannot do: do NOT try to bypass it and do NOT ask the user for credentials — announce in chat that you need them to take over, naming the blocker (e.g. 'I need you to take over: this page needs a login. Tap Take control, sign in, then Resume and I'll continue.'). While the user is in control your browser actions are refused; resume only after they tap Resume.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            userId: { type: "string" },
+            task: {
+              type: "string",
+              description: "What the browser session is for, e.g. 'screenshot example.com'",
+            },
+            conversationId: {
+              type: "string",
+              description: "Injected server-side; enables session reuse across chat turns.",
+            },
+          },
+          required: ["userId"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["browser:control"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 60000,
+        idempotent: false,
+        readOnly: true,
+        permissionLevel: "read",
+        enabled: true,
+      },
+      handler: lazyHandlers["browser.start_session"],
+    },
     // Read-only browser tools (auto-approved)
     {
       tool: {
@@ -1809,7 +1862,7 @@ export function registerInternalTools(): void {
         requiredCapabilities: [],
         requiredPermissions: ["browser:control"],
         risk: "medium",
-        approvalPolicy: READ_ONLY_APPROVAL,
+        approvalPolicy: MUTATION_APPROVAL,
         timeoutMs: 15000,
         idempotent: false,
         readOnly: false,
@@ -1844,7 +1897,7 @@ export function registerInternalTools(): void {
         requiredCapabilities: [],
         requiredPermissions: ["browser:control"],
         risk: "medium",
-        approvalPolicy: READ_ONLY_APPROVAL,
+        approvalPolicy: MUTATION_APPROVAL,
         timeoutMs: 15000,
         idempotent: false,
         readOnly: false,
@@ -1877,7 +1930,7 @@ export function registerInternalTools(): void {
         requiredCapabilities: [],
         requiredPermissions: ["browser:control"],
         risk: "medium",
-        approvalPolicy: READ_ONLY_APPROVAL,
+        approvalPolicy: MUTATION_APPROVAL,
         timeoutMs: 15000,
         idempotent: false,
         readOnly: false,
@@ -1908,7 +1961,7 @@ export function registerInternalTools(): void {
         requiredCapabilities: [],
         requiredPermissions: ["browser:control"],
         risk: "low",
-        approvalPolicy: READ_ONLY_APPROVAL,
+        approvalPolicy: MUTATION_APPROVAL,
         timeoutMs: 10000,
         idempotent: true,
         readOnly: false,
@@ -1937,7 +1990,7 @@ export function registerInternalTools(): void {
         requiredCapabilities: [],
         requiredPermissions: ["browser:control"],
         risk: "low",
-        approvalPolicy: READ_ONLY_APPROVAL,
+        approvalPolicy: MUTATION_APPROVAL,
         timeoutMs: 10000,
         idempotent: true,
         readOnly: false,

@@ -151,7 +151,16 @@ async function startAndWaitForPreview(
   },
   progress: ProgressEmitter,
 ): Promise<"ready" | "failed" | "timeout"> {
-  await transport.startPreview();
+  try {
+    await transport.startPreview();
+  } catch {
+    // A rejected start request (e.g. preview_no_dev_command on a workspace
+    // with no servable entry) is a normal "failed" outcome — returning it
+    // lets callers run the repair loop or surface a pending approval
+    // instead of escaping as a generic launch crash.
+    progress.emit({ type: "preview_status", status: "failed", healthy: false });
+    return "failed";
+  }
 
   const deadline = Date.now() + opts.maxWaitMs;
   while (Date.now() < deadline) {
@@ -504,6 +513,20 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           });
         }
       }
+    }
+
+    // A pause that landed before any workspace mutation has nothing to
+    // serve — starting a preview on an empty workspace fails with
+    // preview_no_dev_command and masks the pending approval behind a
+    // misleading launch error. Return the pause directly; the approval
+    // boundary brings the preview up once the approved mutation lands.
+    if (pausedApproval && !hasAppliedMutation(agentResult)) {
+      return baseResult({
+        finalText: `I need your approval to continue: ${pausedApproval.reason}`,
+        pendingApproval: pausedApproval,
+        repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
+        runtimeRepairAttempts,
+      });
     }
 
     // Phase 2: start and verify the live preview

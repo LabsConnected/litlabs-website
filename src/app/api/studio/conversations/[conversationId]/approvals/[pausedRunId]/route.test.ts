@@ -193,6 +193,40 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
     );
   });
 
+  it("reports the real model failure when the resumed loop dies after an approved mutation", async () => {
+    // Production defect (2026-09-19 golden run): the resumed loop executed
+    // the approved image.generate, then every provider route failed. The
+    // artifact gate masked that behind "No runnable website entry file was
+    // created" — a misleading error that hid the provider exhaustion.
+    vi.mocked(resumeAgentLoopV2).mockResolvedValue({
+      finalText: "LiTT couldn't complete this request because all currently available AI routes were unavailable or reached their limits.",
+      stepsUsed: 3,
+      toolCalls: [{ toolId: "image.generate", success: true, summary: "generated", mutating: true }],
+      cancelled: false,
+      modelFailed: "All tool-calling models failed. Attempts: gemini/gemini-3.6-flash(http_429)",
+      modelFailureText:
+        "LiTT couldn't complete this request because all currently available AI routes were unavailable or reached their limits.",
+    } as any);
+
+    const res = await POST(makeRequest("approved"), routeParams);
+    expect(res.status).toBe(202);
+
+    await vi.waitFor(() => expect(markRunFailed).toHaveBeenCalled());
+    expect(markRunFailed).toHaveBeenCalledWith(
+      PAUSED_ID,
+      "user_123",
+      "LiTT couldn't complete this request because all currently available AI routes were unavailable or reached their limits.",
+      expect.any(String),
+    );
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      "msg-assistant-1",
+      "user_123",
+      "failed",
+      expect.stringContaining("all currently available AI routes"),
+    );
+    expect(markRunCompleted).not.toHaveBeenCalled();
+  });
+
   it("a rejection closes the awaiting message with a truthful declined note and never resumes", async () => {
     const res = await POST(makeRequest("rejected"), routeParams);
     expect(res.status).toBe(200);

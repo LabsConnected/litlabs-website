@@ -28,12 +28,15 @@ describe("final-acceptance-golden workflow secret wiring", () => {
     expect(block).toMatch(/LITT_GOLDEN_PROJECT_ID:\s*""/);
   });
 
-  it("resolves deploy approval before the preview polling budget can expire it", () => {
+  it("resolves the first approval before the preview polling budget can expire it", () => {
     const script = readFileSync(
       path.resolve(__dirname, "../scripts/final-acceptance/prod-mobile-golden.mjs"),
       "utf-8",
     );
-    const approvalPost = script.indexOf("deployApprovalResponse = await page.request.post");
+    // Whichever gated tool the run paused on (project.deploy, or a mutation
+    // gate like image.generate) is approved before the iframe wait so the
+    // resumed run progresses while preview recovery is exercised.
+    const approvalPost = script.indexOf("firstApprovalResponse = await page.request.post");
     const previewPolling = script.indexOf("const iframe = page.getByTestId(\"preview-iframe\")");
     expect(approvalPost).toBeGreaterThan(-1);
     expect(previewPolling).toBeGreaterThan(-1);

@@ -13,6 +13,7 @@ import {
   takeScreenshot,
   closeIdleSessions,
 } from "@/lib/litt-intelligence/browser-session-manager";
+import { preflightBrowserStart } from "@/lib/litt-intelligence/browser-billing";
 
 export const runtime = "nodejs";
 
@@ -81,6 +82,27 @@ async function handler(req: NextRequest) {
         const conversationId = typeof body.conversationId === "string" ? body.conversationId : undefined;
         const model = typeof body.model === "string" ? body.model : undefined;
         const useProxies = body.useProxies === true;
+
+        // Phase 4 — BITS preflight (fail closed): balance, caps, quota,
+        // and the tool-path start rate limit, BEFORE any provider
+        // session exists. The route keeps its withRateLimit guard; this
+        // is the billing layer.
+        const preflight = await preflightBrowserStart(
+          userId,
+          (await dbGetActiveSessions(userId).catch(() => [])).length,
+        );
+        if (!preflight.ok) {
+          const status =
+            preflight.error === "insufficient_bits" ||
+            preflight.error === "spend_ceiling_exceeded" ||
+            preflight.error === "billing_unavailable"
+              ? 402
+              : 429;
+          return NextResponse.json(
+            { error: preflight.message, code: preflight.error },
+            { status },
+          );
+        }
 
         // Clean up idle sessions before starting a new one
         await closeIdleSessions().catch(() => {});

@@ -329,6 +329,9 @@ export async function POST(
     executionMode: resolved.executionMode,
     enableBuildFix: true,
     signal: abortController.signal,
+    // Conversation scope — injected into browser.start_session so the
+    // resumed run reuses the live browser session from before the pause.
+    conversationId,
     // Quality loop: resume with a fresh evidence session so the resumed
     // run is gated the same way (agent markers re-harvest from history).
     // AUTO resumes opt in too — an AUTO run pauses for deploy approval,
@@ -398,15 +401,24 @@ export async function POST(
       // existed on disk.
       const successfulMutation = result.toolCalls.some((call) => call.mutating && call.success);
       const failedMutation = result.toolCalls.some((call) => call.mutating && !call.success);
-      let resumeArtifactError: string | undefined;
+      let resumeFailure: string | undefined;
       let resumePreview: Awaited<ReturnType<typeof ensureProjectPreviewReady>> | null = null;
       if (!result.pendingApproval && !result.cancelled) {
-        if (failedMutation && !successfulMutation) {
-          resumeArtifactError = "The approved workspace operation failed, so the project was not completed.";
+        if (result.modelFailed) {
+          // The resumed loop stopped because the model itself failed
+          // (provider routes exhausted, budget spent, upstream error).
+          // Surface that real reason — letting the artifact gate run here
+          // would mask it behind a misleading "no runnable entry file"
+          // error even though the approved mutation may have succeeded.
+          resumeFailure =
+            result.modelFailureText ??
+            `The resumed run could not complete: ${result.modelFailed}`;
+        } else if (failedMutation && !successfulMutation) {
+          resumeFailure = "The approved workspace operation failed, so the project was not completed.";
         } else if (successfulMutation) {
           resumePreview = await ensureProjectPreviewReady(transport);
           if (!resumePreview.ok) {
-            resumeArtifactError = resumePreview.error ?? "The project files were not runnable after approval.";
+            resumeFailure = resumePreview.error ?? "The project files were not runnable after approval.";
           }
         }
       } else if (result.pendingApproval && successfulMutation) {
@@ -416,16 +428,16 @@ export async function POST(
         resumePreview = await ensureProjectPreviewReady(transport).catch(() => null);
       }
 
-      if (resumeArtifactError) {
+      if (resumeFailure) {
         await writeResumedResultToTranscript({
           conversationId,
           userId,
           projectId: resolved.projectId,
           pausedRunId,
           status: "failed",
-          content: resumeArtifactError,
+          content: resumeFailure,
         });
-        await markRunFailed(pausedRunId, userId, resumeArtifactError, executionToken);
+        await markRunFailed(pausedRunId, userId, resumeFailure, executionToken);
         return;
       }
 

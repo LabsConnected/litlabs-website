@@ -60,6 +60,18 @@ export interface AgentLoopConfig {
   /** Upstream/client AbortSignal propagated to all provider calls. */
   signal?: AbortSignal;
   /**
+   * The authenticated user's ID. Injected server-side into user-scoped
+   * tools (browser.*) at execution time — the model must never supply
+   * userId itself. When absent, browser tools fail closed on validation.
+   */
+  userId?: string;
+  /**
+   * Studio conversation this run belongs to. Injected server-side into
+   * `browser.start_session` (for multi-turn session reuse) — the model
+   * must never supply it itself.
+   */
+  conversationId?: string;
+  /**
    * Opt-in to the LiTT quality loop (gated UNDERSTAND→VERIFY stages +
    * visual-quality judge). When enabled, the loop records stage evidence
    * from tool events and agent declarations, runs one visual inspection
@@ -212,6 +224,32 @@ function toToolDefinition(tool: LiTTToolDefinition): ToolDefinition {
   };
 }
 
+/**
+ * Browser tools are user-scoped: the session manager keys every session by
+ * the authenticated user, and sessions must never be addressable across
+ * users. The model must never supply userId itself (it would hallucinate
+ * it) — the server injects the real authenticated userId here, overriding
+ * anything the model passed.
+ */
+function withUserScopeForBrowserTools(
+  toolId: string,
+  inputs: Record<string, unknown>,
+  userId: string | undefined,
+  conversationId?: string | undefined,
+): Record<string, unknown> {
+  if (userId && toolId.startsWith("browser.")) {
+    const scoped: Record<string, unknown> = { ...inputs, userId };
+    // Session reuse key: the agent's browser.start_session call gets the
+    // server-known conversationId so an existing live session can be
+    // reused across chat turns. The model never supplies this itself.
+    if (toolId === "browser.start_session" && conversationId) {
+      scoped.conversationId = conversationId;
+    }
+    return scoped;
+  }
+  return inputs;
+}
+
 function toPermissionInfo(tool: LiTTToolDefinition): ToolPermissionInfo {
   return {
     toolId: tool.id,
@@ -223,6 +261,28 @@ function toPermissionInfo(tool: LiTTToolDefinition): ToolPermissionInfo {
     // whose capability is unavailable is never advertised or approved.
     requiredCapabilities: tool.requiredCapabilities,
   };
+}
+
+/**
+ * Phase 3: enrich the approval reason for mutating browser tools so the
+ * in-chat approval card names the exact action and target (e.g. `Click
+ * "Buy now" on example.com`) instead of a generic "Mutation requires
+ * approval". Non-browser tools keep the permission engine's reason
+ * untouched. Never throws — a description failure falls back to the
+ * permission engine's reason.
+ */
+async function pauseReasonFor(
+  toolId: string,
+  inputs: Record<string, unknown>,
+  fallback: string,
+): Promise<string> {
+  if (!toolId.startsWith("browser.")) return fallback;
+  try {
+    const { approvalReasonForBrowserAction } = await import("./browser-approval");
+    return await approvalReasonForBrowserAction(toolId, inputs, fallback);
+  } catch {
+    return fallback;
+  }
 }
 
 // ─── Quality loop hooks ───────────────────────────────────────────
@@ -649,10 +709,17 @@ export async function runAgentLoopV2(
       }
 
       if (permResult.requiresApproval) {
+        // Phase 3: browser mutations get an action-and-target description
+        // so the in-chat approval card says what is being approved.
+        const approvalReason = await pauseReasonFor(
+          toolCall.toolId,
+          toolCall.inputs,
+          permResult.reason ?? "Approval required",
+        );
         localProgress.emit({
           type: "approval_required",
           toolId: toolCall.toolId,
-          reason: permResult.reason ?? "Approval required",
+          reason: approvalReason,
         });
 
         // The pre-mutation checkpoint is created BEFORE this pause (see
@@ -676,7 +743,7 @@ export async function runAgentLoopV2(
           // them after the approved tool runs — approving one tool must not
           // silently drop the rest of the batch.
           return {
-            finalText: `I need your approval to run \`${toolCall.toolId}\`. ${permResult.reason ?? "This operation requires explicit approval."}`,
+            finalText: `I need your approval to run \`${toolCall.toolId}\`. ${approvalReason}`,
             stepsUsed,
             totalDurationMs: Date.now() - startTime,
             toolCalls: toolCallLog,
@@ -687,7 +754,7 @@ export async function runAgentLoopV2(
               toolId: toolCall.toolId,
               toolCallId: toolCall.toolCallId,
               inputs: toolCall.inputs,
-              reason: permResult.reason ?? "Approval required",
+              reason: approvalReason,
               pausedMessages: [...llmMessages],
               qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
               deferredToolCalls: deferredCallsAfterBatchPause(llmResponse.toolCalls, toolCall.toolCallId),
@@ -734,7 +801,7 @@ export async function runAgentLoopV2(
 
       try {
         // Use the registry's execute method, passing transport for V2 handlers
-        const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {
+        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId, cfg.conversationId), {
           hasApproval: !permResult.requiresApproval,
           availableCapabilities,
           transport,
@@ -1094,6 +1161,16 @@ export interface DeferredToolBatchContext {
   /** Upstream/client abort signal. Deferred execution must honor the same stop request as the resumed loop. */
   signal?: AbortSignal;
   state: DeferredToolBatchState;
+  /**
+   * Authenticated user id — injected into user-scoped tools (browser.*)
+   * at execution time. The model never supplies userId itself.
+   */
+  userId?: string;
+  /**
+   * Studio conversation id — injected into browser.start_session for
+   * multi-turn session reuse (mirrors AgentLoopConfig.conversationId).
+   */
+  conversationId?: string;
 }
 
 export interface DeferredToolBatchResult {
@@ -1207,10 +1284,17 @@ export async function executeDeferredToolCalls(
     }
 
     if (permResult.requiresApproval) {
+      // Phase 3: browser mutations get an action-and-target description
+      // on the nested gate too.
+      const approvalReason = await pauseReasonFor(
+        toolCall.toolId,
+        toolCall.inputs,
+        permResult.reason ?? "Approval required",
+      );
       ctx.localProgress.emit({
         type: "approval_required",
         toolId: toolCall.toolId,
-        reason: permResult.reason ?? "Approval required",
+        reason: approvalReason,
       });
 
       if (ctx.executionMode === "act") {
@@ -1221,7 +1305,7 @@ export async function executeDeferredToolCalls(
             toolId: toolCall.toolId,
             toolCallId: toolCall.toolCallId,
             inputs: toolCall.inputs,
-            reason: permResult.reason ?? "Approval required",
+            reason: approvalReason,
             pausedMessages: [...ctx.llmMessages],
             qualityLoopState: ctx.qualitySession ? snapshotQualityLoopSession(ctx.qualitySession) : undefined,
             deferredToolCalls: deferredCallsAfterBatchPause(deferred, toolCall.toolCallId),
@@ -1271,7 +1355,7 @@ export async function executeDeferredToolCalls(
 
     let result: ToolCallResult;
     try {
-      const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {
+      const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, ctx.userId, ctx.conversationId), {
         hasApproval: !permResult.requiresApproval,
         transport: ctx.transport,
       });
@@ -1426,7 +1510,7 @@ export async function resumeAgentLoopV2(
         error: "Cancelled by user",
       };
     } else try {
-      const execResult = await toolRegistry.execute(resume.toolId, resume.inputs, {
+      const execResult = await toolRegistry.execute(resume.toolId, withUserScopeForBrowserTools(resume.toolId, resume.inputs, cfg.userId, cfg.conversationId), {
         hasApproval: true,
         availableCapabilities,
         transport,
@@ -1563,6 +1647,8 @@ export async function resumeAgentLoopV2(
       maxOutputChars: cfg.maxOutputChars,
       signal: cfg.signal,
       state: deferredState,
+      userId: cfg.userId,
+      conversationId: cfg.conversationId,
     });
     hasInterveningMutation = deferredState.hasInterveningMutation;
     cancelled = deferredState.cancelled;
@@ -1736,7 +1822,14 @@ export async function resumeAgentLoopV2(
       }
 
       if (permResult.requiresApproval) {
-        localProgress.emit({ type: "approval_required", toolId: toolCall.toolId, reason: permResult.reason ?? "Approval required" });
+        // Phase 3: browser mutations get an action-and-target description
+        // on the resumed-run gate too.
+        const approvalReason = await pauseReasonFor(
+          toolCall.toolId,
+          toolCall.inputs,
+          permResult.reason ?? "Approval required",
+        );
+        localProgress.emit({ type: "approval_required", toolId: toolCall.toolId, reason: approvalReason });
 
         // Pause for approval in AUTO as well as ACT — the same contract as
         // the initial loop. A resumed run that reaches a second gated tool
@@ -1748,7 +1841,7 @@ export async function resumeAgentLoopV2(
         // executed — capture them as deferred calls so the next resume
         // re-injects them after the approved tool.
         return {
-          finalText: `I need your approval to run \`${toolCall.toolId}\`. ${permResult.reason ?? "This operation requires explicit approval."}`,
+          finalText: `I need your approval to run \`${toolCall.toolId}\`. ${approvalReason}`,
           stepsUsed,
           totalDurationMs: Date.now() - startTime,
           toolCalls: toolCallLog,
@@ -1759,7 +1852,7 @@ export async function resumeAgentLoopV2(
             toolId: toolCall.toolId,
             toolCallId: toolCall.toolCallId,
             inputs: toolCall.inputs,
-            reason: permResult.reason ?? "Approval required",
+            reason: approvalReason,
             pausedMessages: [...llmMessages],
             qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
             deferredToolCalls: deferredCallsAfterBatchPause(llmResponse.toolCalls, toolCall.toolCallId),
@@ -1789,7 +1882,7 @@ export async function resumeAgentLoopV2(
 
       let result: ToolCallResult;
       try {
-        const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {
+        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId, cfg.conversationId), {
           hasApproval: !permResult.requiresApproval,
           availableCapabilities,
           transport,
