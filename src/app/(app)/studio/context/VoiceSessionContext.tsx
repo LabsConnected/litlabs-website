@@ -6,7 +6,16 @@
  * ARCHITECTURE (v2 — ghost transcription fix):
  * - Uses useInworldSession for STT (WebSocket → voice-server proxy → Inworld)
  * - Uses Inworld TTS (inworld-tts-2 with configured INWORLD_LITT_VOICE / INWORLD_SPARK_VOICE)
- *   when the transport is connected, falling back to browser speechSynthesis
+ *   when the transport is connected. A single inline style tag steers delivery
+ *   ("deep, calm, precise" for LiTT) — the WebSocket API has no request-level
+ *   instruction field, so steering is inline, not in session config.
+ * - Spoken register: long replies are condensed to 1–2 spoken-style sentences
+ *   via /api/voice/speak-summary (gpt-4o-mini) before TTS — the full text
+ *   stays on screen, only the spoken form changes.
+ * - TTS fallback chain: Inworld → /api/voice/tts (OpenAI tts-1, server-side,
+ *   no getVoices race) → raw browser speechSynthesis (last resort only).
+ *   The fallback chain only fires if Inworld played NO audio yet
+ *   (double-speak guard).
  * - PUSH-TO-TALK ONLY: tap to start recording, tap again to stop.
  *   Hands-free/continuous mode is REMOVED to prevent ghost transcription.
  * - Client-side VAD gates when audio is sent to Inworld (see voice-vad.ts)
@@ -39,6 +48,10 @@ import {
   useState,
 } from "react";
 import { sanitizeSpeech } from "@/features/voice/lib/sanitizeSpeech";
+import {
+  fetchSpokenSummary,
+  SPOKEN_DIRECT_MAX_CHARS,
+} from "@/features/voice/lib/spokenSummary";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { createInitialTimingMetrics, computeLatencies, type VoiceTimingMetrics } from "@/features/voice/types";
 import { useInworldSession, type TranscriptMetadata } from "@/features/voice/hooks/useInworldSession";
@@ -290,6 +303,8 @@ export function VoiceSessionProvider({
   const onTranscriptCompleteRef = useRef<((text: string) => void) | null>(null);
   /** Recording timer interval. */
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** In-flight /api/voice/tts fallback audio element (cancelled by stopSpeaking). */
+  const fallbackAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Keep pref refs in sync
   useEffect(() => { ttsEnabledRef.current = ttsEnabled; }, [ttsEnabled]);
@@ -741,6 +756,10 @@ export function VoiceSessionProvider({
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
+    if (fallbackAudioRef.current) {
+      fallbackAudioRef.current.pause();
+      fallbackAudioRef.current = null;
+    }
     if (inworldConnectedRef.current) {
       inworldSession.interrupt();
     }
@@ -753,9 +772,58 @@ export function VoiceSessionProvider({
   }, [inworldSession]);
 
   // ---------------------------------------------------------------------------
+  // playTtsEndpointAudio — server-side TTS fallback (POST /api/voice/tts).
+  // Server-side synthesis avoids the browser getVoices() race: Chrome loads
+  // voices async, so the first-use raw-speechSynthesis fallback often got a
+  // random low-quality system voice.
+  // Fire-and-forget like the speechSynthesis path: returns true once audio
+  // starts playing (onDone fires when playback ends); false when the endpoint
+  // failed so the caller can try the last-resort speechSynthesis path.
+  // ---------------------------------------------------------------------------
+
+  const playTtsEndpointAudio = useCallback(
+    async (text: string, onDone: () => void): Promise<boolean> => {
+      try {
+        const agentId = useVoiceStore.getState().activeAgent;
+        const res = await fetch("/api/voice/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text,
+            voice: agentId === "spark" ? "nova" : "onyx",
+          }),
+        });
+        if (!res.ok) return false;
+        const data = (await res.json()) as { audioUrl?: unknown };
+        if (typeof data?.audioUrl !== "string" || !data.audioUrl) return false;
+
+        const audio = new Audio(data.audioUrl);
+        fallbackAudioRef.current = audio;
+        audio.onended = () => {
+          fallbackAudioRef.current = null;
+          onDone();
+        };
+        audio.onerror = () => {
+          fallbackAudioRef.current = null;
+          onDone();
+        };
+        // Throws on autoplay-policy rejection → catch → false → last resort.
+        await audio.play();
+        return true;
+      } catch {
+        fallbackAudioRef.current = null;
+        return false;
+      }
+    },
+    [],
+  );
+
+  // ---------------------------------------------------------------------------
   // speakText — TTS via Inworld (inworld-tts-2 with configured voice).
-  // Falls back to browser speechSynthesis if Inworld is not connected.
-  // Does NOT activate the microphone.
+  // Spoken register: long replies are condensed to 1–2 spoken-style sentences
+  // before TTS. Fallback chain: /api/voice/tts endpoint, then raw browser
+  // speechSynthesis as a last resort — and only if Inworld played no audio
+  // yet (double-speak guard). Does NOT activate the microphone.
   // ---------------------------------------------------------------------------
 
   const speakText = useCallback(
@@ -785,6 +853,10 @@ export function VoiceSessionProvider({
       if (typeof window !== "undefined" && window.speechSynthesis) {
         window.speechSynthesis.cancel();
       }
+      if (fallbackAudioRef.current) {
+        fallbackAudioRef.current.pause();
+        fallbackAudioRef.current = null;
+      }
 
       const finishSpeaking = () => {
         setVoiceOutputState("idle");
@@ -801,12 +873,23 @@ export function VoiceSessionProvider({
         updateDiagnostics({ voicePhase: voiceStateRef.current, outputState: "idle" });
       };
 
+      // ── Spoken register ──
+      // Never read a full chat reply verbatim. Short replies are spoken
+      // as-is (no LLM cost, no latency); longer ones are condensed to 1–2
+      // spoken-style sentences. The full text stays on screen — only the
+      // spoken form changes.
+      const agentId = useVoiceStore.getState().activeAgent;
+      let spokenText = sanitized;
+      if (sanitized.length > SPOKEN_DIRECT_MAX_CHARS) {
+        spokenText = await fetchSpokenSummary(sanitized, agentId);
+      }
+
       // Primary: Inworld TTS (uses configured INWORLD_LITT_VOICE / INWORLD_SPARK_VOICE)
       // Always try Inworld first — inworldSession.speakText auto-connects the
       // transport if needed. This lets "Speak" work without first starting voice.
       try {
-        console.debug("[Voice Pipeline] TTS request started", { textLength: sanitized.length, preview: sanitized.slice(0, 60) });
-        await inworldSession.speakText(sanitized);
+        console.debug("[Voice Pipeline] TTS request started", { textLength: spokenText.length, preview: spokenText.slice(0, 60) });
+        await inworldSession.speakText(spokenText);
         // Mark transport as connected since speakText auto-connects
         if (!inworldConnectedRef.current) {
           inworldConnectedRef.current = true;
@@ -818,17 +901,34 @@ export function VoiceSessionProvider({
         // But also set a safety timeout in case the event is missed.
         return;
       } catch (err) {
-        console.warn("[Voice Pipeline] TTS failed (Inworld), falling back to browser TTS:", err);
+        console.warn("[Voice Pipeline] TTS failed (Inworld), falling back:", err);
         // Mark transport as disconnected if it failed
         if (inworldConnectedRef.current) {
           inworldConnectedRef.current = false;
           setVoiceTransportConnected(false);
           updateDiagnostics({ transportConnected: false });
         }
+        // ── Double-speak guard ──
+        // If Inworld played part of the reply before throwing, do NOT
+        // re-speak the whole text from the start via a fallback.
+        if (inworldSession.didLastTtsPlayAudio()) {
+          console.debug("[Voice Pipeline] partial Inworld audio already played — skipping fallback re-speak");
+          finishSpeaking();
+          return;
+        }
         updateDiagnostics({ provider: "browser", transportConnected: false });
       }
 
-      // Fallback: browser SpeechSynthesis
+      // Fallback 1: server-side OpenAI TTS (/api/voice/tts). Server-side
+      // synthesis avoids the browser getVoices() race that gave first-use
+      // fallbacks a random low-quality system voice.
+      if (process.env.NODE_ENV !== "production") console.debug("[Voice Pipeline] TTS endpoint fallback started");
+      if (await playTtsEndpointAudio(spokenText, finishSpeaking)) {
+        if (process.env.NODE_ENV !== "production") console.debug("[Voice Pipeline] TTS endpoint playback started");
+        return;
+      }
+
+      // Fallback 2 (last resort): browser SpeechSynthesis
       if (process.env.NODE_ENV !== "production") console.debug("[Voice Pipeline] browser TTS fallback started");
       if (typeof window === "undefined" || !window.speechSynthesis) {
         console.warn("[Voice] speechSynthesis not available");
@@ -836,8 +936,8 @@ export function VoiceSessionProvider({
         return;
       }
 
-      const utterance = new SpeechSynthesisUtterance(sanitized);
-      const agentId = useVoiceStore.getState().activeAgent;
+      const utterance = new SpeechSynthesisUtterance(spokenText);
+      // (rest unchanged — agentId already resolved above)
       const voices = window.speechSynthesis.getVoices();
       if (voices.length > 0) {
         const preferred = agentId === "spark"
@@ -860,7 +960,7 @@ export function VoiceSessionProvider({
 
       window.speechSynthesis.speak(utterance);
     },
-    [inworldSession, updateDiagnostics],
+    [inworldSession, playTtsEndpointAudio, updateDiagnostics],
   );
 
   // ---------------------------------------------------------------------------
@@ -1017,6 +1117,10 @@ export function VoiceSessionProvider({
       cleanup();
       if (typeof window !== "undefined" && window.speechSynthesis) {
         window.speechSynthesis.cancel();
+      }
+      if (fallbackAudioRef.current) {
+        fallbackAudioRef.current.pause();
+        fallbackAudioRef.current = null;
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
