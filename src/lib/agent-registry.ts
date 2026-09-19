@@ -140,7 +140,7 @@ export const LITT: AgentDefinition = {
     { label: "Research a topic", prompt: "Research this topic for me with sources: " },
     { label: "Review my code", prompt: "Review my recent code for issues" },
   ],
-  systemPrompt: `You are LiTT — the AI Operating System inside LiTTree Lab Studios. You are the single engineering, research, and execution brain. You own coding, research, terminal, git, files, testing, missions, deployment, and project memory. Spark is your creative companion — it handles design direction, images, music, video, branding, and ideation. There are no other separate agents — you do all engineering and research yourself.
+  systemPrompt: `You are LiTT — the AI Operating System inside LiTTree Lab Studios. You are the single engineering, research, and execution brain. You own coding, research, terminal, git, files, testing, missions, deployment, and project memory. You also handle creative direction, design direction, images, branding, and ideation yourself. "Spark" is an internal-only name — never say it to the user, and never redirect the user to "Spark" or any other agent. There are no other separate agents.
 
 PERSONALITY:
 - You're a buddy first, an engineer second. Lead with conversation, not project status.
@@ -183,11 +183,11 @@ CAPABILITIES:
 
 ${TRUTH_RULES}
 
-Adapt to verified project context. For engineering requests, provide production-ready implementation. For research requests, cite sources and verify claims. For creative or strategy requests, stay concise unless depth is requested. You are the only engineering and research agent — do not recommend switching to another agent for coding or research tasks. For creative direction, design, images, music, or branding, suggest Spark.`,
+Adapt to verified project context. For engineering requests, provide production-ready implementation. For research requests, cite sources and verify claims. For creative or strategy requests, stay concise unless depth is requested. You are the only agent — do not recommend switching to another agent for any task. For creative direction, design, images, branding, or ideation, handle it yourself with your own tools. For video or music FILE generation: you cannot generate video or music files — say so plainly and briefly ("I can't generate video files."), then offer what you can do instead (concepts, storyboards, prompts for external tools, or code-based animation). Never mention Spark.`,
 };
 
 /* ------------------------------------------------------------------ */
-/*  Spark — the creative companion (Starter, free)                     */
+/*  Spark — hidden legacy creative profile (not user-visible)          */
 /* ------------------------------------------------------------------ */
 export const SPARK: AgentDefinition = {
   id: "spark",
@@ -209,7 +209,7 @@ export const SPARK: AgentDefinition = {
   cost: { perRun: 0, per1kTokens: 0 },
   enabled: true,
   marketplaceVisible: false,
-  studioVisible: true,
+  studioVisible: false,
   version: "1.0.0",
   domains: [
     "discovery", "brainstorming", "creative", "play", "exploration", "ideas",
@@ -220,7 +220,7 @@ export const SPARK: AgentDefinition = {
     { label: "Explore a direction", prompt: "I want to explore a new creative direction" },
     { label: "Design direction", prompt: "Give me design direction for a project" },
   ],
-  systemPrompt: `You are Spark — LiTT's creative companion inside LiTTree Lab Studios. You help the user explore ideas, discover new directions, and bring creative energy to the table.
+  systemPrompt: `You are LiTT's creative side inside LiTTree Lab Studios. You help the user explore ideas, discover new directions, and bring creative energy to the table. Never call yourself "Spark" — that name is internal-only and must never be said to the user.
 
 PERSONALITY:
 - You're a creative friend, not a hyperactive mascot. Be warm, curious, and genuinely interested in what they're making.
@@ -657,9 +657,10 @@ ${TRUTH_RULES}`,
 /* ------------------------------------------------------------------ */
 
 /**
- * A. CORE PERSONALITIES — LiTT and Spark only.
- * These are the two official user-facing personalities. They appear in the
- * Studio selector and are the only agents advertised as "built-in".
+ * A. CORE PERSONALITIES — LiTT (user-facing) and Spark (hidden legacy).
+ * LiTT is the official user-facing personality and appears in the Studio
+ * selector. Spark is kept for backward compatibility but is hidden from the
+ * Studio selector (studioVisible: false) and must never be named to the user.
  * See docs/PRODUCT_TRUTH.md for the canonical agent model.
  */
 export const CORE_PERSONALITIES: AgentDefinition[] = [LITT, SPARK];
@@ -705,7 +706,7 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 export const AGENT_REGISTRY: Record<string, AgentDefinition> =
   Object.fromEntries(AGENT_DEFINITIONS.map((a) => [a.id, a]));
 
-/** Core personalities — LiTT and Spark (the two official visible agents). */
+/** Core personalities — LiTT is the official visible agent; Spark is hidden. */
 export const FREE_AGENTS = CORE_PERSONALITIES.filter(
   (a) => a.billingModel === "free",
 );
@@ -723,7 +724,7 @@ export function getAgentDefinition(slug: string): AgentDefinition | null {
 }
 
 export function getStudioAgents(): AgentDefinition[] {
-  // Only core personalities (LiTT and Spark) appear in the Studio selector.
+  // Only studio-visible core personalities (LiTT) appear in the Studio selector.
   // Internal specialists are delegated by LiTT, not independently selectable.
   return CORE_PERSONALITIES.filter((a) => a.studioVisible && a.enabled);
 }

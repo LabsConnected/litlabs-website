@@ -88,8 +88,7 @@ export default function StudioGuideClient() {
           </>,
           <>
             <strong>Specialists</strong>{" "}— <InlineCode>LiTT</InlineCode>{" "}(your
-            main operator), <InlineCode>Spark</InlineCode>{" "}(creative companion
-            and designer), <InlineCode>Coder</InlineCode>{" "}(engineering and
+            main operator), <InlineCode>Coder</InlineCode>{" "}(engineering and
             implementation), <InlineCode>Writer</InlineCode>{" "}(content and
             copy), <InlineCode>Researcher</InlineCode>{" "}(research and
             synthesis), <InlineCode>Marketer</InlineCode>{" "}(marketing and

@@ -1,10 +1,11 @@
 /**
- * Per-user agent visibility (hide/disable built-in agents like Spark).
+ * Per-user agent visibility (hide/disable built-in agents).
  *
- * Spark is a built-in core personality — it cannot be uninstalled. This module
- * stores a per-user `hiddenAgents` list (agent ids) so the user can hide Spark
- * from the Studio surfaces (My AI Crew, agent lists, chat mode selector) and
- * bring it back later from Settings → LiTT & Spark.
+ * Spark is a hidden legacy core personality (studioVisible: false) — it never
+ * appears in Studio surfaces, so hiding is a no-op for it now. This module
+ * stores a per-user `hiddenAgents` list (agent ids) kept for backward
+ * compatibility with stored settings; it applies to any agents that support
+ * hiding.
  *
  * Storage: localStorage is the source of truth (same key the Settings page
  * uses for agent settings); the value is also POSTed best-effort to

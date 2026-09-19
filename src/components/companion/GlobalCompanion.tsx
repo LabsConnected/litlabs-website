@@ -11,7 +11,7 @@
  * - Status ring reflects REAL voice state (gray/accent/purple/green/yellow/red)
  * - Page context is sent with each message
  * - "Open in Studio" handoff for deep work
- * - "Creative with Spark" as a specialist action, not a separate assistant
+ * - LiTT as the single assistant (no separate creative persona)
  *
  * The companion uses the same /api/gemini/chat endpoint as Studio's ChatTool.
  * Voice uses useInworldSession via VoiceSessionProvider (same as Studio).
@@ -116,7 +116,7 @@ const RING_COLORS: Record<RingColor, string> = {
 const GUEST_DESTINATIONS = [
   { terms: ["price", "pricing", "cost", "plan"], href: "/pricing", label: "View pricing", reply: "You can compare every plan on Pricing. Starting is free and does not require a credit card." },
   { terms: ["studio", "build", "create", "start", "app", "website"], href: "/studio", label: "Explore Studio", reply: "Studio is where LiTT turns an idea into a plan, real files, a preview, and—after approval—a deployment." },
-  { terms: ["market", "agent", "tool", "plugin"], href: "/marketplace", label: "Browse Marketplace", reply: "Marketplace is where you can discover agents, tools, workflows, and creative packs for LiTT and Spark." },
+  { terms: ["market", "agent", "tool", "plugin"], href: "/marketplace", label: "Browse Marketplace", reply: "Marketplace is where you can discover tools, workflows, and creative packs for LiTT." },
   { terms: ["community", "discover", "social", "people"], href: "/discover", label: "Visit Community", reply: "Community is the public discovery space for creations, builders, and shared work." },
   { terms: ["showcase", "gallery", "creation", "art", "image", "portfolio"], href: "/showcase", label: "Open Showcase", reply: "Showcase is the canonical place for everything you've created or want to feature — AI builds, sites, artwork, architecture, case studies, games, and published creations." },
   { terms: ["game", "retro", "play"], href: "/games", label: "Explore Games", reply: "The Games area includes LiTTree's cloud, DOS, and retro experiences." },
@@ -162,7 +162,6 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [withSpark, setWithSpark] = useState(false);
   const [suggestedAction, setSuggestedAction] = useState<{ href: string; label: string } | null>(null);
   const [voiceHealth, setVoiceHealth] = useState<{
     configured: boolean;
@@ -196,7 +195,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
     return () => { active = false; };
   }, [isSignedIn]);
 
-  const activeAgentId = withSpark ? "spark" : "litt";
+  const activeAgentId = "litt";
   const ringColor = deriveRingColor(voiceState, voiceInputState, voiceOutputState);
 
   // Auto-scroll to bottom on new messages
@@ -328,10 +327,6 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
     onClose();
   };
 
-  const handleSparkToggle = () => {
-    setWithSpark((prev) => !prev);
-  };
-
   const statusLabel = (() => {
     if (voiceState === "error") return errorMessage || "Voice error";
     if (voiceState === "connecting") return "Connecting…";
@@ -364,8 +359,8 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
               }}
             >
               <Image
-                src={withSpark ? "/brand/spark-agent-portrait.png" : "/brand/litt-mascot-avatar.png"}
-                alt={withSpark ? "Spark" : "LiTT"}
+                src="/brand/litt-mascot-avatar.png"
+                alt="LiTT"
                 fill
                 sizes="32px"
                 className="object-cover"
@@ -374,7 +369,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
           </div>
           <div>
             <div className="text-sm font-black text-white">
-              {withSpark ? "LiTT · with Spark" : "LiTT"}
+              LiTT
             </div>
             <div className="text-[10px] text-white/50">
               {statusLabel} · {pageContext.pageTitle}
@@ -418,9 +413,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
                   className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
                     msg.role === "user"
                       ? "bg-accent/15 text-accent"
-                      : withSpark
-                        ? "bg-pink-500/10 text-pink-50"
-                        : "bg-white/5 text-white/80"
+                      : "bg-white/5 text-white/80"
                   }`}
                 >
                   {msg.content}
@@ -518,16 +511,6 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
 
         {/* Secondary actions */}
         <div className="mt-2 flex items-center gap-2">
-          <button
-            onClick={handleSparkToggle}
-            className={`rounded-lg px-2.5 py-1 text-[10px] font-bold transition ${
-              withSpark
-                ? "bg-pink-500/20 text-pink-300 border border-pink-300/30"
-                : "bg-white/5 text-white/50 border border-white/10 hover:text-white/70"
-            }`}
-          >
-            ✦ Creative with Spark
-          </button>
           <button
             onClick={handleOpenInStudio}
             className="rounded-lg bg-white/5 px-2.5 py-1 text-[10px] font-bold text-white/50 border border-white/10 transition hover:text-white/70"

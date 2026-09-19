@@ -36,7 +36,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     monthlyCredits: 500,
     activeProjectLimit: 1,
     features: [
-      "LiTT & Spark agents",
+      "LiTT agent",
       "1 active project",
       "500 AI credits (one-time)",
       "Standard AI routing",
@@ -61,7 +61,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     monthlyCredits: 6000,
     activeProjectLimit: 5,
     features: [
-      "LiTT & Spark agents",
+      "LiTT agent",
       "Research, writing & marketing skills",
       "5 active projects",
       "6,000 AI credits per billing cycle",
@@ -87,7 +87,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     monthlyCredits: 20000,
     activeProjectLimit: 25,
     features: [
-      "LiTT & Spark agents",
+      "LiTT agent",
       "Coding & analytics skills",
       "Everything in Creator Beta",
       "25 active projects",

@@ -100,9 +100,13 @@ describe("AgentTool canonicalization", () => {
   });
 
   describe("P0: Uses canonical agent registry", () => {
-    it("imports from agent-registry (CORE_PERSONALITIES)", () => {
+    it("imports the canonical agent list from agent-registry", () => {
       expect(source).toContain("agent-registry");
-      expect(source).toContain("CORE_PERSONALITIES");
+      // Either the raw CORE_PERSONALITIES list or the studio-visibility-aware
+      // getStudioAgents() accessor — both are the canonical registry.
+      expect(
+        source.includes("CORE_PERSONALITIES") || source.includes("getStudioAgents"),
+      ).toBe(true);
     });
 
     it("does NOT define its own PRIMARY_ASSISTANTS array", () => {

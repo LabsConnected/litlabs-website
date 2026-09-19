@@ -299,18 +299,18 @@ export default function PricingClient() {
 
         <h1>
           Your AI creative studio.
-          <span> Build apps, media, and projects with LiTT and Spark.</span>
+          <span> Build apps, media, and projects with LiTT.</span>
         </h1>
 
         <p className={styles.heroCopy}>
-          One workspace with LiTT, your project operator, and Spark, your
-          creative specialist — sharing one runtime and one memory. Start free, then unlock research,
+          One workspace with LiTT, your project operator and creative partner —
+          sharing one runtime and one memory. Start free, then unlock research,
           writing, and marketing skills with Creator Beta — or add coding and
           analytics skills with Pro Builder Beta.
         </p>
 
         <div className={styles.heroMeta}>
-          <span>LiTT &amp; Spark</span>
+          <span>LiTT</span>
           <span>Clear LiTTBit allowances</span>
           <span>Projects stay yours</span>
         </div>

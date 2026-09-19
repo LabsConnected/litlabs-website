@@ -72,9 +72,9 @@ export const CORE_PERSONALITIES: Record<CorePersonalityId, PersonalityDefinition
   spark: {
     id: "spark",
     name: "Spark",
-    role: "Creative partner",
+    role: "Creative partner (hidden — not user-visible)",
     description:
-      "Spark specializes in creative direction, design, branding, images, music, video, copy, and exploration. Spark works inside the same canonical conversation, Project, and Mission.",
+      "Legacy creative profile. Hidden from all user-facing surfaces; the name must never be shown to the user.",
     canControlTerminal: false,
     canControlFiles: false,
     canControlGit: false,
@@ -155,7 +155,7 @@ export const PLAN_CONTRACTS: Record<PlanId, PlanContract> = {
     checkoutEnabled: true,
     beta: false,
     features: [
-      "LiTT & Spark",
+      "LiTT",
       "1 active project",
       "500 starter AI credits (one-time)",
       "Free AI routing",
@@ -169,7 +169,7 @@ export const PLAN_CONTRACTS: Record<PlanId, PlanContract> = {
   creator_beta: {
     id: "creator_beta",
     name: "Creator Beta",
-    description: "Research, write, and market with LiTT and Spark",
+    description: "Research, write, and market with LiTT",
     billingType: "subscription",
     priceCents: 1500,
     standardPriceCents: null,
@@ -180,7 +180,7 @@ export const PLAN_CONTRACTS: Record<PlanId, PlanContract> = {
     checkoutEnabled: true,
     beta: true,
     features: [
-      "LiTT & Spark",
+      "LiTT",
       "Research, writing & marketing skills",
       "5 active projects",
       "6,000 AI credits per billing cycle",
@@ -195,7 +195,7 @@ export const PLAN_CONTRACTS: Record<PlanId, PlanContract> = {
   pro_builder_beta: {
     id: "pro_builder_beta",
     name: "Pro Builder Beta",
-    description: "Build, debug, and analyze with LiTT and Spark",
+    description: "Build, debug, and analyze with LiTT",
     billingType: "subscription",
     priceCents: 3900,
     standardPriceCents: null,
@@ -206,7 +206,7 @@ export const PLAN_CONTRACTS: Record<PlanId, PlanContract> = {
     checkoutEnabled: true,
     beta: true,
     features: [
-      "LiTT & Spark",
+      "LiTT",
       "Coding & analytics skills",
       "Everything in Creator Beta",
       "25 active projects",

@@ -191,9 +191,6 @@ function AgentCardInner({
           {item.compatible_assistants.includes("litt") && (
             <span className="rounded-md bg-accent/10 px-1.5 py-0.5 font-bold text-accent">LiTT</span>
           )}
-          {item.compatible_assistants.includes("spark") && (
-            <span className="rounded-md bg-violet-400/10 px-1.5 py-0.5 font-bold text-violet-300">Spark</span>
-          )}
         </div>
 
         <div className="mt-2 flex items-center gap-2 text-[10px]">

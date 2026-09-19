@@ -106,15 +106,12 @@ const STORAGE_KEY = "litlabs-mission-forge-v1";
 const STARTER_NODES: MissionNode[] = [
   { id: "brief", type: "input", title: "Mission brief", subtitle: "Your goal and constraints", color: "#65f4ff", x: 54, y: 118, config: {} },
   { id: "litt", type: "assistant", title: "LiTT", subtitle: "Plans, builds, and directs", color: brand.primary.DEFAULT, x: 306, y: 76, assistantId: "litt", config: { mode: "plan_and_coordinate", model: "auto", approval: "before_writes" } },
-  { id: "spark", type: "assistant", title: "Spark", subtitle: "Explores creative directions", color: "#a970ff", x: 306, y: 232, assistantId: "spark", config: { mode: "creative", model: "auto" } },
   { id: "approval", type: "approval", title: "Approval gate", subtitle: "You review before shipping", color: "#ffca5c", x: 558, y: 154, config: { approval_type: "user_approval" } },
 ];
 
 const STARTER_EDGES: MissionEdge[] = [
   { id: "brief-litt", from: "brief", to: "litt" },
-  { id: "brief-spark", from: "brief", to: "spark" },
   { id: "litt-approval", from: "litt", to: "approval" },
-  { id: "spark-approval", from: "spark", to: "approval" },
 ];
 
 /* Static library items (triggers, inputs, logic, approvals, actions, outputs) */
@@ -138,8 +135,7 @@ const STATIC_LIBRARY: LibraryCategory[] = [
   {
     label: "Assistants",
     items: [
-      { type: "assistant", title: "LiTT", subtitle: "Copilot + builder", color: brand.primary.DEFAULT, icon: Brain, assistantId: "litt", keywords: ["litt", "ai", "agent", "code", "build", "plan"] },
-      { type: "assistant", title: "Spark", subtitle: "Creative explorer", color: "#a970ff", icon: Sparkles, assistantId: "spark", keywords: ["spark", "creative", "image", "brand", "writing"] },
+      { type: "assistant", title: "LiTT", subtitle: "Copilot + builder", color: brand.primary.DEFAULT, icon: Brain, assistantId: "litt", keywords: ["litt", "ai", "agent", "code", "build", "plan", "creative", "image", "brand", "writing"] },
     ],
   },
   {
@@ -202,8 +198,6 @@ function defaultConfig(title: string): Record<string, string | number | boolean>
       return { webhook_url: "", message_template: "Mission completed: {{status}}" };
     case "LiTT":
       return { mode: "plan_and_coordinate", model: "auto", approval: "before_writes" };
-    case "Spark":
-      return { mode: "creative", model: "auto" };
     default:
       return {};
   }
@@ -616,10 +610,7 @@ export default function MissionForge() {
     if (lowered.match(/cron|schedule|hourly|daily|weekly|timer|interval/)) detected.push(STATIC_LIBRARY[0].items[2]);
     if (lowered.match(/push|pull request|pr|github/)) detected.push(STATIC_LIBRARY[0].items[0]); /* Manual start for now */
 
-    /* Detect assistants */
-    if (lowered.match(/image|visual|brand|creative|music|social|content|writing|caption/)) {
-      detected.push(STATIC_LIBRARY[2].items[1]); /* Spark */
-    }
+    /* Detect assistants — LiTT handles creative requests too */
     detected.push(STATIC_LIBRARY[2].items[0]); /* LiTT always */
 
     /* Detect capabilities */
@@ -753,7 +744,7 @@ export default function MissionForge() {
             </span>
           </div>
           <p className="text-[9px] mt-1 opacity-50" style={{ color: T.textMuted }}>
-            Build reusable Missions by connecting LiTT, Spark, tools, approvals, and outputs.
+            Build reusable Missions by connecting LiTT, tools, approvals, and outputs.
           </p>
         </div>
 
@@ -1010,7 +1001,7 @@ export default function MissionForge() {
               <div>
                 <Workflow size={34} className="mx-auto text-white/15" />
                 <h3 className="mt-3 text-sm font-black">Your Mission Forge is empty</h3>
-                <p className="mt-1 text-[10px] text-white/35">Drag LiTT, Spark, triggers, and capabilities here to begin.</p>
+                <p className="mt-1 text-[10px] text-white/35">Drag LiTT, triggers, and capabilities here to begin.</p>
               </div>
             </div>
           )}

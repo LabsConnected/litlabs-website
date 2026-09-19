@@ -104,7 +104,7 @@ export default function CliPageClient() {
           <div className="mt-12 grid gap-6 sm:grid-cols-3">
             {[
               { title: "Own your workspace", copy: "Runs in your local repo. Files stay on your machine." },
-              { title: "Same agents as Studio", copy: "LiTT (operator) and Spark (creative specialist) share one runtime, one memory." },
+              { title: "Same agents as Studio", copy: "LiTT handles operation and creative in one runtime, one memory." },
               { title: "Built for builders", copy: "Diffs, tests, builds, deploys, and approvals — in one flow." },
             ].map((item) => (
               <div key={item.title} className="rounded-xl border border-white/10 bg-white/[0.02] p-5">

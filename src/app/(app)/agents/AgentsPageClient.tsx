@@ -66,20 +66,16 @@ const LOCAL_MISSIONS_KEY = "litlabs-agent-local-missions-v1";
 const STARTER_NODES: FlowNode[] = [
   { id: "brief", kind: "input", title: "Mission brief", subtitle: "Your goal and constraints", color: "#65f4ff", x: 54, y: 118 },
   { id: "litt", kind: "agent", title: "LiTT", subtitle: "Plans, builds, and directs", color: brand.primary.DEFAULT, x: 306, y: 76, agentId: "litt" },
-  { id: "spark", kind: "agent", title: "Spark", subtitle: "Explores creative directions", color: "#a970ff", x: 306, y: 232, agentId: "spark" },
   { id: "review", kind: "output", title: "Approval gate", subtitle: "You review before shipping", color: "#ffca5c", x: 558, y: 154 },
 ];
 
 const STARTER_EDGES: FlowEdge[] = [
   { id: "brief-litt", from: "brief", to: "litt" },
-  { id: "brief-spark", from: "brief", to: "spark" },
   { id: "litt-review", from: "litt", to: "review" },
-  { id: "spark-review", from: "spark", to: "review" },
 ];
 
 const PALETTE: PaletteItem[] = [
   { kind: "agent", title: "LiTT", subtitle: "Copilot + builder", color: brand.primary.DEFAULT, agentId: "litt", icon: Brain },
-  { kind: "agent", title: "Spark", subtitle: "Creative explorer", color: "#a970ff", agentId: "spark", icon: Sparkles },
   { kind: "input", title: "Mission brief", subtitle: "Goal + context", color: "#65f4ff", icon: Target },
   { kind: "action", title: "Build code", subtitle: "App, site, or feature", color: "#22d3ee", icon: Code2 },
   { kind: "action", title: "Generate image", subtitle: "Visual creation", color: "#f472b6", icon: ImageIcon },
@@ -527,7 +523,7 @@ export default function AgentsPageClient() {
 
               {nodes.length === 0 && (
                 <div className="absolute inset-0 grid place-items-center p-8 text-center">
-                  <div><Workflow size={34} className="mx-auto text-white/15" /><h3 className="mt-3 text-sm font-black">Your forge is empty</h3><p className="mt-1 text-[10px] text-white/35">Drag LiTT, Spark, and capability blocks here to begin.</p></div>
+                  <div><Workflow size={34} className="mx-auto text-white/15" /><h3 className="mt-3 text-sm font-black">Your forge is empty</h3><p className="mt-1 text-[10px] text-white/35">Drag LiTT and capability blocks here to begin.</p></div>
                 </div>
               )}
             </div>
@@ -624,7 +620,7 @@ export default function AgentsPageClient() {
 
         <footer className="flex flex-col gap-2 border-t border-white/8 px-1 py-4 text-[9px] text-white/30 sm:flex-row sm:items-center sm:justify-between">
           <span>© {new Date().getFullYear()} LiTTree LabStudios™. All rights reserved.</span>
-          <span>LiTTree LabStudios™, LiTT™, Spark™, and the LiTTree mark are trademarks of LiTTree LabStudios.</span>
+          <span>LiTTree LabStudios™, LiTT™, and the LiTTree mark are trademarks of LiTTree LabStudios.</span>
         </footer>
       </div>
     </main>

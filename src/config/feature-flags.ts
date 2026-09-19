@@ -44,7 +44,7 @@ export const FEATURE_FLAGS: Record<FeatureFlag, FeatureFlagDefinition> = {
   // ── ENABLED for v1 ──
   voiceMode: {
     flag: "voiceMode",
-    description: "Voice mode for LiTT/Spark chat",
+    description: "Voice mode for LiTT chat",
     enabled: true,
     hideFromNav: false,
   },
