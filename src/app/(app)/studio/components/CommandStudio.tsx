@@ -28,7 +28,6 @@ import MissionCards from "./MissionCards";
 import PersistentMusicPlayer from "./PersistentMusicPlayer";
 import { MobileCommandNav } from "./CommandStudioNav";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
-import StudioBrowserStatusChip from "./StudioBrowserStatusChip";
 import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
 import LiTTLiveActivity from "./LiTTLiveActivity";
@@ -1590,6 +1589,11 @@ function CommandStudioContent() {
             error={approvalError}
             retryable={approvalRetryable}
             expired={approvalExpired}
+            // Mode pill: the client's currently selected execution mode.
+            // This is display-only — the mode is not yet bound into the
+            // server-side approval request (mode-pill honesty track), so
+            // the card shows the user's selection, never a guessed lane.
+            mode={executionMode}
             // An expired gate's "Retry" re-requests a fresh gate — re-POSTing
             // the dead pausedRunId would 409. Other failures retry the
             // approval POST as before.
@@ -1597,12 +1601,6 @@ function CommandStudioContent() {
           />
         </div>
       )}
-      {/* Agent browser session chip (Phase 2): live/disconnected state is
-          probed server-side; the Stop button closes the session. Pinned
-          directly above the composer so it is visible during any session. */}
-      <StudioBrowserStatusChip
-        conversationId={conversation.selectedConversationId ?? undefined}
-      />
       <CommandComposer
         value={composerValue}
         onChange={setComposerValue}

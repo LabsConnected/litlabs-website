@@ -185,3 +185,90 @@ describe("ApprovalCard — approval lifecycle phases", () => {
     expect(screen.queryByTestId("approval-error")).toBeNull();
   });
 });
+
+describe("ApprovalCard — mode pill", () => {
+  it("renders the ACT pill in lime when mode is act", () => {
+    render(<ApprovalCard approval={baseApproval} mode="act" />);
+    const pill = screen.getByTestId("approval-mode");
+    expect(pill.textContent).toBe("Act");
+    expect(pill.className).toContain("text-accent");
+  });
+
+  it("renders Plan and Auto pills for the other modes", () => {
+    const { rerender } = render(<ApprovalCard approval={baseApproval} mode="plan" />);
+    expect(screen.getByTestId("approval-mode").textContent).toBe("Plan");
+    rerender(<ApprovalCard approval={baseApproval} mode="auto" />);
+    expect(screen.getByTestId("approval-mode").textContent).toBe("Auto");
+  });
+
+  it("renders no pill when mode is absent — never guesses", () => {
+    render(<ApprovalCard approval={baseApproval} />);
+    expect(screen.queryByTestId("approval-mode")).toBeNull();
+  });
+});
+
+describe("ApprovalCard — image request preview", () => {
+  const imageApproval = {
+    toolId: "image.generate",
+    reason: "Image generation requires approval",
+    inputs: { prompt: "a golden retriever getting groomed, photorealistic", size: "16:9" },
+  };
+
+  it("shows the prompt and params instead of faked pixels", () => {
+    render(<ApprovalCard approval={imageApproval} onResolve={vi.fn()} />);
+    expect(screen.getByTestId("approval-image-request")).toBeTruthy();
+    expect(screen.getByTestId("approval-image-prompt").textContent).toContain(
+      "a golden retriever getting groomed"
+    );
+    expect(screen.getByText("size: 16:9")).toBeTruthy();
+    // Honest empty state — no <img> without a real image.
+    expect(screen.queryByTestId("approval-image-thumbnail")).toBeNull();
+    expect(screen.getByText(/No image generated yet/)).toBeTruthy();
+  });
+
+  it("renders a real attached image as a thumbnail, labeled as attached", () => {
+    render(
+      <ApprovalCard
+        approval={{
+          ...imageApproval,
+          inputs: {
+            ...imageApproval.inputs,
+            referenceImageUrl: "https://example.com/dog.png",
+          },
+        }}
+        onResolve={vi.fn()}
+      />
+    );
+    const img = screen.getByTestId("approval-image-thumbnail");
+    expect(img).toHaveProperty("src", "https://example.com/dog.png");
+    expect(screen.getByText(/came with the request, not generated/)).toBeTruthy();
+    // The prompt still shows alongside the attachment, and the
+    // "not generated yet" line is suppressed — there IS an image.
+    expect(screen.getByTestId("approval-image-prompt").textContent).toContain(
+      "a golden retriever getting groomed"
+    );
+    expect(screen.queryByText(/No image generated yet/)).toBeNull();
+  });
+
+  it("does not render the image block for non-image tools", () => {
+    render(
+      <ApprovalCard
+        approval={{ ...baseApproval, inputs: { prompt: "not an image tool" } }}
+        onResolve={vi.fn()}
+      />
+    );
+    expect(screen.queryByTestId("approval-image-request")).toBeNull();
+  });
+
+  it("omits the prompt line when inputs carry no prompt", () => {
+    render(
+      <ApprovalCard
+        approval={{ toolId: "image.generate", reason: "r", inputs: { size: "1:1" } }}
+        onResolve={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId("approval-image-request")).toBeTruthy();
+    expect(screen.queryByTestId("approval-image-prompt")).toBeNull();
+    expect(screen.getByText(/No image generated yet/)).toBeTruthy();
+  });
+});
