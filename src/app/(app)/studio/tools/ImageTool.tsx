@@ -423,12 +423,23 @@ const VISUAL_STYLE_CARDS = [
   { label: "Anime", url: "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=300&h=200&fit=crop", prompt: "anime studio ghibli", fallback: "linear-gradient(135deg, #001a00, #00ff88)" },
 ];
 
-export default function ImageTool() {
+export default function ImageTool({ initialPrompt }: { initialPrompt?: string | null }) {
   const { resolvedColors: T } = useTheme();
   const { setActiveAssetId, projectId } = useStudioContext();
 
   /* ── Prompt state ── */
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(initialPrompt ?? "");
+  const lastInitialPromptRef = useRef(initialPrompt);
+  // P1-1: the chat image intent opens this surface with the user's prompt
+  // prefilled. Sync when a NEW prefill arrives (e.g. a second "generate an
+  // image" while the tool is already open) — never clobber in-progress
+  // typing otherwise.
+  useEffect(() => {
+    if (initialPrompt && initialPrompt !== lastInitialPromptRef.current) {
+      lastInitialPromptRef.current = initialPrompt;
+      setPrompt(initialPrompt);
+    }
+  }, [initialPrompt]);
   const [negativePrompt, setNegativePrompt] = useState("");
   const [remixMode, setRemixMode] = useState<RemixMode>("reskin");
   const [referenceImage, setReferenceImage] = useState<string | null>(null);

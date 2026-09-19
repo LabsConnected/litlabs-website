@@ -22,6 +22,12 @@ export interface IntentResult {
   tool?: StudioTool;
   message: string;
   actions?: Array<{ label: string; action: string }>;
+  /**
+   * The user's original message text. Carried so a handler can prefill a
+   * real surface with it (P1-1: the image intent opens the Image Studio
+   * with the prompt prefilled — the request must survive the routing).
+   */
+  prompt?: string;
 }
 
 // Navigation shortcuts must never intercept a request that describes a
@@ -181,7 +187,7 @@ export function detectIntent(input: string): IntentResult | null {
 function buildIntentResult(
   intent: StudioIntent,
   tool: StudioTool | undefined,
-  _originalText: string,
+  originalText: string,
 ): IntentResult | null {
   switch (intent) {
     case "open_terminal":
@@ -233,7 +239,7 @@ function buildIntentResult(
         message: "Opening Terminal to run that command.",
       };
     case "generate_image":
-      return { intent, tool, message: "" };
+      return { intent, tool, message: "", prompt: originalText };
     case "generate_code":
       return { intent, message: "" };
     default:
@@ -250,6 +256,13 @@ export interface StudioIntentHandlers {
   onOpenProjectNameDialog?: () => void;
   /** Triggered when LiTT should navigate the browser (settings, GitHub install) */
   onNavigate?: (url: string) => void;
+  /**
+   * P1-1: open the REAL Image Studio surface with the user's prompt
+   * prefilled. This is the only honest handler for generate_image —
+   * routing through onRouteToolAction("image") normalizes to the chat
+   * surface (a placeholder + Media tab) and never generates anything.
+   */
+  onOpenImageStudio?: (prompt: string) => void;
 }
 
 /**
@@ -264,6 +277,16 @@ export function dispatchStudioIntent(
   intent: IntentResult,
   handlers: StudioIntentHandlers,
 ): void {
+  if (intent.intent === "generate_image") {
+    // P1-1: the chat tells the user "Opening the image generator." — so
+    // the REAL Image Studio must actually open, with the user's prompt
+    // prefilled. Deliberately NOT routed through onRouteToolAction: the
+    // legacy "image" tool id normalizes to the chat surface (composer
+    // placeholder + Media tab), which is the dead flow this replaces.
+    // The prompt travels on the intent so the request survives routing.
+    handlers.onOpenImageStudio?.(intent.prompt ?? "");
+    return;
+  }
   if (intent.intent === "open_files" || intent.intent === "file_question") {
     handlers.onRouteInspectorAction?.("files");
   } else if (intent.intent === "open_preview" || intent.intent === "visual_output") {

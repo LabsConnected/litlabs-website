@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   mapLegacyToolToDestination,
   destinationToLegacyTool,
+  resolveCreatorDestination,
   DESTINATION_LABELS,
   type StudioDestination,
   type WorkspaceStage,
@@ -277,6 +278,31 @@ describe("studio-destinations", () => {
 
     it("labels game as Game", () => {
       expect(CREATOR_KIND_LABELS.game).toBe("Game");
+    });
+  });
+
+  describe("resolveCreatorDestination (?creator= deep-links)", () => {
+    it("resolves ?creator=image to the Create destination's image mode", () => {
+      expect(resolveCreatorDestination("image")).toEqual({
+        destination: "create",
+        mode: "image",
+      });
+    });
+
+    it("resolves every CreateMode", () => {
+      for (const mode of ["image", "video", "audio", "music", "environment", "game"]) {
+        const dest = resolveCreatorDestination(mode);
+        expect(dest?.destination).toBe("create");
+        expect(dest?.mode).toBe(mode);
+      }
+    });
+
+    it("returns null for missing, empty, and invalid values (falls through to ?tool=)", () => {
+      expect(resolveCreatorDestination(null)).toBeNull();
+      expect(resolveCreatorDestination("")).toBeNull();
+      expect(resolveCreatorDestination("chat")).toBeNull();
+      expect(resolveCreatorDestination("design")).toBeNull();
+      expect(resolveCreatorDestination("../../../etc")).toBeNull();
     });
   });
 });

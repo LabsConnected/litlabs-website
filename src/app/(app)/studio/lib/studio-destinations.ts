@@ -166,6 +166,24 @@ export interface DestinationState {
 }
 
 /**
+ * Resolve an explicit `?creator=` deep-link (e.g. /studio?creator=image
+ * from the Create hub) to the Create destination. This is the ONLY URL
+ * route into the creator surfaces: legacy `?tool=image`-style URLs
+ * deliberately normalize to the chat surface and must keep doing so.
+ *
+ * Returns null for missing/invalid values so callers fall through to
+ * the normal ?tool= handling. Pure — unit-tested in isolation.
+ */
+const CREATE_MODES = ["image", "video", "audio", "music", "environment", "game"] as const;
+
+export function resolveCreatorDestination(creator: string | null): DestinationState | null {
+  if (creator && (CREATE_MODES as readonly string[]).includes(creator)) {
+    return { destination: "create", mode: creator as CreateMode };
+  }
+  return null;
+}
+
+/**
  * Map a legacy `?tool=` query value (or any StudioTool) to a Command
  * Studio destination. ALL old tool URLs now canonicalize to the LiTT
  * chat surface. The user never leaves the conversation.

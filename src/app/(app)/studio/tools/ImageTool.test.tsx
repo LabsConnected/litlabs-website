@@ -295,3 +295,36 @@ describe("ImageTool 'Use in Project'", () => {
     });
   });
 });
+
+describe("P1-1: chat image intent prefill", () => {
+  const promptInputs = () => screen.getAllByTestId("image-prompt-input");
+
+  it("prefills the prompt box when opened from the chat image intent", () => {
+    render(<ImageTool initialPrompt="generate an image of a red pickup truck at sunset" />);
+    const inputs = promptInputs();
+    expect(inputs.length).toBeGreaterThan(0);
+    for (const input of inputs) {
+      expect(input).toHaveValue("generate an image of a red pickup truck at sunset");
+    }
+  });
+
+  it("starts empty without a prefill", () => {
+    render(<ImageTool />);
+    for (const input of promptInputs()) {
+      expect(input).toHaveValue("");
+    }
+  });
+
+  it("syncs a NEW prefill while already open without clobbering in-progress typing", () => {
+    const { rerender } = render(<ImageTool initialPrompt="first prompt" />);
+    const input = promptInputs()[0] as HTMLTextAreaElement;
+    expect(input).toHaveValue("first prompt");
+    // A new intent arrives with a new prompt — it lands in the box.
+    rerender(<ImageTool initialPrompt="second prompt" />);
+    expect(input).toHaveValue("second prompt");
+    // Re-render with the SAME prefill does not reset what the user typed.
+    fireEvent.change(input, { target: { value: "second prompt — edited" } });
+    rerender(<ImageTool initialPrompt="second prompt" />);
+    expect(input).toHaveValue("second prompt — edited");
+  });
+});

@@ -66,12 +66,13 @@ describe("P1-1: studio intent dead flows", () => {
       onRouteInspectorAction: vi.fn(),
       onRunHealthChecks: vi.fn(),
       onOpenProjectNameDialog: vi.fn(),
+      onOpenImageStudio: vi.fn(),
       onNavigate: vi.fn(),
     } satisfies StudioIntentHandlers;
   }
 
   describe("intent classification → correct routing", () => {
-    it("classifies image requests as generate_image routed to the image tool", () => {
+    it("classifies image requests as generate_image carrying the original prompt", () => {
       for (const text of [
         "generate an image of a sunset",
         "create an image of a dog",
@@ -79,9 +80,9 @@ describe("P1-1: studio intent dead flows", () => {
       ]) {
         const intent = detectIntent(text);
         expect(intent?.intent).toBe("generate_image");
-        // The tool is what the dispatch chain routes on — without it the
-        // intent dies locally after printing a confirmation.
-        expect(intent?.tool).toBe("image");
+        // The original prompt travels on the intent so the Image Studio
+        // can prefill it — without it the request dies in routing (P1-1).
+        expect(intent?.prompt).toBe(text);
       }
     });
 
@@ -94,13 +95,18 @@ describe("P1-1: studio intent dead flows", () => {
   });
 
   describe("success path — the real surface-open action fires", () => {
-    it("generate_image opens the real image surface", () => {
+    it("generate_image opens the real Image Studio with the prompt prefilled", () => {
       const h = spies();
-      const intent = detectIntent("generate an image of a sunset");
+      const text = "generate an image of a sunset";
+      const intent = detectIntent(text);
       expect(intent).not.toBeNull();
       dispatchStudioIntent(intent!, h);
-      expect(h.onRouteToolAction).toHaveBeenCalledTimes(1);
-      expect(h.onRouteToolAction).toHaveBeenCalledWith("image");
+      // The REAL action: Image Studio opens with the user's prompt.
+      // onRouteToolAction("image") must NOT fire — the legacy "image"
+      // tool id normalizes to the chat surface, which is the dead flow.
+      expect(h.onOpenImageStudio).toHaveBeenCalledTimes(1);
+      expect(h.onOpenImageStudio).toHaveBeenCalledWith(text);
+      expect(h.onRouteToolAction).not.toHaveBeenCalled();
       expect(h.onNavigate).not.toHaveBeenCalled();
     });
 
@@ -160,8 +166,8 @@ describe("P1-1: studio intent dead flows", () => {
     it.each([
       {
         text: "generate an image of a sunset",
-        firedHandler: "onRouteToolAction",
-        firedWith: ["image"],
+        firedHandler: "onOpenImageStudio",
+        firedWith: ["generate an image of a sunset"],
         message: "Opening the image generator.",
       },
       {
