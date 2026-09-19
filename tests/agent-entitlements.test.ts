@@ -165,12 +165,12 @@ describe("Agent registry", () => {
     }
   });
 
-  it("studio agents are only LiTT and Spark (2 agents)", async () => {
+  it("studio agents are only LiTT (Spark is hidden from the selector)", async () => {
     const { getStudioAgents } = await import("@/lib/agent-registry");
-    expect(getStudioAgents()).toHaveLength(2);
+    expect(getStudioAgents()).toHaveLength(1);
     const ids = getStudioAgents().map((a) => a.id);
     expect(ids).toContain("litt");
-    expect(ids).toContain("spark");
+    expect(ids).not.toContain("spark");
   });
 
   it("marketplace agents are the 5 specialists", async () => {
@@ -415,12 +415,12 @@ describe("chargeAgentRun (billing)", () => {
 });
 
 describe("Studio agent store (scenario 19, 20)", () => {
-  it("exposes only LiTT and Spark in the studio selector (2 agents)", async () => {
+  it("exposes only LiTT in the studio selector (Spark hidden)", async () => {
     const { STUDIO_AGENTS } = await import("@/app/(app)/studio/stores/useStudioAgentStore");
-    expect(STUDIO_AGENTS).toHaveLength(2);
+    expect(STUDIO_AGENTS).toHaveLength(1);
     const ids = STUDIO_AGENTS.map((a) => a.id);
     expect(ids).toContain("litt");
-    expect(ids).toContain("spark");
+    expect(ids).not.toContain("spark");
     // Coder and Researcher are consolidated into LiTT — not studio-visible
     expect(ids).not.toContain("researcher");
     expect(ids).not.toContain("coder");
@@ -434,11 +434,10 @@ describe("Studio agent store (scenario 19, 20)", () => {
     }
   });
 
-  it("LiTT and Spark remain working with starter plan (scenario 20)", async () => {
+  it("LiTT remains working with starter plan; Spark is hidden (scenario 20)", async () => {
     const { AGENT_META } = await import("@/app/(app)/studio/stores/useStudioAgentStore");
     expect(AGENT_META.litt.displayName).toBe("LiTT");
-    expect(AGENT_META.spark.displayName).toBe("Spark");
     expect(AGENT_META.litt.minimumPlan).toBe("starter");
-    expect(AGENT_META.spark.minimumPlan).toBe("starter");
+    expect(AGENT_META.spark).toBeUndefined();
   });
 });
