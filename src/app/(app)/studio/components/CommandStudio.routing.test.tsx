@@ -1161,9 +1161,13 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(document.activeElement).toBe(input);
       expect(screen.getByRole("button", { name: /send message|cancel response/i })).toBeVisible();
 
-      // Closing returns to workspace-only mobile state.
+      // Closing returns to workspace-only mobile state. Canvas-first
+      // layout: the sheet stays mounted and hides via display:none (chat
+      // state — composer drafts, SSE connections, scroll — survives), so
+      // the workspace-only state is a visibility toggle, not an unmount.
       await user.click(screen.getByTestId("litt-mobile-sheet-close"));
-      expect(screen.queryByTestId("litt-mobile-sheet")).toBeNull();
+      expect(screen.getByTestId("litt-mobile-sheet-mount").style.display).toBe("none");
+      expect(screen.getByTestId("litt-mobile-sheet")).not.toBeVisible();
     });
 
     it("mobile chat shows the compact Build status bar instead of the Mission card stack", async () => {

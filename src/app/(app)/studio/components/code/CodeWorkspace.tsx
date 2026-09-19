@@ -115,18 +115,12 @@ export function CodeWorkspace({
   branch,
   workspaceStatus,
   writeAccess,
-  externalPreviewActive = false,
 }: {
   projectId: string | null;
   repositoryName: string | null;
   branch: string | null;
   workspaceStatus: string | null;
   writeAccess: boolean;
-  // True when CommandStudio's permanent right-column preview is mounted
-  // (desktop split >=1280px with advanced tools open). In that case the
-  // App view must NOT mount a second StudioPreviewPanel — exactly one
-  // live preview exists at a time.
-  externalPreviewActive?: boolean;
 }) {
   const { getToken } = useClerkAuth();
   const [entries, setEntries] = useState<Record<string, FileEntry[]>>({});
@@ -869,31 +863,19 @@ export function CodeWorkspace({
             </div>
           )}
 
-          {/* App Preview — shown in app-preview mode. When the permanent
-              right-column preview is active, defer to it instead of
-              mounting a second StudioPreviewPanel. */}
+          {/* App Preview — shown in app-preview mode. Canvas-first layout:
+              there is no permanent right-column preview, so the App view
+              always mounts its own StudioPreviewPanel. */}
           {viewMode === "app-preview" && (
             <div className="flex min-w-0 flex-1 flex-col">
-              {externalPreviewActive ? (
-                <div
-                  className="flex h-full flex-col items-center justify-center gap-2"
-                  data-testid="app-preview-external-notice"
-                >
-                  <Monitor size={32} opacity={0.2} style={{ color: "var(--text-muted)" }} />
-                  <p className="text-[12px] font-medium" style={{ color: "var(--text-muted)" }}>
-                    Live preview is already open in the right panel
-                  </p>
-                </div>
-              ) : (
-                <StudioPreviewPanel
-                  projectId={projectId}
-                  projectName={repositoryName}
-                  repositoryName={repositoryName}
-                  branch={branch}
-                  workspaceStatus={workspaceStatus}
-                  refreshKey={previewRefreshKey}
-                />
-              )}
+              <StudioPreviewPanel
+                projectId={projectId}
+                projectName={repositoryName}
+                repositoryName={repositoryName}
+                branch={branch}
+                workspaceStatus={workspaceStatus}
+                refreshKey={previewRefreshKey}
+              />
             </div>
           )}
         </div>

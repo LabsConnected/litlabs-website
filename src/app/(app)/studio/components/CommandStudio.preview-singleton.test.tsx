@@ -46,15 +46,11 @@ vi.mock("next/dynamic", async () => {
 });
 
 // StudioPreviewPanel is the unit under observation — stub it with a
-// stable testid so mounted instances can be counted.
+// stable testid so mounted instances can be counted. Canvas-first layout:
+// the preview has no split toggle anymore; it always consumes the full
+// workspace width as the Preview tab.
 vi.mock("./StudioPreviewPanel", () => ({
-  default: ({ onToggleSplitPreview }: { onToggleSplitPreview?: () => void }) => (
-    <div data-testid="studio-preview-panel">
-      {onToggleSplitPreview && (
-        <button type="button" data-testid="preview-split-toggle" onClick={onToggleSplitPreview} />
-      )}
-    </div>
-  ),
+  default: () => <div data-testid="studio-preview-panel" />,
 }));
 
 // Other dynamic children that would be pulled in by the lazy passthrough
@@ -418,16 +414,6 @@ async function renderCommandStudio() {
   return { user, ...view };
 }
 
-async function openAdvancedTools(_user: ReturnType<typeof userEvent.setup>) {
-  // Split preview is now explicit. The default desktop layout has no
-  // reserved preview column; this helper opts into it for the tests that
-  // verify the optional split behavior.
-  await settle();
-  const toggle = screen.queryByTestId("preview-split-toggle");
-  if (!toggle) throw new Error("Preview split action did not mount");
-  await _user.click(toggle);
-}
-
 function previewPanels() {
   return screen.queryAllByTestId("studio-preview-panel");
 }
@@ -439,11 +425,12 @@ async function settle() {
   });
 }
 
-describe("CommandStudio — single active preview", () => {
+describe("CommandStudio — canvas-first 2-zone layout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sendMock.mockResolvedValue({ accepted: true });
     window.innerHeight = 844;
+    try { localStorage.clear(); } catch { /* jsdom without storage */ }
     Object.defineProperty(window, "visualViewport", {
       value: {
         width: 390,
@@ -458,67 +445,101 @@ describe("CommandStudio — single active preview", () => {
     });
   });
 
-  it("mounts exactly one preview when desktop split is explicitly enabled", async () => {
-    globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
-    const { user } = await renderCommandStudio();
-    await openAdvancedTools(user);
-    await waitFor(() => expect(screen.getByTestId("permanent-preview-column")).toBeTruthy());
-    // The center workspace yields — it shows the Plan surface instead.
-    await waitFor(() =>
-      expect(screen.getByTestId("studio-center-workspace").querySelector("[data-testid='studio-plan-surface']")).toBeTruthy());
-    // Regression: the center workspace preview used to mount alongside
-    // the permanent right-column preview on desktop split.
-    expect(previewPanels()).toHaveLength(1);
-    const column = screen.getByTestId("permanent-preview-column");
-    expect(column.querySelector("[data-testid='studio-preview-panel']")).toBeTruthy();
-  });
-
-  it("renders exactly one preview in the default layout (advanced tools closed)", async () => {
+  it("has no permanent preview column on desktop — the Preview tab owns the full workspace width", async () => {
     globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
     await renderCommandStudio();
     await settle();
-    expect(previewPanels()).toHaveLength(1);
+    // The permanent right-side preview column is gone for good: no column,
+    // no split toggle, no resize handle reserving canvas width.
     expect(screen.queryByTestId("permanent-preview-column")).toBeNull();
-    // The single preview lives in the center workspace.
+    expect(screen.queryByTestId("preview-split-toggle")).toBeNull();
+    expect(screen.queryByTestId("preview-resize-handle")).toBeNull();
+    // Exactly one preview, living in the center workspace's Preview tab.
+    expect(previewPanels()).toHaveLength(1);
     expect(screen.getByTestId("studio-center-workspace").querySelector("[data-testid='studio-preview-panel']")).toBeTruthy();
   });
 
-  it("keeps exactly one preview across split Preview → Code → Preview navigation", async () => {
+  it("keeps exactly one preview across Preview → Code → Preview navigation", async () => {
     globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
     const { user } = await renderCommandStudio();
-    await openAdvancedTools(user);
-    await waitFor(() => expect(screen.getByTestId("permanent-preview-column")).toBeTruthy());
+    await settle();
 
     await user.click(screen.getByTestId("workspace-tab-code"));
     await settle();
-    expect(previewPanels()).toHaveLength(1);
+    expect(screen.queryByTestId("permanent-preview-column")).toBeNull();
 
     await user.click(screen.getByTestId("workspace-tab-preview"));
     await settle();
     expect(previewPanels()).toHaveLength(1);
-    const column = screen.getByTestId("permanent-preview-column");
-    expect(column.querySelector("[data-testid='studio-preview-panel']")).toBeTruthy();
+    expect(screen.getByTestId("studio-center-workspace").querySelector("[data-testid='studio-preview-panel']")).toBeTruthy();
+    expect(screen.queryByTestId("permanent-preview-column")).toBeNull();
   });
 
   it("keeps the preview as a single workspace tab on compact viewports", async () => {
-    // 1200px — laptop tier, below the 1280px desktop-split threshold.
+    // 1200px — laptop tier.
     globalThis.__TEST_VIEWPORT_WIDTH__ = 1200;
-    const { user } = await renderCommandStudio();
-    await openAdvancedTools(user);
+    await renderCommandStudio();
     await settle();
     expect(screen.queryByTestId("permanent-preview-column")).toBeNull();
     expect(previewPanels()).toHaveLength(1);
     expect(screen.getByTestId("studio-center-workspace").querySelector("[data-testid='studio-preview-panel']")).toBeTruthy();
   });
 
-  it("keeps the conversation surface in the center while split preview stays mounted", async () => {
+  it("chat collapse/expand keeps the canvas mounted with no other column reservations", async () => {
     globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
     const { user } = await renderCommandStudio();
-    await openAdvancedTools(user);
-    await waitFor(() => expect(screen.getByTestId("permanent-preview-column")).toBeTruthy());
     await settle();
-    expect(previewPanels()).toHaveLength(1);
-    expect(screen.getByTestId("studio-center-workspace").querySelector("[data-testid='studio-plan-surface']")).toBeTruthy();
+
+    // Drive to a known state: expanded.
+    if (screen.getByTestId("litt-panel").getAttribute("data-collapsed") === "true") {
+      await user.click(screen.getByTestId("litt-hud-expand"));
+      await settle();
+    }
+    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
+
+    // Collapse — the canvas must stay mounted and take all remaining width.
+    await user.click(screen.getByTestId("litt-panel-collapse"));
+    await settle();
+    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
+    expect(screen.getByTestId("studio-center-workspace")).toBeTruthy();
+    expect(screen.queryByTestId("permanent-preview-column")).toBeNull();
+
+    // Expand again — chat returns, canvas still mounted.
+    await user.click(screen.getByTestId("litt-hud-expand"));
+    await settle();
+    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
+    expect(screen.getByTestId("studio-center-workspace")).toBeTruthy();
+  });
+
+  it("mobile Chat|Canvas switcher toggles surfaces without unmounting chat", async () => {
+    globalThis.__TEST_VIEWPORT_WIDTH__ = 390;
+    window.innerWidth = 390;
+    const { user } = await renderCommandStudio();
+    await settle();
+
+    // The segmented switcher is the primary fast path on the canvas view.
+    expect(screen.getByTestId("mobile-surface-switcher")).toBeTruthy();
+    expect(screen.getByTestId("mobile-switch-chat")).toBeTruthy();
+    expect(screen.getByTestId("mobile-switch-canvas")).toBeTruthy();
+
+    // Chat surface is mounted but hidden — never unmounted while switching.
+    const mount = screen.getByTestId("litt-mobile-sheet-mount");
+    expect(mount.style.display).toBe("none");
+    expect(screen.getByTestId("studio-command-composer")).toBeTruthy();
+
+    // Tap Chat — the sheet becomes visible; the composer instance is the
+    // same one (state, drafts, and SSE connections survive).
+    await user.click(screen.getByTestId("mobile-switch-chat"));
+    await settle();
+    expect(screen.getByTestId("litt-mobile-sheet-mount").style.display).toBe("");
+    expect(screen.getByTestId("studio-command-composer")).toBeTruthy();
+
+    // Close the sheet — back on canvas, chat still mounted (hidden).
+    await user.click(screen.getByTestId("litt-mobile-sheet-close"));
+    await settle();
+    expect(screen.getByTestId("litt-mobile-sheet-mount").style.display).toBe("none");
+    expect(screen.getByTestId("studio-command-composer")).toBeTruthy();
+    expect(screen.getByTestId("mobile-surface-switcher")).toBeTruthy();
   });
 
   it("does NOT show a Done completion card when the run pauses for approval", async () => {
@@ -705,26 +726,8 @@ describe("CommandStudio — approval gate convergence", () => {
   });
 });
 
-describe("CodeWorkspace — app-preview guard", () => {
-  it("defers to the permanent preview instead of mounting a second panel", async () => {
-    const user = userEvent.setup();
-    render(
-      <CodeWorkspace
-        projectId="project-1"
-        repositoryName="owner/repo"
-        branch="main"
-        workspaceStatus="ready"
-        writeAccess={true}
-        externalPreviewActive={true}
-      />,
-    );
-    await user.click(screen.getByTitle("App"));
-    await settle();
-    expect(screen.getByTestId("app-preview-external-notice")).toBeTruthy();
-    expect(previewPanels()).toHaveLength(0);
-  });
-
-  it("still mounts the app preview when no external preview is active", async () => {
+describe("CodeWorkspace — app preview", () => {
+  it("always mounts the app preview in App view (no external preview column exists)", async () => {
     const user = userEvent.setup();
     render(
       <CodeWorkspace
@@ -737,6 +740,8 @@ describe("CodeWorkspace — app-preview guard", () => {
     );
     await user.click(screen.getByTitle("App"));
     await settle();
+    // Canvas-first layout: there is no permanent right-column preview to
+    // defer to, so the App view always mounts its own preview panel.
     expect(previewPanels()).toHaveLength(1);
     expect(screen.queryByTestId("app-preview-external-notice")).toBeNull();
   });
