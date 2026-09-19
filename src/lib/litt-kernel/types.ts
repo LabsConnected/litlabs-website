@@ -153,6 +153,11 @@ export type LiTTControlDecision = {
     requiresCurrentInformation: boolean;
     requiresPrivateData: boolean;
     requiresExecution: boolean;
+    /**
+     * Anaphoric follow-up marker from intent classification ("build it",
+     * "do that again"). Optional — only set by the Kernel path.
+     */
+    anaphoricFollowUp?: boolean;
   };
 
   epistemics: {
@@ -309,4 +314,11 @@ export type IntentClassification = {
   requiresExecution: boolean;
   confidence: number;
   reasoning: string;
+  /**
+   * True when the message is an anaphoric follow-up ("build it", "do that
+   * again") with no artifact noun — the target lives in prior context.
+   * Callers with a project in context should ask a targeted clarification
+   * instead of emitting a generic chat reply.
+   */
+  anaphoricFollowUp: boolean;
 };
