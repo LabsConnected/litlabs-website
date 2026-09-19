@@ -219,6 +219,31 @@ export async function dbGetActions(
   return data as Record<string, unknown>[];
 }
 
+/**
+ * Log a navigation that the URL policy blocked — before the browser ever
+ * saw it. Kept in the same `browser_actions` audit table as executed
+ * actions (success: false), so the audit trail records every navigation
+ * host the agent attempted, not just the ones that ran.
+ */
+export async function logBlockedBrowserNavigation(
+  sessionId: string,
+  userId: string,
+  url: string,
+  reason: string,
+): Promise<void> {
+  await dbInsertAction({
+    sessionId,
+    userId,
+    actor: "agent",
+    action: "browser.navigate",
+    inputs: { url, blockedByPolicy: true },
+    success: false,
+    result: null,
+    error: `Navigation blocked by URL policy: ${reason}`,
+    durationMs: 0,
+  }).catch(() => {});
+}
+
 // ─── Session lifecycle ───────────────────────────────────────────
 
 /**
@@ -573,4 +598,130 @@ export async function closeAllUserSessions(userId: string): Promise<number> {
   }
 
   return closed;
+}
+
+// ─── Live status (Phase 2: backs the Studio status chip) ──────────
+
+export type BrowserLiveState = "live" | "idle" | "disconnected";
+
+export interface BrowserLiveStatus {
+  /** "live": a Stagehand is driving in this process. "idle": a session
+   *  exists but is not currently drivable (paused, human-controlled, or
+   *  recorded active without a live Stagehand here). "disconnected": none. */
+  state: BrowserLiveState;
+  sessionId: string | null;
+  controller: Controller | null;
+  sessionStatus: SessionStatus | null;
+  /** ISO timestamp of the last known activity, if any. */
+  lastActivityAt: string | null;
+}
+
+/**
+ * Honest liveness check for the Studio status chip.
+ *
+ * Never assumes: "live" requires a Stagehand instance present in THIS
+ * process's registry with fresh activity inside the idle TTL. The check
+ * reads the in-memory registry directly (without refreshing heartbeats —
+ * a status poll must not resurrect an idle session) and falls back to
+ * the DB row for "idle" (a session exists but isn't drivable here).
+ * Sessions whose last activity is past the TTL are reported as
+ * "disconnected", not "idle".
+ */
+export async function getLiveSessionStatus(
+  userId: string,
+  conversationId?: string,
+): Promise<BrowserLiveStatus> {
+  const now = Date.now();
+
+  const inProcess = [...activeSessions.values()]
+    .filter((a) => a.session.userId === userId)
+    .filter((a) =>
+      conversationId ? a.session.conversationId === conversationId : true,
+    )
+    .filter((a) => now - a.lastActivity <= SESSION_IDLE_TIMEOUT_MS)
+    .sort((a, b) => b.lastActivity - a.lastActivity)[0];
+
+  if (inProcess) {
+    const { session } = inProcess;
+    if (session.status === "active" || session.status === "agent_control") {
+      return {
+        state: "live",
+        sessionId: session.id,
+        controller: session.controller,
+        sessionStatus: session.status,
+        lastActivityAt: new Date(inProcess.lastActivity).toISOString(),
+      };
+    }
+    // Paused or human-controlled: a session exists, but the agent is not
+    // driving it right now.
+    return {
+      state: "idle",
+      sessionId: session.id,
+      controller: session.controller,
+      sessionStatus: session.status,
+      lastActivityAt: new Date(inProcess.lastActivity).toISOString(),
+    };
+  }
+
+  // DB fallback: a recorded-active session with no live Stagehand in this
+  // process. Report "idle" (it exists; the agent can re-acquire it) unless
+  // it is past the idle TTL, in which case it is honestly "disconnected".
+  const dbSessions = await dbGetActiveSessions(userId).catch(() => []);
+  const dbCandidate = dbSessions
+    .filter((s) =>
+      conversationId ? s.conversationId === conversationId : true,
+    )
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+
+  if (dbCandidate) {
+    const lastActivityMs = new Date(dbCandidate.updatedAt).getTime();
+    const lastActivityAt = Number.isNaN(lastActivityMs)
+      ? null
+      : new Date(lastActivityMs).toISOString();
+    if (!Number.isNaN(lastActivityMs) && now - lastActivityMs <= SESSION_IDLE_TIMEOUT_MS) {
+      return {
+        state: "idle",
+        sessionId: dbCandidate.id,
+        controller: dbCandidate.controller,
+        sessionStatus: dbCandidate.status,
+        lastActivityAt,
+      };
+    }
+  }
+
+  return {
+    state: "disconnected",
+    sessionId: null,
+    controller: null,
+    sessionStatus: null,
+    lastActivityAt: null,
+  };
+}
+
+// ─── Test seams ───────────────────────────────────────────────────
+// The in-memory registry is module-private by design; these helpers exist
+// so TTL-expiry and liveness behavior can be tested without a live
+// Browserbase account. Never used in production code paths.
+
+export interface TestActiveSessionEntry {
+  stagehand: Stagehand;
+  session: BrowserSession;
+  lastActivity: number;
+}
+
+/** Register a session directly in the in-memory registry (tests only). */
+export function __registerActiveSessionForTest(
+  entry: TestActiveSessionEntry,
+): void {
+  activeSessions.set(entry.session.id, entry);
+}
+
+/** Number of sessions currently in the in-memory registry (tests only). */
+export function __activeSessionCountForTest(): number {
+  return activeSessions.size;
+}
+
+/** Clear the in-memory registry without touching the provider (tests only). */
+export function __resetActiveSessionsForTest(): void {
+  activeSessions.clear();
 }

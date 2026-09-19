@@ -28,6 +28,7 @@ import MissionCards from "./MissionCards";
 import PersistentMusicPlayer from "./PersistentMusicPlayer";
 import { MobileCommandNav } from "./CommandStudioNav";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
+import StudioBrowserStatusChip from "./StudioBrowserStatusChip";
 import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
 import LiTTLiveActivity from "./LiTTLiveActivity";
@@ -1596,6 +1597,12 @@ function CommandStudioContent() {
           />
         </div>
       )}
+      {/* Agent browser session chip (Phase 2): live/disconnected state is
+          probed server-side; the Stop button closes the session. Pinned
+          directly above the composer so it is visible during any session. */}
+      <StudioBrowserStatusChip
+        conversationId={conversation.selectedConversationId ?? undefined}
+      />
       <CommandComposer
         value={composerValue}
         onChange={setComposerValue}

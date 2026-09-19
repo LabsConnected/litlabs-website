@@ -66,6 +66,12 @@ export interface AgentLoopConfig {
    */
   userId?: string;
   /**
+   * Studio conversation this run belongs to. Injected server-side into
+   * `browser.start_session` (for multi-turn session reuse) — the model
+   * must never supply it itself.
+   */
+  conversationId?: string;
+  /**
    * Opt-in to the LiTT quality loop (gated UNDERSTAND→VERIFY stages +
    * visual-quality judge). When enabled, the loop records stage evidence
    * from tool events and agent declarations, runs one visual inspection
@@ -229,9 +235,17 @@ function withUserScopeForBrowserTools(
   toolId: string,
   inputs: Record<string, unknown>,
   userId: string | undefined,
+  conversationId?: string | undefined,
 ): Record<string, unknown> {
   if (userId && toolId.startsWith("browser.")) {
-    return { ...inputs, userId };
+    const scoped: Record<string, unknown> = { ...inputs, userId };
+    // Session reuse key: the agent's browser.start_session call gets the
+    // server-known conversationId so an existing live session can be
+    // reused across chat turns. The model never supplies this itself.
+    if (toolId === "browser.start_session" && conversationId) {
+      scoped.conversationId = conversationId;
+    }
+    return scoped;
   }
   return inputs;
 }
@@ -758,7 +772,7 @@ export async function runAgentLoopV2(
 
       try {
         // Use the registry's execute method, passing transport for V2 handlers
-        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId), {
+        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId, cfg.conversationId), {
           hasApproval: !permResult.requiresApproval,
           availableCapabilities,
           transport,
@@ -1123,6 +1137,11 @@ export interface DeferredToolBatchContext {
    * at execution time. The model never supplies userId itself.
    */
   userId?: string;
+  /**
+   * Studio conversation id — injected into browser.start_session for
+   * multi-turn session reuse (mirrors AgentLoopConfig.conversationId).
+   */
+  conversationId?: string;
 }
 
 export interface DeferredToolBatchResult {
@@ -1300,7 +1319,7 @@ export async function executeDeferredToolCalls(
 
     let result: ToolCallResult;
     try {
-      const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, ctx.userId), {
+      const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, ctx.userId, ctx.conversationId), {
         hasApproval: !permResult.requiresApproval,
         transport: ctx.transport,
       });
@@ -1455,7 +1474,7 @@ export async function resumeAgentLoopV2(
         error: "Cancelled by user",
       };
     } else try {
-      const execResult = await toolRegistry.execute(resume.toolId, withUserScopeForBrowserTools(resume.toolId, resume.inputs, cfg.userId), {
+      const execResult = await toolRegistry.execute(resume.toolId, withUserScopeForBrowserTools(resume.toolId, resume.inputs, cfg.userId, cfg.conversationId), {
         hasApproval: true,
         availableCapabilities,
         transport,
@@ -1593,6 +1612,7 @@ export async function resumeAgentLoopV2(
       signal: cfg.signal,
       state: deferredState,
       userId: cfg.userId,
+      conversationId: cfg.conversationId,
     });
     hasInterveningMutation = deferredState.hasInterveningMutation;
     cancelled = deferredState.cancelled;
@@ -1819,7 +1839,7 @@ export async function resumeAgentLoopV2(
 
       let result: ToolCallResult;
       try {
-        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId), {
+        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId, cfg.conversationId), {
           hasApproval: !permResult.requiresApproval,
           availableCapabilities,
           transport,

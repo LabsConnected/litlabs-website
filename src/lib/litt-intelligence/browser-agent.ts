@@ -1,5 +1,5 @@
 /**
- * LiTT Agent Browser — chat-facing orchestration (Phase 1).
+ * LiTT Agent Browser — chat-facing orchestration (Phase 1 + Phase 2).
  *
  * This module is the seam between the Studio chat and the Browserbase +
  * Stagehand session infrastructure (`browser-session-manager.ts`,
@@ -9,10 +9,18 @@
  *   beta until BITS metering ships (Phase 4); until then only the
  *   platform owner's account may start sessions.
  * - `startAgentBrowserSession` — gated session start with honest errors.
+ * - `getActiveSession` — find the user's genuinely live session for a
+ *   conversation (in-process Stagehand, inside the idle TTL), or null.
+ * - `getOrReuseAgentBrowserSession` — get-or-reuse path: reuse the live
+ *   session for this conversation instead of starting a new one. This is
+ *   what makes multi-turn browsing work across chat turns; the agent's
+ *   `browser.start_session` tool calls this.
  * - `runOneShotScreenshot` — the Phase 1 end-to-end loop: start a session,
  *   navigate to a URL, capture a screenshot snapshot, close the session.
  *   The session is ALWAYS closed (no orphaned Browserbase sessions),
  *   and every failure is reported truthfully — never a fake screenshot.
+ *   The one-shot path keeps closing immediately; only multi-turn use
+ *   (via get-or-reuse) keeps sessions open across turns.
  *
  * Security posture (V1):
  * - Clean profile only: Browserbase sessions start with zero cookies,
@@ -24,12 +32,20 @@
 
 import "server-only";
 import { isOwnerClerkId } from "@/lib/owner";
+import { normalizeBrowserUrl } from "./browser-url-policy";
 import {
   startSession,
   closeSession,
+  closeIdleSessions,
+  getStagehand,
+  dbGetActiveSessions,
   type BrowserSession,
 } from "./browser-session-manager";
 import { browserToolHandlers } from "./browser-tool-handlers";
+
+// Re-exported from the policy module (moved there in Phase 2 so the
+// navigate tool path can share it without an import cycle).
+export { normalizeBrowserUrl };
 
 // ─── Beta gate ─────────────────────────────────────────────────────
 
@@ -55,35 +71,9 @@ export const BROWSER_BETA_ONLY_MESSAGE =
 export const BROWSER_UNAVAILABLE_MESSAGE =
   "The browser isn't available right now (not configured on the server). I can't take a screenshot — no image was captured.";
 
-// ─── URL handling ──────────────────────────────────────────────────
-
-/**
- * Normalize user-supplied URL text for the browser.
- * Adds https:// when no scheme is present; rejects non-http(s) schemes
- * (file://, chrome://, javascript:, …) and unparseable input.
- * Returns null when the input is not a loadable web URL.
- */
-export function normalizeBrowserUrl(raw: string): string | null {
-  const trimmed = (raw ?? "").trim();
-  if (!trimmed) return null;
-  // If the input already carries a scheme, only http(s) is loadable —
-  // never rewrite file://, chrome://, javascript:, … into https://.
-  const schemeMatch = trimmed.match(/^([a-z][a-z0-9+.-]*):/i);
-  if (schemeMatch) {
-    const scheme = schemeMatch[1].toLowerCase();
-    if (scheme !== "http" && scheme !== "https") return null;
-    try {
-      return new URL(trimmed).toString();
-    } catch {
-      return null;
-    }
-  }
-  try {
-    return new URL(`https://${trimmed}`).toString();
-  } catch {
-    return null;
-  }
-}
+// ─── URL handling (Phase 2) ──────────────────────────────────────
+// normalizeBrowserUrl lives in ./browser-url-policy (re-exported above)
+// so the navigate tool path shares the exact same normalization.
 
 // ─── Chat intent (Phase 1) ─────────────────────────────────────────
 
@@ -146,7 +136,7 @@ export interface StartAgentBrowserSessionOptions {
 }
 
 export type StartAgentBrowserSessionResult =
-  | { ok: true; session: BrowserSession; message: string }
+  | { ok: true; session: BrowserSession; message: string; reused: boolean }
   | {
       ok: false;
       error: "beta_only" | "unavailable" | "start_failed";
@@ -179,6 +169,7 @@ export async function startAgentBrowserSession(
     return {
       ok: true,
       session,
+      reused: false,
       message:
         "Browser session started — fresh clean profile, no logins. " +
         `I'll announce what I'm doing with it. (session ${session.id})`,
@@ -194,6 +185,90 @@ export async function startAgentBrowserSession(
       message: `The browser couldn't start (${detail}). No session was created.`,
     };
   }
+}
+
+// ─── Multi-turn session reuse (Phase 2) ────────────────────────────
+
+/**
+ * Find the user's genuinely LIVE browser session for a conversation.
+ *
+ * "Live" is checked, not assumed: the session must be recorded as active
+ * (or agent_control) in the DB AND have a live Stagehand instance in this
+ * process (`getStagehand` non-null), AND be inside the 10-minute idle TTL.
+ * A DB row with no live Stagehand here is not reusable (multi-instance
+ * re-attach is Phase 5), so this returns null rather than a dead session.
+ *
+ * Sweeps idle sessions first so expired sessions are closed, not reused.
+ * Never throws — returns null when nothing reusable exists.
+ */
+export async function getActiveSession(
+  userId: string,
+  conversationId?: string,
+): Promise<BrowserSession | null> {
+  try {
+    // Wire the agent to the idle TTL: close expired sessions before
+    // deciding what is reusable.
+    await closeIdleSessions().catch(() => {});
+
+    const sessions = await dbGetActiveSessions(userId);
+    const candidates = sessions
+      .filter((s) =>
+        conversationId ? s.conversationId === conversationId : true,
+      )
+      .filter((s) => s.status === "active" || s.status === "agent_control")
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
+    for (const candidate of candidates) {
+      // getStagehand also refreshes the activity heartbeat on hit, so a
+      // reused session's idle clock restarts here.
+      if (getStagehand(candidate.id)) {
+        return candidate;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export type GetOrReuseAgentBrowserSessionResult = StartAgentBrowserSessionResult;
+
+/**
+ * Get-or-reuse path for the agent's `browser.start_session` tool.
+ *
+ * When the user already has a live session for this conversation
+ * (same userId + conversationId), return it with `reused: true` instead
+ * of starting a new one — this is what keeps a browser alive across chat
+ * turns ("now click the pricing link") without spawning a new
+ * Browserbase session per turn. Otherwise start fresh (beta-gated).
+ *
+ * The one-shot screenshot path does NOT use this — it calls
+ * `startAgentBrowserSession` directly and always closes the session.
+ */
+export async function getOrReuseAgentBrowserSession(
+  options: StartAgentBrowserSessionOptions,
+): Promise<GetOrReuseAgentBrowserSessionResult> {
+  if (!isBrowserBetaAllowed(options.userId)) {
+    return {
+      ok: false,
+      error: "beta_only",
+      message: BROWSER_BETA_ONLY_MESSAGE,
+    };
+  }
+
+  const existing = await getActiveSession(options.userId, options.conversationId);
+  if (existing) {
+    return {
+      ok: true,
+      session: existing,
+      reused: true,
+      message:
+        `Reusing your active browser session (session ${existing.id}) — ` +
+        "no new session started.",
+    };
+  }
+
+  return startAgentBrowserSession(options);
 }
 
 // ─── One-shot screenshot (Phase 1 loop) ────────────────────────────

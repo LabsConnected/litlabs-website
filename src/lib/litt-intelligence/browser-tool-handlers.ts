@@ -21,8 +21,10 @@ import {
   executeBrowserAction,
   getStagehand,
   takeScreenshot,
+  logBlockedBrowserNavigation,
   type BrowserActionResult,
 } from "./browser-session-manager";
+import { normalizeBrowserUrl, checkBrowserUrlPolicy } from "./browser-url-policy";
 
 // Playwright-compatible page interface (Stagehand's Page type is narrower)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -105,21 +107,57 @@ function resolveSelector(inputs: {
 
 /**
  * browser.navigate — Navigate to a URL
+ *
+ * Navigate-time URL policy (§5.3) applies BEFORE the browser is touched:
+ * loopback/link-local/metadata IPs, non-http(s) schemes, and phishing
+ * patterns are blocked and the attempt is logged to the audit trail.
+ * The blocked navigation never reaches the page.
  */
 export async function browserNavigate(
   ctx: BrowserToolContext,
   inputs: { url: string; waitUntil?: "load" | "domcontentloaded" | "networkidle" },
 ): Promise<BrowserActionResult> {
+  const raw = typeof inputs.url === "string" ? inputs.url : "";
+  const normalized = normalizeBrowserUrl(raw);
+  if (!normalized) {
+    await logBlockedBrowserNavigation(
+      ctx.sessionId,
+      ctx.userId,
+      raw,
+      `"${raw}" is not a valid web address`,
+    );
+    return {
+      success: false,
+      error: `Navigation blocked: "${raw}" is not a valid web address.`,
+      durationMs: 0,
+    };
+  }
+
+  const policy = checkBrowserUrlPolicy(normalized);
+  if (!policy.allowed) {
+    await logBlockedBrowserNavigation(
+      ctx.sessionId,
+      ctx.userId,
+      normalized,
+      policy.reason ?? "blocked by URL policy",
+    );
+    return {
+      success: false,
+      error: `Navigation blocked: ${policy.reason}.`,
+      durationMs: 0,
+    };
+  }
+
   return executeBrowserAction(
     ctx.sessionId,
     ctx.userId,
     "browser.navigate",
-    inputs,
+    { ...inputs, url: normalized },
     async (stagehand) => {
       const page = stagehand.context.pages()[0];
       if (!page) return { success: false, error: "No page available", durationMs: 0 };
 
-      await page.goto(inputs.url, {
+      await page.goto(normalized, {
         waitUntil: inputs.waitUntil ?? "domcontentloaded",
       });
       const state = await getBrowserStateWithScreenshot(ctx.sessionId);

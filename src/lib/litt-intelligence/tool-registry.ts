@@ -204,12 +204,16 @@ const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
   },
   // browser.start_session is the entry point: it provisions the sessionId
   // the other browser.* tools require. Beta-gated inside the handler.
+  // Phase 2: get-or-reuse — an existing live session for this conversation
+  // is reused instead of starting a new one (multi-turn browsing).
   "browser.start_session": async () => {
     const m = await import("./browser-agent");
     return (async (inputs: Record<string, unknown>) => {
       const userId = inputs.userId as string;
       const task = typeof inputs.task === "string" ? inputs.task : undefined;
-      return m.startAgentBrowserSession({ userId, task });
+      const conversationId =
+        typeof inputs.conversationId === "string" ? inputs.conversationId : undefined;
+      return m.getOrReuseAgentBrowserSession({ userId, task, conversationId });
     }) as ToolHandler;
   },
   // ─── Realtime internet tools — delegate to @litt/agent-core ──
@@ -1567,7 +1571,7 @@ export function registerInternalTools(): void {
         id: "browser.start_session",
         name: "Browser Start Session",
         description:
-          "Start a new agent browser session (fresh clean profile: no cookies, no logins, no extensions). Returns a sessionId for the other browser.* tools. Private beta: only the owner's account may start sessions; other accounts get an honest error. After starting, announce in chat what you are about to do with the browser. The session auto-closes after 10 idle minutes; close it yourself with browser.close when done.",
+          "Start a new agent browser session (fresh clean profile: no cookies, no logins, no extensions). Returns a sessionId for the other browser.* tools. If you already have a live session for this conversation it is REUSED (reused: true) instead of starting a new one — keep using the returned sessionId across turns. Private beta: only the owner's account may start sessions; other accounts get an honest error. After starting, announce in chat what you are about to do with the browser. The session auto-closes after 10 idle minutes; close it yourself with browser.close when done.",
         source: "internal",
         version: "1.0.0",
         inputSchema: {
@@ -1577,6 +1581,10 @@ export function registerInternalTools(): void {
             task: {
               type: "string",
               description: "What the browser session is for, e.g. 'screenshot example.com'",
+            },
+            conversationId: {
+              type: "string",
+              description: "Injected server-side; enables session reuse across chat turns.",
             },
           },
           required: ["userId"],
