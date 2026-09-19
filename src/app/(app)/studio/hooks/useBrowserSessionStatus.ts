@@ -16,12 +16,25 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 export type BrowserChipState = "live" | "idle" | "disconnected" | "unknown";
 
+export interface BrowserBurn {
+  billableMinutes: number;
+  modelCalls: number;
+  bits: number;
+  live: boolean;
+}
+
 export interface BrowserSessionStatus {
   state: BrowserChipState;
   sessionId: string | null;
   controller: string | null;
   sessionStatus: string | null;
   lastActivityAt: string | null;
+  /**
+   * Phase 4 — live burn from the real session accumulator (served by
+   * GET /api/litt/browser/status). Null when unknown: the chip shows no
+   * burn rather than a fake number.
+   */
+  burn: BrowserBurn | null;
 }
 
 const POLL_INTERVAL_MS = 15_000;
@@ -32,7 +45,25 @@ const UNKNOWN: BrowserSessionStatus = {
   controller: null,
   sessionStatus: null,
   lastActivityAt: null,
+  burn: null,
 };
+
+function parseBurn(value: unknown): BrowserBurn | null {
+  const o = (value ?? {}) as Record<string, unknown>;
+  if (
+    typeof o.billableMinutes !== "number" ||
+    typeof o.modelCalls !== "number" ||
+    typeof o.bits !== "number"
+  ) {
+    return null;
+  }
+  return {
+    billableMinutes: o.billableMinutes,
+    modelCalls: o.modelCalls,
+    bits: o.bits,
+    live: o.live === true,
+  };
+}
 
 function parseStatus(json: unknown): BrowserSessionStatus {
   const o = (json ?? {}) as Record<string, unknown>;
@@ -46,6 +77,7 @@ function parseStatus(json: unknown): BrowserSessionStatus {
     controller: typeof o.controller === "string" ? o.controller : null,
     sessionStatus: typeof o.sessionStatus === "string" ? o.sessionStatus : null,
     lastActivityAt: typeof o.lastActivityAt === "string" ? o.lastActivityAt : null,
+    burn: parseBurn(o.burn),
   };
 }
 

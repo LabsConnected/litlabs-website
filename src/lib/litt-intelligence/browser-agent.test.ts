@@ -14,6 +14,20 @@ vi.mock("./browser-session-manager", () => ({
   startSession: vi.fn(),
   closeSession: vi.fn(),
   getSession: vi.fn(),
+  // Phase 4: startAgentBrowserSession counts active sessions for the
+  // concurrent-session cap.
+  dbGetActiveSessions: vi.fn(),
+}));
+
+// Phase 4: the BITS preflight is real logic tested in
+// browser-billing.test.ts / browser-agent-p4.test.ts — here it is
+// stubbed to "allowed" so the Phase 1 paths keep their original focus.
+vi.mock("./browser-billing", () => ({
+  preflightBrowserStart: vi.fn(),
+  getDailyBrowserMinutesUsed: vi.fn(),
+  DAILY_BROWSER_MINUTES_QUOTA: 120,
+  QUOTA_PAUSED_MESSAGE:
+    "Browser paused: you've hit your daily browser-minute limit. It resets tomorrow.",
 }));
 
 vi.mock("./browser-tool-handlers", () => ({
@@ -32,16 +46,19 @@ import {
   runOneShotScreenshot,
   BROWSER_BETA_ONLY_MESSAGE,
 } from "./browser-agent";
-import { startSession, closeSession } from "./browser-session-manager";
+import { startSession, closeSession, dbGetActiveSessions } from "./browser-session-manager";
 import { browserToolHandlers } from "./browser-tool-handlers";
+import { preflightBrowserStart } from "./browser-billing";
 
 const OWNER_ID = "owner_clerk_123";
 const OTHER_ID = "user_random_456";
 
 const mockStartSession = vi.mocked(startSession);
 const mockCloseSession = vi.mocked(closeSession);
+const mockDbGetActiveSessions = vi.mocked(dbGetActiveSessions);
 const mockNavigate = vi.mocked(browserToolHandlers["browser.navigate"]);
 const mockScreenshot = vi.mocked(browserToolHandlers["browser.screenshot"]);
+const mockPreflightBrowserStart = vi.mocked(preflightBrowserStart);
 
 function fakeSession() {
   const now = new Date().toISOString();
@@ -167,6 +184,10 @@ describe("startAgentBrowserSession", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.LITTLABS_VAPI_OWNER_CLERK_ID = OWNER_ID;
+    // Phase 4: preflight passes by default (the real preflight logic is
+    // tested in browser-billing.test.ts / browser-agent-p4.test.ts).
+    mockPreflightBrowserStart.mockResolvedValue({ ok: true });
+    mockDbGetActiveSessions.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -221,6 +242,9 @@ describe("runOneShotScreenshot", () => {
     process.env.LITTLABS_VAPI_OWNER_CLERK_ID = OWNER_ID;
     mockStartSession.mockResolvedValue(fakeSession());
     mockCloseSession.mockResolvedValue(undefined);
+    // Phase 4: preflight passes by default here too.
+    mockPreflightBrowserStart.mockResolvedValue({ ok: true });
+    mockDbGetActiveSessions.mockResolvedValue([]);
   });
 
   afterEach(() => {

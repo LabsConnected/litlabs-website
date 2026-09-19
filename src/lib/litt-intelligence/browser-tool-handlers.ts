@@ -298,6 +298,7 @@ export async function browserClick(
       const page = stagehand.context.pages()[0] as PlaywrightPage;
       if (!page) return { success: false, error: "No page available", durationMs: 0 };
 
+      let modelCalls = 0;
       // Coordinate fallback
       if (inputs.x !== undefined && inputs.y !== undefined) {
         await page.mouse.click(inputs.x, inputs.y);
@@ -312,9 +313,11 @@ export async function browserClick(
         }
 
         if (selector.startsWith("text=")) {
-          // Use Stagehand's act() for text-based interaction
+          // Use Stagehand's act() for text-based interaction — this is a
+          // MODEL call (Phase 4: accrues the per-action model surcharge).
           const text = selector.slice(5);
           await stagehand.act(`Click the element with text "${text}"`);
+          modelCalls = 1;
         } else {
           await page.click(selector, { timeout: 10000 as number });
         }
@@ -327,6 +330,7 @@ export async function browserClick(
       return {
         success: true,
         data: state,
+        modelCalls,
         durationMs: 0,
       };
     },
@@ -357,6 +361,7 @@ export async function browserType(
       const page = stagehand.context.pages()[0] as PlaywrightPage;
       if (!page) return { success: false, error: "No page available", durationMs: 0 };
 
+      let modelCalls = 0;
       const selector = resolveSelector(inputs);
       if (!selector) {
         return {
@@ -367,8 +372,10 @@ export async function browserType(
       }
 
       if (selector.startsWith("text=")) {
+        // Stagehand act() = model call (Phase 4 surcharge).
         const text = selector.slice(5);
         await stagehand.act(`Find the input field near "${text}" and type "${inputs.value}"`);
+        modelCalls = 1;
       } else {
         if (inputs.clear !== false) {
           await page.fill(selector, "").catch(() => {});
@@ -381,6 +388,7 @@ export async function browserType(
       return {
         success: true,
         data: state,
+        modelCalls,
         durationMs: 0,
       };
     },
@@ -409,6 +417,7 @@ export async function browserSelect(
       const page = stagehand.context.pages()[0] as PlaywrightPage;
       if (!page) return { success: false, error: "No page available", durationMs: 0 };
 
+      let modelCalls = 0;
       const selector = resolveSelector(inputs);
       if (!selector) {
         return {
@@ -419,8 +428,10 @@ export async function browserSelect(
       }
 
       if (selector.startsWith("text=")) {
+        // Stagehand act() = model call (Phase 4 surcharge).
         const text = selector.slice(5);
         await stagehand.act(`Find the select dropdown near "${text}" and select "${inputs.label ?? inputs.value}"`);
+        modelCalls = 1;
       } else {
         await page.selectOption(selector, inputs.value, { timeout: 10000 as number });
       }
@@ -430,6 +441,7 @@ export async function browserSelect(
       return {
         success: true,
         data: state,
+        modelCalls,
         durationMs: 0,
       };
     },
@@ -588,6 +600,8 @@ export async function browserExtract(
 
       return {
         success: true,
+        // stagehand.extract() is model-driven (Phase 4 surcharge).
+        modelCalls: 1,
         data: { ...state, extracted: result },
         durationMs: 0,
       };

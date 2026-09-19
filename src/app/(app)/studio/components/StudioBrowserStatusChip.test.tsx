@@ -22,6 +22,7 @@ let mockStatus: BrowserSessionStatus = {
   controller: null,
   sessionStatus: null,
   lastActivityAt: null,
+  burn: null,
 };
 let mockLiveViewUrl: string | null = null;
 
@@ -50,6 +51,7 @@ beforeEach(() => {
     controller: null,
     sessionStatus: null,
     lastActivityAt: null,
+    burn: null,
   };
 });
 
@@ -61,6 +63,7 @@ describe("StudioBrowserStatusChip — cooperative control", () => {
       controller: "agent",
       sessionStatus: "agent_control",
       lastActivityAt: new Date().toISOString(),
+      burn: { billableMinutes: 3, modelCalls: 2, bits: 155, live: true },
     };
     render(<StudioBrowserStatusChip />);
     expect(screen.getByTestId("browser-take-control")).toBeTruthy();
@@ -76,11 +79,13 @@ describe("StudioBrowserStatusChip — cooperative control", () => {
       controller: "human",
       sessionStatus: "human_control",
       lastActivityAt: new Date().toISOString(),
+      burn: { billableMinutes: 3, modelCalls: 2, bits: 155, live: true },
     };
     mockLiveViewUrl = "https://www.browserbase.com/sessions/bb-1";
     render(<StudioBrowserStatusChip />);
 
-    expect(screen.getByText("Browser · You have control")).toBeTruthy();
+    // Phase 4 — the burn segment comes from the real accumulator.
+    expect(screen.getByText("Browser · You have control · 3 min · 155 BITS")).toBeTruthy();
     expect(screen.getByTestId("browser-resume")).toBeTruthy();
     expect(screen.queryByTestId("browser-take-control")).toBeNull();
     const liveView = screen.getByTestId("browser-live-view");
@@ -98,5 +103,35 @@ describe("StudioBrowserStatusChip — cooperative control", () => {
     expect(screen.getByText("Browser · Disconnected")).toBeTruthy();
     expect(screen.queryByTestId("browser-take-control")).toBeNull();
     expect(screen.queryByTestId("browser-resume")).toBeNull();
+  });
+});
+
+describe("StudioBrowserStatusChip — live burn display (Phase 4)", () => {
+  it("renders the real accumulator burn on a live session", () => {
+    mockStatus = {
+      state: "live",
+      sessionId: "sess-1",
+      controller: "agent",
+      sessionStatus: "active",
+      lastActivityAt: new Date().toISOString(),
+      burn: { billableMinutes: 3, modelCalls: 2, bits: 155, live: true },
+    };
+    render(<StudioBrowserStatusChip />);
+    expect(
+      screen.getByText("Browser · Live · 3 min · 155 BITS"),
+    ).toBeTruthy();
+  });
+
+  it("shows no burn segment when the probe knows nothing (never a fake number)", () => {
+    mockStatus = {
+      state: "live",
+      sessionId: "sess-1",
+      controller: "agent",
+      sessionStatus: "active",
+      lastActivityAt: new Date().toISOString(),
+      burn: null,
+    };
+    render(<StudioBrowserStatusChip />);
+    expect(screen.getByText("Browser · Live")).toBeTruthy();
   });
 });

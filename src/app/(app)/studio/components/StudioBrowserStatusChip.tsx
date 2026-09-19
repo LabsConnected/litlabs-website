@@ -37,10 +37,14 @@ function dotColor(state: string, humanControl: boolean): string {
   return "var(--text-muted)";
 }
 
-function label(state: string, humanControl: boolean): string {
-  if (humanControl) return "Browser · You have control";
-  if (state === "live") return "Browser · Live";
-  if (state === "idle") return "Browser · Idle";
+function label(state: string, humanControl: boolean, burn: { billableMinutes: number; bits: number } | null): string {
+  // Phase 4 — live burn display, e.g. "Browser · Live · 3 min · 135
+  // BITS". The numbers come from the real session accumulator via the
+  // status probe; burn is null (and the segment omitted) when unknown.
+  const burnSeg = burn ? ` · ${burn.billableMinutes} min · ${burn.bits} BITS` : "";
+  if (humanControl) return `Browser · You have control${burnSeg}`;
+  if (state === "live") return `Browser · Live${burnSeg}`;
+  if (state === "idle") return `Browser · Idle${burnSeg}`;
   if (state === "unknown") return "Browser · …";
   return "Browser · Disconnected";
 }
@@ -86,7 +90,7 @@ export default function StudioBrowserStatusChip({
           backgroundColor: "var(--studio-card)",
         }}
         role="status"
-        aria-label={label(status.state, humanControl)}
+        aria-label={label(status.state, humanControl, status.burn)}
       >
         <span className="flex items-center gap-1.5">
           <span
@@ -99,7 +103,7 @@ export default function StudioBrowserStatusChip({
             className="text-[10px] font-black tracking-wide"
             style={{ color: status.state === "live" && !humanControl ? LIME : "var(--text-secondary)" }}
           >
-            {label(status.state, humanControl)}
+            {label(status.state, humanControl, status.burn)}
           </span>
         </span>
         {showTakeControl && (
