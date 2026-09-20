@@ -1,3 +1,5 @@
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+
 const BLOCKED_PATTERNS: RegExp[] = [
   /rm\s+-rf\s+\/(?!\w)/,
   /mkfs\b/,
@@ -44,11 +46,14 @@ const auditLog: AuditEntry[] = [];
 const MAX_AUDIT_ENTRIES = 1_000; // smaller now; durable storage is Supabase
 
 // ── Supabase persistence ──────────────────────────────────────────────────────
-// Lazy-loaded so the terminal-server doesn't pay the import cost unless the
-// Supabase URL and service-role key are actually configured.
-let _supabase: import("@supabase/supabase-js").SupabaseClient | null | undefined;
+// Static import (single module identity): @supabase/supabase-js is a declared
+// dependency of terminal-server. A dynamic import() paired with import()
+// type queries resolves to a *distinct* SupabaseClient class identity, which
+// breaks tsc with TS2322 (protected 'supabaseUrl' nominal mismatch) and
+// TS2589 (excessively deep instantiation).
+let _supabase: SupabaseClient | null | undefined;
 
-async function getSupabase(): Promise<import("@supabase/supabase-js").SupabaseClient | null> {
+async function getSupabase(): Promise<SupabaseClient | null> {
   if (_supabase !== undefined) return _supabase;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? "";
   const key =
@@ -58,7 +63,6 @@ async function getSupabase(): Promise<import("@supabase/supabase-js").SupabaseCl
     return null;
   }
   try {
-    const { createClient } = await import("@supabase/supabase-js");
     _supabase = createClient(url, key, { auth: { persistSession: false } });
     return _supabase;
   } catch {
