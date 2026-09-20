@@ -40,8 +40,8 @@ export function LandingHeroV3() {
 
   useEffect(() => setMounted(true), []);
 
-  const primaryHref = mounted && isSignedIn ? "/studio" : "/sign-up";
-  const primaryLabel = mounted && isSignedIn ? "Enter Studio" : "Start building free";
+  const primaryHref = mounted && isSignedIn ? "/dashboard" : "/sign-up";
+  const primaryLabel = mounted && isSignedIn ? "Open dashboard" : "Start building free";
 
   return (
     <section className={`litt-hero relative overflow-hidden pt-[68px] ${mounted ? "litt-hero-ready" : ""}`}>

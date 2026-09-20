@@ -19,6 +19,7 @@
 
 import { randomUUID } from "crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { getSupabaseSecretKey } from "@/lib/supabase";
 import type {
   KnowledgeRecord,
   KnowledgeCategory,
@@ -106,7 +107,7 @@ export class KnowledgeService {
       client ??
       createClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-        process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+        getSupabaseSecretKey(),
         { auth: { persistSession: false } },
       );
   }

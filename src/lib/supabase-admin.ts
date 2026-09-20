@@ -1,9 +1,10 @@
 // Server-side Supabase admin client
 // Uses SERVICE_ROLE_KEY to bypass RLS (auth handled by Clerk in API routes)
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { getSupabaseSecretKey } from "@/lib/supabase";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+const key = getSupabaseSecretKey();
 
 let _client: SupabaseClient | null = null;
 
@@ -21,6 +22,6 @@ export function getAdminSupabase(): SupabaseClient {
 
 export const isAdminSupabaseConfigured = () => {
   const u = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-  const k = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  const k = getSupabaseSecretKey();
   return !!(u && k && !u.includes("your-project") && !k.includes("your-anon"));
 };

@@ -104,8 +104,24 @@ export function ContinueWorking({
           Continue Working
         </h2>
         <p className="mt-3 text-lg" style={{ color: "#a1a1aa" }}>
-          Ready to build something? Start with a Quick Start option below.
+          Start with an idea and LiTT will take it from description to a real workspace.
         </p>
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <a
+            href="#dashboard-guided-start"
+            className="rounded-md px-4 py-2.5 text-sm font-bold transition hover:brightness-110"
+            style={{ background: "#a78bfa", color: "#0a0012" }}
+          >
+            Start with an idea
+          </a>
+          <Link
+            href="/projects"
+            className="rounded-md border px-4 py-2.5 text-sm font-medium transition hover:bg-white/5"
+            style={{ borderColor: "rgba(255,255,255,0.1)", color: "#fafafa" }}
+          >
+            View projects
+          </Link>
+        </div>
       </div>
     );
   }

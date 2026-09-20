@@ -8,6 +8,7 @@
 
 import { randomUUID } from "crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { getSupabaseSecretKey } from "@/lib/supabase";
 import type { Workspace, WorkspaceState } from "./types";
 
 // ─── Database row type ───────────────────────────────────────────
@@ -83,7 +84,7 @@ export class WorkspaceService {
       client ??
       createClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-        process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+        getSupabaseSecretKey(),
         { auth: { persistSession: false } },
       );
   }

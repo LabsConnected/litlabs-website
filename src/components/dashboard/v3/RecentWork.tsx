@@ -142,8 +142,20 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
       ) : sorted.length === 0 ? (
         <div className="py-6 text-center">
           <p className="text-sm" style={{ color: "#71717a" }}>
-            No projects yet. Create one to get started.
+            No projects yet. Start with a description and LiTT will create the workspace when you are ready.
           </p>
+          <div className="mt-4 flex items-center justify-center gap-3">
+            <a
+              href="#dashboard-guided-start"
+              className="rounded-md px-3 py-2 text-xs font-bold transition hover:brightness-110"
+              style={{ background: "#a78bfa", color: "#0a0012" }}
+            >
+              Start with an idea
+            </a>
+            <Link href="/projects" className="text-xs font-medium" style={{ color: "#a78bfa" }}>
+              Browse projects
+            </Link>
+          </div>
         </div>
       ) : (
         <div className="flex flex-col gap-1.5">

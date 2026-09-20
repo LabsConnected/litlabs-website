@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * QuickStart — six primary creation type tiles.
+ * QuickStart — guided creation first, with six manual creation paths below.
  *
  * Website, App, Game, Image, Video, Music.
  * Launch actions only — uses existing routes/actions.
@@ -34,7 +34,7 @@ export function QuickStart() {
       {/* Guided start: describe-once intake. Project-less here, so a
           confirmed description is stashed as a pending intake and adopted
           into the active project when the user reaches Studio. */}
-      <div className="mb-6">
+      <div id="dashboard-guided-start" className="mb-6 scroll-mt-24">
         <DescribeBusinessBox variant="dashboard" />
       </div>
       <section>

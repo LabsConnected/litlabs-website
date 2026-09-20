@@ -196,7 +196,7 @@ describe("Dashboard v3 — Continue Working", () => {
   });
 
   it("has empty state when no project", () => {
-    expect(src).toContain("Ready to build something");
+    expect(src).toContain("Start with an idea and LiTT will take it from description to a real workspace.");
   });
 });
 
