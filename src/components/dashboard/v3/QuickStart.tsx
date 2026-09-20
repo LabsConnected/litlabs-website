@@ -34,7 +34,7 @@ export function QuickStart() {
       {/* Guided start: describe-once intake. Project-less here, so a
           confirmed description is stashed as a pending intake and adopted
           into the active project when the user reaches Studio. */}
-      <div className="mb-6">
+      <div id="dashboard-guided-start" className="mb-6 scroll-mt-24">
         <DescribeBusinessBox variant="dashboard" />
       </div>
       <section>
