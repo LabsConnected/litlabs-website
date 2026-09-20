@@ -467,14 +467,14 @@ async function createGitCheckpoint(workspaceId: string, userId: string, message:
     throw new Error("TERMINAL_INTERNAL_SERVICE_KEY not configured");
   }
 
-  const execInWorkspace = async (command: string) => {
+  const execInWorkspace = async (command: string, stdin?: string) => {
     const resp = await fetch(`${TERMINAL_BASE()}/internal/workspace/${workspaceId}/exec`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-Internal-Service-Key": internalKey,
       },
-      body: JSON.stringify({ command, userId }),
+      body: JSON.stringify({ command, userId, stdin }),
     });
     if (!resp.ok) {
       const text = await resp.text().catch(() => "Unknown error");
@@ -484,7 +484,7 @@ async function createGitCheckpoint(workspaceId: string, userId: string, message:
   };
 
   await execInWorkspace("git add .");
-  await execInWorkspace(`git commit -m "${message.replace(/"/g, '\\"')}"`);
+  await execInWorkspace("git commit --file=-", message);
   const shaResult = await execInWorkspace("git rev-parse HEAD");
   return shaResult.stdout.trim();
 }

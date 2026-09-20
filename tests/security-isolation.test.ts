@@ -152,4 +152,41 @@ describe("proxy/middleware auth gate", () => {
     const content = readSrc("src/proxy.ts");
     expect(content).toContain("clerkMiddleware(");
   });
+
+  it("proxy protects /api/runtime-test and /api/ghl/test", () => {
+    const content = readSrc("src/proxy.ts");
+    expect(content).toContain('"/api/runtime-test(.*)"');
+    expect(content).toContain('"/api/ghl/test(.*)"');
+  });
+});
+
+describe("runtime-test token must not leak service keys", () => {
+  it("requires auth, 404s when deployed, and never returns internalKey", () => {
+    const content = readSrc("src/app/api/runtime-test/token/route.ts");
+    expect(content).toMatch(/await auth\(/);
+    expect(content).toMatch(/isDeployed\(/);
+    expect(content).toMatch(/status:\s*401/);
+    expect(content).toMatch(/status:\s*404/);
+    expect(content).not.toMatch(/TERMINAL_INTERNAL_SERVICE_KEY/);
+    expect(content).not.toMatch(/internalKey/);
+    expect(content).not.toMatch(/runtime-test-user/);
+  });
+
+  it("acceptance page does not fetch or send X-Internal-Service-Key", () => {
+    const content = readSrc("src/app/(app)/runtime-test/page.tsx");
+    expect(content).not.toMatch(/internalKey/);
+    expect(content).not.toMatch(/X-Internal-Service-Key/);
+    expect(content).toContain("/api/studio/command");
+  });
+});
+
+describe("ghl test sink is locked down", () => {
+  it("requires auth and 404s when deployed", () => {
+    const content = readSrc("src/app/api/ghl/test/route.ts");
+    expect(content).toMatch(/await auth\(/);
+    expect(content).toMatch(/isDeployed\(/);
+    expect(content).toMatch(/status:\s*401/);
+    expect(content).toMatch(/status:\s*404/);
+    expect(content).not.toMatch(/console\.log/);
+  });
 });

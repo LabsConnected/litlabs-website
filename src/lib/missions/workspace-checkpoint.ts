@@ -42,6 +42,7 @@ async function execInWorkspace(
   workspaceId: string,
   userId: string,
   command: string,
+  stdin?: string,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const resp = await fetch(
     `${terminalBase()}/internal/workspace/${workspaceId}/exec`,
@@ -51,7 +52,7 @@ async function execInWorkspace(
         "Content-Type": "application/json",
         "X-Internal-Service-Key": internalServiceKey(),
       },
-      body: JSON.stringify({ command, userId }),
+      body: JSON.stringify({ command, userId, stdin }),
       signal: AbortSignal.timeout(30_000),
     },
   );
@@ -75,12 +76,12 @@ export async function createWorkspaceCheckpoint(
   // Stage all changes
   await execInWorkspace(workspaceId, userId, "git add -A");
 
-  // Create git commit
-  const escapedLabel = label.replace(/"/g, '\\"');
+  const commitMessage = description ? `${label}\n\n${description}` : label;
   await execInWorkspace(
     workspaceId,
     userId,
-    `git commit -m "${escapedLabel}" --allow-empty`,
+    "git commit --file=- --allow-empty",
+    commitMessage,
   );
 
   // Get the SHA

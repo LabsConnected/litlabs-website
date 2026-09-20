@@ -1,17 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { isDeployed } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/ghl/test
- * Shows the expected GHL payload schema and instructions.
+ * GET/POST /api/ghl/test
  *
- * POST /api/ghl/test
- * Receives a payload (from GHL or manual test) and logs/returns it.
- * Use this to verify the payload format before configuring GHL workflows.
+ * Local-only payload inspector for GHL webhook shape. Deployed
+ * environments 404. Unauthenticated requests 401. Never log bodies.
  */
-export async function GET() {
+async function gate(req: NextRequest) {
+  if (isDeployed()) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  const { userId } = await auth(req);
+  if (!userId || userId === "anonymous-dev") {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  return null;
+}
+
+export async function GET(req: NextRequest) {
+  const blocked = await gate(req);
+  if (blocked) return blocked;
+
   const samplePayload = {
     callId: "vapi_call_abc123",
     to: "+13239165462",
@@ -55,14 +69,15 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const blocked = await gate(req);
+  if (blocked) return blocked;
+
   let body: unknown;
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-
-  console.log("[GHL-TEST] Received payload:", JSON.stringify(body, null, 2));
 
   return NextResponse.json({
     received: true,

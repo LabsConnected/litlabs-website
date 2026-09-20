@@ -4,8 +4,8 @@
  * /runtime-test — OS-2D.2 Browser Runtime Acceptance page.
  *
  * TEMPORARY: This page proves the full browser → Socket.IO → RuntimeStore
- * chain without requiring Clerk auth. It mounts LiTTRuntimeProvider, fetches
- * a terminal token from /api/runtime-test/token, and displays:
+ * chain. It requires a Clerk session, fetches a terminal token from
+ * /api/runtime-test/token (local-only), and displays:
  *   - Socket.IO connection state
  *   - runtime:snapshot on connect
  *   - runtime:event stream (command_start, command_end with runId)
@@ -36,7 +36,7 @@ function useTerminalToken() {
       .then((r) => r.json())
       .then((data) => {
         if (!cancelled && data.token) setToken(data.token);
-        else if (!cancelled) setError("No token in response");
+        else if (!cancelled) setError(data.error || "No token in response");
       })
       .catch((err) => {
         if (!cancelled) setError(err.message);
@@ -54,35 +54,6 @@ async function triggerCommand(command: string): Promise<{ runId?: string; ok?: b
     const res = await fetch("/api/studio/command", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        command,
-        cwd: "E:\\LiTT\\Worktrees\\main\\packages\\litt-agent-core",
-      }),
-    });
-    const data = await res.json();
-    return { runId: data.runId, ok: data.ok, error: data.error };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "fetch failed" };
-  }
-}
-
-// ─── Direct command trigger (bypasses Clerk auth, hits terminal-server directly) ──
-
-async function triggerCommandDirect(command: string): Promise<{ runId?: string; ok?: boolean; error?: string }> {
-  try {
-    // Use the test token endpoint which also returns the internal key for testing
-    const tokenRes = await fetch("/api/runtime-test/token");
-    const tokenData = await tokenRes.json();
-    const internalKey = tokenData.internalKey;
-    if (!internalKey) {
-      return { error: "No internal key available" };
-    }
-    const res = await fetch("http://127.0.0.1:4001/internal/command", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Internal-Service-Key": internalKey,
-      },
       body: JSON.stringify({
         command,
         cwd: "E:\\LiTT\\Worktrees\\main\\packages\\litt-agent-core",
@@ -125,8 +96,7 @@ export default function RuntimeTestPage() {
 
   const handleCommand = useCallback(async (cmd: string) => {
     setCommandStatus(`Triggering /${cmd}...`);
-    // Use direct terminal-server call (bypasses Clerk auth for testing)
-    const result = await triggerCommandDirect(cmd);
+    const result = await triggerCommand(cmd);
     if (result.runId) {
       setLastTriggeredRunId(result.runId);
       setCommandStatus(`Triggered /${cmd} — runId: ${result.runId} — ok: ${result.ok}`);
@@ -186,7 +156,7 @@ export default function RuntimeTestPage() {
       </Section>
 
       {/* Command triggers */}
-      <Section title="4. Command Triggers (direct to terminal-server)">
+      <Section title="4. Command Triggers (/api/studio/command)">
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" }}>
           {["check", "test", "build", "status"].map((cmd) => (
             <button
