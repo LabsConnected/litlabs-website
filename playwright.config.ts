@@ -124,7 +124,10 @@ export default defineConfig({
         webServer: {
           command: process.env.PLAYWRIGHT_DEV_SERVER === "true" ? "pnpm dev:webpack" : "pnpm start",
           url: localServerURL,
-          timeout: process.env.PLAYWRIGHT_DEV_SERVER === "true" ? 120_000 : 60_000,
+          // Always allow 2 min — CI builds a full Next.js prod bundle before
+          // `pnpm start`, which can take longer than the old 60 s limit.
+          // Dev-server mode was already 120 s; match it for consistency.
+          timeout: 120_000,
           reuseExistingServer: true,
           cwd: ".",
           env: (() => {
