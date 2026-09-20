@@ -1984,10 +1984,7 @@ function CommandStudioContent() {
                   <div className="min-h-0 min-w-0 flex-1 overflow-auto pb-28 lg:pb-0">
                     <MediaWorkspacePanel
                       projectId={capabilities.projectId}
-                      onOpenCreate={() => {
-                        setDestination("create");
-                        setCreateMode("image");
-                      }}
+                      onOpenCreate={() => handleOpenDockTab("media")}
                     />
                   </div>
                 ) : WorkspaceComponent ? (
