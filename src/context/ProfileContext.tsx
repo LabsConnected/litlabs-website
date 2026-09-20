@@ -9,7 +9,7 @@ import {
   useCallback,
   ReactNode,
 } from "react";
-import { useAppUser } from "@/hooks/useClerkAuth";
+import { useAppUser, useClerkAuth } from "@/hooks/useClerkAuth";
 import type { WallpaperId, WallpaperEffect } from "@/lib/wallpapers";
 
 export type { WallpaperId } from "@/lib/wallpapers";
@@ -115,6 +115,7 @@ function profileToApi(p: UserProfile) {
 
 export function ProfileProvider({ children }: { children: ReactNode }) {
   const { user: accountUser, isLoaded: accountLoaded } = useAppUser();
+  const { getToken } = useClerkAuth();
   const accountUserId = accountUser?.id;
   const accountFullName = accountUser?.fullName;
   const accountFirstName = accountUser?.firstName;
@@ -171,7 +172,10 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     if (!accountUserId) return;
     initialLoadDone.current = true;
 
-    fetch("/api/settings/profile")
+    getToken().then((token) => fetch("/api/settings/profile", {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      credentials: "same-origin",
+    }))
       .then((r) => r.json())
       .then((data) => {
         if (data?.user) {
@@ -192,7 +196,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         // API unavailable — keep localStorage data
       })
       .finally(() => setLoading(false));
-  }, [accountUserId]);
+  }, [accountUserId, getToken]);
 
   // When auth has resolved and there is no user, mark loading done so the
   // profile context is not stuck in a perpetual loading state for
@@ -215,11 +219,15 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
       const body = profileToApi(profile);
-      fetch("/api/settings/profile", {
+      getToken().then((token) => fetch("/api/settings/profile", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify(body),
-      }).catch(() => {
+      })).catch(() => {
         // silent fail — localStorage has the data
       });
     }, 2000);
@@ -227,7 +235,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     return () => {
       if (syncTimer.current) clearTimeout(syncTimer.current);
     };
-  }, [profile, mounted, hydrated, accountUserId]);
+  }, [profile, mounted, hydrated, accountUserId, getToken]);
 
   const updateProfile = useCallback((updates: Partial<UserProfile>) => {
     setProfile((prev) => ({ ...prev, ...updates }));

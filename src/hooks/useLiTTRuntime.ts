@@ -23,6 +23,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { io, type Socket } from "socket.io-client";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 
 // ─── Types (mirror @litt/agent-core RuntimeState) ──────────────────
 
@@ -139,6 +140,7 @@ function getSharedSocket(url: string, token?: string | null): Socket {
 interface RelaySubscriber {
   onSnapshot: (snapshot: RuntimeState) => void;
   onStatus: (connected: boolean, error: string | null) => void;
+  getToken?: () => Promise<string | null>;
 }
 
 const relaySubscribers = new Set<RelaySubscriber>();
@@ -147,8 +149,10 @@ let relayRefCount = 0;
 
 async function pollRelayOnce(): Promise<void> {
   try {
+    const token = await [...relaySubscribers][0]?.getToken?.();
     const resp = await fetch("/api/runtime-feed", {
       credentials: "same-origin",
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
     if (!resp.ok) {
       // Read the honest machine-readable code when available, but never
@@ -245,6 +249,7 @@ export function useLiTTRuntime(options?: {
   token?: string | null | undefined;
   pollIntervalMs?: number;
 }): UseLiTTRuntimeResult {
+  const { getToken } = useClerkAuth();
   const transport = options?.transport ?? (options?.url ? "socket" : "relay");
 
   const wsUrl =
@@ -268,6 +273,7 @@ export function useLiTTRuntime(options?: {
     if (transport !== "relay") return;
 
     const subscriber = {
+      getToken,
       onSnapshot: (snapshot: RuntimeState) => {
         lastSnapshot = snapshot;
         setState(snapshot);
@@ -284,7 +290,7 @@ export function useLiTTRuntime(options?: {
     return () => {
       unsubscribeRelay(subscriber);
     };
-  }, [transport, pollMs]);
+  }, [getToken, transport, pollMs]);
 
   // ── Socket transport: direct Socket.IO (unchanged legacy path) ────
   // Connect / disconnect
