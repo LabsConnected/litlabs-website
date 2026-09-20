@@ -4,12 +4,13 @@
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
-    "start": "expo start",
+    "guard:env": "node ../../scripts/check-client-env-secrets.mjs --app @litt/companion",
+    "start": "pnpm guard:env && expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "typecheck": "tsc --noEmit",
     "export": "expo export --platform android",
-    "check": "tsc --noEmit && expo export --platform android",
+    "check": "pnpm guard:env && tsc --noEmit && expo export --platform android",
     "build:android": "eas build --platform android --profile preview",
     "doctor": "expo doctor"
   },

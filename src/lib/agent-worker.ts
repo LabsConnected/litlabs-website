@@ -2,6 +2,7 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { logAgentEvent } from "@/lib/agent-logger";
 import { jarvis } from "@/lib/litt";
 import { OpenRouterExecutor } from "@/lib/llm-executor";
+import { getSupabaseSecretKey } from "@/lib/supabase";
 
 export interface WorkerConfig {
   agentSlug: string;
@@ -21,13 +22,11 @@ export class AgentWorkerMatrix {
 
   private get supabase(): SupabaseClient {
     if (!this._supabaseAdmin) {
-      const secretKey =
-        process.env.SUPABASE_SERVICE_ROLE_KEY ||
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      const secretKey = getSupabaseSecretKey();
 
       if (!secretKey) {
         throw new Error(
-          "🔱 Critical System Fault: Neither SUPABASE_SERVICE_ROLE_KEY nor NEXT_PUBLIC_SUPABASE_ANON_KEY could be resolved from the environment context.",
+          "🔱 Critical System Fault: SUPABASE_SECRET_KEY is not configured.",
         );
       }
 
