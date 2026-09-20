@@ -67,7 +67,42 @@ function overrideExecPath(cleanDir: string): () => void {
 
 // ─── PATH construction ─────────────────────────────────────────────
 
-import { buildChildPath, probeHealth, resolvePackageManager } from "../preview/PreviewManager";
+import {
+  buildChildPath,
+  formatPreviewDiagnostic,
+  probeHealth,
+  resolvePackageManager,
+} from "../preview/PreviewManager";
+
+describe("PreviewManager — process diagnostics", () => {
+  it("preserves complete recent stderr lines instead of truncating the fatal error", () => {
+    const logs = [
+      "[preview] Ready in 265ms",
+      "[stderr] Error: application crashed after startup",
+      "[stderr]     at boot (/workspace/app/server.ts:42:7)",
+      "[stderr]     at processTicksAndRejections (node:internal/process/task_queues:95:5)",
+    ];
+
+    const diagnostic = formatPreviewDiagnostic(logs);
+
+    expect(diagnostic).toContain("[preview] Ready in 265ms");
+    expect(diagnostic).toContain("[stderr] Error: application crashed after startup");
+    expect(diagnostic).toContain("[stderr]     at boot (/workspace/app/server.ts:42:7)");
+    expect(diagnostic).toContain("[stderr]     at processTicksAndRejections");
+    expect(diagnostic.split("\n").every((line) => line.length > 0)).toBe(true);
+  });
+
+  it("redacts secrets per line without cutting a neighboring error line", () => {
+    const diagnostic = formatPreviewDiagnostic([
+      "[stderr] Error: invalid token=super-secret-value",
+      "[stderr] The request failed after Next reported ready",
+    ]);
+
+    expect(diagnostic).toContain("token=[REDACTED]");
+    expect(diagnostic).toContain("The request failed after Next reported ready");
+    expect(diagnostic).not.toContain("super-secret-value");
+  });
+});
 
 describe("PreviewManager — root route health", () => {
   it("does not call a running server ready when GET / returns Cannot GET /", async () => {
