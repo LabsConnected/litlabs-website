@@ -55,6 +55,7 @@ import ProjectNameDialog from "./ProjectNameDialog";
 import { MediaUtilityDock } from "@/components/media/MediaUtilityDock";
 import {
   mapLegacyToolToDestination,
+  mapMediaIntentToDestination,
   destinationToLegacyTool,
   resolveCreatorDestination,
   workspaceStageToMode,
@@ -226,6 +227,12 @@ function CommandStudioContent() {
   const [createMode, setCreateMode] = useState<CreateMode>(
     initial.destination === "create" ? (initial.mode as CreateMode) ?? "image" : "image",
   );
+  // Bumped only when a prompt-carrying image/video draft is written for an
+  // intent. Creators consume drafts in a mount-only effect (VideoTool /
+  // ImageTool), so a repeat intent while the creator is already mounted
+  // needs a remount (via the WorkspaceComponent key) to read the new draft.
+  // Promptless navigation never touches it — no gratuitous remounts.
+  const [creatorDraftEpoch, setCreatorDraftEpoch] = useState(0);
   const [moreMode, setMoreMode] = useState<MoreMode>(
     initial.destination === "more" ? (initial.mode as MoreMode) ?? "plugins" : "plugins",
   );
@@ -629,7 +636,9 @@ function CommandStudioContent() {
       setScreenDock((v) => ({ ...v, open: true }));
       return;
     }
-    const mapped = mapLegacyToolToDestination(tool, command);
+    const mapped = ["image", "video", "audio", "music"].includes(tool)
+      ? mapMediaIntentToDestination(tool as "image" | "video" | "audio" | "music")
+      : mapLegacyToolToDestination(tool, command);
     setDestination(mapped.destination);
     if (mapped.destination === "studio") {
       setStudioMode((mapped.mode as StudioMode) ?? "work");
@@ -639,7 +648,19 @@ function CommandStudioContent() {
       if (tool === "build") setWorkSurface("builder");
       else if (!mapped.openDrawer) setWorkSurface("conversation");
     }
-    if (mapped.destination === "create") setCreateMode((mapped.mode as CreateMode) ?? "image");
+    if (mapped.destination === "create") {
+      setCreateMode((mapped.mode as CreateMode) ?? "image");
+      if (command.trim() && (tool === "image" || tool === "video")) {
+        try {
+          sessionStorage.setItem(`litlabs:${tool}:draft`, JSON.stringify({ prompt: command.trim() }));
+          // Remount the already-active creator so its mount-only draft
+          // effect picks up the new prompt. No-op when it mounts fresh.
+          setCreatorDraftEpoch((n) => n + 1);
+        } catch {
+          // Draft handoff is best-effort; the creator remains usable if storage is unavailable.
+        }
+      }
+    }
     if (mapped.destination === "missions") setMissionMode((mapped.mode as MissionMode) ?? "overview");
     if (mapped.destination === "more") setMoreMode((mapped.mode as MoreMode) ?? "plugins");
     if (mapped.openDrawer) {
@@ -1974,12 +1995,14 @@ function CommandStudioContent() {
                     {studioCreator ? (
                       <StudioCreatorHost>
                         <WorkspaceComponent
+                          key={creatorDraftEpoch}
                           projectId={capabilities.projectId}
                           initialPrompt={activeLegacyTool === "video" ? videoStudioPrompt : imageStudioPrompt}
                         />
                       </StudioCreatorHost>
                     ) : (
                       <WorkspaceComponent
+                        key={creatorDraftEpoch}
                         projectId={capabilities.projectId}
                         initialPrompt={activeLegacyTool === "video" ? videoStudioPrompt : imageStudioPrompt}
                       />

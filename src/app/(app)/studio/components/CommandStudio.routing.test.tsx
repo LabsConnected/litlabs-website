@@ -35,6 +35,10 @@ function currentTool() {
   return currentSearchParams.get("tool");
 }
 
+function currentCreator() {
+  return currentSearchParams.get("creator");
+}
+
 function currentMode() {
   return currentSearchParams.get("mode");
 }
@@ -236,8 +240,12 @@ vi.mock("../stores/useStudioAgentStore", () => ({
 // Captures the options object CommandStudio passes to
 // useCanonicalConversation on each render — used to assert serverProjectId
 // resolution prefers the URL's explicit ?project= over the async
-// capabilities.projectId (the fresh-conversation "stale revision" 409 race).
-let capturedConversationOptions: { serverProjectId?: string | null } | null = null;
+// capabilities.projectId (the fresh-conversation "stale revision" 409 race),
+// and to drive onRouteToolAction the same way the real intent dispatch does.
+let capturedConversationOptions: {
+  serverProjectId?: string | null;
+  onRouteToolAction?: (tool: "image" | "video" | "audio" | "music", command?: string) => void;
+} | null = null;
 
 vi.mock("../hooks/useCanonicalConversation", () => ({
   useCanonicalConversation: (options: { serverProjectId?: string | null }) => {
@@ -327,9 +335,47 @@ vi.mock("../lib/supabase", () => ({
 vi.mock("./canvas/CanvasPanel", () => ({
   CanvasPanel: () => <div data-testid="canvas-panel" />,
 }));
+// useState for the mount-only draft consumption modeled in the tool mocks.
+import { useState } from "react";
 
-vi.mock("../tools/ImageTool", () => ({ default: () => <div data-testid="image-tool" /> }));
-vi.mock("../tools/VideoTool", () => ({ default: () => <div data-testid="video-tool" /> }));
+// Mount counters + draft consumption model for the creator mocks below.
+// The real creators read their sessionStorage draft in a mount-only effect,
+// so these mocks read the draft during mount render and remove it — the
+// same contract — and count mounts so remount behavior is assertable.
+const toolMounts = vi.hoisted(() => ({ image: 0, video: 0 }));
+
+function readCreatorDraft(key: string): string {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return "";
+    const draft = JSON.parse(raw) as { prompt?: string };
+    sessionStorage.removeItem(key);
+    return draft.prompt ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function MockImageTool() {
+  // Mount-only consumption, like the real creators: the draft is read
+  // once into state at mount; rerenders keep the mounted prompt.
+  const [prompt] = useState(() => {
+    toolMounts.image += 1;
+    return readCreatorDraft("litlabs:image:draft");
+  });
+  return <div data-testid="image-tool" data-prompt={prompt} />;
+}
+
+function MockVideoTool() {
+  const [prompt] = useState(() => {
+    toolMounts.video += 1;
+    return readCreatorDraft("litlabs:video:draft");
+  });
+  return <div data-testid="video-tool" data-prompt={prompt} />;
+}
+
+vi.mock("../tools/ImageTool", () => ({ default: MockImageTool }));
+vi.mock("../tools/VideoTool", () => ({ default: MockVideoTool }));
 vi.mock("../tools/AudioTool", () => ({ default: () => <div data-testid="audio-tool" /> }));
 vi.mock("../tools/BuilderTool", () => ({ default: () => <div data-testid="builder-tool" /> }));
 vi.mock("../tools/CanvasTool", () => ({ default: () => <div data-testid="canvas-tool" /> }));
@@ -348,15 +394,32 @@ vi.mock("@/lib/litt-context", () => ({ parseJarvisActions: () => [] }));
 vi.mock("./canvas/ActionChips", () => ({ ActionChips: () => null }));
 vi.mock("@/components/chat/MessageAvatar", () => ({ UserMessageAvatar: () => <div /> }));
 
-// Mock next/dynamic — pass-through that returns null (loading state).
-// The 3 Builder routing tests are updated to verify the routing state
-// change rather than the dynamic component rendering, since next/dynamic
-// with ssr:false cannot be made synchronous in jsdom.
-vi.mock("next/dynamic", () => ({
-  default: (_loader: () => Promise<{ default: React.ComponentType }>) => {
-    return () => null;
-  },
-}));
+// Mock next/dynamic — resolve the loader (like the real ssr:false wrapper
+// does once the chunk loads) and render the resolved component. Tool
+// modules are vi.mock'd to lightweight divs, so this stays cheap while
+// making mount/unmount/remount behavior observable in jsdom.
+vi.mock("next/dynamic", async () => {
+  const { useState, useEffect } = await import("react");
+  return {
+    default: (loader: () => Promise<{ default: React.ComponentType }>) => {
+      const modPromise = loader();
+      return function DynamicTool(props: Record<string, unknown>) {
+        const [Mod, setMod] = useState<React.ComponentType | null>(null);
+        useEffect(() => {
+          let alive = true;
+          modPromise.then((mod) => {
+            if (alive) setMod(() => mod.default);
+          });
+          return () => {
+            alive = false;
+          };
+        }, []);
+        const Resolved = Mod;
+        return Resolved ? <Resolved {...props} /> : null;
+      };
+    },
+  };
+});
 
 // Shell components (Phase C2.1): LiTTAmbientHUD and ContextDrawer are
 // intentionally NOT mocked here. The bugs this phase fixes were state
@@ -394,6 +457,8 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     mockCapabilities = defaultCapabilities();
     mockRuntime = undefined;
     capturedConversationOptions = null;
+    toolMounts.image = 0;
+    toolMounts.video = 0;
     // The dock persists open/tab/height in sessionStorage (intentional
     // product behavior); clear it so each test starts from a closed dock.
     sessionStorage.clear();
@@ -474,6 +539,95 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     act(() => view.rerender(<CommandStudio />));
     expectBuilderSurfaceActive();
     expect(currentTool()).toBe("build");
+  });
+
+  describe("creator draft handoff (media intent → creator prompt)", () => {
+    it("first video intent opens VideoTool with the intent prompt", async () => {
+      await renderCommandStudio();
+      act(() => {
+        capturedConversationOptions?.onRouteToolAction?.("video", "short video of ocean waves");
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("video-tool")).toBeTruthy();
+      });
+      expect(screen.getByTestId("video-tool")).toHaveAttribute("data-prompt", "short video of ocean waves");
+      // The draft is consumed on mount, not left to ambush a later mount.
+      expect(sessionStorage.getItem("litlabs:video:draft")).toBeNull();
+      // Create write-back uses the canonical ?creator= deep-link (newer
+      // HEAD contract); the echo guard prevents re-applying it as navigation.
+      await waitFor(() => {
+        expect(currentTool()).toBeNull();
+        expect(currentCreator()).toBe("video");
+      });
+    });
+
+    it("second video intent while VideoTool is already active updates to the new prompt", async () => {
+      await renderCommandStudio();
+      act(() => {
+        capturedConversationOptions?.onRouteToolAction?.("video", "ocean waves at dawn");
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("video-tool")).toHaveAttribute("data-prompt", "ocean waves at dawn");
+      });
+      expect(toolMounts.video).toBe(1);
+      // Regression: the draft reader is mount-only, so the second intent
+      // must remount the creator via the draft-epoch key — not silently
+      // drop the new prompt while the tool stays open.
+      act(() => {
+        capturedConversationOptions?.onRouteToolAction?.("video", "a dragon flying over a city");
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("video-tool")).toHaveAttribute("data-prompt", "a dragon flying over a city");
+      });
+      expect(toolMounts.video).toBe(2);
+      expect(sessionStorage.getItem("litlabs:video:draft")).toBeNull();
+    });
+
+    it("image intent opens ImageTool with the prompt and a repeat updates it", async () => {
+      await renderCommandStudio();
+      act(() => {
+        capturedConversationOptions?.onRouteToolAction?.("image", "a sunset");
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("image-tool")).toHaveAttribute("data-prompt", "a sunset");
+      });
+      expect(toolMounts.image).toBe(1);
+      act(() => {
+        capturedConversationOptions?.onRouteToolAction?.("image", "a neon city skyline");
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("image-tool")).toHaveAttribute("data-prompt", "a neon city skyline");
+      });
+      expect(toolMounts.image).toBe(2);
+      expect(sessionStorage.getItem("litlabs:image:draft")).toBeNull();
+    });
+
+    it("promptless navigation does not remount or reset the active creator", async () => {
+      await renderCommandStudio();
+      act(() => {
+        capturedConversationOptions?.onRouteToolAction?.("video", "ocean waves at dawn");
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("video-tool")).toBeTruthy();
+      });
+      expect(toolMounts.video).toBe(1);
+      // Promptless re-routes to the same creator (nav-style) — including a
+      // whitespace-only command — must not bump the draft epoch: no draft
+      // exists, so there is nothing new for the creator to consume.
+      act(() => {
+        capturedConversationOptions?.onRouteToolAction?.("video");
+      });
+      act(() => {
+        capturedConversationOptions?.onRouteToolAction?.("video", "   ");
+      });
+      await waitFor(() => {
+        expect(currentTool()).toBeNull();
+        expect(currentCreator()).toBe("video");
+      });
+      expect(screen.getByTestId("video-tool")).toBeTruthy();
+      expect(screen.getByTestId("video-tool")).toHaveAttribute("data-prompt", "ocean waves at dawn");
+      expect(toolMounts.video).toBe(1);
+    });
   });
 
   it("returns to conversation when chat is routed after Build", async () => {
