@@ -166,7 +166,13 @@ async function handler(req: NextRequest) {
         const sessionId = body.sessionId as string;
         if (!sessionId) return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
 
-        const screenshot = await takeScreenshot(sessionId);
+        // Phase 6 — owner check before serving session pixels: a caller
+        // that doesn't own the session gets 404, never another user's
+        // browser (takeScreenshot's own check is the second layer).
+        const owned = await getSession(sessionId, userId);
+        if (!owned) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+
+        const screenshot = await takeScreenshot(sessionId, userId);
         if (!screenshot) return NextResponse.json({ error: "Failed to capture screenshot" }, { status: 500 });
 
         return NextResponse.json({ screenshot });

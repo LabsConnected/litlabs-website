@@ -91,6 +91,22 @@ function makeFetchMock(jobs: unknown[] = [runningJob, completedJob]) {
       return { ok: true, status: 200, json: async () => ({ job }) } as Response;
     }
 
+    // Live-view probe (Phase 6): owner-checked availability rule.
+    // The panel only iframes the embed URL when the probe says live.
+    if (urlStr.includes("/live-view")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          available: true,
+          reason: "live",
+          embedUrl: "https://debug.browserbase.com/sessions/abc123?fullscreen=1&navbar=false",
+          openUrl: "https://www.browserbase.com/sessions/abc123",
+          sessionStatus: "active",
+        }),
+      } as Response;
+    }
+
     // List endpoint
     if (urlStr.includes("/api/browser/jobs")) {
       return { ok: true, status: 200, json: async () => ({ jobs }) } as Response;
@@ -154,18 +170,55 @@ describe("StudioBrowserJobsPanel", () => {
     });
   });
 
-  it("renders live view iframe when liveViewUrl is present", async () => {
+  it("renders live view iframe when the owner-checked live-view probe is live", async () => {
     render(<StudioBrowserJobsPanel />);
     await waitFor(() => {
       expect(screen.getByText("Inspect GHL workflow")).toBeDefined();
     });
 
-    // The running job auto-selects, so the iframe should appear
+    // The running job auto-selects. Phase 6: the iframe embeds the
+    // probe's embed URL (never the raw job liveViewUrl) and carries
+    // the LIVE badge.
     await waitFor(() => {
-      const iframe = screen.getByTitle("Browserbase live view");
+      const wrap = screen.getByTestId("live-view-iframe-wrap");
+      const iframe = wrap.querySelector("iframe");
       expect(iframe).toBeDefined();
-      expect(iframe.getAttribute("src")).toBe("https://browserbase.com/view/abc123");
+      expect(iframe?.getAttribute("src")).toBe(
+        "https://debug.browserbase.com/sessions/abc123?fullscreen=1&navbar=false",
+      );
     });
+    expect(screen.getByTestId("live-view-live-badge")).toBeDefined();
+  });
+
+  it("shows the honest snapshot fallback when the live view is unavailable", async () => {
+    vi.unstubAllGlobals();
+    const base = makeFetchMock();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (String(url).includes("/live-view")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              available: false,
+              reason: "session_closed",
+              embedUrl: null,
+              openUrl: "https://www.browserbase.com/sessions/abc123",
+              sessionStatus: "closed",
+            }),
+          } as Response;
+        }
+        return (base as (u: string, i?: RequestInit) => Promise<Response>)(url, init);
+      }),
+    );
+    render(<StudioBrowserJobsPanel />);
+    await waitFor(() => {
+      expect(screen.getByTestId("live-view-fallback")).toBeDefined();
+    });
+    // No iframe, no LIVE badge: the fallback never pretends to be live.
+    expect(screen.queryByTestId("live-view-iframe-wrap")).toBeNull();
+    expect(screen.queryByTestId("live-view-live-badge")).toBeNull();
   });
 
   it("shows error state when fetch returns 401", async () => {

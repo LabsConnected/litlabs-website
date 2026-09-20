@@ -63,10 +63,14 @@ async function getBrowserState(sessionId: string): Promise<BrowserState | null> 
 
 async function getBrowserStateWithScreenshot(
   sessionId: string,
+  userId: string,
 ): Promise<BrowserState | null> {
   const state = await getBrowserState(sessionId);
   if (!state) return null;
-  const screenshot = await takeScreenshot(sessionId);
+  // Phase 6 — owner-gated screenshot (the registry's getSession check in
+  // executeBrowserAction already proved ownership; this is the pixel-level
+  // second layer).
+  const screenshot = await takeScreenshot(sessionId, userId);
   return { ...state, screenshot: screenshot ?? undefined };
 }
 
@@ -174,7 +178,7 @@ export async function browserNavigate(
       await page.goto(normalized, {
         waitUntil: inputs.waitUntil ?? "domcontentloaded",
       });
-      const state = await getBrowserStateWithScreenshot(ctx.sessionId);
+      const state = await getBrowserStateWithScreenshot(ctx.sessionId, ctx.userId);
 
       return {
         success: true,
@@ -260,7 +264,7 @@ export async function browserScreenshot(
     "browser.screenshot",
     _inputs,
     async () => {
-      const screenshot = await takeScreenshot(ctx.sessionId);
+      const screenshot = await takeScreenshot(ctx.sessionId, ctx.userId);
       if (!screenshot) {
         return { success: false, error: "Failed to capture screenshot", durationMs: 0 };
       }
@@ -326,7 +330,7 @@ export async function browserClick(
 
       // Wait for potential navigation/render
       await page.waitForTimeout(500).catch(() => {});
-      const state = await getBrowserStateWithScreenshot(ctx.sessionId);
+      const state = await getBrowserStateWithScreenshot(ctx.sessionId, ctx.userId);
 
       return {
         success: true,
@@ -384,7 +388,7 @@ export async function browserType(
         await page.fill(selector, inputs.value, { timeout: 10000 as number });
       }
 
-      const state = await getBrowserStateWithScreenshot(ctx.sessionId);
+      const state = await getBrowserStateWithScreenshot(ctx.sessionId, ctx.userId);
 
       return {
         success: true,
@@ -437,7 +441,7 @@ export async function browserSelect(
         await page.selectOption(selector, inputs.value, { timeout: 10000 as number });
       }
 
-      const state = await getBrowserStateWithScreenshot(ctx.sessionId);
+      const state = await getBrowserStateWithScreenshot(ctx.sessionId, ctx.userId);
 
       return {
         success: true,
@@ -489,7 +493,7 @@ export async function browserScroll(
       }
 
       await page.waitForTimeout(300).catch(() => {});
-      const state = await getBrowserStateWithScreenshot(ctx.sessionId);
+      const state = await getBrowserStateWithScreenshot(ctx.sessionId, ctx.userId);
 
       return {
         success: true,
@@ -519,7 +523,7 @@ export async function browserPress(
       await page.keyboard.press(inputs.key);
       await page.waitForTimeout(300).catch(() => {});
 
-      const state = await getBrowserStateWithScreenshot(ctx.sessionId);
+      const state = await getBrowserStateWithScreenshot(ctx.sessionId, ctx.userId);
 
       return {
         success: true,
@@ -651,7 +655,7 @@ export async function browserUpload(
 
       await fileInput.setInputFiles(inputs.filePath);
 
-      const state = await getBrowserStateWithScreenshot(ctx.sessionId);
+      const state = await getBrowserStateWithScreenshot(ctx.sessionId, ctx.userId);
 
       return {
         success: true,
@@ -679,7 +683,7 @@ export async function browserBack(
       if (!page) return { success: false, error: "No page available", durationMs: 0 };
 
       await page.goBack({ waitUntil: "domcontentloaded" }).catch(() => {});
-      const state = await getBrowserStateWithScreenshot(ctx.sessionId);
+      const state = await getBrowserStateWithScreenshot(ctx.sessionId, ctx.userId);
 
       return {
         success: true,
@@ -707,7 +711,7 @@ export async function browserForward(
       if (!page) return { success: false, error: "No page available", durationMs: 0 };
 
       await page.goForward({ waitUntil: "domcontentloaded" }).catch(() => {});
-      const state = await getBrowserStateWithScreenshot(ctx.sessionId);
+      const state = await getBrowserStateWithScreenshot(ctx.sessionId, ctx.userId);
 
       return {
         success: true,
@@ -735,7 +739,7 @@ export async function browserReload(
       if (!page) return { success: false, error: "No page available", durationMs: 0 };
 
       await page.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
-      const state = await getBrowserStateWithScreenshot(ctx.sessionId);
+      const state = await getBrowserStateWithScreenshot(ctx.sessionId, ctx.userId);
 
       return {
         success: true,
