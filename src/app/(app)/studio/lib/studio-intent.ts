@@ -4,6 +4,7 @@ export type StudioIntent =
   | "chat"
   | "generate_code"
   | "generate_image"
+  | "generate_video"
   | "open_terminal"
   | "run_command"
   | "connect_github"
@@ -36,6 +37,22 @@ export interface IntentResult {
 // request, not a request to open the Preview panel.
 const MUTATION_VERB = /\b(modif(?:y|ication)|change|edit|update|rewrite|replace|remove|delete|add|create|build|deploy|publish)\b/i;
 const MUTATION_TARGET = /\b(file|content|text|paragraph|code|project|site|page|hero|section|button|component|approval|diff)\b/i;
+
+export function extractMediaPrompt(input: string, media: "image" | "video"): string {
+  const text = input.trim();
+  if (media === "video") {
+    return (
+      text
+        .replace(/^turn\s+(.+?)\s+into\s+(?:a|an|the)?\s*(?:video|clip)\s*$/i, "$1")
+        .replace(/^(?:please\s+)?(?:generate|create|make)\s+(?:(?:me|us)\s+)?(?:(?:a|an|the)\s+)?/i, "")
+        .replace(/^animate\s+/i, "")
+        .trim() || text
+    );
+  }
+  return text
+    .replace(/^(?:please\s+)?(?:generate|create|make)\s+(?:(?:me|us)\s+)?(?:(?:a|an|the)\s+)?(?:image|wallpaper)\s*(?:of\s+|about\s+|showing\s+)?/i, "")
+    .trim() || text;
+}
 
 export function isLikelyMutationRequest(input: string): boolean {
   const text = input.trim();
@@ -140,6 +157,16 @@ const INTENT_PATTERNS: IntentPattern[] = [
     ],
   },
   {
+    intent: "generate_video",
+    tool: "video",
+    patterns: [
+      /\b(?:generate|create|make)\s+(?:(?:me|us)\s+)?(?:(?:a|an|the)\s+)?(?:(?:\d+(?:\.\d+)?\s*(?:seconds?|secs?|s)\s+)?(?:short|cinematic|photorealistic|animated)\s+)?(?:video|clip)\b/i,
+      /\banimate\s+(?:this|that|it|the|an?|my)\b/i,
+      /\bturn\s+(?:this|that|it|an?|the|my)\b.*\b(?:video|clip)\b/i,
+      /\b(?:short|cinematic)\s+(?:video|clip)\b/i,
+    ],
+  },
+  {
     intent: "generate_image",
     tool: "image",
     patterns: [
@@ -240,6 +267,8 @@ function buildIntentResult(
       };
     case "generate_image":
       return { intent, tool, message: "", prompt: originalText };
+    case "generate_video":
+      return { intent, tool, message: "", prompt: extractMediaPrompt(originalText, "video") };
     case "generate_code":
       return { intent, message: "" };
     default:
@@ -263,6 +292,8 @@ export interface StudioIntentHandlers {
    * surface (a placeholder + Media tab) and never generates anything.
    */
   onOpenImageStudio?: (prompt: string) => void;
+  /** Open the real Video Studio surface with the prompt prefilled. */
+  onOpenVideoStudio?: (prompt: string) => void;
 }
 
 /**
@@ -285,6 +316,10 @@ export function dispatchStudioIntent(
     // placeholder + Media tab), which is the dead flow this replaces.
     // The prompt travels on the intent so the request survives routing.
     handlers.onOpenImageStudio?.(intent.prompt ?? "");
+    return;
+  }
+  if (intent.intent === "generate_video") {
+    handlers.onOpenVideoStudio?.(intent.prompt ?? "");
     return;
   }
   if (intent.intent === "open_files" || intent.intent === "file_question") {
@@ -335,6 +370,9 @@ export function buildIntentResponseMessage(
   }
   if (intent.intent === "generate_image") {
     return "Opening the image generator.";
+  }
+  if (intent.intent === "generate_video") {
+    return "Opening the video generator.";
   }
   if (intent.intent === "project_health") {
     return runtime.terminalConnected

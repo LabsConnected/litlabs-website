@@ -160,10 +160,11 @@ function ChipRow({
 
 /* ─── Main Component ─────────────────────────────────────────────────── */
 
-export default function VideoTool() {
+export default function VideoTool({ initialPrompt }: { initialPrompt?: string | null }) {
   const { setActiveAssetId } = useStudioContext();
   const [mode, setMode] = useState<CreationMode>("quick");
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(initialPrompt ?? "");
+  const lastInitialPromptRef = useRef(initialPrompt);
   const [originalPrompt, setOriginalPrompt] = useState("");
   const [enhancedPrompt, setEnhancedPrompt] = useState<string | null>(null);
   const [showEnhanced, setShowEnhanced] = useState(false);
@@ -213,6 +214,14 @@ export default function VideoTool() {
   const caps = videoModel.capabilities;
   const cost = videoModel.cost;
   const canAfford = coinBalance === null || coinBalance >= cost;
+
+  useEffect(() => {
+    if (initialPrompt && initialPrompt !== lastInitialPromptRef.current) {
+      lastInitialPromptRef.current = initialPrompt;
+      setPrompt(initialPrompt);
+      setError(null);
+    }
+  }, [initialPrompt]);
 
   // Auto-switch model when mode changes
   useEffect(() => {
@@ -706,6 +715,7 @@ export default function VideoTool() {
             </div>
           ) : (
             <textarea
+              data-testid="video-prompt-input"
               value={prompt}
               onChange={(e) => { setPrompt(e.target.value); setError(null); }}
               placeholder="A futuristic LiTT robot walking through a rain-soaked city at night..."

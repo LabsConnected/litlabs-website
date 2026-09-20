@@ -165,6 +165,13 @@ export interface DestinationState {
   openInspector?: InspectorTab;
 }
 
+/** Route an explicit media-generation request into its real creator surface. */
+export function mapMediaIntentToDestination(
+  tool: Extract<StudioTool, "image" | "video" | "audio" | "music">,
+): DestinationState {
+  return { destination: "create", legacyTool: tool, mode: tool };
+}
+
 /**
  * Resolve an explicit `?creator=` deep-link (e.g. /studio?creator=image
  * from the Create hub) to the Create destination. This is the ONLY URL
