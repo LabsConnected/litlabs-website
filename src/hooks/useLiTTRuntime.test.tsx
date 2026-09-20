@@ -1,6 +1,8 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+const mockGetToken = vi.hoisted(() => vi.fn().mockResolvedValue("fresh-clerk-jwt"));
+
 vi.mock("socket.io-client", () => ({
   io: vi.fn(() => {
     const handlers: Record<string, Array<(...a: unknown[]) => void>> = {};
@@ -13,6 +15,10 @@ vi.mock("socket.io-client", () => ({
       disconnect: vi.fn(),
     };
   }),
+}));
+
+vi.mock("@/hooks/useClerkAuth", () => ({
+  useClerkAuth: () => ({ getToken: mockGetToken }),
 }));
 
 import { io as mockIo } from "socket.io-client";
@@ -69,7 +75,10 @@ describe("useLiTTRuntime relay transport (default)", () => {
     await waitFor(() => expect(result.current.connected).toBe(true));
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/runtime-feed",
-      expect.objectContaining({ credentials: "same-origin" }),
+      expect.objectContaining({
+        credentials: "same-origin",
+        headers: { Authorization: "Bearer fresh-clerk-jwt" },
+      }),
     );
     // No direct socket.io connection for the default relay path
     expect(mockIo).not.toHaveBeenCalled();

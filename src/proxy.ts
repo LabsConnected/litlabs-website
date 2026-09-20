@@ -298,6 +298,7 @@ const isProtectedRouteInner = createRouteMatcher([
   "/api/user-agents(.*)",
   "/api/conversations(.*)",
   "/api/settings/(.*)",
+  "/api/runtime-feed",
   "/api/wallet(.*)",
   "/api/users/(.*)",
   "/api/account",
@@ -410,6 +411,12 @@ function protectRoute(req: NextRequest): NextResponse {
   // API routes should return JSON 401, not redirect to sign-in.
   // Page routes redirect to sign-in with the intended destination preserved.
   if (req.nextUrl.pathname.startsWith("/api/")) {
+    // Route handlers verify Bearer tokens themselves. Let a request with a
+    // token reach them even when the short-lived Clerk session cookie is
+    // missing; otherwise auth(req)'s verified-token fallback is unreachable.
+    if (req.headers.get("authorization")?.match(/^Bearer\s+\S+/i)) {
+      return setCacheHeaders(NextResponse.next(), req.nextUrl.pathname);
+    }
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const signInUrl = new URL("/sign-in", req.url);
@@ -432,6 +439,12 @@ const innerMiddleware = useClerkMiddleware
         // API routes should return JSON 401, not redirect to sign-in.
         // Page routes redirect to sign-in with the intended destination preserved.
         if (req.nextUrl.pathname.startsWith("/api/")) {
+          // The route-level auth helper verifies this token with Clerk. Do not
+          // reject it here merely because the cookie-based middleware context
+          // is empty or stale.
+          if (req.headers.get("authorization")?.match(/^Bearer\s+\S+/i)) {
+            return setCacheHeaders(NextResponse.next(), req.nextUrl.pathname);
+          }
           return NextResponse.json(
             { error: "Unauthorized" },
             { status: 401 },
