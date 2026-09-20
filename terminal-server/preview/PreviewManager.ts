@@ -731,6 +731,32 @@ function pushLog(runtime: PreviewRuntime, line: string): void {
   }
 }
 
+/**
+ * Format process output for a failure diagnostic without cutting an error
+ * through the middle of a line. The runtime log is already a bounded ring;
+ * keep a useful tail of complete, individually-redacted lines from both
+ * stdout and stderr.
+ */
+export function formatPreviewDiagnostic(logs: readonly string[]): string {
+  const maxLines = 200;
+  const maxChars = 16_000;
+  const lines = logs
+    .slice(-maxLines)
+    .map((line) => redactDiagnosticText(line))
+    .filter(Boolean);
+
+  const selected: string[] = [];
+  let chars = 0;
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index];
+    const nextChars = chars + line.length + (selected.length > 0 ? 1 : 0);
+    if (nextChars > maxChars) break;
+    selected.unshift(line);
+    chars = nextChars;
+  }
+  return selected.join("\n");
+}
+
 // ─── Public API ────────────────────────────────────────────────────
 
 export function getPreview(workspaceId: string): PreviewRuntime | undefined {
@@ -1049,7 +1075,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
           `PATH: ${childPath}`;
       } else {
         runtime.errorCode = "preview_dev_server_failed";
-        const recentOutput = redactDiagnosticText(runtime.logs.slice(-20).join("\n"));
+        const recentOutput = formatPreviewDiagnostic(runtime.logs);
         runtime.error = [
           `Dev server process exited (code=${code}, signal=${signal})`,
           recentOutput ? `Recent output:\n${recentOutput}` : "",
