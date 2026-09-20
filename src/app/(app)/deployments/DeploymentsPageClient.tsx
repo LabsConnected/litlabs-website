@@ -207,6 +207,13 @@ export default function DeploymentsPageClient() {
           >
             <Folder size={14} /> Manage projects
           </Link>
+          <Link
+            href="/studio?tool=chat"
+            className="inline-flex shrink-0 items-center gap-2 rounded-xl border px-4 py-2 text-sm font-black transition-all hover:bg-white/5"
+            style={{ borderColor: `${tokens.primary}35`, color: tokens.text }}
+          >
+            <Sparkles size={14} /> Start a new build
+          </Link>
         </div>
       </div>
 

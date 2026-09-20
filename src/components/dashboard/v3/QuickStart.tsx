@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * QuickStart — six primary creation type tiles.
+ * QuickStart — guided creation first, with six manual creation paths below.
  *
  * Website, App, Game, Image, Video, Music.
  * Launch actions only — uses existing routes/actions.

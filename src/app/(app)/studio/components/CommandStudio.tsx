@@ -2514,7 +2514,7 @@ function MediaWorkspacePanel({
             No {modeLabel.toLowerCase()} artifacts yet
           </p>
           <p className="mt-1 text-xs">
-            Generate in Create — your image, video, and audio tools live there.
+            Use the media tools in this workspace to create an image, video, or audio asset.
           </p>
           <button
             type="button"
@@ -2526,7 +2526,7 @@ function MediaWorkspacePanel({
               border: "1px solid rgba(77,255,98,0.3)",
             }}
           >
-            Open Create
+            Open media tools
           </button>
         </div>
       </div>
