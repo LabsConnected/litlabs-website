@@ -148,6 +148,7 @@ export function useCanonicalConversation({
   onRunHealthChecks,
   onOpenProjectNameDialog,
   onOpenImageStudio,
+  onOpenVideoStudio,
   serverProjectId,
   cameraState,
   previewSelection,
@@ -161,6 +162,8 @@ export function useCanonicalConversation({
   onOpenProjectNameDialog?: () => void;
   /** P1-1: open the real Image Studio surface with the prompt prefilled */
   onOpenImageStudio?: (prompt: string) => void;
+  /** Open the real Video Studio surface with the prompt prefilled. */
+  onOpenVideoStudio?: (prompt: string) => void;
   serverProjectId?: string | null;
   /** Camera dock state — passed to the LLM so it knows camera is available */
   cameraState?: { active: boolean; status: string };
@@ -953,6 +956,7 @@ export function useCanonicalConversation({
           onRunHealthChecks,
           onOpenProjectNameDialog,
           onOpenImageStudio,
+          onOpenVideoStudio,
           onNavigate: (url) => {
             if (typeof window !== "undefined") window.location.href = url;
           },
@@ -1597,7 +1601,7 @@ export function useCanonicalConversation({
         // keeps offering Stop and the UI keeps claiming "working".
       }
     },
-    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, onOpenProjectNameDialog, onOpenImageStudio, selectedModel, activeAgentId, activeAgentMode, activeAgentInstanceId, executionMode, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError, reconcileAndApply],
+    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, onOpenProjectNameDialog, onOpenImageStudio, onOpenVideoStudio, selectedModel, activeAgentId, activeAgentMode, activeAgentInstanceId, executionMode, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError, reconcileAndApply],
   );
 
   // Regenerate — calls canonical regenerate API

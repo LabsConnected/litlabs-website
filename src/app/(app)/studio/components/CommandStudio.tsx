@@ -241,6 +241,7 @@ function CommandStudioContent() {
    * so a stale prompt never prefills a later visit.
    */
   const [imageStudioPrompt, setImageStudioPrompt] = useState<string | null>(null);
+  const [videoStudioPrompt, setVideoStudioPrompt] = useState<string | null>(null);
   // Canvas-first 2-zone layout: the live preview is the Preview workspace
   // tab's StudioPreviewPanel, consuming the full workspace width. Studio
   // never reserves canvas width for a second preview column.
@@ -667,11 +668,18 @@ function CommandStudioContent() {
     setDestination("create");
   }, []);
 
+  const handleOpenVideoStudio = useCallback((prompt: string) => {
+    setVideoStudioPrompt(prompt || null);
+    setCreateMode("video");
+    setDestination("create");
+  }, []);
+
   // A prefilled image prompt only lives while the create destination is
   // active — leaving clears it so a later Image Studio visit starts clean.
   useEffect(() => {
     if (destination !== "create") {
       setImageStudioPrompt(null);
+      setVideoStudioPrompt(null);
     }
   }, [destination]);
 
@@ -690,6 +698,7 @@ function CommandStudioContent() {
     },
     onOpenProjectNameDialog: openProjectNameDialog,
     onOpenImageStudio: handleOpenImageStudio,
+    onOpenVideoStudio: handleOpenVideoStudio,
     // The URL's explicit ?project= is authoritative the instant it's present —
     // capabilities.projectId is resolved by an async fetch that can still be
     // in flight (or, if it started before the URL param was readable, can
@@ -1966,13 +1975,13 @@ function CommandStudioContent() {
                       <StudioCreatorHost>
                         <WorkspaceComponent
                           projectId={capabilities.projectId}
-                          initialPrompt={imageStudioPrompt}
+                          initialPrompt={activeLegacyTool === "video" ? videoStudioPrompt : imageStudioPrompt}
                         />
                       </StudioCreatorHost>
                     ) : (
                       <WorkspaceComponent
                         projectId={capabilities.projectId}
-                        initialPrompt={imageStudioPrompt}
+                        initialPrompt={activeLegacyTool === "video" ? videoStudioPrompt : imageStudioPrompt}
                       />
                     )}
                   </div>

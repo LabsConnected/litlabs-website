@@ -67,6 +67,7 @@ describe("P1-1: studio intent dead flows", () => {
       onRunHealthChecks: vi.fn(),
       onOpenProjectNameDialog: vi.fn(),
       onOpenImageStudio: vi.fn(),
+      onOpenVideoStudio: vi.fn(),
       onNavigate: vi.fn(),
     } satisfies StudioIntentHandlers;
   }
@@ -84,6 +85,27 @@ describe("P1-1: studio intent dead flows", () => {
         // can prefill it — without it the request dies in routing (P1-1).
         expect(intent?.prompt).toBe(text);
       }
+    });
+
+    it.each([
+      ["generate a short video of ocean waves", "short video of ocean waves"],
+      ["make me a video of a dragon flying over a city", "video of a dragon flying over a city"],
+      ["create a 5 second cinematic clip of rain", "5 second cinematic clip of rain"],
+      ["animate this image", "this image"],
+      ["turn this image into a video", "this image"],
+    ])("routes %s to Video Studio with the preserved prompt", (text, prompt) => {
+      const intent = detectIntent(text);
+      expect(intent?.intent).toBe("generate_video");
+      expect(intent?.tool).toBe("video");
+      expect(intent?.prompt).toBe(prompt);
+    });
+
+    it.each([
+      "write a storyboard for a video",
+      "how does video generation work?",
+      "make a website for my video company",
+    ])("does not route non-generation request %s to Video Studio", (text) => {
+      expect(detectIntent(text)).not.toMatchObject({ intent: "generate_video" });
     });
 
     it("classifies blank-project and settings requests", () => {
@@ -108,6 +130,16 @@ describe("P1-1: studio intent dead flows", () => {
       expect(h.onOpenImageStudio).toHaveBeenCalledWith(text);
       expect(h.onRouteToolAction).not.toHaveBeenCalled();
       expect(h.onNavigate).not.toHaveBeenCalled();
+    });
+
+    it("generate_video opens the real Video Studio with the prompt prefilled", () => {
+      const h = spies();
+      const intent = detectIntent("generate a short video of ocean waves");
+      expect(intent).not.toBeNull();
+      dispatchStudioIntent(intent!, h);
+      expect(h.onOpenVideoStudio).toHaveBeenCalledTimes(1);
+      expect(h.onOpenVideoStudio).toHaveBeenCalledWith("short video of ocean waves");
+      expect(buildIntentResponseMessage(intent!, runtime)).toBe("Opening the video generator.");
     });
 
     it("start_blank_project opens the real project-name dialog", () => {

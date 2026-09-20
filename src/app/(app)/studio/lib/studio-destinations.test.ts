@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   mapLegacyToolToDestination,
+  mapMediaIntentToDestination,
   destinationToLegacyTool,
   resolveCreatorDestination,
   DESTINATION_LABELS,
@@ -13,6 +14,19 @@ import {
 } from "./studio-destinations";
 
 describe("studio-destinations", () => {
+  it("maps explicit media-generation intents to their real creator surfaces", () => {
+    expect(mapMediaIntentToDestination("image")).toEqual({
+      destination: "create",
+      legacyTool: "image",
+      mode: "image",
+    });
+    expect(mapMediaIntentToDestination("video")).toEqual({
+      destination: "create",
+      legacyTool: "video",
+      mode: "video",
+    });
+  });
+
   describe("mapLegacyToolToDestination", () => {
     it("maps home/chat to Studio/Preview (preview is the primary surface)", () => {
       expect(mapLegacyToolToDestination("home")).toEqual({
