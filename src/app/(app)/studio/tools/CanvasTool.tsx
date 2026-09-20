@@ -5,6 +5,10 @@ import { useTheme } from "@/context/ThemeContext";
 import { CODE_MODELS as MODELS } from "@/lib/studio-models";
 import { apiFetch, ApiResponseError } from "@/lib/api-response";
 import {
+  useCanvasPersistence,
+  type CanvasFile,
+} from "./useCanvasPersistence";
+import {
   Bot,
   Copy,
   Download,
@@ -37,11 +41,7 @@ type Message = {
   ts: string;
 };
 
-type GeneratedFile = {
-  name: string;
-  content: string;
-  language: string;
-};
+type GeneratedFile = CanvasFile;
 
 const STARTER_TEMPLATES = [
   {
@@ -81,7 +81,6 @@ const QUALITY_LEVELS = [
   { id: "production", label: "Production", desc: "Tests, types, deployment-ready" },
 ];
 
-const PERSIST_KEY = "litlabs:canvas:files";
 const PERSIST_MSG_KEY = "litlabs:canvas:messages";
 
 /** Real LiTTree pricing — injected into AI prompt so generated pricing pages use real data. */
@@ -107,7 +106,20 @@ export default function CanvasTool({ projectId }: CanvasToolProps) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [model, setModel] = useState("gemini-flash");
-  const [generatedFiles, setGeneratedFiles] = useState<GeneratedFile[]>([]);
+  /* Canvas files are owned by the server (Supabase) via useCanvasPersistence:
+     the hook resolves/creates the canvas, loads its file blocks, and syncs
+     every local change through the API with an honest save state. */
+  const {
+    files: generatedFiles,
+    setFiles: setGeneratedFiles,
+    loadState: canvasLoadState,
+    loadError: canvasLoadError,
+    saveState: canvasSaveState,
+    saveError: canvasSaveError,
+    retrySave: retryCanvasSave,
+    retryLoad: retryCanvasLoad,
+    resetCanvas,
+  } = useCanvasPersistence(projectId);
   const [activeFile, setActiveFile] = useState<string>("");
   const [previewMode, setPreviewMode] = useState<"code" | "preview">("code");
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -126,17 +138,10 @@ export default function CanvasTool({ projectId }: CanvasToolProps) {
   const [acceptError, setAcceptError] = useState<string | null>(null);
   const [writtenFiles, setWrittenFiles] = useState<string[]>([]);
 
-  // Load persisted files and messages on mount
+  // Load persisted chat messages on mount. Chat history stays a local
+  // cache; canvas files are owned by the server (useCanvasPersistence).
   useEffect(() => {
     try {
-      const savedFiles = localStorage.getItem(PERSIST_KEY);
-      if (savedFiles) {
-        const files = JSON.parse(savedFiles) as GeneratedFile[];
-        if (files.length > 0) {
-          setGeneratedFiles(files);
-          setActiveFile(files[0].name);
-        }
-      }
       const savedMsgs = localStorage.getItem(PERSIST_MSG_KEY);
       if (savedMsgs) {
         const msgs = JSON.parse(savedMsgs) as Message[];
@@ -145,19 +150,21 @@ export default function CanvasTool({ projectId }: CanvasToolProps) {
     } catch { /* ignore corrupt storage */ }
   }, []);
 
-  // Persist files when they change
-  useEffect(() => {
-    if (generatedFiles.length > 0) {
-      localStorage.setItem(PERSIST_KEY, JSON.stringify(generatedFiles));
-    }
-  }, [generatedFiles]);
-
-  // Persist messages when they change
+  // Persist messages when they change (local chat-history cache)
   useEffect(() => {
     if (messages.length > 0) {
       localStorage.setItem(PERSIST_MSG_KEY, JSON.stringify(messages.slice(-20)));
     }
   }, [messages]);
+
+  // Keep a valid file selected once the canvas is ready (e.g. after the
+  // initial server load restores files, activeFile starts empty).
+  useEffect(() => {
+    if (canvasLoadState !== "ready") return;
+    if (generatedFiles.length > 0 && !generatedFiles.some((f) => f.name === activeFile)) {
+      setActiveFile(generatedFiles[0].name);
+    }
+  }, [canvasLoadState, generatedFiles, activeFile]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({
@@ -314,7 +321,7 @@ export default function CanvasTool({ projectId }: CanvasToolProps) {
         setIsLoading(false);
       }
     },
-    [isLoading, messages, extractCode, model, memories, qualityLevel],
+    [isLoading, messages, extractCode, model, memories, qualityLevel, setGeneratedFiles],
   );
 
   const handleKey = (e: React.KeyboardEvent) => {
@@ -399,43 +406,34 @@ export default function CanvasTool({ projectId }: CanvasToolProps) {
 
   const deleteFile = useCallback(
     (fileName: string) => {
-      setGeneratedFiles((prev) => {
-        const next = prev.filter((f) => f.name !== fileName);
-        if (activeFile === fileName) {
-          setActiveFile(next.length > 0 ? next[0].name : "");
-        }
-        if (next.length === 0) {
-          localStorage.removeItem(PERSIST_KEY);
-        } else {
-          localStorage.setItem(PERSIST_KEY, JSON.stringify(next));
-        }
-        return next;
-      });
+      // Server sync is debounced inside the persistence hook.
+      const next = generatedFiles.filter((f) => f.name !== fileName);
+      setGeneratedFiles(next);
+      if (activeFile === fileName) {
+        setActiveFile(next.length > 0 ? next[0].name : "");
+      }
     },
-    [activeFile],
+    [generatedFiles, activeFile, setGeneratedFiles],
   );
 
   const startNew = useCallback(() => {
-    setGeneratedFiles([]);
+    // Archive the current canvas server-side and start a fresh one;
+    // chat history is local-only and cleared outright.
+    void resetCanvas();
     setMessages([]);
     setActiveFile("");
     setInput("");
     setSelectedIntent("");
-    localStorage.removeItem(PERSIST_KEY);
     localStorage.removeItem(PERSIST_MSG_KEY);
-  }, []);
+  }, [resetCanvas]);
 
   const createBlankFile = useCallback(() => {
     const name = `untitled-${Date.now()}.html`;
     const newFile: GeneratedFile = { name, content: "<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"utf-8\">\n  <title>Untitled</title>\n</head>\n<body>\n  \n</body>\n</html>", language: "html" };
-    setGeneratedFiles((prev) => {
-      const next = [...prev, newFile];
-      localStorage.setItem(PERSIST_KEY, JSON.stringify(next));
-      return next;
-    });
+    setGeneratedFiles([...generatedFiles, newFile]);
     setActiveFile(name);
     setPreviewMode("code");
-  }, []);
+  }, [generatedFiles, setGeneratedFiles]);
 
   /* ── Accept: write generated files to the active workspace ── */
   const handleAccept = useCallback(async () => {
@@ -467,18 +465,17 @@ export default function CanvasTool({ projectId }: CanvasToolProps) {
     }
   }, [projectId, generatedFiles]);
 
-  /* ── Revert: discard generated files (clears local state only) ── */
+  /* ── Revert: discard generated files (archives the server canvas, starts fresh) ── */
   const handleRevert = useCallback(() => {
-    setGeneratedFiles([]);
+    void resetCanvas();
     setActiveFile("");
     setMessages([]);
     setInput("");
     setSelectedIntent("");
     setAcceptState("idle");
     setWrittenFiles([]);
-    localStorage.removeItem(PERSIST_KEY);
     localStorage.removeItem(PERSIST_MSG_KEY);
-  }, []);
+  }, [resetCanvas]);
 
   return (
     <div
@@ -527,6 +524,47 @@ export default function CanvasTool({ projectId }: CanvasToolProps) {
               <Brain size={10} /> {memories.length} {memories.length === 1 ? "memory" : "memories"}
             </span>
           )}
+          {/* Canvas sync status — honest save state, never pretends success */}
+          <span
+            className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full"
+            title={canvasSaveState === "error" ? canvasSaveError ?? undefined : "Canvas files sync to your account"}
+            style={{
+              backgroundColor:
+                canvasSaveState === "error"
+                  ? "#ef444415"
+                  : canvasSaveState === "saved"
+                    ? "#22c55e15"
+                    : T.boxBg,
+              color:
+                canvasSaveState === "error"
+                  ? "#ef4444"
+                  : canvasSaveState === "saved"
+                    ? "#22c55e"
+                    : T.textMuted,
+              border: `1px solid ${
+                canvasSaveState === "error"
+                  ? "#ef444430"
+                  : canvasSaveState === "saved"
+                    ? "#22c55e30"
+                    : T.borderColor + "25"
+              }`,
+            }}
+          >
+            {canvasLoadState === "loading" || canvasSaveState === "saving" ? (
+              <><Loader2 size={10} className="animate-spin" /> {canvasLoadState === "loading" ? "Loading canvas…" : "Saving…"}</>
+            ) : canvasSaveState === "saved" ? (
+              <><Check size={10} /> Saved</>
+            ) : canvasSaveState === "error" ? (
+              <button
+                onClick={retryCanvasSave}
+                className="flex items-center gap-1 font-bold hover:underline"
+              >
+                <AlertCircle size={10} /> Save failed — retry
+              </button>
+            ) : (
+              <><Check size={10} /> Synced</>
+            )}
+          </span>
         </div>
         <div className="flex items-center gap-2">
           {/* Model Switcher */}
@@ -562,7 +600,31 @@ export default function CanvasTool({ projectId }: CanvasToolProps) {
         </div>
       </div>
 
-      <div className="flex flex-1 min-h-0 overflow-hidden">
+      <div className="relative flex flex-1 min-h-0 overflow-hidden">
+        {/* Canvas load failure — honest banner, never silently empty */}
+        {canvasLoadState === "error" && (
+          <div
+            className="absolute top-12 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 rounded-xl px-3 py-2 text-[11px] font-bold shadow-lg"
+            style={{
+              backgroundColor: "#ef444415",
+              border: "1px solid #ef444440",
+              color: "#ef4444",
+              backdropFilter: "blur(8px)",
+            }}
+          >
+            <AlertCircle size={13} className="shrink-0" />
+            <span className="max-w-md truncate" title={canvasLoadError ?? undefined}>
+              {canvasLoadError ?? "Couldn't load your canvas."}
+            </span>
+            <button
+              onClick={retryCanvasLoad}
+              className="flex items-center gap-1 px-2 py-0.5 rounded-lg hover:scale-105 transition-all"
+              style={{ backgroundColor: "#ef444420", border: "1px solid #ef444440" }}
+            >
+              <RefreshCw size={10} /> Retry
+            </button>
+          </div>
+        )}
         {/* Chat Panel */}
         <div
           className="flex flex-col min-h-0 border-r w-full md:w-1/2 lg:w-[42%] shrink-0"
@@ -1065,7 +1127,7 @@ export default function CanvasTool({ projectId }: CanvasToolProps) {
               style={{ borderColor: T.borderColor + "20", color: T.textMuted }}
             >
               <AlertCircle size={12} />
-              <span>Select a project to write generated files to the workspace. Files are saved locally only.</span>
+              <span>Select a project to write generated files to the workspace. Canvas files sync to your account.</span>
             </div>
           )}
 
