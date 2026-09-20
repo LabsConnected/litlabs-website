@@ -467,14 +467,16 @@ async function createGitCheckpoint(workspaceId: string, userId: string, message:
     throw new Error("TERMINAL_INTERNAL_SERVICE_KEY not configured");
   }
 
-  const execInWorkspace = async (command: string) => {
+  // Accept optional stdin so the commit message can be passed safely via pipe
+  // instead of shell-interpolated into the command string.
+  const execInWorkspace = async (command: string, stdin?: string) => {
     const resp = await fetch(`${TERMINAL_BASE()}/internal/workspace/${workspaceId}/exec`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-Internal-Service-Key": internalKey,
       },
-      body: JSON.stringify({ command, userId }),
+      body: JSON.stringify({ command, userId, stdin }),
     });
     if (!resp.ok) {
       const text = await resp.text().catch(() => "Unknown error");
@@ -484,7 +486,10 @@ async function createGitCheckpoint(workspaceId: string, userId: string, message:
   };
 
   await execInWorkspace("git add .");
-  await execInWorkspace(`git commit -m "${message.replace(/"/g, '\\"')}"`);
+  // Pass the commit message via stdin (--file=-) so it never touches the shell
+  // parser. This prevents injection via backticks, $(), newlines, or any other
+  // shell metacharacters that could appear in an agent-supplied message string.
+  await execInWorkspace("git commit --file=-", message);
   const shaResult = await execInWorkspace("git rev-parse HEAD");
   return shaResult.stdout.trim();
 }
