@@ -54,15 +54,58 @@ const homeSchema = {
       },
       inLanguage: "en-US",
     },
+    {
+      "@type": "SoftwareApplication",
+      "@id": `${SITE_URL}/#litt-application`,
+      name: "LiTT",
+      applicationCategory: "DeveloperApplication",
+      operatingSystem: "Web",
+      url: SITE_URL,
+      description:
+        "LiTT plans, builds, edits real projects, uses tools, verifies the work, and helps you ship—all from one workspace.",
+      publisher: {
+        "@id": `${SITE_URL}/#organization`,
+      },
+      offers: [
+        {
+          "@type": "Offer",
+          name: "Starter",
+          price: "0",
+          priceCurrency: "USD",
+          url: absoluteUrl("/pricing"),
+          description:
+            "Free forever. 500 AI credits (one-time), 1 active project.",
+        },
+        {
+          "@type": "Offer",
+          name: "Creator Beta",
+          price: "15",
+          priceCurrency: "USD",
+          url: absoluteUrl("/pricing"),
+          description:
+            "Beta pricing. Research, write, and market with AI agents. 6,000 AI credits monthly, 5 active projects.",
+        },
+        {
+          "@type": "Offer",
+          name: "Pro Builder Beta",
+          price: "39",
+          priceCurrency: "USD",
+          url: absoluteUrl("/pricing"),
+          description:
+            "Beta pricing. Build, debug, and deploy with full AI tooling. 20,000 AI credits monthly, 25 active projects.",
+        },
+      ],
+    },
   ],
 };
 
 describe("Homepage structured data (JSON-LD)", () => {
-  it("has @graph with Organization and WebSite", () => {
+  it("has @graph with Organization, WebSite, and SoftwareApplication", () => {
     const graph = homeSchema["@graph"] as Array<Record<string, unknown>>;
-    expect(graph).toHaveLength(2);
+    expect(graph).toHaveLength(3);
     expect(graph[0]["@type"]).toBe("Organization");
     expect(graph[1]["@type"]).toBe("WebSite");
+    expect(graph[2]["@type"]).toBe("SoftwareApplication");
   });
 
   it("Organization alternateName includes LitLabs", () => {
@@ -140,6 +183,39 @@ describe("Homepage structured data (JSON-LD)", () => {
     const org = (homeSchema["@graph"] as Array<Record<string, unknown>>)[0];
     const altNames = org.alternateName as string[];
     expect(altNames[0]).toBe("LitLabs");
+  });
+
+  it("SoftwareApplication @id is correct", () => {
+    const app = (homeSchema["@graph"] as Array<Record<string, unknown>>)[2];
+    expect(app["@id"]).toBe(`${SITE_URL}/#litt-application`);
+  });
+
+  it("SoftwareApplication is named LiTT", () => {
+    const app = (homeSchema["@graph"] as Array<Record<string, unknown>>)[2];
+    expect(app.name).toBe("LiTT");
+  });
+
+  it("SoftwareApplication publisher references Organization @id", () => {
+    const app = (homeSchema["@graph"] as Array<Record<string, unknown>>)[2];
+    const publisher = app.publisher as Record<string, string>;
+    expect(publisher["@id"]).toBe(`${SITE_URL}/#organization`);
+  });
+
+  it("SoftwareApplication lists the three real plan offers", () => {
+    const app = (homeSchema["@graph"] as Array<Record<string, unknown>>)[2];
+    const offers = app.offers as Array<Record<string, string>>;
+    expect(offers).toHaveLength(3);
+    expect(offers.map((o) => o.name)).toEqual([
+      "Starter",
+      "Creator Beta",
+      "Pro Builder Beta",
+    ]);
+    expect(offers.map((o) => o.price)).toEqual(["0", "15", "39"]);
+    offers.forEach((o) => {
+      expect(o["@type"]).toBe("Offer");
+      expect(o.priceCurrency).toBe("USD");
+      expect(o.url).toBe(absoluteUrl("/pricing"));
+    });
   });
 
   it("DEFAULT_TITLE contains LitLabs", () => {
