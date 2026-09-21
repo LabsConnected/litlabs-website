@@ -340,6 +340,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           model: options.model,
           executionMode: options.executionMode ?? "act",
           enableBuildFix: options.enableBuildFix ?? true,
+          requireToolCallOnFirstStep: options.requiresExecution === true,
           evalMetadata: options.evalMetadata,
           // Always bounded by the global launch budget — a reprompt must not
           // restart the clock.
