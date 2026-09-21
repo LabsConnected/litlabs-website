@@ -362,7 +362,7 @@ describe("Agent loop max-rounds — truthful partial answer from tool evidence",
           readOnly: true,
         },
         handler: async () => ({
-          status: "ok",
+          status: "success",
           success: true,
           message: "Branch: main, 2 modified files",
           data: {},
