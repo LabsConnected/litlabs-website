@@ -53,6 +53,9 @@ export interface PreviewRuntime {
   port: number;
   framework: string;
   command: string;
+  /** Pre-substitution command with $PORT intact — restart must rebind a
+   *  freshly allocated port, not the literal port baked into `command`. */
+  commandTemplate: string;
   status: PreviewStatus;
   startedAt: number | null;
   lastHealthCheck: number | null;
@@ -769,6 +772,18 @@ export async function probeHealth(
         return { healthy: true, authConfigError: false, status: resp.status, bodySnippet: null, rootRouteMissing: false };
       }
       if (resp.status === 404) {
+        // A 404 on the port could come from a squatter the dev server is
+        // about to abandon — `next dev` auto-increments on EADDRINUSE and
+        // announces the real port a beat later (adoptBoundPort). Failing
+        // on the first 404 would misattribute a foreign process's
+        // "Cannot GET /" to the workspace's app during that boot window.
+        // Give the port one interval to move; if it moved, the 404 was
+        // stale evidence — keep probing wherever the runtime points now.
+        // If it did not move, the answering process is the runtime's own
+        // server: a missing root route is a truthful failure.
+        const portAt404 = currentPort();
+        await new Promise((resolve) => setTimeout(resolve, HEALTH_PROBE_INTERVAL_MS));
+        if (currentPort() !== portAt404) continue;
         // A running process is not a usable website preview when its root
         // route is missing. This is the source of the visible "Cannot GET /"
         // state; keep it truthful instead of marking the runtime ready.
@@ -980,6 +995,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
         port,
         framework: detected.framework,
         command: detected.command,
+        commandTemplate: detected.command,
         status: "failed",
         startedAt: Date.now(),
         lastHealthCheck: null,
@@ -1093,6 +1109,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
       port: failedPort,
       framework: detected.framework,
       command: actualCommand,
+      commandTemplate: detected.command,
       status: "failed",
       startedAt: Date.now(),
       lastHealthCheck: null,
@@ -1118,6 +1135,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
     port,
     framework: detected.framework,
     command: actualCommand,
+    commandTemplate: detected.command,
     status: "starting",
     startedAt: Date.now(),
     lastHealthCheck: null,
@@ -1362,12 +1380,16 @@ export async function restartPreview(workspaceId: string): Promise<PreviewRuntim
     pushLog(rt, `[preview] Port ${port} never freed up — allocation will skip it if still bound`);
   }
 
-  // Start again with same config
+  // Start again with same config — the command TEMPLATE ($PORT intact),
+  // not rt.command: that has the old literal port baked in and would
+  // force the dev server onto a stale port while the fresh runtime
+  // record points at the newly allocated one — the same stale
+  // workspace→port mapping this restart is supposed to clear.
   return startPreview({
     workspaceId,
     userId: rt.userId,
     framework: rt.framework,
-    command: rt.command,
+    command: rt.commandTemplate ?? rt.command,
     packageManager: "pnpm",
   });
 }

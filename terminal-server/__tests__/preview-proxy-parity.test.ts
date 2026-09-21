@@ -361,6 +361,7 @@ describe("preview port truth — adoptBoundPort", () => {
     port,
     framework: "nextjs",
     command: `pnpm exec next dev --port ${port}`,
+    commandTemplate: "pnpm exec next dev --port $PORT",
     status: "starting",
     startedAt: Date.now(),
     lastHealthCheck: null,
