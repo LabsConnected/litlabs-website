@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getProject, updateProjectRuntime } from "@/lib/projects/project-repository";
 import { ensureWorkspaceAlive, provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
+import { SecretBroker } from "@/lib/terminal-v1/secret-broker";
+import { extractClerkEnvFromSecrets } from "@/lib/preview-clerk-env";
 import {
   startPreviewInternal,
   getPreviewStatusInternal,
@@ -150,10 +152,25 @@ export async function POST(
   });
 
   try {
+    // Resolve the project's configured Clerk keys from its secret store
+    // so the preview runtime gets the PROJECT's keys — not the terminal
+    // server's container env (which is deliberately isolated since #444).
+    // Fail-soft: if the store is unreachable, the preview's own Clerk
+    // validation surfaces a structured configuration error.
+    let projectEnv: Record<string, string> = {};
+    try {
+      const broker = new SecretBroker();
+      const secrets = await broker.resolveForSandbox(userId, projectId);
+      projectEnv = extractClerkEnvFromSecrets(secrets);
+    } catch {
+      projectEnv = {};
+    }
+
     const result = await startPreviewInternal(workspaceId, userId, {
       framework: project.framework ?? undefined,
       command: project.developmentCommand ?? undefined,
       packageManager: project.packageManager ?? undefined,
+      projectEnv,
     });
 
     const previewUrl = result.status === "ready"

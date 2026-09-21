@@ -107,6 +107,18 @@ export interface PreviewRuntime {
   error: string | null;
   errorCode: PreviewErrorCode | null;
   logs: string[];
+  /**
+   * Fingerprint of the resolved Clerk project env this runtime started
+   * with (see fingerprintProjectEnv). Used to restart only when the env
+   * actually changed. Null for runtimes created before this field existed.
+   */
+  clerkEnvFingerprint: string | null;
+  /**
+   * The Clerk subset of projectEnv passed at start (extractClerkEnv).
+   * Persisted so an explicit restart re-resolves the same project env
+   * instead of silently dropping it.
+   */
+  clerkProjectEnv: Record<string, string> | null;
 }
 
 interface PreviewStartInput {
@@ -115,6 +127,19 @@ interface PreviewStartInput {
   framework?: string;
   command?: string;
   packageManager?: string;
+  /**
+   * Project-configured environment (e.g. Clerk keys resolved from the
+   * project's secret store by the web app). Only the Clerk subset is
+   * ever extracted — see extractClerkEnv. Merged BELOW workspace
+   * .env/.env.local, which keep Next.js dev precedence.
+   */
+  projectEnv?: Record<string, string>;
+  /**
+   * Bypass the reuse-a-healthy-runtime optimization and always tear
+   * down + restart. Used by explicit restart (the user asked for a
+   * fresh dev server, not a no-op).
+   */
+  forceRestart?: boolean;
 }
 
 /**
@@ -642,12 +667,91 @@ export function fingerprintClerkEnv(
   };
 }
 
+// ─── Project env resolution (Clerk) ────────────────────────────────
+//
+// Since PR #444 the preview child inherits ONLY the allowlisted container
+// vars plus the workspace's own .env/.env.local. That isolation is
+// deliberate (a user workspace must never inherit the terminal server's
+// production secrets), but it leaves Clerk workspaces with no way to get
+// their own keys when the container clone has no .env.local.
+//
+// The web app resolves the project's configured Clerk keys from its
+// secret store and passes them as `projectEnv` on preview start. Only
+// the Clerk subset is ever extracted — everything else stays out of the
+// child process. Merge precedence (lowest → highest):
+//   container allowlist < project secrets < workspace .env < .env.local
+// which mirrors Next.js dev semantics: local files win.
+
+/**
+ * Extract the Clerk subset from an arbitrary env map (e.g. decrypted
+ * project secrets). Maps CLERK_PUBLISHABLE_KEY to
+ * NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY when the latter is absent, cleans
+ * values, and drops empties. Never includes non-Clerk keys.
+ */
+export function extractClerkEnv(
+  source: Record<string, string>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  const secret = cleanEnvValue(source.CLERK_SECRET_KEY);
+  if (secret) out.CLERK_SECRET_KEY = secret;
+  const publishable = cleanEnvValue(
+    source.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? source.CLERK_PUBLISHABLE_KEY,
+  );
+  if (publishable) out.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = publishable;
+  return out;
+}
+
+/**
+ * Resolve the project-level env for a preview spawn: project secrets
+ * first, then the workspace's own .env/.env.local on top.
+ */
+export function resolvePreviewProjectEnv(
+  projectEnv: Record<string, string> | undefined,
+  workspaceRoot: string,
+): Record<string, string> {
+  return {
+    ...extractClerkEnv(projectEnv ?? {}),
+    ...loadWorkspaceEnv(workspaceRoot),
+  };
+}
+
+/**
+ * Stable fingerprint of the resolved Clerk project env, for change
+ * detection. Safe to log — it's a hash, never the values.
+ */
+export function fingerprintProjectEnv(env: Record<string, string>): string {
+  const subset = extractClerkEnv(env);
+  const keys = Object.keys(subset).sort();
+  if (keys.length === 0) return "none";
+  return createHash("sha256")
+    .update(keys.map((k) => `${k}=${subset[k]}`).join("\n"))
+    .digest("hex")
+    .slice(0, 16);
+}
+
+/**
+ * Decide whether an existing preview runtime can be reused instead of
+ * torn down and restarted. Only when it is healthy (ready/starting),
+ * its process is still alive, and the resolved Clerk env is
+ * byte-identical to what it started with. A null stored fingerprint
+ * (pre-upgrade runtime) never matches — it takes the full restart path.
+ */
+export function shouldReuseRuntime(
+  existing: Pick<PreviewRuntime, "status" | "clerkEnvFingerprint" | "process">,
+  newFingerprint: string,
+): boolean {
+  if (!existing.clerkEnvFingerprint) return false;
+  if (existing.status !== "ready" && existing.status !== "starting") return false;
+  const proc = existing.process;
+  if (!proc || proc.exitCode !== null || proc.killed) return false;
+  return existing.clerkEnvFingerprint === newFingerprint;
+}
+
 async function installWorkspaceDependencies(
   root: string,
   packageManager: string,
   executable: string,
-): Promise<void> {
-  if (!existsSync(join(root, "package.json")) || packageManager === "npx") return;
+): Promise<void> {  if (!existsSync(join(root, "package.json")) || packageManager === "npx") return;
 
   const args = executable === "corepack"
     ? ["pnpm", "install", "--prefer-offline"]
@@ -971,10 +1075,35 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
   if (ws.userId !== userId) throw new Error("Forbidden");
   if (!ws.ready) throw new Error("Workspace not ready");
 
+  // Resolve the project env BEFORE touching any existing runtime, so a
+  // healthy runtime whose env is unchanged can be reused instead of
+  // torn down. Precedence: project secrets < .env < .env.local.
+  const clerkProjectEnv = extractClerkEnv(input.projectEnv ?? {});
+  const projectEnv = resolvePreviewProjectEnv(input.projectEnv, ws.root);
+  const newFingerprint = fingerprintProjectEnv(projectEnv);
+  const storedClerkEnv =
+    Object.keys(clerkProjectEnv).length > 0 ? clerkProjectEnv : null;
+
   // Stop existing runtime if any — wait for the process to exit so
-  // the port is released before we try to rebind.
+  // the port is released before we try to rebind. A healthy runtime
+  // whose resolved env is unchanged is reused as-is (no disruptive
+  // restart) — unless the caller forced a restart or the requested
+  // framework/command differs from what is running. Anything else
+  // takes the full stop + start path.
   const existing = runtimes.get(workspaceId);
   const preservedLogs = existing?.logs ?? [];
+  const configMatches =
+    !existing ||
+    ((input.framework === undefined || input.framework === existing.framework) &&
+      (input.command === undefined || input.command === existing.command));
+  if (
+    !input.forceRestart &&
+    existing &&
+    configMatches &&
+    shouldReuseRuntime(existing, newFingerprint)
+  ) {
+    return existing;
+  }
   if (existing) {
     await stopPreviewAndWait(workspaceId);
   }
@@ -1030,6 +1159,8 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
         status: "failed",
         startedAt: Date.now(),
         lastHealthCheck: null,
+        clerkEnvFingerprint: newFingerprint,
+        clerkProjectEnv: storedClerkEnv,
         error: err.message,
         errorCode: err.code,
         logs: [
@@ -1065,8 +1196,10 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
 
   // Bind host follows the parent terminal-server's own resolved policy —
   // see previewBindHost() / ../network-bind.ts.
+  // Project env (project secrets, then workspace .env/.env.local) is
+  // merged over the allowlisted container vars — never the reverse.
   const env: Record<string, string> = {
-    ...buildPreviewEnv(loadWorkspaceEnv(ws.root)),
+    ...buildPreviewEnv(projectEnv),
     PATH: childPath,
     PORT: String(port),
     HOSTNAME: previewBindHost(),
@@ -1123,11 +1256,12 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
       {
         cwd: ws.root,
         suggestedRemediation:
-          "Check that CLERK_SECRET_KEY starts with sk_test_ or sk_live_, " +
-          "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY starts with pk_test_ or pk_live_, " +
-          "both are from the same Clerk environment, and neither has " +
-          "whitespace or quotes. If the secret was recently rotated, " +
-          "update it in the terminal-server Railway env or workspace .env.local.",
+          "Provide both keys for this project — via its Studio project " +
+          "secrets, the workspace .env.local, or the terminal-server " +
+          "Railway env. Check that CLERK_SECRET_KEY starts with sk_test_ " +
+          "or sk_live_, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY starts with " +
+          "pk_test_ or pk_live_, both are from the same Clerk environment, " +
+          "and neither has whitespace or quotes.",
       },
     );
     const failedPort = await allocateFreePort();
@@ -1143,6 +1277,8 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
       status: "failed",
       startedAt: Date.now(),
       lastHealthCheck: null,
+      clerkEnvFingerprint: newFingerprint,
+      clerkProjectEnv: storedClerkEnv,
       error: err.message,
       errorCode: err.code,
       logs: [
@@ -1168,6 +1304,8 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
     status: "starting",
     startedAt: Date.now(),
     lastHealthCheck: null,
+    clerkEnvFingerprint: newFingerprint,
+    clerkProjectEnv: storedClerkEnv,
     error: null,
     errorCode: null,
     logs: [...preservedLogs],
@@ -1387,7 +1525,10 @@ export async function stopPreviewAndWait(workspaceId: string): Promise<void> {
   pushLog(rt, "[preview] Stopped (waited for exit)");
 }
 
-export async function restartPreview(workspaceId: string): Promise<PreviewRuntime> {
+export async function restartPreview(
+  workspaceId: string,
+  projectEnv?: Record<string, string>,
+): Promise<PreviewRuntime> {
   const rt = runtimes.get(workspaceId);
   if (!rt) throw new Error("No preview runtime to restart");
 
@@ -1409,14 +1550,60 @@ export async function restartPreview(workspaceId: string): Promise<PreviewRuntim
     pushLog(rt, `[preview] Port ${port} never freed up — allocation will skip it if still bound`);
   }
 
-  // Start again with same config
+  // Start again with same config. A freshly provided projectEnv wins;
+  // otherwise reuse the env this runtime was started with, so an
+  // explicit restart never silently drops the resolved Clerk keys.
+  // forceRestart bypasses the reuse-a-healthy-runtime optimization —
+  // an explicit restart always means a fresh dev server.
   return startPreview({
     workspaceId,
     userId: rt.userId,
     framework: rt.framework,
     command: rt.command,
     packageManager: "pnpm",
+    projectEnv: projectEnv ?? rt.clerkProjectEnv ?? undefined,
+    forceRestart: true,
   });
+}
+
+/**
+ * Restart the preview ONLY if the resolved project env changed since
+ * the runtime started. Returns whether a restart happened.
+ *
+ * This is the hook for secret rotation: when the project's configured
+ * Clerk keys change, the caller re-resolves them and calls this — the
+ * preview is recreated with the new env, without a disruptive restart
+ * when nothing changed. When no runtime exists, nothing happens and
+ * the caller should start one normally.
+ */
+export async function ensurePreviewEnv(
+  workspaceId: string,
+  userId: string,
+  projectEnv?: Record<string, string>,
+): Promise<{ restarted: boolean; runtime: PreviewRuntime | null }> {
+  const ws = getWorkspace(workspaceId);
+  if (!ws) {
+    throw new PreviewError(
+      "preview_workspace_not_found",
+      `Workspace not found: ${workspaceId}`,
+      { cwd: null },
+    );
+  }
+  if (ws.userId !== userId) throw new Error("Forbidden");
+  if (!ws.ready) throw new Error("Workspace not ready");
+
+  const existing = runtimes.get(workspaceId);
+  if (!existing) return { restarted: false, runtime: null };
+
+  const newFingerprint = fingerprintProjectEnv(
+    resolvePreviewProjectEnv(projectEnv, ws.root),
+  );
+  if (shouldReuseRuntime(existing, newFingerprint)) {
+    return { restarted: false, runtime: existing };
+  }
+
+  const runtime = await startPreview({ workspaceId, userId, projectEnv });
+  return { restarted: true, runtime };
 }
 
 /**

@@ -272,6 +272,7 @@ describe("PreviewManager — resolvePackageManager", () => {
 import {
   startPreview,
   stopPreview,
+  restartPreview,
   getPreviewStatus,
   PreviewError,
 } from "../preview/PreviewManager";
@@ -762,4 +763,291 @@ describe("PreviewManager — auth config error in health probe", () => {
     globalThis.fetch = origFetch;
     restore();
   });
+});
+
+// ─── Project env resolution (Clerk) ─────────────────────────────────
+
+import {
+  extractClerkEnv,
+  resolvePreviewProjectEnv,
+  fingerprintProjectEnv,
+  shouldReuseRuntime,
+} from "../preview/PreviewManager";
+
+describe("PreviewManager — project env resolution", () => {
+  let tmpRoot: string;
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), "preview-projenv-"));
+  });
+
+  afterEach(() => {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("extractClerkEnv picks only Clerk keys and maps the publishable fallback", () => {
+    expect(
+      extractClerkEnv({
+        CLERK_SECRET_KEY: "sk_test_abc",
+        CLERK_PUBLISHABLE_KEY: "pk_test_xyz",
+        DATABASE_URL: "postgres://must-not-leak",
+        STRIPE_SECRET_KEY: "sk_live_must_not_leak",
+      }),
+    ).toEqual({
+      CLERK_SECRET_KEY: "sk_test_abc",
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_xyz",
+    });
+  });
+
+  it("extractClerkEnv prefers NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY over the fallback", () => {
+    expect(
+      extractClerkEnv({
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_public",
+        CLERK_PUBLISHABLE_KEY: "pk_test_fallback",
+      }),
+    ).toEqual({ NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_public" });
+  });
+
+  it("extractClerkEnv cleans quotes/whitespace and drops empties", () => {
+    expect(
+      extractClerkEnv({
+        CLERK_SECRET_KEY: '  "sk_test_abc"  ',
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "   ",
+      }),
+    ).toEqual({ CLERK_SECRET_KEY: "sk_test_abc" });
+  });
+
+  it("resolvePreviewProjectEnv lets workspace .env.local beat project secrets", () => {
+    writeFileSync(
+      join(tmpRoot, ".env.local"),
+      "CLERK_SECRET_KEY=sk_live_from_file\n",
+    );
+    const resolved = resolvePreviewProjectEnv(
+      {
+        CLERK_SECRET_KEY: "sk_test_from_secrets",
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_from_secrets",
+      },
+      tmpRoot,
+    );
+    expect(resolved.CLERK_SECRET_KEY).toBe("sk_live_from_file");
+    expect(resolved.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY).toBe("pk_test_from_secrets");
+  });
+
+  it("resolvePreviewProjectEnv uses project secrets when no .env files exist", () => {
+    const resolved = resolvePreviewProjectEnv(
+      { CLERK_SECRET_KEY: "sk_test_from_secrets" },
+      tmpRoot,
+    );
+    expect(resolved.CLERK_SECRET_KEY).toBe("sk_test_from_secrets");
+  });
+
+  it("fingerprintProjectEnv is stable, order-insensitive, and never contains values", () => {
+    const a = fingerprintProjectEnv({
+      CLERK_SECRET_KEY: "sk_test_aaa",
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_bbb",
+    });
+    const b = fingerprintProjectEnv({
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_bbb",
+      CLERK_SECRET_KEY: "sk_test_aaa",
+      UNRELATED: "ignored",
+    });
+    expect(a).toBe(b);
+    expect(a).not.toBe("none");
+    expect(a).not.toContain("sk_test_aaa");
+    expect(a).not.toContain("pk_test_bbb");
+    expect(fingerprintProjectEnv({})).toBe("none");
+    expect(
+      fingerprintProjectEnv({ CLERK_SECRET_KEY: "sk_test_different" }),
+    ).not.toBe(a);
+  });
+});
+
+describe("PreviewManager — shouldReuseRuntime", () => {
+  const aliveProc = { exitCode: null, killed: false } as any;
+  const deadProc = { exitCode: 1, killed: false } as any;
+
+  it("reuses a ready, alive runtime with an identical fingerprint", () => {
+    expect(
+      shouldReuseRuntime(
+        { status: "ready", clerkEnvFingerprint: "abc", process: aliveProc },
+        "abc",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not reuse when the fingerprint changed", () => {
+    expect(
+      shouldReuseRuntime(
+        { status: "ready", clerkEnvFingerprint: "abc", process: aliveProc },
+        "def",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not reuse a failed runtime even with a matching fingerprint", () => {
+    expect(
+      shouldReuseRuntime(
+        { status: "failed", clerkEnvFingerprint: "abc", process: aliveProc },
+        "abc",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not reuse when the process died", () => {
+    expect(
+      shouldReuseRuntime(
+        { status: "ready", clerkEnvFingerprint: "abc", process: deadProc },
+        "abc",
+      ),
+    ).toBe(false);
+    expect(
+      shouldReuseRuntime(
+        { status: "ready", clerkEnvFingerprint: "abc", process: null },
+        "abc",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not reuse a legacy runtime with a null fingerprint", () => {
+    expect(
+      shouldReuseRuntime(
+        { status: "ready", clerkEnvFingerprint: null, process: aliveProc },
+        "abc",
+      ),
+    ).toBe(false);
+  });
+});
+
+// ─── Project env injection + restart-on-change (integration) ─────────
+
+describe("PreviewManager — project env injection and restart-on-change", () => {
+  let tmpRoot: string;
+  let origEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), "preview-reuse-"));
+    origEnv = { ...process.env };
+    mockedGetWorkspace.mockReset();
+  });
+
+  afterEach(() => {
+    process.env = origEnv;
+    try {
+      stopPreview("ws-reuse");
+    } catch {
+      // ignore cleanup errors
+    }
+    rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  function setupWorkspace(): () => void {
+    writeFileSync(
+      join(tmpRoot, "package.json"),
+      JSON.stringify({ dependencies: { "@clerk/nextjs": "^6.0.0" } }),
+    );
+    mockedGetWorkspace.mockReturnValue({
+      workspaceId: "ws-reuse",
+      userId: "u1",
+      projectId: "p1",
+      root: tmpRoot,
+      branch: "main",
+      commitSha: "abc",
+      ready: true,
+    } as any);
+    const cleanNodeDir = join(tmpRoot, "clean-node");
+    mkdirSync(cleanNodeDir, { recursive: true });
+    const fakeBin = join(tmpRoot, "fakebin");
+    mkdirSync(fakeBin, { recursive: true });
+    createFakeExecutable(fakeBin, "pnpm");
+    process.env.PATH = fakeBin;
+    delete process.env.NODE_BIN_DIR;
+    return overrideExecPath(cleanNodeDir);
+  }
+
+  function startWithEnv(projectEnv?: Record<string, string>) {
+    return startPreview({
+      workspaceId: "ws-reuse",
+      userId: "u1",
+      command: "sleep 30",
+      framework: "node",
+      packageManager: "pnpm",
+      projectEnv,
+    });
+  }
+
+  it("reuses the runtime when project env is unchanged, restarts when it changes", async () => {
+    const restore = setupWorkspace();
+    const keys = {
+      CLERK_SECRET_KEY: "sk_test_reuse_abc123",
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_reuse_xyz789",
+    };
+
+    const first = await startWithEnv(keys);
+    expect(["starting", "ready"]).toContain(first.status);
+
+    // Same env → same runtime object, no disruptive restart
+    const second = await startWithEnv({ ...keys });
+    expect(second).toBe(first);
+
+    // Rotated secret → full restart with the new env
+    const third = await startWithEnv({
+      CLERK_SECRET_KEY: "sk_test_rotated_newkey",
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_reuse_xyz789",
+    });
+    expect(third).not.toBe(first);
+    expect(third.clerkEnvFingerprint).not.toBe(first.clerkEnvFingerprint);
+
+    stopPreview("ws-reuse");
+    restore();
+  }, 30000);
+
+  it("explicit restart always restarts even when env is unchanged", async () => {
+    const restore = setupWorkspace();
+    const keys = {
+      CLERK_SECRET_KEY: "sk_test_reuse_abc123",
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_reuse_xyz789",
+    };
+
+    const first = await startWithEnv(keys);
+    const second = await restartPreview("ws-reuse");
+    expect(second).not.toBe(first);
+    // The restarted runtime keeps the resolved project env
+    expect(second.clerkProjectEnv).toEqual(keys);
+
+    stopPreview("ws-reuse");
+    restore();
+  }, 30000);
+
+  it("start with a changed command restarts instead of reusing", async () => {
+    const restore = setupWorkspace();
+    const keys = {
+      CLERK_SECRET_KEY: "sk_test_reuse_abc123",
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_reuse_xyz789",
+    };
+
+    const first = await startWithEnv(keys);
+    const second = await startPreview({
+      workspaceId: "ws-reuse",
+      userId: "u1",
+      command: "sleep 60",
+      framework: "node",
+      packageManager: "pnpm",
+      projectEnv: keys,
+    });
+    expect(second).not.toBe(first);
+
+    stopPreview("ws-reuse");
+    restore();
+  }, 30000);
+
+  it("still fails with preview_clerk_config_error when no keys resolve", async () => {
+    const restore = setupWorkspace();
+    await expect(startWithEnv({})).rejects.toMatchObject({
+      code: "preview_clerk_config_error",
+    });
+    const status = getPreviewStatus("ws-reuse");
+    expect(status.status).toBe("failed");
+    expect(status.errorCode).toBe("preview_clerk_config_error");
+    restore();
+  }, 30000);
 });

@@ -51,10 +51,29 @@ import {
   stopPreview,
   stopPreviewAndWait,
   restartPreview,
+  ensurePreviewEnv,
   getPreviewStatus,
   getPreviewLogs,
   verifyPreviewHealth,
 } from "./preview/PreviewManager";
+
+/**
+ * Sanitize an untrusted projectEnv payload from the internal API into a
+ * small string map. Rejects non-objects, non-string values, suspicious
+ * key names, and oversized values. Values are never logged anywhere.
+ */
+function sanitizeProjectEnv(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v !== "string") continue;
+    if (!/^[A-Z][A-Z0-9_]*$/.test(k)) continue;
+    if (v.length > 8192) continue;
+    out[k] = v;
+    if (Object.keys(out).length >= 50) break;
+  }
+  return out;
+}
 import { registerPreviewProxyRoute } from "./preview/proxy";
 import { registerWorkspaceRoutes } from "./workspace-routes";
 import { dispatchCommand } from "./command-bridge";
@@ -992,6 +1011,9 @@ app.post("/internal/workspace/:workspaceId/preview/start", requireInternalServic
   const framework = req.body?.framework ? String(req.body.framework) : undefined;
   const command = req.body?.command ? String(req.body.command) : undefined;
   const packageManager = req.body?.packageManager ? String(req.body.packageManager) : undefined;
+  // Project-configured env (e.g. Clerk keys from the project's secret
+  // store). Sanitized to a small string map — values are NEVER logged.
+  const projectEnv = sanitizeProjectEnv(req.body?.projectEnv);
 
   if (!userId) {
     res.status(400).json({ error: "Missing userId" });
@@ -1013,7 +1035,7 @@ app.post("/internal/workspace/:workspaceId/preview/start", requireInternalServic
   }
 
   try {
-    const runtime = await startPreview({ workspaceId, userId, framework, command, packageManager });
+    const runtime = await startPreview({ workspaceId, userId, framework, command, packageManager, projectEnv });
     res.json({
       workspaceId: runtime.workspaceId,
       status: runtime.status,
@@ -1022,6 +1044,33 @@ app.post("/internal/workspace/:workspaceId/preview/start", requireInternalServic
       command: runtime.command,
       startedAt: runtime.startedAt,
     });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const errorCode = (err as { code?: string }).code ?? null;
+    res.status(500).json({ error: message, errorCode });
+  }
+});
+
+/**
+ * POST /internal/workspace/:workspaceId/preview/ensure-env
+ * Restart the preview ONLY if the provided project env differs from what
+ * the running preview started with. Lets callers react to secret
+ * rotation without a disruptive restart when nothing changed.
+ * Responds with { restarted, status } — never echoes env values.
+ */
+app.post("/internal/workspace/:workspaceId/preview/ensure-env", requireInternalServiceAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const workspaceId = req.params.workspaceId;
+  const userId = String(req.body?.userId || "");
+  const projectEnv = sanitizeProjectEnv(req.body?.projectEnv);
+
+  if (!userId) {
+    res.status(400).json({ error: "Missing userId" });
+    return;
+  }
+
+  try {
+    const { restarted, runtime } = await ensurePreviewEnv(workspaceId, userId, projectEnv);
+    res.json({ restarted, status: runtime?.status ?? "stopped" });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const errorCode = (err as { code?: string }).code ?? null;
@@ -1101,6 +1150,7 @@ app.post("/internal/workspace/:workspaceId/preview/stop", requireInternalService
 app.post("/internal/workspace/:workspaceId/preview/restart", requireInternalServiceAuth, async (req: AuthenticatedRequest, res: Response) => {
   const workspaceId = req.params.workspaceId;
   const userId = String(req.body?.userId || "");
+  const projectEnv = sanitizeProjectEnv(req.body?.projectEnv);
 
   if (!userId) {
     res.status(400).json({ error: "Missing userId" });
@@ -1118,7 +1168,7 @@ app.post("/internal/workspace/:workspaceId/preview/restart", requireInternalServ
   }
 
   try {
-    const runtime = await restartPreview(workspaceId);
+    const runtime = await restartPreview(workspaceId, projectEnv);
     res.json({
       workspaceId: runtime.workspaceId,
       status: runtime.status,
