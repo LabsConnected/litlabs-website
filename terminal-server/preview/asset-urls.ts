@@ -270,3 +270,73 @@ export function rewritePreviewLocation(
   }
   return rewritten;
 }
+
+export interface AuthHandshakeCheckOptions {
+  workspaceId: string;
+  publicOrigin?: string;
+}
+
+/**
+ * True when `original` is the auth-handshake escape pattern that
+ * rewritePreviewLocation re-homes: an absolute redirect to an external
+ * auth provider (e.g. Clerk's /v1/client/handshake) whose redirect_url-style
+ * param pointed at the proxy's public origin OUTSIDE the mount, and
+ * `rewritten` is that same redirect with the param now pointing INSIDE the
+ * mount.
+ *
+ * The preview escape guard (proxy.ts) uses this to let the handshake
+ * through: the outer redirect legitimately leaves the mount for the auth
+ * provider, but the re-homed param guarantees the browser comes back
+ * inside the mount when the handshake completes. A redirect whose param
+ * was already inside the mount — or never pointed at our origin — is not
+ * this pattern and stays subject to the guard, so a workspace cannot
+ * launder an arbitrary external bounce by appending a benign
+ * redirect_url.
+ */
+export function isRehomedAuthHandshake(
+  original: string,
+  rewritten: string,
+  opts: AuthHandshakeCheckOptions,
+): boolean {
+  const publicOrigin = opts.publicOrigin?.trim().replace(/\/+$/, "");
+  if (!publicOrigin) return false;
+  const value = original.trim();
+  const isAbsoluteOrRoot =
+    /^[a-z][a-z0-9+.-]*:/i.test(value) || value.startsWith("//") || value.startsWith("/");
+  if (!isAbsoluteOrRoot) return false;
+
+  let outer: URL;
+  let outerRewritten: URL;
+  try {
+    outer = new URL(value, publicOrigin);
+    outerRewritten = new URL(rewritten.trim(), publicOrigin);
+  } catch {
+    return false;
+  }
+  if (!/^https?:$/.test(outer.protocol)) return false;
+
+  const mount = `/preview/${encodeURIComponent(opts.workspaceId)}`;
+  for (const name of REDIRECT_URL_PARAMS) {
+    const rawOriginal = outer.searchParams.get(name);
+    const rawRewritten = outerRewritten.searchParams.get(name);
+    if (!rawOriginal || !rawRewritten) continue;
+    let innerOriginal: URL;
+    let innerRewritten: URL;
+    try {
+      // rehomeRedirectParam only acts on absolute param targets (it
+      // constructs new URL(raw) with no base); mirror that exactly.
+      innerOriginal = new URL(rawOriginal);
+      innerRewritten = new URL(rawRewritten);
+    } catch {
+      continue;
+    }
+    if (!/^https?:$/.test(innerOriginal.protocol)) continue;
+    if (!/^https?:$/.test(innerRewritten.protocol)) continue;
+    if (innerOriginal.origin !== publicOrigin) continue;
+    if (innerRewritten.origin !== publicOrigin) continue;
+    const wasOutsideMount = !isInsideMount(innerOriginal.pathname, mount);
+    const nowInsideMount = isInsideMount(innerRewritten.pathname, mount);
+    if (wasOutsideMount && nowInsideMount) return true;
+  }
+  return false;
+}

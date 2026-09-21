@@ -695,6 +695,10 @@ describe("PreviewManager — auth config error in health probe", () => {
       JSON.stringify({ dependencies: { "@clerk/nextjs": "^6.0.0" } }),
     );
     writeFileSync(join(tmpRoot, "next.config.js"), "module.exports = {}");
+    writeFileSync(
+      join(tmpRoot, ".env.local"),
+      "CLERK_SECRET_KEY=sk_live_abc123def456\nNEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_xyz789ghi012\n",
+    );
     writeFileSync(join(tmpRoot, "pnpm-lock.yaml"), "");
 
     mockedGetWorkspace.mockReturnValue({

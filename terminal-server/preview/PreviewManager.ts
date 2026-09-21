@@ -25,8 +25,56 @@ import { existsSync, readFileSync, statSync } from "fs";
 import { createServer as createTcpServer } from "net";
 import { delimiter as PATH_DELIMITER, dirname, join, resolve } from "path";
 import { promisify } from "util";
+import { parse as parseDotenv } from "dotenv";
 import { getWorkspace, type WorkspaceDescriptor } from "../workspace/WorkspaceManager";
 import { resolveBindHost } from "../network-bind";
+
+/**
+ * Environment variables that may be inherited from the terminal server.
+ * Workspace-specific configuration is loaded separately from the workspace.
+ */
+export const PREVIEW_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "USER",
+  "SHELL",
+  "LANG",
+  "LC_ALL",
+  "TZ",
+  "NODE_ENV",
+  "DEBUG",
+  "LOG_LEVEL",
+  "SystemRoot",
+  "ComSpec",
+  "TEMP",
+  "TMP",
+] as const;
+
+export function buildPreviewEnv(
+  projectEnv: Record<string, string> = {},
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of PREVIEW_ENV_ALLOWLIST) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  Object.assign(env, projectEnv);
+  return env;
+}
+
+function loadWorkspaceEnv(root: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const filename of [".env", ".env.local"]) {
+    const path = join(root, filename);
+    if (!existsSync(path)) continue;
+    try {
+      Object.assign(env, parseDotenv(readFileSync(path)));
+    } catch {
+      // Workspace startup will surface invalid configuration through its normal diagnostics.
+    }
+  }
+  return env;
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -386,13 +434,12 @@ function redactDiagnosticText(value: unknown): string {
 
 // ─── Clerk configuration validation ────────────────────────────────
 //
-// The preview runtime inherits the terminal-server's process.env via
-// `...process.env`. If the terminal-server has a stale, rotated, or
-// malformed CLERK_SECRET_KEY, the preview's Clerk middleware crashes
-// with a 500 ("Handshake token verification failed: secret-key-invalid").
+// The preview runtime must not inherit the terminal-server's process.env.
+// A stale, rotated, or malformed terminal-server CLERK_SECRET_KEY can make
+// the preview's Clerk middleware crash with a 500.
 //
-// Next.js does NOT override already-set process.env values with .env*
-// files, so the inherited (stale) key wins over any workspace .env.local.
+// Workspace .env files are loaded explicitly into the isolated preview env so
+// Next.js does not accidentally prefer a terminal-server value.
 //
 // These validators run BEFORE spawning the dev server so we surface a
 // truthful, deterministic configuration error instead of a generic
@@ -612,11 +659,11 @@ async function installWorkspaceDependencies(
   const childPath = buildChildPath(root);
   const nodeBinDir = process.env.NODE_BIN_DIR?.trim();
   const env: Record<string, string> = {
-    ...process.env,
+    ...buildPreviewEnv(loadWorkspaceEnv(root)),
     PATH: nodeBinDir ? `${nodeBinDir}${PATH_DELIMITER}${childPath}` : childPath,
     NODE_ENV: "development",
     NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
-  } as Record<string, string>;
+  };
 
   const resolvedExecutable = lookupExecutable(executable, childPath, process.platform === "win32") ?? executable;
   try {
@@ -1019,7 +1066,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
   // Bind host follows the parent terminal-server's own resolved policy —
   // see previewBindHost() / ../network-bind.ts.
   const env: Record<string, string> = {
-    ...process.env,
+    ...buildPreviewEnv(loadWorkspaceEnv(ws.root)),
     PATH: childPath,
     PORT: String(port),
     HOSTNAME: previewBindHost(),
@@ -1031,7 +1078,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
     // TypeScript deps during dev server startup. Without this, pnpm rejects
     // the auto-install with ERR_PNPM_ADDING_TO_ROOT.
     NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
-  } as Record<string, string>;
+  };
 
   // Service users on Railway often lack nvm-installed Node/pnpm in PATH.
   // Prepend the Node bin directory so package manager binaries are found.

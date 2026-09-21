@@ -30,7 +30,8 @@ import {
   injectInspector as injectInspectorScript,
   INSPECTOR_DROPPED_HEADERS,
 } from "./inspector";
-import { rewritePreviewAssetUrls, rewritePreviewLocation } from "./asset-urls";
+import { rewritePreviewAssetUrls, rewritePreviewLocation, isRehomedAuthHandshake } from "./asset-urls";
+import { isPreviewScopedRedirect, stripPreviewAuthHeaders } from "./proxy-security";
 import type { AuthenticatedRequest } from "../internal-auth";
 
 type PreviewStatusSnapshot = ReturnType<typeof defaultGetPreviewStatus>;
@@ -103,10 +104,10 @@ export function registerPreviewProxyRoute(
     try {
       const proxyResp = await fetch(targetUrl, {
         method: req.method,
-        headers: {
-          ...req.headers as Record<string, string>,
-          host: `127.0.0.1:${upstreamPort}`,
-        },
+        headers: stripPreviewAuthHeaders(
+          new Headers(req.headers as Record<string, string>),
+          upstreamPort,
+        ),
         body: ["GET", "HEAD"].includes(req.method) ? undefined : (req as any),
         redirect: "manual",
       });
@@ -129,6 +130,51 @@ export function registerPreviewProxyRoute(
             `server=${proxyResp.headers.get("server") ?? "-"} ` +
             `poweredBy=${proxyResp.headers.get("x-powered-by") ?? "-"}`,
         );
+      }
+
+      // Redirect escape guard: the Location handed to the browser must
+      // stay inside /preview/<workspaceId>. In-mount redirects and the
+      // ones rewritePreviewLocation re-homes (root-relative, absolute
+      // back at this dev server) pass through; anything that still
+      // resolves outside the mount — an external hosted-auth bounce, a
+      // foreign host, traversal that escapes the mount — is rejected
+      // rather than forwarded to the iframe.
+      //
+      // Exception — the re-homed auth handshake: the upstream app builds
+      // redirect_url from its forwarded headers, pointing at the bare
+      // public origin; rewritePreviewLocation re-homes that param inside
+      // the mount. The outer redirect still targets the external auth
+      // provider (Clerk handshake), which the scope check alone would
+      // reject — so a redirect whose redirect_url param was re-homed from
+      // outside the mount to inside it is let through. The handshake
+      // completes and the browser lands back inside the mount; a redirect
+      // whose param was already in-mount (or never pointed at our origin)
+      // stays subject to the guard.
+      const redirectLocation = proxyResp.headers.get("location");
+      if (proxyResp.status >= 300 && proxyResp.status < 400) {
+        const rewrittenLocation =
+          redirectLocation === null
+            ? null
+            : rewritePreviewLocation(redirectLocation, locationOpts);
+        const scoped = isPreviewScopedRedirect(
+          rewrittenLocation,
+          workspaceId,
+          req.get("host"),
+        );
+        const authHandshake =
+          redirectLocation !== null &&
+          isRehomedAuthHandshake(redirectLocation, rewrittenLocation ?? "", {
+            workspaceId,
+            publicOrigin,
+          });
+        if (!scoped && !authHandshake) {
+          res.status(502).json({
+            error: "preview_escape_redirect",
+            message: "Workspace attempted to redirect outside preview scope",
+            location: redirectLocation,
+          });
+          return;
+        }
       }
 
       // Entry-path servability guard (2026-09-18): a 404 on / means the
