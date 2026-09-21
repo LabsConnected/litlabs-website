@@ -363,6 +363,34 @@ export async function updateMessageStatus(
 }
 
 /**
+ * Liveness heartbeat for an in-flight run: bumps `updated_at` on the
+ * assistant message while its status is still 'streaming'.
+ *
+ * The GET reconciler condemns a 'streaming' message once `updated_at` is
+ * older than STALE_STREAMING_MESSAGE_MS. Without this heartbeat the
+ * timestamp only moves on terminal writeback, so staleness could not
+ * distinguish "run is alive and working" from "the process is gone" — and
+ * a GET on a different instance (or after the in-memory registry pruned a
+ * long run) could mark a live run failed.
+ *
+ * The update is guarded by `status = 'streaming'`: it can never resurrect
+ * a terminal or 'awaiting_approval' write that landed between beats.
+ */
+export async function touchStreamingMessage(
+  messageId: string,
+  ownerId: string,
+): Promise<boolean> {
+  const { error } = await supabaseAdmin
+    .from("studio_conversation_messages")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", messageId)
+    .eq("owner_id", ownerId)
+    .eq("status", "streaming");
+
+  return !error;
+}
+
+/**
  * Get the latest assistant message still awaiting approval in a
  * conversation. Used when a paused run resumes — the resumed result is
  * written back onto the message that originally paused, so the transcript

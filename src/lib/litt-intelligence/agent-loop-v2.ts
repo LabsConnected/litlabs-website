@@ -808,6 +808,7 @@ export async function runAgentLoopV2(
           hasApproval: !permResult.requiresApproval,
           availableCapabilities,
           transport,
+          signal: cfg.signal,
         });
 
         if (execResult.ok) {
@@ -1361,6 +1362,7 @@ export async function executeDeferredToolCalls(
       const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, ctx.userId, ctx.conversationId), {
         hasApproval: !permResult.requiresApproval,
         transport: ctx.transport,
+        signal: ctx.signal,
       });
 
       if (execResult.ok) {
@@ -1517,6 +1519,7 @@ export async function resumeAgentLoopV2(
         hasApproval: true,
         availableCapabilities,
         transport,
+        signal: cfg.signal,
       });
 
       if (execResult.ok) {
@@ -1890,6 +1893,7 @@ export async function resumeAgentLoopV2(
           hasApproval: !permResult.requiresApproval,
           availableCapabilities,
           transport,
+          signal: cfg.signal,
         });
 
         if (execResult.ok) {
@@ -2110,6 +2114,7 @@ export function createAutonomousRepairCallback(
               hasApproval: true,
               availableCapabilities,
               transport,
+              signal,
             });
 
             // Same domain-failure normalization as the main loop: a
