@@ -7,26 +7,38 @@
  * environment. That handed untrusted generated code the platform's own
  * secrets: TERMINAL_INTERNAL_SERVICE_KEY (full internal API access),
  * PREVIEW_ACCESS_TOKEN (the shared gate for EVERY workspace preview),
- * TERMINAL_AUTH_SECRET, SUPABASE_SERVICE_ROLE_KEY, database and billing
- * keys. `process.env.X` inside the workspace reads them trivially.
+ * TERMINAL_AUTH_SECRET, SUPABASE_SERVICE_ROLE_KEY, CLERK_SECRET_KEY,
+ * database and billing keys. `process.env.X` inside the workspace reads
+ * them trivially.
  *
  * buildPreviewEnv() inverts the default: only an explicit allowlist of
- * runtime vars, package-manager config families, and intentionally
- * approved project vars cross the boundary.
+ * runtime vars and package-manager config families cross the boundary.
  *
  *   Runtime:       PATH, HOME, PORT, HOSTNAME, NODE_ENV, NODE_BIN_DIR,
  *                  NODE_OPTIONS, locale/TZ, TLS/CA, HTTP(S)_PROXY
  *   Package mgrs:  NPM_CONFIG_*, npm_config_*, COREPACK_*, PNPM_*,
  *                  YARN_* (registry/cache/workspace settings)
- *   Project vars:  CLERK_* — generated apps intentionally share the
- *                  platform Clerk instance so preview sign-in works;
- *                  validateClerkConfig() verifies them before spawn.
- *   Ops extras:    PREVIEW_ENV_ALLOWLIST="FOO,BAR" opts a name in.
+ *   Ops extras:    PREVIEW_ENV_ALLOWLIST="FOO,BAR" opts a benign name in
  *
- * A name-shaped secret (…_SECRET/TOKEN/PASSWORD/API_KEY/PRIVATE_KEY…)
- * is dropped even when a prefix family or the ops allowlist would have
- * let it through; PREVIEW_ENV_NEVER hard-blocks the gateway's own
- * credentials no matter what.
+ * Guards, in order:
+ *   1. PREVIEW_ENV_EXACT admits curated runtime names.
+ *   2. PREVIEW_ENV_NEVER hard-blocks the platform's own credentials —
+ *      nothing below can re-admit them.
+ *   3. SECRET_NAME drops anything secret-shaped (…_SECRET/TOKEN/
+ *      PASSWORD/API_KEY/PRIVATE_KEY/SESSION_KEY/WEBHOOK/_KEY). This
+ *      runs BEFORE the ops allowlist, so PREVIEW_ENV_ALLOWLIST can
+ *      never smuggle a secret name through.
+ *   4. PREVIEW_ENV_ALLOWLIST extras and prefix families pass.
+ *
+ * Clerk: the platform's own CLERK_SECRET_KEY NEVER crosses — server-side
+ * secrets are never injected into untrusted workspace code. A
+ * Clerk-using workspace either carries its own keys in .env* files
+ * (which the dev server loads itself) or ops configures a dedicated,
+ * isolated preview Clerk app via PREVIEW_CLERK_SECRET_KEY /
+ * PREVIEW_CLERK_PUBLISHABLE_KEY, which this builder maps onto the
+ * standard CLERK_SECRET_KEY / NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY names.
+ * The PREVIEW_CLERK_* source vars are secret-shaped, so they can never
+ * cross under their own names either.
  */
 
 /** Exact names always allowed into the child environment. */
@@ -60,11 +72,6 @@ const PREVIEW_ENV_EXACT = new Set([
   "http_proxy",
   "https_proxy",
   "no_proxy",
-  // Intentionally approved project vars — workspace previews share the
-  // platform's Clerk instance; validated by validateClerkConfig().
-  "CLERK_SECRET_KEY",
-  "CLERK_PUBLISHABLE_KEY",
-  "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
 ]);
 
 /** Prefix families allowed into the child environment. */
@@ -79,20 +86,27 @@ const PREVIEW_ENV_PREFIXES = [
 ];
 
 /**
- * Gateway credentials that must never reach a workspace child, even if a
- * prefix family or PREVIEW_ENV_ALLOWLIST names them.
+ * Platform credentials and connection strings that must never reach a
+ * workspace child — checked before the secret-name guard and the ops
+ * allowlist, so PREVIEW_ENV_ALLOWLIST cannot re-admit them.
  */
 const PREVIEW_ENV_NEVER = new Set([
   "PREVIEW_ACCESS_TOKEN",
   "PREVIEW_ENV_ALLOWLIST",
   "TERMINAL_INTERNAL_SERVICE_KEY",
   "TERMINAL_AUTH_SECRET",
+  // Platform server-side secrets. CLERK_SECRET_KEY is named explicitly
+  // so the platform's own Clerk app can never be re-admitted — previews
+  // use a dedicated PREVIEW_CLERK_* app or the workspace's own .env*.
+  "CLERK_SECRET_KEY",
+  "DATABASE_URL",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "SUPABASE_SECRET_KEY",
 ]);
 
 /**
- * Name shape that marks a var as secret-bearing. Checked AFTER the exact
- * allowlist (which intentionally approves CLERK_SECRET_KEY) but BEFORE
- * prefix families and the ops allowlist.
+ * Name shape that marks a var as secret-bearing. Checked before the ops
+ * allowlist — PREVIEW_ENV_ALLOWLIST can admit benign names only.
  */
 const SECRET_NAME =
   /(SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|PRIVATE_KEY|API_KEY|AUTH_KEY|ACCESS_KEY|SESSION_KEY|WEBHOOK|_KEY$)/i;
@@ -100,10 +114,8 @@ const SECRET_NAME =
 function isAllowedEnvName(key: string, extras: Set<string>): boolean {
   if (PREVIEW_ENV_EXACT.has(key)) return true;
   if (PREVIEW_ENV_NEVER.has(key)) return false;
-  // Explicit ops approval wins over the generic secret-name guard — the
-  // guard exists to catch secrets hiding inside prefix families.
-  if (extras.has(key)) return true;
   if (SECRET_NAME.test(key)) return false;
+  if (extras.has(key)) return true;
   return PREVIEW_ENV_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
 
@@ -130,5 +142,17 @@ export function buildPreviewEnv(
     if (value === undefined) continue;
     if (isAllowedEnvName(key, extras)) env[key] = value;
   }
+
+  // Isolated preview Clerk credentials. The platform's own CLERK_SECRET_KEY
+  // is never inherited; a dedicated preview Clerk app is injected under
+  // the standard names so generated apps' clerkMiddleware keeps working.
+  // Values are cleaned downstream (cleanEnvValue in PreviewManager).
+  const previewClerkSecret = process.env.PREVIEW_CLERK_SECRET_KEY?.trim();
+  const previewClerkPublishable = process.env.PREVIEW_CLERK_PUBLISHABLE_KEY?.trim();
+  if (previewClerkSecret) env.CLERK_SECRET_KEY = previewClerkSecret;
+  if (previewClerkPublishable) {
+    env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = previewClerkPublishable;
+  }
+
   return { ...env, ...overrides };
 }

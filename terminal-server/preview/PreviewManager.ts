@@ -21,6 +21,7 @@
 
 import { execFile, spawn, type ChildProcess } from "child_process";
 import { createHash } from "crypto";
+import dotenv from "dotenv";
 import { existsSync, readFileSync, statSync } from "fs";
 import { createServer as createTcpServer } from "net";
 import { delimiter as PATH_DELIMITER, dirname, join, resolve } from "path";
@@ -391,13 +392,16 @@ function redactDiagnosticText(value: unknown): string {
 
 // ─── Clerk configuration validation ────────────────────────────────
 //
-// The preview runtime inherits the terminal-server's process.env via
-// `...process.env`. If the terminal-server has a stale, rotated, or
-// malformed CLERK_SECRET_KEY, the preview's Clerk middleware crashes
-// with a 500 ("Handshake token verification failed: secret-key-invalid").
+// The preview child env is allowlisted (buildPreviewEnv) — the platform's
+// own CLERK_SECRET_KEY NEVER reaches workspace code. A Clerk-using
+// workspace gets its keys from one of two sources:
+//   1. Its own .env* files, which the dev server loads itself at boot.
+//   2. PREVIEW_CLERK_SECRET_KEY / PREVIEW_CLERK_PUBLISHABLE_KEY — a
+//      dedicated, isolated Clerk app configured on the terminal-server.
 //
-// Next.js does NOT override already-set process.env values with .env*
-// files, so the inherited (stale) key wins over any workspace .env.local.
+// If neither is configured, a stale or missing key would make the
+// preview's Clerk middleware crash with a 500 ("Handshake token
+// verification failed: secret-key-invalid").
 //
 // These validators run BEFORE spawning the dev server so we surface a
 // truthful, deterministic configuration error instead of a generic
@@ -458,7 +462,38 @@ function fingerprintSecret(value: string): string {
 }
 
 /**
+ * Read the workspace's own .env* files — the same files the dev server
+ * will load at boot. Used to build the EFFECTIVE env for validation: a
+ * workspace carrying its own keys in .env.local needs nothing injected.
+ * Precedence follows Next.js dev semantics: .env < .env.development <
+ * .env.local < .env.development.local, and an existing child env value
+ * always wins (Next.js never overrides a set process.env var).
+ */
+export function readWorkspaceEnvFiles(root: string): Record<string, string> {
+  const merged: Record<string, string> = {};
+  for (const name of [
+    ".env",
+    ".env.development",
+    ".env.local",
+    ".env.development.local",
+  ]) {
+    const file = join(root, name);
+    if (!existsSync(file)) continue;
+    try {
+      Object.assign(merged, dotenv.parse(readFileSync(file)));
+    } catch {
+      // Malformed dotenv — the dev server will surface it at boot.
+    }
+  }
+  return merged;
+}
+
+/**
  * Validate the Clerk configuration that will reach the preview runtime.
+ *
+ * `env` is the allowlisted child env; the workspace's own .env* files are
+ * merged underneath it (matching what the dev server will actually see)
+ * before checking.
  *
  * Checks:
  *   1. If the workspace uses Clerk, CLERK_SECRET_KEY must be present.
@@ -481,9 +516,10 @@ export function validateClerkConfig(
     return { ok: true, reason: null, usesClerk: false };
   }
 
-  const secretKey = cleanEnvValue(env.CLERK_SECRET_KEY);
+  const effectiveEnv = { ...readWorkspaceEnvFiles(root), ...env };
+  const secretKey = cleanEnvValue(effectiveEnv.CLERK_SECRET_KEY);
   const publishableKey = cleanEnvValue(
-    env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? env.CLERK_PUBLISHABLE_KEY,
+    effectiveEnv.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? effectiveEnv.CLERK_PUBLISHABLE_KEY,
   );
 
   if (!secretKey) {
@@ -491,8 +527,11 @@ export function validateClerkConfig(
       ok: false,
       reason:
         "CLERK_SECRET_KEY is missing. The workspace uses @clerk/nextjs but " +
-        "no secret key was found in the preview runtime environment. " +
-        "Add it to the workspace .env.local or configure it in the preview env.",
+        "no secret key was found in the workspace .env* files or the " +
+        "preview environment. The platform's own Clerk secret is never " +
+        "injected into workspace code — add the workspace's keys to " +
+        ".env.local, or configure a dedicated preview Clerk app via " +
+        "PREVIEW_CLERK_SECRET_KEY / PREVIEW_CLERK_PUBLISHABLE_KEY.",
       usesClerk: true,
     };
   }
@@ -535,7 +574,8 @@ export function validateClerkConfig(
       reason:
         "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is missing. The workspace uses " +
         "@clerk/nextjs which requires NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY " +
-        "(or CLERK_PUBLISHABLE_KEY as fallback) in the preview environment.",
+        "(or CLERK_PUBLISHABLE_KEY as fallback) in the workspace .env* " +
+        "files or PREVIEW_CLERK_PUBLISHABLE_KEY on the terminal-server.",
       usesClerk: true,
     };
   }
@@ -1041,9 +1081,10 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
   // The child env is allowlisted via buildPreviewEnv — NOT ...process.env.
   // Workspace code is untrusted generated code; the terminal-server's env
   // holds platform secrets (TERMINAL_INTERNAL_SERVICE_KEY,
-  // PREVIEW_ACCESS_TOKEN, SUPABASE_*, billing keys) that must never cross
-  // into it. Approved project vars (Clerk) still pass through the
-  // allowlist, so the validation below keeps working unchanged.
+  // PREVIEW_ACCESS_TOKEN, CLERK_SECRET_KEY, SUPABASE_*, billing keys) that
+  // must never cross into it. A Clerk-using workspace gets keys from its
+  // own .env* files or an isolated preview Clerk app injected via
+  // PREVIEW_CLERK_* — the validation below checks that effective config.
   const env: Record<string, string> = buildPreviewEnv({
     PATH: childPath,
     PORT: String(port),
@@ -1072,17 +1113,10 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
   }
 
   // ─── Clerk env normalization ──────────────────────────────────────
-  // The terminal-server may have CLERK_PUBLISHABLE_KEY but not
-  // NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY (the var name @clerk/nextjs
-  // expects). Map it so the preview runtime gets the right var.
-  // Also clean whitespace/newlines/quotes that sneak in from Railway
-  // variable editing or copy-paste.
-  if (
-    !env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY &&
-    env.CLERK_PUBLISHABLE_KEY
-  ) {
-    env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = cleanEnvValue(env.CLERK_PUBLISHABLE_KEY);
-  }
+  // The only Clerk values in the child env come from PREVIEW_CLERK_*
+  // (a dedicated preview app mapped by buildPreviewEnv). Clean
+  // whitespace/newlines/quotes that sneak in from Railway variable
+  // editing or copy-paste.
   if (env.CLERK_SECRET_KEY) {
     env.CLERK_SECRET_KEY = cleanEnvValue(env.CLERK_SECRET_KEY);
   }
@@ -1092,8 +1126,11 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
 
   // ─── Clerk config validation ─────────────────────────────────────
   // Validate BEFORE spawning so we surface a truthful configuration
-  // error instead of a 60-second timeout masking a Clerk 500.
-  const clerkValidation = validateClerkConfig(env, ws.root);
+  // error instead of a 60-second timeout masking a Clerk 500. The
+  // effective env overlays the workspace's own .env* files under the
+  // child env — the dev server loads those files itself at boot.
+  const effectiveClerkEnv = { ...readWorkspaceEnvFiles(ws.root), ...env };
+  const clerkValidation = validateClerkConfig(effectiveClerkEnv, ws.root);
   if (!clerkValidation.ok) {
     const err = new PreviewError(
       "preview_clerk_config_error",
@@ -1104,12 +1141,13 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
           "Check that CLERK_SECRET_KEY starts with sk_test_ or sk_live_, " +
           "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY starts with pk_test_ or pk_live_, " +
           "both are from the same Clerk environment, and neither has " +
-          "whitespace or quotes. If the secret was recently rotated, " +
-          "update it in the terminal-server Railway env or workspace .env.local.",
+          "whitespace or quotes. Keys come from the workspace .env.local " +
+          "or a dedicated preview Clerk app (PREVIEW_CLERK_SECRET_KEY / " +
+          "PREVIEW_CLERK_PUBLISHABLE_KEY) — never the platform's own secret.",
       },
     );
     const failedPort = await allocateFreePort();
-    const fingerprint = fingerprintClerkEnv(env);
+    const fingerprint = fingerprintClerkEnv(effectiveClerkEnv);
     const failedRuntime: PreviewRuntime = {
       workspaceId,
       userId,
@@ -1169,7 +1207,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
   // Log a redacted fingerprint of the Clerk env so we can diagnose
   // which key the runtime received without ever logging the full value.
   if (clerkValidation.usesClerk) {
-    const fingerprint = fingerprintClerkEnv(env);
+    const fingerprint = fingerprintClerkEnv(effectiveClerkEnv);
     pushLog(runtime, `[preview] Clerk env fingerprint: ${JSON.stringify(fingerprint)}`);
   }
 

@@ -95,7 +95,9 @@ describe("buildPreviewEnv — child env allowlist", () => {
     process.env.TERMINAL_INTERNAL_SERVICE_KEY = "internal-key";
     process.env.TERMINAL_AUTH_SECRET = "auth-secret";
     process.env.PREVIEW_ACCESS_TOKEN = "preview-gate-token";
+    process.env.CLERK_SECRET_KEY = "sk_live_platform";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    process.env.SUPABASE_SECRET_KEY = "sb_secret_platform";
     process.env.DATABASE_URL = "postgres://prod";
     process.env.STRIPE_SECRET_KEY = "sk_live_platform";
     process.env.OPENAI_API_KEY = "sk-platform";
@@ -104,7 +106,9 @@ describe("buildPreviewEnv — child env allowlist", () => {
     expect(env.TERMINAL_INTERNAL_SERVICE_KEY).toBeUndefined();
     expect(env.TERMINAL_AUTH_SECRET).toBeUndefined();
     expect(env.PREVIEW_ACCESS_TOKEN).toBeUndefined();
+    expect(env.CLERK_SECRET_KEY).toBeUndefined();
     expect(env.SUPABASE_SERVICE_ROLE_KEY).toBeUndefined();
+    expect(env.SUPABASE_SECRET_KEY).toBeUndefined();
     expect(env.DATABASE_URL).toBeUndefined();
     expect(env.STRIPE_SECRET_KEY).toBeUndefined();
     expect(env.OPENAI_API_KEY).toBeUndefined();
@@ -131,15 +135,33 @@ describe("buildPreviewEnv — child env allowlist", () => {
     expect(env.LANG).toBe("C.UTF-8");
   });
 
-  it("passes the approved Clerk project vars through (validateClerkConfig input)", () => {
-    process.env.CLERK_SECRET_KEY = "sk_live_workspace";
-    process.env.CLERK_PUBLISHABLE_KEY = "pk_live_workspace";
-    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = "pk_live_workspace";
+  it("never inherits the platform's own Clerk keys — publishable included", () => {
+    process.env.CLERK_SECRET_KEY = "sk_live_platform";
+    process.env.CLERK_PUBLISHABLE_KEY = "pk_live_platform";
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = "pk_live_platform";
 
     const env = buildPreviewEnv();
-    expect(env.CLERK_SECRET_KEY).toBe("sk_live_workspace");
-    expect(env.CLERK_PUBLISHABLE_KEY).toBe("pk_live_workspace");
-    expect(env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY).toBe("pk_live_workspace");
+    // No Clerk config is inherited at all — a platform publishable key
+    // would also override a workspace's own .env.local pk, creating a
+    // mismatched sk/pk pair from different Clerk apps.
+    expect(env.CLERK_SECRET_KEY).toBeUndefined();
+    expect(env.CLERK_PUBLISHABLE_KEY).toBeUndefined();
+    expect(env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY).toBeUndefined();
+  });
+
+  it("maps isolated PREVIEW_CLERK_* credentials onto the standard names", () => {
+    process.env.PREVIEW_CLERK_SECRET_KEY = "sk_test_previewapp";
+    process.env.PREVIEW_CLERK_PUBLISHABLE_KEY = "pk_test_previewapp";
+    // The platform's own keys are still never inherited.
+    process.env.CLERK_SECRET_KEY = "sk_live_platform";
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = "pk_live_platform";
+
+    const env = buildPreviewEnv();
+    expect(env.CLERK_SECRET_KEY).toBe("sk_test_previewapp");
+    expect(env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY).toBe("pk_test_previewapp");
+    // The PREVIEW_* source vars are secret-shaped — never cross as-is.
+    expect(env.PREVIEW_CLERK_SECRET_KEY).toBeUndefined();
+    expect(env.PREVIEW_CLERK_PUBLISHABLE_KEY).toBeUndefined();
   });
 
   it("drops secret-shaped names even inside allowed prefix families", () => {
@@ -159,6 +181,35 @@ describe("buildPreviewEnv — child env allowlist", () => {
     const env = buildPreviewEnv();
     expect(env.MY_PROJECT_FLAG).toBe("on");
     expect(env.PREVIEW_ACCESS_TOKEN).toBeUndefined();
+  });
+
+  it("PREVIEW_ENV_ALLOWLIST cannot smuggle secret-shaped names", () => {
+    process.env.PREVIEW_ENV_ALLOWLIST =
+      "MY_APP_SECRET,MY_APP_TOKEN,MY_APP_API_KEY,CLERK_SECRET_KEY,SUPABASE_SERVICE_ROLE_KEY,SESSION_KEY,MY_WEBHOOK_SECRET,MY_PRIVATE_KEY,MY_APP_PASSWORD";
+    process.env.MY_APP_SECRET = "s";
+    process.env.MY_APP_TOKEN = "t";
+    process.env.MY_APP_API_KEY = "k";
+    process.env.CLERK_SECRET_KEY = "sk_live_platform";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    process.env.SESSION_KEY = "sess";
+    process.env.MY_WEBHOOK_SECRET = "w";
+    process.env.MY_PRIVATE_KEY = "pk";
+    process.env.MY_APP_PASSWORD = "p";
+    process.env.MY_BENIGN_FLAG = "yes";
+    process.env.PREVIEW_ENV_ALLOWLIST += ",MY_BENIGN_FLAG";
+
+    const env = buildPreviewEnv();
+    expect(env.MY_APP_SECRET).toBeUndefined();
+    expect(env.MY_APP_TOKEN).toBeUndefined();
+    expect(env.MY_APP_API_KEY).toBeUndefined();
+    expect(env.CLERK_SECRET_KEY).toBeUndefined();
+    expect(env.SUPABASE_SERVICE_ROLE_KEY).toBeUndefined();
+    expect(env.SESSION_KEY).toBeUndefined();
+    expect(env.MY_WEBHOOK_SECRET).toBeUndefined();
+    expect(env.MY_PRIVATE_KEY).toBeUndefined();
+    expect(env.MY_APP_PASSWORD).toBeUndefined();
+    // Benign extras still pass.
+    expect(env.MY_BENIGN_FLAG).toBe("yes");
   });
 
   it("applies caller overrides last", () => {
@@ -731,6 +782,62 @@ describe("PreviewManager — Clerk config validation", () => {
     );
     expect(result.ok).toBe(true);
   });
+
+  it("workspace .env.local keys satisfy validation with nothing injected", () => {
+    writeClerkPackageJson(tmpRoot);
+    writeFileSync(
+      join(tmpRoot, ".env.local"),
+      "CLERK_SECRET_KEY=sk_test_fromworkspace\n" +
+        "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_workspace\n",
+    );
+    const result = validateClerkConfig({}, tmpRoot);
+    expect(result.ok).toBe(true);
+    expect(result.usesClerk).toBe(true);
+  });
+
+  it("workspace .env fallback keys satisfy validation", () => {
+    writeClerkPackageJson(tmpRoot);
+    writeFileSync(
+      join(tmpRoot, ".env"),
+      "CLERK_SECRET_KEY=sk_test_dotenv\nCLERK_PUBLISHABLE_KEY=pk_test_dotenv\n",
+    );
+    const result = validateClerkConfig({}, tmpRoot);
+    expect(result.ok).toBe(true);
+  });
+
+  it("child env wins over workspace .env files (Next.js semantics)", () => {
+    writeClerkPackageJson(tmpRoot);
+    writeFileSync(
+      join(tmpRoot, ".env.local"),
+      "CLERK_SECRET_KEY=sk_test_dotenv\nNEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_dotenv\n",
+    );
+    const result = validateClerkConfig(
+      { CLERK_SECRET_KEY: "bogus_value" },
+      tmpRoot,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("unexpected prefix");
+  });
+
+  it("the platform's own CLERK_SECRET_KEY cannot satisfy preview auth", () => {
+    writeClerkPackageJson(tmpRoot);
+    const origSecret = process.env.CLERK_SECRET_KEY;
+    const origPk = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    process.env.CLERK_SECRET_KEY = "sk_live_platform";
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = "pk_live_platform";
+    try {
+      const env = buildPreviewEnv();
+      expect(env.CLERK_SECRET_KEY).toBeUndefined();
+      const result = validateClerkConfig(env, tmpRoot);
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain("CLERK_SECRET_KEY is missing");
+    } finally {
+      if (origSecret === undefined) delete process.env.CLERK_SECRET_KEY;
+      else process.env.CLERK_SECRET_KEY = origSecret;
+      if (origPk === undefined) delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+      else process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = origPk;
+    }
+  });
 });
 
 // ─── Clerk env fingerprinting (never logs full key) ──────────────────
@@ -802,9 +909,10 @@ describe("PreviewManager — auth config error in health probe", () => {
       ready: true,
     } as any);
 
-    // Set valid Clerk env so validation passes
-    process.env.CLERK_SECRET_KEY = "sk_live_abc123def456";
-    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = "pk_live_xyz789ghi012";
+    // Set valid isolated preview Clerk credentials so validation passes —
+    // the platform's own CLERK_SECRET_KEY is never inherited.
+    process.env.PREVIEW_CLERK_SECRET_KEY = "sk_live_abc123def456";
+    process.env.PREVIEW_CLERK_PUBLISHABLE_KEY = "pk_live_xyz789ghi012";
 
     // Make pnpm resolvable
     const cleanNodeDir = join(tmpRoot, "clean-node");
