@@ -20,7 +20,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { rewritePreviewLocation } from "../preview/asset-urls";
+import { rewritePreviewLocation, isRehomedAuthHandshake } from "../preview/asset-urls";
 
 const WS = "ws-3648d2ea-b9c5004a";
 const TOKEN = "tok-9";
@@ -156,5 +156,54 @@ describe("rewritePreviewLocation — pre-existing behavior is unchanged", () => 
 
   it("returns blank input unchanged", () => {
     expect(rewritePreviewLocation("   ", OPTS)).toBe("   ");
+  });
+});
+
+describe("isRehomedAuthHandshake — escape-guard exception", () => {
+  const CHECK = { workspaceId: WS, publicOrigin: ORIGIN };
+
+  it("allows the production handshake shape once its redirect_url is re-homed", () => {
+    const rewritten = rewritePreviewLocation(HANDSHAKE, OPTS);
+    expect(isRehomedAuthHandshake(HANDSHAKE, rewritten, CHECK)).toBe(true);
+  });
+
+  it("rejects a plain external redirect with no redirect_url param", () => {
+    expect(
+      isRehomedAuthHandshake(
+        "https://accounts.example.com/sign-in",
+        "https://accounts.example.com/sign-in",
+        CHECK,
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects an external redirect whose redirect_url was already in-mount (laundering)", () => {
+    const original =
+      "https://evil.example.com/x?redirect_url=" +
+      encodeURIComponent(`${ORIGIN}${M}/?token=${TOKEN}`);
+    const rewritten = rewritePreviewLocation(original, OPTS);
+    expect(rewritten).toBe(original); // nothing to re-home
+    expect(isRehomedAuthHandshake(original, rewritten, CHECK)).toBe(false);
+  });
+
+  it("rejects when the param points at a foreign origin", () => {
+    const original =
+      "https://clerk.litlabs.net/v1/client/handshake?redirect_url=" +
+      encodeURIComponent("https://other.example.com/?token=x");
+    const rewritten = rewritePreviewLocation(original, OPTS);
+    expect(isRehomedAuthHandshake(original, rewritten, CHECK)).toBe(false);
+  });
+
+  it("returns false without a publicOrigin", () => {
+    const rewritten = rewritePreviewLocation(HANDSHAKE, OPTS);
+    expect(isRehomedAuthHandshake(HANDSHAKE, rewritten, { workspaceId: WS })).toBe(false);
+  });
+
+  it("supports the redirectUrl camelCase param name", () => {
+    const original =
+      "https://clerk.litlabs.net/v1/client/handshake?redirectUrl=" +
+      encodeURIComponent(`${ORIGIN}/?token=${TOKEN}`);
+    const rewritten = rewritePreviewLocation(original, OPTS);
+    expect(isRehomedAuthHandshake(original, rewritten, CHECK)).toBe(true);
   });
 });

@@ -47,6 +47,15 @@ import {
 const WORKSPACE_ID = "ws_parity";
 const TOKEN = "test-preview-token";
 
+/**
+ * Public origin the gateway tests present via x-forwarded-host. The
+ * handshake fixture builds its redirect_url against this origin so it
+ * matches the publicOrigin the proxy computes — the upstream never sees
+ * the forwarded headers (stripPreviewAuthHeaders removes them), so the
+ * fixture hardcodes the same constant.
+ */
+const HANDSHAKE_PUBLIC_HOST = "auth-test.example.com";
+
 const HTML_BODY = [
   "<!DOCTYPE html><html><head>",
   "<title>Workspace Test App</title>",
@@ -87,6 +96,38 @@ function upstreamDevServer(): Server {
         res.writeHead(302, { location: "https://accounts.example.com/sign-in" });
         res.end();
         return;
+      case "/redirect-handshake": {
+        // Production Clerk-handshake shape (2026-09-21): a 307 to the
+        // external auth provider whose redirect_url was built from
+        // forwarded headers — pointing at the bare public origin, outside
+        // the mount. The proxy re-homes the param; the escape guard must
+        // let the handshake through (not 502) so the browser completes it
+        // and lands back inside the mount.
+        const redirectUrl = encodeURIComponent(
+          `https://${HANDSHAKE_PUBLIC_HOST}/?token=${TOKEN}`,
+        );
+        res.writeHead(307, {
+          location:
+            `https://clerk.test-provider.example/v1/client/handshake` +
+            `?redirect_url=${redirectUrl}&__clerk_hs_reason=client-uat-but-no-session-token`,
+        });
+        res.end();
+        return;
+      }
+      case "/redirect-ext-launder": {
+        // Laundering attempt: an external bounce carrying a redirect_url
+        // that already points inside the mount. The handshake exception
+        // only applies when the proxy itself re-homed the param — this
+        // must stay a 502.
+        const redirectUrl = encodeURIComponent(
+          `https://${HANDSHAKE_PUBLIC_HOST}/preview/${WORKSPACE_ID}/?token=${TOKEN}`,
+        );
+        res.writeHead(302, {
+          location: `https://evil.example.com/phish?redirect_url=${redirectUrl}`,
+        });
+        res.end();
+        return;
+      }
       default:
         // Express-style 404 — the shape a foreign process on the port emits.
         res.writeHead(404, { "content-type": "text/plain" });
@@ -259,15 +300,54 @@ describe("preview gateway — redirect containment inside the mount", () => {
     );
   });
 
-  it("passes external absolute Locations through untouched", async () => {
+  it("rejects external absolute Locations that escape the preview mount", async () => {
     const proxied = await request(app)
       .get(`/preview/${WORKSPACE_ID}/redirect-ext?token=${TOKEN}`)
       .redirects(0);
 
-    expect(proxied.status).toBe(302);
-    expect(proxied.headers["location"]).toBe(
+    // Hosted-auth/external redirects are the preview-escape vector — the
+    // gateway answers 502 instead of forwarding the Location.
+    expect(proxied.status).toBe(502);
+    expect(proxied.body.error).toBe("preview_escape_redirect");
+    expect(proxied.body.location).toBe(
       "https://accounts.example.com/sign-in",
     );
+  });
+
+  it("lets the re-homed auth handshake through — 307 forwarded, never 502", async () => {
+    const proxied = await request(app)
+      .get(`/preview/${WORKSPACE_ID}/redirect-handshake?token=${TOKEN}`)
+      .set("x-forwarded-host", HANDSHAKE_PUBLIC_HOST)
+      .set("x-forwarded-proto", "https")
+      .redirects(0);
+
+    // The escape guard must not kill the Clerk handshake: its
+    // redirect_url param was re-homed inside the mount, so the browser
+    // completes the handshake and lands back in the preview.
+    expect(proxied.status).toBe(307);
+    const outer = new URL(proxied.headers["location"] as string);
+    expect(outer.origin).toBe("https://clerk.test-provider.example");
+    expect(outer.searchParams.get("__clerk_hs_reason")).toBe(
+      "client-uat-but-no-session-token",
+    );
+    const inner = new URL(outer.searchParams.get("redirect_url")!);
+    expect(inner.origin).toBe(`https://${HANDSHAKE_PUBLIC_HOST}`);
+    expect(inner.pathname).toBe(`/preview/${WORKSPACE_ID}/`);
+    expect(inner.searchParams.get("token")).toBe(TOKEN);
+  });
+
+  it("still rejects an external redirect that merely carries an in-mount redirect_url", async () => {
+    const proxied = await request(app)
+      .get(`/preview/${WORKSPACE_ID}/redirect-ext-launder?token=${TOKEN}`)
+      .set("x-forwarded-host", HANDSHAKE_PUBLIC_HOST)
+      .set("x-forwarded-proto", "https")
+      .redirects(0);
+
+    // The handshake exception only applies when the proxy itself re-homed
+    // the param — a workspace cannot launder an arbitrary external bounce
+    // by appending a benign redirect_url.
+    expect(proxied.status).toBe(502);
+    expect(proxied.body.error).toBe("preview_escape_redirect");
   });
 
   it("denies requests without the preview token (fail closed)", async () => {
