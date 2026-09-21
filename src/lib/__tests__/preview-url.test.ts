@@ -81,4 +81,43 @@ describe("buildPreviewProxyUrl", () => {
     const url = buildPreviewProxyUrl("ws-789");
     expect(url).toContain("ws-789");
   });
+
+  it("never collapses to the bare terminal-server root", () => {
+    // Production defect (2026-09-21): the Studio iframe rendered the
+    // terminal server's raw "Cannot GET /" — the Express default 404 for
+    // the bare origin root. The preview URL must always carry the
+    // /preview/:workspaceId path; a bare-root URL can never be a valid
+    // preview target.
+    process.env.TERMINAL_SERVER_URL = "https://terminal.example.com";
+    delete process.env.PREVIEW_ACCESS_TOKEN;
+    for (const workspaceId of ["ws-123", "ws-3648d2ea-b9c5004a", ""]) {
+      const url = buildPreviewProxyUrl(workspaceId);
+      const parsed = new URL(url);
+      expect(parsed.origin).toBe("https://terminal.example.com");
+      expect(parsed.pathname.startsWith("/preview/")).toBe(true);
+      expect(parsed.pathname).not.toBe("/");
+    }
+  });
+
+  it("uses PREVIEW_PROXY_HOST with the full preview path and token", () => {
+    process.env.TERMINAL_SERVER_URL = "https://terminal.example.com";
+    process.env.PREVIEW_PROXY_HOST = "preview-proxy.example.com";
+    process.env.PREVIEW_ACCESS_TOKEN = "secret-token";
+    const url = buildPreviewProxyUrl("ws-123");
+    expect(url).toBe("https://preview-proxy.example.com/preview/ws-123?token=secret-token");
+    const parsed = new URL(url);
+    expect(parsed.pathname).toBe("/preview/ws-123");
+    expect(parsed.searchParams.get("token")).toBe("secret-token");
+  });
+
+  it("keeps the token when the base URL has a trailing slash", () => {
+    process.env.TERMINAL_SERVER_URL = "https://terminal.example.com/";
+    process.env.PREVIEW_ACCESS_TOKEN = "secret-token";
+    delete process.env.PREVIEW_PROXY_HOST;
+    const url = buildPreviewProxyUrl("ws-123");
+    // A trailing slash on the base must not produce "//preview/..." —
+    // Express would not match the double-slash path against
+    // /preview/:workspaceId and the iframe would miss the proxy.
+    expect(url).toBe("https://terminal.example.com/preview/ws-123?token=secret-token");
+  });
 });
