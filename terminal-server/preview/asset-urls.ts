@@ -114,3 +114,74 @@ export function rewritePreviewAssetUrls(html: string, opts: RewritePreviewUrlsOp
 
   return out;
 }
+
+/** Merge the preview token into a path+query string, preserving #fragments. */
+function withPreviewToken(pathQuery: string, token: string): string {
+  const hashIndex = pathQuery.indexOf("#");
+  const fragment = hashIndex >= 0 ? pathQuery.slice(hashIndex) : "";
+  const head = hashIndex >= 0 ? pathQuery.slice(0, hashIndex) : pathQuery;
+  if (!token || /[?&]token=/.test(head)) return head + fragment;
+  return `${head}${head.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}${fragment}`;
+}
+
+/** Loopback hostnames a dev-server redirect may use to point at itself. */
+const UPSTREAM_HOSTS = new Set(["127.0.0.1", "localhost", "0.0.0.0", "::1", "[::1]"]);
+
+export interface RewritePreviewLocationOptions {
+  workspaceId: string;
+  /** The validated preview token (same value already present in the page URL). */
+  token: string;
+  /** The upstream dev-server port the proxy forwards to. */
+  upstreamPort: number;
+}
+
+/**
+ * Rewrite an upstream `Location` header so a redirect stays inside the
+ * /preview/:workspaceId mount instead of escaping to the terminal-server
+ * origin (where every path 404s with "Cannot GET /…").
+ *
+ * Rewritten:
+ *   "/login"                       -> "/preview/<ws>/login?token=T"
+ *   "/"                            -> "/preview/<ws>/?token=T"
+ *   "http://localhost:<port>/x"    -> "/preview/<ws>/x?token=T"  (same upstream)
+ * Untouched:
+ *   "https://accounts.example/…"   external origin — must pass through
+ *   "//cdn.example/…"              protocol-relative external
+ *   already-mounted paths          kept, token ensured
+ */
+export function rewritePreviewLocation(
+  location: string,
+  opts: RewritePreviewLocationOptions,
+): string {
+  const value = location.trim();
+  if (!value) return location;
+  const mount = `/preview/${encodeURIComponent(opts.workspaceId)}`;
+
+  // Already inside the mount — keep it, just make sure the token survives.
+  if (value === mount || value.startsWith(`${mount}/`) || value.startsWith(`${mount}?`)) {
+    return withPreviewToken(value, opts.token);
+  }
+
+  // Protocol-relative or scheme-qualified absolute URL.
+  if (value.startsWith("//")) return location;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
+    try {
+      const u = new URL(value);
+      const port = Number(u.port || (u.protocol === "https:" ? 443 : 80));
+      if (UPSTREAM_HOSTS.has(u.hostname) && port === opts.upstreamPort) {
+        return `${mount}${withPreviewToken(`${u.pathname}${u.search}`, opts.token)}${u.hash}`;
+      }
+    } catch {
+      // Unparseable absolute URL — pass through untouched.
+    }
+    return location;
+  }
+
+  // Root-relative — re-home under the mount.
+  if (value.startsWith("/")) {
+    return `${mount}${withPreviewToken(value, opts.token)}`;
+  }
+
+  // Bare relative ("login") — resolves inside the mount already; add token.
+  return withPreviewToken(value, opts.token);
+}

@@ -22,6 +22,7 @@
 import { execFile, spawn, type ChildProcess } from "child_process";
 import { createHash } from "crypto";
 import { existsSync, readFileSync, statSync } from "fs";
+import { createServer as createTcpServer } from "net";
 import { delimiter as PATH_DELIMITER, dirname, join, resolve } from "path";
 import { promisify } from "util";
 import { getWorkspace, type WorkspaceDescriptor } from "../workspace/WorkspaceManager";
@@ -80,6 +81,7 @@ export type PreviewErrorCode =
   | "preview_port_never_ready"
   | "preview_spawn_error"
   | "preview_no_free_port"
+  | "preview_port_conflict"
   | "preview_no_dev_command"
   | "preview_dependency_install_failed"
   | "preview_root_route_missing"
@@ -129,12 +131,58 @@ const runtimes = new Map<string, PreviewRuntime>();
 
 const usedPorts = new Set<number>();
 
-function allocatePort(): number {
+/** True when nothing is bound to `port` on `host` right now. */
+export function isPortFree(port: number, host: string): Promise<boolean> {
+  return new Promise((resolvePromise) => {
+    const test = createTcpServer();
+    test.once("error", () => resolvePromise(false));
+    test.once("listening", () => {
+      test.close(() => resolvePromise(true));
+    });
+    test.listen(port, host);
+  });
+}
+
+/**
+ * Poll until `port` accepts a bind on `host` — i.e. no process owns it —
+ * up to timeoutMs. Returns false while still occupied.
+ */
+async function waitForPortFree(
+  port: number,
+  host: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await isPortFree(port, host)) return true;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
+  }
+  return isPortFree(port, host);
+}
+
+/**
+ * Allocate a preview port that is actually bindable — not merely absent
+ * from the in-process usedPorts set.
+ *
+ * The old allocator trusted usedPorts alone: after a terminal-server
+ * restart the set is empty while orphaned dev servers still hold
+ * 4100-4200. `next dev --port <p>` then auto-increments ("Port 4100 is
+ * in use, trying 4101") and the runtime kept pointing at the squatter —
+ * the health probe and the iframe proxy both talked to the wrong
+ * process, which is how a dead port could read "Preview ready" while
+ * serving "Cannot GET /".
+ */
+export async function allocateFreePort(): Promise<number> {
+  const bindHost = previewBindHost();
   for (let port = PORT_RANGE_START; port <= PORT_RANGE_END; port++) {
-    if (!usedPorts.has(port)) {
-      usedPorts.add(port);
-      return port;
-    }
+    if (usedPorts.has(port)) continue;
+    // The child binds `bindHost`; the probe and proxy reach the server
+    // via 127.0.0.1. A squatter on either interface makes the port
+    // unsafe to hand out — skip it.
+    if (!(await isPortFree(port, bindHost))) continue;
+    if (bindHost !== "127.0.0.1" && !(await isPortFree(port, "127.0.0.1"))) continue;
+    usedPorts.add(port);
+    return port;
   }
   throw new PreviewError(
     "preview_no_free_port",
@@ -144,6 +192,56 @@ function allocatePort(): number {
 
 function releasePort(port: number): void {
   usedPorts.delete(port);
+}
+
+/**
+ * Extract the port a dev server actually bound from one output line.
+ * Covers the two truthful announcements:
+ *   Next.js : "⚠ Port 4100 is in use, trying 4101 instead."
+ *   Next/Vite/…: "- Local:   http://localhost:4101" / "➜  Local:  http://127.0.0.1:5174/"
+ * Returns null when the line carries no bound-port information.
+ */
+export function detectBoundPort(line: string): number | null {
+  const trying = /port\s+\d+\s+is\s+in\s+use,?\s+trying\s+(\d{2,5})/i.exec(line);
+  if (trying) return Number(trying[1]);
+  // Host may be a name, IPv4, or bracketed IPv6 — the port is the last
+  // ":digits" before the path/end.
+  const local = /\bLocal:\s+https?:\/\/[\w.\-[\]:]+:(\d{2,5})(?:[/?]|$)/i.exec(line);
+  if (local) return Number(local[1]);
+  return null;
+}
+
+/**
+ * Retarget the runtime when the dev server announces a bound port
+ * different from the allocated one — `next dev` auto-increments on
+ * EADDRINUSE instead of failing. Keeping runtime.port on the squatter
+ * would route the probe and the iframe proxy to the wrong process.
+ *
+ * If the announced port is already allocated to another preview, the
+ * child landed on a foreign dev server — adopting it would serve
+ * another workspace's app (tenant crossover), so fail instead.
+ */
+export function adoptBoundPort(runtime: PreviewRuntime, bound: number): void {
+  if (bound === runtime.port) return;
+  if (bound < 1024 || bound > 65535) return;
+  if (runtime.status !== "starting" && runtime.status !== "ready") return;
+  if (usedPorts.has(bound)) {
+    runtime.status = "failed";
+    runtime.errorCode = "preview_port_conflict";
+    runtime.error =
+      `Dev server bound port ${bound}, which is already allocated to ` +
+      "another preview runtime. Restart preview to allocate a fresh port.";
+    pushLog(runtime, `[preview] Port conflict — dev server bound ${bound}, already allocated to another workspace`);
+    return;
+  }
+  pushLog(
+    runtime,
+    `[preview] Allocated port ${runtime.port} was taken — dev server ` +
+      `actually bound ${bound}; retargeting runtime and proxy`,
+  );
+  releasePort(runtime.port);
+  usedPorts.add(bound);
+  runtime.port = bound;
 }
 
 // ─── Robust PATH construction ──────────────────────────────────────
@@ -654,13 +752,17 @@ interface HealthProbeResult {
 }
 
 export async function probeHealth(
-  port: number,
+  port: number | (() => number),
   timeoutMs: number,
 ): Promise<HealthProbeResult> {
+  // Accept a resolver so the probe follows a port the dev server moved
+  // to (adoptBoundPort) instead of polling the squatter that took the
+  // allocated port.
+  const currentPort = () => (typeof port === "function" ? port() : port);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const resp = await fetch(`http://127.0.0.1:${port}/`, {
+      const resp = await fetch(`http://127.0.0.1:${currentPort()}/`, {
         signal: AbortSignal.timeout(3000),
       });
       if (resp.ok) {
@@ -869,7 +971,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
         },
       );
       // Record a failed runtime so the status endpoint can report it.
-      const port = allocatePort();
+      const port = await allocateFreePort();
       const runtime: PreviewRuntime = {
         workspaceId,
         userId,
@@ -905,7 +1007,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
     );
   }
 
-  const port = allocatePort();
+  const port = await allocateFreePort();
 
   // Build the actual command, replacing $PORT with the allocated port
   const actualCommand = detected.command.replace("$PORT", String(port));
@@ -981,7 +1083,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
           "update it in the terminal-server Railway env or workspace .env.local.",
       },
     );
-    const failedPort = allocatePort();
+    const failedPort = await allocateFreePort();
     const fingerprint = fingerprintClerkEnv(env);
     const failedRuntime: PreviewRuntime = {
       workspaceId,
@@ -1055,12 +1157,24 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
 
   child.stdout?.on("data", (data: Buffer) => {
     const lines = data.toString("utf-8").split("\n").filter(Boolean);
-    for (const line of lines) pushLog(runtime, line);
+    for (const line of lines) {
+      pushLog(runtime, line);
+      // Dev servers that auto-increment on EADDRINUSE (next dev: "Port
+      // 4100 is in use, trying 4101") announce the port they actually
+      // bound — retarget the runtime so the probe and proxy never point
+      // at the squatter on the allocated port.
+      const bound = detectBoundPort(line);
+      if (bound) adoptBoundPort(runtime, bound);
+    }
   });
 
   child.stderr?.on("data", (data: Buffer) => {
     const lines = data.toString("utf-8").split("\n").filter(Boolean);
-    for (const line of lines) pushLog(runtime, `[stderr] ${line}`);
+    for (const line of lines) {
+      pushLog(runtime, `[stderr] ${line}`);
+      const bound = detectBoundPort(line);
+      if (bound) adoptBoundPort(runtime, bound);
+    }
   });
 
   child.on("exit", (code, signal) => {
@@ -1084,7 +1198,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
       runtime.status = "failed";
     }
     runtime.process = null;
-    releasePort(port);
+    releasePort(runtime.port);
   });
 
   child.on("error", (err) => {
@@ -1093,16 +1207,18 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
     runtime.errorCode = "preview_spawn_error";
     runtime.error = err.message;
     runtime.process = null;
-    releasePort(port);
+    releasePort(runtime.port);
   });
 
-  // Health probe in background — don't block the response
-  probeHealth(port, HEALTH_PROBE_TIMEOUT_MS)
+  // Health probe in background — don't block the response. The resolver
+  // follows runtime.port so a dev server that announced a different
+  // bound port (auto-increment) is probed where it actually listens.
+  probeHealth(() => runtime.port, HEALTH_PROBE_TIMEOUT_MS)
     .then((result) => {
       runtime.lastHealthCheck = Date.now();
       if (result.healthy && runtime.status === "starting") {
         runtime.status = "ready";
-        pushLog(runtime, `[preview] Health check passed — ready on port ${port}`);
+        pushLog(runtime, `[preview] Health check passed — ready on port ${runtime.port}`);
       } else if (result.rootRouteMissing && runtime.status === "starting") {
         runtime.status = "failed";
         runtime.errorCode = "preview_root_route_missing";
@@ -1209,7 +1325,18 @@ export async function stopPreviewAndWait(workspaceId: string): Promise<void> {
     rt.process = null;
     await exitPromise;
   }
-  releasePort(rt.port);
+  // The tracked child exiting does not guarantee the port is free — a
+  // detached grandchild (pnpm → next dev) can keep it bound, and that
+  // squatter would then be re-allocated to the next preview and serve
+  // it the wrong app. Wait briefly for the OS to release it; if an
+  // orphan survives, allocateFreePort will simply skip this port.
+  const port = rt.port;
+  if (await waitForPortFree(port, previewBindHost(), 5000)) {
+    pushLog(rt, `[preview] Port ${port} released`);
+  } else {
+    pushLog(rt, `[preview] Port ${port} still bound after stop — an orphaned process may still own it`);
+  }
+  releasePort(port);
   pushLog(rt, "[preview] Stopped (waited for exit)");
 }
 
@@ -1226,29 +1353,13 @@ export async function restartPreview(workspaceId: string): Promise<PreviewRuntim
   await stopPreviewAndWait(workspaceId);
 
   // Wait for the port to actually be free. The OS may hold the socket
-  // in TIME_WAIT even after the process exits. Poll until the port is
-  // available or timeout.
+  // in TIME_WAIT even after the process exits — and a detached
+  // grandchild can keep it bound indefinitely.
   const port = rt.port;
-  for (let i = 0; i < 10; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    try {
-      const net = require("net");
-      const testServer = net.createServer();
-      await new Promise<void>((resolve, reject) => {
-        testServer.once("error", reject);
-        testServer.once("listening", () => {
-          testServer.close(() => resolve());
-        });
-        testServer.listen(port, previewBindHost());
-      });
-      pushLog(rt, `[preview] Port ${port} is free after ${(i + 1) * 500}ms`);
-      break;
-    } catch {
-      pushLog(rt, `[preview] Port ${port} still in use, waiting... (${i + 1}/10)`);
-      if (i === 9) {
-        pushLog(rt, `[preview] Port ${port} never freed up, proceeding anyway`);
-      }
-    }
+  if (await waitForPortFree(port, previewBindHost(), 5000)) {
+    pushLog(rt, `[preview] Port ${port} is free`);
+  } else {
+    pushLog(rt, `[preview] Port ${port} never freed up — allocation will skip it if still bound`);
   }
 
   // Start again with same config
