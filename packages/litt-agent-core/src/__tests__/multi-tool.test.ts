@@ -181,7 +181,22 @@ describe("parseToolCalls", () => {
     );
     assert.equal(calls.length, 1);
     assert.equal(calls[0].toolId, "project.status");
-    assert.deepEqual(calls[0].inputs, { verbose: "true" });
+    assert.deepEqual(calls[0].inputs, { verbose: true });
+  });
+
+  it("parses a bare namespaced no-arg tool call", () => {
+    const calls = parseToolCalls("<tool_call>project.status</tool_call>");
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].toolId, "project.status");
+    assert.deepEqual(calls[0].inputs, {});
+  });
+
+  it("does not treat prose as a bare tool call", () => {
+    assert.deepEqual(
+      parseToolCalls("<tool_call>example of a non-call payload</tool_call>"),
+      [],
+    );
   });
 
   it("deduplicates an XML envelope against its fenced twin", () => {
