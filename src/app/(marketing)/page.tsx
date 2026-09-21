@@ -14,13 +14,13 @@ export const revalidate = 60;
 
 export const metadata: Metadata = {
   ...buildMetadata({
-    title: "Bring the idea. LiTT builds the rest.",
+    title: "LiTT — AI Project Operator & Creative Workspace",
     description:
-      "LiTT plans, builds, edits real projects, uses tools, verifies the work, and helps you ship—all from one workspace. Free to start, no credit card required.",
+      "LiTT plans, builds, edits real projects, uses tools, verifies work, and helps you ship from one workspace. Build apps, media, and workflows at litlabs.net.",
     path: "/",
     index: true,
   }),
-  title: { absolute: "Bring the idea. LiTT builds the rest. | LiTTree LabStudios" },
+  title: { absolute: "LiTT — AI Project Operator & Creative Workspace | LiTTree LabStudios" },
 };
 
 const homeSchema = {
