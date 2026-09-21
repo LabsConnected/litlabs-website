@@ -56,6 +56,8 @@ export interface AgentLoopConfig {
   model?: string;
   systemPrompt: string;
   enableBuildFix: boolean;
+  /** Require a structured tool call on the first model turn of an execution flow. */
+  requireToolCallOnFirstStep?: boolean;
   evalMetadata?: LLMCallMetadata;
   /** Upstream/client AbortSignal propagated to all provider calls. */
   signal?: AbortSignal;
@@ -481,6 +483,7 @@ export async function runAgentLoopV2(
           model: cfg.model,
           temperature: 0.15,
           maxTokens: 4096,
+          toolChoice: cfg.requireToolCallOnFirstStep && stepsUsed === 1 ? "required" : "auto",
           evalMetadata: cfg.evalMetadata,
           deadlineMs: startTime + cfg.maxRuntimeMs,
           signal: cfg.signal,
@@ -1693,6 +1696,7 @@ export async function resumeAgentLoopV2(
           model: cfg.model,
           temperature: 0.15,
           maxTokens: 4096,
+          toolChoice: cfg.requireToolCallOnFirstStep && stepsUsed === 1 ? "required" : "auto",
           evalMetadata: cfg.evalMetadata,
           deadlineMs: startTime + cfg.maxRuntimeMs,
           signal: cfg.signal,

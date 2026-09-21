@@ -113,6 +113,8 @@ describe("Launch Flow: no-mutation reprompt", () => {
     const result = await runLaunchFlow(options);
 
     expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    expect(runAgentLoop.mock.calls[0][2]).toMatchObject({ requireToolCallOnFirstStep: true });
+    expect(runAgentLoop.mock.calls[1][2]).toMatchObject({ requireToolCallOnFirstStep: true });
     expect(String(runAgentLoop.mock.calls[1][0])).toContain("did not write any project files");
     expect(result.success).toBe(true);
     expect(result.status).toBe("preview_ready");
