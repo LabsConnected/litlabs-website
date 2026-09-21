@@ -91,6 +91,26 @@ export function registerPreviewProxyRoute(
         redirect: "manual",
       });
 
+      // TEMPORARY diagnostic logging (2026-09-21): fingerprint upstream
+      // redirects. A transient 302 from the workspace dev server (~02:30 EDT)
+      // escaped the /preview/:workspaceId mount and landed the Studio iframe
+      // on "Cannot GET /". The emitter is unidentified and the 302 no longer
+      // reproduces, so log the full fingerprint of any upstream 3xx while it
+      // is live. Purely additive — no behavior change. Safe to remove once
+      // the emitter is found. (Never logs the preview token or cookies.)
+      if (proxyResp.status >= 300 && proxyResp.status < 400) {
+        const rawLocation = proxyResp.headers.get("location") ?? "(none)";
+        const pathOnly = strippedPath.split("?")[0] || "/";
+        console.warn(
+          `[Preview] upstream redirect workspace=${workspaceId} ` +
+            `port=${upstreamPort} path=${pathOnly} status=${proxyResp.status} ` +
+            `location=${rawLocation} ` +
+            `rewritten=${rewritePreviewLocation(rawLocation, { workspaceId, token: previewToken, upstreamPort })} ` +
+            `server=${proxyResp.headers.get("server") ?? "-"} ` +
+            `poweredBy=${proxyResp.headers.get("x-powered-by") ?? "-"}`,
+        );
+      }
+
       // Entry-path servability guard (2026-09-18): a 404 on / means the
       // process on the preview port is not serving the app. The old code
       // forwarded the backend's white "Cannot GET /" while the UI still

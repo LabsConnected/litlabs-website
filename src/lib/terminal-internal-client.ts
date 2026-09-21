@@ -388,7 +388,7 @@ export async function getPreviewLogsInternal(
  * The browser uses this URL to access the running dev server.
  */
 export function buildPreviewProxyUrl(workspaceId: string): string {
-  const base = TERMINAL_BASE();
+  const base = TERMINAL_BASE().replace(/\/+$/, "");
   const token = process.env.PREVIEW_ACCESS_TOKEN ?? "";
   const tokenParam = token ? `?token=${encodeURIComponent(token)}` : "";
 
