@@ -154,6 +154,26 @@ export function resetExecutionRegistryForTests(): void {
 }
 
 /**
+ * Snapshot every non-stale active execution, dropping stale bookkeeping
+ * from killed processes. Used by the graceful shutdown routine
+ * (SIGTERM/SIGINT) so a deployment cutover can abort and write back
+ * every in-flight run instead of leaving transcripts frozen as
+ * streaming.
+ */
+export function snapshotActiveExecutions(): ActiveExecution[] {
+  const now = Date.now();
+  const out: ActiveExecution[] = [];
+  for (const [conversationId, entry] of executions) {
+    if (now - entry.startedAt > STALE_EXECUTION_MS) {
+      executions.delete(conversationId);
+      continue;
+    }
+    out.push(entry);
+  }
+  return out;
+}
+
+/**
  * Request cancellation of the active execution for a conversation.
  *
  * Cancellation is ALWAYS keyed to the exact clientRequestId — there is no
