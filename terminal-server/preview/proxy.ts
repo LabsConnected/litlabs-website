@@ -77,6 +77,26 @@ export function registerPreviewProxyRoute(
     }
     const upstreamPort = status.port;
 
+    // The public origin the browser used, as the upstream app sees it via
+    // forwarded headers. The app builds absolute URLs (and auth-handshake
+    // redirect_url params) against this origin after the proxy strips the
+    // mount prefix — rewritePreviewLocation uses it to tell self-redirects
+    // apart from genuinely external links.
+    const firstHeaderValue = (v: unknown): string =>
+      String(Array.isArray(v) ? v[0] : (v ?? "")).split(",")[0].trim();
+    const publicHost =
+      firstHeaderValue(req.headers["x-forwarded-host"]) ||
+      firstHeaderValue(req.headers.host);
+    const publicProto =
+      firstHeaderValue(req.headers["x-forwarded-proto"]) || "https";
+    const publicOrigin = publicHost ? `${publicProto}://${publicHost}` : undefined;
+    const locationOpts = {
+      workspaceId,
+      token: previewToken,
+      upstreamPort,
+      publicOrigin,
+    };
+
     // Proxy the request to localhost:<port>
     const strippedPath = req.url.replace(/^\/preview\/[^/]+/, "");
     const targetUrl = `http://127.0.0.1:${upstreamPort}${strippedPath}`;
@@ -105,7 +125,7 @@ export function registerPreviewProxyRoute(
           `[Preview] upstream redirect workspace=${workspaceId} ` +
             `port=${upstreamPort} path=${pathOnly} status=${proxyResp.status} ` +
             `location=${rawLocation} ` +
-            `rewritten=${rewritePreviewLocation(rawLocation, { workspaceId, token: previewToken, upstreamPort })} ` +
+            `rewritten=${rewritePreviewLocation(rawLocation, locationOpts)} ` +
             `server=${proxyResp.headers.get("server") ?? "-"} ` +
             `poweredBy=${proxyResp.headers.get("x-powered-by") ?? "-"}`,
         );
@@ -160,11 +180,7 @@ export function registerPreviewProxyRoute(
         if (header === "location") {
           res.setHeader(
             "location",
-            rewritePreviewLocation(value, {
-              workspaceId,
-              token: previewToken,
-              upstreamPort,
-            }),
+            rewritePreviewLocation(value, locationOpts),
           );
           return;
         }
