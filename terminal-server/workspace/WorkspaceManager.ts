@@ -8,6 +8,7 @@ import {
   buildWelcomeReactVite,
 } from "./welcome-screen";
 import { writeScaffoldManifest } from "./scaffold";
+import { buildPreviewEnv } from "../preview/preview-env";
 
 
 export interface WorkspaceDescriptor {
@@ -146,11 +147,13 @@ export async function prepareWorkspace(
       // devDependencies. The Railway service runs with NODE_ENV=production,
       // which causes pnpm to skip devDeps by default — this breaks Next.js
       // dev server startup (TypeScript types are in devDependencies).
+      // The child env is allowlisted: install lifecycle scripts execute
+      // workspace-controlled code and must not see platform secrets.
       execFileSync(pm, ["install", "--prefer-offline"], {
         cwd: root,
         stdio: "pipe",
         timeout: 300_000,
-        env: { ...process.env, NODE_ENV: "development" },
+        env: { ...buildPreviewEnv(), NODE_ENV: "development" },
       });
     } catch {
       // Non-fatal — the workspace is still usable for file browsing and
@@ -177,7 +180,7 @@ export async function prepareWorkspace(
             cwd: root,
             stdio: "pipe",
             timeout: 120_000,
-            env: { ...process.env, NODE_ENV: "development" },
+            env: { ...buildPreviewEnv(), NODE_ENV: "development" },
           });
         } catch {
           // Non-fatal — Next.js will attempt its own auto-install.

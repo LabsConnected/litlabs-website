@@ -73,6 +73,101 @@ import {
   probeHealth,
   resolvePackageManager,
 } from "../preview/PreviewManager";
+import { buildPreviewEnv } from "../preview/preview-env";
+
+// ─── Preview child env allowlist ───────────────────────────────────
+// Workspace children run untrusted generated code — the child env must
+// be allowlisted, never ...process.env (which hands workspace code the
+// platform's TERMINAL_INTERNAL_SERVICE_KEY, PREVIEW_ACCESS_TOKEN, etc.).
+
+describe("buildPreviewEnv — child env allowlist", () => {
+  let origEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    origEnv = { ...process.env };
+  });
+
+  afterEach(() => {
+    process.env = origEnv;
+  });
+
+  it("never leaks platform secrets into the child env", () => {
+    process.env.TERMINAL_INTERNAL_SERVICE_KEY = "internal-key";
+    process.env.TERMINAL_AUTH_SECRET = "auth-secret";
+    process.env.PREVIEW_ACCESS_TOKEN = "preview-gate-token";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+    process.env.DATABASE_URL = "postgres://prod";
+    process.env.STRIPE_SECRET_KEY = "sk_live_platform";
+    process.env.OPENAI_API_KEY = "sk-platform";
+
+    const env = buildPreviewEnv();
+    expect(env.TERMINAL_INTERNAL_SERVICE_KEY).toBeUndefined();
+    expect(env.TERMINAL_AUTH_SECRET).toBeUndefined();
+    expect(env.PREVIEW_ACCESS_TOKEN).toBeUndefined();
+    expect(env.SUPABASE_SERVICE_ROLE_KEY).toBeUndefined();
+    expect(env.DATABASE_URL).toBeUndefined();
+    expect(env.STRIPE_SECRET_KEY).toBeUndefined();
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+  });
+
+  it("preserves required runtime vars and package-manager config", () => {
+    process.env.PATH = "/usr/bin";
+    process.env.HOME = "/home/svc";
+    process.env.NODE_ENV = "production";
+    process.env.NODE_BIN_DIR = "/opt/node/bin";
+    process.env.NPM_CONFIG_REGISTRY = "https://registry.example.com";
+    process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT = "0";
+    process.env.PNPM_HOME = "/root/.local/share/pnpm";
+    process.env.LANG = "C.UTF-8";
+
+    const env = buildPreviewEnv();
+    expect(env.PATH).toBe("/usr/bin");
+    expect(env.HOME).toBe("/home/svc");
+    expect(env.NODE_ENV).toBe("production");
+    expect(env.NODE_BIN_DIR).toBe("/opt/node/bin");
+    expect(env.NPM_CONFIG_REGISTRY).toBe("https://registry.example.com");
+    expect(env.COREPACK_ENABLE_DOWNLOAD_PROMPT).toBe("0");
+    expect(env.PNPM_HOME).toBe("/root/.local/share/pnpm");
+    expect(env.LANG).toBe("C.UTF-8");
+  });
+
+  it("passes the approved Clerk project vars through (validateClerkConfig input)", () => {
+    process.env.CLERK_SECRET_KEY = "sk_live_workspace";
+    process.env.CLERK_PUBLISHABLE_KEY = "pk_live_workspace";
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = "pk_live_workspace";
+
+    const env = buildPreviewEnv();
+    expect(env.CLERK_SECRET_KEY).toBe("sk_live_workspace");
+    expect(env.CLERK_PUBLISHABLE_KEY).toBe("pk_live_workspace");
+    expect(env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY).toBe("pk_live_workspace");
+  });
+
+  it("drops secret-shaped names even inside allowed prefix families", () => {
+    process.env.NPM_CONFIG_TOKEN = "registry-auth-token";
+    process.env.YARN_NPM_AUTH_TOKEN = "yarn-token";
+
+    const env = buildPreviewEnv();
+    expect(env.NPM_CONFIG_TOKEN).toBeUndefined();
+    expect(env.YARN_NPM_AUTH_TOKEN).toBeUndefined();
+  });
+
+  it("honors PREVIEW_ENV_ALLOWLIST extras but cannot re-allow gateway credentials", () => {
+    process.env.PREVIEW_ENV_ALLOWLIST = "MY_PROJECT_FLAG,PREVIEW_ACCESS_TOKEN";
+    process.env.MY_PROJECT_FLAG = "on";
+    process.env.PREVIEW_ACCESS_TOKEN = "preview-gate-token";
+
+    const env = buildPreviewEnv();
+    expect(env.MY_PROJECT_FLAG).toBe("on");
+    expect(env.PREVIEW_ACCESS_TOKEN).toBeUndefined();
+  });
+
+  it("applies caller overrides last", () => {
+    process.env.NODE_ENV = "production";
+    const env = buildPreviewEnv({ NODE_ENV: "development", PORT: "4100" });
+    expect(env.NODE_ENV).toBe("development");
+    expect(env.PORT).toBe("4100");
+  });
+});
 
 describe("PreviewManager — process diagnostics", () => {
   it("preserves complete recent stderr lines instead of truncating the fatal error", () => {

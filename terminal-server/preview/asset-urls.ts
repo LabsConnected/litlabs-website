@@ -133,55 +133,113 @@ export interface RewritePreviewLocationOptions {
   token: string;
   /** The upstream dev-server port the proxy forwards to. */
   upstreamPort: number;
+  /**
+   * Host[:port] identities of this gateway's own public origin (request
+   * Host header, RAILWAY_PUBLIC_DOMAIN, etc.). An absolute redirect that
+   * targets one of these OUTSIDE the mount is an escape, not an external
+   * redirect — it lands on the terminal-server's Express routes.
+   */
+  gatewayHosts?: readonly string[];
 }
 
 /**
- * Rewrite an upstream `Location` header so a redirect stays inside the
+ * What the proxy should do with an upstream `Location` header.
+ *   rewrite     — re-homed inside /preview/:workspaceId (token merged)
+ *   passthrough — genuinely external origin, forward untouched
+ *   escape      — targets the gateway's own public origin outside the
+ *                 mount; the proxy must fail explicitly rather than emit
+ *                 this Location (re-homing it risks a redirect loop).
+ */
+export type RewritePreviewLocationResult =
+  | { action: "rewrite"; location: string }
+  | { action: "passthrough"; location: string }
+  | { action: "escape"; location: string };
+
+/**
+ * True when `u` targets one of the gateway's own public host[:port]
+ * identities. A bare-host entry ("terminal.litlabs.net") matches only
+ * URLs on the scheme-default port — "host:8443" is a different service,
+ * not the gateway. A host:port entry ("localhost:4001") matches the
+ * URL's full host:port.
+ */
+function isGatewayHost(u: URL, gatewayHosts: readonly string[]): boolean {
+  const host = u.host.toLowerCase();
+  const hostname = u.hostname.toLowerCase();
+  for (const raw of gatewayHosts) {
+    const gh = raw.trim().toLowerCase();
+    if (!gh) continue;
+    if (gh.includes(":") || gh.startsWith("[")) {
+      if (host === gh) return true;
+    } else if (hostname === gh && !u.port) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Classify an upstream `Location` header so a redirect stays inside the
  * /preview/:workspaceId mount instead of escaping to the terminal-server
  * origin (where every path 404s with "Cannot GET /…").
  *
  * Rewritten:
- *   "/login"                       -> "/preview/<ws>/login?token=T"
- *   "/"                            -> "/preview/<ws>/?token=T"
- *   "http://localhost:<port>/x"    -> "/preview/<ws>/x?token=T"  (same upstream)
- * Untouched:
- *   "https://accounts.example/…"   external origin — must pass through
- *   "//cdn.example/…"              protocol-relative external
- *   already-mounted paths          kept, token ensured
+ *   "/login"                                -> "/preview/<ws>/login?token=T"
+ *   "/"                                     -> "/preview/<ws>/?token=T"
+ *   "http://localhost:<port>/x"             -> "/preview/<ws>/x?token=T"  (same upstream)
+ *   "https://<gateway>/preview/<ws>/x"      -> "/preview/<ws>/x?token=T"  (own origin, inside mount)
+ * Passthrough:
+ *   "https://accounts.example/…"            external origin — must pass through
+ *   "//cdn.example/…"                       protocol-relative external
+ * Escape (caller must fail — never emit this Location):
+ *   "https://<gateway>/login"               own public origin outside the mount
+ *   "//<gateway>/preview/<other>/x"         own origin, different workspace
  */
 export function rewritePreviewLocation(
   location: string,
   opts: RewritePreviewLocationOptions,
-): string {
+): RewritePreviewLocationResult {
   const value = location.trim();
-  if (!value) return location;
+  if (!value) return { action: "passthrough", location };
   const mount = `/preview/${encodeURIComponent(opts.workspaceId)}`;
 
   // Already inside the mount — keep it, just make sure the token survives.
   if (value === mount || value.startsWith(`${mount}/`) || value.startsWith(`${mount}?`)) {
-    return withPreviewToken(value, opts.token);
+    return { action: "rewrite", location: withPreviewToken(value, opts.token) };
   }
 
   // Protocol-relative or scheme-qualified absolute URL.
-  if (value.startsWith("//")) return location;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
+  if (value.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(value)) {
     try {
-      const u = new URL(value);
+      const u = new URL(value, "http://upstream.invalid");
       const port = Number(u.port || (u.protocol === "https:" ? 443 : 80));
       if (UPSTREAM_HOSTS.has(u.hostname) && port === opts.upstreamPort) {
-        return `${mount}${withPreviewToken(`${u.pathname}${u.search}`, opts.token)}${u.hash}`;
+        return {
+          action: "rewrite",
+          location: `${mount}${withPreviewToken(`${u.pathname}${u.search}`, opts.token)}${u.hash}`,
+        };
+      }
+      if (isGatewayHost(u, opts.gatewayHosts ?? [])) {
+        // Own public origin but already inside this workspace's mount —
+        // strip the origin and keep the mounted path (no loop possible).
+        if (u.pathname === mount || u.pathname.startsWith(`${mount}/`)) {
+          return {
+            action: "rewrite",
+            location: `${withPreviewToken(`${u.pathname}${u.search}`, opts.token)}${u.hash}`,
+          };
+        }
+        return { action: "escape", location };
       }
     } catch {
       // Unparseable absolute URL — pass through untouched.
     }
-    return location;
+    return { action: "passthrough", location };
   }
 
   // Root-relative — re-home under the mount.
   if (value.startsWith("/")) {
-    return `${mount}${withPreviewToken(value, opts.token)}`;
+    return { action: "rewrite", location: `${mount}${withPreviewToken(value, opts.token)}` };
   }
 
   // Bare relative ("login") — resolves inside the mount already; add token.
-  return withPreviewToken(value, opts.token);
+  return { action: "rewrite", location: withPreviewToken(value, opts.token) };
 }

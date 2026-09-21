@@ -36,6 +36,7 @@ import { createServer, type Server } from "http";
 import type { AddressInfo } from "net";
 
 import { registerPreviewProxyRoute, type PreviewProxyDeps } from "../preview/proxy";
+import { rewritePreviewLocation } from "../preview/asset-urls";
 import {
   isPortFree,
   allocateFreePort,
@@ -86,6 +87,34 @@ function upstreamDevServer(): Server {
       case "/redirect-ext":
         res.writeHead(302, { location: "https://accounts.example.com/sign-in" });
         res.end();
+        return;
+      case "/redirect-gateway":
+        // Absolute redirect at the gateway's own public origin — escapes
+        // the mount onto the terminal-server's Express routes.
+        res.writeHead(302, { location: "https://terminal.litlabs.net/login" });
+        res.end();
+        return;
+      case "/redirect-gateway-protorel":
+        res.writeHead(302, { location: "//terminal.litlabs.net/login" });
+        res.end();
+        return;
+      case "/redirect-gateway-mounted":
+        res.writeHead(302, { location: `https://terminal.litlabs.net/preview/${WORKSPACE_ID}/dash?x=1` });
+        res.end();
+        return;
+      case "/redirect-gateway-port":
+        res.writeHead(302, { location: "https://terminal.litlabs.net:8443/login" });
+        res.end();
+        return;
+      case "/redirect-railway-domain":
+        res.writeHead(302, { location: "https://litt-terminal.up.railway.app/login" });
+        res.end();
+        return;
+      case "/echo-headers":
+        // Returns the exact header set the workspace dev server received —
+        // proves what does and does not cross the gateway boundary.
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(req.headers));
         return;
       default:
         // Express-style 404 — the shape a foreign process on the port emits.
@@ -273,6 +302,205 @@ describe("preview gateway — redirect containment inside the mount", () => {
   it("denies requests without the preview token (fail closed)", async () => {
     const res = await request(app).get(`/preview/${WORKSPACE_ID}/`);
     expect(res.status).toBe(401);
+  });
+});
+
+describe("preview gateway — request-header boundary", () => {
+  let upstream: Server;
+  let upstreamPort: number;
+  let app: express.Application;
+
+  beforeAll(async () => {
+    process.env.PREVIEW_ACCESS_TOKEN = TOKEN;
+    upstream = upstreamDevServer();
+    await listenOnPreviewPortOrEphemeral(upstream);
+    upstreamPort = (upstream.address() as AddressInfo).port;
+    app = buildGateway({
+      getPreviewStatus: () => readyStatus(upstreamPort),
+    });
+  });
+
+  afterAll(async () => {
+    delete process.env.PREVIEW_ACCESS_TOKEN;
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  });
+
+  it("strips the browser's session material and spoofable edge identity before the workspace", async () => {
+    const proxied = await request(app)
+      .get(`/preview/${WORKSPACE_ID}/echo-headers?token=${TOKEN}`)
+      .set("Cookie", "__session=clerk-session-jwt; __client_uat=123")
+      .set("Authorization", "Bearer clerk-session-token")
+      .set("X-Preview-Token", TOKEN)
+      .set("X-Internal-Service-Key", "platform-internal-key")
+      .set("X-Api-Key", "some-api-key")
+      .set("X-Forwarded-For", "1.2.3.4")
+      .set("X-Forwarded-Host", "litlabs.net")
+      .set("X-Forwarded-Proto", "https")
+      .set("Forwarded", "for=1.2.3.4;proto=https")
+      .set("CF-Connecting-IP", "1.2.3.4")
+      .set("CF-Ray", "8f8f8f-SJC")
+      .set("X-Real-IP", "1.2.3.4")
+      .set("X-Clerk-Auth-Status", "signed-in")
+      .set("X-Custom-App-Header", "kept")
+      .set("Accept-Language", "en-US,en;q=0.9");
+
+    expect(proxied.status).toBe(200);
+    const echoed = JSON.parse(proxied.text) as Record<string, string>;
+
+    // Session/auth material owned by the gateway origin — never upstream.
+    expect(echoed["cookie"]).toBeUndefined();
+    expect(echoed["authorization"]).toBeUndefined();
+    expect(echoed["x-preview-token"]).toBeUndefined();
+    expect(echoed["x-internal-service-key"]).toBeUndefined();
+    expect(echoed["x-api-key"]).toBeUndefined();
+
+    // Client-supplied edge/forwarding identity — spoofable, dropped.
+    expect(echoed["x-forwarded-for"]).toBeUndefined();
+    expect(echoed["x-forwarded-host"]).toBeUndefined();
+    expect(echoed["x-forwarded-proto"]).toBeUndefined();
+    expect(echoed["forwarded"]).toBeUndefined();
+    expect(echoed["cf-connecting-ip"]).toBeUndefined();
+    expect(echoed["cf-ray"]).toBeUndefined();
+    expect(echoed["x-real-ip"]).toBeUndefined();
+    expect(echoed["x-clerk-auth-status"]).toBeUndefined();
+
+    // Ordinary application headers still reach the dev server, and Host
+    // is rewritten to the upstream (not the gateway origin).
+    expect(echoed["x-custom-app-header"]).toBe("kept");
+    expect(echoed["accept-language"]).toBe("en-US,en;q=0.9");
+    expect(echoed["host"]).toBe(`127.0.0.1:${upstreamPort}`);
+  });
+});
+
+describe("preview gateway — escape redirect guard", () => {
+  let upstream: Server;
+  let upstreamPort: number;
+  let app: express.Application;
+  const markEscapeRedirect = vi.fn(() => true);
+
+  beforeAll(async () => {
+    process.env.PREVIEW_ACCESS_TOKEN = TOKEN;
+    // The gateway's configured public domain — detected even when the
+    // request Host is something else.
+    process.env.RAILWAY_PUBLIC_DOMAIN = "litt-terminal.up.railway.app";
+    upstream = upstreamDevServer();
+    await listenOnPreviewPortOrEphemeral(upstream);
+    upstreamPort = (upstream.address() as AddressInfo).port;
+    app = buildGateway({
+      getPreviewStatus: () => readyStatus(upstreamPort),
+      markPreviewEscapeRedirect: markEscapeRedirect,
+    });
+  });
+
+  afterAll(async () => {
+    delete process.env.PREVIEW_ACCESS_TOKEN;
+    delete process.env.RAILWAY_PUBLIC_DOMAIN;
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  });
+
+  it("fails an absolute redirect at the gateway's own origin — never emits the escape Location", async () => {
+    markEscapeRedirect.mockClear();
+    const proxied = await request(app)
+      .get(`/preview/${WORKSPACE_ID}/redirect-gateway?token=${TOKEN}`)
+      .set("Host", "terminal.litlabs.net")
+      .redirects(0);
+
+    expect(proxied.status).toBe(502);
+    // The escape Location must never reach the browser.
+    expect(proxied.headers["location"]).toBeUndefined();
+    expect(proxied.text).toContain("preview_escape_redirect");
+    expect(markEscapeRedirect).toHaveBeenCalledWith(WORKSPACE_ID);
+  });
+
+  it("fails a protocol-relative redirect at the gateway origin", async () => {
+    const proxied = await request(app)
+      .get(`/preview/${WORKSPACE_ID}/redirect-gateway-protorel?token=${TOKEN}`)
+      .set("Host", "terminal.litlabs.net")
+      .redirects(0);
+
+    expect(proxied.status).toBe(502);
+    expect(proxied.headers["location"]).toBeUndefined();
+    expect(proxied.text).toContain("preview_escape_redirect");
+  });
+
+  it("fails a redirect at the configured Railway public domain even when the request Host differs", async () => {
+    const proxied = await request(app)
+      .get(`/preview/${WORKSPACE_ID}/redirect-railway-domain?token=${TOKEN}`)
+      .redirects(0);
+
+    expect(proxied.status).toBe(502);
+    expect(proxied.headers["location"]).toBeUndefined();
+    expect(proxied.text).toContain("preview_escape_redirect");
+  });
+
+  it("re-homes a gateway-origin redirect that stays inside this workspace's mount", async () => {
+    const proxied = await request(app)
+      .get(`/preview/${WORKSPACE_ID}/redirect-gateway-mounted?token=${TOKEN}`)
+      .set("Host", "terminal.litlabs.net")
+      .redirects(0);
+
+    expect(proxied.status).toBe(302);
+    expect(proxied.headers["location"]).toBe(
+      `/preview/${WORKSPACE_ID}/dash?x=1&token=${TOKEN}`,
+    );
+  });
+
+  it("treats a non-default port on the gateway hostname as a different service — passthrough", async () => {
+    const proxied = await request(app)
+      .get(`/preview/${WORKSPACE_ID}/redirect-gateway-port?token=${TOKEN}`)
+      .set("Host", "terminal.litlabs.net")
+      .redirects(0);
+
+    expect(proxied.status).toBe(302);
+    expect(proxied.headers["location"]).toBe("https://terminal.litlabs.net:8443/login");
+  });
+});
+
+describe("rewritePreviewLocation — escape classification", () => {
+  const OPTS = {
+    workspaceId: "ws_1",
+    token: "tok-1",
+    upstreamPort: 4100,
+    gatewayHosts: ["terminal.litlabs.net", "litt-terminal.up.railway.app"],
+  };
+
+  it("classifies a gateway-origin absolute redirect outside the mount as escape", () => {
+    expect(rewritePreviewLocation("https://terminal.litlabs.net/login", OPTS))
+      .toEqual({ action: "escape", location: "https://terminal.litlabs.net/login" });
+  });
+
+  it("classifies a protocol-relative gateway redirect as escape", () => {
+    expect(rewritePreviewLocation("//terminal.litlabs.net/login", OPTS))
+      .toEqual({ action: "escape", location: "//terminal.litlabs.net/login" });
+  });
+
+  it("classifies a redirect to another workspace's mount on the gateway as escape", () => {
+    expect(rewritePreviewLocation("https://terminal.litlabs.net/preview/ws_other/x", OPTS))
+      .toEqual({ action: "escape", location: "https://terminal.litlabs.net/preview/ws_other/x" });
+  });
+
+  it("rewrites a gateway-origin redirect inside the mount to a path-only location", () => {
+    expect(rewritePreviewLocation("https://terminal.litlabs.net/preview/ws_1/dash?x=1", OPTS))
+      .toEqual({ action: "rewrite", location: "/preview/ws_1/dash?x=1&token=tok-1" });
+  });
+
+  it("passes genuinely external absolute origins through", () => {
+    expect(rewritePreviewLocation("https://accounts.example.com/sign-in", OPTS))
+      .toEqual({ action: "passthrough", location: "https://accounts.example.com/sign-in" });
+    expect(rewritePreviewLocation("//cdn.example.com/x.png", OPTS))
+      .toEqual({ action: "passthrough", location: "//cdn.example.com/x.png" });
+  });
+
+  it("does not flag the gateway hostname on a non-default port", () => {
+    expect(rewritePreviewLocation("https://terminal.litlabs.net:8443/login", OPTS))
+      .toEqual({ action: "passthrough", location: "https://terminal.litlabs.net:8443/login" });
+  });
+
+  it("still re-homes root-relative and upstream-loopback locations", () => {
+    expect(rewritePreviewLocation("/login", OPTS))
+      .toEqual({ action: "rewrite", location: "/preview/ws_1/login?token=tok-1" });
+    expect(rewritePreviewLocation("http://localhost:4100/x", OPTS))
+      .toEqual({ action: "rewrite", location: "/preview/ws_1/x?token=tok-1" });
   });
 });
 

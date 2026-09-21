@@ -16,6 +16,7 @@
  */
 
 import type { Application, Response } from "express";
+import type { IncomingHttpHeaders } from "http";
 
 import { checkPreviewToken } from "../preview-auth";
 import {
@@ -23,6 +24,7 @@ import {
   decideProxiedEntryResponse,
   markPreviewRootRouteMissing,
   markPreviewBackendUnreachable,
+  markPreviewEscapeRedirect,
   buildPreviewErrorPage,
 } from "./PreviewManager";
 import {
@@ -40,6 +42,98 @@ export interface PreviewProxyDeps {
   getPreviewStatus?: (workspaceId: string) => PreviewStatusSnapshot;
   markPreviewRootRouteMissing?: (workspaceId: string) => boolean;
   markPreviewBackendUnreachable?: (workspaceId: string) => boolean;
+  markPreviewEscapeRedirect?: (workspaceId: string) => boolean;
+}
+
+// ─── Request-header boundary ────────────────────────────────────────
+// This proxy is the trust boundary between the authenticated browser
+// context and workspace code. Requests arrive carrying the user's
+// terminal-origin session material — Clerk cookies (__session,
+// __clerk_*), Authorization — plus client-supplied edge identity headers
+// (X-Forwarded-*, Forwarded, CF-*) that edge/CDN front-ends normally own.
+// Forwarding them into the workspace dev server lets untrusted generated
+// code ride the user's session and lets clients spoof edge identity.
+// The proxy therefore sends an explicit allowlist-shaped header set
+// upstream — never the raw `...req.headers` spread.
+
+/** Exact request headers dropped before forwarding upstream. */
+const STRIPPED_REQUEST_HEADERS = new Set([
+  // Auth/session material owned by the gateway origin
+  "cookie",
+  "authorization",
+  "proxy-authorization",
+  "proxy-authenticate",
+  "x-preview-token",
+  "x-internal-service-key",
+  "x-api-key",
+  // Client-supplied edge/forwarding identity — spoofable by the caller
+  "forwarded",
+  "x-real-ip",
+  "true-client-ip",
+  "x-client-ip",
+  "x-cluster-client-ip",
+  // Hop-by-hop headers (RFC 9110 §7.6.1) — describe this hop, not the next
+  "connection",
+  "keep-alive",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+]);
+
+/** Header prefixes dropped before forwarding upstream. */
+const STRIPPED_REQUEST_HEADER_PREFIXES = [
+  "x-forwarded-", // for/host/proto/port/server/...
+  "cf-", // Cloudflare edge headers (cf-connecting-ip, cf-ray, ...)
+  "x-clerk-", // Clerk handshake/status headers
+  "x-vercel-", // Vercel edge headers
+];
+
+/**
+ * Build the header set forwarded to the workspace dev server. Drops
+ * session/auth material, client-supplied forwarding identity, hop-by-hop
+ * headers, and any header named by the request's own `Connection` token
+ * list (which marks it hop-by-hop). Multi-value headers are joined per
+ * HTTP list semantics.
+ */
+export function stripAuthHeaders(
+  headers: IncomingHttpHeaders,
+): Record<string, string> {
+  // Any header named by `Connection` is hop-by-hop for this hop.
+  const connectionTokens = new Set<string>();
+  const connection = headers["connection"];
+  const connectionValue = Array.isArray(connection) ? connection.join(",") : connection;
+  for (const token of (connectionValue ?? "").split(",")) {
+    const name = token.trim().toLowerCase();
+    if (name) connectionTokens.add(name);
+  }
+
+  const out: Record<string, string> = {};
+  for (const [rawName, value] of Object.entries(headers)) {
+    if (value === undefined) continue;
+    const name = rawName.toLowerCase();
+    if (STRIPPED_REQUEST_HEADERS.has(name)) continue;
+    if (connectionTokens.has(name)) continue;
+    if (STRIPPED_REQUEST_HEADER_PREFIXES.some((prefix) => name.startsWith(prefix))) continue;
+    out[name] = Array.isArray(value) ? value.join(", ") : value;
+  }
+  return out;
+}
+
+/**
+ * Host[:port] identities of this gateway's own public origin. An upstream
+ * redirect that targets one of these outside /preview/:workspaceId is an
+ * escape, not an external redirect. Sourced from the request's own Host
+ * header plus configured public domains so both the custom domain and the
+ * Railway-assigned domain are recognized.
+ */
+function gatewayHostsFor(req: AuthenticatedRequest): string[] {
+  return [
+    req.headers.host,
+    process.env.RAILWAY_PUBLIC_DOMAIN,
+    process.env.PREVIEW_PROXY_HOST,
+    process.env.TERMINAL_PUBLIC_HOST,
+  ].filter((h): h is string => Boolean(h));
 }
 
 export function registerPreviewProxyRoute(
@@ -51,6 +145,8 @@ export function registerPreviewProxyRoute(
     deps.markPreviewRootRouteMissing ?? markPreviewRootRouteMissing;
   const markUnreachable =
     deps.markPreviewBackendUnreachable ?? markPreviewBackendUnreachable;
+  const markEscapeRedirect =
+    deps.markPreviewEscapeRedirect ?? markPreviewEscapeRedirect;
 
   app.use("/preview/:workspaceId", async (req: AuthenticatedRequest, res: Response) => {
     const workspaceId = req.params.workspaceId;
@@ -80,11 +176,14 @@ export function registerPreviewProxyRoute(
     // Proxy the request to localhost:<port>
     const strippedPath = req.url.replace(/^\/preview\/[^/]+/, "");
     const targetUrl = `http://127.0.0.1:${upstreamPort}${strippedPath}`;
+    const gatewayHosts = gatewayHostsFor(req);
     try {
       const proxyResp = await fetch(targetUrl, {
         method: req.method,
         headers: {
-          ...req.headers as Record<string, string>,
+          // The browser's authenticated context (cookies, Authorization,
+          // edge identity) stops at this boundary — see stripAuthHeaders.
+          ...stripAuthHeaders(req.headers),
           host: `127.0.0.1:${upstreamPort}`,
         },
         body: ["GET", "HEAD"].includes(req.method) ? undefined : (req as any),
@@ -115,6 +214,39 @@ export function registerPreviewProxyRoute(
       const contentType = proxyResp.headers.get("content-type") ?? "";
       const injectInspector = shouldInjectInspector(proxyResp.status, contentType);
 
+      // Redirect containment is decided up front: a root-relative or
+      // upstream-loopback Location resolves against the terminal-server
+      // origin and escapes the /preview/:workspaceId mount — the browser
+      // lands on an Express route that doesn't exist ("Cannot GET /…")
+      // while the badge still says ready. Re-home it under the mount.
+      // An absolute Location back at this gateway's own public origin
+      // (e.g. https://terminal.litlabs.net/login) is an escape, not an
+      // external redirect — re-homing it would risk a redirect loop, so
+      // fail explicitly with the honest error page instead.
+      const rawLocation = proxyResp.headers.get("location");
+      const rewrittenLocation = rawLocation !== null
+        ? rewritePreviewLocation(rawLocation, {
+            workspaceId,
+            token: previewToken,
+            upstreamPort,
+            gatewayHosts,
+          })
+        : null;
+      if (rewrittenLocation?.action === "escape") {
+        markEscapeRedirect(workspaceId);
+        res.status(502).setHeader("content-type", "text/html; charset=utf-8");
+        res.send(buildPreviewErrorPage({
+          heading: "Preview redirect escaped the preview",
+          message:
+            "The dev server redirected to this gateway's own origin outside the preview mount — the app is building absolute URLs against the wrong host. Fix the app's base-URL or redirect config, then restart preview.",
+          command: status.command,
+          framework: status.framework,
+          errorCode: "preview_escape_redirect",
+          workspaceId,
+        }));
+        return;
+      }
+
       // Forward status, headers, and body
       res.status(proxyResp.status);
       proxyResp.headers.forEach((value, key) => {
@@ -132,20 +264,10 @@ export function registerPreviewProxyRoute(
           return;
         }
 
-        // Redirect containment: a root-relative or upstream-loopback
-        // Location resolves against the terminal-server origin and escapes
-        // the /preview/:workspaceId mount — the browser lands on an
-        // Express route that doesn't exist ("Cannot GET /…") while the
-        // badge still says ready. Re-home it under the mount instead.
         if (header === "location") {
-          res.setHeader(
-            "location",
-            rewritePreviewLocation(value, {
-              workspaceId,
-              token: previewToken,
-              upstreamPort,
-            }),
-          );
+          if (rewrittenLocation) {
+            res.setHeader("location", rewrittenLocation.location);
+          }
           return;
         }
 

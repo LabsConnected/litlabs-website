@@ -27,6 +27,7 @@ import { delimiter as PATH_DELIMITER, dirname, join, resolve } from "path";
 import { promisify } from "util";
 import { getWorkspace, type WorkspaceDescriptor } from "../workspace/WorkspaceManager";
 import { resolveBindHost } from "../network-bind";
+import { buildPreviewEnv } from "./preview-env";
 
 const execFileAsync = promisify(execFile);
 
@@ -88,6 +89,7 @@ export type PreviewErrorCode =
   | "preview_no_dev_command"
   | "preview_dependency_install_failed"
   | "preview_root_route_missing"
+  | "preview_escape_redirect"
   | "preview_clerk_config_error"
   | "preview_auth_config_error";
 
@@ -614,12 +616,13 @@ async function installWorkspaceDependencies(
 
   const childPath = buildChildPath(root);
   const nodeBinDir = process.env.NODE_BIN_DIR?.trim();
-  const env: Record<string, string> = {
-    ...process.env,
+  // `pnpm install` runs workspace-controlled lifecycle scripts — the
+  // child env is allowlisted (buildPreviewEnv), never ...process.env.
+  const env: Record<string, string> = buildPreviewEnv({
     PATH: nodeBinDir ? `${nodeBinDir}${PATH_DELIMITER}${childPath}` : childPath,
     NODE_ENV: "development",
     NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
-  } as Record<string, string>;
+  });
 
   const resolvedExecutable = lookupExecutable(executable, childPath, process.platform === "win32") ?? executable;
   try {
@@ -1034,8 +1037,14 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
 
   // Bind host follows the parent terminal-server's own resolved policy —
   // see previewBindHost() / ../network-bind.ts.
-  const env: Record<string, string> = {
-    ...process.env,
+  //
+  // The child env is allowlisted via buildPreviewEnv — NOT ...process.env.
+  // Workspace code is untrusted generated code; the terminal-server's env
+  // holds platform secrets (TERMINAL_INTERNAL_SERVICE_KEY,
+  // PREVIEW_ACCESS_TOKEN, SUPABASE_*, billing keys) that must never cross
+  // into it. Approved project vars (Clerk) still pass through the
+  // allowlist, so the validation below keeps working unchanged.
+  const env: Record<string, string> = buildPreviewEnv({
     PATH: childPath,
     PORT: String(port),
     HOSTNAME: previewBindHost(),
@@ -1047,7 +1056,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
     // TypeScript deps during dev server startup. Without this, pnpm rejects
     // the auto-install with ERR_PNPM_ADDING_TO_ROOT.
     NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
-  } as Record<string, string>;
+  });
 
   // Service users on Railway often lack nvm-installed Node/pnpm in PATH.
   // Prepend the Node bin directory so package manager binaries are found.
@@ -1512,6 +1521,25 @@ export function markPreviewBackendUnreachable(workspaceId: string): boolean {
   rt.error =
     "The preview proxy could not reach the dev server — the process may have crashed. Restart preview to try again.";
   pushLog(rt, "[preview] Backend unreachable at proxy time — runtime marked failed");
+  return true;
+}
+
+/**
+ * Flip a preview runtime to failed because the dev server issued a
+ * redirect to the gateway's own public origin OUTSIDE the
+ * /preview/:workspaceId mount at proxy time. Passing it through would
+ * land the iframe on the terminal-server's Express routes; re-homing it
+ * risks a redirect loop. Failing is the truthful state — the app is
+ * generating absolute URLs against the wrong host.
+ */
+export function markPreviewEscapeRedirect(workspaceId: string): boolean {
+  const rt = runtimes.get(workspaceId);
+  if (!rt || rt.status === "failed" || rt.status === "stopped") return false;
+  rt.status = "failed";
+  rt.errorCode = "preview_escape_redirect";
+  rt.error =
+    "The dev server redirected to the preview gateway's own origin outside the preview mount — the app is building absolute URLs against the wrong host. Fix the app's base-URL/redirect config and restart preview.";
+  pushLog(rt, "[preview] Escape redirect at proxy time — runtime marked failed");
   return true;
 }
 
