@@ -133,6 +133,69 @@ export interface RewritePreviewLocationOptions {
   token: string;
   /** The upstream dev-server port the proxy forwards to. */
   upstreamPort: number;
+  /**
+   * The proxy's own public origin as the browser sees it, e.g.
+   * "https://terminal.litlabs.net" (built from x-forwarded-host/proto).
+   * The upstream app builds absolute URLs against this origin from its
+   * forwarded headers (the proxy strips the mount prefix before
+   * forwarding), so absolute redirects to it are self-redirects that must
+   * be re-homed inside the mount. It is also the key for detecting
+   * redirect_url params that escape the mount (Clerk handshake, 2026-09-21).
+   */
+  publicOrigin?: string;
+}
+
+/** Query params that carry a "where to go next" URL (auth handshakes, OAuth). */
+const REDIRECT_URL_PARAMS = ["redirect_url", "redirectUrl"];
+
+function isInsideMount(pathname: string, mount: string): boolean {
+  return pathname === mount || pathname.startsWith(`${mount}/`);
+}
+
+/**
+ * Re-home a redirect_url-style param whose value is an absolute URL on the
+ * proxy's own public origin but outside the mount. The upstream app never
+ * sees the mount prefix (the proxy strips it before forwarding), so auth
+ * handshakes built from forwarded headers — e.g. Clerk's
+ * /v1/client/handshake?redirect_url=https://<origin>/?token=… — point at
+ * the bare origin and the browser escapes the mount ("Cannot GET /").
+ * Returns the outer URL unchanged when there is nothing to fix.
+ */
+function rehomeRedirectParam(
+  outer: string,
+  mount: string,
+  token: string,
+  publicOrigin: string,
+): string {
+  // Bare-relative outers resolve against the mount path already; only
+  // absolute or root-relative outers can carry an escaping param target.
+  const isAbsolute = /^[a-z][a-z0-9+.-]*:/i.test(outer) || outer.startsWith("//");
+  if (!isAbsolute && !outer.startsWith("/")) return outer;
+  let u: URL;
+  try {
+    u = new URL(outer, publicOrigin);
+  } catch {
+    return outer;
+  }
+  let changed = false;
+  for (const name of REDIRECT_URL_PARAMS) {
+    const raw = u.searchParams.get(name);
+    if (!raw) continue;
+    let inner: URL;
+    try {
+      inner = new URL(raw);
+    } catch {
+      continue; // relative or unparseable — not our escape
+    }
+    if (!/^https?:$/.test(inner.protocol)) continue;
+    if (inner.origin !== publicOrigin) continue; // genuinely external
+    if (isInsideMount(inner.pathname, mount)) continue; // already contained
+    const rehomed = `${mount}${withPreviewToken(`${inner.pathname}${inner.search}`, token)}${inner.hash}`;
+    u.searchParams.set(name, `${publicOrigin}${rehomed}`);
+    changed = true;
+  }
+  if (!changed) return outer;
+  return isAbsolute ? u.toString() : `${u.pathname}${u.search}${u.hash}`;
 }
 
 /**
@@ -144,6 +207,13 @@ export interface RewritePreviewLocationOptions {
  *   "/login"                       -> "/preview/<ws>/login?token=T"
  *   "/"                            -> "/preview/<ws>/?token=T"
  *   "http://localhost:<port>/x"    -> "/preview/<ws>/x?token=T"  (same upstream)
+ *   "https://<publicOrigin>/x"     -> "/preview/<ws>/x?token=T"  (self-origin;
+ *                                     requires opts.publicOrigin)
+ *   "https://clerk…/handshake?redirect_url=https%3A%2F%2F<publicOrigin>%2F…"
+ *                                  -> outer URL passes through, but the
+ *                                     redirect_url param is re-homed under
+ *                                     the mount (Clerk handshake escape,
+ *                                     2026-09-21)
  * Untouched:
  *   "https://accounts.example/…"   external origin — must pass through
  *   "//cdn.example/…"              protocol-relative external
@@ -156,32 +226,47 @@ export function rewritePreviewLocation(
   const value = location.trim();
   if (!value) return location;
   const mount = `/preview/${encodeURIComponent(opts.workspaceId)}`;
+  const publicOrigin = opts.publicOrigin?.trim().replace(/\/+$/, "");
 
-  // Already inside the mount — keep it, just make sure the token survives.
+  let rewritten: string;
   if (value === mount || value.startsWith(`${mount}/`) || value.startsWith(`${mount}?`)) {
-    return withPreviewToken(value, opts.token);
-  }
-
-  // Protocol-relative or scheme-qualified absolute URL.
-  if (value.startsWith("//")) return location;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
+    // Already inside the mount — keep it, just make sure the token survives.
+    rewritten = withPreviewToken(value, opts.token);
+  } else if (value.startsWith("//")) {
+    // Protocol-relative external — pass through (redirect params still checked below).
+    rewritten = value;
+  } else if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
+    // Scheme-qualified absolute URL.
+    rewritten = value;
     try {
       const u = new URL(value);
       const port = Number(u.port || (u.protocol === "https:" ? 443 : 80));
-      if (UPSTREAM_HOSTS.has(u.hostname) && port === opts.upstreamPort) {
-        return `${mount}${withPreviewToken(`${u.pathname}${u.search}`, opts.token)}${u.hash}`;
+      const isLoopback = UPSTREAM_HOSTS.has(u.hostname) && port === opts.upstreamPort;
+      // The upstream app builds absolute URLs against the public origin from
+      // its forwarded headers (the proxy strips the mount prefix before
+      // forwarding) — those are self-redirects, not external links.
+      const isSelfOrigin = !!publicOrigin && u.origin === publicOrigin;
+      if (isLoopback || isSelfOrigin) {
+        rewritten = `${mount}${withPreviewToken(`${u.pathname}${u.search}`, opts.token)}${u.hash}`;
       }
     } catch {
       // Unparseable absolute URL — pass through untouched.
     }
-    return location;
+  } else if (value.startsWith("/")) {
+    // Root-relative — re-home under the mount.
+    rewritten = `${mount}${withPreviewToken(value, opts.token)}`;
+  } else {
+    // Bare relative ("login") — resolves inside the mount already; add token.
+    rewritten = withPreviewToken(value, opts.token);
   }
 
-  // Root-relative — re-home under the mount.
-  if (value.startsWith("/")) {
-    return `${mount}${withPreviewToken(value, opts.token)}`;
+  // Auth-handshake escape hatch: an absolute redirect can carry a
+  // redirect_url param pointing at the public origin but outside the mount
+  // (Clerk builds it from forwarded headers after the mount prefix is
+  // stripped). Re-home the param target so the handshake lands back inside
+  // the mount instead of on "Cannot GET /".
+  if (publicOrigin) {
+    rewritten = rehomeRedirectParam(rewritten, mount, opts.token, publicOrigin);
   }
-
-  // Bare relative ("login") — resolves inside the mount already; add token.
-  return withPreviewToken(value, opts.token);
+  return rewritten;
 }
