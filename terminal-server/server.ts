@@ -45,7 +45,6 @@ import {
 import { resolveWorkspacePath as resolveWorkspacePathSecure, validateWritePayload } from "./workspace/WorkspaceSecurity";
 import { deleteResolvedPath } from "./workspace/FileService";
 import { replaceScaffoldingForWrite, SCAFFOLD_DIR_NAME } from "./workspace/scaffold";
-import { checkPreviewToken } from "./preview-auth";
 import { evaluateWorkspaceRoot } from "./workspace/durability";
 import {
   startPreview,
@@ -55,18 +54,8 @@ import {
   getPreviewStatus,
   getPreviewLogs,
   verifyPreviewHealth,
-  decideProxiedEntryResponse,
-  markPreviewRootRouteMissing,
-  markPreviewBackendUnreachable,
-  buildPreviewErrorPage,
-  type PreviewStatus,
 } from "./preview/PreviewManager";
-import {
-  shouldInjectInspector,
-  injectInspector as injectInspectorScript,
-  INSPECTOR_DROPPED_HEADERS,
-} from "./preview/inspector";
-import { rewritePreviewAssetUrls } from "./preview/asset-urls";
+import { registerPreviewProxyRoute } from "./preview/proxy";
 import { registerWorkspaceRoutes } from "./workspace-routes";
 import { dispatchCommand } from "./command-bridge";
 import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manager";
@@ -1173,7 +1162,7 @@ app.get("/internal/workspace/:workspaceId/preview/logs", requireInternalServiceA
 });
 
 /**
- * GET /preview/:workspaceId/*
+ * /preview/:workspaceId/*
  * Public preview proxy — proxies HTTP requests to the workspace's
  * dev server running on localhost:<port>. This is how the browser
  * accesses the running application.
@@ -1181,120 +1170,11 @@ app.get("/internal/workspace/:workspaceId/preview/logs", requireInternalServiceA
  * Access is protected by a preview token query parameter (or
  * X-Preview-Token header). The check is FAIL-CLOSED: when
  * PREVIEW_ACCESS_TOKEN is not configured, all requests are denied.
+ *
+ * Handler lives in preview/proxy.ts so the routing-parity regression
+ * tests exercise the same code registered here.
  */
-app.use("/preview/:workspaceId", async (req: AuthenticatedRequest, res: Response) => {
-  const workspaceId = req.params.workspaceId;
-
-  // Verify preview token — fail CLOSED when the token is not configured.
-  // (checkPreviewToken denies every request if PREVIEW_ACCESS_TOKEN is unset.)
-  const previewToken = String(req.query.token || req.headers["x-preview-token"] || "");
-  const previewAuth = checkPreviewToken(previewToken);
-  if (!previewAuth.ok) {
-    res.status(previewAuth.status).json({ error: previewAuth.error, errorCode: previewAuth.errorCode });
-    return;
-  }
-
-  const status = getPreviewStatus(workspaceId);
-  if (status.status !== "ready" || !status.port) {
-    res.status(503).json({
-      error: status.error ?? "Preview not ready",
-      errorCode: status.errorCode ?? "preview_not_ready",
-      status: status.status,
-      command: status.command,
-      framework: status.framework,
-    });
-    return;
-  }
-
-  // Proxy the request to localhost:<port>
-  const strippedPath = req.url.replace(/^\/preview\/[^/]+/, "");
-  const targetUrl = `http://127.0.0.1:${status.port}${strippedPath}`;
-  try {
-    const proxyResp = await fetch(targetUrl, {
-      method: req.method,
-      headers: {
-        ...req.headers as Record<string, string>,
-        host: `127.0.0.1:${status.port}`,
-      },
-      body: ["GET", "HEAD"].includes(req.method) ? undefined : (req as any),
-      redirect: "manual",
-    });
-
-    // Entry-path servability guard (2026-09-18): a 404 on / means the
-    // process on the preview port is not serving the app. The old code
-    // forwarded the backend's white "Cannot GET /" while the UI still
-    // said "Preview ready". Flip the runtime to failed and serve an
-    // honest error page instead — never the raw backend 404.
-    if (decideProxiedEntryResponse(strippedPath, proxyResp.status) === "entry_route_missing") {
-      markPreviewRootRouteMissing(workspaceId);
-      res.status(502).setHeader("content-type", "text/html; charset=utf-8");
-      res.send(buildPreviewErrorPage({
-        heading: "Preview isn't serving the app",
-        message: "The preview server answered, but the app entry route (/) returned 404 — the process on the preview port is not serving your project. This is usually a stale or wrong dev server holding the port.",
-        command: status.command,
-        framework: status.framework,
-        errorCode: "preview_root_route_missing",
-        workspaceId,
-      }));
-      return;
-    }
-
-    // Successful HTML documents get the inspector bridge injected so the
-    // Studio iframe can offer element selection across origins.
-    const contentType = proxyResp.headers.get("content-type") ?? "";
-    const injectInspector = shouldInjectInspector(proxyResp.status, contentType);
-
-    // Forward status, headers, and body
-    res.status(proxyResp.status);
-    proxyResp.headers.forEach((value, key) => {
-      const header = key.toLowerCase();
-
-      // Express manages transfer-encoding. Preview responses must also be
-      // frameable by Studio even when the project itself sends DENY/SAMEORIGIN.
-      // Studio's parent CSP still controls which preview hosts may be embedded.
-      if (header === "transfer-encoding" || header === "x-frame-options") {
-        return;
-      }
-
-      // Rewritten bodies have a new length and are no longer encoded.
-      if (injectInspector && INSPECTOR_DROPPED_HEADERS.has(header)) {
-        return;
-      }
-
-      res.setHeader(key, value);
-    });
-
-    const body = await proxyResp.arrayBuffer();
-    if (injectInspector) {
-      // Rewrite document-local URLs so subresources stay inside the
-      // /preview/:workspaceId mount and carry the preview token —
-      // root-relative refs ("/assets/x", "/_next/...") otherwise escape
-      // the mount (404) and relative refs lose auth (401).
-      const rewritten = rewritePreviewAssetUrls(
-        Buffer.from(body).toString("utf8"),
-        { workspaceId, token: previewToken, pagePath: strippedPath },
-      );
-      res.send(injectInspectorScript(rewritten));
-      return;
-    }
-    res.send(Buffer.from(body));
-  } catch (err) {
-    // The backend died between the status check and the proxy (or was
-    // never reachable). An iframe showing raw JSON next to a green
-    // "Preview ready" badge is the same lie as the white 404 — flip the
-    // runtime and serve the honest error page instead.
-    markPreviewBackendUnreachable(workspaceId);
-    res.status(502).setHeader("content-type", "text/html; charset=utf-8");
-    res.send(buildPreviewErrorPage({
-      heading: "Preview dev server unreachable",
-      message: "The preview proxy could not reach the dev server — it may have crashed after reporting ready.",
-      command: status.command,
-      framework: status.framework,
-      errorCode: "preview_dev_server_failed",
-      workspaceId,
-    }));
-  }
-});
+registerPreviewProxyRoute(app);
 
 function getUserWorkspace(userId: string) {
   const workspace = resolve(WORKSPACE_ROOT, userId);
