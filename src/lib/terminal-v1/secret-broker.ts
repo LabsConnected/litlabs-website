@@ -196,6 +196,98 @@ export class SecretBroker {
   }
 
   /**
+   * List secrets scoped strictly to one project (excludes user-scoped).
+   * Used by the Studio secrets UI — the owner manages per-project keys.
+   */
+  async listProjectSecrets(userId: string, projectId: string): Promise<SecretMetadata[]> {
+    const { data, error } = await this.client
+      .from("terminal_secrets")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("project_id", projectId)
+      .order("created_at", { ascending: false });
+
+    if (error) throw new Error(`Failed to list project secrets: ${error.message}`);
+    return (data as SecretRow[]).map(rowToMetadata);
+  }
+
+  /**
+   * Find a project-scoped secret by name (for upsert).
+   */
+  async getProjectSecretByName(
+    userId: string,
+    projectId: string,
+    name: string,
+  ): Promise<SecretMetadata | null> {
+    const { data, error } = await this.client
+      .from("terminal_secrets")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("project_id", projectId)
+      .eq("name", name)
+      .maybeSingle();
+
+    if (error) throw new Error(`Failed to get secret: ${error.message}`);
+    if (!data) return null;
+    return rowToMetadata(data as SecretRow);
+  }
+
+  /**
+   * Create or replace a project-scoped secret. Returns metadata (never the value).
+   */
+  async upsertProjectSecret(input: {
+    userId: string;
+    projectId: string;
+    name: string;
+    value: string;
+    description?: string;
+    secretType?: string;
+  }): Promise<SecretMetadata> {
+    const existing = await this.getProjectSecretByName(input.userId, input.projectId, input.name);
+    if (existing) {
+      await this.updateValue(existing.secretId, input.userId, input.value);
+      const refreshed = await this.getById(existing.secretId, input.userId);
+      // getById re-checks ownership; fall back to the stale metadata if it vanished mid-write.
+      return refreshed ?? existing;
+    }
+    return this.create({
+      userId: input.userId,
+      projectId: input.projectId,
+      name: input.name,
+      description: input.description,
+      value: input.value,
+      secretType: input.secretType ?? "generic",
+      scope: "project",
+    });
+  }
+
+  /**
+   * Decrypt a single secret's value (ownership-checked). Used to derive
+   * display fingerprints — callers must never return the value itself.
+   */
+  async decryptValue(secretId: string, userId: string): Promise<string | null> {
+    const { data, error } = await this.client
+      .from("terminal_secrets")
+      .select("encrypted_value, encryption_iv, encryption_tag")
+      .eq("secret_id", secretId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error) throw new Error(`Failed to read secret: ${error.message}`);
+    if (!data) return null;
+    const row = data as Pick<SecretRow, "encrypted_value" | "encryption_iv" | "encryption_tag">;
+    try {
+      return decryptSecret({
+        encryptedValue: row.encrypted_value,
+        iv: row.encryption_iv,
+        tag: row.encryption_tag,
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * List secrets for a specific project (includes user-scoped secrets).
    */
   async listForProject(userId: string, projectId: string): Promise<SecretMetadata[]> {
