@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
@@ -18,7 +17,7 @@ import {
 type CreateIntent = {
   label: string;
   description: string;
-  href: string;
+  seed: string;
   icon: LucideIcon;
 };
 
@@ -26,43 +25,43 @@ export const CREATE_INTENTS: CreateIntent[] = [
   {
     label: "Website",
     description: "Landing pages, sites, and web apps — built, previewed, and deployed.",
-    href: "/studio?tool=chat&mode=website",
+    seed: "Build me a website",
     icon: Globe,
   },
   {
     label: "Image",
     description: "Generate and edit images, then drop them into a project.",
-    href: "/studio?creator=image",
+    seed: "Generate artwork",
     icon: ImageIcon,
   },
   {
     label: "Video",
     description: "Clips and motion content generated into your asset library.",
-    href: "/studio?tool=chat&mode=video",
+    seed: "Make a video",
     icon: Video,
   },
   {
     label: "Music & Audio",
     description: "Songs, loops, and sound — saved as reusable assets.",
-    href: "/studio?tool=chat&mode=music",
+    seed: "Make me a song",
     icon: Music,
   },
   {
     label: "Code",
     description: "Start from the code workspace with LiTT alongside.",
-    href: "/studio?tool=chat&mode=code",
+    seed: "Build me an app",
     icon: Code2,
   },
   {
     label: "Design",
     description: "Freeform design canvas for layouts and visuals.",
-    href: "/studio?tool=design",
+    seed: "Design a new interface",
     icon: Palette,
   },
   {
     label: "Game",
     description: "Describe a game — LiTT builds it as a playable web project.",
-    href: "/studio?tool=game",
+    seed: "Build me a game",
     icon: Gamepad2,
   },
 ];
@@ -178,10 +177,14 @@ export function CreateExperience({
           {CREATE_INTENTS.map((intent) => {
             const Icon = intent.icon;
             return (
-              <Link
+              <button
                 key={intent.label}
-                href={intent.href}
-                className="group flex min-h-24 items-center gap-3 rounded-xl border p-3 transition hover:-translate-y-0.5 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                type="button"
+                onClick={() => {
+                  setPrompt(intent.seed);
+                  setRoutingMessage(null);
+                }}
+                className="group flex min-h-24 items-center gap-3 rounded-xl border p-3 text-left transition hover:-translate-y-0.5 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
                 style={{ borderColor: "rgba(255,255,255,0.07)", background: "rgba(18,18,21,0.6)" }}
               >
                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg" style={{ background: "rgba(167,139,250,0.12)", color: "#c4b5fd" }}>
@@ -191,7 +194,7 @@ export function CreateExperience({
                   <span className="block text-sm font-semibold" style={{ color: "#fafafa" }}>{intent.label}</span>
                   <span className="mt-1 line-clamp-2 block text-[11px] leading-4" style={{ color: "#71717a" }}>{intent.description}</span>
                 </span>
-              </Link>
+              </button>
             );
           })}
         </div>
