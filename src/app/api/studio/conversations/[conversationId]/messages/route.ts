@@ -819,6 +819,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               safeEvent({ type: "deploy_result", success: evt.success, productionUrl: evt.productionUrl, error: evt.error });
             } else if (evt.type === "deploy_verify") {
               safeEvent({ type: "deploy_verify", url: evt.url, success: evt.success, detail: evt.detail });
+            } else if (evt.type === "step_timing") {
+              safeEvent({ type: "step_timing", step: evt.step, stepDurationMs: evt.stepDurationMs, elapsedMs: evt.elapsedMs });
             }
           });
 

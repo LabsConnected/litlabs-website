@@ -94,8 +94,8 @@ export interface AgentLoopConfig {
 }
 
 export const DEFAULT_LOOP_CONFIG: AgentLoopConfig = {
-  maxSteps: 20,
-  maxRuntimeMs: 600_000, // 10 minutes — enough for full build+preview+deploy
+  maxSteps: 50,
+  maxRuntimeMs: 1_800_000, // 30 minutes — a real multi-file build needs the room (was 10 min)
   maxOutputChars: 50_000,
   maxRetries: 2,
   executionMode: "act",
@@ -469,11 +469,13 @@ export async function runAgentLoopV2(
     }
 
     stepsUsed++;
+    const stepStartTime = Date.now();
     localProgress.emit({ type: "phase", phase: "call_llm", step: stepsUsed });
     localProgress.emit({ type: "status", summary: `Step ${stepsUsed}: reasoning with ${cfg.model ?? "default model"}` });
 
     // Call LLM with tools (with automatic fallback)
     let llmResponse;
+    const llmStartTime = Date.now();
     try {
       llmResponse = await callLLMWithTools(
         cfg.systemPrompt,
@@ -489,15 +491,19 @@ export async function runAgentLoopV2(
           signal: cfg.signal,
         },
       );
+      const llmDurationMs = Date.now() - llmStartTime;
       if (llmResponse.responseShape && llmResponse.provider) {
         localProgress.emit({ type: "model_response", provider: llmResponse.provider, model: llmResponse.model, ...llmResponse.responseShape, finishReason: llmResponse.finishReason });
       }
-      // Emit model routing event so LiTT Live shows which provider/model was actually used
+      // Emit model routing event so LiTT Live shows which provider/model was actually used.
+      // latencyMs records how long the model call took, so a slow step can be
+      // attributed to the model call vs tool execution (tool_result has durationMs).
       localProgress.emit({
         type: "model_routing",
         model: llmResponse.model,
         provider: llmResponse.provider ?? "unknown",
         fallbackFrom: cfg.model && llmResponse.model !== cfg.model ? cfg.model : undefined,
+        latencyMs: llmDurationMs,
       });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -900,6 +906,15 @@ export async function runAgentLoopV2(
     if (!batchHasMutation) {
       mutationBatchPending = false;
     }
+
+    // Per-step timing: total step duration + cumulative elapsed, so the work log
+    // can show exactly where the minutes went on a slow build.
+    localProgress.emit({
+      type: "step_timing",
+      step: stepsUsed,
+      stepDurationMs: Date.now() - stepStartTime,
+      elapsedMs: Date.now() - startTime,
+    });
   }
 
   // Run build-fix loop if mutations were made and enabled
