@@ -1,13 +1,18 @@
 -- Seed: Discover welcome posts from the LiTT team
 -- ============================================================
--- HOW TO RUN (Larry, ~1 minute, Supabase dashboard):
+-- MANUAL SEED — not a migration. Run in Supabase Dashboard →
+-- SQL Editor → New Query → Run (same convention as rls_fix.sql).
+-- Kept OUT of supabase/migrations/ on purpose: this inserts
+-- production content, it must not replay on `supabase db reset`.
+--
+-- HOW TO RUN (Larry, ~1 minute):
 --   1. Open the Supabase dashboard for the production project
 --      ("supabase-sky-candle").
 --   2. Go to SQL Editor → New query.
 --   3. Paste this entire file and click Run.
 --   4. Open https://www.litlabs.net/discover — the welcome posts
---      should be there. (The "Community" nav link ships in the
---      companion code PR; merge that first or the nav won't show it.)
+--      should be there. (Merge the companion code PR first so the
+--      "Community" nav link is live.)
 --
 -- IDEMPOTENT: safe to re-run. The team user is upserted by email and
 -- posts are inserted only when the team has none yet, so re-runs are
