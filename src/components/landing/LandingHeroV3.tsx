@@ -71,7 +71,7 @@ export function LandingHeroV3() {
             LiTT plans, builds, edits real projects, uses tools, verifies the work, and helps you ship—all from one workspace.
           </p>
 
-          <div className="litt-hero-reveal litt-hero-step-4 mt-9 flex flex-col gap-3 sm:flex-row">
+          <div className="litt-hero-reveal litt-hero-step-4 mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
             <Link
               href={primaryHref}
               className="litt-primary-button"
@@ -79,14 +79,14 @@ export function LandingHeroV3() {
             >
               <Zap size={17} fill="currentColor" /> {primaryLabel} <ArrowRight size={16} />
             </Link>
+            {/* Larry's site audit (2026-09-22, issue #469): single primary CTA.
+                "Watch LiTT work" is a plain text link, not a second button. */}
             <a
               href="#how-it-works"
-              className="litt-secondary-button"
+              className="inline-flex items-center gap-2 px-1 py-3 text-sm font-bold text-white/65 underline decoration-white/25 underline-offset-[6px] transition hover:text-white hover:decoration-white/60"
               onClick={() => track("watch_litt_click", { source: "hero" })}
             >
-              <span className="grid h-7 w-7 place-items-center rounded-full bg-white/8">
-                <Play size={11} fill="currentColor" />
-              </span>
+              <Play size={13} fill="currentColor" />
               Watch LiTT work
             </a>
           </div>
