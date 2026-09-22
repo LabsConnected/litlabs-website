@@ -845,7 +845,7 @@ export default function ShowcaseSignedIn() {
 
       {/* Back nav */}
       <div className="w-full px-6 pb-12">
-        <Link href="/" className="btn btn-ghost text-xs">
+        <Link href="/studio" className="btn btn-ghost text-xs">
           ← Back to Studio
         </Link>
       </div>
