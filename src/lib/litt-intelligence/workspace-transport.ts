@@ -211,6 +211,17 @@ export async function createWorkspaceTransport(
 
 // ─── Implementation ───────────────────────────────────────────────
 
+/**
+ * Every transport call must be self-bounding. An unanswered /ws-files
+ * fetch (dead socket, stalled terminal-server pod) used to hang its tool
+ * call forever — the agent loop's runtime budget only checks between
+ * steps, so one wedged read could strand a run in 'streaming' with no
+ * persisted outcome. These per-request deadlines make the failure
+ * explicit and recoverable instead.
+ */
+const FILE_OP_TIMEOUT_MS = 30_000;
+const BINARY_WRITE_TIMEOUT_MS = 120_000;
+
 class WorkspaceTransportImpl implements WorkspaceTransport {
   constructor(
     public readonly projectId: string,
@@ -240,7 +251,7 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
   async listFiles(path: string): Promise<{ entries: Array<{ name: string; type: string }> }> {
     const resp = await fetch(
       `${terminalBase()}/ws-files?path=${encodeURIComponent(path || ".")}`,
-      { headers: this.wsFileHeaders },
+      { headers: this.wsFileHeaders, signal: AbortSignal.timeout(FILE_OP_TIMEOUT_MS) },
     );
     if (!resp.ok) {
       const err = await resp.text().catch(() => "");
@@ -265,6 +276,7 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
       method: "POST",
       headers: this.wsFileHeaders,
       body: JSON.stringify({ path, encoding }),
+      signal: AbortSignal.timeout(FILE_OP_TIMEOUT_MS),
     });
     if (!resp.ok) {
       const err = await resp.text().catch(() => "");
@@ -290,6 +302,7 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
       method: "POST",
       headers: this.wsFileHeaders,
       body: JSON.stringify({ path, content }),
+      signal: AbortSignal.timeout(FILE_OP_TIMEOUT_MS),
     });
     if (!resp.ok) {
       const err = await resp.text().catch(() => "");
@@ -303,6 +316,7 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
       method: "POST",
       headers: this.wsFileHeaders,
       body: JSON.stringify({ path, content: base64Content, encoding: "base64" }),
+      signal: AbortSignal.timeout(BINARY_WRITE_TIMEOUT_MS),
     });
     if (!resp.ok) {
       const err = await resp.text().catch(() => "");
@@ -316,6 +330,7 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
       method: "POST",
       headers: this.wsFileHeaders,
       body: JSON.stringify({ path }),
+      signal: AbortSignal.timeout(FILE_OP_TIMEOUT_MS),
     });
     if (!resp.ok) {
       const err = await resp.text().catch(() => "");
@@ -329,6 +344,7 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
       method: "POST",
       headers: this.wsFileHeaders,
       body: JSON.stringify({ path }),
+      signal: AbortSignal.timeout(FILE_OP_TIMEOUT_MS),
     });
     if (!resp.ok) {
       const err = await resp.text().catch(() => "");
@@ -342,6 +358,7 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
       method: "POST",
       headers: this.wsFileHeaders,
       body: JSON.stringify({ path, newPath }),
+      signal: AbortSignal.timeout(FILE_OP_TIMEOUT_MS),
     });
     if (!resp.ok) {
       const err = await resp.text().catch(() => "");

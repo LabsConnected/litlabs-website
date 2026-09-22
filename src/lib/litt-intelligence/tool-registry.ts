@@ -21,6 +21,80 @@ type V2Module = typeof import("./tool-handlers-v2");
 type V2Handler = (inputs: Record<string, unknown>, transport: WorkspaceTransport) => Promise<unknown>;
 
 /**
+ * Thrown when a tool handler exceeds its declared `timeoutMs`.
+ * Every registered tool declares a timeoutMs — until now it was
+ * documentation only: `execute()` awaited the handler with no bound, so a
+ * wedged workspace call (dead socket, stalled terminal-server) could hang
+ * the agent loop past every runtime budget and leave the run stuck in
+ * 'streaming' with no persisted outcome.
+ */
+export class ToolExecutionTimeoutError extends Error {
+  constructor(
+    public readonly toolId: string,
+    public readonly timeoutMs: number,
+  ) {
+    super(`Tool "${toolId}" timed out after ${timeoutMs}ms`);
+    this.name = "ToolExecutionTimeoutError";
+  }
+}
+
+/** Thrown when the run's abort signal fires while a tool is in flight. */
+export class ToolExecutionAbortedError extends Error {
+  constructor(public readonly toolId: string) {
+    super(`Tool "${toolId}" was aborted`);
+    this.name = "ToolExecutionAbortedError";
+  }
+}
+
+/** Safety bound for tools that somehow lack a declared timeoutMs. */
+const DEFAULT_TOOL_TIMEOUT_MS = 120_000;
+
+/**
+ * Bound a tool invocation by its declared deadline and the run's abort
+ * signal. A timeout/abort rejects the awaited promise so the loop records
+ * a truthful tool failure and can recover — the underlying handler may
+ * still settle in the background (transports carry their own fetch
+ * timeouts), but the run is never held hostage by it.
+ */
+function withExecutionDeadline<T>(
+  run: () => Promise<T>,
+  timeoutMs: number,
+  toolId: string,
+  signal?: AbortSignal,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      finish(() => reject(new ToolExecutionTimeoutError(toolId, timeoutMs)));
+    }, timeoutMs);
+    // A detached run must not keep the process alive for its timeout.
+    (timer as { unref?: () => void }).unref?.();
+    const onAbort = () => {
+      finish(() => reject(new ToolExecutionAbortedError(toolId)));
+    };
+    function finish(fn: () => void): void {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      fn();
+    }
+    if (signal) {
+      if (signal.aborted) {
+        clearTimeout(timer);
+        reject(new ToolExecutionAbortedError(toolId));
+        return;
+      }
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+    run().then(
+      (value) => finish(() => resolve(value)),
+      (err) => finish(() => reject(err)),
+    );
+  });
+}
+
+/**
  * Workspace-scoped tools MUST execute through the WorkspaceTransport
  * (authenticated, workspace-rooted terminal-server endpoints). They must
  * never fall back to the web service's own filesystem — process.cwd() on
@@ -382,6 +456,7 @@ class ToolRegistry {
       hasApproval?: boolean;
       availableCapabilities?: string[];
       transport?: unknown;
+      signal?: AbortSignal;
     } = {},
   ): Promise<{ ok: true; result: unknown } | { ok: false; error: string }> {
     const tool = this.tools.get(id);
@@ -433,8 +508,19 @@ class ToolRegistry {
       const handler = typeof handlerEntry === "function" && handlerEntry.length === 0
         ? await (handlerEntry as () => Promise<(inputs: Record<string, unknown>, transport?: unknown) => Promise<unknown>>)()
         : handlerEntry as (inputs: Record<string, unknown>, transport?: unknown) => Promise<unknown>;
-      const result = await handler(inputs, options.transport);
-      const finalResult = await maybeAutoInsertGeneratedImage(id, result, options.transport);
+      const timeoutMs =
+        tool.timeoutMs && tool.timeoutMs > 0 ? tool.timeoutMs : DEFAULT_TOOL_TIMEOUT_MS;
+      const finalResult = await withExecutionDeadline(
+        async () =>
+          maybeAutoInsertGeneratedImage(
+            id,
+            await handler(inputs, options.transport),
+            options.transport,
+          ),
+        timeoutMs,
+        id,
+        options.signal,
+      );
       return { ok: true, result: finalResult };
     } catch (err) {
       return {
