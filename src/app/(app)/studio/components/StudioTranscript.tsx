@@ -6,6 +6,12 @@ import ReactMarkdown from "react-markdown";
 import { UserMessageAvatar } from "@/components/chat/MessageAvatar";
 import { parseJarvisActions } from "@/lib/litt-context";
 import { ActionChips } from "./canvas/ActionChips";
+import {
+  ExecutionBlock,
+  ExecutionDetailsExpander,
+  toolActivityDotColor,
+  type ExecutionDetailRecord,
+} from "./ExecutionBlock";
 import { useVoiceSession } from "@/app/(app)/studio/context/VoiceSessionContext";
 import { useTerminalStore } from "@/stores/useTerminalStore";
 import {
@@ -100,6 +106,25 @@ function deriveWorkLog(
   return { label, color };
 }
 
+/* ── Per-run execution details (raw low-level records) ─────────────── */
+
+/**
+ * Raw low-level records for a completed run's Details expander.
+ *
+ * `toolActivity` is the recorded stream of what the run did (tool calls,
+ * build checks, checkpoints — including low-level reads). These are factual
+ * records only: they sit behind the collapsed expander and never pretend to
+ * be the run's result. The result is the evidence-derived verdict line.
+ */
+function executionDetailsFor(message: ChatMessage): ExecutionDetailRecord[] {
+  const activity = message.toolActivity ?? [];
+  return activity.map((record, index) => ({
+    id: `${message.id ?? "msg"}-activity-${index}`,
+    summary: record.summary?.trim() ? record.summary : record.toolId.replace(/_/g, " "),
+    dotColor: toolActivityDotColor(record.success),
+  }));
+}
+
 /* ── Live run progress shown inline in the streaming assistant bubble ── */
 
 /** Concise headline labels for the chat surface — no low-level noise. */
@@ -160,6 +185,13 @@ function StreamingProgress() {
     .filter((e) => !e.lowLevel && !PROGRESS_HIDDEN_TYPES.has(e.type) && e.summary?.trim())
     .slice(-4);
 
+  // The full raw event firehose — tool calls, step ticks, retries, internal
+  // status transitions — stays behind the collapsed Details expander. These
+  // are factual records of what happened; they never claim to be the result.
+  const rawDetails: ExecutionDetailRecord[] = events
+    .filter((e) => e.summary?.trim())
+    .map((e) => ({ id: e.id, summary: e.summary, dotColor: eventDotColor(e) }));
+
   return (
     <div data-testid="studio-live-progress" className="mb-2 border-b pb-2" style={{ borderColor: "rgba(155,77,255,0.14)" }} aria-live="polite">
       <div className="flex items-center gap-2 text-[11px] font-bold" style={{ color: "var(--text-main)" }}>
@@ -180,6 +212,7 @@ function StreamingProgress() {
           ))}
         </ul>
       )}
+      <ExecutionDetailsExpander details={rawDetails} />
     </div>
   );
 }
@@ -687,24 +720,20 @@ export default function StudioTranscript({
                   />
                 )}
                 {/*
-                  Work log — derived ONLY from execution evidence. A message
-                  with no execution evidence renders no work log at all: a
-                  conversational reply is not completed work, and `actions`
-                  are proposals the user can click, not work that happened.
+                  Execution lane — visually distinct from the conversation
+                  bubble above. The verdict line is derived ONLY from execution
+                  evidence (see deriveWorkLog); the raw low-level events sit
+                  collapsed behind the Details expander and never claim to be
+                  the run's result. A message with no execution evidence
+                  renders no execution lane at all: a conversational reply is
+                  not completed work, and `actions` are proposals the user can
+                  click, not work that happened.
                 */}
                 {!isUser && !isStreaming && hasContent && workLog && (
-                  <div
-                    data-testid="studio-work-log"
-                    className="mt-1 flex items-center gap-1.5 px-1 text-[9px] font-bold"
-                    style={{ color: "var(--text-muted)" }}
-                  >
-                    <span
-                      className="inline-block h-1.5 w-1.5 rounded-full"
-                      style={{ backgroundColor: workLog.color }}
-                      aria-hidden
-                    />
-                    <span>Work log · {workLog.label}</span>
-                  </div>
+                  <ExecutionBlock
+                    verdict={workLog}
+                    details={executionDetailsFor(message)}
+                  />
                 )}
                 {/* Pinned indicator badge */}
                 {isPinned && (
