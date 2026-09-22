@@ -9,6 +9,7 @@ import {
   listMessages,
   insertMessage,
   updateMessageStatus,
+  touchStreamingMessage,
 } from "@/lib/studio/conversation-service";
 import { resolveAgent, isValidAgentSlug } from "@/lib/studio/agent-registry";
 import { buildStudioContext } from "@/lib/studio/project-resolver";
@@ -29,11 +30,12 @@ import { runAgentLoop } from "@/lib/litt-intelligence/agent-loop";
 import { runAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
 import { findToolCallMarkup, stripToolCallMarkupText } from "@/lib/litt-intelligence/tool-call-markup";
 import { withV1NoToolsDirective } from "@/lib/litt-intelligence/text-lane-guard";
+import { sanitizeTextLaneHistory } from "@/lib/litt-intelligence/toolless-lane-guard";
 import { runLaunchFlow, type LaunchFlowResult } from "@/lib/litt-intelligence/launch-flow";
 import { shouldEnableQualityLoop } from "@/lib/litt-intelligence/quality-loop-flow";
 import { ProgressEmitter, type ProgressEvent } from "@/lib/litt-intelligence/progress-events";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
-import { createPausedRun, getLatestPausedRunForConversation, getPendingPausedRunForConversation } from "@/lib/litt-intelligence/paused-run-store";
+import { createPausedRun, getLatestPausedRunForConversation, getPendingPausedRunForConversation, pausedRunBelongsToMessage } from "@/lib/litt-intelligence/paused-run-store";
 import { getActiveExecution, registerExecution, unregisterExecution } from "@/lib/studio/execution-registry";
 import { resolveTurn } from "@/lib/litt-intelligence/turn-resolver";
 import {
@@ -56,6 +58,20 @@ interface RouteParams {
 // inserting the message, leaving it as "streaming" would render a permanent
 // "LiTT is thinking" bubble on the next load.
 const STALE_STREAMING_MESSAGE_MS = 2 * 60 * 1000;
+
+// How often the running execution heartbeats the assistant message's
+// updated_at. Well under the staleness window so a live run is never
+// misjudged, even across instances or after registry pruning.
+const STREAM_LIVENESS_MS = 30_000;
+
+// Anaphoric follow-ups ("build it", "do that again but lime") name no target.
+// With a project in context, steer the model to ask a short, targeted
+// clarification about what to do on the project instead of a generic chat reply.
+const ANAPHORIC_CLARIFICATION_NUDGE =
+  "The user's latest message is an anaphoric follow-up — it references prior " +
+  "context (words like 'it', 'that', or 'again') and names no explicit target. " +
+  "Do not give a generic chat reply. Ask one short, targeted clarification " +
+  "question about what specifically they want built or changed on their project.";
 
 /**
  * POST /api/studio/conversations/[conversationId]/messages
@@ -272,14 +288,22 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const allMessages = await listMessages(conversation.id, userId);
   const priorMessages = allMessages.filter((m) => m.id !== userMessage.id);
 
-  // 7. Build model history in chronological order
-  const history = priorMessages
-    .filter((m) => m.status === "completed" && (m.role === "user" || m.role === "assistant"))
-    .slice(-HISTORY_LIMIT)
-    .map((m) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-    }));
+  // 7. Build model history in chronological order.
+  // V1 text-lane hygiene: this lane calls the model with NO tools
+  // attached, so a pseudo tool call persisted by an earlier turn would
+  // re-prime the model to emit envelope markup again mid-conversation.
+  // Strip envelope markup from assistant turns before history reaches the
+  // prompt (user turns and backtick-quoted examples are preserved). The
+  // V2 native lane performs its own strip in buildAssistantToolCallMessage.
+  const history = sanitizeTextLaneHistory(
+    priorMessages
+      .filter((m) => m.status === "completed" && (m.role === "user" || m.role === "assistant"))
+      .slice(-HISTORY_LIMIT)
+      .map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      })),
+  );
 
   // 7.5. Resolve ambiguous references in the user message using conversation history.
   // Expands "it", "that", "same thing", "why", etc. into self-contained messages.
@@ -500,6 +524,12 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       executionMode: canonicalCtx.executionMode,
       enableBuildFix: true,
       model: typeof body.model === "string" ? body.model : undefined,
+      // Authenticated user — injected server-side into user-scoped tools
+      // (browser.*) at execution time; the model never supplies userId.
+      userId,
+      // Conversation scope — injected into browser.start_session so the
+      // agent reuses its live browser session across chat turns.
+      conversationId: conversation.id,
       // Quality loop: gate serious ACT/AUTO-mode builds through the
       // UNDERSTAND→VERIFY evidence stages + visual-quality judge.
       qualityLoop: shouldEnableQualityLoop(canonicalCtx.executionMode, conversation.projectId)
@@ -529,6 +559,11 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       v2Transport ?? undefined,
     );
     finalPrompt = v1Result.enrichedPrompt;
+    // Anaphoric follow-up with a project in context: don't let this fall
+    // through to a generic chat reply — nudge toward a targeted clarification.
+    if (conversation.projectId && built.kernelResult.decision.routing.anaphoricFollowUp) {
+      finalPrompt = `${ANAPHORIC_CLARIFICATION_NUDGE}\n\n${finalPrompt}`;
+    }
   }
 
   // 11. Insert pending assistant message
@@ -571,8 +606,15 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     );
 
     if (!reserveResult.ok) {
-      // Insufficient balance — abort BEFORE the model call
-      await updateMessageStatus(assistantMessage.id, userId, "failed");
+      // Insufficient balance — abort BEFORE the model call. Persist the
+      // reason so a reload shows what actually happened, not an empty
+      // failed bubble.
+      await updateMessageStatus(
+        assistantMessage.id,
+        userId,
+        "failed",
+        reserveResult.error || "Insufficient LiTTBits balance — purchase credits to run this agent.",
+      );
       return NextResponse.json(
         {
           error: reserveResult.error || "Insufficient LiTTBits balance",
@@ -675,6 +717,16 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         }
         safeEnqueue(encoder.encode(": keepalive\n\n"));
       }, 15_000);
+
+      // Durable liveness for the run itself: the 'streaming' message's
+      // updated_at is bumped while this process is alive and working, so a
+      // stale timestamp is proof the executor is gone — on THIS or any
+      // other instance. The update is status-guarded and can never
+      // resurrect a terminal/awaiting_approval write that already landed.
+      const livenessTimer = setInterval(() => {
+        touchStreamingMessage(assistantMessage.id, userId).catch(() => {});
+      }, STREAM_LIVENESS_MS);
+      (livenessTimer as { unref?: () => void }).unref?.();
 
       let assistantText = "";
       let reasoningText = "";
@@ -806,6 +858,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
 
           // If V2 paused for approval, persist the paused state and flag it
           let pausedRunId: string | undefined;
+          let pausedRunPersistFailed = false;
           if (v2Result?.pendingApproval) {
             try {
               const pausedRun = await createPausedRun({
@@ -822,12 +875,20 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
                 checkpointId: v2Result.checkpoint?.checkpointId ?? null,
                 qualityLoopState: v2Result.qualityLoopState,
+                deferredToolCalls: v2Result.pendingApproval.deferredToolCalls,
+                stepsUsed: v2Result.pendingApproval.stepsUsedAtPause,
+                hadInterveningMutation: v2Result.pendingApproval.hadInterveningMutationAtPause,
               });
               pausedRunId = pausedRun.id;
             } catch (pausedErr) {
-              // If persistence fails, still send the approval event without a
-              // resume ID — but log it: without pausedRunId the client's
-              // Approve button cannot resume anything and becomes a dead end.
+              // If persistence fails, the gate cannot be resumed — there is
+              // no pausedRunId for the Approve button to act on. Emitting
+              // pending_approval anyway would mount a dead card that can
+              // never resolve (2026-09-18 defect: the transcript reconciler
+              // then attributed a stale expired run to this message and
+              // told the user the approval "expired before a decision was
+              // made" within seconds). Fail the turn honestly instead.
+              pausedRunPersistFailed = true;
               studioLog("message:paused_run_persist_failed", {
                 conversationId: conversation.id,
                 projectId: conversation.projectId,
@@ -837,30 +898,53 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               });
             }
 
-            safeEvent({
-              type: "pending_approval",
-              toolId: v2Result.pendingApproval.toolId,
-              reason: v2Result.pendingApproval.reason,
-              inputs: v2Result.pendingApproval.inputs,
-              pausedRunId,
-            });
+            if (!pausedRunPersistFailed) {
+              safeEvent({
+                type: "pending_approval",
+                toolId: v2Result.pendingApproval.toolId,
+                reason: v2Result.pendingApproval.reason,
+                inputs: v2Result.pendingApproval.inputs,
+                pausedRunId,
+              });
+            }
+          }
+
+          // An approval gate that could not be persisted is not actionable —
+          // surface it as a failed turn, never as a phantom approval card.
+          const actionableApproval = v2Result?.pendingApproval && !pausedRunPersistFailed
+            ? v2Result.pendingApproval
+            : undefined;
+          if (pausedRunPersistFailed) {
+            assistantText = "I needed your approval to continue, but the approval request couldn't be saved. Please send your request again and I'll ask for approval once more.";
           }
 
           // A run that produced no response text cannot be reported as
           // completed — empty provider output is a failure, not success.
+          // (A persist-failed approval is not "empty": it failed honestly.)
           const v2Empty = !launchFlowResult?.cancelled
-            && !v2Result?.pendingApproval
+            && !actionableApproval
             && !assistantText.trim();
 
           const finalMessageStatus: MessageStatus = launchFlowResult?.cancelled
             ? "cancelled"
-            : launchFlowResult?.pendingApproval
+            : actionableApproval
               ? "awaiting_approval"
-              : launchFlowResult?.success && !v2Empty
+              : launchFlowResult?.success && !v2Empty && !pausedRunPersistFailed
                 ? "completed"
                 : "failed";
 
-          await updateMessageStatus(assistantMessage.id, userId, finalMessageStatus, assistantText);
+          const statusPersisted = await updateMessageStatus(assistantMessage.id, userId, finalMessageStatus, assistantText);
+          if (statusPersisted === false) {
+            // The run reached a terminal state but the transcript row did
+            // not learn it — the message stays 'streaming' and the GET
+            // reconciler is the only line of defense left. Log loudly so
+            // this is diagnosable instead of surfacing as a mystery
+            // "previous run ended" later.
+            studioLog(`message:terminal_status_write_failed mid=${assistantMessage.id}`, {
+              conversationId: conversation.id,
+              status: finalMessageStatus,
+            });
+          }
           if (agentRunId) {
             const actualCredits = runtimeAgent
               ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
@@ -946,7 +1030,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             model: routedModel,
             latencyMs: launchLatencyMs,
             v2: true,
-            pendingApproval: v2Result?.pendingApproval ?? undefined,
+            pendingApproval: actionableApproval ?? undefined,
             launchStatus: launchFlowResult?.status ?? undefined,
             previewUrl: launchFlowResult?.previewUrl ?? undefined,
             productionUrl: launchFlowResult?.productionUrl ?? undefined,
@@ -1052,7 +1136,10 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             v1MessageStatus,
             v1MarkupHit
               ? "The model produced a tool call in a format this run cannot execute, so nothing was executed."
-              : assistantText || undefined,
+              : assistantText ||
+                  (v1Empty
+                    ? "The model returned an empty response — nothing was produced. Send the request again to retry."
+                    : undefined),
           );
           if (agentRunId) {
             const actualCredits = runtimeAgent
@@ -1184,11 +1271,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         if (!cancelledBySignal) {
           console.error(`[messages-route:${rid}] Stream failed:`, errorMsg, err instanceof Error ? err.stack : "");
         }
+        // Persist WHY the run failed on the transcript row — a failed
+        // message with empty content collapses to the generic stale-stream
+        // fallback on reload and the real error is only in logs.
+        const failureNote = assistantText.trim().length > 0
+          ? `${assistantText.trimEnd()}\n\nThe run failed: ${errorMsg}`
+          : `The run failed before it could produce a result: ${errorMsg}`;
         await updateMessageStatus(
           assistantMessage.id,
           userId,
           cancelledBySignal ? "cancelled" : "failed",
-          cancelledBySignal ? assistantText || undefined : undefined,
+          cancelledBySignal ? assistantText || undefined : failureNote,
         );
         if (agentRunId) {
           settleRun(agentRunId, {
@@ -1233,6 +1326,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         }
       } finally {
         clearInterval(heartbeatTimer);
+        clearInterval(livenessTimer);
         unregisterExecution(conversation.id, executionKey);
         if (!transportOpen) {
           studioLog("message:execution_finished_after_disconnect", {
@@ -1312,45 +1406,84 @@ async function getHandler(req: NextRequest, routeCtx: RouteParams) {
           pausedRunId: pendingRun.id,
           inputs: pendingRun.inputs,
         };
-      } else if (
-        lastAssistant.status === "awaiting_approval" &&
-        !getActiveExecution(conversation.id)
-      ) {
+      } else if (!getActiveExecution(conversation.id)) {
+        // A 'streaming' message is only condemned once it has gone quiet:
+        // the running execution heartbeats updated_at every ~30s, so a
+        // fresh timestamp means the run is provably alive on SOME instance
+        // (or its send is still racing registration). 'awaiting_approval'
+        // carries no such liveness signal — the gate state is checked
+        // immediately.
+        const streamingStale =
+          lastAssistant.status === "streaming" &&
+          Boolean(lastAssistant.updatedAt) &&
+          Number.isFinite(Date.parse(lastAssistant.updatedAt)) &&
+          Date.now() - Date.parse(lastAssistant.updatedAt) > STALE_STREAMING_MESSAGE_MS;
+        const consultRun =
+          lastAssistant.status === "awaiting_approval" || streamingStale;
+
         // The open turn has no resumable gate — the pause died without a
         // writeback (TTL expiry, or a decision writeback that missed).
         // Reconcile the message to a truthful terminal state instead of
         // leaving "Waiting for your approval" mounted forever.
-        const latestRun = await getLatestPausedRunForConversation(conversation.id, userId);
-        if (latestRun?.status === "expired") {
+        //
+        // A paused message can also persist as 'streaming' when the
+        // 'awaiting_approval' status write failed, and a resumed run never
+        // registers in the in-process execution registry — so the durable
+        // run record is consulted for EITHER status before the message is
+        // condemned. The run row is authoritative for what happened: its
+        // runError/runResult carry the real outcome, never a generic
+        // fallback.
+        //
+        // Precision guard: the latest run is only this message's gate when
+        // it was created after the message. Without this, a STALE run from
+        // the conversation's history (e.g. an approval that expired
+        // yesterday) is attributed to a fresh approval whenever the
+        // pending lookup misses — row persist failure, replication lag —
+        // and the user sees "expired before a decision was made" within
+        // seconds of the request (2026-09-18 defect). An unrelated run
+        // leaves the message alone instead of writing a bogus note.
+        const latestRun = consultRun
+          ? await getLatestPausedRunForConversation(conversation.id, userId)
+          : null;
+        const gateRun =
+          latestRun &&
+          pausedRunBelongsToMessage(latestRun.createdAt, lastAssistant.createdAt)
+            ? latestRun
+            : null;
+        // A pending gate that missed the pending lookup, or an approved run
+        // still processing/just claimed, owns this message's writeback —
+        // leave the message alone while the resumed run is in flight.
+        let ownedByLiveRun = false;
+        if (gateRun?.status === "expired") {
           const note = `${lastAssistant.content || "Approval was required."}\n\nThis approval expired before a decision was made — send the request again to continue.`;
           const persisted = await updateMessageStatus(lastAssistant.id, userId, "cancelled", note);
           if (persisted !== false) {
             lastAssistant.status = "cancelled";
             lastAssistant.content = note;
           }
-        } else if (latestRun?.status === "rejected") {
+        } else if (gateRun?.status === "rejected") {
           const note = `${lastAssistant.content || "Approval was required."}\n\nDeclined — the gated action was not performed.`;
           const persisted = await updateMessageStatus(lastAssistant.id, userId, "completed", note);
           if (persisted !== false) {
             lastAssistant.status = "completed";
             lastAssistant.content = note;
           }
-        } else if (latestRun?.status === "approved" && latestRun.runStatus === "failed") {
+        } else if (gateRun?.status === "approved" && gateRun.runStatus === "failed") {
           // The resumed run died without a transcript writeback — the
           // process was killed mid-flight and the stale-run watchdog
           // marked it failed. Reconcile the dead approval card to a
           // truthful terminal state instead of leaving it mounted.
-          const note = `${lastAssistant.content || "Approval was required."}\n\nThe approved run failed before it could finish${latestRun.runError ? ` — ${latestRun.runError}` : ""}. Send the request again to retry.`;
+          const note = `${lastAssistant.content || "Approval was required."}\n\nThe approved run failed before it could finish${gateRun.runError ? ` — ${gateRun.runError}` : ""}. Send the request again to retry.`;
           const persisted = await updateMessageStatus(lastAssistant.id, userId, "failed", note);
           if (persisted !== false) {
             lastAssistant.status = "failed";
             lastAssistant.content = note;
           }
-        } else if (latestRun?.status === "approved" && latestRun.runStatus === "completed") {
+        } else if (gateRun?.status === "approved" && gateRun.runStatus === "completed") {
           // The resumed run finished but its transcript writeback missed.
           // Reconcile to the recorded outcome — a nested gate whose row
           // was never persisted is a dead card and must surface as failed.
-          const result = latestRun.runResult;
+          const result = gateRun.runResult;
           const note = result?.pendingApproval
             ? `${lastAssistant.content || "Approval was required."}\n\nThe run reached a follow-up approval that could not be persisted — send the request again to retry.`
             : result?.finalText?.trim() ||
@@ -1365,31 +1498,31 @@ async function getHandler(req: NextRequest, routeCtx: RouteParams) {
             lastAssistant.status = status;
             lastAssistant.content = note;
           }
+        } else if (gateRun) {
+          ownedByLiveRun = true;
         }
         // approved/processing gates own their writeback — leave the
         // message alone while the resumed run is in flight.
-      } else if (
-        lastAssistant.status === "streaming" &&
-        lastAssistant.updatedAt &&
-        Number.isFinite(Date.parse(lastAssistant.updatedAt)) &&
-        Date.now() - Date.parse(lastAssistant.updatedAt) > STALE_STREAMING_MESSAGE_MS &&
-        !getActiveExecution(conversation.id)
-      ) {
-        // No active execution and no resumable approval means the stream is
-        // stale. Persist a truthful terminal state so reload cannot resurrect
-        // the message as an active thinking indicator.
-        const fallbackContent = lastAssistant.content?.trim()
-          ? lastAssistant.content
-          : "The previous run ended before it produced a result.";
-        const persisted = await updateMessageStatus(
-          lastAssistant.id,
-          userId,
-          "failed",
-          fallbackContent,
-        );
-        if (persisted !== false) {
-          lastAssistant.status = "failed";
-          lastAssistant.content = fallbackContent;
+
+        if (!ownedByLiveRun && !gateRun && streamingStale) {
+          // No active execution, no durable run record, and the message
+          // stopped reporting — the executor is gone (process restart,
+          // crash, or an execution that outlived its in-memory registry
+          // entry). Persist a truthful terminal state so reload cannot
+          // resurrect the message as an active thinking indicator.
+          const fallbackContent = lastAssistant.content?.trim()
+            ? lastAssistant.content
+            : "The previous run ended before it produced a result — the server lost the execution before it could write an outcome (a restart or crash). Retry the request to run it again.";
+          const persisted = await updateMessageStatus(
+            lastAssistant.id,
+            userId,
+            "failed",
+            fallbackContent,
+          );
+          if (persisted !== false) {
+            lastAssistant.status = "failed";
+            lastAssistant.content = fallbackContent;
+          }
         }
       }
     } catch {
