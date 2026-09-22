@@ -587,7 +587,7 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
           </div>
           <div className="flex items-center gap-2">
             <span className="rounded-full border px-2.5 py-1 text-[10px] font-black" style={{ borderColor: "rgba(114,242,56,0.3)", background: "rgba(114,242,56,0.08)", color: "#72F238" }}>
-              {coinBalance ?? "—"} BITS
+              {coinBalance ?? "—"} LiTTBits
             </span>
             <span className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black" style={{ borderColor: "rgba(255,255,255,0.08)", color: genStatus === "generating" ? "#F97316" : "#72F238" }}>
               <span className="h-1.5 w-1.5 rounded-full" style={{ background: genStatus === "generating" ? "#F97316" : "#72F238" }} />
@@ -683,7 +683,7 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
                 <span>{videoModel.label}</span>
                 <span>{aspectRatio}</span>
                 <span>{resolution}</span>
-                <span>{cost} BITS</span>
+                <span>{cost} LiTTBits</span>
               </div>
             </div>
           )}
@@ -742,7 +742,7 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
               className="ml-auto flex items-center gap-2 rounded-xl px-5 py-2 text-xs font-black transition hover:scale-[1.02] active:scale-95 disabled:opacity-40"
               style={{ background: "linear-gradient(135deg, #8B5CF6, #A970FF)", color: "#fff", boxShadow: "0 0 24px rgba(139,92,246,0.3)", minHeight: 40 }}
             >
-              {isGenerating ? <><Loader2 size={14} className="animate-spin" /> Generating...</> : <><Sparkles size={14} /> Generate · {cost} BITS</>}
+              {isGenerating ? <><Loader2 size={14} className="animate-spin" /> Generating...</> : <><Sparkles size={14} /> Generate · {cost} LiTTBits</>}
             </button>
           </div>
 
@@ -855,7 +855,7 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
                       }}>
                         <div className="flex items-center justify-between font-bold">
                           <span>{m.label}</span>
-                          <span className="text-[9px] opacity-60">{m.cost} BITS</span>
+                          <span className="text-[9px] opacity-60">{m.cost} LiTTBits</span>
                         </div>
                         <div className="mt-0.5 text-[9px] opacity-50">{m.desc}</div>
                       </button>
@@ -922,7 +922,7 @@ export default function VideoTool({ initialPrompt }: { initialPrompt?: string | 
                 {/* Estimate */}
                 <div className="flex items-center justify-between rounded-lg border px-3 py-2.5" style={{ borderColor: "rgba(139,92,246,0.2)", background: "rgba(139,92,246,0.05)" }}>
                   <span className="text-[10px] text-white/50">Estimated cost</span>
-                  <span className="text-sm font-black" style={{ color: "#A970FF" }}>{cost} BITS</span>
+                  <span className="text-sm font-black" style={{ color: "#A970FF" }}>{cost} LiTTBits</span>
                 </div>
               </div>
             )}

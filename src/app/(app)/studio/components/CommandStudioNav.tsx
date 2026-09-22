@@ -140,12 +140,12 @@ export default function CommandStudioNav({
         {/* Spacer pushes footer to bottom */}
         <div className="flex-1" />
 
-        {/* BITS balance footer — shows AI credits count */}
+        {/* LiTTBits balance footer — shows AI credits count */}
         <Link
           href="/wallet"
           className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all hover:bg-white/8"
           style={{ color: "var(--text-muted)" }}
-          title={`BITS: ${balance.toLocaleString()}`}
+          title={`LiTTBits: ${balance.toLocaleString()}`}
           aria-label="View wallet"
         >
           <div className="flex flex-col items-center pointer-events-none">
@@ -159,7 +159,7 @@ export default function CommandStudioNav({
               className="text-[7px] font-bold leading-none mt-0.5 uppercase tracking-wider"
               style={{ color: "var(--text-muted)" }}
             >
-              BITS
+              LiTTBits
             </span>
           </div>
           <span
@@ -170,7 +170,7 @@ export default function CommandStudioNav({
               color: "var(--text-primary)",
             }}
           >
-            {balance.toLocaleString()} BITS
+            {balance.toLocaleString()} LiTTBits
           </span>
         </Link>
       </nav>
