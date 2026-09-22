@@ -132,9 +132,10 @@ describe("Navigation routes Music to Studio", () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/app/(app)/create/page.tsx"),
+      path.resolve("src/components/create/CreateExperience.tsx"),
       "utf-8",
     );
+    expect(content).toContain('label: "Music & Audio"');
     expect(content).toContain("/studio?tool=chat&mode=music");
   });
 });
