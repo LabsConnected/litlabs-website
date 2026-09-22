@@ -76,16 +76,46 @@ export function CreateExperience({
 }) {
   const router = useRouter();
   const [prompt, setPrompt] = useState(initialPrompt);
+  const [isRouting, setIsRouting] = useState(false);
+  const [routingMessage, setRoutingMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialPrompt) setPrompt(initialPrompt);
   }, [initialPrompt]);
 
-  const submit = (event: FormEvent<HTMLFormElement>) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const text = prompt.trim();
-    if (!text) return;
-    router.push(`/studio?tool=chat&prompt=${encodeURIComponent(text)}`);
+    if (!text || isRouting) return;
+    setIsRouting(true);
+    setRoutingMessage(null);
+    try {
+      const response = await fetch("/api/litt/intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: text }),
+      });
+      const payload = (await response.json()) as {
+        type?: "intent" | "clarification";
+        request?: { question?: string };
+        result?: { primaryIntent?: string };
+        plan?: { id?: string };
+        error?: string;
+      };
+      if (!response.ok) throw new Error(payload.error || "LiTT could not route that request.");
+      if (payload.type === "clarification") {
+        setRoutingMessage(payload.request?.question || "Tell LiTT what you want to work on.");
+        return;
+      }
+      const params = new URLSearchParams({ tool: "chat", prompt: text });
+      if (payload.result?.primaryIntent) params.set("intent", payload.result.primaryIntent);
+      if (payload.plan?.id) params.set("planId", payload.plan.id);
+      router.push(`/studio?${params.toString()}`);
+    } catch (error) {
+      setRoutingMessage(error instanceof Error ? error.message : "LiTT could not route that request.");
+    } finally {
+      setIsRouting(false);
+    }
   };
 
   return (
@@ -130,13 +160,19 @@ export function CreateExperience({
           />
           <button
             type="submit"
-            disabled={!prompt.trim()}
+            disabled={!prompt.trim() || isRouting}
+            aria-busy={isRouting}
             className="flex min-h-12 items-center justify-center gap-2 rounded-xl px-5 text-sm font-black transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
             style={{ background: "#a78bfa", color: "#0a0012" }}
           >
-            Build with LiTT <ArrowRight size={16} aria-hidden="true" />
+            {isRouting ? "Routing…" : "Build with LiTT"} <ArrowRight size={16} aria-hidden="true" />
           </button>
         </form>
+        {routingMessage && (
+          <p className="mt-3 text-sm" role="status" aria-live="polite" style={{ color: "#fbbf24" }}>
+            {routingMessage}
+          </p>
+        )}
 
         <div className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4" aria-label="Quick create options">
           {CREATE_INTENTS.map((intent) => {

@@ -15,7 +15,8 @@ describe("Dashboard owns the canonical create experience", () => {
   it("uses one shared prompt and creation flow", () => {
     expect(quickStart).toContain("CreateExperience");
     expect(dashboard).toContain('initialPrompt={searchParams.get("prompt")');
-    expect(createExperience).toContain("router.push(`/studio?tool=chat&prompt=");
+    expect(createExperience).toContain('fetch("/api/litt/intent"');
+    expect(createExperience).toContain("params.set(\"intent\"");
     expect(createExperience.match(/onSubmit=\{submit\}/g)).toHaveLength(1);
   });
 

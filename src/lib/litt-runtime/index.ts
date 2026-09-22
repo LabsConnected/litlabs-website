@@ -14,6 +14,9 @@ export { executeRun, executeRunStream, type ExecutionResult } from "./execution-
 export { verifyResult, type VerifiedResult } from "./result-verifier";
 export { auditRun, logLegacyAgentChat, type AuditRunEvent } from "./audit-service";
 export { detectActions, createLiTTStream, buildSseHeaders } from "./response-stream";
+export { routeIntent } from "@/lib/intent-router";
+export { buildPlan, validatePlan } from "@/lib/planner";
+export { executePlan, MemoryExecutionStore, ExecutorRegistry, createExecutorRegistry } from "@/lib/execution";
 export type {
   LiTTRunRequest,
   LiTTRunResult,
