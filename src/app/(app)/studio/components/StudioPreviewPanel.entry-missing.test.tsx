@@ -68,9 +68,14 @@ describe("StudioPreviewPanel — preview-entry-missing message", () => {
     );
 
     // The badge must not wait for the 30s poll — a status re-check fires now.
-    await vi.waitFor(() => {
-      expect(fetchSpy.mock.calls.length).toBeGreaterThan(callsAfterReady);
-    });
+    // Generous timeout: the handler awaits authHeaders() before fetch, and
+    // this flakes under CI load with the default 1s timeout (2026-09-21).
+    await vi.waitFor(
+      () => {
+        expect(fetchSpy.mock.calls.length).toBeGreaterThan(callsAfterReady);
+      },
+      { timeout: 5000 },
+    );
   });
 
   it("ignores the message from a foreign origin", async () => {
