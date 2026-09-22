@@ -1,5 +1,5 @@
-﻿import { RouteLoading } from "@/components/route-loading";
+import DiscoverShell from "@/components/page-shells/DiscoverShell";
 
 export default function Loading() {
-  return <RouteLoading label="Loading Discover" />;
+  return <DiscoverShell />;
 }
