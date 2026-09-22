@@ -167,9 +167,15 @@ export async function executeBrowserJob(jobId: string, userId: string): Promise<
 
   const durationMs = Date.now() - start;
 
-  // 3. Update job status
+  // 3. Update job status — the state machine makes these transitions
+  // atomic: a racing executor that no longer owns the job gets `false`
+  // and must not emit completion events for a job it didn't finish.
   if (handlerResult.success) {
-    await completeJob(jobId, handlerResult.result);
+    const transitioned = await completeJob(jobId, handlerResult.result);
+    if (!transitioned) {
+      console.warn(`[browser:executor] completeJob no-op for ${jobId} — job left the running state`);
+      return;
+    }
     await emitJobEvent({
       jobId,
       type: "job.completed",
@@ -177,7 +183,11 @@ export async function executeBrowserJob(jobId: string, userId: string): Promise<
       metadata: { durationMs },
     });
   } else {
-    await failJob(jobId, handlerResult.error ?? "Job failed without error message");
+    const transitioned = await failJob(jobId, handlerResult.error ?? "Job failed without error message");
+    if (!transitioned) {
+      console.warn(`[browser:executor] failJob no-op for ${jobId} — job left the running state`);
+      return;
+    }
     await emitJobEvent({
       jobId,
       type: "job.failed",

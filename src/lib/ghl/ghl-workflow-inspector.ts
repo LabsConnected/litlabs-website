@@ -314,7 +314,8 @@ export async function inspectGhlWorkflow(
       return { success: true, durationMs: 0 };
     });
 
-    progress = advanceProgress(progress, 1, "completed");
+    // Route-accurate provenance: record the exact page navigated to.
+    progress = advanceProgress(progress, 1, "completed", undefined, { url: workflowsUrl });
     progress = advanceProgress(progress, 2, "running");
     await updateJobProgress(jobId, progress);
     await emitJobEvent({ jobId, type: "step.started", step: 2, message: "Checking authentication" });
@@ -329,16 +330,21 @@ export async function inspectGhlWorkflow(
         const page = stagehand.context.pages()[0] as PlaywrightPage;
         if (!page) return { success: false, error: "No page available", durationMs: 0 };
         const onLogin = await isOnLoginPage(page);
-        return { success: true, data: { needsLogin: onLogin }, durationMs: 0 };
+        return { success: true, data: { needsLogin: onLogin, url: page.url() }, durationMs: 0 };
       },
     );
 
-    if (needsLogin.data && (needsLogin.data as { needsLogin?: boolean }).needsLogin) {
+    if (needsLogin.data && (needsLogin.data as { needsLogin?: boolean; url?: string }).needsLogin) {
       // Not authenticated — return needs_login status with live view URL
-      progress = advanceProgress(progress, 2, "completed", "Needs login");
-      await updateJobProgress(jobId, progress);
-
+      const stepUrl = (needsLogin.data as { url?: string }).url ?? workflowsUrl;
       const screenshot = await takeScreenshot(session.id, userId);
+      // Record route-accurate provenance on the step: the screenshot is
+      // captioned with the URL it was actually captured at.
+      progress = advanceProgress(progress, 2, "completed", "Needs login", {
+        url: stepUrl,
+        screenshotUrl: screenshot,
+      });
+      await updateJobProgress(jobId, progress);
       // Phase 6 — attach the snapshot to the event stream so the
       // Studio snapshot timeline has a labeled, timestamped entry.
       // The liveViewUrl in metadata is owner-scoped (the SSE stream
