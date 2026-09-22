@@ -773,9 +773,11 @@ function MarketplaceInner() {
                   </div>
                 ))}
               </div>
-              <Link href="/pricing" className="mt-4 flex w-full items-center justify-center rounded-xl bg-amber-400 py-2 text-xs font-black text-black transition hover:scale-[1.02]">
+              {/* Not offered on /pricing — a dead link there would mislead,
+                  so this is an honest disabled state, not a Link. */}
+              <span aria-disabled="true" className="mt-4 flex w-full cursor-not-allowed items-center justify-center rounded-xl bg-amber-400/40 py-2 text-xs font-black text-black/60">
                 Currently Unavailable
-              </Link>
+              </span>
             </div>
           </div>
 
