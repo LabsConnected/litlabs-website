@@ -21,7 +21,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { X, Terminal, GitBranch, Rocket, ChevronRight } from "lucide-react";
 
 import { AnimatedBackground } from "./AnimatedBackground";
@@ -44,6 +44,7 @@ import type { PulseItem, DashboardProject } from "./types";
 
 export function Dashboard() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   // ── Data ────────────────────────────────────────────────────────
   const missionControl = useMissionControl();
@@ -147,7 +148,10 @@ export function Dashboard() {
               onOpenTerminal={handleOpenTerminal}
               onOpenDeveloperDrawer={handleOpenDeveloperDrawer}
             />
-            <QuickStart />
+            <QuickStart
+              initialPrompt={searchParams.get("prompt") ?? ""}
+              initialIntent={searchParams.get("intent") ?? searchParams.get("type")}
+            />
           </div>
 
           {/* Right column: Recent Work + Recent Media */}
