@@ -511,3 +511,78 @@ describe("Approval gate lifecycle", () => {
     expect(useExecutionStore.getState().phase).toBe("done");
   });
 });
+
+describe("approval gate staleness — resolved gates never re-arm", () => {
+  beforeEach(() => {
+    useExecutionStore.getState().reset();
+    useExecutionStore.getState().startRun();
+  });
+
+  it("records the pausedRunId when a gate is resolved", () => {
+    const s = useExecutionStore.getState();
+    s.setPendingApproval({ toolId: "files.write", reason: "gate", pausedRunId: "paused-1" });
+    s.resolveApproval("approved");
+    expect(useExecutionStore.getState().pendingApproval).toBeNull();
+    expect(useExecutionStore.getState().resolvedPausedRunIds).toContain("paused-1");
+  });
+
+  it("ignores a duplicate pending_approval SSE for an already-resolved gate", () => {
+    // The stuck-badge bug: the gate resolved and the run completed, but a
+    // late or duplicated pending_approval event re-armed the dead gate —
+    // stranding the "Approval waiting" badge with no live card to clear it.
+    const s = useExecutionStore.getState();
+    s.setPendingApproval({ toolId: "files.write", reason: "gate", pausedRunId: "paused-1" });
+    expect(useExecutionStore.getState().pendingApproval).not.toBeNull();
+    s.resolveApproval("approved");
+    expect(useExecutionStore.getState().pendingApproval).toBeNull();
+
+    feedSSEEventToExecutionStore({
+      type: "pending_approval",
+      toolId: "files.write",
+      reason: "gate",
+      pausedRunId: "paused-1",
+    });
+
+    expect(useExecutionStore.getState().pendingApproval).toBeNull();
+  });
+
+  it("still arms a genuinely new gate after resolving an old one", () => {
+    const s = useExecutionStore.getState();
+    s.setPendingApproval({ toolId: "files.write", reason: "gate", pausedRunId: "paused-1" });
+    s.resolveApproval("approved");
+
+    feedSSEEventToExecutionStore({
+      type: "pending_approval",
+      toolId: "project.deploy",
+      reason: "new gate",
+      pausedRunId: "paused-2",
+    });
+
+    const after = useExecutionStore.getState();
+    expect(after.pendingApproval?.pausedRunId).toBe("paused-2");
+    expect(after.pendingApproval?.toolId).toBe("project.deploy");
+  });
+
+  it("clears a stale gate when the streamed run finishes", () => {
+    // A "finished" event means the run completed without pausing — a
+    // gate-paused run returns early without emitting it — so any gate
+    // still set at that point is stale by definition.
+    const s = useExecutionStore.getState();
+    s.setPendingApproval({ toolId: "files.write", reason: "gate", pausedRunId: "paused-1" });
+
+    feedSSEEventToExecutionStore({ type: "finished", totalSteps: 5 });
+
+    const after = useExecutionStore.getState();
+    expect(after.pendingApproval).toBeNull();
+    expect(after.phase).toBe("done");
+  });
+
+  it("reset clears the resolved gate record", () => {
+    const s = useExecutionStore.getState();
+    s.setPendingApproval({ toolId: "files.write", reason: "gate", pausedRunId: "paused-1" });
+    s.resolveApproval("approved");
+    expect(useExecutionStore.getState().resolvedPausedRunIds).toContain("paused-1");
+    useExecutionStore.getState().reset();
+    expect(useExecutionStore.getState().resolvedPausedRunIds).toEqual([]);
+  });
+});
