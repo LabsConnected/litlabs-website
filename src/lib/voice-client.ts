@@ -6,6 +6,12 @@ export type VoiceConnectionInfo = {
   endpoint: string;
   littVoice: string;
   sparkVoice: string;
+  /**
+   * Non-reversible fingerprint (12 hex chars of SHA-256) of the
+   * VOICE_AUTH_SECRET the token was signed with. Used to detect a
+   * website/voice-proxy credential mismatch after a double-4001.
+   */
+  secretFp?: string;
 };
 
 let cached: VoiceConnectionInfo | null = null;
@@ -35,6 +41,7 @@ export async function getVoiceConnection(forceRefresh = false): Promise<VoiceCon
         endpoint: body.endpoint,
         littVoice: body.littVoice || "",
         sparkVoice: body.sparkVoice || body.littVoice || "",
+        secretFp: body.secretFp,
       };
       return cached;
     })
