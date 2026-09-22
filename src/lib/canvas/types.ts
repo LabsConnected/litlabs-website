@@ -286,6 +286,15 @@ export const ArtifactActionSchema = z.discriminatedUnion("type", [
     type: z.literal("studio.deploy_site"),
     projectId: z.string(),
   }),
+  z.object({
+    type: z.literal("studio.browse_files"),
+    projectId: z.string(),
+  }),
+  z.object({
+    type: z.literal("studio.open_file"),
+    projectId: z.string(),
+    path: z.string().min(1),
+  }),
 ]);
 export type ArtifactAction = z.infer<typeof ArtifactActionSchema>;
 

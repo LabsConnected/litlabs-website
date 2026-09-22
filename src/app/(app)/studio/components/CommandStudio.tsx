@@ -18,7 +18,7 @@ import { useConversationStore } from "../stores/useConversationStore";
 import { useLiTTRealtimeSession } from "../hooks/useLiTTRealtimeSession";
 import type { LiTTLiveSessionContext } from "@/lib/litt/live/types";
 import type { ArtifactAction } from "@/lib/canvas/types";
-import { STUDIO_EVENT_OPEN_DOCK, STUDIO_EVENT_REQUEST_DEPLOY } from "@/lib/canvas/panel-actions";
+import { STUDIO_EVENT_OPEN_DOCK, STUDIO_EVENT_OPEN_FILE, STUDIO_EVENT_REQUEST_DEPLOY } from "@/lib/canvas/panel-actions";
 import { INITIAL_RUNTIME_STATE, deriveExecutionHint } from "@/lib/projects/runtime-state";
 import { useLiTTRuntime } from "@/hooks/useLiTTRuntime";
 
@@ -579,11 +579,21 @@ function CommandStudioContent() {
         }),
       );
     };
+    // Open a file from the ActionPanel's file tree: switch to the dock
+    // Files tab. The StudioProjectFiles instances listen for the same
+    // event and select the file themselves when the project matches.
+    const openFile = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { projectId?: string; path?: string } | undefined;
+      if (typeof detail?.path !== "string" || detail.path.length === 0) return;
+      handleOpenDockTab("files");
+    };
     window.addEventListener(STUDIO_EVENT_OPEN_DOCK, openDock);
     window.addEventListener(STUDIO_EVENT_REQUEST_DEPLOY, requestDeploy);
+    window.addEventListener(STUDIO_EVENT_OPEN_FILE, openFile);
     return () => {
       window.removeEventListener(STUDIO_EVENT_OPEN_DOCK, openDock);
       window.removeEventListener(STUDIO_EVENT_REQUEST_DEPLOY, requestDeploy);
+      window.removeEventListener(STUDIO_EVENT_OPEN_FILE, openFile);
     };
   }, [handleOpenDockTab]);
 

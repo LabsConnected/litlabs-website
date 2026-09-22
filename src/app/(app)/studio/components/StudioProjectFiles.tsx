@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useStudioContext } from "../context/StudioContext";
+import { STUDIO_EVENT_OPEN_FILE } from "@/lib/canvas/panel-actions";
 
 interface FileEntry {
   name: string;
@@ -393,6 +394,30 @@ export default function StudioProjectFiles({
       setFileLoading(false);
     }
   }, [dirty, projectId, requestJson]);
+
+  // Listen for the ActionPanel file tree's "open this file" request
+  // (studio.open_file action). Selects the file through the same openFile
+  // path a tap uses — the real editor, not a separate viewer. Ignores
+  // events for other projects and malformed paths.
+  useEffect(() => {
+    if (!projectId) return;
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.projectId !== projectId) return;
+      const rawPath = typeof detail?.path === "string" ? detail.path : "";
+      let normalized: string;
+      try {
+        normalized = normalizePath(rawPath);
+      } catch {
+        return;
+      }
+      if (normalized === ".") return;
+      const name = normalized.split("/").pop() ?? normalized;
+      void openFile({ name, type: "file", path: normalized });
+    };
+    window.addEventListener(STUDIO_EVENT_OPEN_FILE, handler);
+    return () => window.removeEventListener(STUDIO_EVENT_OPEN_FILE, handler);
+  }, [projectId, openFile]);
 
   const mutate = useCallback(async (action: MutationAction, body: Record<string, unknown>) => {
     if (!projectId) throw new Error("No project selected");

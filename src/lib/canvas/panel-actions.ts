@@ -2,16 +2,16 @@
  * ActionPanel registry — "What LiTT can do".
  *
  * Maps the actions a user can trigger from the Studio canvas to the
- * ArtifactAction payloads the client executes. The first entries surface
- * capabilities that already exist (inspector, terminal drawer, deploy);
- * later entries will add new block-backed actions (file tree, etc.).
+ * ArtifactAction payloads the client executes. The entries surface
+ * capabilities that already exist (inspector, terminal drawer, deploy,
+ * file tree); later entries will add new block-backed actions.
  *
  * Availability is resolved when the panel opens: an action can be shown
  * disabled with a reason (e.g. "Publish site" when the publish-readiness
  * check reports blockers) — never a silent dead end.
  */
 import type { LucideIcon } from "lucide-react";
-import { MousePointerClick, TerminalSquare, Rocket } from "lucide-react";
+import { FolderOpen, MousePointerClick, TerminalSquare, Rocket } from "lucide-react";
 import type { ArtifactAction } from "./types";
 
 /* ── DOM events ─────────────────────────────────────────────── */
@@ -22,14 +22,17 @@ import type { ArtifactAction } from "./types";
 export const STUDIO_EVENT_ACTIVATE_INSPECTOR = "studio:activate-inspector";
 export const STUDIO_EVENT_OPEN_DOCK = "studio:open-dock";
 export const STUDIO_EVENT_REQUEST_DEPLOY = "studio:request-deploy";
+/** Fired when a studio.open_file action executes; the files surface selects the file. */
+export const STUDIO_EVENT_OPEN_FILE = "studio:open-file";
 
 /* ── Types ──────────────────────────────────────────────────── */
 
-export type PanelActionCategory = "build" | "inspect" | "deploy" | "media" | "data";
+export type PanelActionCategory = "build" | "files" | "inspect" | "deploy" | "media" | "data";
 
 export const PANEL_ACTION_CATEGORIES: { id: PanelActionCategory | "all"; label: string }[] = [
   { id: "all", label: "All" },
   { id: "build", label: "Build" },
+  { id: "files", label: "Files" },
   { id: "inspect", label: "Inspect" },
   { id: "deploy", label: "Deploy" },
   { id: "media", label: "Media" },
@@ -135,6 +138,22 @@ export function getPanelActionDefinitions(): PanelActionDefinition[] {
       category: "build",
       chipLabel: "Open terminal",
       buildAction: () => ({ type: "studio.open_terminal" }),
+      isAvailable: (ctx) =>
+        ctx.projectId
+          ? { available: true }
+          : { available: false, reason: "Attach this canvas to a project first" },
+    },
+    {
+      id: "browse_files",
+      label: "Browse files",
+      description: "Browse the project file tree and open a file",
+      icon: FolderOpen,
+      category: "files",
+      chipLabel: "Browse files",
+      buildAction: (ctx) => {
+        if (!ctx.projectId) throw new Error("browse_files needs a projectId");
+        return { type: "studio.browse_files", projectId: ctx.projectId };
+      },
       isAvailable: (ctx) =>
         ctx.projectId
           ? { available: true }
