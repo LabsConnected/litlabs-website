@@ -610,7 +610,7 @@ export function ProfileOverview({
           <SectionHeader
             title="Recent Artifacts"
             action="View all"
-            actionHref="/library"
+            actionHref="/library/files"
           />
           <EmptyState
             icon={<ImageIcon size={36} />}
