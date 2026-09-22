@@ -13,7 +13,7 @@ const NAV_ITEMS = [
   { label: "CLI", href: "/cli" },
   { label: "Creations", href: "/#creations" },
   { label: "FAQ", href: "/#faq" },
-  { label: "Community", href: "/discover" },
+  { label: "Discover", href: "/discover" },
 ] as const;
 
 export default function MarketingHeader() {
