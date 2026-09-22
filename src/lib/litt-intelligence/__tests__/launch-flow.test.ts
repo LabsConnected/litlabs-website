@@ -661,9 +661,10 @@ describe("Launch Flow: budget limits", () => {
     expect(config.maxOutputChars).toBe(200_000);
     expect(config.maxSteps).toBe(40);
     // Runtime budget must still be the real bound (allow 1ms timing slack
-    // for the elapsed-time subtraction before the agent loop starts)
-    expect(config.maxRuntimeMs).toBeGreaterThanOrEqual(599_000);
-    expect(config.maxRuntimeMs).toBeLessThanOrEqual(600_000);
+    // for the elapsed-time subtraction before the agent loop starts).
+    // Budget is 30 minutes (was 10) — a real multi-file build needs the room.
+    expect(config.maxRuntimeMs).toBeGreaterThanOrEqual(1_799_000);
+    expect(config.maxRuntimeMs).toBeLessThanOrEqual(1_800_000);
   });
 
   it("passes maxOutputChars to the repair agent loop too", async () => {
@@ -686,8 +687,8 @@ describe("Launch Flow: budget limits", () => {
     expect(runAgentLoop.mock.calls.length).toBeGreaterThanOrEqual(2);
     const repairConfig = runAgentLoop.mock.calls[1][2] as Record<string, unknown>;
     expect(repairConfig.maxOutputChars).toBe(200_000);
-    // Repair must not restart the global runtime budget
-    expect(repairConfig.maxRuntimeMs).toBeLessThanOrEqual(600_000);
+    // Repair must not restart the global runtime budget (30 minutes)
+    expect(repairConfig.maxRuntimeMs).toBeLessThanOrEqual(1_800_000);
   });
 });
 
