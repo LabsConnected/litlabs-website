@@ -906,7 +906,7 @@ export default function StudioPreviewPanel({
             backgroundColor: secretsOpen ? "rgba(114,242,56,0.12)" : "transparent",
             color: secretsOpen ? "var(--litt-primary)" : "var(--text-muted)",
           }}
-          aria-label={secretsOpen ? "Close project secrets" : "Open project secrets"}
+          aria-label="Project secrets"
           aria-pressed={secretsOpen}
           title="Project secrets (Clerk keys for the preview)"
           data-testid="preview-secrets-toggle"
