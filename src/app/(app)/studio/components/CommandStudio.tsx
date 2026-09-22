@@ -40,7 +40,7 @@ import MobileDiagOverlay from "./MobileDiagOverlay";
 import { mobileDiag, isMobileDiagEnabled } from "../lib/mobileDiagnostics";
 import ContextDrawer, { type ContextDrawerTab } from "./context/ContextDrawer";
 import AssetsPanel from "./context/AssetsPanel";
-import { StudioContextProvider } from "../context/StudioContext";
+import { StudioContextProvider, type StudioSelection } from "../context/StudioContext";
 import { deriveCreator, deriveWorkspaceStage } from "../context/derive-studio-context";
 import { StudioCreatorHost } from "./creators/StudioCreatorHost";
 import { useViewportTier } from "../hooks/useViewportTier";
@@ -253,6 +253,9 @@ function CommandStudioContent() {
   // tab's StudioPreviewPanel, consuming the full workspace width. Studio
   // never reserves canvas width for a second preview column.
   const [previewSelection, setPreviewSelection] = useState<PreviewSelection | null>(null);
+  const studioSelection: StudioSelection | null = previewSelection
+    ? { elementId: previewSelection.selector, componentName: previewSelection.tagName, content: previewSelection.label }
+    : null;
   const [completion, setCompletion] = useState<{ changes: MutationSummary; previewUpdated: boolean; repaired: boolean } | null>(null);
 
   // Safety: clear any stuck body styles from resize handles that didn't
@@ -929,6 +932,11 @@ function CommandStudioContent() {
           } else {
             setLittCollapsed(false);
           }
+        } else if (result.awaitingInput) {
+          // A clarifying question is a paused turn, not completed work.
+          // Keep the mission truthful and avoid the false completion card.
+          execution.setPhase("awaiting_input");
+          setLittActiveTab("chat");
         } else if (result.suppressCompletion) {
           // P1-1: the image intent opened the Image Studio surface — this
           // send was not an agent run, so no completion card. Rendering
@@ -1051,7 +1059,11 @@ function CommandStudioContent() {
   const handleResolveApproval = useCallback((decision: "approved" | "rejected") => {
     const exec = useExecutionStore.getState();
     const pending = exec.pendingApproval;
-    const convId = conversation.selectedConversationId;
+    // The gate's OWN conversation wins: a pausedRunId posted to a different
+    // conversation deterministic-403s ("Conversation mismatch") and used to
+    // dead-end the card as unretryable. Falls back to the current selection
+    // only for gates mounted before conversation binding existed.
+    const convId = pending?.conversationId ?? conversation.selectedConversationId;
     if (pending?.pausedRunId && convId) {
       exec.beginApprovalSubmit();
       submitApprovalAndPoll({
@@ -1105,7 +1117,9 @@ function CommandStudioContent() {
   const handleReRequestApproval = useCallback(async () => {
     const exec = useExecutionStore.getState();
     const pending = exec.pendingApproval;
-    const convId = conversation.selectedConversationId;
+    // Same gate-bound conversation rule as handleResolveApproval — the
+    // re-request must recreate the gate in its own conversation.
+    const convId = pending?.conversationId ?? conversation.selectedConversationId;
     if (!pending?.pausedRunId || !convId) return;
     exec.beginApprovalSubmit();
     try {
@@ -1161,7 +1175,10 @@ function CommandStudioContent() {
     applyApprovalOutcomeRef.current = applyApprovalOutcome;
   });
   const watchPausedRunId = useExecutionStore((s) => s.pendingApproval?.pausedRunId ?? null);
-  const watchConversationId = conversation.selectedConversationId;
+  // Watch (and poll) against the gate's OWN conversation so a conversation
+  // switch after the gate mounted cannot redirect the status GET either.
+  const watchConversationId = useExecutionStore((s) => s.pendingApproval?.conversationId)
+    ?? conversation.selectedConversationId;
   useEffect(() => {
     // Deps are only the gate identity — applyApprovalOutcome changes every
     // render (conversation identity is unstable), and re-arming on each
@@ -1750,6 +1767,10 @@ function CommandStudioContent() {
       sessionId={studioSessionId}
       workspaceMode={studioWorkspaceMode}
       creator={studioCreator}
+      selection={studioSelection}
+      onSelectionChange={(next) => {
+        setPreviewSelection(next ? { label: next.content ?? next.elementId, selector: next.elementId, tagName: next.componentName ?? "element" } : null);
+      }}
       onWorkspaceModeChange={(mode) => {
         const mapped = workspaceStageToMode(mode);
         setStudioMode(mapped);
@@ -1978,6 +1999,7 @@ function CommandStudioContent() {
                       sourceStatus={capabilities.sourceStatus}
                       versionControl={capabilities.versionControl}
                       workspaceStatus={capabilities.workspaceStatus ?? null}
+                      onSelectionChange={setPreviewSelection}
                     />
                   </div>
                 ) : isMedia ? (
