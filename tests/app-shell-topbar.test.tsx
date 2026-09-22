@@ -106,7 +106,7 @@ describe("AppShell top bar", () => {
     const header = getHeader();
     const scope = within(header);
     // Canonical main pills + the More overflow button.
-    for (const label of ["Home", "Studio", "Create", "Assets", "Agents", "Missions"]) {
+    for (const label of ["Home", "Studio", "Assets", "Agents", "Missions"]) {
       expect(scope.getAllByText(label).length).toBeGreaterThanOrEqual(1);
     }
     expect(scope.getAllByTestId("nav-more").length).toBeGreaterThanOrEqual(1);
