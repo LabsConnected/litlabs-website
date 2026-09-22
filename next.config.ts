@@ -396,6 +396,10 @@ const nextConfig: NextConfig = {
       { source: "/creator", destination: "/dashboard", permanent: true },
       { source: "/landing", destination: "/", permanent: true },
       { source: "/login", destination: "/sign-in", permanent: true },
+      // Larry's site audit (2026-09-22, issue #469): /capabilities was a 404.
+      // The nav "Capabilities" label points at the /#what-we-do homepage
+      // section, so direct visitors/guessers land there instead of a dead end.
+      { source: "/capabilities", destination: "/#what-we-do", permanent: true },
     ];
   },
 
