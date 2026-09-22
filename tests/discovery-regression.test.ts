@@ -6,7 +6,6 @@ import {
   SITE_NAME,
   DEFAULT_TITLE,
   DEFAULT_DESCRIPTION,
-  DEFAULT_OG_IMAGE,
   absoluteUrl,
   buildMetadata,
 } from "@/lib/seo";
@@ -510,17 +509,19 @@ describe("Discovery regression — Round 2 QA fixes", () => {
 });
 
 // ── Trailer playback robustness ──────────────────────────
+// The trailer now lives inside the StudioTour component (final tour step);
+// the source assertions follow it there.
 describe("Discovery regression — trailer sources", () => {
-  const proofSrc = readFileSync(
-    path.resolve(__dirname, "../src/components/landing/RealProductProof.tsx"),
+  const tourSrc = readFileSync(
+    path.resolve(__dirname, "../src/components/landing/StudioTour.tsx"),
     "utf-8"
   );
 
   it("serves a WebM source ahead of the MP4 fallback", () => {
-    expect(proofSrc).toContain('"/demos/litt-trailer.webm"');
-    expect(proofSrc).toContain('"/demos/litt-trailer.mp4"');
-    expect(proofSrc.indexOf("litt-trailer.webm")).toBeLessThan(
-      proofSrc.indexOf("litt-trailer.mp4")
+    expect(tourSrc).toContain('"/demos/litt-trailer.webm"');
+    expect(tourSrc).toContain('"/demos/litt-trailer.mp4"');
+    expect(tourSrc.indexOf("litt-trailer.webm")).toBeLessThan(
+      tourSrc.indexOf("litt-trailer.mp4")
     );
   });
 

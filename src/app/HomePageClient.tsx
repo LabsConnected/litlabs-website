@@ -40,8 +40,8 @@ const TrustSection = dynamic(
   () => import("@/components/landing/TrustSection").then((m) => m.TrustSection),
   { ssr: true },
 );
-const RealProductProof = dynamic(
-  () => import("@/components/landing/RealProductProof").then((m) => m.RealProductProof),
+const StudioTour = dynamic(
+  () => import("@/components/landing/StudioTour").then((m) => m.StudioTour),
   { ssr: true },
 );
 const OnboardingSteps = dynamic(
@@ -237,7 +237,7 @@ function LandingPage() {
       <CapabilityStatus />
       <CapabilityGrid />
       <MissionDemo />
-      <RealProductProof />
+      <StudioTour />
       <ComparisonTable />
       <AgentCrew />
       <CreationsSection />
