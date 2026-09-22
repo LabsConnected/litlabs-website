@@ -73,6 +73,8 @@ export interface LiTTRunResult {
   latencyMs: number;
   reasoning?: string;
   actions?: unknown[];
+  intent?: import("@/lib/intent-router").IntentRouterResult;
+  plan?: import("@/lib/intent-router").ExecutionPlan;
 }
 
 /**
