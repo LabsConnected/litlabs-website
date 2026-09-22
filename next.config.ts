@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
+import { CANONICAL_REDIRECTS } from "./src/lib/canonical-redirects";
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
@@ -396,6 +397,10 @@ const nextConfig: NextConfig = {
       { source: "/creator", destination: "/dashboard", permanent: true },
       { source: "/landing", destination: "/", permanent: true },
       { source: "/login", destination: "/sign-in", permanent: true },
+      // Canonical route unification (polish program, issue #467): /discover
+      // is the one true route for the community surface. The aliases 308 so
+      // external links and future forks can never silently duplicate it.
+      ...CANONICAL_REDIRECTS,
       // Larry's site audit (2026-09-22, issue #469): /capabilities was a 404.
       // The nav "Capabilities" label points at the /#what-we-do homepage
       // section, so direct visitors/guessers land there instead of a dead end.

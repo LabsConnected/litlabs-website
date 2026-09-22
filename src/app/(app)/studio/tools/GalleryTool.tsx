@@ -317,7 +317,7 @@ export default function GalleryTool() {
     { id: "all" as Tab, label: `All (${allItems.length})` },
     { id: "generations" as Tab, label: `My Bucket (${myItems.length})` },
     { id: "videos" as Tab, label: `Videos (${videoItems.length})` },
-    { id: "discover" as Tab, label: "Community" },
+    { id: "discover" as Tab, label: "Discover" },
   ];
 
   return (

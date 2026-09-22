@@ -13,7 +13,7 @@ export default function MarketingFooter() {
           <Link href="/studio" className="litt-footer-link">Studio</Link>
           <Link href="/agents" className="litt-footer-link">Agents</Link>
           <Link href="/marketplace" className="litt-footer-link">Marketplace</Link>
-          <Link href="/discover" className="litt-footer-link">Community</Link>
+          <Link href="/discover" className="litt-footer-link">Discover</Link>
           <Link href="/pricing" className="litt-footer-link">Pricing</Link>
           <a href="https://github.com/LabsConnected" target="_blank" rel="noopener noreferrer" className="litt-footer-link">GitHub</a>
           <Link href="/privacy" className="litt-footer-link">Privacy</Link>
