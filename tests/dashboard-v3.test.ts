@@ -185,8 +185,10 @@ describe("Dashboard v3 — Quick Start", () => {
     expect(createSrc).toContain("quick-create");
   });
 
-  it("links to real studio routes", () => {
-    expect(createSrc).toContain("/studio?");
+  it("uses suggestion seeds instead of bypassing the intent router", () => {
+    expect(createSrc).toContain("seed:");
+    expect(createSrc).toContain('fetch(\"/api/litt/intent\"');
+    expect(createSrc).not.toContain('href: \"/studio?');
   });
 
   it("is responsive and touch-friendly", () => {

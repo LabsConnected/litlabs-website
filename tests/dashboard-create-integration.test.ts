@@ -20,11 +20,12 @@ describe("Dashboard owns the canonical create experience", () => {
     expect(createExperience.match(/onSubmit=\{submit\}/g)).toHaveLength(1);
   });
 
-  it("exposes all seven quick-create intents with real Studio routes", () => {
+  it("exposes all seven suggestion chips without bypassing the router", () => {
     for (const label of ["Website", "Image", "Video", "Music & Audio", "Code", "Design", "Game"]) {
       expect(createExperience).toContain(`label: "${label}"`);
     }
-    expect(createExperience.match(new RegExp('href: "/studio\\?', "g"))?.length).toBe(7);
+    expect(createExperience.match(/seed: "/g)?.length).toBe(7);
+    expect(createExperience).not.toContain('href: "/studio?');
   });
 
   it("redirects legacy /create links to Dashboard and preserves query params", () => {
