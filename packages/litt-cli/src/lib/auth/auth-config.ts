@@ -33,7 +33,7 @@
 import { AuthError } from "./types.js";
 
 /** Default Clerk issuer for the LiTT production instance. */
-const DEFAULT_ISSUER = "https://clerk.litlabs.net";
+const DEFAULT_ISSUER = "https://www.litlabs.net/__clerk";
 
 /**
  * Default Clerk OAuth client_id for the LiTT CLI.

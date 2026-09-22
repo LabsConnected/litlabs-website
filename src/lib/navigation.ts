@@ -18,7 +18,6 @@ import {
   Gamepad2 as GamesIcon,
   Compass,
   Terminal,
-  CirclePlus,
   FolderOpen,
 } from "lucide-react";
 
@@ -42,7 +41,7 @@ export type NavSection = {
 
 /* ─── Canonical App Shell navigation ───────────────────────────────────
  * ONE canonical authenticated global nav:
- *   Main: Home · Studio · Create · Assets · Agents · Missions · More
+ *   Main: Home · Studio · Assets · Agents · Missions · More
  *   More: Projects · Games · Discover · Marketplace · Showcase · Wallet ·
  *         CLI · Docs · Deployments · Settings · Profile
  *
@@ -56,7 +55,6 @@ export type NavSection = {
 export const APP_NAV_MAIN: NavItem[] = [
   { label: "Home", href: "/dashboard", icon: LayoutDashboard, shortcut: "⌘D" },
   { label: "Studio", href: "/studio", icon: Sparkles, shortcut: "⌘S" },
-  { label: "Create", href: "/create", icon: CirclePlus },
   { label: "Assets", href: "/studio?tool=assets", icon: FolderOpen },
   { label: "Agents", href: "/studio?tool=agents", icon: Bot },
   { label: "Missions", href: "/studio?tool=workflows", icon: Workflow },
