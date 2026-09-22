@@ -71,7 +71,7 @@ describe("Games enabled — Navigation & Feature Flags", () => {
     // creation-tile surface on the dashboard.
     it("QuickStart has a Game creation tile linked to a real surface", () => {
       const content = readFileSync(
-        join(ROOT, "src/components/dashboard/v3/QuickStart.tsx"),
+        join(ROOT, "src/components/create/CreateExperience.tsx"),
         "utf8",
       );
       expect(content).toContain('"Game"');
@@ -117,11 +117,11 @@ describe("Games Restoration — Route Files Exist", () => {
 });
 
 describe("Games Restoration — Icon Support", () => {
-  it("the v3 QuickStart renders a gamepad icon for the Game tile", () => {
+  it("the shared Dashboard CreateExperience renders a gamepad icon for the Game tile", () => {
     // dashboard-v2-utils (v2 Icon component) was retired with the v2
     // dashboard; lucide's Gamepad2 is the live game icon.
     const content = readFileSync(
-      join(ROOT, "src/components/dashboard/v3/QuickStart.tsx"),
+      join(ROOT, "src/components/create/CreateExperience.tsx"),
       "utf8",
     );
     expect(content).toContain("Gamepad2");
