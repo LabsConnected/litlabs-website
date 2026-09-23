@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { getConversation } from "@/lib/studio/conversation-service";
-import { listActionRuns, listActionEvents } from "@/lib/action-runtime";
+import {
+  getActionRun,
+  listActionRuns,
+  listActionEvents,
+  isTerminalActionRunStatus,
+  type ActionRun,
+} from "@/lib/action-runtime";
 import { buildActionRunProjection } from "@/lib/action-runtime/projection";
 import { listPausedRunsForActionRun } from "@/lib/litt-intelligence/paused-run-store";
 
@@ -21,7 +27,12 @@ export const runtime = "nodejs";
  * approval gates, and deployment evidence — everything the
  * ActionRunStatusPanel needs to render truthful runtime state.
  *
- * Returns { projection: null } when the conversation has no ActionRun —
+ * Selection: an explicit ?runId is honored only when the run belongs to
+ * this conversation (a client can pin a run, never project someone
+ * else's); otherwise the newest non-terminal run wins, falling back to
+ * the newest terminal run so finished tasks still render their truth.
+ *
+ * Returns { projection: null } when there is nothing truthful to show —
  * a conversation without durable execution is a normal state, not an error.
  */
 async function getHandler(req: NextRequest, routeCtx: RouteParams) {
@@ -36,16 +47,22 @@ async function getHandler(req: NextRequest, routeCtx: RouteParams) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Latest run for this conversation — the projection renders terminal
-  // truth too, so take the newest regardless of status.
-  const runs = await listActionRuns(userId, { conversationId: convId, limit: 1 });
-  const run = runs[0];
+  let run: ActionRun | null = null;
+  const explicitRunId = new URL(req.url).searchParams.get("runId");
+  if (explicitRunId) {
+    const explicit = await getActionRun(explicitRunId, userId);
+    run = explicit && explicit.conversationId === convId ? explicit : null;
+  } else {
+    const runs = await listActionRuns(userId, { conversationId: convId, limit: 50 });
+    run = runs.find((candidate) => !isTerminalActionRunStatus(candidate.status)) ?? runs[0] ?? null;
+  }
+
   if (!run) {
     return NextResponse.json({ projection: null });
   }
 
   const [events, pausedRuns] = await Promise.all([
-    listActionEvents(run.id, userId, { limit: 200 }),
+    listActionEvents(run.id, userId, { limit: 500 }),
     listPausedRunsForActionRun(run.id, userId),
   ]);
 
