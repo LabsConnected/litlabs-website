@@ -33,10 +33,11 @@ import { useLittHealth } from "@/hooks/useLittHealth";
 import { planDisplayLabel } from "@/lib/plan-label";
 import {
   getVisibleMainNav,
-  getVisibleMoreNav,
+  getVisibleMoreNavSections,
   APP_NAV_SECONDARY,
   isAppNavActive,
   type NavItem,
+  type NavMenuSection,
 } from "@/lib/navigation";
 import { BrandLogo } from "@/components/branding/BrandLogo";
 
@@ -275,18 +276,17 @@ function TopNavItem({
 
 /**
  * MoreNavMenu — the "More" overflow item in the canonical nav.
- * Opens a dropdown of secondary destinations (Projects, Games, Discover,
- * Marketplace, Showcase, Wallet, CLI, Docs, Deployments, Settings,
- * Profile). Portaled to document.body because the mobile nav strip is
+ * Opens a grouped product-navigation dropdown. Account destinations stay in
+ * the avatar menu. Portaled to document.body because the mobile nav strip is
  * overflow-x:auto and the blurred header is a containing block for fixed
  * descendants — an in-place dropdown would clip on both.
  */
 function MoreNavMenu({
-  items,
+  sections,
   active,
   T,
 }: {
-  items: NavItem[];
+  sections: NavMenuSection[];
   active: boolean;
   T: ReturnType<typeof useTheme>["resolvedColors"];
 }) {
@@ -361,7 +361,7 @@ function MoreNavMenu({
             data-more-menu
             role="menu"
             aria-label="More"
-            className="w-56 rounded-xl border p-1.5 shadow-2xl"
+            className="w-64 rounded-xl border p-2 shadow-2xl"
             style={{
               position: "fixed",
               top: anchor.top,
@@ -372,23 +372,30 @@ function MoreNavMenu({
               backdropFilter: "blur(16px)",
             }}
           >
-            {items.map((item) => {
-              if (!item.href) return null;
-              const Icon = item.icon;
-              return (
-                <Link
-                  key={item.label}
-                  href={item.href}
-                  role="menuitem"
-                  onClick={() => setOpen(false)}
-                  className="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-xs font-bold transition hover:bg-white/5"
-                  style={{ color: T.textMuted }}
-                >
-                  <Icon size={14} className="shrink-0" />
-                  {item.label}
-                </Link>
-              );
-            })}
+            {sections.map((section) => (
+              <div key={section.id} className="not-first:mt-2">
+                <div className="px-2.5 pb-1 pt-1 text-[9px] font-black uppercase tracking-[0.14em]" style={{ color: T.textMuted }}>
+                  {section.label}
+                </div>
+                {section.items.map((item) => {
+                  if (!item.href) return null;
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.label}
+                      href={item.href}
+                      role="menuitem"
+                      onClick={() => setOpen(false)}
+                      className="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-xs font-bold transition hover:bg-white/5"
+                      style={{ color: T.textMuted }}
+                    >
+                      <Icon size={14} className="shrink-0" />
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            ))}
           </div>,
           document.body,
         )}
@@ -411,8 +418,8 @@ function TopBar() {
 
   const checkActive = (href?: string) => isAppNavActive(pathname, searchParams, href);
   const mainItems = getVisibleMainNav();
-  const moreItems = getVisibleMoreNav();
-  const moreActive = moreItems.some((i) => i.href && checkActive(i.href));
+  const moreSections = getVisibleMoreNavSections();
+  const moreActive = moreSections.some((section) => section.items.some((i) => i.href && checkActive(i.href)));
 
   return (
     <header
@@ -442,7 +449,7 @@ function TopBar() {
               T={T}
             />
           ))}
-          <MoreNavMenu items={moreItems} active={moreActive} T={T} />
+          <MoreNavMenu sections={moreSections} active={moreActive} T={T} />
         </nav>
 
         <div className="flex-1" />
@@ -506,7 +513,7 @@ function TopBar() {
               T={T}
             />
           ))}
-          <MoreNavMenu items={moreItems} active={moreActive} T={T} />
+          <MoreNavMenu sections={moreSections} active={moreActive} T={T} />
         </nav>
       )}
     </header>

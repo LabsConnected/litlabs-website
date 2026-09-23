@@ -5,9 +5,6 @@ import {
   Sparkles,
   ShoppingBag,
   BarChart3,
-  Settings,
-  User,
-  Wallet,
   Bookmark,
   Bot,
   Layers,
@@ -42,8 +39,8 @@ export type NavSection = {
 /* ─── Canonical App Shell navigation ───────────────────────────────────
  * ONE canonical authenticated global nav:
  *   Main: Home · Studio · Assets · Agents · Missions · More
- *   More: Projects · Games · Discover · Marketplace · Showcase · Wallet ·
- *         CLI · Docs · Deployments · Settings · Profile
+ *   More: Projects · Discover · Marketplace · Showcase · Games · CLI ·
+ *         Deployments · Docs
  *
  * Assets/Agents/Missions resolve to their real Studio destinations
  * (?tool=assets|agents|workflows — the same canonical URLs the Studio
@@ -63,16 +60,25 @@ export const APP_NAV_MAIN: NavItem[] = [
 /* Secondary destinations behind the More menu — real routes only. */
 export const APP_NAV_MORE: NavItem[] = [
   { label: "Projects", href: "/projects", icon: FolderKanban },
-  { label: "Games", href: "/games", icon: GamesIcon },
   { label: "Discover", href: "/discover", icon: Compass },
   { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
   { label: "Showcase", href: "/showcase", icon: Star },
-  { label: "Wallet", href: "/wallet", icon: Wallet },
+  { label: "Games", href: "/games", icon: GamesIcon },
   { label: "CLI", href: "/cli", icon: Terminal },
-  { label: "Docs", href: "/docs", icon: FileText },
   { label: "Deployments", href: "/deployments", icon: BarChart3 },
-  { label: "Settings", href: "/settings", icon: Settings },
-  { label: "Profile", href: "/profile", icon: User },
+  { label: "Docs", href: "/docs", icon: FileText },
+];
+
+export interface NavMenuSection {
+  id: string;
+  label: string;
+  items: NavItem[];
+}
+
+export const APP_NAV_MORE_SECTIONS: NavMenuSection[] = [
+  { id: "build", label: "Build", items: APP_NAV_MORE.filter((item) => ["Projects", "CLI", "Deployments"].includes(item.label)) },
+  { id: "explore", label: "Explore", items: APP_NAV_MORE.filter((item) => ["Discover", "Marketplace", "Showcase", "Games"].includes(item.label)) },
+  { id: "learn", label: "Learn", items: APP_NAV_MORE.filter((item) => item.label === "Docs") },
 ];
 
 /* ─── Secondary navigation ─────────────────────────────────────────────
@@ -94,7 +100,6 @@ export const APP_NAV_SECONDARY: NavSection[] = [
     label: "Developer Tools",
     items: [
       { label: "Connections", href: "/settings/connections", icon: Layers },
-      { label: "Docs", href: "/docs", icon: FileText },
     ],
   },
 ];
@@ -113,6 +118,13 @@ export function getVisibleMoreNav(): NavItem[] {
     if (item.href === "/discover") return isFeatureEnabled("communitySocial");
     return true;
   });
+}
+
+export function getVisibleMoreNavSections(): NavMenuSection[] {
+  const visible = new Set(getVisibleMoreNav().map((item) => item.label));
+  return APP_NAV_MORE_SECTIONS
+    .map((section) => ({ ...section, items: section.items.filter((item) => visible.has(item.label)) }))
+    .filter((section) => section.items.length > 0);
 }
 
 /**
