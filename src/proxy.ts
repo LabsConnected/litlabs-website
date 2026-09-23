@@ -303,6 +303,8 @@ const isProtectedRouteInner = createRouteMatcher([
   "/api/users/(.*)",
   "/api/account",
   "/api/orchestrate",
+  "/api/runtime-test(.*)",
+  "/api/ghl/test(.*)",
   "/api/marketplace/agents/(.*)/install(.*)",
   "/api/marketplace/agents/(.*)/checkout(.*)",
   "/api/marketplace/installations(.*)",

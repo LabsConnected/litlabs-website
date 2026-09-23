@@ -164,4 +164,17 @@ describe("cross-user isolation: checkpoint injection fix (P0-3)", () => {
     // Must use --file=- to read from stdin
     expect(src).toMatch(/--file=-/);
   });
+
+  it.each([
+    "src/lib/missions/mission-executor.ts",
+    "src/lib/missions/workspace-checkpoint.ts",
+    "src/lib/litt-intelligence/workspace-transport.ts",
+    "src/lib/project-tools/registry.ts",
+  ])("%s commits via --file=- instead of interpolating -m", async (rel) => {
+    const fs = await import("fs");
+    const path = await import("path");
+    const src = fs.readFileSync(path.resolve(process.cwd(), rel), "utf-8");
+    expect(src).not.toMatch(/git commit -m [`'"]/);
+    expect(src).toMatch(/git commit --file=-/);
+  });
 });

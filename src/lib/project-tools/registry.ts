@@ -88,11 +88,12 @@ export async function runWorkspaceCommand(
   workspaceId: string,
   userId: string,
   command: string,
+  stdin?: string,
 ) {
   const response = await fetch(`${TERMINAL_BASE()}/internal/workspace/${workspaceId}/exec`, {
     method: "POST",
     headers: internalHeaders(),
-    body: JSON.stringify({ command, userId }),
+    body: JSON.stringify({ command, userId, stdin }),
   });
   const payload = (await response.json().catch(() => null)) as {
     exitCode?: number;
@@ -918,8 +919,12 @@ export const toolCommitChanges: ToolHandler = async (userId, args) => {
       return fail(`git add failed: ${addResult.stderr ?? "unknown error"}`);
     }
 
-    const safeMessage = message.replace(/'/g, "'\\''");
-    const commitResult = await runWorkspaceCommand(workspaceId, userId, `git commit -m '${safeMessage}'`);
+    const commitResult = await runWorkspaceCommand(
+      workspaceId,
+      userId,
+      "git commit --file=-",
+      message,
+    );
 
     if (commitResult.exitCode !== 0) {
       const stderr = commitResult.stderr ?? "";
