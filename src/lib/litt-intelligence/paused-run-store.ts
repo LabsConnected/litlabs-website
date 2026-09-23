@@ -113,6 +113,8 @@ export interface PausedRunRecord {
   executionMode: "plan" | "act" | "auto";
   systemPrompt: string;
   checkpointId: string | null;
+  /** Durable parent ActionRun this approval gate belongs to. */
+  actionRunId: string | null;
   status: "pending" | "approved" | "rejected" | "expired";
   createdAt: string;
   expiresAt: string;
@@ -163,6 +165,7 @@ interface PausedRunRow {
   execution_mode: string;
   system_prompt: string;
   checkpoint_id: string | null;
+  action_run_id?: string | null;
   status: string;
   created_at: string;
   expires_at: string;
@@ -196,6 +199,7 @@ function rowToRecord(row: PausedRunRow): PausedRunRecord {
     executionMode: row.execution_mode as "plan" | "act" | "auto",
     systemPrompt: row.system_prompt,
     checkpointId: row.checkpoint_id,
+    actionRunId: row.action_run_id ?? null,
     status: row.status as PausedRunRecord["status"],
     createdAt: row.created_at,
     expiresAt: row.expires_at,
@@ -228,6 +232,8 @@ export async function createPausedRun(input: {
   executionMode: "plan" | "act" | "auto";
   systemPrompt: string;
   checkpointId: string | null;
+  /** Durable parent ActionRun to resume under the same execution context. */
+  actionRunId?: string | null;
   qualityLoopState?: QualityLoopSnapshot;
   deferredToolCalls?: DeferredToolCall[];
   stepsUsed?: number;
@@ -253,6 +259,7 @@ export async function createPausedRun(input: {
       execution_mode: input.executionMode,
       system_prompt: input.systemPrompt,
       checkpoint_id: input.checkpointId,
+      action_run_id: input.actionRunId ?? null,
       status: "pending",
       created_at: now.toISOString(),
       expires_at: expiresAt.toISOString(),

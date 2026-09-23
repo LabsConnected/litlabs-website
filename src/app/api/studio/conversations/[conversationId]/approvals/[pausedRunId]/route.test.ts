@@ -67,6 +67,11 @@ vi.mock("@/lib/studio/logger", () => ({
   studioLog: vi.fn(),
 }));
 
+vi.mock("@/lib/action-runtime", () => ({
+  transitionActionRun: vi.fn(() => Promise.resolve({})),
+  transitionActionRunEventActivity: vi.fn(() => Promise.resolve({})),
+}));
+
 import { auth } from "@/lib/auth";
 import { POST } from "./route";
 import {
@@ -79,6 +84,10 @@ import {
 } from "@/lib/litt-intelligence/paused-run-store";
 import { resumeAgentLoopV2 } from "@/lib/litt-intelligence/agent-loop-v2";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
+import {
+  transitionActionRun,
+  transitionActionRunEventActivity,
+} from "@/lib/action-runtime";
 import {
   getAwaitingApprovalAssistantMessage,
   insertMessage,
@@ -117,6 +126,7 @@ const pendingRun = {
   executionMode: "act",
   systemPrompt: "system",
   checkpointId: null,
+  actionRunId: "run-parent-1",
   status: "pending",
   createdAt: new Date().toISOString(),
   expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -161,6 +171,31 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
     expect(res.status).toBe(202);
 
     await vi.waitFor(() => expect(markRunCompleted).toHaveBeenCalled());
+
+    // Approval resumed under the same durable parent run: waiting→working
+    // at decision time, the exact ActionExecutionContext in loop config,
+    // then the same run settled completed after the result writeback.
+    expect(transitionActionRunEventActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-parent-1",
+        userId: "user_123",
+        status: "working",
+        eventType: "approval.approved",
+      }),
+    );
+    const resumeInput = vi.mocked(resumeAgentLoopV2).mock.calls[0][0];
+    expect(resumeInput.config?.actionContext).toEqual({
+      actionRunId: "run-parent-1",
+      userId: "user_123",
+      conversationId: CONV_ID,
+      projectId: "proj-123",
+    });
+    expect(transitionActionRun).toHaveBeenCalledWith(
+      "run-parent-1",
+      "user_123",
+      "completed",
+      expect.objectContaining({ currentActivity: "Task completed" }),
+    );
 
     // The paused message becomes the completed reply — the real outcome,
     // not a fabricated regeneration.
@@ -238,6 +273,12 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
       "completed",
       expect.stringContaining("Declined"),
     );
+    expect(transitionActionRun).toHaveBeenCalledWith(
+      "run-parent-1",
+      "user_123",
+      "cancelled",
+      expect.objectContaining({ approvalReference: null }),
+    );
   });
 
   it("persists a resumable paused run when the resumed run pauses again", async () => {
@@ -267,12 +308,21 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
         conversationId: CONV_ID,
         toolId: "deploy.production",
         toolCallId: "tc-9",
+        actionRunId: "run-parent-1",
       }),
     );
     const runResult = vi.mocked(markRunCompleted).mock.calls[0][2] as {
       pendingApproval?: { pausedRunId?: string };
     };
     expect(runResult.pendingApproval?.pausedRunId).toBe("paused-2");
+    expect(transitionActionRunEventActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-parent-1",
+        status: "waiting_for_user",
+        eventType: "approval.required",
+        payload: expect.objectContaining({ pausedRunId: "paused-2" }),
+      }),
+    );
     // The transcript message stays awaiting_approval for the new gate.
     expect(updateMessageStatus).toHaveBeenCalledWith(
       "msg-assistant-1",

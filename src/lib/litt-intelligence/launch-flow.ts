@@ -22,6 +22,7 @@ import { runAgentLoopV2, type AgentLoopResult, type AgentLoopConfig, DEFAULT_LOO
 import { toolRegistry } from "./tool-registry";
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import type { BuildFixLoopResult } from "./build-fix-loop";
+import type { ActionExecutionContext } from "@/lib/action-runtime";
 import { ProgressEmitter } from "./progress-events";
 import { buildPreviewProxyUrl } from "@/lib/terminal-internal-client";
 import {
@@ -72,6 +73,14 @@ export interface LaunchFlowOptions {
   signal?: AbortSignal;
   progress?: ProgressEmitter;
   evalMetadata?: LLMCallMetadata;
+  /**
+   * Canonical parent run context created by the authenticated orchestrator.
+   * Launch flow must propagate it to every agent-loop pass so files,
+   * terminal, preview, deployment, and browser work share one ActionRun.
+   */
+  actionContext?: ActionExecutionContext;
+  /** Conversation scope for trusted context/user-scoped tools. */
+  conversationId?: string;
   /** Injected for tests. */
   runAgentLoop?: (
     userMessage: string,
@@ -309,6 +318,17 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
   const steps: string[] = [];
   let runtimeRepairAttempts = 0;
   const maxRuntimeRepairAttempts = options.maxRuntimeRepairAttempts ?? 2;
+  // Tenant/project identity is reconstructed from authenticated launch-flow
+  // options, never trusted from a forwarded object. The actionRunId itself is
+  // the only value taken from the orchestrator's context.
+  const actionContext: ActionExecutionContext | undefined = options.actionContext
+    ? {
+        actionRunId: options.actionContext.actionRunId,
+        userId: options.userId,
+        conversationId: options.actionContext.conversationId ?? options.conversationId,
+        projectId: options.projectId,
+      }
+    : undefined;
 
   let lastAgentLoopResult: AgentLoopResult | undefined;
 
@@ -363,6 +383,9 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           maxSteps: 40,
           maxOutputChars: 200_000,
           signal,
+          userId: options.userId,
+          conversationId: actionContext?.conversationId ?? options.conversationId,
+          actionContext,
           // Quality loop: gate the main build phase when the caller opted in.
           // (The repair phase below runs without it — it is a bounded
           // sub-task of the already-gated build, not a new build.)
@@ -599,6 +622,9 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           maxRuntimeMs: Math.max(0, startTime + DEFAULT_LOOP_CONFIG.maxRuntimeMs - Date.now()),
           maxOutputChars: 200_000,
           signal,
+          userId: options.userId,
+          conversationId: actionContext?.conversationId ?? options.conversationId,
+          actionContext,
         },
         progress,
       );

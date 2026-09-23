@@ -129,6 +129,42 @@ describe("Launch Flow: no-mutation reprompt", () => {
     expect(runAgentLoop).toHaveBeenCalledTimes(1);
   });
 
+  it("propagates the same trusted parent ActionRun context through reprompts", async () => {
+    const actionContext = {
+      actionRunId: "run-composite",
+      userId: "trusted-user",
+      conversationId: "conv-parent",
+      projectId: "trusted-project",
+    };
+    const runAgentLoop = vi.fn()
+      .mockResolvedValueOnce(successAgentResult({ toolCalls: [] }))
+      .mockResolvedValueOnce(successAgentResult({
+        toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
+      }));
+    const options = makeOptions({
+      requiresExecution: true,
+      runAgentLoop,
+      actionContext,
+      conversationId: "conv-parent",
+    });
+
+    await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    for (const call of runAgentLoop.mock.calls) {
+      expect(call[2]).toMatchObject({
+        userId: "user-test",
+        conversationId: "conv-parent",
+        actionContext: {
+          actionRunId: "run-composite",
+          userId: "user-test",
+          conversationId: "conv-parent",
+          projectId: "proj-test",
+        },
+      });
+    }
+  });
+
   it("reprompts at most once even if the second pass also writes nothing", async () => {
     const runAgentLoop = vi.fn().mockResolvedValue(successAgentResult({ toolCalls: [] }));
     const options = makeOptions({ requiresExecution: true, runAgentLoop });

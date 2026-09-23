@@ -16,7 +16,7 @@ import type { ActionExecutionContext } from "@/lib/action-runtime";
 // The web registry delegates to it so CLI and Studio have the same capability.
 import { webSearch as coreWebSearch, safeFetch as coreSafeFetch, weatherForecast as coreWeatherForecast } from "@litt/agent-core";
 
-interface ToolExecutionContext {
+export interface ToolExecutionContext {
   actionRunId?: string;
   /**
    * Trusted server execution context — the ActionRun identity plus the
@@ -659,10 +659,22 @@ class ToolRegistry {
       if (id.startsWith("browser.") && actionContext && inputUserId && inputUserId !== actionContext.userId) {
         return { ok: false, error: "browser_user_mismatch" };
       }
+      const transportIdentity = options.transport && typeof options.transport === "object"
+        ? options.transport as { userId?: unknown; projectId?: unknown }
+        : null;
+      if (actionContext && typeof transportIdentity?.userId === "string" && transportIdentity.userId !== actionContext.userId) {
+        return { ok: false, error: "action_context_user_mismatch" };
+      }
+      if (actionContext?.projectId && typeof transportIdentity?.projectId === "string" && transportIdentity.projectId !== actionContext.projectId) {
+        return { ok: false, error: "action_context_project_mismatch" };
+      }
       const browserUserId = actionContext?.userId ?? inputUserId;
       const explicitActionRunId = actionContext?.actionRunId ?? options.actionRunId ?? null;
       const runtime = id.startsWith("browser.") && id !== "browser.start_session" && browserSessionId && browserUserId
         ? await import("@/lib/action-runtime/browser-runtime")
+        : null;
+      const toolRuntime = actionContext && !id.startsWith("browser.")
+        ? await import("@/lib/action-runtime/tool-runtime")
         : null;
       // Run identity: explicit actionRunId first, then the durable
       // session -> run association established at attach time. A session with
@@ -701,6 +713,23 @@ class ToolRegistry {
           return { ok: false, error: "action_runtime_unavailable" };
         }
       }
+      if (toolRuntime && actionContext) {
+        try {
+          await toolRuntime.recordActionToolStarted(actionContext, id);
+        } catch (persistError) {
+          // A non-browser mutation/verification must not run untracked
+          // either: if the parent run cannot record its start, the call
+          // fails before side effects.
+          console.error("[action-runtime] tool start could not be persisted; tool call aborted", {
+            runId: actionContext.actionRunId,
+            toolId: id,
+            userId: actionContext.userId,
+            errorType: persistError instanceof Error ? persistError.name : typeof persistError,
+            errorClass: persistError instanceof Error ? persistError.message : String(persistError),
+          });
+          return { ok: false, error: "action_runtime_unavailable" };
+        }
+      }
       try {
         const finalResult = await withExecutionDeadline(
           async () =>
@@ -709,7 +738,7 @@ class ToolRegistry {
               await handler(inputs, options.transport, {
                 actionRunId: explicitActionRunId ?? undefined,
                 actionContext,
-                userId: actionContext?.userId,
+                userId: actionContext?.userId ?? inputUserId ?? undefined,
               }),
               options.transport,
             ),
@@ -734,6 +763,28 @@ class ToolRegistry {
             return { ok: false, error: "ACTION_RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION" };
           }
         }
+        if (toolRuntime && actionContext) {
+          const domainFailure = toolRuntime.actionToolResultFailed(finalResult);
+          try {
+            if (domainFailure) {
+              await toolRuntime.recordActionToolFailed(actionContext, id, domainFailure);
+            } else {
+              await toolRuntime.recordActionToolCompleted(actionContext, id);
+            }
+          } catch (persistError) {
+            // The tool already ran; do not replay it. Return an explicit
+            // reconciliation error and mark the run persistence-degraded.
+            console.error("[action-runtime] tool result could not be persisted after execution", {
+              runId: actionContext.actionRunId,
+              toolId: id,
+              userId: actionContext.userId,
+              errorType: persistError instanceof Error ? persistError.name : typeof persistError,
+              errorClass: persistError instanceof Error ? persistError.message : String(persistError),
+            });
+            await toolRuntime.markActionToolRunPersistenceDegraded(actionContext);
+            return { ok: false, error: "ACTION_RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION" };
+          }
+        }
         return { ok: true, result: finalResult };
       } catch (err) {
         if (runtime && browserContext) {
@@ -747,6 +798,20 @@ class ToolRegistry {
               errorType: persistError instanceof Error ? persistError.name : typeof persistError,
             });
             await runtime.markBrowserRunPersistenceDegraded(browserContext);
+          }
+        }
+        if (toolRuntime && actionContext) {
+          try {
+            await toolRuntime.recordActionToolFailed(actionContext, id, err);
+          } catch (persistError) {
+            console.error("[action-runtime] tool failure could not be persisted", {
+              runId: actionContext.actionRunId,
+              toolId: id,
+              userId: actionContext.userId,
+              errorType: persistError instanceof Error ? persistError.name : typeof persistError,
+              errorClass: persistError instanceof Error ? persistError.message : String(persistError),
+            });
+            await toolRuntime.markActionToolRunPersistenceDegraded(actionContext);
           }
         }
         return {

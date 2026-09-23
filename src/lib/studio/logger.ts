@@ -3,6 +3,8 @@ export interface LogContext {
   clientRequestId?: string;
   conversationId?: string;
   projectId?: string;
+  actionRunId?: string;
+  actionRunCancellation?: "not_applicable" | "requested" | "failed";
   userId?: string;
   agentSlug?: string;
   agentInstanceId?: string | null;

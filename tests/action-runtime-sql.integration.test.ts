@@ -15,11 +15,13 @@ const DATABASE_URL = `postgres://postgres:postgres@127.0.0.1:${PG_PORT}/postgres
 let client: Client;
 
 const MIGRATIONS = [
+  "20260808220000_agent_paused_runs.sql",
   "20260810160000_browser_agent_sessions.sql",
   "20260923000000_action_runtime.sql",
   "20260923010000_browser_action_runtime_hardening.sql",
   "20260923020000_action_runtime_final_gate.sql",
   "20260923030000_action_runtime_lockdown.sql",
+  "20260923040000_action_execution_context.sql",
 ];
 
 async function docker(args: string[]) {
@@ -104,6 +106,8 @@ describe("Action Runtime SQL invariants", () => {
       CREATE SCHEMA IF NOT EXISTS auth;
       CREATE OR REPLACE FUNCTION auth.uid() RETURNS text
       LANGUAGE sql STABLE AS $$ SELECT NULL::text $$;
+      CREATE OR REPLACE FUNCTION auth.jwt() RETURNS jsonb
+      LANGUAGE sql STABLE AS $$ SELECT '{}'::jsonb $$;
       DO $$ BEGIN CREATE ROLE service_role NOLOGIN BYPASSRLS; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
       DO $$ BEGIN CREATE ROLE anon NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
       DO $$ BEGIN CREATE ROLE authenticated NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;

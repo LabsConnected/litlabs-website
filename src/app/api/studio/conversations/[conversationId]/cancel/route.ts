@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { getConversation } from "@/lib/studio/conversation-service";
 import { requestExecutionCancellation } from "@/lib/studio/execution-registry";
+import { requestActionRunCancellation } from "@/lib/action-runtime";
 import { studioLog } from "@/lib/studio/logger";
 
 interface RouteParams {
@@ -67,17 +68,39 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  let actionRunCancellation: "not_applicable" | "requested" | "failed" = "not_applicable";
+  if (result.actionRunId) {
+    try {
+      await requestActionRunCancellation(result.actionRunId, userId);
+      actionRunCancellation = "requested";
+    } catch (error) {
+      actionRunCancellation = "failed";
+      studioLog("message:action_run_cancel_persist_failed", {
+        conversationId: conversation.id,
+        projectId: conversation.projectId,
+        userId,
+        clientRequestId,
+        actionRunId: result.actionRunId,
+        errorClass: error instanceof Error ? error.message : "unknown",
+      });
+    }
+  }
+
   studioLog("message:execution_cancel_requested", {
     conversationId: conversation.id,
     projectId: conversation.projectId,
     userId,
     clientRequestId,
     status: result.status,
+    actionRunId: result.actionRunId,
+    actionRunCancellation,
   });
 
   return NextResponse.json({
     cancelled: result.status === "aborted" || result.status === "recorded",
     status: result.status,
+    actionRunId: result.actionRunId,
+    actionRunCancellation,
   });
 }
 

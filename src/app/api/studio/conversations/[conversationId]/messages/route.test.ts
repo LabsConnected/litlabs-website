@@ -116,6 +116,15 @@ vi.mock("@/lib/litt-intelligence/launch-flow", () => ({
   runLaunchFlow: vi.fn(),
 }));
 
+const actionRuntimeMocks = vi.hoisted(() => ({
+  createActionRun: vi.fn(),
+  transitionActionRunEventActivity: vi.fn(),
+  transitionActionRun: vi.fn(),
+  requestActionRunCancellation: vi.fn(),
+}));
+
+vi.mock("@/lib/action-runtime", () => actionRuntimeMocks);
+
 vi.mock("@/lib/litt-intelligence/agent-loop", () => ({
   runAgentLoop: vi.fn(),
 }));
@@ -263,10 +272,25 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
       error: null,
     }) as any);
     vi.mocked(updateMessageStatus).mockResolvedValue(true as any);
+    actionRuntimeMocks.createActionRun.mockResolvedValue({
+      id: "action-run-123",
+      userId: "user_123",
+      projectId: "proj-123",
+      conversationId: "conv-123",
+      kind: "composite",
+      status: "queued",
+    } as any);
+    actionRuntimeMocks.transitionActionRunEventActivity.mockResolvedValue({} as any);
+    actionRuntimeMocks.transitionActionRun.mockResolvedValue({} as any);
+    actionRuntimeMocks.requestActionRunCancellation.mockResolvedValue({} as any);
   });
 
   it("emits exactly one terminal `done` event and `[DONE]` marker on successful V2 run with fallback", async () => {
-    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({
+      projectId: "proj-123",
+      userId: "user_123",
+      workspaceId: "ws-123",
+    } as any);
 
     // Simulate a multi-step launch flow with provider fallback that succeeds
     vi.mocked(runLaunchFlow).mockImplementation(async (opts: any) => {
@@ -322,7 +346,36 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
     const doneEvents = events.filter((e) => e.type === "done");
     expect(doneEvents.length).toBe(1);
     expect(doneEvents[0].assistantMessage.status).toBe("completed");
+    expect(doneEvents[0].actionRunId).toBe("action-run-123");
+    expect(doneEvents[0].actionRunPersistence).toBe("ok");
     expect(doneEvents[0].previewUrl).toBe("https://preview.example.com");
+
+    // The authenticated route creates ONE composite parent run and passes
+    // that exact context into launch flow — no tool re-discovers run identity.
+    expect(actionRuntimeMocks.createActionRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user_123",
+        conversationId: "conv-123",
+        kind: "composite",
+        idempotencyKey: expect.stringMatching(/^studio-message:conv-123:/),
+      }),
+    );
+    const launchOptions = vi.mocked(runLaunchFlow).mock.calls[0][0];
+    expect(launchOptions.actionContext).toEqual({
+      actionRunId: "action-run-123",
+      userId: "user_123",
+      conversationId: "conv-123",
+      projectId: "proj-123",
+    });
+    expect(actionRuntimeMocks.transitionActionRunEventActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "action-run-123", status: "working", eventType: "run.started" }),
+    );
+    expect(actionRuntimeMocks.transitionActionRun).toHaveBeenCalledWith(
+      "action-run-123",
+      "user_123",
+      "completed",
+      expect.objectContaining({ currentActivity: "Task completed" }),
+    );
 
     // `[DONE]` marker present
     expect(raw).toContain("data: [DONE]");
