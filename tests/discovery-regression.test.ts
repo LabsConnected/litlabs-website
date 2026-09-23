@@ -440,7 +440,9 @@ describe("Discovery regression — Round 2 QA fixes", () => {
       "utf-8"
     );
     expect(src).toContain('href="/studio"');
-    expect(src).toContain('href="/agents"');
+    // "Agents" points at the real in-app Agents destination — the same
+    // target /agents redirects to — so both footers resolve identically.
+    expect(src).toContain('href="/studio?tool=agents"');
     expect(src).not.toContain("SmartLink");
     expect(src).not.toContain("/sign-up");
   });

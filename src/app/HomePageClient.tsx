@@ -1,10 +1,13 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { track } from "@/lib/analytics";
 import {
+  ArrowRight,
+  ArrowUpRight,
   BrainCircuit,
   Braces,
   Check,
@@ -12,6 +15,7 @@ import {
   ImageIcon,
   Mic2,
   Palette,
+  Play,
   Rocket,
   Sparkles,
   TestTube2,
@@ -20,10 +24,9 @@ import {
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 // Above-the-fold sections stay in the main bundle.
 import { LandingHeroV3 } from "@/components/landing/LandingHeroV3";
-import { CapabilityStatus } from "@/components/landing/CapabilityStatus";
 // Below-the-fold sections are code-split (ssr: true keeps them in the
 // server-rendered HTML for SEO; the client JS loads on demand). This
-// keeps the initial homepage JS payload to hero + status + grid.
+// keeps the initial homepage JS payload to hero + capabilities.
 const InteractiveProductDemo = dynamic(
   () => import("@/components/landing/InteractiveProductDemo").then((m) => m.InteractiveProductDemo),
   { ssr: true },
@@ -144,6 +147,28 @@ function CapabilityGrid() {
     <section id="what-we-do" className="litt-section relative overflow-hidden border-t border-white/8">
       <div className="litt-grid-fade pointer-events-none absolute inset-0 opacity-40" />
       <div className="relative mx-auto max-w-[1500px] px-5 lg:px-8">
+        {/* Availability status (folded in from CapabilityStatus): the unique
+            "working now" signal + beta tag. The per-capability chips were
+            folded into the grid cards below to remove duplicated messaging. */}
+        <div data-reveal className="mb-12 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex shrink-0 items-center gap-3">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-45" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-accent shadow-accent-glow-strong" />
+            </span>
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.2em] text-accent">Working now</div>
+              <div className="mt-0.5 text-xs font-semibold text-white/42">Core capabilities available in Studio</div>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-3 text-[10px] font-black uppercase tracking-[0.14em]">
+            <span className="rounded-full border border-amber-300/16 bg-amber-300/6 px-3 py-2 text-amber-200/78">Voice · Terminal · Deploy <span className="text-white/30">Beta</span></span>
+            <Link href="/pricing" className="hidden items-center gap-1.5 text-white/40 transition hover:text-white sm:inline-flex">
+              Compare plans <ArrowUpRight size={12} />
+            </Link>
+          </div>
+        </div>
+
         <SectionHeading
           eyebrow="One workspace, the whole creative loop"
           title={<>Everything between <span className="litt-gradient-text">idea and done.</span></>}
@@ -213,15 +238,46 @@ function MissionDemo() {
 }
 
 function CreationsSection() {
+  const handleWatchClick = () => {
+    track("watch_litt_click", { source: "real_proof" });
+  };
+
   return (
     <section id="creations" className="litt-section relative overflow-hidden border-t border-white/8 bg-[#05070d]">
+      <div className="pointer-events-none absolute left-1/2 top-0 h-[380px] w-[680px] -translate-x-1/2 rounded-full bg-accent/6 blur-[140px]" />
       <div className="relative mx-auto max-w-[1500px] px-5 lg:px-8">
-        <SectionHeading
-          eyebrow="From prompt to project"
-          title={<>One system. <span className="litt-gradient-text">Very different outcomes.</span></>}
-          copy="Explore transparent product demonstrations that show how LiTTree approaches product builds, dashboards, campaigns, and creative work."
-        />
-        <div className="mt-12"><RealCreations /></div>
+        {/* Creations: the product-demonstration cards */}
+        <div className="mt-20 sm:mt-24">
+          <SectionHeading
+            eyebrow="From prompt to project"
+            title={<>One system. <span className="litt-gradient-text">Very different outcomes.</span></>}
+            copy="Explore transparent product demonstrations that show how LiTTree approaches product builds, dashboards, campaigns, and creative work."
+          />
+          <div className="mt-12"><RealCreations /></div>
+        </div>
+
+        <div data-reveal className="mt-12 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+          <Link
+            href="/sign-up"
+            className="litt-primary-button"
+            onClick={() => track("hero_cta_click", { source: "real_proof" })}
+          >
+            Start building free <ArrowRight size={16} />
+          </Link>
+          <a
+            href="#how-it-works"
+            className="litt-secondary-button"
+            onClick={handleWatchClick}
+          >
+            <Play size={13} fill="currentColor" /> See the walkthrough
+          </a>
+          <Link
+            href="/showcase/artist-launch-site"
+            className="litt-secondary-button"
+          >
+            See an example session <ArrowRight size={13} />
+          </Link>
+        </div>
       </div>
     </section>
   );
@@ -234,7 +290,6 @@ function LandingPage() {
   return (
     <main ref={landingRef} id="main-content" className="litt-landing min-h-dvh overflow-hidden bg-[#03050a] text-white selection:bg-accent selection:text-on-accent">
       <LandingHeroV3 />
-      <CapabilityStatus />
       <CapabilityGrid />
       <MissionDemo />
       <StudioTour />

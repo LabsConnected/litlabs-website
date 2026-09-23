@@ -45,6 +45,12 @@ export interface ChatMessage {
    * stream, never the work.
    */
   execution?: MessageExecution;
+  /**
+   * Raw per-run tool activity records (tool calls, build checks, checkpoints).
+   * Rendered ONLY behind the run's collapsed "Details" expander — these are
+   * factual records and must never be presented as the run's result.
+   */
+  toolActivity?: Array<{ toolId: string; success?: boolean; summary: string }>;
 }
 
 /** Execution evidence attached to an assistant message. */

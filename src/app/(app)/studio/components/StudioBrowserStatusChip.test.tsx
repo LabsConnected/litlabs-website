@@ -85,7 +85,7 @@ describe("StudioBrowserStatusChip — cooperative control", () => {
     render(<StudioBrowserStatusChip />);
 
     // Phase 4 — the burn segment comes from the real accumulator.
-    expect(screen.getByText("Browser · You have control · 3 min · 155 BITS")).toBeTruthy();
+    expect(screen.getByText("Browser · You have control · 3 min · 155 LiTTBits")).toBeTruthy();
     expect(screen.getByTestId("browser-resume")).toBeTruthy();
     expect(screen.queryByTestId("browser-take-control")).toBeNull();
     const liveView = screen.getByTestId("browser-live-view");
@@ -118,7 +118,7 @@ describe("StudioBrowserStatusChip — live burn display (Phase 4)", () => {
     };
     render(<StudioBrowserStatusChip />);
     expect(
-      screen.getByText("Browser · Live · 3 min · 155 BITS"),
+      screen.getByText("Browser · Live · 3 min · 155 LiTTBits"),
     ).toBeTruthy();
   });
 

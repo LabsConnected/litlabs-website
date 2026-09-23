@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowRight, ChevronRight, Menu, X } from "lucide-react";
 import { track, type FunnelEvent } from "@/lib/analytics";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 import BrandMark from "./BrandMark";
 
 type MarketingNavItem = {
@@ -14,9 +15,9 @@ type MarketingNavItem = {
 };
 
 // Larry's site audit (2026-09-22, issue #469): lead with the product —
-// Studio → How it works → Pricing first. "Community" is intentionally
-// omitted until the /discover feed is seeded (it renders an empty state);
-// re-add it when posts exist. Labels and hrefs are unchanged, order only.
+// Studio → How it works → Pricing first. "Community" is back in the nav now
+// that the /discover feed is seeded with LiTT-team welcome posts (it renders
+// /discover, the canonical route; /community and /communities 308 there).
 const NAV_ITEMS: MarketingNavItem[] = [
   { label: "Studio", href: "/studio" },
   { label: "How it works", href: "/#how-it-works" },
@@ -25,10 +26,20 @@ const NAV_ITEMS: MarketingNavItem[] = [
   { label: "Creations", href: "/#creations" },
   { label: "CLI", href: "/cli" },
   { label: "FAQ", href: "/#faq" },
+  { label: "Community", href: "/discover" },
 ];
 
 export default function MarketingHeader() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const { isLoaded, isSignedIn } = useClerkAuth();
+  // Swap auth CTAs only after hydration — Clerk state is client-only,
+  // so render the signed-out CTAs on first paint to avoid a mismatch.
+  const signedIn = mounted && isLoaded && isSignedIn;
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -69,12 +80,20 @@ export default function MarketingHeader() {
         </nav>
 
         <div className="flex items-center gap-2">
-          <Link href="/sign-in" className="hidden px-3 py-2 text-sm font-bold text-white/55 transition hover:text-white sm:block">
-            Sign in
-          </Link>
-          <Link href="/sign-up" className="litt-primary-button !min-h-10 !px-4 !py-2 text-sm" onClick={() => track("hero_cta_click", { source: "header" })}>
-            Start free <ArrowRight size={14} />
-          </Link>
+          {signedIn ? (
+            <Link href="/studio" className="litt-primary-button !min-h-10 !px-4 !py-2 text-sm" onClick={() => track("hero_cta_click", { source: "header" })}>
+              Open Studio <ArrowRight size={14} />
+            </Link>
+          ) : (
+            <>
+              <Link href="/sign-in" className="hidden px-3 py-2 text-sm font-bold text-white/55 transition hover:text-white sm:block">
+                Sign in
+              </Link>
+              <Link href="/sign-up" className="litt-primary-button !min-h-10 !px-4 !py-2 text-sm" onClick={() => track("hero_cta_click", { source: "header" })}>
+                Start free <ArrowRight size={14} />
+              </Link>
+            </>
+          )}
           <button
             type="button"
             aria-label={menuOpen ? "Close menu" : "Open menu"}
