@@ -306,7 +306,7 @@ describe("POST /api/litt/browser/session", () => {
     const body = await json(response);
 
     expect(response.status).toBe(500);
-    expect(body.code).toBe("ACTION_RUNTIME_PERSISTENCE_FAILED");
+    expect(body.code).toBe("ACTION_RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION");
     expect(body.sessionCleanup).toBe("closed");
     expect(mocks.closeSession).toHaveBeenCalledWith("session-one", "user-one");
   });
@@ -314,24 +314,41 @@ describe("POST /api/litt/browser/session", () => {
   it("reports when attach fails and provider cleanup also fails", async () => {
     mocks.attachBrowserSession.mockRejectedValue(new Error("database unavailable"));
     mocks.closeSession.mockRejectedValue(new Error("provider cleanup failed"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const response = await POST(request({ action: "start", actionRunId: "run-one" }));
     const body = await json(response);
 
     expect(response.status).toBe(500);
-    expect(body.code).toBe("ACTION_RUNTIME_PERSISTENCE_FAILED");
+    expect(body.code).toBe("ACTION_RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION");
     expect(body.sessionCleanup).toBe("failed");
     expect(mocks.closeSession).toHaveBeenCalledWith("session-one", "user-one");
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[browser-session] attach failed and session cleanup failed",
+      expect.objectContaining({
+        code: "BROWSER_SESSION_CLEANUP_FAILED",
+        operation: "attach",
+        userId: "user-one",
+        actionRunId: "run-one",
+        sessionId: "session-one",
+      }),
+    );
+    errorSpy.mockRestore();
   });
 
-  it("maps billing_unavailable to 503 instead of payment required", async () => {
-    mocks.preflightBrowserStart.mockResolvedValue({ ok: false, error: "billing_unavailable", message: "Billing unavailable" });
+  it.each([
+    ["insufficient_bits", 402],
+    ["spend_ceiling_exceeded", 402],
+    ["billing_unavailable", 503],
+    ["rate_limited", 429],
+  ] as const)("maps billing preflight %s to HTTP %i", async (billingError, status) => {
+    mocks.preflightBrowserStart.mockResolvedValue({ ok: false, error: billingError, message: `Billing ${billingError}` });
 
     const response = await POST(request({ action: "start" }));
     const body = await json(response);
 
-    expect(response.status).toBe(503);
-    expect(body.code).toBe("billing_unavailable");
+    expect(response.status).toBe(status);
+    expect(body.code).toBe(billingError);
     expect(mocks.startSession).not.toHaveBeenCalled();
   });
 
@@ -463,6 +480,20 @@ describe("GET /api/litt/browser/session", () => {
     expect(body.runStatus).toBe("working");
     expect(body.currentActivity).toBe("Starting browser session");
   });
+
+  it.each(["getSession", "dbGetActions", "resolveBrowserActionRun"] as const)(
+    "maps session recovery %s failure through the safe error boundary",
+    async (dependency) => {
+      mocks[dependency].mockRejectedValue(new Error("database unavailable"));
+
+      const response = await GET(new NextRequest("http://localhost/api/litt/browser/session?sessionId=session-one"));
+      const body = await json(response);
+
+      expect(response.status).toBe(503);
+      expect(body.code).toBe("BROWSER_SESSION_RECOVERY_FAILED");
+      expect(JSON.stringify(body)).not.toContain("database unavailable");
+    },
+  );
 
   it("maps recovery database failures through the safe error boundary", async () => {
     mocks.dbGetActiveSessionsStrict.mockRejectedValue(new Error("database unavailable"));

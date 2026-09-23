@@ -2,7 +2,7 @@ import "server-only";
 
 import { randomUUID } from "crypto";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { assertActionRunTransition } from "./state-machine";
+import { assertActionRunTransition, isTerminalActionRunStatus } from "./state-machine";
 import {
   sanitizeActionActivityMessage,
   sanitizeActionPayload,
@@ -190,6 +190,9 @@ export async function patchActionRun(
 ): Promise<ActionRun> {
   const current = await getOwnedRunRow(runId, userId);
   if (!current) throw new ActionRuntimeError("Action run not found", "ACTION_RUN_NOT_FOUND");
+  if (isTerminalActionRunStatus(current.status)) {
+    throw new ActionRuntimeError("Terminal action runs cannot be mutated", "ACTION_RUN_TERMINAL_IMMUTABLE");
+  }
   const sanitizedPatch = sanitizeActionRunPatch(patch);
   const { data, error } = await adminOrThrow().rpc("action_runtime_transition", {
     p_run_id: runId,
@@ -211,6 +214,9 @@ export async function transitionActionRun(
 ): Promise<ActionRun> {
   const current = await getOwnedRunRow(runId, userId);
   if (!current) throw new ActionRuntimeError("Action run not found", "ACTION_RUN_NOT_FOUND");
+  if (isTerminalActionRunStatus(current.status)) {
+    throw new ActionRuntimeError("Terminal action runs cannot be mutated", "ACTION_RUN_TERMINAL_IMMUTABLE");
+  }
   assertActionRunTransition(current.status, status);
   const sanitizedPatch = sanitizeActionRunPatch(patch);
   const eventType = status === "completed"

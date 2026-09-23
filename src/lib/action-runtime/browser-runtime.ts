@@ -18,7 +18,6 @@ import {
   ActionRuntimeError,
   type ActionRun,
   type BrowserActionContext,
-  type BrowserToolExecutionResult,
   type CreateActionRunInput,
 } from "./types";
 import type { BrowserSession } from "@/lib/litt-intelligence/browser-session-manager";
@@ -61,6 +60,7 @@ async function getBrowserRun(context: BrowserActionContext): Promise<ActionRun> 
 }
 
 /**
+ * LEGACY / STANDALONE / RECOVERY ONLY.
  * Boundary fallback only: creates the outer browser ActionRun when a caller
  * genuinely has no parent run (legacy entry points, recovery). Callers that
  * already hold an ActionExecutionContext must use that run instead — one user
@@ -132,6 +132,9 @@ export async function recordBrowserToolStarted(context: BrowserActionContext & {
   const { toolId } = context;
   const run = await getBrowserRun(context);
   const message = browserActivityForTool(toolId, "started");
+  if (run.status === "user_controlling") {
+    throw new ActionRuntimeError("Browser control must be returned before browser work can resume", "ACTION_RUN_INVALID_TRANSITION");
+  }
   if (run.status === "paused" || run.status === "starting" || run.status === "queued") {
     return transitionActionRunEventActivity({
       runId: run.id,
@@ -145,7 +148,7 @@ export async function recordBrowserToolStarted(context: BrowserActionContext & {
   }
   if (run.status !== "working") {
     if (!canTransitionActionRun(run.status, "working")) {
-      throw new ActionRuntimeError("Action run cannot start browser work from its current state", "INVALID_TRANSITION");
+      throw new ActionRuntimeError("Action run cannot start browser work from its current state", "ACTION_RUN_INVALID_TRANSITION");
     }
     return transitionActionRunEventActivity({
       runId: run.id,
@@ -192,20 +195,10 @@ export async function recordBrowserToolFailed(context: BrowserActionContext & { 
 }
 
 /**
- * @deprecated Use recordBrowserToolCompleted or recordBrowserToolFailed so
- * execution outcome remains explicit at the call site.
- * Records the finished outcome of a browser tool call inside the supplied
- * run. `result.outcome` is the actual execution outcome — it is never
- * inferred from a handler's success-shaped payload. Persistence failures
- * propagate so callers can surface or mark the run degraded.
+ * Canonical outcome recording is explicit: callers that returned invoke
+ * recordBrowserToolCompleted; callers that threw/aborted/timed out invoke
+ * recordBrowserToolFailed. The runtime never infers outcome from a payload.
  */
-export async function recordBrowserToolExecution(
-  context: BrowserActionContext & { toolId: string; result: BrowserToolExecutionResult },
-): Promise<ActionRun> {
-  return context.result.outcome === "completed"
-    ? recordBrowserToolCompleted(context)
-    : recordBrowserToolFailed(context, context.result.error ?? new Error("Browser action failed"));
-}
 
 /**
  * Best-effort degradation marker: when durable event persistence fails after
@@ -228,6 +221,7 @@ export async function markBrowserRunPersistenceDegraded(context: BrowserActionCo
   }
 }
 
+/** Boundary/recovery resolver: explicit actionRunId is canonical; session lookup is legacy recovery. */
 export async function resolveBrowserActionRun(
   userId: string,
   options: { actionRunId?: string; browserSessionId?: string },
@@ -242,7 +236,7 @@ export async function markBrowserSessionPaused(userId: string, session: BrowserS
   const run = await resolveBrowserActionRun(userId, { actionRunId, browserSessionId: session.id });
   if (!run) return actionRunId ? Promise.reject(new ActionRuntimeError("Action run not found", "ACTION_RUN_NOT_FOUND")) : null;
   const context = { actionRunId: run.id, userId, browserSessionId: session.id } satisfies BrowserActionContext;
-  if (actionRunId) assertBrowserRun(run, context);
+  assertBrowserRun(run, context);
   return transitionActionRunEventActivity({
     runId: context.actionRunId,
     userId,
@@ -257,7 +251,7 @@ export async function markBrowserSessionControl(userId: string, session: Browser
   const run = await resolveBrowserActionRun(userId, { actionRunId, browserSessionId: session.id });
   if (!run) return actionRunId ? Promise.reject(new ActionRuntimeError("Action run not found", "ACTION_RUN_NOT_FOUND")) : null;
   const context = { actionRunId: run.id, userId, browserSessionId: session.id } satisfies BrowserActionContext;
-  if (actionRunId) assertBrowserRun(run, context);
+  assertBrowserRun(run, context);
   const human = session.controller === "human";
   const next = human ? "user_controlling" : "paused";
   const message = human ? "You're controlling this browser" : "Control returned to LiTT";

@@ -159,18 +159,23 @@ describe("toolRegistry.execute — browser ActionRuntime recording", () => {
     );
   });
 
-  it("keeps the real result but marks the run degraded when post-execution persistence fails", async () => {
+  it("returns an explicit reconciliation error when post-execution persistence fails", async () => {
     runtimeMocks.recordBrowserToolCompleted.mockRejectedValue(new Error("event insert failed"));
-    const handler: TestHandler = async (_inputs) => ({ navigated: true });
+    let handlerCalls = 0;
+    const handler: TestHandler = async (_inputs) => {
+      handlerCalls += 1;
+      return { navigated: true };
+    };
     toolRegistry.register(fakeBrowserTool("browser.fake"), handler);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const result = await toolRegistry.execute("browser.fake", browserInputs, { actionRunId: "run-one" });
 
-    // The browser action already executed — reporting failure would invite a
-    // retry of a non-idempotent action. The degradation is logged + stamped.
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.result).toEqual({ navigated: true });
+    // The browser action already executed; callers see a durable-truth
+    // reconciliation error, but the registry never replays it automatically.
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("ACTION_RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION");
+    expect(handlerCalls).toBe(1);
     expect(runtimeMocks.markBrowserRunPersistenceDegraded).toHaveBeenCalledWith(
       expect.objectContaining({ actionRunId: "run-one", browserSessionId: "session-one" }),
     );

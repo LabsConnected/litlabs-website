@@ -44,6 +44,7 @@ import {
   markBrowserSessionControl,
   recordBrowserToolCompleted,
   recordBrowserToolFailed,
+  recordBrowserSessionClosed,
   recordBrowserToolStarted,
   resolveBrowserActionRun,
   startBrowserActionRun,
@@ -148,6 +149,26 @@ describe("primary explicit-run path (canonical)", () => {
     }
   });
 
+  it("records failed browser work explicitly with identifiers only", async () => {
+    await recordBrowserToolStarted({ ...toolContext, toolId: "browser.click" });
+    await recordBrowserToolFailed({ ...toolContext, toolId: "browser.click" }, new Error("provider exploded with token=secret"));
+
+    const types = mocks.recordActionEventActivity.mock.calls.map(([input]) => (input as { type: string }).type);
+    expect(types).toEqual(["browser.action.started", "browser.action.failed"]);
+    expect(mocks.recordActionEventActivity).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "browser.action.failed",
+      payload: expect.objectContaining({
+        toolId: "browser.click",
+        browserSessionId: "session-one",
+        outcome: "failed",
+        failureCode: expect.any(String),
+      }),
+    }));
+    const payload = mocks.recordActionEventActivity.mock.calls[1][0].payload as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("error");
+    expect(JSON.stringify(payload)).not.toContain("token=secret");
+  });
+
   it("keeps concurrent browser actions on the same run with no run creation", async () => {
     mocks.recordActionEventActivity.mockResolvedValue(run);
     const [navStarted, clickStarted] = await Promise.all([
@@ -171,6 +192,22 @@ describe("primary explicit-run path (canonical)", () => {
     }
   });
 
+  it("records browser close as a resource event without terminalizing the parent run", async () => {
+    mocks.appendActionEvent.mockResolvedValue({ id: "event-one" });
+
+    const result = await recordBrowserSessionClosed(toolContext);
+
+    expect(result.status).toBe("working");
+    expect(mocks.appendActionEvent).toHaveBeenCalledWith({
+      runId: "run-one",
+      userId: "user-one",
+      type: "browser.session.completed",
+      payload: { browserSessionId: "session-one", reason: "user_closed" },
+    });
+    expect(mocks.transitionActionRun).not.toHaveBeenCalled();
+    expect(mocks.recordActionEventActivity).not.toHaveBeenCalled();
+  });
+
   it("returns control to paused, then resumes working on the same run", async () => {
     mocks.getActionRun.mockResolvedValueOnce({ ...run, status: "user_controlling" });
     mocks.transitionActionRunEventActivity.mockResolvedValueOnce({ ...run, status: "paused" });
@@ -182,6 +219,16 @@ describe("primary explicit-run path (canonical)", () => {
     const started = await recordBrowserToolStarted({ ...toolContext, toolId: "browser.navigate" });
     expect(started.status).toBe("working");
     expect(mocks.transitionActionRunEventActivity).toHaveBeenLastCalledWith(expect.objectContaining({ runId: "run-one", status: "working", eventType: "browser.action.started" }));
+  });
+
+  it("does not shortcut user_controlling directly to working", async () => {
+    mocks.getActionRun.mockResolvedValueOnce({ ...run, status: "user_controlling" });
+
+    await expect(
+      recordBrowserToolStarted({ ...toolContext, toolId: "browser.navigate" }),
+    ).rejects.toMatchObject({ code: "ACTION_RUN_INVALID_TRANSITION" });
+    expect(mocks.transitionActionRunEventActivity).not.toHaveBeenCalled();
+    expect(mocks.recordActionEventActivity).not.toHaveBeenCalled();
   });
 });
 

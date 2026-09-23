@@ -9,7 +9,6 @@ export {
   markBrowserSessionPaused,
   resolveBrowserActionRun,
   recordBrowserToolCompleted,
-  recordBrowserToolExecution,
   recordBrowserToolFailed,
   recordBrowserSessionClosed,
   recordBrowserToolStarted,

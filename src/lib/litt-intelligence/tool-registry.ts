@@ -658,6 +658,7 @@ class ToolRegistry {
               errorType: persistError instanceof Error ? persistError.name : typeof persistError,
             });
             await runtime.markBrowserRunPersistenceDegraded(browserContext);
+            return { ok: false, error: "ACTION_RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION" };
           }
         }
         return { ok: true, result: finalResult };

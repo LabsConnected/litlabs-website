@@ -145,15 +145,6 @@ export interface BrowserActionContext extends ActionExecutionContext {
   browserSessionId: string;
 }
 
-/**
- * The actual execution outcome of a browser tool call, supplied by the
- * caller that ran the action — never inferred from a handler's
- * success-shaped return payload.
- */
-export type BrowserToolExecutionResult =
-  | { outcome: "completed" }
-  | { outcome: "failed"; error?: unknown };
-
 export class ActionRuntimeError extends Error {
   constructor(
     message: string,

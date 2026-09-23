@@ -366,14 +366,16 @@ async function handler(req: NextRequest) {
             const cleanupFailure = mapBrowserFailure(cleanupError, "BROWSER_SESSION_CLEANUP_FAILED");
             console.error("[browser-session] attach failed and session cleanup failed", {
               code: cleanupFailure.code,
+              operation: "attach",
               userId,
               actionRunId: actionRun.id,
               sessionId: session.id,
             });
           }
-          const failure = mapBrowserFailure(attachError, "ACTION_RUNTIME_PERSISTENCE_FAILED");
+          const failure = mapBrowserFailure(attachError, "ACTION_RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION");
           console.error("[browser-session] attach failed; provider session cleanup attempted", {
             code: failure.code,
+            operation: "attach",
             userId,
             actionRunId: actionRun.id,
             sessionId: session.id,
@@ -381,7 +383,7 @@ async function handler(req: NextRequest) {
           });
           return NextResponse.json(
             {
-              code: "ACTION_RUNTIME_PERSISTENCE_FAILED",
+              code: "ACTION_RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION",
               message: "The browser started, but LiTT couldn't attach it to the task state.",
               actionRunId: actionRun.id,
               sessionCleanup: cleanupFailed ? "failed" : "closed",

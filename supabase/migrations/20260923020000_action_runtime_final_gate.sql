@@ -70,6 +70,9 @@ EXCEPTION
       WHERE user_id = p_user_id AND idempotency_key = p_idempotency_key;
       IF FOUND THEN RETURN v_run; END IF;
     END IF;
+    SELECT * INTO v_run FROM public.action_runs
+    WHERE user_id = p_user_id AND id = p_id;
+    IF FOUND THEN RETURN v_run; END IF;
     RAISE EXCEPTION 'ACTION_RUN_CONFLICT' USING ERRCODE = 'P0001';
 END;
 $$;
@@ -269,6 +272,12 @@ BEGIN
     RAISE EXCEPTION 'ACTION_RUN_TERMINAL_IMMUTABLE' USING ERRCODE = 'P0001';
   END IF;
   IF v_current.browser_session_id IS NOT NULL AND v_current.browser_session_id <> p_browser_session_id THEN
+    RAISE EXCEPTION 'ACTION_BROWSER_SESSION_MISMATCH' USING ERRCODE = 'P0001';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.browser_sessions
+    WHERE id = p_browser_session_id
+  ) THEN
     RAISE EXCEPTION 'ACTION_BROWSER_SESSION_MISMATCH' USING ERRCODE = 'P0001';
   END IF;
   IF EXISTS (
