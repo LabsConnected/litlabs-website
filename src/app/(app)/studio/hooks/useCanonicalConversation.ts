@@ -129,6 +129,8 @@ function toUIMessage(
     reasoning: msg.reasoning,
     // Execution evidence drives the truthful work log. Absent = no execution.
     execution: msg.execution ?? undefined,
+    // Raw per-run activity records — shown only behind the Details expander.
+    toolActivity: msg.toolActivity ?? undefined,
   };
 }
 

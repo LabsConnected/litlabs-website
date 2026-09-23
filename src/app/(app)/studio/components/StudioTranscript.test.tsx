@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
@@ -59,6 +59,7 @@ vi.mock("@/components/chat/MessageAvatar", () => ({
 
 import StudioTranscript from "./StudioTranscript";
 import type { ChatMessage, AgentId } from "../stores/useStudioAgentStore";
+import { useExecutionStore } from "../stores/useExecutionStore";
 
 describe("StudioTranscript — Phase 1.1 functional tests", () => {
   beforeEach(() => {
@@ -484,5 +485,185 @@ describe("StudioTranscript — overflowDownloads (mobile density redesign)", () 
     fireEvent.click(md);
     expect(downloadTextFileMock).toHaveBeenCalledTimes(1);
     expect(downloadTextFileMock.mock.calls[0][0]).toMatch(/\.md$/);
+  });
+});
+
+/* ── Conversation/execution separation (polish program #6) ────────── */
+
+/**
+ * One concise progress block per run; low-level events behind a collapsed
+ * "Details" expander; the verdict line derived from execution evidence only;
+ * conversation replies in their own prominent lane.
+ */
+describe("StudioTranscript — conversation/execution separation", () => {
+  const runMessage = (over: Partial<ChatMessage> = {}): ChatMessage => ({
+    role: "assistant",
+    content: "Here's your audit report.",
+    status: "completed",
+    createdAt: Date.now(),
+    ...over,
+  });
+
+  const successfulBuild = () =>
+    runMessage({
+      execution: {
+        mode: "build",
+        toolCalls: [
+          { toolId: "read_file", success: true, mutating: false },
+          { toolId: "edit_file", success: true, mutating: true },
+        ],
+      },
+      toolActivity: [
+        { toolId: "read_file", success: true, summary: "Reading index.html" },
+        { toolId: "edit_file", success: true, summary: "Editing index.html" },
+      ],
+    });
+
+  function renderTranscript(messages: ChatMessage[], busy = false) {
+    return render(
+      <StudioTranscript
+        messages={messages}
+        busy={busy}
+        activeAgentId={"litt" as AgentId}
+        onRouteToolAction={vi.fn()}
+      />,
+    );
+  }
+
+  beforeEach(() => {
+    useExecutionStore.getState().reset();
+  });
+
+  afterEach(() => {
+    useExecutionStore.getState().reset();
+  });
+
+  it("collapses a completed run's low-level events behind a Details expander by default", () => {
+    renderTranscript([successfulBuild()]);
+
+    const lane = screen.getByTestId("studio-execution-block");
+    expect(lane).toBeInTheDocument();
+
+    const toggle = screen.getByTestId("execution-details-toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    // Raw records are hidden until the user expands them.
+    expect(screen.queryByTestId("execution-details")).toBeNull();
+    expect(screen.queryByText("Reading index.html")).toBeNull();
+    expect(screen.queryByText("Editing index.html")).toBeNull();
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("execution-details")).toBeInTheDocument();
+    expect(screen.getByText("Reading index.html")).toBeInTheDocument();
+    expect(screen.getByText("Editing index.html")).toBeInTheDocument();
+  });
+
+  it("collapses the live run's raw events behind Details while running", () => {
+    useExecutionStore.setState({
+      phase: "editing",
+      isRunning: true,
+      events: [
+        {
+          id: "e1",
+          seq: 0,
+          ts: Date.now(),
+          type: "tool_start",
+          summary: "Reading index.html",
+          toolId: "read_file",
+          lowLevel: true,
+        },
+        {
+          id: "e2",
+          seq: 1,
+          ts: Date.now(),
+          type: "reasoning",
+          summary: "Considering layout options",
+        },
+      ],
+    });
+    renderTranscript(
+      [
+        { role: "user", content: "Audit my site", createdAt: Date.now() },
+        { role: "assistant", content: "", status: "streaming", createdAt: Date.now() },
+      ],
+      true,
+    );
+
+    // One concise progress block for the live run.
+    expect(screen.getByTestId("studio-live-progress")).toBeInTheDocument();
+
+    // The raw firehose stays collapsed.
+    const toggle = screen.getByTestId("execution-details-toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("execution-details")).toBeNull();
+    expect(screen.queryByText("Reading index.html")).toBeNull();
+    expect(screen.queryByText("Considering layout options")).toBeNull();
+
+    fireEvent.click(toggle);
+
+    expect(screen.getByTestId("execution-details")).toBeInTheDocument();
+    expect(screen.getByText("Reading index.html")).toBeInTheDocument();
+    expect(screen.getByText("Considering layout options")).toBeInTheDocument();
+  });
+
+  it("derives the success verdict from execution evidence inside the execution lane", () => {
+    renderTranscript([successfulBuild()]);
+    const lane = screen.getByTestId("studio-execution-block");
+    const verdict = screen.getByTestId("studio-work-log");
+    expect(lane).toContainElement(verdict);
+    expect(verdict.textContent).toContain("2 of 2 steps complete");
+  });
+
+  it("verdict line tells the truth for a failed run — no false success", () => {
+    renderTranscript([
+      runMessage({
+        content: "The build broke.",
+        status: "failed",
+        execution: {
+          mode: "build",
+          toolCalls: [{ toolId: "edit_file", success: false, mutating: true }],
+          workspaceChange: { status: "unchanged" },
+        },
+        toolActivity: [{ toolId: "edit_file", success: false, summary: "Editing index.html" }],
+      }),
+    ]);
+    const verdict = screen.getByTestId("studio-work-log");
+    expect(verdict.textContent).toMatch(/0 of 1 steps complete — failed/);
+    const lane = screen.getByTestId("studio-execution-block");
+    expect(lane.textContent).not.toMatch(/done!/i);
+    expect(lane.textContent).not.toMatch(/completed successfully/i);
+  });
+
+  it("verdict line reports partial when the deployment never happened", () => {
+    renderTranscript([
+      runMessage({
+        execution: {
+          mode: "ship",
+          toolCalls: [{ toolId: "edit_file", success: true, mutating: true }],
+        },
+      }),
+    ]);
+    const verdict = screen.getByTestId("studio-work-log");
+    expect(verdict.textContent).toMatch(/deployment missing/i);
+    expect(screen.getByTestId("studio-execution-block")).toContainElement(verdict);
+  });
+
+  it("renders the reply in its own conversation lane, separate from the execution lane", () => {
+    renderTranscript([successfulBuild()]);
+    const lane = screen.getByTestId("studio-execution-block");
+    // The reply text lives in the conversation bubble, not the execution lane.
+    expect(lane.textContent).not.toContain("audit report");
+    expect(screen.getByText(/Here's your audit report/)).toBeInTheDocument();
+    // The verdict lives in the execution lane, not the conversation bubble.
+    const verdict = screen.getByTestId("studio-work-log");
+    expect(lane).toContainElement(verdict);
+  });
+
+  it("renders no execution lane for a conversational reply", () => {
+    renderTranscript([runMessage()]);
+    expect(screen.queryByTestId("studio-execution-block")).toBeNull();
+    expect(screen.getByText(/Here's your audit report/)).toBeInTheDocument();
   });
 });
