@@ -65,12 +65,17 @@ describe("StudioPreviewPanel — preview-entry-missing message", () => {
       const callsAfterReady = fetchSpy.mock.calls.length;
       expect(callsAfterReady).toBeGreaterThan(0);
 
-      window.dispatchEvent(
-        new MessageEvent("message", {
-          origin: PREVIEW_ORIGIN,
-          data: { source: "litt-preview", type: "preview-entry-missing", workspaceId: "ws_1" },
-        }),
-      );
+      // Let React commit the previewUrl-dependent message listener before
+      // dispatching; findByTitle only proves the iframe node exists.
+      await act(async () => Promise.resolve());
+      act(() => {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            origin: PREVIEW_ORIGIN,
+            data: { source: "litt-preview", type: "preview-entry-missing", workspaceId: "ws_1" },
+          }),
+        );
+      });
 
       // The badge must not wait for the 30s poll — a status re-check fires now.
       // Generous timeout: the handler awaits authHeaders() before fetch, and

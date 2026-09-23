@@ -40,6 +40,12 @@ describe("resumeAgentLoopV2 — deferred approval abort", () => {
         maxSteps: 5,
         maxRuntimeMs: 30_000,
         signal: controller.signal,
+        actionContext: {
+          actionRunId: "run-parent",
+          userId: "u-resume-abort",
+          conversationId: "conv-resume",
+          projectId: "p-resume-abort",
+        },
       },
       stepsUsedBeforePause: 1,
       hadInterveningMutation: false,
@@ -58,6 +64,9 @@ describe("resumeAgentLoopV2 — deferred approval abort", () => {
     // The deferred call must never start once the shared signal is aborted.
     expect(executeSpy).toHaveBeenCalledTimes(1);
     expect(executeSpy.mock.calls[0]?.[0]).toBe("files.read");
+    expect(executeSpy.mock.calls[0]?.[2]).toMatchObject({
+      actionContext: { actionRunId: "run-parent", userId: "u-resume-abort" },
+    });
     expect(result.cancelled).toBe(true);
     expect(result.cancelReason).toBe("Cancelled by user");
     expect(result.toolCalls).toHaveLength(1);

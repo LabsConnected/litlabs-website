@@ -11,11 +11,28 @@
 
 import type { LiTTToolDefinition, ApprovalPolicy } from "./types";
 import type { WorkspaceTransport } from "./workspace-transport";
+import type { ActionExecutionContext } from "@/lib/action-runtime";
 // Shared realtime capability from @litt/agent-core — the ONE implementation.
 // The web registry delegates to it so CLI and Studio have the same capability.
-import { webSearch as coreWebSearch, safeFetch as coreSafeFetch, weatherForecast as coreWeatherForecast, SafeFetchError } from "@litt/agent-core";
+import { webSearch as coreWebSearch, safeFetch as coreSafeFetch, weatherForecast as coreWeatherForecast } from "@litt/agent-core";
 
-type ToolHandler = (inputs: Record<string, unknown>, transport?: unknown) => Promise<unknown>;
+export interface ToolExecutionContext {
+  actionRunId?: string;
+  /**
+   * Trusted server execution context — the ActionRun identity plus the
+   * authenticated tenant identity. Flows DOWN from the orchestrator;
+   * model-controlled inputs never establish it.
+   */
+  actionContext?: ActionExecutionContext;
+  /** Authenticated user identity (server-injected, never model-chosen). */
+  userId?: string;
+}
+
+type ToolHandler = (
+  inputs: Record<string, unknown>,
+  transport?: unknown,
+  executionContext?: ToolExecutionContext,
+) => Promise<unknown>;
 
 type V2Module = typeof import("./tool-handlers-v2");
 type V2Handler = (inputs: Record<string, unknown>, transport: WorkspaceTransport) => Promise<unknown>;
@@ -282,12 +299,127 @@ const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
   // is reused instead of starting a new one (multi-turn browsing).
   "browser.start_session": async () => {
     const m = await import("./browser-agent");
-    return (async (inputs: Record<string, unknown>) => {
-      const userId = inputs.userId as string;
+    const runtime = await import("@/lib/action-runtime/browser-runtime");
+    return (async (inputs: Record<string, unknown>, _transport: unknown, executionContext?: ToolExecutionContext) => {
+      // Canonical identity comes from trusted execution context; the
+      // model-facing inputs.userId is legacy injection and must agree.
+      const ctxUserId = executionContext?.actionContext?.userId ?? executionContext?.userId;
+      const inputUserId = typeof inputs.userId === "string" && inputs.userId.trim() ? inputs.userId : undefined;
+      if (ctxUserId && inputUserId && inputUserId !== ctxUserId) {
+        return {
+          ok: false,
+          error: "browser_user_mismatch",
+          message: "LiTT couldn't verify the browser task owner.",
+        };
+      }
+      const userId = ctxUserId ?? inputUserId;
+      if (!userId) {
+        return {
+          ok: false,
+          error: "missing_user",
+          message: "LiTT couldn't verify the browser task owner.",
+        };
+      }
       const task = typeof inputs.task === "string" ? inputs.task : undefined;
-      const conversationId =
-        typeof inputs.conversationId === "string" ? inputs.conversationId : undefined;
-      return m.getOrReuseAgentBrowserSession({ userId, task, conversationId });
+      const conversationId = executionContext?.actionContext?.conversationId
+        ?? (typeof inputs.conversationId === "string" ? inputs.conversationId : undefined);
+      const actionRunId = executionContext?.actionContext?.actionRunId ?? executionContext?.actionRunId;
+      const inputProjectId = typeof inputs.projectId === "string" ? inputs.projectId : undefined;
+
+      let run: Awaited<ReturnType<typeof runtime.startBrowserActionRun>> | null = null;
+      try {
+        run = await runtime.resolveBrowserActionRun(userId, {
+          actionRunId,
+          browserSessionId: undefined,
+        });
+        if (actionRunId && !run) {
+          return {
+            ok: false,
+            error: "action_run_not_found",
+            message: "LiTT couldn't find the task context for this browser action.",
+          };
+        }
+        // Terminal work must not acquire a new billable browser session.
+        if (run && (await import("@/lib/action-runtime/state-machine")).isTerminalActionRunStatus(run.status)) {
+          return {
+            ok: false,
+            error: "action_run_terminal",
+            message: "LiTT can't start a browser for a task that has already ended.",
+          };
+        }
+        if (!run) {
+          // Legacy fallback boundary (standalone callers with no parent run):
+          // a model-supplied projectId is untrusted — verify ownership before
+          // it can be written into the created run.
+          let projectId = executionContext?.actionContext?.projectId ?? null;
+          if (!projectId && inputProjectId) {
+            const owned = await (await import("@/lib/projects/project-repository")).getProject(inputProjectId, userId);
+            projectId = owned ? inputProjectId : null;
+          }
+          if (inputProjectId && !projectId) {
+            return {
+              ok: false,
+              error: "project_not_found",
+              message: "LiTT couldn't verify that project.",
+            };
+          }
+          run = await runtime.findActiveBrowserActionRun(userId, { conversationId });
+          if (!run) {
+            run = await runtime.startBrowserActionRun({
+              userId,
+              conversationId,
+              projectId,
+            });
+          }
+        }
+      } catch (error) {
+        console.error("[action-runtime] browser run creation failed", {
+          errorType: error instanceof Error ? error.name : typeof error,
+          userId,
+          conversationId,
+        });
+        return {
+          ok: false,
+          error: "runtime_unavailable",
+          message: "LiTT couldn't start this browser task because its activity service is unavailable.",
+        };
+      }
+
+      const result = await m.getOrReuseAgentBrowserSession({ userId, task, conversationId });
+      if (result.ok) {
+        try {
+          const actionRun = await runtime.attachBrowserSession(run, result.session);
+          return { ...result, actionRunId: actionRun.id };
+        } catch (error) {
+          const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "runtime_unavailable";
+          console.error("[action-runtime] browser session link failed", {
+            code,
+            errorType: error instanceof Error ? error.name : typeof error,
+            userId,
+            conversationId,
+            actionRunId: run.id,
+          });
+          return {
+            ok: false,
+            error: code,
+            message: "LiTT couldn't record the browser task state.",
+          };
+        }
+      }
+
+      try {
+        await runtime.failBrowserActionRun(run, result.error);
+      } catch (persistError) {
+        // The honest answer is still result.error — the browser session did
+        // not start. But a durable-write failure is never silently dropped.
+        console.error("[action-runtime] browser start failure could not be persisted", {
+          runId: run.id,
+          userId,
+          conversationId,
+          errorType: persistError instanceof Error ? persistError.name : typeof persistError,
+        });
+      }
+      return { ...result, actionRunId: run.id };
     }) as ToolHandler;
   },
   // ─── Realtime internet tools — delegate to @litt/agent-core ──
@@ -457,6 +589,14 @@ class ToolRegistry {
       availableCapabilities?: string[];
       transport?: unknown;
       signal?: AbortSignal;
+      /** Legacy alias — prefer actionContext. */
+      actionRunId?: string;
+      /**
+       * Trusted server execution context: the parent ActionRun identity and
+       * the authenticated tenant identity. This is execution state, not a
+       * model-visible tool argument.
+       */
+      actionContext?: ActionExecutionContext;
     } = {},
   ): Promise<{ ok: true; result: unknown } | { ok: false; error: string }> {
     const tool = this.tools.get(id);
@@ -506,22 +646,179 @@ class ToolRegistry {
     try {
       // Resolve lazy handler if needed
       const handler = typeof handlerEntry === "function" && handlerEntry.length === 0
-        ? await (handlerEntry as () => Promise<(inputs: Record<string, unknown>, transport?: unknown) => Promise<unknown>>)()
-        : handlerEntry as (inputs: Record<string, unknown>, transport?: unknown) => Promise<unknown>;
+        ? await (handlerEntry as () => Promise<ToolHandler>)()
+        : handlerEntry as ToolHandler;
       const timeoutMs =
         tool.timeoutMs && tool.timeoutMs > 0 ? tool.timeoutMs : DEFAULT_TOOL_TIMEOUT_MS;
-      const finalResult = await withExecutionDeadline(
-        async () =>
-          maybeAutoInsertGeneratedImage(
-            id,
-            await handler(inputs, options.transport),
-            options.transport,
-          ),
-        timeoutMs,
-        id,
-        options.signal,
-      );
-      return { ok: true, result: finalResult };
+      const browserSessionId = typeof inputs.sessionId === "string" ? inputs.sessionId : null;
+      const actionContext = options.actionContext;
+      const inputUserId = typeof inputs.userId === "string" ? inputs.userId : null;
+      // Tenant identity flows DOWN from trusted execution context. A
+      // userId present in tool inputs is legacy server injection only — when
+      // trusted context exists it must agree, never override.
+      if (id.startsWith("browser.") && actionContext && inputUserId && inputUserId !== actionContext.userId) {
+        return { ok: false, error: "browser_user_mismatch" };
+      }
+      const transportIdentity = options.transport && typeof options.transport === "object"
+        ? options.transport as { userId?: unknown; projectId?: unknown }
+        : null;
+      if (actionContext && typeof transportIdentity?.userId === "string" && transportIdentity.userId !== actionContext.userId) {
+        return { ok: false, error: "action_context_user_mismatch" };
+      }
+      if (actionContext?.projectId && typeof transportIdentity?.projectId === "string" && transportIdentity.projectId !== actionContext.projectId) {
+        return { ok: false, error: "action_context_project_mismatch" };
+      }
+      const browserUserId = actionContext?.userId ?? inputUserId;
+      const explicitActionRunId = actionContext?.actionRunId ?? options.actionRunId ?? null;
+      const runtime = id.startsWith("browser.") && id !== "browser.start_session" && browserSessionId && browserUserId
+        ? await import("@/lib/action-runtime/browser-runtime")
+        : null;
+      const toolRuntime = actionContext && !id.startsWith("browser.")
+        ? await import("@/lib/action-runtime/tool-runtime")
+        : null;
+      // Run identity: explicit actionRunId first, then the durable
+      // session -> run association established at attach time. A session with
+      // no attached run predates the runtime — it cannot be recorded, which
+      // is logged rather than silently skipped.
+      let browserContext: { actionRunId: string; userId: string; browserSessionId: string } | null = null;
+      if (runtime && browserSessionId && browserUserId) {
+        if (explicitActionRunId) {
+          browserContext = { actionRunId: explicitActionRunId, userId: browserUserId, browserSessionId };
+        } else {
+          const attachedRun = await runtime.resolveBrowserActionRun(browserUserId, { browserSessionId });
+          if (attachedRun) {
+            browserContext = { actionRunId: attachedRun.id, userId: browserUserId, browserSessionId };
+          } else {
+            console.warn("[action-runtime] browser session is not attached to any run; tool events will not be recorded", {
+              toolId: id,
+              userId: browserUserId,
+              browserSessionId,
+            });
+          }
+        }
+      }
+      if (runtime && browserContext) {
+        try {
+          await runtime.recordBrowserToolStarted({ ...browserContext, toolId: id });
+        } catch (persistError) {
+          // Durable runtime state is not telemetry: if the started event
+          // cannot be persisted, the browser action must not run untracked.
+          console.error("[action-runtime] browser action start could not be persisted; tool call aborted", {
+            runId: browserContext.actionRunId,
+            toolId: id,
+            userId: browserUserId,
+            errorType: persistError instanceof Error ? persistError.name : typeof persistError,
+            errorClass: persistError instanceof Error ? persistError.message : String(persistError),
+          });
+          return { ok: false, error: "action_runtime_unavailable" };
+        }
+      }
+      if (toolRuntime && actionContext) {
+        try {
+          await toolRuntime.recordActionToolStarted(actionContext, id);
+        } catch (persistError) {
+          // A non-browser mutation/verification must not run untracked
+          // either: if the parent run cannot record its start, the call
+          // fails before side effects.
+          console.error("[action-runtime] tool start could not be persisted; tool call aborted", {
+            runId: actionContext.actionRunId,
+            toolId: id,
+            userId: actionContext.userId,
+            errorType: persistError instanceof Error ? persistError.name : typeof persistError,
+            errorClass: persistError instanceof Error ? persistError.message : String(persistError),
+          });
+          return { ok: false, error: "action_runtime_unavailable" };
+        }
+      }
+      try {
+        const finalResult = await withExecutionDeadline(
+          async () =>
+            maybeAutoInsertGeneratedImage(
+              id,
+              await handler(inputs, options.transport, {
+                actionRunId: explicitActionRunId ?? undefined,
+                actionContext,
+                userId: actionContext?.userId ?? inputUserId ?? undefined,
+              }),
+              options.transport,
+            ),
+          timeoutMs,
+          id,
+          options.signal,
+        );
+        if (runtime && browserContext) {
+          try {
+            await runtime.recordBrowserToolCompleted({ ...browserContext, toolId: id });
+          } catch (persistError) {
+            // The browser action already executed — returning ok:false here
+            // would invite a retry of a possibly non-idempotent action. Log
+            // and stamp the run degraded so state does not claim clean truth.
+            console.error("[action-runtime] browser action result could not be persisted after execution", {
+              runId: browserContext.actionRunId,
+              toolId: id,
+              userId: browserUserId,
+              errorType: persistError instanceof Error ? persistError.name : typeof persistError,
+            });
+            await runtime.markBrowserRunPersistenceDegraded(browserContext);
+            return { ok: false, error: "ACTION_RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION" };
+          }
+        }
+        if (toolRuntime && actionContext) {
+          const domainFailure = toolRuntime.actionToolResultFailed(finalResult);
+          try {
+            if (domainFailure) {
+              await toolRuntime.recordActionToolFailed(actionContext, id, domainFailure);
+            } else {
+              await toolRuntime.recordActionToolCompleted(actionContext, id, finalResult);
+            }
+          } catch (persistError) {
+            // The tool already ran; do not replay it. Return an explicit
+            // reconciliation error and mark the run persistence-degraded.
+            console.error("[action-runtime] tool result could not be persisted after execution", {
+              runId: actionContext.actionRunId,
+              toolId: id,
+              userId: actionContext.userId,
+              errorType: persistError instanceof Error ? persistError.name : typeof persistError,
+              errorClass: persistError instanceof Error ? persistError.message : String(persistError),
+            });
+            await toolRuntime.markActionToolRunPersistenceDegraded(actionContext);
+            return { ok: false, error: "ACTION_RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION" };
+          }
+        }
+        return { ok: true, result: finalResult };
+      } catch (err) {
+        if (runtime && browserContext) {
+          try {
+            await runtime.recordBrowserToolFailed({ ...browserContext, toolId: id }, err);
+          } catch (persistError) {
+            console.error("[action-runtime] browser action failure could not be persisted", {
+              runId: browserContext.actionRunId,
+              toolId: id,
+              userId: browserUserId,
+              errorType: persistError instanceof Error ? persistError.name : typeof persistError,
+            });
+            await runtime.markBrowserRunPersistenceDegraded(browserContext);
+          }
+        }
+        if (toolRuntime && actionContext) {
+          try {
+            await toolRuntime.recordActionToolFailed(actionContext, id, err);
+          } catch (persistError) {
+            console.error("[action-runtime] tool failure could not be persisted", {
+              runId: actionContext.actionRunId,
+              toolId: id,
+              userId: actionContext.userId,
+              errorType: persistError instanceof Error ? persistError.name : typeof persistError,
+              errorClass: persistError instanceof Error ? persistError.message : String(persistError),
+            });
+            await toolRuntime.markActionToolRunPersistenceDegraded(actionContext);
+          }
+        }
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
     } catch (err) {
       return {
         ok: false,

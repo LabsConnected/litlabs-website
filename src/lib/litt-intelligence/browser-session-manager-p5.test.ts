@@ -167,6 +167,12 @@ vi.mock("@/lib/supabase", () => ({
   getSupabaseAdmin: () => null,
 }));
 
+// ─── Action Runtime reconciliation (unit-tested separately) ──────
+const runtimeReconcile = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/action-runtime/browser-sweep", () => ({
+  reconcileSweptBrowserSession: runtimeReconcile,
+}));
+
 // ─── Wallet ledger + owner billing ────────────────────────────────
 vi.mock("@/lib/wallet-ledger", () => ({
   getCreditBalances: vi.fn(),
@@ -235,6 +241,7 @@ beforeEach(() => {
   stagehandMock.FakeStagehand.instances = [];
   stagehandMock.state.initImpl = async () => {};
   mockAdjust.mockResolvedValue({ replayed: false } as never);
+  runtimeReconcile.mockResolvedValue("no_run");
 });
 
 describe("Phase 5 — transparent re-attach after instance loss", () => {
@@ -449,6 +456,90 @@ describe("Phase 5 — sweepIdleBrowserSessions", () => {
     expect(second.settledBits).toBe(0);
     expect(mockAdjust).not.toHaveBeenCalled();
     expect(dbMock.state.sessions.get(idle.id)?.status).toBe("closed");
+  });
+
+  it("two concurrent sweepers elect one winner: one close, one settle, one reconcile", async () => {
+    const idle = seed(
+      dbRow({
+        id: "sess-sweep-race",
+        created_at: isoAgo(20.5 * 60_000),
+        updated_at: isoAgo(20 * 60_000),
+        metadata: { billing: { actionCount: 1, modelCalls: 0 } },
+      }),
+    );
+    runtimeReconcile.mockResolvedValue("event_recorded");
+
+    const [a, b] = await Promise.all([
+      sweepIdleBrowserSessions(),
+      sweepIdleBrowserSessions(),
+    ]);
+
+    // Exactly one logical close across both sweeps.
+    expect(a.dbClosed + b.dbClosed).toBe(1);
+    expect(a.closed + b.closed).toBe(1);
+    expect(dbMock.state.sessions.get(idle.id)?.status).toBe("closed");
+
+    // Exactly one billing settlement, under the session-scoped key.
+    expect(mockAdjust).toHaveBeenCalledTimes(1);
+    expect(mockAdjust).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: "browser:settle:sess-sweep-race" }),
+    );
+
+    // Exactly one Action Runtime reconciliation — the losing sweeper does
+    // not emit a duplicate idle-timeout lifecycle event.
+    expect(runtimeReconcile).toHaveBeenCalledTimes(1);
+    expect(runtimeReconcile).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "sess-sweep-race", userId: USER }),
+    );
+    expect(a.runtimeReconciled + b.runtimeReconciled).toBe(1);
+  });
+
+  it("reports observable sweep counts without secrets or provider internals", async () => {
+    seed(
+      dbRow({
+        id: "sess-sweep-observe",
+        created_at: isoAgo(20.5 * 60_000),
+        updated_at: isoAgo(20 * 60_000),
+        metadata: { billing: { actionCount: 1, modelCalls: 0 } },
+      }),
+    );
+    runtimeReconcile.mockResolvedValue("event_recorded");
+
+    const res = await sweepIdleBrowserSessions();
+
+    expect(res.inspected).toBe(1);
+    expect(res.expired).toBe(1);
+    expect(res.closed).toBe(1);
+    expect(res.billingSettled).toBe(1);
+    expect(res.providerCleanupFailed).toBe(0);
+    expect(res.runtimeReconciled).toBe(1);
+    expect(res.runtimeReconcileFailed).toBe(0);
+    expect(JSON.stringify(res)).not.toMatch(/api[_-]?key|token|password|secret/i);
+  });
+
+  it("a failed runtime reconciliation is counted and logged, never silently dropped", async () => {
+    seed(
+      dbRow({
+        id: "sess-sweep-reconcile-fail",
+        created_at: isoAgo(20.5 * 60_000),
+        updated_at: isoAgo(20 * 60_000),
+        metadata: { billing: { actionCount: 1, modelCalls: 0 } },
+      }),
+    );
+    runtimeReconcile.mockRejectedValue(new Error("action_runs write failed"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await sweepIdleBrowserSessions();
+
+    // The close + settle still happened; the reconcile failure is visible.
+    expect(res.dbClosed).toBe(1);
+    expect(res.runtimeReconciled).toBe(0);
+    expect(res.runtimeReconcileFailed).toBe(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[browser-session-sweep] ActionRun reconciliation failed",
+      expect.objectContaining({ sessionId: "sess-sweep-reconcile-fail" }),
+    );
+    errorSpy.mockRestore();
   });
 });
 

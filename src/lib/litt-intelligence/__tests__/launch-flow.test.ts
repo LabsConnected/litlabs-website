@@ -4,6 +4,11 @@ import { registerInternalTools, toolRegistry } from "@/lib/litt-intelligence/too
 import type { WorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import type { AgentLoopResult } from "@/lib/litt-intelligence/agent-loop-v2";
 import type { BuildFixLoopResult } from "@/lib/litt-intelligence/build-fix-loop";
+import { recordActionEventActivity } from "@/lib/action-runtime";
+
+vi.mock("@/lib/action-runtime", () => ({
+  recordActionEventActivity: vi.fn(() => Promise.resolve({})),
+}));
 
 // ─── Mocks ──────────────────────────────────────────────────────────
 
@@ -96,6 +101,7 @@ function makeOptions(overrides: Partial<LaunchFlowOptions> = {}): LaunchFlowOpti
 
 describe("Launch Flow: no-mutation reprompt", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     toolRegistry.clear();
     registerInternalTools();
   });
@@ -127,6 +133,79 @@ describe("Launch Flow: no-mutation reprompt", () => {
     await runLaunchFlow(options);
 
     expect(runAgentLoop).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates the same trusted parent ActionRun context through reprompts", async () => {
+    const actionContext = {
+      actionRunId: "run-composite",
+      userId: "trusted-user",
+      conversationId: "conv-parent",
+      projectId: "trusted-project",
+    };
+    const runAgentLoop = vi.fn()
+      .mockResolvedValueOnce(successAgentResult({ toolCalls: [] }))
+      .mockResolvedValueOnce(successAgentResult({
+        toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
+      }));
+    const options = makeOptions({
+      requiresExecution: true,
+      runAgentLoop,
+      actionContext,
+      conversationId: "conv-parent",
+    });
+
+    await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    for (const call of runAgentLoop.mock.calls) {
+      expect(call[2]).toMatchObject({
+        userId: "user-test",
+        conversationId: "conv-parent",
+        actionContext: {
+          actionRunId: "run-composite",
+          userId: "user-test",
+          conversationId: "conv-parent",
+          projectId: "proj-test",
+        },
+      });
+    }
+    expect(recordActionEventActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-composite",
+        userId: "user-test",
+        type: "preview.started",
+      }),
+    );
+    expect(recordActionEventActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-composite",
+        userId: "user-test",
+        type: "preview.ready",
+      }),
+    );
+  });
+
+  it("does not provision an untracked preview when the started event cannot persist", async () => {
+    const transport = createMockTransport();
+    vi.mocked(recordActionEventActivity).mockRejectedValue(new Error("event insert failed"));
+    const options = makeOptions({
+      transport,
+      runAgentLoop: vi.fn().mockResolvedValue(successAgentResult({
+        toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
+      })),
+      actionContext: {
+        actionRunId: "run-composite",
+        userId: "user-test",
+        conversationId: "conv-parent",
+        projectId: "proj-test",
+      },
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(transport.startPreview).not.toHaveBeenCalled();
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("event insert failed");
   });
 
   it("reprompts at most once even if the second pass also writes nothing", async () => {
@@ -201,6 +280,7 @@ describe("Launch Flow: approval pause runs preview", () => {
 
 describe("Launch Flow: approval pause before any mutation", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     toolRegistry.clear();
     registerInternalTools();
   });
@@ -268,6 +348,7 @@ describe("Launch Flow: approval pause before any mutation", () => {
 
 describe("Launch Flow: rejected preview start", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     toolRegistry.clear();
     registerInternalTools();
   });
@@ -713,6 +794,7 @@ describe("Launch Flow: preservation of existing project work", () => {
 
 describe("Launch Flow: quality-loop pass-through", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     toolRegistry.clear();
     registerInternalTools();
   });

@@ -25,6 +25,7 @@ import { buildPatchRecoveryMessage, validateApplyPatchInputs, validateFilesWrite
 import { computeWorkspaceChange } from "./workspace-change-producer";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { toolRegistry } from "./tool-registry";
+import type { ActionExecutionContext } from "@/lib/action-runtime";
 import { resolveAvailableCapabilities } from "./capabilities";
 import type { LiTTToolDefinition } from "./types";
 import {
@@ -73,6 +74,14 @@ export interface AgentLoopConfig {
    * must never supply it itself.
    */
   conversationId?: string;
+  /** Parent ActionRun owning this work; injected server-side. */
+  actionRunId?: string;
+  /**
+   * Canonical execution context for the entire run. Prefer this over the
+   * legacy actionRunId field: it carries tenant, conversation, and project
+   * identity together so tool handlers never reconstruct them from inputs.
+   */
+  actionContext?: ActionExecutionContext;
   /**
    * Opt-in to the LiTT quality loop (gated UNDERSTAND→VERIFY stages +
    * visual-quality judge). When enabled, the loop records stage evidence
@@ -283,6 +292,29 @@ function toToolDefinition(tool: LiTTToolDefinition): ToolDefinition {
  * it) — the server injects the real authenticated userId here, overriding
  * anything the model passed.
  */
+/**
+ * Trusted execution context for the whole run — built ONCE from
+ * server-authenticated config and passed DOWN through ToolRegistry.
+ * The ActionRun identity is never a model-visible tool input.
+ */
+function actionContextFrom(cfg: {
+  actionContext?: ActionExecutionContext;
+  actionRunId?: string;
+  userId?: string;
+  conversationId?: string;
+  projectId?: string;
+}): ActionExecutionContext | undefined {
+  if (cfg.actionContext) return cfg.actionContext;
+  return cfg.actionRunId && cfg.userId
+    ? {
+        actionRunId: cfg.actionRunId,
+        userId: cfg.userId,
+        conversationId: cfg.conversationId,
+        projectId: cfg.projectId,
+      }
+    : undefined;
+}
+
 function withUserScopeForBrowserTools(
   toolId: string,
   inputs: Record<string, unknown>,
@@ -894,11 +926,12 @@ export async function runAgentLoopV2(
 
       try {
         // Use the registry's execute method, passing transport for V2 handlers
-        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId, cfg.conversationId), {
+        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId ?? actionContextFrom(cfg)?.userId, cfg.conversationId ?? actionContextFrom(cfg)?.conversationId), {
           hasApproval: !permResult.requiresApproval,
           availableCapabilities,
           transport,
           signal: cfg.signal,
+          actionContext: actionContextFrom(cfg),
         });
 
         if (execResult.ok) {
@@ -1006,7 +1039,7 @@ export async function runAgentLoopV2(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg)),
     });
   }
 
@@ -1274,6 +1307,10 @@ export interface DeferredToolBatchContext {
    * multi-turn session reuse (mirrors AgentLoopConfig.conversationId).
    */
   conversationId?: string;
+  /** Parent ActionRun for server-side ActionExecutionContext propagation. */
+  actionRunId?: string;
+  /** Full trusted context propagated to ToolRegistry.execute. */
+  actionContext?: ActionExecutionContext;
 }
 
 export interface DeferredToolBatchResult {
@@ -1458,10 +1495,11 @@ export async function executeDeferredToolCalls(
 
     let result: ToolCallResult;
     try {
-      const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, ctx.userId, ctx.conversationId), {
+      const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, ctx.userId ?? ctx.actionContext?.userId, ctx.conversationId ?? ctx.actionContext?.conversationId), {
         hasApproval: !permResult.requiresApproval,
         transport: ctx.transport,
         signal: ctx.signal,
+        actionContext: ctx.actionContext ?? actionContextFrom(ctx),
       });
 
       if (execResult.ok) {
@@ -1617,11 +1655,12 @@ export async function resumeAgentLoopV2(
         error: "Cancelled by user",
       };
     } else try {
-      const execResult = await toolRegistry.execute(resume.toolId, withUserScopeForBrowserTools(resume.toolId, resume.inputs, cfg.userId, cfg.conversationId), {
+      const execResult = await toolRegistry.execute(resume.toolId, withUserScopeForBrowserTools(resume.toolId, resume.inputs, cfg.userId ?? actionContextFrom(cfg)?.userId, cfg.conversationId ?? actionContextFrom(cfg)?.conversationId), {
         hasApproval: true,
         availableCapabilities,
         transport,
         signal: cfg.signal,
+        actionContext: actionContextFrom(cfg),
       });
 
       if (execResult.ok) {
@@ -1757,6 +1796,8 @@ export async function resumeAgentLoopV2(
       state: deferredState,
       userId: cfg.userId,
       conversationId: cfg.conversationId,
+      actionRunId: cfg.actionRunId,
+      actionContext: actionContextFrom(cfg),
     });
     hasInterveningMutation = deferredState.hasInterveningMutation;
     cancelled = deferredState.cancelled;
@@ -2023,11 +2064,12 @@ export async function resumeAgentLoopV2(
 
       let result: ToolCallResult;
       try {
-        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId, cfg.conversationId), {
+        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId ?? actionContextFrom(cfg)?.userId, cfg.conversationId ?? actionContextFrom(cfg)?.conversationId), {
           hasApproval: !permResult.requiresApproval,
           availableCapabilities,
           transport,
           signal: cfg.signal,
+          actionContext: actionContextFrom(cfg),
         });
 
         if (execResult.ok) {
@@ -2090,7 +2132,7 @@ export async function resumeAgentLoopV2(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg)),
     });
   }
 
@@ -2181,6 +2223,7 @@ export function createAutonomousRepairCallback(
   // deployment set so repair tools (files.patch, checkpoint.*) cannot fail
   // closed as "incapable" — the same unified-gate guarantee as the main loop.
   availableCapabilities: string[] = resolveAvailableCapabilities({ transport }),
+  actionContext?: ActionExecutionContext,
 ): (attempt: number, errors: string) => Promise<boolean> {
   const permissionEngine = new PermissionEngine();
   return async (attempt: number, errors: string) => {
@@ -2244,12 +2287,22 @@ export function createAutonomousRepairCallback(
           }
 
           try {
-            const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {
-              hasApproval: true,
-              availableCapabilities,
-              transport,
-              signal,
-            });
+            const execResult = await toolRegistry.execute(
+              toolCall.toolId,
+              withUserScopeForBrowserTools(
+                toolCall.toolId,
+                toolCall.inputs,
+                actionContext?.userId,
+                actionContext?.conversationId,
+              ),
+              {
+                hasApproval: true,
+                availableCapabilities,
+                transport,
+                signal,
+                actionContext,
+              },
+            );
 
             // Same domain-failure normalization as the main loop: a
             // handler returning { success: false } is a failed repair

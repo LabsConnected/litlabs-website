@@ -35,6 +35,14 @@ import {
   updateMessageStatus,
 } from "@/lib/studio/conversation-service";
 import { studioLog } from "@/lib/studio/logger";
+import {
+  getActionRun,
+  transitionActionRun,
+  transitionActionRunEventActivity,
+  type ActionRunPatch,
+  type ActionRunStatus,
+} from "@/lib/action-runtime";
+import { isTerminalActionRunStatus } from "@/lib/action-runtime/state-machine";
 import type { MessageStatus } from "@/lib/studio/types";
 
 /**
@@ -77,6 +85,40 @@ async function writeResumedResultToTranscript(opts: {
       userId: opts.userId,
       pausedRunId: opts.pausedRunId,
       errorClass: err instanceof Error ? err.message : "unknown",
+    });
+  }
+}
+
+async function settleParentActionRun(
+  record: PausedRunRecord,
+  status: ActionRunStatus,
+  patch: ActionRunPatch,
+  logEvent: string,
+  eventType?: "approval.approved" | "approval.rejected",
+): Promise<void> {
+  if (!record.actionRunId) return;
+  try {
+    if (eventType) {
+      await transitionActionRunEventActivity({
+        runId: record.actionRunId,
+        userId: record.userId,
+        status,
+        eventType,
+        payload: { pausedRunId: record.id, toolId: record.toolId },
+        message: patch.currentActivity ?? `Approval ${status}`,
+        patch,
+      });
+    } else {
+      await transitionActionRun(record.actionRunId, record.userId, status, patch);
+    }
+  } catch (error) {
+    studioLog(logEvent, {
+      conversationId: record.conversationId,
+      userId: record.userId,
+      pausedRunId: record.id,
+      actionRunId: record.actionRunId,
+      status,
+      errorClass: error instanceof Error ? error.message : "unknown",
     });
   }
 }
@@ -136,6 +178,29 @@ export async function POST(
   const pausedRun = await getPausedRun(pausedRunId, userId);
   if (!pausedRun) {
     return NextResponse.json({ error: "Approval not found or expired" }, { status: 404 });
+  }
+
+  // The approval is subordinate to its durable parent task. If Stop already
+  // settled that task, this gate is historical evidence — not a button that
+  // can resurrect a cancelled run.
+  if (pausedRun.actionRunId) {
+    const parentRun = await getActionRun(pausedRun.actionRunId, userId);
+    if (!parentRun) {
+      return NextResponse.json(
+        { error: "The parent task for this approval is no longer available", code: "ACTION_RUN_NOT_FOUND" },
+        { status: 409 },
+      );
+    }
+    if (isTerminalActionRunStatus(parentRun.status)) {
+      return NextResponse.json(
+        {
+          error: `The parent task is already ${parentRun.status}`,
+          code: "ACTION_RUN_TERMINAL",
+          status: parentRun.status,
+        },
+        { status: 409 },
+      );
+    }
   }
 
   // Set when this POST is a controlled retry of an approved run whose
@@ -219,6 +284,16 @@ export async function POST(
         `${awaiting.content || "Approval was required."}\n\nDeclined — the gated action was not performed.`,
       ).catch(() => undefined);
     }
+    await settleParentActionRun(
+      resolved,
+      "cancelled",
+      {
+        currentActivity: "Approval declined — task cancelled",
+        approvalReference: null,
+      },
+      "approval:action_run_reject_settle_failed",
+      "approval.rejected",
+    );
     return NextResponse.json({
       resolved: true,
       decision: "rejected",
@@ -238,6 +313,12 @@ export async function POST(
     });
   } catch {
     await markRunFailed(pausedRunId, userId, "Workspace is no longer available");
+    await settleParentActionRun(
+      resolved,
+      "failed",
+      { currentActivity: "Workspace is no longer available", failureCode: "WORKSPACE_UNAVAILABLE", failureMessage: "Workspace is no longer available" },
+      "approval:action_run_workspace_settle_failed",
+    );
     return NextResponse.json(
       {
         error:
@@ -255,6 +336,12 @@ export async function POST(
     const verified = await verifyProjectWorkspace(resolved.projectId, userId);
     if (verified.workspaceId !== resolved.workspaceId) {
       await markRunFailed(pausedRunId, userId, "Workspace changed since approval");
+      await settleParentActionRun(
+        resolved,
+        "failed",
+        { currentActivity: "Workspace changed since approval", failureCode: "WORKSPACE_CHANGED", failureMessage: "Workspace changed since approval" },
+        "approval:action_run_workspace_change_settle_failed",
+      );
       return NextResponse.json(
         {
           error:
@@ -268,6 +355,12 @@ export async function POST(
     }
   } catch {
     await markRunFailed(pausedRunId, userId, "Workspace verification failed on resume");
+    await settleParentActionRun(
+      resolved,
+      "failed",
+      { currentActivity: "Workspace verification failed on resume", failureCode: "WORKSPACE_VERIFICATION_FAILED", failureMessage: "Workspace verification failed on resume" },
+      "approval:action_run_workspace_verify_settle_failed",
+    );
     return NextResponse.json(
       { error: "Workspace verification failed on resume", resolved: true, status: "failed" },
       { status: 500 },
@@ -324,14 +417,54 @@ export async function POST(
     lastProgressAt = new Date().toISOString();
   });
 
+  const actionContext = resolved.actionRunId
+    ? {
+        actionRunId: resolved.actionRunId,
+        userId,
+        conversationId,
+        projectId: resolved.projectId,
+      }
+    : undefined;
+
+  if (actionContext) {
+    try {
+      await transitionActionRunEventActivity({
+        runId: actionContext.actionRunId,
+        userId,
+        status: "working",
+        eventType: "approval.approved",
+        payload: { pausedRunId, toolId: resolved.toolId },
+        message: `Approval granted for ${resolved.toolId}`,
+        patch: {
+          approvalReference: pausedRunId,
+          currentActivity: `Approval granted for ${resolved.toolId}`,
+        },
+      });
+    } catch (error) {
+      const message = "Durable task state could not be updated for the approved run";
+      studioLog("approval:action_run_resume_transition_failed", {
+        conversationId,
+        userId,
+        pausedRunId,
+        actionRunId: actionContext.actionRunId,
+        errorClass: error instanceof Error ? error.message : "unknown",
+      });
+      clearInterval(heartbeat);
+      await markRunFailed(pausedRunId, userId, message, executionToken);
+      return NextResponse.json({ error: message, code: "ACTION_RUNTIME_UNAVAILABLE" }, { status: 503 });
+    }
+  }
+
   const resumeConfig: Partial<AgentLoopConfig> = {
     systemPrompt: resolved.systemPrompt,
     executionMode: resolved.executionMode,
     enableBuildFix: true,
     signal: abortController.signal,
+    userId,
     // Conversation scope — injected into browser.start_session so the
     // resumed run reuses the live browser session from before the pause.
     conversationId,
+    actionContext,
     // Quality loop: resume with a fresh evidence session so the resumed
     // run is gated the same way (agent markers re-harvest from history).
     // AUTO resumes opt in too — an AUTO run pauses for deploy approval,
@@ -416,7 +549,7 @@ export async function POST(
         } else if (failedMutation && !successfulMutation) {
           resumeFailure = "The approved workspace operation failed, so the project was not completed.";
         } else if (successfulMutation) {
-          resumePreview = await ensureProjectPreviewReady(transport);
+          resumePreview = await ensureProjectPreviewReady(transport, {}, undefined, actionContext);
           if (!resumePreview.ok) {
             resumeFailure = resumePreview.error ?? "The project files were not runnable after approval.";
           }
@@ -425,7 +558,7 @@ export async function POST(
         // A nested approval is allowed to continue, but preview can already
         // be useful once the first file mutation has landed. Do not fail the
         // nested gate merely because a later file has not been written yet.
-        resumePreview = await ensureProjectPreviewReady(transport).catch(() => null);
+        resumePreview = await ensureProjectPreviewReady(transport, {}, undefined, actionContext).catch(() => null);
       }
 
       if (resumeFailure) {
@@ -438,6 +571,12 @@ export async function POST(
           content: resumeFailure,
         });
         await markRunFailed(pausedRunId, userId, resumeFailure, executionToken);
+        await settleParentActionRun(
+          resolved,
+          "failed",
+          { currentActivity: "Task failed", failureCode: "TASK_FAILED", failureMessage: resumeFailure },
+          "approval:action_run_failure_settle_failed",
+        );
         return;
       }
 
@@ -460,12 +599,30 @@ export async function POST(
             executionMode: resolved.executionMode,
             systemPrompt: resolved.systemPrompt,
             checkpointId: null,
+            actionRunId: actionContext?.actionRunId ?? null,
             qualityLoopState: result.pendingApproval.qualityLoopState,
             deferredToolCalls: result.pendingApproval.deferredToolCalls,
             stepsUsed: result.pendingApproval.stepsUsedAtPause,
             hadInterveningMutation: result.pendingApproval.hadInterveningMutationAtPause,
           });
           nestedPausedRunId = nested.id;
+          if (actionContext) {
+            await transitionActionRunEventActivity({
+              runId: actionContext.actionRunId,
+              userId,
+              status: "waiting_for_user",
+              eventType: "approval.required",
+              payload: {
+                toolId: result.pendingApproval.toolId,
+                pausedRunId: nestedPausedRunId,
+              },
+              message: `Approval required for ${result.pendingApproval.toolId}`,
+              patch: {
+                approvalReference: nestedPausedRunId,
+                currentActivity: `Approval required for ${result.pendingApproval.toolId}`,
+              },
+            });
+          }
         } catch (nestedErr) {
           studioLog("approval:nested_paused_run_persist_failed", {
             conversationId,
@@ -488,6 +645,12 @@ export async function POST(
             content: nestedPersistError,
           });
           await markRunFailed(pausedRunId, userId, nestedPersistError, executionToken);
+          await settleParentActionRun(
+            resolved,
+            "failed",
+            { currentActivity: nestedPersistError, failureCode: "APPROVAL_STATE_UNAVAILABLE", failureMessage: nestedPersistError },
+            "approval:action_run_nested_settle_failed",
+          );
           return;
         }
       }
@@ -567,7 +730,23 @@ export async function POST(
           : undefined,
         qualityLoopState,
       };
-      return markRunCompleted(pausedRunId, userId, runResult, executionToken);
+      const completion = await markRunCompleted(pausedRunId, userId, runResult, executionToken);
+      if (!result.pendingApproval) {
+        await settleParentActionRun(
+          resolved,
+          result.cancelled ? "cancelled" : "completed",
+          {
+            currentActivity: result.cancelled ? "Task cancelled by user" : "Task completed",
+            approvalReference: null,
+            failureCode: null,
+            failureMessage: null,
+          },
+          result.cancelled
+            ? "approval:action_run_cancel_settle_failed"
+            : "approval:action_run_complete_settle_failed",
+        );
+      }
+      return completion;
     })
     .catch(async (err) => {
       if (fenced) return;
@@ -580,6 +759,12 @@ export async function POST(
         status: "failed",
         content: `The resumed run failed: ${message}`,
       });
+      await settleParentActionRun(
+        resolved,
+        "failed",
+        { currentActivity: "Task failed", failureCode: "TASK_FAILED", failureMessage: message },
+        "approval:action_run_exception_settle_failed",
+      );
       return markRunFailed(pausedRunId, userId, message, executionToken);
     })
     .finally(() => {

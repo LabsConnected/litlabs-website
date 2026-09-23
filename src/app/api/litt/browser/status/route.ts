@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { getLiveSessionStatus } from "@/lib/litt-intelligence/browser-session-manager";
 import { getBurnSnapshot } from "@/lib/litt-intelligence/browser-billing";
+import { mapBrowserFailure } from "@/lib/action-runtime/safe-errors";
 
 export const runtime = "nodejs";
 
@@ -44,9 +45,14 @@ async function handler(req: NextRequest) {
     }
     return NextResponse.json({ ...status, burn });
   } catch (err) {
+    const failure = mapBrowserFailure(err, "BROWSER_STATUS_FAILED");
+    console.error("[browser-status] probe failed", {
+      code: failure.code,
+      userId,
+    });
     return NextResponse.json(
-      { error: "Internal server error", detail: err instanceof Error ? err.message : String(err) },
-      { status: 500 },
+      { code: failure.code, message: "LiTT couldn't check the browser status right now." },
+      { status: 503 },
     );
   }
 }
