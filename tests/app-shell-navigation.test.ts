@@ -3,8 +3,8 @@
  *
  * Verifies the ONE canonical authenticated global nav:
  *   Main: Home · Studio · Assets · Agents · Missions · More
- *   More: Projects · Games · Discover · Marketplace · Showcase · Wallet ·
- *         CLI · Docs · Deployments · Settings · Profile
+ *   More: Projects · Discover · Marketplace · Showcase · Games · CLI ·
+ *         Deployments · Docs
  *
  * Assets/Agents/Missions are Studio destinations (?tool=…) and must light
  * up independently of the bare-Studio pill (isAppNavActive).
@@ -55,16 +55,13 @@ describe("AppShell Navigation", () => {
       const labels = APP_NAV_MORE.map((i) => i.label);
       expect(labels).toEqual([
         "Projects",
-        "Games",
         "Discover",
         "Marketplace",
         "Showcase",
-        "Wallet",
+        "Games",
         "CLI",
-        "Docs",
         "Deployments",
-        "Settings",
-        "Profile",
+        "Docs",
       ]);
     });
 
@@ -85,16 +82,20 @@ describe("AppShell Navigation", () => {
       const ids = APP_NAV_SECONDARY.map((s) => s.id);
       expect(ids).toEqual(["library", "devtools"]);
       const hrefs = APP_NAV_SECONDARY.flatMap((s) => s.items.map((i) => i.href));
-      // Account menu keeps Files / Saved / Connections / Docs. Code Workspace
-      // (Projects page + footer), CLI (More menu), and Terminal (Studio) live
-      // in their own surfaces — they are not duplicated here.
+      // Account menu keeps Files / Saved / Connections. Product resources
+      // such as Docs stay in More, not the personal account menu.
       expect(hrefs).toEqual([
         "/library/files",
         "/library/saved",
         "/settings/connections",
-        "/docs",
       ]);
     });
+  });
+
+  it("does not duplicate account destinations in More", () => {
+    const moreLabels = APP_NAV_MORE.map((item) => item.label);
+    expect(moreLabels).not.toEqual(expect.arrayContaining(["Profile", "Wallet", "Settings"]));
+    expect(moreLabels).toEqual(expect.arrayContaining(["Docs", "Deployments"]));
   });
 
   // Regression: /hire is permanently retired — the page always redirects
