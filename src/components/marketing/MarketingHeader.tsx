@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { ArrowRight, ChevronRight, Menu, X } from "lucide-react";
 import { track, type FunnelEvent } from "@/lib/analytics";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import BrandMark from "./BrandMark";
+import { BrandLogo } from "@/components/branding/BrandLogo";
 
 type MarketingNavItem = {
   label: string;
@@ -52,15 +52,13 @@ export default function MarketingHeader() {
   return (
     <header className="litt-site-header fixed inset-x-0 top-0 z-50 border-b border-white/8">
       <div className="mx-auto flex h-[68px] max-w-[1500px] items-center justify-between px-5 lg:px-8">
-        <Link
+        <BrandLogo
           href="/"
-          aria-label="LiTTree LabStudios home"
-          className="flex items-center gap-2.5 font-black tracking-[-0.02em] text-white"
-        >
-          <BrandMark />
-          <span className="hidden sm:block">LiTTree <span className="text-white/48">LabStudios</span></span>
-          <span className="sm:hidden">LiTTree</span>
-        </Link>
+          size={42}
+          showText={false}
+          variant="full"
+          className="max-w-[190px]"
+        />
 
         <nav aria-label="Primary navigation" className="hidden items-center gap-7 text-[13px] font-bold text-white/55 lg:flex">
           {NAV_ITEMS.map((item) => {
