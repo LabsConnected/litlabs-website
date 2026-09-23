@@ -1,12 +1,12 @@
 import Link from "next/link";
-import BrandMark from "./BrandMark";
+import { BrandLogo } from "@/components/branding/BrandLogo";
 
 export default function MarketingFooter() {
   return (
     <footer className="border-t border-white/8 bg-[#03050a] px-5 py-10 pb-[calc(2.5rem+env(safe-area-inset-bottom))] lg:px-8">
       <div className="mx-auto grid max-w-[1500px] gap-8 md:grid-cols-[1.2fr_2fr] md:items-end">
         <div>
-          <Link href="/" className="inline-flex items-center gap-2.5 font-black text-white"><BrandMark /> LiTTree LabStudios</Link>
+          <BrandLogo href="/" size={42} showText={false} variant="full" className="max-w-[190px]" />
           <p className="mt-4 max-w-sm text-sm leading-6 text-white/38">An AI creative operating system for turning ideas into real, ownable work.</p>
         </div>
         <div className="flex flex-wrap gap-x-6 gap-y-3 text-xs font-bold text-white/42 md:justify-end">
