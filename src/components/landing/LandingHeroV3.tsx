@@ -12,7 +12,6 @@ import {
   Code2,
   FileCode2,
   GitBranch,
-  Play,
   ShieldCheck,
   Terminal,
   WandSparkles,
@@ -79,16 +78,8 @@ export function LandingHeroV3() {
             >
               <Zap size={17} fill="currentColor" /> {primaryLabel} <ArrowRight size={16} />
             </Link>
-            {/* Larry's site audit (2026-09-22, issue #469): single primary CTA.
-                "Watch LiTT work" is a plain text link, not a second button. */}
-            <a
-              href="#how-it-works"
-              className="inline-flex items-center gap-2 px-1 py-3 text-sm font-bold text-white/65 underline decoration-white/25 underline-offset-[6px] transition hover:text-white hover:decoration-white/60"
-              onClick={() => track("watch_litt_click", { source: "hero" })}
-            >
-              <Play size={13} fill="currentColor" />
-              Watch LiTT work
-            </a>
+            {/* Larry's site audit (2026-09-23 round 2): single hero CTA.
+                The "Watch LiTT work" text link is gone — one CTA only. */}
           </div>
 
           <div className="litt-hero-reveal litt-hero-step-5 mt-7 flex flex-wrap gap-x-5 gap-y-2 text-[11px] font-bold text-white/38 sm:text-xs">
