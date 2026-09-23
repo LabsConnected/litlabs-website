@@ -8,10 +8,13 @@ export {
   markBrowserSessionControl,
   markBrowserSessionPaused,
   resolveBrowserActionRun,
+  recordBrowserToolCompleted,
   recordBrowserToolExecution,
+  recordBrowserToolFailed,
   recordBrowserSessionClosed,
   recordBrowserToolStarted,
   startBrowserActionRun,
 } from "./browser-runtime";
 
 export { projectBrowserSessionStatus } from "./browser-state";
+export { reconcileSweptBrowserSession, BROWSER_SESSION_IDLE_TIMEOUT_CODE } from "./browser-sweep";

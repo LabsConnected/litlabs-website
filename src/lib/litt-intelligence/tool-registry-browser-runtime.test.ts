@@ -12,7 +12,8 @@ import type { LiTTToolDefinition } from "./types";
 
 const runtimeMocks = vi.hoisted(() => ({
   recordBrowserToolStarted: vi.fn(),
-  recordBrowserToolExecution: vi.fn(),
+  recordBrowserToolCompleted: vi.fn(),
+  recordBrowserToolFailed: vi.fn(),
   markBrowserRunPersistenceDegraded: vi.fn(),
   resolveBrowserActionRun: vi.fn(),
 }));
@@ -54,7 +55,8 @@ describe("toolRegistry.execute — browser ActionRuntime recording", () => {
     toolRegistry.clear();
     vi.clearAllMocks();
     runtimeMocks.recordBrowserToolStarted.mockResolvedValue({ id: "run-one" });
-    runtimeMocks.recordBrowserToolExecution.mockResolvedValue({ id: "run-one" });
+    runtimeMocks.recordBrowserToolCompleted.mockResolvedValue({ id: "run-one" });
+    runtimeMocks.recordBrowserToolFailed.mockResolvedValue({ id: "run-one" });
     runtimeMocks.markBrowserRunPersistenceDegraded.mockResolvedValue(undefined);
     runtimeMocks.resolveBrowserActionRun.mockResolvedValue(null);
   });
@@ -76,12 +78,11 @@ describe("toolRegistry.execute — browser ActionRuntime recording", () => {
       browserSessionId: "session-one",
       toolId: "browser.fake",
     });
-    expect(runtimeMocks.recordBrowserToolExecution).toHaveBeenCalledWith({
+    expect(runtimeMocks.recordBrowserToolCompleted).toHaveBeenCalledWith({
       actionRunId: "run-one",
       userId: "user-one",
       browserSessionId: "session-one",
       toolId: "browser.fake",
-      result: { outcome: "completed" },
     });
     expect(runtimeMocks.resolveBrowserActionRun).not.toHaveBeenCalled();
   });
@@ -114,12 +115,12 @@ describe("toolRegistry.execute — browser ActionRuntime recording", () => {
     const result = await toolRegistry.execute("browser.fake", browserInputs, { actionRunId: "run-one" });
 
     expect(result.ok).toBe(false);
-    expect(runtimeMocks.recordBrowserToolExecution).toHaveBeenCalledWith(
+    expect(runtimeMocks.recordBrowserToolFailed).toHaveBeenCalledWith(
       expect.objectContaining({
         actionRunId: "run-one",
         toolId: "browser.fake",
-        result: expect.objectContaining({ outcome: "failed" }),
       }),
+      expect.any(Error),
     );
   });
 
@@ -159,7 +160,7 @@ describe("toolRegistry.execute — browser ActionRuntime recording", () => {
   });
 
   it("keeps the real result but marks the run degraded when post-execution persistence fails", async () => {
-    runtimeMocks.recordBrowserToolExecution.mockRejectedValue(new Error("event insert failed"));
+    runtimeMocks.recordBrowserToolCompleted.mockRejectedValue(new Error("event insert failed"));
     const handler: TestHandler = async (_inputs) => ({ navigated: true });
     toolRegistry.register(fakeBrowserTool("browser.fake"), handler);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});

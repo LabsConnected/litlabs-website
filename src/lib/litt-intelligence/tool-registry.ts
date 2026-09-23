@@ -646,7 +646,7 @@ class ToolRegistry {
         );
         if (runtime && browserContext) {
           try {
-            await runtime.recordBrowserToolExecution({ ...browserContext, toolId: id, result: { outcome: "completed" } });
+            await runtime.recordBrowserToolCompleted({ ...browserContext, toolId: id });
           } catch (persistError) {
             // The browser action already executed — returning ok:false here
             // would invite a retry of a possibly non-idempotent action. Log
@@ -664,7 +664,7 @@ class ToolRegistry {
       } catch (err) {
         if (runtime && browserContext) {
           try {
-            await runtime.recordBrowserToolExecution({ ...browserContext, toolId: id, result: { outcome: "failed", error: err } });
+            await runtime.recordBrowserToolFailed({ ...browserContext, toolId: id }, err);
           } catch (persistError) {
             console.error("[action-runtime] browser action failure could not be persisted", {
               runId: browserContext.actionRunId,

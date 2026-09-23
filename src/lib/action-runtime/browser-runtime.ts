@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  appendActionEvent,
   attachBrowserSessionToRun,
   findActiveActionRunForConversation,
   findOrCreateBrowserActionRun,
@@ -165,7 +166,7 @@ export async function recordBrowserToolStarted(context: BrowserActionContext & {
   });
 }
 
-async function recordBrowserToolCompleted(context: BrowserActionContext & { toolId: string }): Promise<ActionRun> {
+export async function recordBrowserToolCompleted(context: BrowserActionContext & { toolId: string }): Promise<ActionRun> {
   const { toolId } = context;
   const run = await getBrowserRun(context);
   return recordActionEventActivity({
@@ -177,7 +178,7 @@ async function recordBrowserToolCompleted(context: BrowserActionContext & { tool
   });
 }
 
-async function recordBrowserToolFailed(context: BrowserActionContext & { toolId: string }, error: unknown): Promise<ActionRun> {
+export async function recordBrowserToolFailed(context: BrowserActionContext & { toolId: string }, error: unknown): Promise<ActionRun> {
   const { toolId } = context;
   const run = await getBrowserRun(context);
   const failure = mapBrowserFailure(error, "BROWSER_ACTION_FAILED");
@@ -191,6 +192,8 @@ async function recordBrowserToolFailed(context: BrowserActionContext & { toolId:
 }
 
 /**
+ * @deprecated Use recordBrowserToolCompleted or recordBrowserToolFailed so
+ * execution outcome remains explicit at the call site.
  * Records the finished outcome of a browser tool call inside the supplied
  * run. `result.outcome` is the actual execution outcome — it is never
  * inferred from a handler's success-shaped payload. Persistence failures
@@ -270,20 +273,20 @@ export async function markBrowserSessionControl(userId: string, session: Browser
 
 export async function recordBrowserSessionClosed(
   context: BrowserActionContext,
-  message = "Browser session closed",
+  _message = "Browser session closed",
 ): Promise<ActionRun> {
   const run = await getActionRun(context.actionRunId, context.userId);
   if (!run) throw new ActionRuntimeError("Action run not found", "ACTION_RUN_NOT_FOUND");
   if (run.browserSessionId !== context.browserSessionId) {
     throw new ActionRuntimeError("Action run is not attached to this browser session", "ACTION_BROWSER_SESSION_MISMATCH");
   }
-  return recordActionEventActivity({
+  await appendActionEvent({
     runId: run.id,
     userId: context.userId,
     type: "browser.session.completed",
-    payload: { browserSessionId: context.browserSessionId },
-    message,
+    payload: { browserSessionId: context.browserSessionId, reason: "user_closed" },
   });
+  return run;
 }
 
 /** Legacy browser-resource completion. Composite parents remain owned by the orchestrator. */

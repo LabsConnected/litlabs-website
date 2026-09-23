@@ -1,6 +1,7 @@
 import {
   type ActionEventPayload,
   type ActionEventType,
+  type ActionRunPatch,
   type JsonValue,
 } from "./types";
 
@@ -27,6 +28,62 @@ export function sanitizeActionPayload(
   return sanitizeValue(payload) as ActionEventPayload;
 }
 
+const SECRET_VALUE_PATTERN = new RegExp(
+  [
+    String.raw`(?<key>(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|session[_-]?id|secret|password|passwd|credential|cookie|set-cookie|private[_-]?key)\s*(?:=|:|["'\s]+)\s*)(?<value>[^\s,;}"']+)`,
+    String.raw`Bearer\s+[A-Za-z0-9._~+\/-]+=*`,
+    String.raw`Basic\s+[A-Za-z0-9._~+\/-]+=*`,
+    String.raw`eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`,
+    String.raw`(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9_-]+`,
+  ].join("|"),
+  "gi",
+);
+
+const HTML_DOCUMENT_PATTERN = /<!doctype\s+html|<html[\s>]|<body[\s>]|<script[\s>]/i;
+const MAX_ACTIVITY_MESSAGE_LENGTH = 500;
+
+/**
+ * Sanitizes free-form text before it becomes durable product truth. This is
+ * intentionally conservative: provider exceptions, HTTP dumps, credentials,
+ * cookies, bearer material, and HTML bodies must never land in run/activity
+ * fields where reconnecting clients and support tooling can read them.
+ */
+export function sanitizeActionActivityMessage(message: string | null | undefined): string | null {
+  if (message === null || message === undefined) return null;
+  let sanitized = String(message)
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, " ")
+    .replace(SECRET_VALUE_PATTERN, (matched) => {
+      const separator = matched.search(/[:=]/);
+      return separator > 0 && !/^(Bearer|Basic)\s/i.test(matched)
+        ? `${matched.slice(0, separator + 1)} [REDACTED]`
+        : "[REDACTED]";
+    })
+    .replace(/<[a-z][^>]*>/gi, "[HTML_REDACTED]")
+    .trim();
+  if (HTML_DOCUMENT_PATTERN.test(message)) {
+    sanitized = "[HTML response redacted]";
+  }
+  if (sanitized.length > MAX_ACTIVITY_MESSAGE_LENGTH) {
+    sanitized = `${sanitized.slice(0, MAX_ACTIVITY_MESSAGE_LENGTH - 1).trimEnd()}…`;
+  }
+  return sanitized;
+}
+
+/** Sanitizes free-form ActionRun patch fields while leaving IDs/timestamps intact. */
+export function sanitizeActionRunPatch(patch: ActionRunPatch = {}): ActionRunPatch {
+  const sanitized = { ...patch };
+  if (typeof sanitized.currentActivity === "string") {
+    sanitized.currentActivity = sanitizeActionActivityMessage(sanitized.currentActivity);
+  }
+  if (typeof sanitized.failureMessage === "string") {
+    sanitized.failureMessage = sanitizeActionActivityMessage(sanitized.failureMessage);
+  }
+  if (typeof sanitized.approvalReference === "string") {
+    sanitized.approvalReference = sanitizeActionActivityMessage(sanitized.approvalReference);
+  }
+  return sanitized;
+}
+
 export interface ActionEventInput {
   runId: string;
   userId: string;
@@ -40,5 +97,5 @@ export interface ActivityEventInput extends ActionEventInput {
 }
 
 export function activityPayload(message: string): Record<string, unknown> {
-  return { message };
+  return { message: sanitizeActionActivityMessage(message) };
 }

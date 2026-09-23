@@ -19,10 +19,10 @@ async function handler(req: NextRequest, context: RouteContext) {
     const run = await getActionRun(runId, userId);
     if (!run) return NextResponse.json({ error: "Action run not found" }, { status: 404 });
     const rawCursor = new URL(req.url).searchParams.get("afterSequence");
-    const afterSequence = rawCursor === null ? undefined : Number(rawCursor);
-    const events = await listActionEvents(runId, userId, {
-      afterSequence: Number.isFinite(afterSequence) ? afterSequence : undefined,
-    });
+    // The sequence is a BIGINT identity transported as text — pass it
+    // through untouched so cursors stay exact past 2^53.
+    const afterSequence = rawCursor && /^\d+$/.test(rawCursor) ? rawCursor : undefined;
+    const events = await listActionEvents(runId, userId, { afterSequence });
     return NextResponse.json({ run, events });
   } catch (error) {
     return runtimeErrorResponse(error);

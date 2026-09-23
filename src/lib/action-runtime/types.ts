@@ -90,7 +90,8 @@ export type ActionEventType = (typeof ACTION_EVENT_TYPES)[number];
 
 export interface ActionEvent {
   id: string;
-  sequence: number;
+  /** BIGINT identity is transported as text so values remain exact forever. */
+  sequence: string;
   runId: string;
   userId: string;
   type: ActionEventType;
@@ -99,12 +100,15 @@ export interface ActionEvent {
 }
 
 export interface ActionActivity {
+  /** Durable activity event ID — never ActionRun.id. */
   id: string;
   runId: string;
   userId: string;
   message: string;
   createdAt: string;
-  eventId: string | null;
+  eventId: string;
+  /** Exact BIGINT sequence, represented as text. */
+  sequence: string;
 }
 
 export interface CreateActionRunInput {
@@ -114,6 +118,10 @@ export interface CreateActionRunInput {
   kind: ActionRunKind;
   currentActivity?: string | null;
   browserSessionId?: string | null;
+  /** Caller-controlled retry identity for the logical run creation. */
+  idempotencyKey?: string;
+  /** Optional caller-controlled UUID for compatible retry paths. */
+  id?: string;
 }
 
 /**
@@ -155,8 +163,13 @@ export class ActionRuntimeError extends Error {
       | "NOT_FOUND"
       | "CONFLICT"
       | "ACTION_RUN_NOT_FOUND"
+      | "ACTION_RUN_INVALID_TRANSITION"
+      | "ACTION_RUN_TERMINAL"
+      | "ACTION_RUN_TERMINAL_IMMUTABLE"
       | "ACTION_BROWSER_SESSION_MISMATCH"
-      | "ACTION_RUN_TERMINAL",
+      | "ACTION_BROWSER_SESSION_OWNER_MISMATCH"
+      | "ACTION_EVENT_INVALID_TYPE"
+      | "ACTION_RUN_CONFLICT",
   ) {
     super(message);
     this.name = "ActionRuntimeError";

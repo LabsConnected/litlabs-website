@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS public.action_runs (
   cancellation_requested_at TIMESTAMPTZ,
   approval_reference TEXT,
   failure_code TEXT,
-  failure_message TEXT
+  failure_message TEXT,
+  idempotency_key TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_action_runs_user_created
@@ -39,6 +40,9 @@ CREATE INDEX IF NOT EXISTS idx_action_runs_status
   ON public.action_runs(status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_action_runs_browser_session
   ON public.action_runs(browser_session_id);
+-- Caller-controlled retry identity: at most one run per (user, key).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_action_runs_idempotency_key
+  ON public.action_runs(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 
 ALTER TABLE public.action_runs ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS service_role_all_action_runs ON public.action_runs;
@@ -99,19 +103,37 @@ CREATE OR REPLACE FUNCTION public.action_runtime_create_run(
   p_conversation_id TEXT,
   p_kind TEXT,
   p_current_activity TEXT DEFAULT NULL,
-  p_browser_session_id UUID DEFAULT NULL
+  p_browser_session_id UUID DEFAULT NULL,
+  p_idempotency_key TEXT DEFAULT NULL
 ) RETURNS public.action_runs
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
   v_run public.action_runs;
 BEGIN
+  -- Idempotent create: a retry of the same logical creation (same p_id, or
+  -- same (user, idempotency_key)) returns the existing run instead of
+  -- duplicating it — and never emits a second run.created event.
   INSERT INTO public.action_runs (
     id, user_id, project_id, conversation_id, kind, status,
-    current_activity, browser_session_id
+    current_activity, browser_session_id, idempotency_key
   ) VALUES (
     p_id, p_user_id, p_project_id, p_conversation_id, p_kind, 'queued',
-    p_current_activity, p_browser_session_id
-  ) RETURNING * INTO v_run;
+    p_current_activity, p_browser_session_id, p_idempotency_key
+  ) ON CONFLICT DO NOTHING
+  RETURNING * INTO v_run;
+
+  IF v_run.id IS NULL THEN
+    SELECT * INTO v_run FROM public.action_runs
+    WHERE id = p_id
+       OR (p_idempotency_key IS NOT NULL
+           AND user_id = p_user_id
+           AND idempotency_key = p_idempotency_key)
+    LIMIT 1;
+    IF v_run.id IS NULL THEN
+      RAISE EXCEPTION 'ACTION_RUN_CONFLICT' USING ERRCODE = 'P0001';
+    END IF;
+    RETURN v_run;
+  END IF;
 
   INSERT INTO public.action_events (run_id, user_id, type, payload)
   VALUES (v_run.id, p_user_id, 'run.created', jsonb_build_object('kind', p_kind));
@@ -316,14 +338,17 @@ BEGIN
 END;
 $$;
 
+-- Returns {run, event}: the activity identity is the durable event row —
+-- its id and sequence are real replay cursors, never the run id.
 CREATE OR REPLACE FUNCTION public.action_runtime_activity(
   p_run_id UUID,
   p_user_id TEXT,
   p_message TEXT
-) RETURNS public.action_runs
+) RETURNS JSONB
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
   v_updated public.action_runs;
+  v_event public.action_events;
 BEGIN
   UPDATE public.action_runs SET current_activity = p_message, updated_at = now()
   WHERE id = p_run_id AND user_id = p_user_id
@@ -333,8 +358,10 @@ BEGIN
   END IF;
 
   INSERT INTO public.action_events (run_id, user_id, type, payload)
-  VALUES (p_run_id, p_user_id, 'activity.created', jsonb_build_object('message', p_message));
-  RETURN v_updated;
+  VALUES (p_run_id, p_user_id, 'activity.created', jsonb_build_object('message', p_message))
+  RETURNING * INTO v_event;
+
+  RETURN jsonb_build_object('run', to_jsonb(v_updated), 'event', to_jsonb(v_event));
 END;
 $$;
 

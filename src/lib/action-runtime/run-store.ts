@@ -3,7 +3,12 @@ import "server-only";
 import { randomUUID } from "crypto";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { assertActionRunTransition } from "./state-machine";
-import { sanitizeActionPayload, type ActionEventInput } from "./events";
+import {
+  sanitizeActionActivityMessage,
+  sanitizeActionPayload,
+  sanitizeActionRunPatch,
+  type ActionEventInput,
+} from "./events";
 import {
   ActionRuntimeError,
   type ActionActivity,
@@ -35,12 +40,17 @@ interface ActionRunRow {
 
 interface ActionEventRow {
   id: string;
-  sequence: number;
+  sequence: string;
   run_id: string;
   user_id: string;
   type: ActionEvent["type"];
   created_at: string;
   payload: ActionEvent["payload"];
+}
+
+interface ActionActivityResultRow {
+  run: ActionRunRow;
+  event: ActionEventRow;
 }
 
 function adminOrThrow() {
@@ -59,9 +69,13 @@ function mapDatabaseError(error: unknown, fallback: ActionRuntimeError["code"]):
     ? String((error as { message?: unknown }).message)
     : "";
   if (message.includes("ACTION_RUN_NOT_FOUND")) return new ActionRuntimeError("Action run not found", "ACTION_RUN_NOT_FOUND");
-  if (message.includes("ACTION_RUN_INVALID_TRANSITION")) return new ActionRuntimeError("Invalid action run transition", "INVALID_TRANSITION");
+  if (message.includes("ACTION_RUN_INVALID_TRANSITION")) return new ActionRuntimeError("Invalid action run transition", "ACTION_RUN_INVALID_TRANSITION");
+  if (message.includes("ACTION_RUN_TERMINAL_IMMUTABLE")) return new ActionRuntimeError("Terminal action runs cannot be mutated", "ACTION_RUN_TERMINAL_IMMUTABLE");
   if (message.includes("ACTION_RUN_TERMINAL")) return new ActionRuntimeError("Action run is terminal", "ACTION_RUN_TERMINAL");
+  if (message.includes("ACTION_BROWSER_SESSION_OWNER_MISMATCH")) return new ActionRuntimeError("Browser session belongs to another user", "ACTION_BROWSER_SESSION_OWNER_MISMATCH");
   if (message.includes("ACTION_BROWSER_SESSION_MISMATCH")) return new ActionRuntimeError("Action run is not attached to this browser session", "ACTION_BROWSER_SESSION_MISMATCH");
+  if (message.includes("ACTION_EVENT_INVALID_TYPE")) return new ActionRuntimeError("Invalid action event type", "ACTION_EVENT_INVALID_TYPE");
+  if (message.includes("ACTION_RUN_CONFLICT")) return new ActionRuntimeError("Action run conflict", "ACTION_RUN_CONFLICT");
   return new ActionRuntimeError("Action Runtime persistence failed", fallback);
 }
 
@@ -89,7 +103,7 @@ function mapRun(row: ActionRunRow): ActionRun {
 function mapEvent(row: ActionEventRow): ActionEvent {
   return {
     id: row.id,
-    sequence: Number(row.sequence),
+    sequence: String(row.sequence),
     runId: row.run_id,
     userId: row.user_id,
     type: row.type,
@@ -110,19 +124,27 @@ async function getOwnedRunRow(runId: string, userId: string): Promise<ActionRunR
 }
 
 export async function createActionRun(input: CreateActionRunInput): Promise<ActionRun> {
+  const patch = sanitizeActionRunPatch({ currentActivity: input.currentActivity ?? null });
   const { data, error } = await adminOrThrow().rpc("action_runtime_create_run", {
-    p_id: randomUUID(),
+    p_id: input.id ?? randomUUID(),
     p_user_id: input.userId,
     p_project_id: input.projectId ?? null,
     p_conversation_id: input.conversationId ?? null,
     p_kind: input.kind,
-    p_current_activity: input.currentActivity ?? null,
+    p_current_activity: patch.currentActivity ?? null,
     p_browser_session_id: input.browserSessionId ?? null,
+    p_idempotency_key: input.idempotencyKey ?? null,
   });
   if (error || !data) throw mapDatabaseError(error, "PERSISTENCE_UNAVAILABLE");
   return mapRun(data as ActionRunRow);
 }
 
+/**
+ * LEGACY / STANDALONE / RECOVERY ONLY.
+ * Canonical work starts with an outer orchestrator-created ActionRun and
+ * carries ActionExecutionContext.actionRunId through browser/files/deploy;
+ * browser tooling must never silently become the task owner again.
+ */
 export async function findOrCreateBrowserActionRun(input: {
   userId: string;
   projectId?: string | null;
@@ -167,12 +189,13 @@ export async function patchActionRun(
   patch: ActionRunPatch,
 ): Promise<ActionRun> {
   const current = await getOwnedRunRow(runId, userId);
-  if (!current) throw new ActionRuntimeError("Action run not found", "NOT_FOUND");
+  if (!current) throw new ActionRuntimeError("Action run not found", "ACTION_RUN_NOT_FOUND");
+  const sanitizedPatch = sanitizeActionRunPatch(patch);
   const { data, error } = await adminOrThrow().rpc("action_runtime_transition", {
     p_run_id: runId,
     p_user_id: userId,
     p_to_status: current.status,
-    p_patch: patch,
+    p_patch: sanitizedPatch,
     p_event_type: "run.status",
     p_event_payload: {},
   });
@@ -187,8 +210,9 @@ export async function transitionActionRun(
   patch: ActionRunPatch = {},
 ): Promise<ActionRun> {
   const current = await getOwnedRunRow(runId, userId);
-  if (!current) throw new ActionRuntimeError("Action run not found", "NOT_FOUND");
+  if (!current) throw new ActionRuntimeError("Action run not found", "ACTION_RUN_NOT_FOUND");
   assertActionRunTransition(current.status, status);
+  const sanitizedPatch = sanitizeActionRunPatch(patch);
   const eventType = status === "completed"
     ? "run.completed"
     : status === "failed"
@@ -200,9 +224,9 @@ export async function transitionActionRun(
     p_run_id: runId,
     p_user_id: userId,
     p_to_status: status,
-    p_patch: patch,
+    p_patch: sanitizedPatch,
     p_event_type: eventType,
-    p_event_payload: { currentActivity: patch.currentActivity ?? current.current_activity },
+    p_event_payload: { currentActivity: sanitizedPatch.currentActivity ?? current.current_activity },
   });
   if (error || !data) throw mapDatabaseError(error, "CONFLICT");
   return mapRun(data as ActionRunRow);
@@ -257,10 +281,10 @@ export async function transitionActionRunEventActivity(input: {
     p_run_id: input.runId,
     p_user_id: input.userId,
     p_to_status: input.status,
-    p_patch: input.patch ?? {},
+    p_patch: sanitizeActionRunPatch(input.patch ?? {}),
     p_event_type: input.eventType,
     p_event_payload: sanitizeActionPayload(input.payload),
-    p_message: input.message,
+    p_message: sanitizeActionActivityMessage(input.message),
   });
   if (error || !data) throw mapDatabaseError(error, "CONFLICT");
   return mapRun(data as ActionRunRow);
@@ -305,7 +329,7 @@ export async function recordActionEventActivity(input: {
     p_user_id: input.userId,
     p_type: input.type,
     p_payload: sanitizeActionPayload(input.payload),
-    p_message: input.message,
+    p_message: sanitizeActionActivityMessage(input.message),
   });
   if (error || !data) throw mapDatabaseError(error, "PERSISTENCE_UNAVAILABLE");
   return mapRun(data as ActionRunRow);
@@ -316,39 +340,42 @@ export async function recordActionActivity(
   userId: string,
   message: string,
 ): Promise<ActionActivity> {
+  const sanitizedMessage = sanitizeActionActivityMessage(message) ?? "";
   const { data, error } = await adminOrThrow().rpc("action_runtime_activity", {
     p_run_id: runId,
     p_user_id: userId,
-    p_message: message,
+    p_message: sanitizedMessage,
   });
   if (error || !data) throw mapDatabaseError(error, "PERSISTENCE_UNAVAILABLE");
-  const run = mapRun(data as ActionRunRow);
+  const result = data as ActionActivityResultRow;
+  const event = mapEvent(result.event);
   return {
-    id: run.id,
+    id: event.id,
     runId,
     userId,
-    message,
-    createdAt: run.updatedAt,
-    eventId: null,
+    message: sanitizedMessage,
+    createdAt: event.createdAt,
+    eventId: event.id,
+    sequence: event.sequence,
   };
 }
 
 export async function listActionEvents(
   runId: string,
   userId: string,
-  options: { afterSequence?: number; limit?: number } = {},
+  options: { afterSequence?: string; limit?: number } = {},
 ): Promise<ActionEvent[]> {
   const owned = await getOwnedRunRow(runId, userId);
   if (!owned) return [];
   const limit = Math.max(1, Math.min(Math.trunc(options.limit ?? 200), 500));
   let query = adminOrThrow()
     .from("action_events")
-    .select("*")
+    .select("id, sequence::text, run_id, user_id, type, created_at, payload")
     .eq("run_id", runId)
     .eq("user_id", userId)
     .order("sequence", { ascending: true })
     .limit(limit);
-  if (Number.isFinite(options.afterSequence)) query = query.gt("sequence", Math.max(0, Math.trunc(options.afterSequence as number)));
+  if (options.afterSequence) query = query.gt("sequence", options.afterSequence);
   const { data, error } = await query;
   if (error || !data) throw mapDatabaseError(error, "PERSISTENCE_UNAVAILABLE");
   return (data as ActionEventRow[]).map(mapEvent);
