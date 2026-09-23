@@ -95,6 +95,30 @@ describe("tool-runtime — composite ActionRun tool events", () => {
     );
   });
 
+  it("persists verified deployment identifiers on deployment.completed", async () => {
+    await recordActionToolCompleted(context, "project.deploy", {
+      success: true,
+      liveUrl: "https://site.example.com",
+      deployment: { deploymentId: "dep-123", status: "LIVE" },
+      httpStatus: 200,
+    });
+
+    expect(mocks.recordActionEventActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "deployment.completed",
+        payload: expect.objectContaining({
+          toolId: "project.deploy",
+          outcome: "completed",
+          deploymentId: "dep-123",
+          publicUrl: "https://site.example.com",
+          providerStatus: "LIVE",
+          verified: true,
+          httpStatus: 200,
+        }),
+      }),
+    );
+  });
+
   it("atomically moves a queued parent to working when tool work starts", async () => {
     mocks.getActionRun.mockResolvedValue(run("queued"));
 

@@ -98,8 +98,34 @@ export async function recordActionToolStarted(
 export async function recordActionToolCompleted(
   context: ActionExecutionContext,
   toolId: string,
+  result?: unknown,
 ): Promise<ActionRun> {
-  return recordToolEvent(context, toolId, "completed", { outcome: "completed" });
+  return recordToolEvent(context, toolId, "completed", {
+    outcome: "completed",
+    ...deploymentOutcomePayload(toolId, result),
+  });
+}
+
+function deploymentOutcomePayload(toolId: string, result: unknown): Record<string, unknown> {
+  if (!DEPLOYMENT_TOOL_IDS.has(toolId) || !result || typeof result !== "object" || Array.isArray(result)) {
+    return {};
+  }
+  const payload = result as Record<string, unknown>;
+  const deployment = payload.deployment && typeof payload.deployment === "object" && !Array.isArray(payload.deployment)
+    ? payload.deployment as Record<string, unknown>
+    : {};
+  const pickString = (...values: unknown[]) =>
+    values.find((value): value is string => typeof value === "string" && value.trim().length > 0) ?? null;
+  const httpStatus = [payload.httpStatus, payload.statusCode, deployment.httpStatus, deployment.statusCode]
+    .find((value): value is number => typeof value === "number" && Number.isFinite(value)) ?? null;
+
+  return {
+    deploymentId: pickString(payload.deploymentId, deployment.deploymentId, deployment.id),
+    publicUrl: pickString(payload.publicUrl, payload.liveUrl, payload.url, deployment.publicUrl, deployment.liveUrl, deployment.url),
+    providerStatus: pickString(payload.status, deployment.status),
+    verified: payload.verified === true || deployment.verified === true || (httpStatus !== null && httpStatus >= 200 && httpStatus < 400),
+    httpStatus,
+  };
 }
 
 export async function recordActionToolFailed(

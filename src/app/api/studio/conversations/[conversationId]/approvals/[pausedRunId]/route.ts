@@ -36,11 +36,13 @@ import {
 } from "@/lib/studio/conversation-service";
 import { studioLog } from "@/lib/studio/logger";
 import {
+  getActionRun,
   transitionActionRun,
   transitionActionRunEventActivity,
   type ActionRunPatch,
   type ActionRunStatus,
 } from "@/lib/action-runtime";
+import { isTerminalActionRunStatus } from "@/lib/action-runtime/state-machine";
 import type { MessageStatus } from "@/lib/studio/types";
 
 /**
@@ -176,6 +178,29 @@ export async function POST(
   const pausedRun = await getPausedRun(pausedRunId, userId);
   if (!pausedRun) {
     return NextResponse.json({ error: "Approval not found or expired" }, { status: 404 });
+  }
+
+  // The approval is subordinate to its durable parent task. If Stop already
+  // settled that task, this gate is historical evidence — not a button that
+  // can resurrect a cancelled run.
+  if (pausedRun.actionRunId) {
+    const parentRun = await getActionRun(pausedRun.actionRunId, userId);
+    if (!parentRun) {
+      return NextResponse.json(
+        { error: "The parent task for this approval is no longer available", code: "ACTION_RUN_NOT_FOUND" },
+        { status: 409 },
+      );
+    }
+    if (isTerminalActionRunStatus(parentRun.status)) {
+      return NextResponse.json(
+        {
+          error: `The parent task is already ${parentRun.status}`,
+          code: "ACTION_RUN_TERMINAL",
+          status: parentRun.status,
+        },
+        { status: 409 },
+      );
+    }
   }
 
   // Set when this POST is a controlled retry of an approved run whose

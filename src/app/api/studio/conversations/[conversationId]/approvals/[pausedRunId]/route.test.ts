@@ -68,6 +68,7 @@ vi.mock("@/lib/studio/logger", () => ({
 }));
 
 vi.mock("@/lib/action-runtime", () => ({
+  getActionRun: vi.fn(),
   recordActionEventActivity: vi.fn(() => Promise.resolve({})),
   transitionActionRun: vi.fn(() => Promise.resolve({})),
   transitionActionRunEventActivity: vi.fn(() => Promise.resolve({})),
@@ -86,6 +87,7 @@ import {
 import { resumeAgentLoopV2 } from "@/lib/litt-intelligence/agent-loop-v2";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import {
+  getActionRun,
   transitionActionRun,
   transitionActionRunEventActivity,
 } from "@/lib/action-runtime";
@@ -154,9 +156,23 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
     vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" } as any);
     vi.mocked(getPausedRun).mockResolvedValue(pendingRun as any);
     vi.mocked(resolvePausedRun).mockResolvedValue({ ...pendingRun, status: "approved" } as any);
+    vi.mocked(getActionRun).mockResolvedValue({ id: "run-parent-1", status: "waiting_for_user" } as any);
     vi.mocked(verifyProjectWorkspace).mockResolvedValue({ workspaceId: "ws-123" } as any);
     vi.mocked(markRunProcessing).mockResolvedValue(true);
     vi.mocked(getAwaitingApprovalAssistantMessage).mockResolvedValue(awaitingMessage as any);
+  });
+
+  it("cannot resurrect a pending approval after explicit parent-run cancellation", async () => {
+    vi.mocked(getActionRun).mockResolvedValue({ id: "run-parent-1", status: "cancelled" } as any);
+
+    const res = await POST(makeRequest("approved"), routeParams);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.code).toBe("ACTION_RUN_TERMINAL");
+    expect(resolvePausedRun).not.toHaveBeenCalled();
+    expect(markRunProcessing).not.toHaveBeenCalled();
+    expect(resumeAgentLoopV2).not.toHaveBeenCalled();
   });
 
   it("writes the resumed run's finalText onto the awaiting message before completing", async () => {

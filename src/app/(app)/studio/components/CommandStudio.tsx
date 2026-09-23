@@ -31,6 +31,7 @@ import { MobileCommandNav } from "./CommandStudioNav";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
 import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
+import { ActionRunStatusPanel } from "./ActionRunStatusPanel";
 import LiTTLiveActivity from "./LiTTLiveActivity";
 import LiTTPanel from "./LiTTPanel";
 import LiTTMobileSheet from "./litt/LiTTMobileSheet";
@@ -1625,6 +1626,7 @@ function CommandStudioContent() {
       ) : null}
       <StudioWorkSurface
         messages={conversation.messages}
+        conversationId={conversation.selectedConversationId ?? null}
         busy={conversation.busy}
         loading={conversation.loading}
         activeAgentId={conversation.activeAgentId}
@@ -2572,6 +2574,7 @@ function MediaWorkspacePanel({
 /* ── Studio/Work surface: empty state OR real transcript ──────── */
 function StudioWorkSurface({
   messages,
+  conversationId,
   busy,
   loading,
   activeAgentId,
@@ -2589,6 +2592,7 @@ function StudioWorkSurface({
   overflowDownloads = false,
 }: {
   messages: import("../stores/useStudioAgentStore").ChatMessage[];
+  conversationId: string | null;
   busy: boolean;
   loading: boolean;
   activeAgentId: import("../stores/useStudioAgentStore").AgentId;
@@ -2630,6 +2634,7 @@ function StudioWorkSurface({
           {fallbackNotice}
         </div>
       )}
+      {conversationId && <ActionRunStatusPanel conversationId={conversationId} busy={busy} />}
       {isEmpty ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <LiTEmptyState

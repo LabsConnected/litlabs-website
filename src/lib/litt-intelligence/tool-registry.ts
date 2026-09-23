@@ -769,7 +769,7 @@ class ToolRegistry {
             if (domainFailure) {
               await toolRuntime.recordActionToolFailed(actionContext, id, domainFailure);
             } else {
-              await toolRuntime.recordActionToolCompleted(actionContext, id);
+              await toolRuntime.recordActionToolCompleted(actionContext, id, finalResult);
             }
           } catch (persistError) {
             // The tool already ran; do not replay it. Return an explicit

@@ -418,6 +418,27 @@ export async function getPendingPausedRunForConversation(
   return rowToRecord(data as PausedRunRow);
 }
 
+/** Approval gates owned by one durable parent ActionRun. */
+export async function listPausedRunsForActionRun(
+  actionRunId: string,
+  userId: string,
+): Promise<PausedRunRecord[]> {
+  if (!supabaseAdmin) return [];
+
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .select("*")
+    .eq("action_run_id", actionRunId)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+
+  if (error || !data) return [];
+  return Promise.all(
+    (data as PausedRunRow[]).map(async (row) =>
+      recoverStaleRun(await expireIfStale(rowToRecord(row)))),
+  );
+}
+
 /**
  * Newest paused run for a conversation regardless of status — used to
  * reconcile a transcript message whose gate died without a writeback

@@ -14,15 +14,20 @@ const DATABASE_URL = `postgres://postgres:postgres@127.0.0.1:${PG_PORT}/postgres
 
 let client: Client;
 
-const MIGRATIONS = [
+const PRE_ACTION_CONTEXT_MIGRATIONS = [
   "20260808220000_agent_paused_runs.sql",
   "20260810160000_browser_agent_sessions.sql",
+  "20260913070000_add_run_status_to_paused_runs.sql",
+  "20260917010000_add_quality_loop_state_to_paused_runs.sql",
+  "20260917180000_add_batch_remainder_to_paused_runs.sql",
+  "20260918120000_paused_runs_ttl_30min.sql",
+  "20260920000000_paused_run_lease.sql",
   "20260923000000_action_runtime.sql",
   "20260923010000_browser_action_runtime_hardening.sql",
   "20260923020000_action_runtime_final_gate.sql",
   "20260923030000_action_runtime_lockdown.sql",
-  "20260923040000_action_execution_context.sql",
 ];
+const ACTION_CONTEXT_MIGRATION = "20260923040000_action_execution_context.sql";
 
 async function docker(args: string[]) {
   return execFileAsync("docker", args, { timeout: 120_000 });
@@ -113,9 +118,50 @@ describe("Action Runtime SQL invariants", () => {
       DO $$ BEGIN CREATE ROLE authenticated NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
       DO $$ BEGIN CREATE ROLE litt_unpriv NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
     `);
-    for (const migration of MIGRATIONS) {
+    for (const migration of PRE_ACTION_CONTEXT_MIGRATIONS) {
       await applySql(path.join("supabase", "migrations", migration));
     }
+
+    // Production-shaped upgrade fixture: an existing user's pending approval
+    // and an already-resolved approval exist before action_run_id lands. The
+    // new column must remain nullable for these rows rather than requiring a
+    // destructive backfill or orphaning the old gates.
+    await client.query(`
+      INSERT INTO public.agent_paused_runs (
+        id, user_id, conversation_id, project_id, workspace_id,
+        tool_id, tool_call_id, inputs, reason, paused_messages,
+        execution_mode, system_prompt, checkpoint_id, status,
+        run_status, run_result, quality_loop_state,
+        deferred_tool_calls, steps_used, had_intervening_mutation,
+        lease_expires_at, last_progress_at, execution_token
+      ) VALUES
+        (
+          '11111111-1111-4111-8111-111111111111',
+          'user-one', 'conversation-one', 'project-one', 'workspace-one',
+          'project.deploy', 'tc-old-pending', '{"source":"pre-upgrade"}',
+          'Sensitive action — requires explicit approval',
+          '[{"role":"user","content":"ship it"}]',
+          'act', 'system', 'checkpoint-old', 'pending',
+          NULL, NULL, '{"filesWritten":["index.html"]}',
+          '[{"toolId":"preview.inspect","toolCallId":"tc-next","inputs":{}}]',
+          3, true,
+          now() + interval '10 minutes', now(), gen_random_uuid()
+        ),
+        (
+          '22222222-2222-4222-8222-222222222222',
+          'user-one', 'conversation-old', 'project-old', 'workspace-old',
+          'files.write', 'tc-old-approved', '{}', 'approved before upgrade',
+          '[]', 'act', 'system', NULL, 'approved',
+          'completed', '{"success":true}', NULL,
+          NULL, 1, true,
+          NULL, NULL, NULL
+        )
+    `);
+
+    await applySql(path.join("supabase", "migrations", ACTION_CONTEXT_MIGRATION));
+    // The deployment runner may replay a repaired migration history; the
+    // context upgrade itself must be idempotent, not just forward-only.
+    await applySql(path.join("supabase", "migrations", ACTION_CONTEXT_MIGRATION));
   }, 180_000);
 
   afterAll(async () => {
@@ -311,6 +357,60 @@ describe("Action Runtime SQL invariants", () => {
     expect(events.rows.map((row) => row.type)).toEqual(["tool.started", "preview.ready"]);
   });
 
+  it("migrates pre-existing paused runs without a destructive backfill", async () => {
+    const rows = await client.query<{ id: string; action_run_id: string | null; status: string }>(
+      `SELECT id::text, action_run_id::text, status
+       FROM public.agent_paused_runs
+       WHERE id IN (
+         '11111111-1111-4111-8111-111111111111',
+         '22222222-2222-4222-8222-222222222222'
+       )
+       ORDER BY id`,
+    );
+
+    expect(rows.rows).toHaveLength(2);
+    expect(rows.rows.map((row) => row.status)).toEqual(["pending", "approved"]);
+    expect(rows.rows.every((row) => row.action_run_id === null)).toBe(true);
+  });
+
+  it("lets an old pending approval bind to a same-tenant ActionRun and resume", async () => {
+    const run = await createRun({ userId: "user-one" });
+    const pausedRunId = "11111111-1111-4111-8111-111111111111";
+
+    await client.query(
+      `UPDATE public.agent_paused_runs
+       SET action_run_id = $1
+       WHERE id = $2 AND user_id = 'user-one'`,
+      [run.id, pausedRunId],
+    );
+    await client.query(
+      `UPDATE public.agent_paused_runs
+       SET status = 'approved', resolved_at = now(), run_status = 'processing', run_started_at = now()
+       WHERE id = $1 AND user_id = 'user-one' AND status = 'pending'`,
+      [pausedRunId],
+    );
+
+    const row = await client.query<{
+      status: string;
+      run_status: string | null;
+      action_run_id: string | null;
+      deferred_tool_calls: unknown;
+    }>(
+      `SELECT status, run_status, action_run_id::text, deferred_tool_calls
+       FROM public.agent_paused_runs WHERE id = $1`,
+      [pausedRunId],
+    );
+
+    expect(row.rows[0]).toMatchObject({
+      status: "approved",
+      run_status: "processing",
+      action_run_id: run.id,
+    });
+    expect(row.rows[0].deferred_tool_calls).toEqual([
+      { toolId: "preview.inspect", toolCallId: "tc-next", inputs: {} },
+    ]);
+  });
+
   it("enforces tenant ownership on paused-run parent ActionRun references", async () => {
     const foreignRun = await createRun({ userId: "user-two" });
     await expect(
@@ -321,6 +421,36 @@ describe("Action Runtime SQL invariants", () => {
         [foreignRun.id],
       ),
     ).rejects.toMatchObject({ code: "23503" });
+  });
+
+  it("blocks deleting a parent run that still owns an approval record", async () => {
+    const run = await createRun({ userId: "user-one" });
+    await client.query(
+      `INSERT INTO public.agent_paused_runs
+        (user_id, conversation_id, project_id, workspace_id, tool_id, tool_call_id, reason, action_run_id)
+       VALUES ('user-one', 'conversation-delete', 'project-one', 'workspace-one', 'files.write', 'tc-delete', 'approval', $1)`,
+      [run.id],
+    );
+
+    await expect(
+      client.query("DELETE FROM public.action_runs WHERE id = $1 AND user_id = 'user-one'", [run.id]),
+    ).rejects.toMatchObject({ code: "23503" });
+  });
+
+  it("creates the action_run_id/status lookup index used by approval projection", async () => {
+    const result = await client.query<{ column: string }>(
+      `SELECT a.attname AS column
+       FROM pg_index i
+       JOIN pg_class t ON t.oid = i.indrelid
+       JOIN pg_namespace n ON n.oid = t.relnamespace
+       CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+       JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+       WHERE n.nspname = 'public'
+         AND t.relname = 'agent_paused_runs'
+         AND i.indexrelid = 'public.idx_agent_paused_runs_action_run'::regclass
+       ORDER BY k.ord`,
+    );
+    expect(result.rows.map((row) => row.column)).toEqual(["action_run_id", "status"]);
   });
 
   it("returns terminal runs idempotently for same-status no-op patches", async () => {
