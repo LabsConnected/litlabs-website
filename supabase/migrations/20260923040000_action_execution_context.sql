@@ -32,6 +32,7 @@ LANGUAGE sql IMMUTABLE AS $$
     'run.created', 'run.started', 'run.status', 'run.completed', 'run.failed',
     'run.cancelled', 'agent.started', 'agent.status', 'agent.completed',
     'agent.failed', 'tool.started', 'tool.completed', 'tool.failed',
+    'preview.started', 'preview.ready', 'preview.failed',
     'browser.session.started', 'browser.session.updated',
     'browser.session.completed', 'browser.session.failed',
     'browser.action.started', 'browser.action.completed',

@@ -10,6 +10,16 @@ const runtimeMocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/action-runtime/tool-runtime", () => runtimeMocks);
 
+const browserRuntimeMocks = vi.hoisted(() => ({
+  markBrowserRunPersistenceDegraded: vi.fn(async () => undefined),
+  recordBrowserToolCompleted: vi.fn(async () => ({})),
+  recordBrowserToolFailed: vi.fn(async () => ({})),
+  recordBrowserToolStarted: vi.fn(async () => ({})),
+  resolveBrowserActionRun: vi.fn(),
+}));
+
+vi.mock("@/lib/action-runtime/browser-runtime", () => browserRuntimeMocks);
+
 import { toolRegistry } from "./tool-registry";
 import type { ToolExecutionContext } from "./tool-registry";
 import type { LiTTToolDefinition } from "./types";
@@ -66,6 +76,11 @@ describe("toolRegistry.execute — trusted ActionExecutionContext propagation", 
     runtimeMocks.recordActionToolCompleted.mockResolvedValue({});
     runtimeMocks.recordActionToolFailed.mockResolvedValue({});
     runtimeMocks.markActionToolRunPersistenceDegraded.mockResolvedValue(undefined);
+    browserRuntimeMocks.recordBrowserToolStarted.mockResolvedValue({});
+    browserRuntimeMocks.recordBrowserToolCompleted.mockResolvedValue({});
+    browserRuntimeMocks.recordBrowserToolFailed.mockResolvedValue({});
+    browserRuntimeMocks.markBrowserRunPersistenceDegraded.mockResolvedValue(undefined);
+    browserRuntimeMocks.resolveBrowserActionRun.mockResolvedValue(null);
   });
 
   it("passes the parent context to handlers and records start/completion on that run", async () => {
@@ -162,5 +177,47 @@ describe("toolRegistry.execute — trusted ActionExecutionContext propagation", 
     expect(result).toEqual({ ok: false, error: "ACTION_RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION" });
     expect(handler).toHaveBeenCalledTimes(1);
     expect(runtimeMocks.markActionToolRunPersistenceDegraded).toHaveBeenCalledWith(context);
+  });
+
+  it("keeps file, terminal, deployment, verification, and browser work on one parent run", async () => {
+    const compositeToolIds = [
+      "files.write",
+      "terminal.exec",
+      "project.deploy",
+      "deploy.verify",
+    ];
+    for (const toolId of compositeToolIds) {
+      registerTool(toolId, vi.fn(async (_inputs) => ({ ok: true })));
+    }
+    registerTool("browser.navigate", vi.fn(async (_inputs) => ({ ok: true })));
+
+    for (const toolId of compositeToolIds) {
+      const result = await toolRegistry.execute(toolId, {}, { transport, actionContext: context });
+      expect(result.ok).toBe(true);
+    }
+    const browserResult = await toolRegistry.execute(
+      "browser.navigate",
+      { sessionId: "session-one", url: "https://example.com" },
+      { transport, actionContext: context },
+    );
+
+    expect(browserResult.ok).toBe(true);
+    for (const toolId of compositeToolIds) {
+      expect(runtimeMocks.recordActionToolStarted).toHaveBeenCalledWith(context, toolId);
+      expect(runtimeMocks.recordActionToolCompleted).toHaveBeenCalledWith(context, toolId);
+    }
+    expect(browserRuntimeMocks.recordBrowserToolStarted).toHaveBeenCalledWith({
+      actionRunId: "run-composite",
+      userId: "user-one",
+      browserSessionId: "session-one",
+      toolId: "browser.navigate",
+    });
+    expect(browserRuntimeMocks.recordBrowserToolCompleted).toHaveBeenCalledWith({
+      actionRunId: "run-composite",
+      userId: "user-one",
+      browserSessionId: "session-one",
+      toolId: "browser.navigate",
+    });
+    expect(browserRuntimeMocks.resolveBrowserActionRun).not.toHaveBeenCalled();
   });
 });

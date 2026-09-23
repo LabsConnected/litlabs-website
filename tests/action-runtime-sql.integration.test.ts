@@ -297,6 +297,32 @@ describe("Action Runtime SQL invariants", () => {
     ).rejects.toMatchObject({ code: "23514" });
   });
 
+  it("accepts canonical composite tool and preview lifecycle event types", async () => {
+    const run = await createRun();
+    await client.query(
+      "INSERT INTO public.action_events (run_id, user_id, type, payload) VALUES ($1, 'user-one', 'tool.started', '{\"toolId\":\"files.write\"}'), ($1, 'user-one', 'preview.ready', '{\"workspaceId\":\"ws-one\"}')",
+      [run.id],
+    );
+
+    const events = await client.query<{ type: string }>(
+      "SELECT type FROM public.action_events WHERE run_id = $1 AND type IN ('tool.started', 'preview.ready')",
+      [run.id],
+    );
+    expect(events.rows.map((row) => row.type)).toEqual(["tool.started", "preview.ready"]);
+  });
+
+  it("enforces tenant ownership on paused-run parent ActionRun references", async () => {
+    const foreignRun = await createRun({ userId: "user-two" });
+    await expect(
+      client.query(
+        `INSERT INTO public.agent_paused_runs
+          (user_id, conversation_id, project_id, workspace_id, tool_id, tool_call_id, reason, action_run_id)
+         VALUES ('user-one', 'conversation-one', 'project-one', 'workspace-one', 'files.write', 'tc-one', 'approval', $1)`,
+        [foreignRun.id],
+      ),
+    ).rejects.toMatchObject({ code: "23503" });
+  });
+
   it("returns terminal runs idempotently for same-status no-op patches", async () => {
     const run = await createRun({ status: "working" });
     await client.query(

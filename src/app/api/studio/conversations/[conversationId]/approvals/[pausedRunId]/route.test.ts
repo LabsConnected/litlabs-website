@@ -68,6 +68,7 @@ vi.mock("@/lib/studio/logger", () => ({
 }));
 
 vi.mock("@/lib/action-runtime", () => ({
+  recordActionEventActivity: vi.fn(() => Promise.resolve({})),
   transitionActionRun: vi.fn(() => Promise.resolve({})),
   transitionActionRunEventActivity: vi.fn(() => Promise.resolve({})),
 }));
@@ -273,11 +274,13 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
       "completed",
       expect.stringContaining("Declined"),
     );
-    expect(transitionActionRun).toHaveBeenCalledWith(
-      "run-parent-1",
-      "user_123",
-      "cancelled",
-      expect.objectContaining({ approvalReference: null }),
+    expect(transitionActionRunEventActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-parent-1",
+        userId: "user_123",
+        status: "cancelled",
+        eventType: "approval.rejected",
+      }),
     );
   });
 

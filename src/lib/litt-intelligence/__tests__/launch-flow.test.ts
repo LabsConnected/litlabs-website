@@ -4,6 +4,11 @@ import { registerInternalTools, toolRegistry } from "@/lib/litt-intelligence/too
 import type { WorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import type { AgentLoopResult } from "@/lib/litt-intelligence/agent-loop-v2";
 import type { BuildFixLoopResult } from "@/lib/litt-intelligence/build-fix-loop";
+import { recordActionEventActivity } from "@/lib/action-runtime";
+
+vi.mock("@/lib/action-runtime", () => ({
+  recordActionEventActivity: vi.fn(() => Promise.resolve({})),
+}));
 
 // ─── Mocks ──────────────────────────────────────────────────────────
 
@@ -96,6 +101,7 @@ function makeOptions(overrides: Partial<LaunchFlowOptions> = {}): LaunchFlowOpti
 
 describe("Launch Flow: no-mutation reprompt", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     toolRegistry.clear();
     registerInternalTools();
   });
@@ -163,6 +169,20 @@ describe("Launch Flow: no-mutation reprompt", () => {
         },
       });
     }
+    expect(recordActionEventActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-composite",
+        userId: "user-test",
+        type: "preview.started",
+      }),
+    );
+    expect(recordActionEventActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-composite",
+        userId: "user-test",
+        type: "preview.ready",
+      }),
+    );
   });
 
   it("reprompts at most once even if the second pass also writes nothing", async () => {
@@ -237,6 +257,7 @@ describe("Launch Flow: approval pause runs preview", () => {
 
 describe("Launch Flow: approval pause before any mutation", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     toolRegistry.clear();
     registerInternalTools();
   });
@@ -304,6 +325,7 @@ describe("Launch Flow: approval pause before any mutation", () => {
 
 describe("Launch Flow: rejected preview start", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     toolRegistry.clear();
     registerInternalTools();
   });
@@ -749,6 +771,7 @@ describe("Launch Flow: preservation of existing project work", () => {
 
 describe("Launch Flow: quality-loop pass-through", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     toolRegistry.clear();
     registerInternalTools();
   });

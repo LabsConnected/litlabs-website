@@ -596,6 +596,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
           conversationId: "conv-123",
           toolId: "deploy.production",
           toolCallId: "tc-1",
+          actionRunId: "action-run-123",
         }),
       );
     });
@@ -607,6 +608,14 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         expect.anything(),
       );
     });
+    expect(actionRuntimeMocks.transitionActionRunEventActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "action-run-123",
+        status: "waiting_for_user",
+        eventType: "approval.required",
+        payload: expect.objectContaining({ pausedRunId: "paused-1" }),
+      }),
+    );
     expect(updateMessageStatus).not.toHaveBeenCalledWith(
       expect.any(String),
       "user_123",

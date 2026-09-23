@@ -62,7 +62,7 @@ Direct user-initiated file operations are intentionally approval-free.
 | Extended secret redaction | `terminal-server/security.ts` | ✅ Applied |
 | Supabase audit log persistence | `terminal-server/security.ts` | ✅ Applied |
 | posts is_published RLS | `supabase/migrations/20260920000001_*` | ✅ Applied |
-| terminal_audit_log table | `supabase/migrations/20260920000002_*` | ✅ Applied |
+| terminal_command_audit_log table | `supabase/migrations/20260920000002_*` | ✅ Applied |
 | .gitignore date dirs | `.gitignore` | ✅ Applied |
 
 ---
@@ -86,5 +86,5 @@ supabase db push
 
 # Option B — direct psql
 psql "$DATABASE_URL" < supabase/migrations/20260920000001_posts_rls_published_filter.sql
-psql "$DATABASE_URL" < supabase/migrations/20260920000002_terminal_audit_log.sql
+psql "$DATABASE_URL" < supabase/migrations/20260920000002_terminal_command_audit_log.sql
 ```

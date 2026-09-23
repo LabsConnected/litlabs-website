@@ -92,10 +92,23 @@ async function settleParentActionRun(
   status: ActionRunStatus,
   patch: ActionRunPatch,
   logEvent: string,
+  eventType?: "approval.approved" | "approval.rejected",
 ): Promise<void> {
   if (!record.actionRunId) return;
   try {
-    await transitionActionRun(record.actionRunId, record.userId, status, patch);
+    if (eventType) {
+      await transitionActionRunEventActivity({
+        runId: record.actionRunId,
+        userId: record.userId,
+        status,
+        eventType,
+        payload: { pausedRunId: record.id, toolId: record.toolId },
+        message: patch.currentActivity ?? `Approval ${status}`,
+        patch,
+      });
+    } else {
+      await transitionActionRun(record.actionRunId, record.userId, status, patch);
+    }
   } catch (error) {
     studioLog(logEvent, {
       conversationId: record.conversationId,
@@ -254,6 +267,7 @@ export async function POST(
         approvalReference: null,
       },
       "approval:action_run_reject_settle_failed",
+      "approval.rejected",
     );
     return NextResponse.json({
       resolved: true,
@@ -510,7 +524,7 @@ export async function POST(
         } else if (failedMutation && !successfulMutation) {
           resumeFailure = "The approved workspace operation failed, so the project was not completed.";
         } else if (successfulMutation) {
-          resumePreview = await ensureProjectPreviewReady(transport);
+          resumePreview = await ensureProjectPreviewReady(transport, {}, undefined, actionContext);
           if (!resumePreview.ok) {
             resumeFailure = resumePreview.error ?? "The project files were not runnable after approval.";
           }
@@ -519,7 +533,7 @@ export async function POST(
         // A nested approval is allowed to continue, but preview can already
         // be useful once the first file mutation has landed. Do not fail the
         // nested gate merely because a later file has not been written yet.
-        resumePreview = await ensureProjectPreviewReady(transport).catch(() => null);
+        resumePreview = await ensureProjectPreviewReady(transport, {}, undefined, actionContext).catch(() => null);
       }
 
       if (resumeFailure) {

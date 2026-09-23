@@ -26,6 +26,10 @@ vi.mock("@/lib/studio/logger", () => ({
   studioLog: vi.fn(),
 }));
 
+vi.mock("@/lib/action-runtime", () => ({
+  requestActionRunCancellation: vi.fn(() => Promise.resolve({})),
+}));
+
 import { auth } from "@/lib/auth";
 import { getConversation } from "@/lib/studio/conversation-service";
 import {
@@ -34,6 +38,7 @@ import {
   resetExecutionRegistryForTests,
   getActiveExecution,
 } from "@/lib/studio/execution-registry";
+import { requestActionRunCancellation } from "@/lib/action-runtime";
 import { POST } from "./route";
 
 function makeRequest(body?: Record<string, unknown>): NextRequest {
@@ -88,6 +93,26 @@ describe("POST /api/studio/conversations/[conversationId]/cancel", () => {
     expect(data.cancelled).toBe(true);
     expect(data.status).toBe("aborted");
     expect(controller.signal.aborted).toBe(true);
+  });
+
+  it("binds explicit Stop to the durable parent ActionRun", async () => {
+    const controller = new AbortController();
+    registerExecution({
+      conversationId: "conv-123",
+      userId: "user_123",
+      clientRequestId: "req-runtime",
+      assistantMessageId: "msg-runtime",
+      actionRunId: "action-run-123",
+      controller,
+    });
+
+    const res = await POST(makeRequest({ clientRequestId: "req-runtime" }), params);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.cancelled).toBe(true);
+    expect(data.actionRunId).toBe("action-run-123");
+    expect(data.actionRunCancellation).toBe("requested");
+    expect(requestActionRunCancellation).toHaveBeenCalledWith("action-run-123", "user_123");
   });
 
   it("requires clientRequestId — rejects without touching the registry", async () => {

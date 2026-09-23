@@ -22,7 +22,11 @@ import { runAgentLoopV2, type AgentLoopResult, type AgentLoopConfig, DEFAULT_LOO
 import { toolRegistry } from "./tool-registry";
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import type { BuildFixLoopResult } from "./build-fix-loop";
-import type { ActionExecutionContext } from "@/lib/action-runtime";
+import {
+  recordActionEventActivity,
+  type ActionEventInput,
+  type ActionExecutionContext,
+} from "@/lib/action-runtime";
 import { ProgressEmitter } from "./progress-events";
 import { buildPreviewProxyUrl } from "@/lib/terminal-internal-client";
 import {
@@ -151,6 +155,22 @@ function hasAppliedMutation(result: AgentLoopResult): boolean {
   });
 }
 
+async function recordPreviewRuntimeEvent(
+  actionContext: ActionExecutionContext | undefined,
+  type: ActionEventInput["type"],
+  payload: Record<string, string>,
+  message: string,
+): Promise<void> {
+  if (!actionContext) return;
+  await recordActionEventActivity({
+    runId: actionContext.actionRunId,
+    userId: actionContext.userId,
+    type,
+    payload,
+    message,
+  });
+}
+
 async function startAndWaitForPreview(
   transport: WorkspaceTransport,
   opts: {
@@ -159,32 +179,95 @@ async function startAndWaitForPreview(
     signal?: AbortSignal;
   },
   progress: ProgressEmitter,
+  actionContext?: ActionExecutionContext,
 ): Promise<"ready" | "failed" | "timeout"> {
+  let terminalEventRecorded = false;
+  const recordTerminal = async (
+    type: "preview.ready" | "preview.failed",
+    payload: Record<string, string>,
+    message: string,
+  ) => {
+    terminalEventRecorded = true;
+    await recordPreviewRuntimeEvent(actionContext, type, payload, message);
+  };
+
   try {
+    try {
+      await recordPreviewRuntimeEvent(
+        actionContext,
+        "preview.started",
+        { workspaceId: transport.workspaceId },
+        "Starting project preview",
+      );
+    } catch (persistError) {
+      console.error("[action-runtime] preview start could not be persisted; preview start aborted", {
+        runId: actionContext?.actionRunId,
+        workspaceId: transport.workspaceId,
+        errorClass: persistError instanceof Error ? persistError.message : String(persistError),
+      });
+      throw persistError;
+    }
     await transport.startPreview();
-  } catch {
+  } catch (error) {
     // A rejected start request (e.g. preview_no_dev_command on a workspace
     // with no servable entry) is a normal "failed" outcome — returning it
     // lets callers run the repair loop or surface a pending approval
     // instead of escaping as a generic launch crash.
     progress.emit({ type: "preview_status", status: "failed", healthy: false });
+    if (!terminalEventRecorded) {
+      await recordTerminal(
+        "preview.failed",
+        { error: error instanceof Error ? error.message.slice(0, 300) : "preview_start_failed" },
+        "Project preview failed to start",
+      ).catch(() => undefined);
+    }
     return "failed";
   }
 
-  const deadline = Date.now() + opts.maxWaitMs;
-  while (Date.now() < deadline) {
-    checkSignal(opts.signal);
+  try {
+    const deadline = Date.now() + opts.maxWaitMs;
+    while (Date.now() < deadline) {
+      checkSignal(opts.signal);
 
-    const status = await transport.getPreviewStatus();
-    progress.emit({ type: "preview_status", status: status.status, healthy: status.status === "ready" && !status.error });
+      const status = await transport.getPreviewStatus();
+      progress.emit({ type: "preview_status", status: status.status, healthy: status.status === "ready" && !status.error });
 
-    if (status.status === "ready" && !status.error) return "ready";
-    if (status.status === "failed" || status.error) return "failed";
+      if (status.status === "ready" && !status.error) {
+        await recordTerminal(
+          "preview.ready",
+          { workspaceId: transport.workspaceId, ...(status.port ? { port: String(status.port) } : {}) },
+          "Project preview is ready",
+        );
+        return "ready";
+      }
+      if (status.status === "failed" || status.error) {
+        await recordTerminal(
+          "preview.failed",
+          { error: (status.error ?? `Preview status ${status.status}`).slice(0, 300) },
+          "Project preview failed",
+        );
+        return "failed";
+      }
 
-    await sleep(opts.pollIntervalMs);
+      await sleep(opts.pollIntervalMs);
+    }
+
+    await recordTerminal(
+      "preview.failed",
+      { error: "preview_ready_timeout" },
+      "Project preview timed out",
+    );
+    return "timeout";
+  } catch (error) {
+    if (!terminalEventRecorded) {
+      await recordTerminal(
+        "preview.failed",
+        { error: error instanceof Error ? error.message.slice(0, 300) : "preview_wait_failed" },
+        "Project preview failed",
+      ).catch(() => undefined);
+    }
+    throw error;
   }
-
-  return "timeout";
 }
 
 export interface ProjectArtifactCheck {
@@ -272,6 +355,7 @@ export async function ensureProjectPreviewReady(
   transport: WorkspaceTransport,
   options: { maxWaitMs?: number; pollIntervalMs?: number } = {},
   progress: ProgressEmitter = new ProgressEmitter(),
+  actionContext?: ActionExecutionContext,
 ): Promise<{ ok: boolean; files: string[]; error?: string }> {
   let artifacts: ProjectArtifactCheck = { ok: false, files: [] };
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -289,6 +373,7 @@ export async function ensureProjectPreviewReady(
         pollIntervalMs: options.pollIntervalMs ?? 1_000,
       },
       progress,
+      actionContext,
     );
     if (status !== "ready") {
       const runtime = await transport.getPreviewStatus().catch(() => null);
@@ -416,6 +501,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
                 signal,
               },
               progress,
+              actionContext,
             ).then((previewStatus) => {
               if (previewStatus === "ready") {
                 const previewUrl = (options.buildPreviewUrl ?? buildPreviewProxyUrl)(transport.workspaceId);
@@ -588,6 +674,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
         signal,
       },
       progress,
+      actionContext,
     );
 
     // Runtime repair loop
@@ -687,6 +774,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           signal,
         },
         progress,
+        actionContext,
       );
     }
 
