@@ -86,6 +86,25 @@ describe("toolRegistry.execute — browser ActionRuntime recording", () => {
     expect(runtimeMocks.resolveBrowserActionRun).not.toHaveBeenCalled();
   });
 
+  it("ignores a model-supplied actionRunId and trusts only the execution option", async () => {
+    const handler: TestHandler = async (_inputs) => ({ navigated: true });
+    toolRegistry.register(fakeBrowserTool("browser.fake"), handler);
+
+    const result = await toolRegistry.execute(
+      "browser.fake",
+      { ...browserInputs, actionRunId: "model-controlled-run" },
+      { actionRunId: "server-run" },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(runtimeMocks.recordBrowserToolStarted).toHaveBeenCalledWith(
+      expect.objectContaining({ actionRunId: "server-run" }),
+    );
+    expect(runtimeMocks.recordBrowserToolStarted).not.toHaveBeenCalledWith(
+      expect.objectContaining({ actionRunId: "model-controlled-run" }),
+    );
+  });
+
   it("records a thrown tool error as a failed execution on the same run", async () => {
     const handler: TestHandler = async (_inputs) => {
       throw new Error("click timed out");

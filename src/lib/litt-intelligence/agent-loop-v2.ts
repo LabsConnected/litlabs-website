@@ -817,6 +817,7 @@ export async function runAgentLoopV2(
           availableCapabilities,
           transport,
           signal: cfg.signal,
+          actionRunId: cfg.actionRunId,
         });
 
         if (execResult.ok) {
@@ -1192,6 +1193,8 @@ export interface DeferredToolBatchContext {
    * multi-turn session reuse (mirrors AgentLoopConfig.conversationId).
    */
   conversationId?: string;
+  /** Parent ActionRun for server-side ActionExecutionContext propagation. */
+  actionRunId?: string;
 }
 
 export interface DeferredToolBatchResult {
@@ -1380,6 +1383,7 @@ export async function executeDeferredToolCalls(
         hasApproval: !permResult.requiresApproval,
         transport: ctx.transport,
         signal: ctx.signal,
+        actionRunId: ctx.actionRunId,
       });
 
       if (execResult.ok) {
@@ -1532,11 +1536,12 @@ export async function resumeAgentLoopV2(
         error: "Cancelled by user",
       };
     } else try {
-      const execResult = await toolRegistry.execute(resume.toolId, withUserScopeForBrowserTools(resume.toolId, resume.inputs, cfg.userId, cfg.conversationId, cfg.actionRunId), {
+      const execResult = await toolRegistry.execute(resume.toolId, withUserScopeForBrowserTools(resume.toolId, resume.inputs, cfg.userId, cfg.conversationId), {
         hasApproval: true,
         availableCapabilities,
         transport,
         signal: cfg.signal,
+        actionRunId: cfg.actionRunId,
       });
 
       if (execResult.ok) {
@@ -1672,6 +1677,7 @@ export async function resumeAgentLoopV2(
       state: deferredState,
       userId: cfg.userId,
       conversationId: cfg.conversationId,
+      actionRunId: cfg.actionRunId,
     });
     hasInterveningMutation = deferredState.hasInterveningMutation;
     cancelled = deferredState.cancelled;
@@ -1911,6 +1917,7 @@ export async function resumeAgentLoopV2(
           availableCapabilities,
           transport,
           signal: cfg.signal,
+          actionRunId: cfg.actionRunId,
         });
 
         if (execResult.ok) {

@@ -199,7 +199,7 @@ async function recordBrowserToolFailed(context: BrowserActionContext & { toolId:
 export async function recordBrowserToolExecution(
   context: BrowserActionContext & { toolId: string; result: BrowserToolExecutionResult },
 ): Promise<ActionRun> {
-  return context.result.outcome === "completed"
+  return context.result.success
     ? recordBrowserToolCompleted(context)
     : recordBrowserToolFailed(context, context.result.error ?? new Error("Browser action failed"));
 }
