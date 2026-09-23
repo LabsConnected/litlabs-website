@@ -5,7 +5,16 @@ import {
   type JsonValue,
 } from "./types";
 
-const SECRET_KEY = /(secret|password|passwd|token|cookie|authorization|api[_-]?key|private[_-]?key)/i;
+// A key is credential-shaped when a secret word ends it (token, apiKey,
+// cookie) or is followed by a delimiter (CLERK_SECRET_KEY). Harmless names
+// like tokenCount, cookiePolicy, secretLabel deliberately do NOT match —
+// the sanitizer redacts credentials, not every string containing "token".
+const SECRET_KEY = /(?:secret|password|passwd|token|cookie|authorization|api[_-]?key|private[_-]?key)(?:[_-].*)?$/i;
+const SECRET_KEY_NORMALIZED = /(?:secret|password|passwd|token|cookie|authorization|apikey|privatekey)$/;
+
+function isSecretKey(key: string): boolean {
+  return SECRET_KEY.test(key) || SECRET_KEY_NORMALIZED.test(key.toLowerCase().replace(/[_-]/g, ""));
+}
 
 function sanitizeValue(value: unknown): JsonValue {
   if (value === null || typeof value === "number" || typeof value === "boolean") {
@@ -21,7 +30,7 @@ function sanitizeValue(value: unknown): JsonValue {
   if (typeof value === "object") {
     const output: Record<string, JsonValue> = {};
     for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
-      output[key] = SECRET_KEY.test(key) ? "[REDACTED]" : sanitizeValue(nested);
+      output[key] = isSecretKey(key) ? "[REDACTED]" : sanitizeValue(nested);
     }
     return output;
   }
