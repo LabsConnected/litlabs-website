@@ -82,7 +82,7 @@ CREATE OR REPLACE FUNCTION public.action_runtime_can_transition(
 ) RETURNS BOOLEAN
 LANGUAGE sql IMMUTABLE AS $$
   SELECT p_from = p_to OR CASE p_from
-    WHEN 'queued' THEN p_to IN ('starting', 'working', 'paused', 'failed', 'cancelled')
+    WHEN 'queued' THEN p_to IN ('starting', 'working', 'failed', 'cancelled')
     WHEN 'starting' THEN p_to IN ('working', 'waiting_for_user', 'paused', 'failed', 'cancelled')
     WHEN 'working' THEN p_to IN ('waiting_for_user', 'user_controlling', 'paused', 'completed', 'failed', 'cancelled')
     WHEN 'waiting_for_user' THEN p_to IN ('user_controlling', 'working', 'paused', 'failed', 'cancelled')

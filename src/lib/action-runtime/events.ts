@@ -8,8 +8,14 @@ import {
 const SECRET_KEY = /(secret|password|passwd|token|cookie|authorization|api[_-]?key|private[_-]?key)/i;
 
 function sanitizeValue(value: unknown): JsonValue {
-  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+  if (value === null || typeof value === "number" || typeof value === "boolean") {
     return value;
+  }
+  // String values are free-form — a provider error under an innocent key
+  // ({error: "Authorization: Bearer …"}) would otherwise persist raw secret
+  // material. Apply the same conservative scrub as activity messages.
+  if (typeof value === "string") {
+    return sanitizeActionActivityMessage(value);
   }
   if (Array.isArray(value)) return value.map(sanitizeValue);
   if (typeof value === "object") {
@@ -30,7 +36,8 @@ export function sanitizeActionPayload(
 
 const SECRET_VALUE_PATTERN = new RegExp(
   [
-    String.raw`(?<key>(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|session[_-]?id|secret|password|passwd|credential|cookie|set-cookie|private[_-]?key)\s*(?:=|:|["'\s]+)\s*)(?<value>[^\s,;}"']+)`,
+    String.raw`(?<key>(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|session[_-]?id|token|secret|password|passwd|credential|cookie|set-cookie|private[_-]?key)\s*(?:=|:)\s*(?:bearer\s+|basic\s+)?)(?<value>[^\s,;}"']+)`,
+    String.raw`(?<key2>(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|session[_-]?id|token|secret|password|passwd|credential|cookie|set-cookie|private[_-]?key)\s+)(?<value2>[^\s,;}"']+)`,
     String.raw`Bearer\s+[A-Za-z0-9._~+\/-]+=*`,
     String.raw`Basic\s+[A-Za-z0-9._~+\/-]+=*`,
     String.raw`eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`,

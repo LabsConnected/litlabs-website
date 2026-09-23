@@ -1,7 +1,9 @@
 import { ActionRuntimeError, type ActionRunStatus } from "./types";
 
 const transitions: Record<ActionRunStatus, ReadonlySet<ActionRunStatus>> = {
-  queued: new Set(["starting", "working", "paused", "failed", "cancelled"]),
+  // A queued run has never executed — it begins (starting/working) or
+  // terminates (failed/cancelled); it is never "paused work".
+  queued: new Set(["starting", "working", "failed", "cancelled"]),
   starting: new Set(["working", "waiting_for_user", "paused", "failed", "cancelled"]),
   working: new Set([
     "waiting_for_user",
@@ -33,7 +35,7 @@ export function assertActionRunTransition(
   if (!canTransitionActionRun(from, to)) {
     throw new ActionRuntimeError(
       `Cannot transition action run from ${from} to ${to}`,
-      "INVALID_TRANSITION",
+      "ACTION_RUN_INVALID_TRANSITION",
     );
   }
 }
