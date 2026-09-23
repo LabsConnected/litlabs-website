@@ -73,6 +73,8 @@ export interface AgentLoopConfig {
    * must never supply it itself.
    */
   conversationId?: string;
+  /** Parent ActionRun owning browser work; injected server-side. */
+  actionRunId?: string;
   /**
    * Opt-in to the LiTT quality loop (gated UNDERSTAND→VERIFY stages +
    * visual-quality judge). When enabled, the loop records stage evidence
@@ -238,6 +240,7 @@ function withUserScopeForBrowserTools(
   inputs: Record<string, unknown>,
   userId: string | undefined,
   conversationId?: string | undefined,
+  actionRunId?: string | undefined,
 ): Record<string, unknown> {
   if (userId && toolId.startsWith("browser.")) {
     const scoped: Record<string, unknown> = { ...inputs, userId };
@@ -247,6 +250,7 @@ function withUserScopeForBrowserTools(
     if (toolId === "browser.start_session" && conversationId) {
       scoped.conversationId = conversationId;
     }
+    if (actionRunId) scoped.actionRunId = actionRunId;
     return scoped;
   }
   return inputs;
@@ -810,7 +814,7 @@ export async function runAgentLoopV2(
 
       try {
         // Use the registry's execute method, passing transport for V2 handlers
-        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId, cfg.conversationId), {
+        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId, cfg.conversationId, cfg.actionRunId), {
           hasApproval: !permResult.requiresApproval,
           availableCapabilities,
           transport,
@@ -1530,7 +1534,7 @@ export async function resumeAgentLoopV2(
         error: "Cancelled by user",
       };
     } else try {
-      const execResult = await toolRegistry.execute(resume.toolId, withUserScopeForBrowserTools(resume.toolId, resume.inputs, cfg.userId, cfg.conversationId), {
+      const execResult = await toolRegistry.execute(resume.toolId, withUserScopeForBrowserTools(resume.toolId, resume.inputs, cfg.userId, cfg.conversationId, cfg.actionRunId), {
         hasApproval: true,
         availableCapabilities,
         transport,
@@ -1904,7 +1908,7 @@ export async function resumeAgentLoopV2(
 
       let result: ToolCallResult;
       try {
-        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId, cfg.conversationId), {
+        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId, cfg.conversationId, cfg.actionRunId), {
           hasApproval: !permResult.requiresApproval,
           availableCapabilities,
           transport,

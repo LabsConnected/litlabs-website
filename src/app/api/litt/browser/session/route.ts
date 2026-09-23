@@ -8,12 +8,25 @@ import {
   takeControl,
   returnControl,
   getSession,
-  dbGetActiveSessions,
+  dbGetActiveSessionsStrict,
   dbGetActions,
   takeScreenshot,
   closeIdleSessions,
 } from "@/lib/litt-intelligence/browser-session-manager";
+import type { BrowserSession } from "@/lib/litt-intelligence/browser-session-manager";
 import { preflightBrowserStart } from "@/lib/litt-intelligence/browser-billing";
+import { mapBrowserFailure } from "@/lib/action-runtime/safe-errors";
+import {
+  attachBrowserSession,
+  failBrowserActionRun,
+  getActionRun,
+  markBrowserSessionControl,
+  markBrowserSessionPaused,
+  recordBrowserSessionClosed,
+  resolveBrowserActionRun,
+  startBrowserActionRun,
+} from "@/lib/action-runtime";
+import { isTerminalActionRunStatus } from "@/lib/action-runtime/state-machine";
 
 export const runtime = "nodejs";
 
@@ -32,6 +45,70 @@ export const runtime = "nodejs";
  * GET /api/litt/browser/session?sessionId=xxx
  * Get a specific session with recent actions.
  */
+function stringField(body: Record<string, unknown>, key: string): string | null {
+  const value = body[key];
+  return value === undefined ? null : typeof value === "string" && value.trim() ? value : null;
+}
+
+async function resolveRunForRequest(
+  userId: string,
+  actionRunId: string | null,
+  sessionId: string,
+) {
+  const run = await resolveBrowserActionRun(userId, {
+    actionRunId: actionRunId ?? undefined,
+    browserSessionId: actionRunId ? undefined : sessionId,
+  });
+  if (actionRunId && !run) {
+    return { error: NextResponse.json({ error: "Action run not found" }, { status: 404 }) };
+  }
+  if (run?.browserSessionId && run.browserSessionId !== sessionId) {
+    return { error: NextResponse.json({ error: "Action run is not attached to this session" }, { status: 409 }) };
+  }
+  if (run && isTerminalActionRunStatus(run.status)) {
+    return { error: NextResponse.json({ error: "Action run is terminal", code: "ACTION_RUN_TERMINAL" }, { status: 409 }) };
+  }
+  if (actionRunId && run?.browserSessionId !== sessionId) {
+    return { error: NextResponse.json({ error: "Action run is not attached to this session", code: "ACTION_BROWSER_SESSION_MISMATCH" }, { status: 409 }) };
+  }
+  return { run };
+}
+
+function isReusableBrowserSession(session: BrowserSession | null): session is BrowserSession {
+  return !!session && !session.closedAt && ["active", "paused", "human_control", "agent_control"].includes(session.status);
+}
+
+function runtimeAfterExecutionResponse(
+  operation: string,
+  userId: string,
+  sessionId: string,
+  actionRunId: string | null,
+  error: unknown,
+): NextResponse {
+  const failure = mapBrowserFailure(error, "RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION");
+  console.error("[browser-session] runtime persistence failed after provider execution", {
+    code: failure.code,
+    operation,
+    userId,
+    sessionId,
+    actionRunId,
+  });
+  return NextResponse.json(
+    {
+      code: "RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION",
+      message: "The browser action completed, but LiTT couldn't persist the task state.",
+      operation,
+      actionRunId,
+    },
+    { status: 500 },
+  );
+}
+
+function safeErrorResponse(error: unknown, fallbackCode: string, status = 500): NextResponse {
+  const failure = mapBrowserFailure(error, fallbackCode);
+  return NextResponse.json({ code: failure.code, message: failure.message }, { status });
+}
+
 async function handler(req: NextRequest) {
   const { userId } = await auth(req);
   if (!userId) {
@@ -40,20 +117,34 @@ async function handler(req: NextRequest) {
 
   // ─── GET: list sessions or get specific session ───────────────
   if (req.method === "GET") {
-    const url = new URL(req.url);
-    const sessionId = url.searchParams.get("sessionId");
+    try {
+      const url = new URL(req.url);
+      const sessionId = url.searchParams.get("sessionId");
 
-    if (sessionId) {
-      const session = await getSession(sessionId, userId);
-      if (!session) {
-        return NextResponse.json({ error: "Session not found" }, { status: 404 });
+      if (sessionId) {
+        const session = await getSession(sessionId, userId);
+        if (!session) {
+          return NextResponse.json({ error: "Session not found" }, { status: 404 });
+        }
+        const actions = await dbGetActions(sessionId, userId, 50);
+        const actionRun = await resolveBrowserActionRun(userId, { browserSessionId: session.id });
+        return NextResponse.json({
+          session,
+          actions,
+          actionRun,
+          actionRunId: actionRun?.id ?? null,
+          runStatus: actionRun?.status ?? null,
+          currentActivity: actionRun?.currentActivity ?? null,
+        });
       }
-      const actions = await dbGetActions(sessionId, userId, 50);
-      return NextResponse.json({ session, actions });
-    }
 
-    const sessions = await dbGetActiveSessions(userId);
-    return NextResponse.json({ sessions });
+      const sessions = await dbGetActiveSessionsStrict(userId);
+      return NextResponse.json({ sessions });
+    } catch (err) {
+      const failure = mapBrowserFailure(err, "BROWSER_SESSION_RECOVERY_FAILED");
+      console.error("[browser-session] recovery read failed", { code: failure.code, userId });
+      return NextResponse.json({ code: failure.code, message: failure.message }, { status: 503 });
+    }
   }
 
   if (req.method !== "POST") {
@@ -63,14 +154,29 @@ async function handler(req: NextRequest) {
   // ─── POST: session control ────────────────────────────────────
   let body: Record<string, unknown>;
   try {
-    body = await req.json();
+    const parsed: unknown = await req.json();
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+    }
+    body = parsed as Record<string, unknown>;
   } catch {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const action = body.action as string | undefined;
-  if (!action) {
+  if (body.action === undefined) {
     return NextResponse.json({ error: "Missing action" }, { status: 400 });
+  }
+  if (typeof body.action !== "string") {
+    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+  }
+  const action = body.action;
+  const actionRunId = body.actionRunId === undefined
+    ? null
+    : typeof body.actionRunId === "string" && body.actionRunId.trim()
+      ? body.actionRunId
+      : null;
+  if (body.actionRunId !== undefined && !actionRunId) {
+    return NextResponse.json({ error: "Invalid actionRunId" }, { status: 400 });
   }
 
   try {
@@ -78,19 +184,22 @@ async function handler(req: NextRequest) {
       // ── Start new session ──────────────────────────────────────
       case "start": {
         const task = typeof body.task === "string" ? body.task : undefined;
-        const projectId = typeof body.projectId === "string" ? body.projectId : undefined;
-        const conversationId = typeof body.conversationId === "string" ? body.conversationId : undefined;
+        const requestedProjectId = typeof body.projectId === "string" ? body.projectId : undefined;
+        const requestedConversationId = typeof body.conversationId === "string" ? body.conversationId : undefined;
         const model = typeof body.model === "string" ? body.model : undefined;
         const useProxies = body.useProxies === true;
 
-        // Phase 4 — BITS preflight (fail closed): balance, caps, quota,
-        // and the tool-path start rate limit, BEFORE any provider
-        // session exists. The route keeps its withRateLimit guard; this
-        // is the billing layer.
-        const preflight = await preflightBrowserStart(
-          userId,
-          (await dbGetActiveSessions(userId).catch(() => [])).length,
-        );
+        let activeSessionCount: number;
+        try {
+          activeSessionCount = (await dbGetActiveSessionsStrict(userId)).length;
+        } catch {
+          return NextResponse.json(
+            { code: "BROWSER_SESSION_PREFLIGHT_UNAVAILABLE", message: "LiTT couldn't verify browser limits right now." },
+            { status: 503 },
+          );
+        }
+
+        const preflight = await preflightBrowserStart(userId, activeSessionCount);
         if (!preflight.ok) {
           const status =
             preflight.error === "insufficient_bits" ||
@@ -104,67 +213,118 @@ async function handler(req: NextRequest) {
           );
         }
 
-        // Clean up idle sessions before starting a new one
-        await closeIdleSessions().catch(() => {});
+        let actionRun = actionRunId ? await getActionRun(actionRunId, userId) : null;
+        if (actionRunId && !actionRun) {
+          return NextResponse.json({ error: "Action run not found" }, { status: 404 });
+        }
+        if (!actionRun) {
+          actionRun = await startBrowserActionRun({
+            userId,
+            projectId: requestedProjectId ?? null,
+            conversationId: requestedConversationId ?? null,
+          });
+        }
 
-        const session = await startSession({
-          userId,
-          projectId,
-          conversationId,
-          task,
-          model,
-          useProxies,
-        });
+        try {
+          await closeIdleSessions();
+        } catch (error) {
+          console.warn("[browser-session] idle cleanup failed", {
+            errorType: error instanceof Error ? error.name : typeof error,
+            userId,
+          });
+        }
 
-        return NextResponse.json({ session });
+        let session;
+        try {
+          session = await startSession({
+            userId,
+            projectId: actionRun.projectId ?? requestedProjectId,
+            conversationId: actionRun.conversationId ?? requestedConversationId,
+            task,
+            model,
+            useProxies,
+          });
+        } catch (error) {
+          await failBrowserActionRun(actionRun, error, "BROWSER_SESSION_START_FAILED").catch((persistenceError) => {
+            const persistenceFailure = mapBrowserFailure(persistenceError, "ACTION_RUNTIME_PERSISTENCE_FAILED");
+            console.error("[action-runtime] browser start failure could not be persisted", {
+              code: persistenceFailure.code,
+              userId,
+              actionRunId: actionRun?.id,
+            });
+          });
+          throw error;
+        }
+
+        const linkedRun = await attachBrowserSession(actionRun, session);
+        return NextResponse.json({ session, actionRunId: linkedRun.id });
       }
 
       // ── Pause agent control ────────────────────────────────────
       case "pause": {
-        const sessionId = body.sessionId as string;
-        if (!sessionId) return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
+        const sessionId = stringField(body, "sessionId");
+        if (!sessionId) return NextResponse.json({ error: body.sessionId === undefined ? "Missing sessionId" : "Invalid sessionId" }, { status: 400 });
+        const resolved = await resolveRunForRequest(userId, actionRunId, sessionId);
+        if (resolved.error) return resolved.error;
 
         const session = await pauseSession(sessionId, userId);
         if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
-
-        return NextResponse.json({ session });
+        const run = await markBrowserSessionPaused(userId, session, resolved.run?.id);
+        return NextResponse.json({ session, actionRunId: run?.id ?? resolved.run?.id ?? null });
       }
 
       // ── Take control (human) ───────────────────────────────────
       case "take_control": {
-        const sessionId = body.sessionId as string;
-        if (!sessionId) return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
+        const sessionId = stringField(body, "sessionId");
+        if (!sessionId) return NextResponse.json({ error: body.sessionId === undefined ? "Missing sessionId" : "Invalid sessionId" }, { status: 400 });
+        const resolved = await resolveRunForRequest(userId, actionRunId, sessionId);
+        if (resolved.error) return resolved.error;
 
         const session = await takeControl(sessionId, userId);
         if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
-
-        return NextResponse.json({ session });
+        const run = await markBrowserSessionControl(userId, session, resolved.run?.id);
+        return NextResponse.json({ session, actionRunId: run?.id ?? resolved.run?.id ?? null });
       }
 
       // ── Return control to agent ────────────────────────────────
       case "return_control": {
-        const sessionId = body.sessionId as string;
-        if (!sessionId) return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
+        const sessionId = stringField(body, "sessionId");
+        if (!sessionId) return NextResponse.json({ error: body.sessionId === undefined ? "Missing sessionId" : "Invalid sessionId" }, { status: 400 });
+        const resolved = await resolveRunForRequest(userId, actionRunId, sessionId);
+        if (resolved.error) return resolved.error;
 
         const session = await returnControl(sessionId, userId);
         if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
-
-        return NextResponse.json({ session });
+        const run = await markBrowserSessionControl(userId, session, resolved.run?.id);
+        return NextResponse.json({ session, actionRunId: run?.id ?? resolved.run?.id ?? null });
       }
 
       // ── Close session ──────────────────────────────────────────
       case "close": {
-        const sessionId = body.sessionId as string;
-        if (!sessionId) return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
+        const sessionId = stringField(body, "sessionId");
+        if (!sessionId) return NextResponse.json({ error: body.sessionId === undefined ? "Missing sessionId" : "Invalid sessionId" }, { status: 400 });
+        const resolved = await resolveRunForRequest(userId, actionRunId, sessionId);
+        if (resolved.error) return resolved.error;
+        const owned = await getSession(sessionId, userId);
+        if (!owned) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
-        await closeSession(sessionId, userId);
-        return NextResponse.json({ success: true });
+        const closed = await closeSession(sessionId, userId);
+        if (!closed) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+
+        let run = resolved.run;
+        if (run && !["completed", "failed", "cancelled"].includes(run.status)) {
+          await requestActionRunCancellation(run.id, userId);
+          run = await transitionActionRun(run.id, userId, "cancelled", {
+            currentActivity: "Browser session stopped",
+          });
+        }
+        return NextResponse.json({ success: true, actionRunId: run?.id ?? null, run: run ?? null });
       }
 
       // ── Screenshot ─────────────────────────────────────────────
       case "screenshot": {
-        const sessionId = body.sessionId as string;
-        if (!sessionId) return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
+        const sessionId = stringField(body, "sessionId");
+        if (!sessionId) return NextResponse.json({ error: body.sessionId === undefined ? "Missing sessionId" : "Invalid sessionId" }, { status: 400 });
 
         // Phase 6 — owner check before serving session pixels: a caller
         // that doesn't own the session gets 404, never another user's
@@ -182,8 +342,13 @@ async function handler(req: NextRequest) {
         return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
     }
   } catch (err) {
+    const failure = mapBrowserFailure(err, "BROWSER_SESSION_REQUEST_FAILED");
+    console.error("[browser-session] request failed", {
+      code: failure.code,
+      userId,
+    });
     return NextResponse.json(
-      { error: "Internal server error", detail: err instanceof Error ? err.message : String(err) },
+      { code: failure.code, message: failure.message },
       { status: 500 },
     );
   }

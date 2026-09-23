@@ -23,7 +23,7 @@
 import "server-only";
 import { randomUUID } from "crypto";
 import { Stagehand } from "@browserbasehq/stagehand";
-import { supabaseAdmin } from "@/lib/supabase";
+import { getSupabaseAdmin, supabaseAdmin } from "@/lib/supabase";
 // Phase 4 — BITS metering: gates consulted per action, settlement on
 // close. Type-only in the other direction (browser-billing imports
 // BrowserSession as a type), so there is no runtime import cycle.
@@ -180,7 +180,19 @@ export async function dbGetSession(
 }
 
 export async function dbGetActiveSessions(userId: string): Promise<BrowserSession[]> {
-  if (!supabaseAdmin) return [];
+  try {
+    return await dbGetActiveSessionsStrict(userId);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Preflight variant: quota/concurrency callers must distinguish an empty
+ * result from an unavailable database and fail closed when the latter occurs.
+ */
+export async function dbGetActiveSessionsStrict(userId: string): Promise<BrowserSession[]> {
+  if (!getSupabaseAdmin()) throw new Error("Browser session persistence unavailable");
   const { data, error } = await supabaseAdmin
     .from("browser_sessions")
     .select("*")
@@ -188,7 +200,7 @@ export async function dbGetActiveSessions(userId: string): Promise<BrowserSessio
     .in("status", ["active", "paused", "human_control", "agent_control"])
     .order("created_at", { ascending: false });
 
-  if (error || !data) return [];
+  if (error || !data) throw new Error("Unable to load active browser sessions");
   return (data as Record<string, unknown>[]).map(rowToSession);
 }
 
@@ -708,7 +720,13 @@ export async function returnControl(
 export async function closeSession(
   sessionId: string,
   userId: string,
-): Promise<void> {
+): Promise<boolean> {
+  // Ownership is checked before touching the in-memory provider handle or
+  // changing the persisted row. A missing row is indistinguishable from an
+  // unowned row to callers, preventing cross-user session probing.
+  const owned = await getSession(sessionId, userId);
+  if (!owned) return false;
+
   const active = activeSessions.get(sessionId);
   const inMemorySession = active?.session ?? null;
   if (active) {
@@ -732,6 +750,7 @@ export async function closeSession(
       (await dbGetSession(sessionId, userId).catch(() => null)) ?? session;
     await settleBrowserSessionFromRow(row).catch(() => {});
   }
+  return true;
 }
 
 /**

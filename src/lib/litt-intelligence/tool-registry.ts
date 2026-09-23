@@ -282,12 +282,69 @@ const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
   // is reused instead of starting a new one (multi-turn browsing).
   "browser.start_session": async () => {
     const m = await import("./browser-agent");
+    const runtime = await import("@/lib/action-runtime/browser-runtime");
     return (async (inputs: Record<string, unknown>) => {
       const userId = inputs.userId as string;
       const task = typeof inputs.task === "string" ? inputs.task : undefined;
       const conversationId =
         typeof inputs.conversationId === "string" ? inputs.conversationId : undefined;
-      return m.getOrReuseAgentBrowserSession({ userId, task, conversationId });
+      const actionRunId = typeof inputs.actionRunId === "string" ? inputs.actionRunId : undefined;
+
+      let run: Awaited<ReturnType<typeof runtime.startBrowserActionRun>> | null = null;
+      try {
+        run = await runtime.resolveBrowserActionRun(userId, {
+          actionRunId,
+          browserSessionId: undefined,
+        });
+        if (actionRunId && !run) {
+          return {
+            ok: false,
+            error: "action_run_not_found",
+            message: "LiTT couldn't find the task context for this browser action.",
+          };
+        }
+        if (!run) run = await runtime.findActiveBrowserActionRun(userId, { conversationId });
+        if (!run) {
+          run = await runtime.startBrowserActionRun({
+            userId,
+            conversationId,
+            projectId: typeof inputs.projectId === "string" ? inputs.projectId : null,
+          });
+        }
+      } catch (error) {
+        console.error("[action-runtime] browser run creation failed", {
+          errorType: error instanceof Error ? error.name : typeof error,
+          userId,
+          conversationId,
+        });
+        return {
+          ok: false,
+          error: "runtime_unavailable",
+          message: "LiTT couldn't start this browser task because its activity service is unavailable.",
+        };
+      }
+
+      const result = await m.getOrReuseAgentBrowserSession({ userId, task, conversationId });
+      if (result.ok) {
+        try {
+          const actionRun = await runtime.attachBrowserSession(run, result.session);
+          return { ...result, actionRunId: actionRun.id };
+        } catch (error) {
+          console.error("[action-runtime] browser session link failed", {
+            errorType: error instanceof Error ? error.name : typeof error,
+            userId,
+            conversationId,
+          });
+          return {
+            ok: false,
+            error: "runtime_unavailable",
+            message: "LiTT couldn't record the browser task state.",
+          };
+        }
+      }
+
+      await runtime.failBrowserActionRun(run, result.error);
+      return { ...result, actionRunId: run.id };
     }) as ToolHandler;
   },
   // ─── Realtime internet tools — delegate to @litt/agent-core ──
@@ -457,6 +514,7 @@ class ToolRegistry {
       availableCapabilities?: string[];
       transport?: unknown;
       signal?: AbortSignal;
+      actionRunId?: string;
     } = {},
   ): Promise<{ ok: true; result: unknown } | { ok: false; error: string }> {
     const tool = this.tools.get(id);
@@ -510,18 +568,46 @@ class ToolRegistry {
         : handlerEntry as (inputs: Record<string, unknown>, transport?: unknown) => Promise<unknown>;
       const timeoutMs =
         tool.timeoutMs && tool.timeoutMs > 0 ? tool.timeoutMs : DEFAULT_TOOL_TIMEOUT_MS;
-      const finalResult = await withExecutionDeadline(
-        async () =>
-          maybeAutoInsertGeneratedImage(
-            id,
-            await handler(inputs, options.transport),
-            options.transport,
-          ),
-        timeoutMs,
-        id,
-        options.signal,
-      );
-      return { ok: true, result: finalResult };
+      const browserSessionId = typeof inputs.sessionId === "string" ? inputs.sessionId : null;
+      const browserUserId = typeof inputs.userId === "string" ? inputs.userId : null;
+      const browserActionRunId = options.actionRunId ?? (typeof inputs.actionRunId === "string" ? inputs.actionRunId : null);
+      const runtime = id.startsWith("browser.") && browserSessionId && browserUserId
+        ? await import("@/lib/action-runtime/browser-runtime")
+        : null;
+      const browserContext = runtime && browserSessionId && browserUserId && browserActionRunId
+        ? { actionRunId: browserActionRunId, userId: browserUserId, browserSessionId }
+        : null;
+      if (runtime && !browserContext && id !== "browser.start_session" && browserSessionId && browserUserId) {
+        throw new Error("Browser tool execution requires an ActionExecutionContext");
+      }
+      if (runtime && browserContext) {
+        await runtime.recordBrowserToolStarted(browserContext, id);
+      }
+      try {
+        const finalResult = await withExecutionDeadline(
+          async () =>
+            maybeAutoInsertGeneratedImage(
+              id,
+              await handler(inputs, options.transport),
+              options.transport,
+            ),
+          timeoutMs,
+          id,
+          options.signal,
+        );
+        if (runtime && browserContext) {
+          await runtime.recordBrowserToolCompleted(browserContext, id);
+        }
+        return { ok: true, result: finalResult };
+      } catch (err) {
+        if (runtime && browserContext) {
+          await runtime.recordBrowserToolFailed(browserContext, id, err);
+        }
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
     } catch (err) {
       return {
         ok: false,

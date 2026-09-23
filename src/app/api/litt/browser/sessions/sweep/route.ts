@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { isOwnerClerkId } from "@/lib/owner";
 import { sweepIdleBrowserSessions } from "@/lib/litt-intelligence/browser-session-manager";
+import { mapBrowserFailure } from "@/lib/action-runtime/safe-errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -67,12 +68,13 @@ async function handler(req: NextRequest) {
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
+    const failure = mapBrowserFailure(err, "BROWSER_SESSION_SWEEP_FAILED");
+    console.error("[browser-session-sweep] failed", {
+      code: failure.code,
+    });
     return NextResponse.json(
-      {
-        error: "Sweep failed",
-        detail: err instanceof Error ? err.message : String(err),
-      },
-      { status: 500 },
+      { code: failure.code, message: "LiTT couldn't clean up browser sessions right now." },
+      { status: 503 },
     );
   }
 }
