@@ -2,6 +2,11 @@
 
 import { create } from "zustand";
 import type { Canvas, CanvasBlock, ArtifactAction } from "@/lib/canvas/types";
+import {
+  STUDIO_EVENT_ACTIVATE_INSPECTOR,
+  STUDIO_EVENT_OPEN_DOCK,
+  STUDIO_EVENT_REQUEST_DEPLOY,
+} from "@/lib/canvas/panel-actions";
 
 interface CanvasStore {
   // ─── State ───────────────────────────────────────────────────
@@ -272,6 +277,34 @@ export async function executeAction(
         }
         const data = await res.json();
         return { ok: true, data };
+      }
+      // ─── Studio UI actions ────────────────────────────────
+      // Client-side only: dispatch a DOM event the owning component
+      // listens for. Guarded for SSR — executeAction only runs in the
+      // browser, but the guard keeps it honest.
+      case "studio.inspect_element": {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent(STUDIO_EVENT_ACTIVATE_INSPECTOR));
+        }
+        return { ok: true };
+      }
+      case "studio.open_terminal": {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent(STUDIO_EVENT_OPEN_DOCK, { detail: { tab: "terminal" } }),
+          );
+        }
+        return { ok: true };
+      }
+      case "studio.deploy_site": {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent(STUDIO_EVENT_REQUEST_DEPLOY, {
+              detail: { projectId: action.projectId },
+            }),
+          );
+        }
+        return { ok: true };
       }
     }
   } catch (err) {
