@@ -93,11 +93,11 @@ describe("primary explicit-run path (canonical)", () => {
     mocks.getActionRun.mockResolvedValue(compositeRun);
 
     await recordBrowserToolStarted({ ...toolContext, toolId: "browser.navigate" });
-    await recordBrowserToolExecution({ ...toolContext, toolId: "browser.navigate", result: { success: true } });
+    await recordBrowserToolExecution({ ...toolContext, toolId: "browser.navigate", result: { outcome: "completed" } });
     await recordBrowserToolStarted({ ...toolContext, toolId: "browser.click" });
-    await recordBrowserToolExecution({ ...toolContext, toolId: "browser.click", result: { success: true } });
+    await recordBrowserToolExecution({ ...toolContext, toolId: "browser.click", result: { outcome: "completed" } });
     await recordBrowserToolStarted({ ...toolContext, toolId: "browser.type" });
-    await recordBrowserToolExecution({ ...toolContext, toolId: "browser.type", result: { success: true } });
+    await recordBrowserToolExecution({ ...toolContext, toolId: "browser.type", result: { outcome: "completed" } });
     // A deployment/verification event can share the same user task run.
     await mocks.appendActionEvent({
       runId: "run-one",
@@ -122,9 +122,9 @@ describe("primary explicit-run path (canonical)", () => {
 
   it("emits the exact event sequence with safe identifiers only", async () => {
     await recordBrowserToolStarted({ ...toolContext, toolId: "browser.navigate" });
-    await recordBrowserToolExecution({ ...toolContext, toolId: "browser.navigate", result: { success: true } });
+    await recordBrowserToolExecution({ ...toolContext, toolId: "browser.navigate", result: { outcome: "completed" } });
     await recordBrowserToolStarted({ ...toolContext, toolId: "browser.click" });
-    await recordBrowserToolExecution({ ...toolContext, toolId: "browser.click", result: { success: true } });
+    await recordBrowserToolExecution({ ...toolContext, toolId: "browser.click", result: { outcome: "completed" } });
 
     const types = mocks.recordActionEventActivity.mock.calls.map(([input]) => (input as { type: string }).type);
     expect(types).toEqual([
@@ -154,8 +154,8 @@ describe("primary explicit-run path (canonical)", () => {
       recordBrowserToolStarted({ ...toolContext, toolId: "browser.click" }),
     ]);
     const [navDone, clickDone] = await Promise.all([
-      recordBrowserToolExecution({ ...toolContext, toolId: "browser.navigate", result: { success: true } }),
-      recordBrowserToolExecution({ ...toolContext, toolId: "browser.click", result: { success: true } }),
+      recordBrowserToolExecution({ ...toolContext, toolId: "browser.navigate", result: { outcome: "completed" } }),
+      recordBrowserToolExecution({ ...toolContext, toolId: "browser.click", result: { outcome: "completed" } }),
     ]);
 
     for (const result of [navStarted, clickStarted, navDone, clickDone]) {
@@ -329,7 +329,7 @@ describe("durable persistence failures", () => {
     // Event/activity path (already working): event insert failure propagates.
     mocks.recordActionEventActivity.mockRejectedValueOnce(new Error("event insert failed"));
     await expect(
-      recordBrowserToolExecution({ ...toolContext, toolId: "browser.navigate", result: { success: true } }),
+      recordBrowserToolExecution({ ...toolContext, toolId: "browser.navigate", result: { outcome: "completed" } }),
     ).rejects.toThrow("event insert failed");
   });
 

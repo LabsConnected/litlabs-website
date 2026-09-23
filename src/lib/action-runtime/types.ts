@@ -143,8 +143,8 @@ export interface BrowserActionContext extends ActionExecutionContext {
  * success-shaped return payload.
  */
 export type BrowserToolExecutionResult =
-  | { success: true }
-  | { success: false; error?: unknown };
+  | { outcome: "completed" }
+  | { outcome: "failed"; error?: unknown };
 
 export class ActionRuntimeError extends Error {
   constructor(

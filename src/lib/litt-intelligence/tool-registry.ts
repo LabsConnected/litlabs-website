@@ -13,7 +13,7 @@ import type { LiTTToolDefinition, ApprovalPolicy } from "./types";
 import type { WorkspaceTransport } from "./workspace-transport";
 // Shared realtime capability from @litt/agent-core — the ONE implementation.
 // The web registry delegates to it so CLI and Studio have the same capability.
-import { webSearch as coreWebSearch, safeFetch as coreSafeFetch, weatherForecast as coreWeatherForecast, SafeFetchError } from "@litt/agent-core";
+import { webSearch as coreWebSearch, safeFetch as coreSafeFetch, weatherForecast as coreWeatherForecast } from "@litt/agent-core";
 
 interface ToolExecutionContext {
   actionRunId?: string;
@@ -646,7 +646,7 @@ class ToolRegistry {
         );
         if (runtime && browserContext) {
           try {
-            await runtime.recordBrowserToolExecution({ ...browserContext, toolId: id, result: { success: true } });
+            await runtime.recordBrowserToolExecution({ ...browserContext, toolId: id, result: { outcome: "completed" } });
           } catch (persistError) {
             // The browser action already executed — returning ok:false here
             // would invite a retry of a possibly non-idempotent action. Log
@@ -664,7 +664,7 @@ class ToolRegistry {
       } catch (err) {
         if (runtime && browserContext) {
           try {
-            await runtime.recordBrowserToolExecution({ ...browserContext, toolId: id, result: { success: false, error: err } });
+            await runtime.recordBrowserToolExecution({ ...browserContext, toolId: id, result: { outcome: "failed", error: err } });
           } catch (persistError) {
             console.error("[action-runtime] browser action failure could not be persisted", {
               runId: browserContext.actionRunId,
