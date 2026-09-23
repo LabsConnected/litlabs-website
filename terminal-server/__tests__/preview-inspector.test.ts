@@ -87,3 +87,31 @@ describe("INSPECTOR_DROPPED_HEADERS", () => {
     expect(INSPECTOR_DROPPED_HEADERS.has("content-encoding")).toBe(true);
   });
 });
+
+describe("style probe (P0: Tailwind v4 @import trap)", () => {
+  function injectedScript(): string {
+    const out = injectInspector("<html><head></head><body><h1>Hi</h1></body></html>");
+    const start = out.indexOf("<script>") + "<script>".length;
+    const end = out.indexOf("</script>");
+    return out.slice(start, end);
+  }
+
+  it("implements the style-probe protocol in the injected script", () => {
+    const script = injectedScript();
+    // child → parent result message
+    expect(script).toContain('"style-probe"');
+    // Tailwind intent detection: browser CDN script or text/tailwindcss block
+    expect(script).toContain('script[src*="tailwindcss"]');
+    expect(script).toContain('style[type="text/tailwindcss"]');
+    // hidden probe element + computed-style assertion
+    expect(script).toContain("getComputedStyle");
+    expect(script).toContain("tailwindDetected");
+    // runs after load so async CDN scripts get a chance to execute
+    expect(script).toContain('addEventListener("load"');
+  });
+
+  it("reports styled:true without Tailwind intent (plain-CSS pages must not alarm)", () => {
+    const script = injectedScript();
+    expect(script).toContain("{ tailwindDetected: false, styled: true }");
+  });
+});

@@ -52,6 +52,66 @@ export function findPlaceholderToken(text: string): string | null {
 }
 
 /**
+ * Matches <style> blocks that feed the Tailwind CSS v4 browser build
+ * (<style type="text/tailwindcss">), tolerating attribute order, quoting
+ * style, and case variations.
+ */
+const TAILWIND_STYLE_BLOCK_RE =
+  /<style\b[^>]*\btype\s*=\s*(?:"text\/tailwindcss"|'text\/tailwindcss'|text\/tailwindcss(?=[\s>]))[^>]*>([\s\S]*?)<\/style\s*>/gi;
+
+/**
+ * The Tailwind v4 browser-build @import trap.
+ *
+ * The Tailwind CSS v4 browser build decides whether to auto-inject its core
+ * import with a naive substring check over <style type="text/tailwindcss">
+ * blocks: when the block contains ANY "@import" line, the default
+ * `@import "tailwindcss"` is NOT prepended. A page whose block carries a
+ * Google Fonts @import (or any other import) without also importing
+ * tailwindcss gets a build that silently compiles ZERO utilities — all
+ * content renders, completely unstyled, with no error anywhere.
+ * Production evidence: the 2026-09-23 North Shore acceptance run.
+ *
+ * This mirrors the build's own check exactly: the build tests
+ * `t.includes("@import")` (case-sensitive), so the lint flags a block whose
+ * text contains "@import" but not "tailwindcss" (an explicit
+ * `@import "tailwindcss";` in the block is the legitimate escape hatch).
+ * Returns the offending @import line (truncated) for the remediation
+ * message, or null when the content is clean.
+ */
+export function findTailwindImportTrap(content: string): string | null {
+  if (typeof content !== "string") return null;
+  TAILWIND_STYLE_BLOCK_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = TAILWIND_STYLE_BLOCK_RE.exec(content)) !== null) {
+    const block = m[1] ?? "";
+    if (block.includes("@import") && !block.toLowerCase().includes("tailwindcss")) {
+      const line =
+        block
+          .split("\n")
+          .find((l) => l.includes("@import"))
+          ?.trim() ?? "@import";
+      return line.slice(0, 160);
+    }
+  }
+  return null;
+}
+
+/**
+ * Model-facing remediation for the Tailwind @import trap. Shared by the
+ * files.write and apply_patch validators so the builder gets the exact
+ * fix either way the trap is introduced.
+ */
+export function tailwindImportTrapMessage(trap: string, path: string): string {
+  return (
+    `rejected: ${path} contains a <style type="text/tailwindcss"> block with ${JSON.stringify(trap)} ` +
+    `but no @import "tailwindcss". The Tailwind v4 browser build silently compiles ZERO utilities when it ` +
+    `sees any @import without tailwindcss — the page would render completely unstyled with no error. ` +
+    `Load fonts with <link> tags in <head> (never @import inside the Tailwind block), or add ` +
+    `@import "tailwindcss"; as the first line of the block, then rewrite the content.`
+  );
+}
+
+/**
  * Enforcement-floor guard for mutation handlers. Returns an error string
  * when `value` carries an unresolved placeholder, else null. Handler-level
  * checks matter because the agent-loop gate is not the only path into a
@@ -137,6 +197,16 @@ export async function validateApplyPatchInputs(
 
   // 1. Lexical placeholder scan — covers both search and replace so a
   //    patch can't smuggle template slots into the file either direction.
+  // 1b. Tailwind @import trap — a patch can introduce the trap just as
+  //     easily as a full write, so replace text gets the same check.
+  for (let i = 0; i < patches.length; i++) {
+    const replace = patches[i]?.replace;
+    if (typeof replace !== "string") continue;
+    const trap = findTailwindImportTrap(replace);
+    if (trap) {
+      return `apply_patch ${tailwindImportTrapMessage(trap, path)} (introduced by patch ${i + 1}).`;
+    }
+  }
   for (let i = 0; i < patches.length; i++) {
     const patch = patches[i];
     for (const field of ["search", "replace"] as const) {
@@ -206,6 +276,11 @@ export function validateFilesWriteInputs(inputs: FilesWriteInputs): string | nul
       `files.write rejected: content for ${path} contains an unresolved placeholder ${JSON.stringify(token)}. ` +
       `Template slots never belong in produced file content — write the literal text for ${path}.`
     );
+  }
+
+  const trap = findTailwindImportTrap(content);
+  if (trap) {
+    return `files.write ${tailwindImportTrapMessage(trap, path)}`;
   }
 
   return null;

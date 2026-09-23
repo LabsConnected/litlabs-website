@@ -257,6 +257,14 @@ export function buildRuntimeContextBlock(ctx: CanonicalRuntimeContext): string {
     lines.push("PATCH RECOVERY: before apply_patch, read the target file. If a patch is rejected because its search text does not match, use the returned current file content to regenerate it or use files.write with complete literal content. Never repeat the same rejected patch blindly.");
     if (ctx.framework === "static") {
       lines.push("STATIC SITE CONTRACT: for a static or empty-static website, the runnable and deployable entry file must be workspace-root index.html. Use path=\"index.html\"; do not put the entry file under public/.");
+      lines.push(
+        "STYLING CONTRACT (Tailwind browser CDN): when a static page uses the Tailwind CSS browser build, the <head> MUST follow this exact pattern: " +
+        '<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>, fonts via <link> tags (preconnect + stylesheet), ' +
+        "and custom CSS in <style type=\"text/tailwindcss\"> (use @theme for design tokens). " +
+        "NEVER put an @import line inside <style type=\"text/tailwindcss\"> unless the block also contains @import \"tailwindcss\"; as its first line — " +
+        "the Tailwind v4 browser build silently compiles ZERO utilities when it sees any @import without tailwindcss, leaving the page completely unstyled with no error. " +
+        "Load Google Fonts with <link>, never with @import.",
+      );
     }
   }
 
