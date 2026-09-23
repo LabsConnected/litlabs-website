@@ -95,6 +95,21 @@ const optionalAISchema = z.object({
   LITT_DISABLE_OLLAMA: z.string().optional(),
 });
 
+// Demo lane (anonymous limited /demo) — all optional, validated loosely.
+const optionalDemoSchema = z.object({
+  DEMO_ENABLED: z.string().optional(),
+  DEMO_KILL_SWITCH: z.string().optional(),
+  DEMO_MAX_MESSAGES: z.string().optional(),
+  DEMO_MAX_TOKENS: z.string().optional(),
+  DEMO_MODEL_PROVIDER: z.string().optional(),
+  DEMO_SESSION_TTL_SECONDS: z.string().optional(),
+  DEMO_SESSION_SECRET: z.string().optional(),
+  DEMO_SESSION_PER_MINUTE: z.string().optional(),
+  DEMO_IP_PER_MINUTE: z.string().optional(),
+  DEMO_MAX_HISTORY_ENTRIES: z.string().optional(),
+  DEMO_MAX_MESSAGE_CHARS: z.string().optional(),
+});
+
 // Optional integration keys.
 const optionalIntegrationSchema = z.object({
   R2_ACCOUNT_ID: z.string().optional(),
@@ -186,7 +201,7 @@ const adminSchema = z.object({
 /*  Validation logic                                                   */
 /* ------------------------------------------------------------------ */
 
-export type EnvCategory = "core" | "production" | "public" | "ai" | "integration" | "terminal" | "admin";
+export type EnvCategory = "core" | "production" | "public" | "ai" | "integration" | "terminal" | "admin" | "demo";
 
 export interface EnvValidationResult {
   valid: boolean;
@@ -289,6 +304,7 @@ export function validateEnv(): EnvValidationResult[] {
   results.push(validateCategory("integration", optionalIntegrationSchema, "[integration]"));
   results.push(validateCategory("terminal", terminalSchema, "[terminal]"));
   results.push(validateCategory("admin", adminSchema, "[admin]"));
+  results.push(validateCategory("demo", optionalDemoSchema, "[demo]"));
 
   return results;
 }
