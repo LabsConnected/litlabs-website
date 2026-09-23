@@ -15,9 +15,9 @@ type MarketingNavItem = {
 };
 
 // Larry's site audit (2026-09-22, issue #469): lead with the product —
-// Studio → How it works → Pricing first. "Community" is intentionally
-// omitted until the /discover feed is seeded (it renders an empty state);
-// re-add it when posts exist. Labels and hrefs are unchanged, order only.
+// Studio → How it works → Pricing first. "Community" is back in the nav now
+// that the /discover feed is seeded with LiTT-team welcome posts (it renders
+// /discover, the canonical route; /community and /communities 308 there).
 const NAV_ITEMS: MarketingNavItem[] = [
   { label: "Studio", href: "/studio" },
   { label: "How it works", href: "/#how-it-works" },
@@ -26,6 +26,7 @@ const NAV_ITEMS: MarketingNavItem[] = [
   { label: "Creations", href: "/#creations" },
   { label: "CLI", href: "/cli" },
   { label: "FAQ", href: "/#faq" },
+  { label: "Community", href: "/discover" },
 ];
 
 export default function MarketingHeader() {
