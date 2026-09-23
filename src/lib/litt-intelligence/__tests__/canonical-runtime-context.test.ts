@@ -160,4 +160,66 @@ describe("buildRuntimeContextBlock", () => {
     expect(block).toContain("Workspace execution is available even though the visible terminal UI is disconnected");
     expect(block).toContain("Do NOT say 'terminal is not connected'");
   });
+
+  it("includes the Tailwind styling contract for static frameworks", () => {
+    const ctx: CanonicalRuntimeContext = {
+      projectId: "proj-123",
+      projectName: "north-shore-test",
+      workspaceId: "ws-123",
+      workspaceReady: true,
+      workspaceExecutionAvailable: true,
+      workspaceRoot: "/workspace/proj-123",
+      terminalConnected: false,
+      terminalStatus: "disconnected",
+      terminalServerAlive: true,
+      githubConnected: false,
+      repository: null,
+      branch: null,
+      writePermission: true,
+      previewStatus: "unknown",
+      availableTools: [],
+      executionMode: "act",
+      framework: "static",
+      model: null,
+      provider: null,
+      sourceType: "blank",
+      deploymentStatus: "not_started",
+      deploymentUrl: null,
+    };
+
+    const block = buildRuntimeContextBlock(ctx);
+    expect(block).toContain("STYLING CONTRACT (Tailwind browser CDN)");
+    expect(block).toContain("@tailwindcss/browser@4");
+    expect(block).toContain("NEVER put an @import line inside");
+  });
+
+  it("omits the Tailwind styling contract for non-static frameworks", () => {
+    const ctx: CanonicalRuntimeContext = {
+      projectId: "proj-123",
+      projectName: "app",
+      workspaceId: "ws-123",
+      workspaceReady: true,
+      workspaceExecutionAvailable: true,
+      workspaceRoot: "/workspace/proj-123",
+      terminalConnected: false,
+      terminalStatus: "disconnected",
+      terminalServerAlive: true,
+      githubConnected: false,
+      repository: null,
+      branch: null,
+      writePermission: true,
+      previewStatus: "unknown",
+      availableTools: [],
+      executionMode: "act",
+      framework: "nextjs",
+      model: null,
+      provider: null,
+      sourceType: "github",
+      deploymentStatus: "not_started",
+      deploymentUrl: null,
+    };
+
+    const block = buildRuntimeContextBlock(ctx);
+    expect(block).not.toContain("STYLING CONTRACT");
+  });
 });

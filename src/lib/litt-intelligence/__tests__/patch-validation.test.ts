@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from "vitest";
 import type { WorkspaceTransport } from "../workspace-transport";
-import { buildPatchRecoveryMessage, validateApplyPatchInputs, validateFilesWriteInputs } from "../patch-validation";
+import { buildPatchRecoveryMessage, findTailwindImportTrap, validateApplyPatchInputs, validateFilesWriteInputs } from "../patch-validation";
 import { normalizeWorkspaceRelativePath } from "../workspace-path";
 
 /**
@@ -333,5 +333,92 @@ describe("mutation handlers — enforcement floor", () => {
     expect(res.success).toBe(false);
     expect(res.error).toContain("[PERSON_NAME]");
     expect(t.exec).not.toHaveBeenCalled();
+  });
+});
+
+describe("findTailwindImportTrap — Tailwind v4 browser @import trap (P0)", () => {
+  const TRAPPED = `<html><head>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<style type="text/tailwindcss">
+@import url("https://fonts.googleapis.com/css2?family=Inter&display=swap");
+.glass { backdrop-filter: blur(12px); }
+</style></head><body><h1 class="text-3xl">Hi</h1></body></html>`;
+
+  const BLESSED = `<html><head>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter&display=swap" rel="stylesheet">
+<style type="text/tailwindcss">
+@theme { --color-glow: #a8ff2f; }
+.glass { backdrop-filter: blur(12px); }
+</style></head><body><h1 class="text-3xl">Hi</h1></body></html>`;
+
+  const EXPLICIT_IMPORT = `<style type="text/tailwindcss">
+@import "tailwindcss";
+@import url("https://fonts.googleapis.com/css2?family=Inter&display=swap");
+</style>`;
+
+  it("rejects a files.write whose tailwindcss block has a fonts @import and no tailwindcss import", () => {
+    const err = validateFilesWriteInputs({ path: "index.html", content: TRAPPED });
+    expect(err).toContain("tailwindcss");
+    expect(err).toContain("@import");
+    expect(err).toContain("<link>");
+  });
+
+  it("accepts the blessed head pattern (fonts via <link>, no @import in the tailwind block)", () => {
+    expect(validateFilesWriteInputs({ path: "index.html", content: BLESSED })).toBeNull();
+  });
+
+  it("accepts a block with an explicit @import \"tailwindcss\" alongside other imports", () => {
+    expect(validateFilesWriteInputs({ path: "index.html", content: EXPLICIT_IMPORT })).toBeNull();
+  });
+
+  it("is case-insensitive on the style tag but mirrors the build's @import check", () => {
+    const upper = `<STYLE TYPE="TEXT/TAILWINDCSS">@import url("https://fonts.googleapis.com/css2?family=Inter");</STYLE>`;
+    expect(findTailwindImportTrap(upper)).not.toBeNull();
+    const escapedUpper = `<style type="text/tailwindcss">@import "TailwindCSS";</style>`;
+    expect(findTailwindImportTrap(escapedUpper)).toBeNull();
+  });
+
+  it("flags the trap even when a second clean tailwind block exists", () => {
+    const mixed = `<style type="text/tailwindcss">@theme { --x: 1; }</style>` + TRAPPED;
+    expect(findTailwindImportTrap(mixed)).not.toBeNull();
+  });
+
+  it("ignores @import in plain <style> blocks (not the browser build's input)", () => {
+    const plain = `<style>@import url("https://fonts.googleapis.com/css2?family=Inter"); .a { color: red; }</style>`;
+    expect(findTailwindImportTrap(plain)).toBeNull();
+    expect(validateFilesWriteInputs({ path: "index.html", content: plain })).toBeNull();
+  });
+
+  it("returns null for content without any tailwindcss block", () => {
+    expect(findTailwindImportTrap("<html><body>hello</body></html>")).toBeNull();
+  });
+
+  it("rejects an apply_patch whose replace introduces the trap", async () => {
+    const err = await validateApplyPatchInputs(
+      {
+        path: "index.html",
+        patches: [
+          {
+            search: "<head>",
+            replace: `<head><style type="text/tailwindcss">@import url("https://fonts.googleapis.com/css2?family=Inter");</style>`,
+          },
+        ],
+      },
+      fakeTransport("<html><head></head></html>"),
+    );
+    expect(err).toContain("tailwindcss");
+  });
+
+  it("accepts an apply_patch whose replace carries the blessed pattern", async () => {
+    const err = await validateApplyPatchInputs(
+      {
+        path: "index.html",
+        patches: [{ search: "<head>", replace: `<head>${BLESSED}` }],
+      },
+      fakeTransport("<html><head></head></html>"),
+    );
+    expect(err).toBeNull();
   });
 });

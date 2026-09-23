@@ -184,6 +184,11 @@ export default function StudioPreviewPanel({
   const [logsOpen, setLogsOpen] = useState(false);
   const [iframeFailed, setIframeFailed] = useState(false);
   const [urlCopied, setUrlCopied] = useState(false);
+  // Style-probe result from the injected inspector script: whether the
+  // preview page intends Tailwind (browser CDN) and whether its utilities
+  // actually applied. A Tailwind-intended page that renders unstyled (the
+  // v4 @import trap) must never keep the green "Preview ready" badge.
+  const [styleProbe, setStyleProbe] = useState<{ tailwindDetected: boolean; styled: boolean } | null>(null);
   const [selectionMode, setSelectionMode] = useState(true);
   const [selectedElement, setSelectedElement] = useState<PreviewSelection | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
@@ -480,6 +485,35 @@ export default function StudioPreviewPanel({
     return () => window.removeEventListener("message", handler);
   }, []);
 
+  // Style-probe listener: the injected inspector script reports whether
+  // Tailwind utilities actually applied in the preview frame. The probe
+  // runs on every frame load, so reset on previewUrl change — a stale
+  // "styled" verdict must never mask a fresh unstyled page.
+  useEffect(() => {
+    if (!projectId || !previewUrl) return;
+    setStyleProbe(null);
+    let previewOrigin: string;
+    try {
+      previewOrigin = new URL(previewUrl, window.location.href).origin;
+    } catch {
+      return;
+    }
+    const handler = (event: MessageEvent) => {
+      if (event.origin !== previewOrigin) return;
+      const data = event.data as { source?: unknown; type?: unknown; payload?: unknown } | null;
+      if (!data || data.source !== "litt-inspector" || data.type !== "style-probe") return;
+      const p = data.payload as { tailwindDetected?: unknown; styled?: unknown } | null;
+      setStyleProbe({
+        tailwindDetected: p?.tailwindDetected === true,
+        // A malformed payload must not false-alarm: only an explicit
+        // styled:false on a Tailwind-intended page counts as a failure.
+        styled: p?.styled !== false,
+      });
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [projectId, previewUrl]);
+
   // The terminal-server proxy serves an honest error page (instead of the
   // backend's white "Cannot GET /") when the dev server 404s the entry
   // path at proxy time, and that page postMessages us. Flip the badge
@@ -746,9 +780,12 @@ export default function StudioPreviewPanel({
 
   const displayUrl = previewUrl ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}studioRefresh=${frameKey}` : null;
   const isAuthConfigError = errorCode === "preview_clerk_config_error" || errorCode === "preview_auth_config_error";
-  const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (iframeFailed ? "Preview failed to load" : "Preview ready") : state === "stale" ? "Preview may be stale" : state === "not_started" ? "Preview not started" : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : "Preview failed to start") : "Preview runtime unreachable";
+  // The v4 @import trap: a Tailwind-intended preview that renders unstyled
+  // must surface honestly — never a green "Preview ready" over dead CSS.
+  const stylingFailed = state === "ready" && styleProbe?.tailwindDetected === true && styleProbe.styled === false;
+  const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (iframeFailed ? "Preview failed to load" : stylingFailed ? "Preview styling failed to apply" : "Preview ready") : state === "stale" ? "Preview may be stale" : state === "not_started" ? "Preview not started" : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : "Preview failed to start") : "Preview runtime unreachable";
   const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "not_started" ? "Preparing your preview automatically…" : state === "unreachable" ? (error ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (error ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : error ?? "The dev server failed to start. Try restarting it.") : error ?? "The preview surface reports only real project runtime state.";
-  const dotColor = STATUS_DOT_COLOR[state];
+  const dotColor = stylingFailed ? STATUS_DOT_COLOR.stale : STATUS_DOT_COLOR[state];
   const isLive = state === "ready" || state === "stale";
   const sourceSummary = formatSourceSummary({
     kind: sourceKind,
