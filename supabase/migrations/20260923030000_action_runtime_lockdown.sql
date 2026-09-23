@@ -10,11 +10,17 @@
 -- An event's (run_id, user_id) must equal the owning run's (id, user_id).
 -- The composite FK makes cross-user event corruption impossible even if a
 -- future code path bypasses the RPC layer.
-ALTER TABLE public.action_runs
-  ADD CONSTRAINT action_runs_id_user_id_key UNIQUE (id, user_id);
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'action_runs_id_user_id_key') THEN
+    ALTER TABLE public.action_runs
+      ADD CONSTRAINT action_runs_id_user_id_key UNIQUE (id, user_id);
+  END IF;
+END $$;
 
 ALTER TABLE public.action_events
   DROP CONSTRAINT IF EXISTS action_events_run_id_fkey,
+  DROP CONSTRAINT IF EXISTS action_events_run_owner_fkey,
   ADD CONSTRAINT action_events_run_owner_fkey
     FOREIGN KEY (run_id, user_id) REFERENCES public.action_runs(id, user_id)
     ON DELETE CASCADE;
@@ -22,20 +28,31 @@ ALTER TABLE public.action_events
 -- ─── 2. Structural browser-session ownership ─────────────────────────────────
 -- A run may only attach a browser session owned by the same user. The
 -- composite FK enforces it; RPC-level checks stay as defense-in-depth.
-ALTER TABLE public.browser_sessions
-  ADD CONSTRAINT browser_sessions_id_user_id_key UNIQUE (id, user_id);
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'browser_sessions_id_user_id_key') THEN
+    ALTER TABLE public.browser_sessions
+      ADD CONSTRAINT browser_sessions_id_user_id_key UNIQUE (id, user_id);
+  END IF;
+END $$;
 
 ALTER TABLE public.action_runs
   DROP CONSTRAINT IF EXISTS action_runs_browser_session_id_fkey,
+  DROP CONSTRAINT IF EXISTS action_runs_browser_session_owner_fkey,
   ADD CONSTRAINT action_runs_browser_session_owner_fkey
     FOREIGN KEY (browser_session_id, user_id) REFERENCES public.browser_sessions(id, user_id)
     ON DELETE SET NULL (browser_session_id);
 
 -- ─── 3. Canonical event vocabulary ───────────────────────────────────────────
 -- Unknown event types fail at the table level, not just inside the RPCs.
-ALTER TABLE public.action_events
-  ADD CONSTRAINT action_events_type_check
-  CHECK (public.action_runtime_is_event_type(type));
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'action_events_type_check') THEN
+    ALTER TABLE public.action_events
+      ADD CONSTRAINT action_events_type_check
+      CHECK (public.action_runtime_is_event_type(type));
+  END IF;
+END $$;
 
 -- ─── 4. Transition semantics ─────────────────────────────────────────────────
 -- queued -> paused removed: a run that never executed is not "paused work".

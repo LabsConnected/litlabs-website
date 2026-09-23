@@ -15,8 +15,9 @@ ALTER TABLE public.agent_paused_runs
     REFERENCES public.action_runs(id, user_id)
     ON DELETE NO ACTION;
 
-CREATE INDEX IF NOT EXISTS idx_agent_paused_runs_action_run
-  ON public.agent_paused_runs(action_run_id)
+DROP INDEX IF EXISTS public.idx_agent_paused_runs_action_run;
+CREATE INDEX idx_agent_paused_runs_action_run
+  ON public.agent_paused_runs(action_run_id, status)
   WHERE action_run_id IS NOT NULL;
 
 COMMENT ON COLUMN public.agent_paused_runs.action_run_id IS
