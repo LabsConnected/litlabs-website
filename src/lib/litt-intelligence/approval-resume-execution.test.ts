@@ -209,3 +209,42 @@ describe("resumeAgentLoopV2 — approved mutation executes", () => {
     expect(runCheck).not.toHaveBeenCalled();
   });
 });
+
+describe("resumeAgentLoopV2 — mid-build stall recovery", () => {
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("nudges instead of silently finishing when the resumed turn announces work but emits no tool calls", async () => {
+    // Production 2026-09-23: after the last file-write approval the
+    // resumed model said "The Contact form component has been created...
+    // Now, I'll create the Footer component" with zero tool calls. The
+    // loop accepted that as the final answer and the run went Idle with
+    // half the build done.
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "The Contact form component has been created with validation. Now, I'll create the Footer component.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "Footer created. Done.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      });
+
+    const { transport } = makeTransport();
+    const result = await resumeAgentLoopV2(makePausedInput(), transport);
+
+    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBeGreaterThanOrEqual(2);
+    const nudgeCall = vi.mocked(callLLMWithTools).mock.calls[1];
+    const nudgeMessages = nudgeCall[1] as LLMMessage[];
+    expect(
+      nudgeMessages.some((m) => m.role === "user" && m.content.includes("emitted no tool calls")),
+    ).toBe(true);
+    expect(result.cancelled).toBe(false);
+    expect(result.finalText).toBe("Footer created. Done.");
+  });
+});
