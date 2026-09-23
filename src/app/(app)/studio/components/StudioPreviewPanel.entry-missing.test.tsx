@@ -74,13 +74,14 @@ describe("StudioPreviewPanel — preview-entry-missing message", () => {
 
       // The badge must not wait for the 30s poll — a status re-check fires now.
       // Generous timeout: the handler awaits authHeaders() before fetch, and
-      // this flakes under CI load with the default 1s timeout (2026-09-21).
-      // 10s still proves "immediate" versus the 30s poll interval.
+      // this flakes under CI load with the default 1s timeout (2026-09-21)
+      // and flaked again at 10s under full-suite load (2026-09-23). 20s still
+      // proves "immediate" versus the 30s poll interval.
       await vi.waitFor(
         () => {
           expect(fetchSpy.mock.calls.length).toBeGreaterThan(callsAfterReady);
         },
-        { timeout: 10000 },
+        { timeout: 20000 },
       );
     },
   );
