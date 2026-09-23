@@ -155,7 +155,11 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION public.action_runtime_append_event(
+-- DROP + CREATE (not OR REPLACE): the final-gate migration retypes this
+-- function to RETURNS JSONB, so an idempotent re-apply must be able to
+-- replace that version too.
+DROP FUNCTION IF EXISTS public.action_runtime_append_event(UUID, TEXT, TEXT, JSONB);
+CREATE FUNCTION public.action_runtime_append_event(
   p_run_id UUID,
   p_user_id TEXT,
   p_type TEXT,
@@ -316,7 +320,9 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION public.action_runtime_activity(
+-- DROP + CREATE for the same reason: final-gate retypes it to JSONB.
+DROP FUNCTION IF EXISTS public.action_runtime_activity(UUID, TEXT, TEXT);
+CREATE FUNCTION public.action_runtime_activity(
   p_run_id UUID,
   p_user_id TEXT,
   p_message TEXT
