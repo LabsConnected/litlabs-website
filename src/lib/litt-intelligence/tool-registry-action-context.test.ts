@@ -110,7 +110,7 @@ describe("toolRegistry.execute — trusted ActionExecutionContext propagation", 
       }),
     );
     expect(runtimeMocks.recordActionToolStarted).toHaveBeenCalledWith(context, "context.files.write");
-    expect(runtimeMocks.recordActionToolCompleted).toHaveBeenCalledWith(context, "context.files.write");
+    expect(runtimeMocks.recordActionToolCompleted).toHaveBeenCalledWith(context, "context.files.write", expect.anything());
     expect(runtimeMocks.recordActionToolFailed).not.toHaveBeenCalled();
   });
 
@@ -204,7 +204,9 @@ describe("toolRegistry.execute — trusted ActionExecutionContext propagation", 
     expect(browserResult.ok).toBe(true);
     for (const toolId of compositeToolIds) {
       expect(runtimeMocks.recordActionToolStarted).toHaveBeenCalledWith(context, toolId);
-      expect(runtimeMocks.recordActionToolCompleted).toHaveBeenCalledWith(context, toolId);
+      // The completed call carries the tool result so deployment evidence
+      // (deploymentId/publicUrl/verified) lands on the same run's events.
+      expect(runtimeMocks.recordActionToolCompleted).toHaveBeenCalledWith(context, toolId, expect.anything());
     }
     expect(browserRuntimeMocks.recordBrowserToolStarted).toHaveBeenCalledWith({
       actionRunId: "run-composite",
