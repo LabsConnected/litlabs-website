@@ -182,6 +182,7 @@ async function startAndWaitForPreview(
   actionContext?: ActionExecutionContext,
 ): Promise<"ready" | "failed" | "timeout"> {
   let terminalEventRecorded = false;
+  let previewStartPersistFailed = false;
   const recordTerminal = async (
     type: "preview.ready" | "preview.failed",
     payload: Record<string, string>,
@@ -205,6 +206,7 @@ async function startAndWaitForPreview(
         workspaceId: transport.workspaceId,
         errorClass: persistError instanceof Error ? persistError.message : String(persistError),
       });
+      previewStartPersistFailed = true;
       throw persistError;
     }
     await transport.startPreview();
@@ -212,15 +214,18 @@ async function startAndWaitForPreview(
     // A rejected start request (e.g. preview_no_dev_command on a workspace
     // with no servable entry) is a normal "failed" outcome — returning it
     // lets callers run the repair loop or surface a pending approval
-    // instead of escaping as a generic launch crash.
+    // instead of escaping as a generic launch crash. A runtime persistence
+    // failure is different: it remains an explicit error and never retries
+    // hidden untracked work.
     progress.emit({ type: "preview_status", status: "failed", healthy: false });
     if (!terminalEventRecorded) {
       await recordTerminal(
         "preview.failed",
         { error: error instanceof Error ? error.message.slice(0, 300) : "preview_start_failed" },
         "Project preview failed to start",
-      ).catch(() => undefined);
+      );
     }
+    if (previewStartPersistFailed) throw error;
     return "failed";
   }
 
@@ -264,7 +269,7 @@ async function startAndWaitForPreview(
         "preview.failed",
         { error: error instanceof Error ? error.message.slice(0, 300) : "preview_wait_failed" },
         "Project preview failed",
-      ).catch(() => undefined);
+      );
     }
     throw error;
   }

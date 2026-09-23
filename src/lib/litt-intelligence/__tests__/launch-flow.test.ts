@@ -185,6 +185,29 @@ describe("Launch Flow: no-mutation reprompt", () => {
     );
   });
 
+  it("does not provision an untracked preview when the started event cannot persist", async () => {
+    const transport = createMockTransport();
+    vi.mocked(recordActionEventActivity).mockRejectedValue(new Error("event insert failed"));
+    const options = makeOptions({
+      transport,
+      runAgentLoop: vi.fn().mockResolvedValue(successAgentResult({
+        toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
+      })),
+      actionContext: {
+        actionRunId: "run-composite",
+        userId: "user-test",
+        conversationId: "conv-parent",
+        projectId: "proj-test",
+      },
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(transport.startPreview).not.toHaveBeenCalled();
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("event insert failed");
+  });
+
   it("reprompts at most once even if the second pass also writes nothing", async () => {
     const runAgentLoop = vi.fn().mockResolvedValue(successAgentResult({ toolCalls: [] }));
     const options = makeOptions({ requiresExecution: true, runAgentLoop });
