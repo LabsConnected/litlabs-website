@@ -776,35 +776,35 @@ function fixDevProxyHeaders(req: NextRequest): NextResponse | undefined {
 }
 
 /**
- * Redirect naked-domain auth requests to www.litlabs.net before Clerk
- * loads. Clerk session cookies and the <SignIn> component behave
- * correctly only on the canonical application domain (www.litlabs.net);
- * the naked litlabs.net domain returns an empty/broken sign-in page.
+ * Redirect naked-domain requests to www.litlabs.net.
+ *
+ * Larry's site audit (2026-09-23 round 2): the bare domain must never render
+ * a stuck loading state — apex → www is the canonical host for EVERY path
+ * (previously only /sign-in and /oauth-consent were covered here; the rest
+ * relied solely on the Cloudflare edge rule). This is defense in depth
+ * behind that edge rule: Cloudflare 301s the apex before requests reach the
+ * app, but if the edge rule is ever dropped the app still canonicalizes.
+ *
+ * Clerk session cookies and the <SignIn> component behave correctly only on
+ * the canonical application domain (www.litlabs.net); the naked litlabs.net
+ * domain returns an empty/broken sign-in page.
  *
  * This runs before bot detection to avoid leaking bot-detection headers
  * in the redirect and before Clerk middleware so the browser never sees
- * a broken Clerk state on the naked domain.
+ * a broken Clerk state on the naked domain. Path and query string are
+ * preserved; 308 keeps the request method for non-GET requests.
  */
-function redirectNakedToWww(req: NextRequest): NextResponse | null {
+export function redirectNakedToWww(req: NextRequest): NextResponse | null {
   if (process.env.NODE_ENV === "development") return null;
 
   const host = req.headers.get("host") ?? "";
-  const proto = req.headers.get("x-forwarded-proto") ?? "https";
 
   // Only redirect if the request is on the naked litlabs.net apex,
-  // not on www.litlabs.net or any other subdomain.
+  // not on www.litlabs.net or any other subdomain/host.
   if (host !== "litlabs.net") return null;
 
-  // Only redirect auth-related pages; the rest of the site can be
-  // canonicalized by Cloudflare/global redirect rules later.
-  const isSignInRoute =
-    req.nextUrl.pathname === "/sign-in" ||
-    req.nextUrl.pathname.startsWith("/sign-in/");
-  const isOAuthConsentRoute = req.nextUrl.pathname === "/oauth-consent";
-  if (!isSignInRoute && !isOAuthConsentRoute) return null;
-
   const redirectUrl = new URL(req.nextUrl.pathname + req.nextUrl.search, `https://www.litlabs.net`);
-  // Preserve the full query string (e.g. redirect_url) on the canonical host
+  // Preserve the full query string on the canonical host
   return NextResponse.redirect(redirectUrl, 308);
 }
 
