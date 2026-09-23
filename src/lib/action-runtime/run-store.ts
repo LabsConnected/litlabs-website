@@ -226,7 +226,9 @@ export async function transitionActionRun(
     p_to_status: status,
     p_patch: sanitizedPatch,
     p_event_type: eventType,
-    p_event_payload: { currentActivity: sanitizedPatch.currentActivity ?? current.current_activity },
+    p_event_payload: {
+      currentActivity: sanitizedPatch.currentActivity ?? sanitizeActionActivityMessage(current.current_activity),
+    },
   });
   if (error || !data) throw mapDatabaseError(error, "CONFLICT");
   return mapRun(data as ActionRunRow);
@@ -254,13 +256,30 @@ export async function findActiveActionRunForConversation(
   return data ? mapRun(data as ActionRunRow) : null;
 }
 
+/**
+ * Batch lookup for GET-list recovery: all of a user's runs attached to any of
+ * the given browser sessions. One query, never per-session N+1.
+ */
+export async function listActionRunsForBrowserSessions(
+  userId: string,
+  browserSessionIds: string[],
+): Promise<ActionRun[]> {
+  if (browserSessionIds.length === 0) return [];
+  const { data, error } = await adminOrThrow()
+    .from("action_runs")
+    .select("*")
+    .eq("user_id", userId)
+    .in("browser_session_id", browserSessionIds);
+  if (error || !data) throw mapDatabaseError(error, "PERSISTENCE_UNAVAILABLE");
+  return (data as ActionRunRow[]).map(mapRun);
+}
+
 export async function getActionRunByBrowserSession(userId: string, browserSessionId: string): Promise<ActionRun | null> {
   const { data, error } = await adminOrThrow()
     .from("action_runs")
     .select("*")
     .eq("user_id", userId)
     .eq("browser_session_id", browserSessionId)
-    .not("status", "in", "(completed,failed,cancelled)")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -370,7 +389,7 @@ export async function listActionEvents(
   const limit = Math.max(1, Math.min(Math.trunc(options.limit ?? 200), 500));
   let query = adminOrThrow()
     .from("action_events")
-    .select("id, sequence::text, run_id, user_id, type, created_at, payload")
+    .select("id, sequence:sequence::text, run_id, user_id, type, created_at, payload")
     .eq("run_id", runId)
     .eq("user_id", userId)
     .order("sequence", { ascending: true })

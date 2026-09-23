@@ -25,8 +25,12 @@ const mocks = vi.hoisted(() => ({
   markBrowserSessionPaused: vi.fn(),
   markBrowserSessionControl: vi.fn(),
   recordBrowserSessionClosed: vi.fn(),
+  createActionRun: vi.fn(),
+  listActionRunsForBrowserSessions: vi.fn(),
   requestActionRunCancellation: vi.fn(),
   transitionActionRun: vi.fn(),
+  getProject: vi.fn(),
+  getConversation: vi.fn(),
 }));
 
 vi.mock("@/lib/auth", () => ({ auth: mocks.auth }));
@@ -50,13 +54,17 @@ vi.mock("@/lib/litt-intelligence/browser-billing", () => ({
 vi.mock("@/lib/action-runtime", () => ({
   getActionRun: mocks.getActionRun,
   startBrowserActionRun: mocks.startBrowserActionRun,
+  createActionRun: mocks.createActionRun,
   attachBrowserSession: mocks.attachBrowserSession,
   failBrowserActionRun: mocks.failBrowserActionRun,
   resolveBrowserActionRun: mocks.resolveBrowserActionRun,
   markBrowserSessionPaused: mocks.markBrowserSessionPaused,
   markBrowserSessionControl: mocks.markBrowserSessionControl,
   recordBrowserSessionClosed: mocks.recordBrowserSessionClosed,
+  listActionRunsForBrowserSessions: mocks.listActionRunsForBrowserSessions,
 }));
+vi.mock("@/lib/projects/project-repository", () => ({ getProject: mocks.getProject }));
+vi.mock("@/lib/studio/conversation-service", () => ({ getConversation: mocks.getConversation }));
 vi.mock("@/lib/action-runtime/run-store", () => ({
   requestActionRunCancellation: mocks.requestActionRunCancellation,
   transitionActionRun: mocks.transitionActionRun,
@@ -135,6 +143,10 @@ describe("POST /api/litt/browser/session", () => {
     mocks.closeSession.mockResolvedValue(true);
     mocks.requestActionRunCancellation.mockResolvedValue({ ...run, cancellationRequestedAt: "now" });
     mocks.transitionActionRun.mockResolvedValue({ ...run, status: "cancelled" });
+    mocks.createActionRun.mockResolvedValue(run);
+    mocks.listActionRunsForBrowserSessions.mockResolvedValue([run]);
+    mocks.getProject.mockResolvedValue({ id: "project-one" });
+    mocks.getConversation.mockResolvedValue({ id: "conversation-one" });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -256,7 +268,7 @@ describe("POST /api/litt/browser/session", () => {
     const body = await json(response);
 
     expect(response.status).toBe(500);
-    expect(body.code).toBe("RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION");
+    expect(body.code).toBe("ACTION_RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION");
     expect(mocks.closeSession).toHaveBeenCalled();
     expect(mocks.requestActionRunCancellation).not.toHaveBeenCalled();
   });
@@ -330,8 +342,102 @@ describe("POST /api/litt/browser/session", () => {
     const body = await json(response);
 
     expect(response.status).toBe(500);
-    expect(body.code).toBe("RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION");
+    expect(body.code).toBe("ACTION_RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION");
     expect(mocks.takeControl).toHaveBeenCalledWith("session-one", "user-one");
+  });
+
+  it("a retried standalone start with the same idempotencyKey never double-provisions", async () => {
+    // First attempt: creates the run, provisions the session, attaches it.
+    const first = await POST(request({ action: "start", idempotencyKey: "start-abc" }));
+    expect(first.status).toBe(200);
+    expect(mocks.startSession).toHaveBeenCalledTimes(1);
+
+    // Retry: the idempotency key replays to the same run, which now carries
+    // the attached session — the existing session is returned, no second
+    // provider session, no second run.
+    mocks.createActionRun.mockResolvedValue({ ...run, browserSessionId: session.id });
+    const second = await POST(request({ action: "start", idempotencyKey: "start-abc" }));
+    const body = await json(second);
+
+    expect(second.status).toBe(200);
+    expect(body.actionRunId).toBe("run-one");
+    expect(body.session).toEqual(session);
+    expect(mocks.startSession).toHaveBeenCalledTimes(1);
+    expect(mocks.startBrowserActionRun).not.toHaveBeenCalled();
+    expect(mocks.attachBrowserSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows a browser start on a paused ActionRun (resume path)", async () => {
+    mocks.getActionRun.mockResolvedValue({ ...run, status: "paused" });
+
+    const response = await POST(request({ action: "start", actionRunId: "run-one" }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.startSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a fallback start with an unowned projectId", async () => {
+    mocks.getProject.mockResolvedValue(null);
+
+    const response = await POST(request({ action: "start", projectId: "foreign-project" }));
+
+    expect(response.status).toBe(404);
+    expect(mocks.startBrowserActionRun).not.toHaveBeenCalled();
+    expect(mocks.startSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects a fallback start with an unowned conversationId", async () => {
+    mocks.getConversation.mockResolvedValue(null);
+
+    const response = await POST(request({ action: "start", conversationId: "foreign-conversation" }));
+
+    expect(response.status).toBe(404);
+    expect(mocks.startBrowserActionRun).not.toHaveBeenCalled();
+    expect(mocks.startSession).not.toHaveBeenCalled();
+  });
+
+  it("reconciles a dead attached session deliberately before refusing", async () => {
+    mocks.getActionRun.mockResolvedValue({ ...run, browserSessionId: session.id });
+    mocks.getSession.mockResolvedValue({ ...session, status: "closed", closedAt: "2026-09-23T00:05:00.000Z" });
+
+    const response = await POST(request({ action: "start", actionRunId: "run-one" }));
+    const body = await json(response);
+
+    expect(response.status).toBe(409);
+    expect(body.code).toBe("ACTION_BROWSER_SESSION_DEAD");
+    expect(mocks.failBrowserActionRun).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "run-one" }),
+      expect.any(Error),
+      "BROWSER_SESSION_DEAD",
+    );
+    expect(mocks.startSession).not.toHaveBeenCalled();
+  });
+
+  it("flags runtime degradation when the start fails and the failure cannot be persisted", async () => {
+    mocks.startSession.mockRejectedValue(new Error("provider token secret=hidden"));
+    mocks.failBrowserActionRun.mockRejectedValue(new Error("database unavailable"));
+
+    const response = await POST(request({ action: "start" }));
+    const body = await json(response);
+
+    expect(response.status).toBe(500);
+    expect(body.code).toBe("ACTION_RUNTIME_PERSISTENCE_FAILED");
+    expect(body.runtimeDegraded).toBe(true);
+    expect(JSON.stringify(body)).not.toContain("provider token");
+  });
+
+  it.each([
+    ["close", 123],
+    ["close", { id: "x" }],
+    ["close", "   "],
+    ["screenshot", 123],
+    ["screenshot", { id: "x" }],
+    ["screenshot", ""],
+  ] as const)("rejects invalid sessionId for %s (%j) with 400", async (action, sessionId) => {
+    const response = await POST(request({ action, sessionId }));
+    expect(response.status).toBe(400);
+    expect(mocks.closeSession).not.toHaveBeenCalled();
+    expect(mocks.takeScreenshot).not.toHaveBeenCalled();
   });
 });
 
@@ -343,6 +449,7 @@ describe("GET /api/litt/browser/session", () => {
     mocks.dbGetActions.mockResolvedValue([{ id: "action-one" }]);
     mocks.resolveBrowserActionRun.mockResolvedValue({ ...run, status: "working", browserSessionId: session.id });
     mocks.dbGetActiveSessionsStrict.mockResolvedValue([session]);
+    mocks.listActionRunsForBrowserSessions.mockResolvedValue([{ ...run, browserSessionId: session.id }]);
   });
 
   it("returns Action Runtime recovery truth for a session reconnect", async () => {
@@ -366,5 +473,17 @@ describe("GET /api/litt/browser/session", () => {
     expect(response.status).toBe(503);
     expect(body.code).toBe("BROWSER_SESSION_RECOVERY_FAILED");
     expect(JSON.stringify(body)).not.toContain("database unavailable");
+  });
+
+  it("exposes the attached ActionRun truth per session in the list response", async () => {
+    const response = await GET(new NextRequest("http://localhost/api/litt/browser/session"));
+    const body = await json(response);
+
+    expect(response.status).toBe(200);
+    expect(body.sessions).toEqual([session]);
+    expect(mocks.listActionRunsForBrowserSessions).toHaveBeenCalledWith("user-one", ["session-one"]);
+    expect(body.actionRuns).toEqual([
+      { sessionId: "session-one", actionRunId: "run-one", runStatus: "starting", currentActivity: "Starting browser session" },
+    ]);
   });
 });

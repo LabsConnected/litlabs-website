@@ -18,14 +18,18 @@ import { preflightBrowserStart } from "@/lib/litt-intelligence/browser-billing";
 import { mapBrowserFailure } from "@/lib/action-runtime/safe-errors";
 import {
   attachBrowserSession,
+  createActionRun,
   failBrowserActionRun,
   getActionRun,
+  listActionRunsForBrowserSessions,
   markBrowserSessionControl,
   markBrowserSessionPaused,
   recordBrowserSessionClosed,
   resolveBrowserActionRun,
   startBrowserActionRun,
 } from "@/lib/action-runtime";
+import { getProject } from "@/lib/projects/project-repository";
+import { getConversation } from "@/lib/studio/conversation-service";
 import { isTerminalActionRunStatus } from "@/lib/action-runtime/state-machine";
 
 export const runtime = "nodejs";
@@ -86,7 +90,7 @@ function runtimeAfterExecutionResponse(
   actionRunId: string | null,
   error: unknown,
 ): NextResponse {
-  const failure = mapBrowserFailure(error, "RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION");
+  const failure = mapBrowserFailure(error, "ACTION_RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION");
   console.error("[browser-session] runtime persistence failed after provider execution", {
     code: failure.code,
     operation,
@@ -96,7 +100,7 @@ function runtimeAfterExecutionResponse(
   });
   return NextResponse.json(
     {
-      code: "RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION",
+      code: "ACTION_RUNTIME_PERSISTENCE_FAILED_AFTER_EXECUTION",
       message: "The browser action completed, but LiTT couldn't persist the task state.",
       operation,
       actionRunId,
@@ -140,7 +144,21 @@ async function handler(req: NextRequest) {
       }
 
       const sessions = await dbGetActiveSessionsStrict(userId);
-      return NextResponse.json({ sessions });
+      // Recovery truth per session: the ActionRun each browser resource is
+      // attached to, so reconnecting clients restore server state instead of
+      // reconstructing it from BrowserSession alone.
+      const runs = await listActionRunsForBrowserSessions(userId, sessions.map((s) => s.id));
+      const runBySession = new Map(runs.map((r) => [r.browserSessionId, r]));
+      const actionRuns = sessions.map((s) => {
+        const r = runBySession.get(s.id);
+        return {
+          sessionId: s.id,
+          actionRunId: r?.id ?? null,
+          runStatus: r?.status ?? null,
+          currentActivity: r?.currentActivity ?? null,
+        };
+      });
+      return NextResponse.json({ sessions, actionRuns });
     } catch (err) {
       const failure = mapBrowserFailure(err, "BROWSER_SESSION_RECOVERY_FAILED");
       console.error("[browser-session] recovery read failed", { code: failure.code, userId });
@@ -187,31 +205,73 @@ async function handler(req: NextRequest) {
         const task = typeof body.task === "string" ? body.task : undefined;
         const requestedProjectId = typeof body.projectId === "string" ? body.projectId : undefined;
         const requestedConversationId = typeof body.conversationId === "string" ? body.conversationId : undefined;
+        const idempotencyKey = stringField(body, "idempotencyKey") ?? undefined;
         const model = typeof body.model === "string" ? body.model : undefined;
         const useProxies = body.useProxies === true;
+
+        // Client-supplied tenant associations are untrusted: they may only
+        // flow into a run/session after server-side ownership verification.
+        // (Canonical callers derive these from the ActionRun itself.)
+        if (requestedProjectId && !(await getProject(requestedProjectId, userId))) {
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
+        }
+        if (requestedConversationId && !(await getConversation(requestedConversationId, userId))) {
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
+        }
 
         let actionRun = actionRunId ? await getActionRun(actionRunId, userId) : null;
         if (actionRunId && !actionRun) {
           return NextResponse.json({ error: "Action run not found" }, { status: 404 });
         }
         if (!actionRun) {
-          actionRun = await startBrowserActionRun({
-            userId,
-            projectId: requestedProjectId ?? null,
-            conversationId: requestedConversationId ?? null,
-          });
+          // Standalone start fallback: an explicit idempotency key makes a
+          // retried request return the same run instead of provisioning a
+          // second run (and a second billable browser session).
+          actionRun = idempotencyKey
+            ? await createActionRun({
+                userId,
+                kind: "browser",
+                projectId: requestedProjectId ?? null,
+                conversationId: requestedConversationId ?? null,
+                idempotencyKey,
+              })
+            : await startBrowserActionRun({
+                userId,
+                projectId: requestedProjectId ?? null,
+                conversationId: requestedConversationId ?? null,
+              });
         }
         if (isTerminalActionRunStatus(actionRun.status)) {
           return NextResponse.json({ error: "Action run is terminal", code: "ACTION_RUN_TERMINAL" }, { status: 409 });
         }
 
+        // Start idempotency for the canonical path: the run already owns a
+        // browser session — return it (retry) or reconcile a dead attachment.
         if (actionRun.browserSessionId) {
           const existingSession = await getSession(actionRun.browserSessionId, userId);
           if (isReusableBrowserSession(existingSession)) {
             return NextResponse.json({ session: existingSession, actionRunId: actionRun.id, actionRun });
           }
+          try {
+            await failBrowserActionRun(
+              actionRun,
+              new Error("Attached browser session is no longer active"),
+              "BROWSER_SESSION_DEAD",
+            );
+          } catch (reconcileError) {
+            console.error("[browser-session] dead-session reconcile failed", {
+              userId,
+              actionRunId: actionRun.id,
+              browserSessionId: actionRun.browserSessionId,
+              errorType: reconcileError instanceof Error ? reconcileError.name : typeof reconcileError,
+            });
+          }
           return NextResponse.json(
-            { error: "Action run is attached to a browser session that is not active", code: "ACTION_BROWSER_SESSION_MISMATCH" },
+            {
+              error: "Action run is attached to a browser session that is not active",
+              code: "ACTION_BROWSER_SESSION_DEAD",
+              actionRunId: actionRun.id,
+            },
             { status: 409 },
           );
         }
@@ -269,14 +329,28 @@ async function handler(req: NextRequest) {
             useProxies,
           });
         } catch (error) {
-          await failBrowserActionRun(actionRun, error, "BROWSER_SESSION_START_FAILED").catch((persistenceError) => {
+          try {
+            await failBrowserActionRun(actionRun, error, "BROWSER_SESSION_START_FAILED");
+          } catch (persistenceError) {
+            // Provider start failed AND the failure could not be persisted —
+            // the durable run does not reflect reality. Flag reconciliation
+            // explicitly instead of letting the client trust the run state.
             const persistenceFailure = mapBrowserFailure(persistenceError, "ACTION_RUNTIME_PERSISTENCE_FAILED");
             console.error("[action-runtime] browser start failure could not be persisted", {
               code: persistenceFailure.code,
               userId,
-              actionRunId: actionRun?.id,
+              actionRunId: actionRun.id,
             });
-          });
+            return NextResponse.json(
+              {
+                code: "ACTION_RUNTIME_PERSISTENCE_FAILED",
+                message: "The browser couldn't start, and LiTT couldn't record the failure — the task needs reconciliation.",
+                actionRunId: actionRun.id,
+                runtimeDegraded: true,
+              },
+              { status: 500 },
+            );
+          }
           throw error;
         }
 
