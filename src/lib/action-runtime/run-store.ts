@@ -208,6 +208,28 @@ export async function transitionActionRun(
   return mapRun(data as ActionRunRow);
 }
 
+/**
+ * Controlled legacy/recovery fallback: latest non-terminal run for a
+ * conversation. Conversation ID is NOT run identity — callers must prefer an
+ * explicit actionRunId or the attached session -> run association.
+ */
+export async function findActiveActionRunForConversation(
+  userId: string,
+  conversationId: string,
+): Promise<ActionRun | null> {
+  const { data, error } = await adminOrThrow()
+    .from("action_runs")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("conversation_id", conversationId)
+    .not("status", "in", "(completed,failed,cancelled)")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw mapDatabaseError(error, "PERSISTENCE_UNAVAILABLE");
+  return data ? mapRun(data as ActionRunRow) : null;
+}
+
 export async function getActionRunByBrowserSession(userId: string, browserSessionId: string): Promise<ActionRun | null> {
   const { data, error } = await adminOrThrow()
     .from("action_runs")

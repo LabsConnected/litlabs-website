@@ -5,7 +5,10 @@ import {
   ActionRuntimeError,
   getActionRun,
   requestActionRunCancellation,
+  transitionActionRun,
 } from "@/lib/action-runtime";
+import { isTerminalActionRunStatus } from "@/lib/action-runtime/state-machine";
+import { closeSession } from "@/lib/litt-intelligence/browser-session-manager";
 import { requestExecutionCancellation } from "@/lib/studio/execution-registry";
 
 export const runtime = "nodejs";
@@ -27,16 +30,44 @@ async function handler(req: NextRequest, context: RouteContext) {
     : null;
 
   try {
-    const updated = await requestActionRunCancellation(runId, userId);
+    const requested = await requestActionRunCancellation(runId, userId);
     let executionStatus: string | null = null;
     if (run.conversationId && clientRequestId) {
       const result = requestExecutionCancellation(run.conversationId, userId, clientRequestId);
       if (result.status === "forbidden") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       executionStatus = result.status;
     }
-    return NextResponse.json({ run: updated, cancellationRequested: true, executionStatus });
+
+    const updated = isTerminalActionRunStatus(requested.status)
+      ? requested
+      : await transitionActionRun(runId, userId, "cancelled", {
+          cancellationRequestedAt: requested.cancellationRequestedAt ?? new Date().toISOString(),
+          currentActivity: "Task cancelled by user",
+        });
+
+    let browserSessionClosed: boolean | null = null;
+    if (run.browserSessionId) {
+      try {
+        browserSessionClosed = await closeSession(run.browserSessionId, userId);
+      } catch (error) {
+        browserSessionClosed = false;
+        console.error("[action-runs] task cancelled but browser cleanup failed", {
+          userId,
+          actionRunId: runId,
+          browserSessionId: run.browserSessionId,
+          errorType: error instanceof Error ? error.name : typeof error,
+        });
+      }
+    }
+
+    return NextResponse.json({
+      run: updated,
+      cancellationRequested: true,
+      executionStatus,
+      browserSessionClosed,
+    });
   } catch (error) {
-    if (error instanceof ActionRuntimeError && error.code === "NOT_FOUND") {
+    if (error instanceof ActionRuntimeError && (error.code === "NOT_FOUND" || error.code === "ACTION_RUN_NOT_FOUND")) {
       return NextResponse.json({ error: "Action run not found" }, { status: 404 });
     }
     return NextResponse.json(

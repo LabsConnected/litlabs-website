@@ -54,6 +54,7 @@ async function resolveRunForRequest(
   userId: string,
   actionRunId: string | null,
   sessionId: string,
+  options: { allowTerminal?: boolean } = {},
 ) {
   const run = await resolveBrowserActionRun(userId, {
     actionRunId: actionRunId ?? undefined,
@@ -65,7 +66,7 @@ async function resolveRunForRequest(
   if (run?.browserSessionId && run.browserSessionId !== sessionId) {
     return { error: NextResponse.json({ error: "Action run is not attached to this session" }, { status: 409 }) };
   }
-  if (run && isTerminalActionRunStatus(run.status)) {
+  if (run && !options.allowTerminal && isTerminalActionRunStatus(run.status)) {
     return { error: NextResponse.json({ error: "Action run is terminal", code: "ACTION_RUN_TERMINAL" }, { status: 409 }) };
   }
   if (actionRunId && run?.browserSessionId !== sessionId) {
@@ -189,6 +190,32 @@ async function handler(req: NextRequest) {
         const model = typeof body.model === "string" ? body.model : undefined;
         const useProxies = body.useProxies === true;
 
+        let actionRun = actionRunId ? await getActionRun(actionRunId, userId) : null;
+        if (actionRunId && !actionRun) {
+          return NextResponse.json({ error: "Action run not found" }, { status: 404 });
+        }
+        if (!actionRun) {
+          actionRun = await startBrowserActionRun({
+            userId,
+            projectId: requestedProjectId ?? null,
+            conversationId: requestedConversationId ?? null,
+          });
+        }
+        if (isTerminalActionRunStatus(actionRun.status)) {
+          return NextResponse.json({ error: "Action run is terminal", code: "ACTION_RUN_TERMINAL" }, { status: 409 });
+        }
+
+        if (actionRun.browserSessionId) {
+          const existingSession = await getSession(actionRun.browserSessionId, userId);
+          if (isReusableBrowserSession(existingSession)) {
+            return NextResponse.json({ session: existingSession, actionRunId: actionRun.id, actionRun });
+          }
+          return NextResponse.json(
+            { error: "Action run is attached to a browser session that is not active", code: "ACTION_BROWSER_SESSION_MISMATCH" },
+            { status: 409 },
+          );
+        }
+
         let activeSessionCount: number;
         try {
           activeSessionCount = (await dbGetActiveSessionsStrict(userId)).length;
@@ -202,27 +229,24 @@ async function handler(req: NextRequest) {
         const preflight = await preflightBrowserStart(userId, activeSessionCount);
         if (!preflight.ok) {
           const status =
-            preflight.error === "insufficient_bits" ||
-            preflight.error === "spend_ceiling_exceeded" ||
-            preflight.error === "billing_unavailable"
+            preflight.error === "insufficient_bits" || preflight.error === "spend_ceiling_exceeded"
               ? 402
-              : 429;
+              : preflight.error === "billing_unavailable"
+                ? 503
+                : 429;
+          try {
+            await failBrowserActionRun(actionRun, new Error(preflight.message), "BROWSER_SESSION_START_DENIED");
+          } catch (persistenceError) {
+            console.error("[action-runtime] preflight denial could not be persisted", {
+              runId: actionRun?.id,
+              userId,
+              errorType: persistenceError instanceof Error ? persistenceError.name : typeof persistenceError,
+            });
+          }
           return NextResponse.json(
             { error: preflight.message, code: preflight.error },
             { status },
           );
-        }
-
-        let actionRun = actionRunId ? await getActionRun(actionRunId, userId) : null;
-        if (actionRunId && !actionRun) {
-          return NextResponse.json({ error: "Action run not found" }, { status: 404 });
-        }
-        if (!actionRun) {
-          actionRun = await startBrowserActionRun({
-            userId,
-            projectId: requestedProjectId ?? null,
-            conversationId: requestedConversationId ?? null,
-          });
         }
 
         try {
@@ -256,8 +280,41 @@ async function handler(req: NextRequest) {
           throw error;
         }
 
-        const linkedRun = await attachBrowserSession(actionRun, session);
-        return NextResponse.json({ session, actionRunId: linkedRun.id });
+        try {
+          const linkedRun = await attachBrowserSession(actionRun, session);
+          return NextResponse.json({ session, actionRunId: linkedRun.id });
+        } catch (attachError) {
+          let cleanupFailed = false;
+          try {
+            await closeSession(session.id, userId);
+          } catch (cleanupError) {
+            cleanupFailed = true;
+            const cleanupFailure = mapBrowserFailure(cleanupError, "BROWSER_SESSION_CLEANUP_FAILED");
+            console.error("[browser-session] attach failed and session cleanup failed", {
+              code: cleanupFailure.code,
+              userId,
+              actionRunId: actionRun.id,
+              sessionId: session.id,
+            });
+          }
+          const failure = mapBrowserFailure(attachError, "ACTION_RUNTIME_PERSISTENCE_FAILED");
+          console.error("[browser-session] attach failed; provider session cleanup attempted", {
+            code: failure.code,
+            userId,
+            actionRunId: actionRun.id,
+            sessionId: session.id,
+            cleanupFailed,
+          });
+          return NextResponse.json(
+            {
+              code: "ACTION_RUNTIME_PERSISTENCE_FAILED",
+              message: "The browser started, but LiTT couldn't attach it to the task state.",
+              actionRunId: actionRun.id,
+              sessionCleanup: cleanupFailed ? "failed" : "closed",
+            },
+            { status: 500 },
+          );
+        }
       }
 
       // ── Pause agent control ────────────────────────────────────
@@ -269,8 +326,12 @@ async function handler(req: NextRequest) {
 
         const session = await pauseSession(sessionId, userId);
         if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
-        const run = await markBrowserSessionPaused(userId, session, resolved.run?.id);
-        return NextResponse.json({ session, actionRunId: run?.id ?? resolved.run?.id ?? null });
+        try {
+          const run = await markBrowserSessionPaused(userId, session, resolved.run?.id);
+          return NextResponse.json({ session, actionRunId: run?.id ?? resolved.run?.id ?? null });
+        } catch (error) {
+          return runtimeAfterExecutionResponse("pause", userId, sessionId, resolved.run?.id ?? actionRunId, error);
+        }
       }
 
       // ── Take control (human) ───────────────────────────────────
@@ -282,8 +343,12 @@ async function handler(req: NextRequest) {
 
         const session = await takeControl(sessionId, userId);
         if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
-        const run = await markBrowserSessionControl(userId, session, resolved.run?.id);
-        return NextResponse.json({ session, actionRunId: run?.id ?? resolved.run?.id ?? null });
+        try {
+          const run = await markBrowserSessionControl(userId, session, resolved.run?.id);
+          return NextResponse.json({ session, actionRunId: run?.id ?? resolved.run?.id ?? null });
+        } catch (error) {
+          return runtimeAfterExecutionResponse("take_control", userId, sessionId, resolved.run?.id ?? actionRunId, error);
+        }
       }
 
       // ── Return control to agent ────────────────────────────────
@@ -295,15 +360,19 @@ async function handler(req: NextRequest) {
 
         const session = await returnControl(sessionId, userId);
         if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
-        const run = await markBrowserSessionControl(userId, session, resolved.run?.id);
-        return NextResponse.json({ session, actionRunId: run?.id ?? resolved.run?.id ?? null });
+        try {
+          const run = await markBrowserSessionControl(userId, session, resolved.run?.id);
+          return NextResponse.json({ session, actionRunId: run?.id ?? resolved.run?.id ?? null });
+        } catch (error) {
+          return runtimeAfterExecutionResponse("return_control", userId, sessionId, resolved.run?.id ?? actionRunId, error);
+        }
       }
 
       // ── Close session ──────────────────────────────────────────
       case "close": {
         const sessionId = stringField(body, "sessionId");
         if (!sessionId) return NextResponse.json({ error: body.sessionId === undefined ? "Missing sessionId" : "Invalid sessionId" }, { status: 400 });
-        const resolved = await resolveRunForRequest(userId, actionRunId, sessionId);
+        const resolved = await resolveRunForRequest(userId, actionRunId, sessionId, { allowTerminal: true });
         if (resolved.error) return resolved.error;
         const owned = await getSession(sessionId, userId);
         if (!owned) return NextResponse.json({ error: "Session not found" }, { status: 404 });
@@ -311,14 +380,23 @@ async function handler(req: NextRequest) {
         const closed = await closeSession(sessionId, userId);
         if (!closed) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
-        let run = resolved.run;
-        if (run && !["completed", "failed", "cancelled"].includes(run.status)) {
-          await requestActionRunCancellation(run.id, userId);
-          run = await transitionActionRun(run.id, userId, "cancelled", {
-            currentActivity: "Browser session stopped",
-          });
+        const run = resolved.run;
+        if (run) {
+          try {
+            await recordBrowserSessionClosed(
+              { actionRunId: run.id, userId, browserSessionId: sessionId },
+              "Browser session closed",
+            );
+          } catch (error) {
+            return runtimeAfterExecutionResponse("close", userId, sessionId, run.id, error);
+          }
         }
-        return NextResponse.json({ success: true, actionRunId: run?.id ?? null, run: run ?? null });
+        return NextResponse.json({
+          success: true,
+          actionRunId: run?.id ?? null,
+          run: run ?? null,
+          runStatus: run?.status ?? null,
+        });
       }
 
       // ── Screenshot ─────────────────────────────────────────────
@@ -347,10 +425,7 @@ async function handler(req: NextRequest) {
       code: failure.code,
       userId,
     });
-    return NextResponse.json(
-      { code: failure.code, message: failure.message },
-      { status: 500 },
-    );
+    return safeErrorResponse(err, "BROWSER_SESSION_REQUEST_FAILED", 500);
   }
 }
 

@@ -116,11 +116,30 @@ export interface CreateActionRunInput {
   browserSessionId?: string | null;
 }
 
+/**
+ * Identity of the user task currently executing. The orchestrator creates or
+ * resolves the ActionRun ONCE and carries this context through every tool
+ * call; low-level handlers must never invent or rediscover a run.
+ */
 export interface ActionExecutionContext {
   actionRunId: string;
   userId: string;
+  conversationId?: string;
+  projectId?: string;
+}
+
+/**
+ * ActionExecutionContext narrowed to an attached browser session resource.
+ * browserSessionId is the resource binding (session -> ActionRun.id), not the
+ * run identity — actionRunId remains the identity.
+ */
+export interface BrowserActionContext extends ActionExecutionContext {
   browserSessionId: string;
 }
+
+export type BrowserToolExecutionResult =
+  | { outcome: "completed" }
+  | { outcome: "failed"; error?: unknown };
 
 export class ActionRuntimeError extends Error {
   constructor(

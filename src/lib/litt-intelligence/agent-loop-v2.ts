@@ -240,7 +240,6 @@ function withUserScopeForBrowserTools(
   inputs: Record<string, unknown>,
   userId: string | undefined,
   conversationId?: string | undefined,
-  actionRunId?: string | undefined,
 ): Record<string, unknown> {
   if (userId && toolId.startsWith("browser.")) {
     const scoped: Record<string, unknown> = { ...inputs, userId };
@@ -250,7 +249,6 @@ function withUserScopeForBrowserTools(
     if (toolId === "browser.start_session" && conversationId) {
       scoped.conversationId = conversationId;
     }
-    if (actionRunId) scoped.actionRunId = actionRunId;
     return scoped;
   }
   return inputs;
@@ -814,7 +812,7 @@ export async function runAgentLoopV2(
 
       try {
         // Use the registry's execute method, passing transport for V2 handlers
-        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId, cfg.conversationId, cfg.actionRunId), {
+        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId, cfg.conversationId), {
           hasApproval: !permResult.requiresApproval,
           availableCapabilities,
           transport,
@@ -1908,7 +1906,7 @@ export async function resumeAgentLoopV2(
 
       let result: ToolCallResult;
       try {
-        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId, cfg.conversationId, cfg.actionRunId), {
+        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId, cfg.conversationId), {
           hasApproval: !permResult.requiresApproval,
           availableCapabilities,
           transport,

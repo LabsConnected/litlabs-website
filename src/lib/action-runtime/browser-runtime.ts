@@ -2,31 +2,49 @@ import "server-only";
 
 import {
   attachBrowserSessionToRun,
+  findActiveActionRunForConversation,
   findOrCreateBrowserActionRun,
   getActionRun,
   getActionRunByBrowserSession,
+  patchActionRun,
   recordActionEventActivity,
   transitionActionRun,
   transitionActionRunEventActivity,
 } from "./run-store";
 import { canTransitionActionRun, isTerminalActionRunStatus } from "./state-machine";
 import { mapBrowserFailure } from "./safe-errors";
-import { ActionRuntimeError, type ActionExecutionContext, type ActionRun, type CreateActionRunInput } from "./types";
+import {
+  ActionRuntimeError,
+  type ActionRun,
+  type BrowserActionContext,
+  type BrowserToolExecutionResult,
+  type CreateActionRunInput,
+} from "./types";
 import type { BrowserSession } from "@/lib/litt-intelligence/browser-session-manager";
 
-/** Legacy/recovery-only lookup. Canonical execution must carry actionRunId. */
+/**
+ * Legacy/recovery-only lookup. Canonical execution carries an explicit
+ * actionRunId in its ActionExecutionContext; this exists so reconnect and
+ * pre-runtime callers can rediscover a run through the durable
+ * session -> run association or, as a last resort, the conversation.
+ * It must never be the primary identity mechanism for new work.
+ */
 export async function findLegacyBrowserActionRunForRecovery(
   userId: string,
   options: { conversationId?: string; browserSessionId?: string },
 ): Promise<ActionRun | null> {
   if (options.browserSessionId) return getActionRunByBrowserSession(userId, options.browserSessionId);
+  if (options.conversationId) return findActiveActionRunForConversation(userId, options.conversationId);
   return null;
 }
 
-/** @deprecated Only use this for legacy recovery paths. */
+/**
+ * @deprecated Boundary/recovery fallback only. Never call from low-level
+ * browser tool handlers — run identity comes from ActionExecutionContext.
+ */
 export const findActiveBrowserActionRun = findLegacyBrowserActionRunForRecovery;
 
-function assertBrowserRun(run: ActionRun | null, context: ActionExecutionContext): ActionRun {
+function assertBrowserRun(run: ActionRun | null, context: BrowserActionContext): ActionRun {
   if (!run) throw new ActionRuntimeError("Action run not found", "ACTION_RUN_NOT_FOUND");
   if (isTerminalActionRunStatus(run.status)) {
     throw new ActionRuntimeError("Action run is terminal", "ACTION_RUN_TERMINAL");
@@ -37,10 +55,16 @@ function assertBrowserRun(run: ActionRun | null, context: ActionExecutionContext
   return run;
 }
 
-async function getBrowserRun(context: ActionExecutionContext): Promise<ActionRun> {
+async function getBrowserRun(context: BrowserActionContext): Promise<ActionRun> {
   return assertBrowserRun(await getActionRun(context.actionRunId, context.userId), context);
 }
 
+/**
+ * Boundary fallback only: creates the outer browser ActionRun when a caller
+ * genuinely has no parent run (legacy entry points, recovery). Callers that
+ * already hold an ActionExecutionContext must use that run instead — one user
+ * task is one ActionRun, and browser tool calls are events inside it.
+ */
 export async function startBrowserActionRun(
   input: Omit<CreateActionRunInput, "kind">,
 ): Promise<ActionRun> {
@@ -63,7 +87,7 @@ export async function attachBrowserSession(run: ActionRun, session: BrowserSessi
 
 /** Records browser failure without terminating composite/agent/studio parents. */
 export async function recordBrowserFailure(
-  context: ActionExecutionContext,
+  context: BrowserActionContext,
   error: unknown,
   fallbackCode = "BROWSER_ACTION_FAILED",
 ): Promise<ActionRun> {
@@ -97,7 +121,14 @@ export async function failBrowserActionRun(run: ActionRun, error: unknown, fallb
   });
 }
 
-export async function recordBrowserToolStarted(context: ActionExecutionContext, toolId: string): Promise<ActionRun> {
+/**
+ * Records `browser.action.started` inside the supplied run. The context's
+ * actionRunId is the run identity — it is required, never discovered.
+ * Persistence failures propagate: a browser action that cannot be recorded
+ * is a runtime-truth failure, not telemetry.
+ */
+export async function recordBrowserToolStarted(context: BrowserActionContext & { toolId: string }): Promise<ActionRun> {
+  const { toolId } = context;
   const run = await getBrowserRun(context);
   const message = browserActivityForTool(toolId, "started");
   if (run.status === "paused" || run.status === "starting" || run.status === "queued") {
@@ -134,7 +165,8 @@ export async function recordBrowserToolStarted(context: ActionExecutionContext, 
   });
 }
 
-export async function recordBrowserToolCompleted(context: ActionExecutionContext, toolId: string): Promise<ActionRun> {
+async function recordBrowserToolCompleted(context: BrowserActionContext & { toolId: string }): Promise<ActionRun> {
+  const { toolId } = context;
   const run = await getBrowserRun(context);
   return recordActionEventActivity({
     runId: run.id,
@@ -145,7 +177,8 @@ export async function recordBrowserToolCompleted(context: ActionExecutionContext
   });
 }
 
-export async function recordBrowserToolFailed(context: ActionExecutionContext, toolId: string, error: unknown): Promise<ActionRun> {
+async function recordBrowserToolFailed(context: BrowserActionContext & { toolId: string }, error: unknown): Promise<ActionRun> {
+  const { toolId } = context;
   const run = await getBrowserRun(context);
   const failure = mapBrowserFailure(error, "BROWSER_ACTION_FAILED");
   return recordActionEventActivity({
@@ -157,16 +190,39 @@ export async function recordBrowserToolFailed(context: ActionExecutionContext, t
   });
 }
 
-/** @deprecated Use recordBrowserToolCompleted/Failed; result.success is not an execution outcome. */
+/**
+ * Records the finished outcome of a browser tool call inside the supplied
+ * run. `result.outcome` is the actual execution outcome — it is never
+ * inferred from a handler's success-shaped payload. Persistence failures
+ * propagate so callers can surface or mark the run degraded.
+ */
 export async function recordBrowserToolExecution(
-  context: ActionExecutionContext,
-  toolId: string,
-  outcome: "completed" | "failed",
-  error?: unknown,
+  context: BrowserActionContext & { toolId: string; result: BrowserToolExecutionResult },
 ): Promise<ActionRun> {
-  return outcome === "completed"
-    ? recordBrowserToolCompleted(context, toolId)
-    : recordBrowserToolFailed(context, toolId, error ?? new Error("Browser action failed"));
+  return context.result.outcome === "completed"
+    ? recordBrowserToolCompleted(context)
+    : recordBrowserToolFailed(context, context.result.error ?? new Error("Browser action failed"));
+}
+
+/**
+ * Best-effort degradation marker: when durable event persistence fails after
+ * the browser action already executed, the run is stamped with a failure code
+ * so run state does not claim clean progress. Never throws — the underlying
+ * persistence failure is the caller's to surface.
+ */
+export async function markBrowserRunPersistenceDegraded(context: BrowserActionContext): Promise<void> {
+  try {
+    await patchActionRun(context.actionRunId, context.userId, {
+      failureCode: "ACTION_RUNTIME_PERSISTENCE_FAILED",
+      failureMessage: "Durable Action Runtime persistence failed during browser execution",
+    });
+  } catch (error) {
+    console.error("[action-runtime] could not mark run persistence-degraded", {
+      runId: context.actionRunId,
+      userId: context.userId,
+      errorType: error instanceof Error ? error.name : typeof error,
+    });
+  }
 }
 
 export async function resolveBrowserActionRun(
@@ -182,7 +238,7 @@ export async function resolveBrowserActionRun(
 export async function markBrowserSessionPaused(userId: string, session: BrowserSession, actionRunId?: string): Promise<ActionRun | null> {
   const run = await resolveBrowserActionRun(userId, { actionRunId, browserSessionId: session.id });
   if (!run) return actionRunId ? Promise.reject(new ActionRuntimeError("Action run not found", "ACTION_RUN_NOT_FOUND")) : null;
-  const context = { actionRunId: run.id, userId, browserSessionId: session.id } satisfies ActionExecutionContext;
+  const context = { actionRunId: run.id, userId, browserSessionId: session.id } satisfies BrowserActionContext;
   if (actionRunId) assertBrowserRun(run, context);
   return transitionActionRunEventActivity({
     runId: context.actionRunId,
@@ -197,7 +253,7 @@ export async function markBrowserSessionPaused(userId: string, session: BrowserS
 export async function markBrowserSessionControl(userId: string, session: BrowserSession, actionRunId?: string): Promise<ActionRun | null> {
   const run = await resolveBrowserActionRun(userId, { actionRunId, browserSessionId: session.id });
   if (!run) return actionRunId ? Promise.reject(new ActionRuntimeError("Action run not found", "ACTION_RUN_NOT_FOUND")) : null;
-  const context = { actionRunId: run.id, userId, browserSessionId: session.id } satisfies ActionExecutionContext;
+  const context = { actionRunId: run.id, userId, browserSessionId: session.id } satisfies BrowserActionContext;
   if (actionRunId) assertBrowserRun(run, context);
   const human = session.controller === "human";
   const next = human ? "user_controlling" : "paused";
@@ -213,10 +269,14 @@ export async function markBrowserSessionControl(userId: string, session: Browser
 }
 
 export async function recordBrowserSessionClosed(
-  context: ActionExecutionContext,
+  context: BrowserActionContext,
   message = "Browser session closed",
 ): Promise<ActionRun> {
-  const run = await getBrowserRun(context);
+  const run = await getActionRun(context.actionRunId, context.userId);
+  if (!run) throw new ActionRuntimeError("Action run not found", "ACTION_RUN_NOT_FOUND");
+  if (run.browserSessionId !== context.browserSessionId) {
+    throw new ActionRuntimeError("Action run is not attached to this browser session", "ACTION_BROWSER_SESSION_MISMATCH");
+  }
   return recordActionEventActivity({
     runId: run.id,
     userId: context.userId,
