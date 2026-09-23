@@ -23,6 +23,23 @@ describe("Action Runtime state machine", () => {
     expect(canTransitionActionRun("queued", "failed")).toBe(true);
   });
 
+  it("rejects skipped-stage transitions that would falsify history", () => {
+    // queued -> waiting_for_user is forbidden: a run that never executed
+    // cannot be waiting on the user mid-work (same rule as queued -> paused).
+    expect(canTransitionActionRun("queued", "waiting_for_user")).toBe(false);
+    expect(canTransitionActionRun("queued", "user_controlling")).toBe(false);
+    // Completion must flow through executed work, never straight from
+    // queued/starting — otherwise "completed" means nothing.
+    expect(canTransitionActionRun("queued", "completed")).toBe(false);
+    expect(canTransitionActionRun("starting", "completed")).toBe(false);
+    // Terminal -> terminal is rejected: completed truth cannot become
+    // failed or cancelled after the fact (and vice versa).
+    expect(canTransitionActionRun("completed", "failed")).toBe(false);
+    expect(canTransitionActionRun("completed", "cancelled")).toBe(false);
+    expect(canTransitionActionRun("failed", "cancelled")).toBe(false);
+    expect(canTransitionActionRun("cancelled", "failed")).toBe(false);
+  });
+
   it("rejects transitions out of terminal states", () => {
     expect(() => assertActionRunTransition("completed", "working")).toThrow(/Cannot transition/);
     expect(canTransitionActionRun("failed", "working")).toBe(false);
@@ -161,14 +178,34 @@ describe("event payload safety", () => {
       tokenCount: 42,
       cookiePolicy: "strict",
       secretLabel: "public label",
+      secretName: "display name",
       sessionId: "session-one",
       tokensUsed: 7,
     })).toEqual({
       tokenCount: 42,
       cookiePolicy: "strict",
       secretLabel: "public label",
+      secretName: "display name",
       sessionId: "session-one",
       tokensUsed: 7,
+    });
+  });
+
+  it("handles nulls, primitives, nested objects, and arrays of primitives", () => {
+    expect(sanitizeActionPayload({
+      nothing: null,
+      count: 3,
+      ok: true,
+      deep: { level: { token: "nested-secret", keep: "yes" } },
+      list: ["a", 1, false],
+      objects: [{ apiKey: "array-secret" }, { safe: "v" }],
+    })).toEqual({
+      nothing: null,
+      count: 3,
+      ok: true,
+      deep: { level: { token: "[REDACTED]", keep: "yes" } },
+      list: ["a", 1, false],
+      objects: [{ apiKey: "[REDACTED]" }, { safe: "v" }],
     });
   });
 });
