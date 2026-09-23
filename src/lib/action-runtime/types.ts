@@ -66,6 +66,9 @@ export const ACTION_EVENT_TYPES = [
   "agent.status",
   "agent.completed",
   "agent.failed",
+  "tool.started",
+  "tool.completed",
+  "tool.failed",
   "browser.session.started",
   "browser.session.updated",
   "browser.session.completed",
@@ -160,7 +163,8 @@ export class ActionRuntimeError extends Error {
       | "ACTION_BROWSER_SESSION_MISMATCH"
       | "ACTION_BROWSER_SESSION_OWNER_MISMATCH"
       | "ACTION_EVENT_INVALID_TYPE"
-      | "ACTION_RUN_CONFLICT",
+      | "ACTION_RUN_CONFLICT"
+      | "INVALID_INPUT",
   ) {
     super(message);
     this.name = "ActionRuntimeError";

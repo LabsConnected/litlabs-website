@@ -354,7 +354,9 @@ export async function recordActionEventActivity(input: {
     p_user_id: input.userId,
     p_type: input.type,
     p_payload: sanitizeActionPayload(input.payload),
-    p_message: sanitizeActionActivityMessage(input.message),
+    // An empty/whitespace message is not meaningful activity — coerce to
+    // NULL so SQL emits the domain event without an empty activity row.
+    p_message: sanitizeActionActivityMessage(input.message) || null,
   });
   if (error || !data) throw mapDatabaseError(error, "PERSISTENCE_UNAVAILABLE");
   return mapRun(data as ActionRunRow);
@@ -365,7 +367,12 @@ export async function recordActionActivity(
   userId: string,
   message: string,
 ): Promise<ActionActivity> {
-  const sanitizedMessage = sanitizeActionActivityMessage(message) ?? "";
+  const sanitizedMessage = sanitizeActionActivityMessage(message);
+  // A durable activity row must carry a meaningful, bounded message —
+  // never an empty string, giant dump, or raw provider error body.
+  if (!sanitizedMessage) {
+    throw new ActionRuntimeError("Activity message must be non-empty", "INVALID_INPUT");
+  }
   const { data, error } = await adminOrThrow().rpc("action_runtime_activity", {
     p_run_id: runId,
     p_user_id: userId,

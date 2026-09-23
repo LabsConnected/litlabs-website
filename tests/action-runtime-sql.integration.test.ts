@@ -374,6 +374,37 @@ describe("Action Runtime SQL invariants", () => {
     expect((await runStatus(run.id)).status).toBe("queued");
   });
 
+  it("serializes concurrent browser find-or-create to one run and one event", async () => {
+    // Two connections racing the same logical task: the advisory lock
+    // serializes them so the loser finds the winner's run instead of
+    // inserting a second one.
+    const second = new Client({ connectionString: DATABASE_URL });
+    await second.connect();
+    try {
+      const conversationId = `conv-${randomUUID()}`;
+      const [a, b] = await Promise.all([
+        client.query(
+          `SELECT * FROM public.action_runtime_find_or_create_browser_run($1::uuid, 'user-one', NULL, $2::text)`,
+          [randomUUID(), conversationId],
+        ),
+        second.query(
+          `SELECT * FROM public.action_runtime_find_or_create_browser_run($1::uuid, 'user-one', NULL, $2::text)`,
+          [randomUUID(), conversationId],
+        ),
+      ]);
+
+      expect(a.rows[0].id).toBe(b.rows[0].id);
+      expect(await eventCount(a.rows[0].id)).toBe(1);
+      const runs = await client.query<{ count: string }>(
+        "SELECT count(*)::text AS count FROM public.action_runs WHERE conversation_id = $1 AND kind = 'browser'",
+        [conversationId],
+      );
+      expect(Number(runs.rows[0].count)).toBe(1);
+    } finally {
+      await second.end().catch(() => undefined);
+    }
+  });
+
   it("never persists activity.created with a null message via event_activity", async () => {
     const run = await createRun();
     await client.query(

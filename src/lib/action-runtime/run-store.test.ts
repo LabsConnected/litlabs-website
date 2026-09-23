@@ -205,6 +205,27 @@ describe("ActionRun persistence boundary", () => {
     expect(activity.id).not.toBe(runRow.id);
   });
 
+  it("rejects empty activity messages instead of persisting an empty event", async () => {
+    await expect(
+      recordActionActivity(runRow.id, "user-one", "   "),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("coerces an empty event-activity message to NULL so no empty activity row is emitted", async () => {
+    await recordActionEventActivity({
+      runId: runRow.id,
+      userId: "user-one",
+      type: "browser.action.completed",
+      payload: { toolId: "browser.navigate" },
+      message: "   ",
+    });
+
+    expect(mocks.rpc).toHaveBeenCalledWith("action_runtime_event_activity", expect.objectContaining({
+      p_message: null,
+    }));
+  });
+
   it("keeps event sequence filters and results as exact BIGINT strings", async () => {
     ownedRunQuery();
     const query = listQuery([eventRow]);
