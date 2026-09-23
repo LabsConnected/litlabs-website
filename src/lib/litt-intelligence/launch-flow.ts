@@ -202,12 +202,22 @@ const WEBSITE_ENTRY_FILES = new Set([
 ]);
 
 /**
+ * Marker comment the platform seeds into blank-workspace entry files
+ * (source of truth: terminal-server/workspace/welcome-screen.ts
+ * WELCOME_SCREEN_MARKER). A build that stalled before replacing the
+ * starter leaves this marker behind — the filename check alone cannot
+ * tell a real project from the welcome screen, so entry candidates are
+ * read and rejected when the marker is still present.
+ */
+const WELCOME_SCREEN_MARKER = "LITT-WELCOME-SCREEN";
+
+/**
  * Verify that a website build produced a real entry artifact in the bound
  * workspace. This deliberately asks the workspace transport rather than
  * trusting tool-call metadata or the model's final prose.
  */
 export async function verifyProjectArtifacts(
-  transport: Pick<WorkspaceTransport, "listFiles">,
+  transport: Pick<WorkspaceTransport, "listFiles" | "readFile">,
 ): Promise<ProjectArtifactCheck> {
   const files: string[] = [];
   const queue: Array<{ path: string; depth: number }> = [{ path: ".", depth: 0 }];
@@ -241,13 +251,43 @@ export async function verifyProjectArtifacts(
     };
   }
 
-  const normalized = new Set(files.map((file) => file.toLowerCase()));
-  const hasEntry = [...WEBSITE_ENTRY_FILES].some((file) => normalized.has(file));
-  if (!hasEntry) {
+  const entryFiles = [...WEBSITE_ENTRY_FILES]
+    .map((entry) => files.find((file) => file.toLowerCase() === entry))
+    .filter((file): file is string => file !== undefined);
+  if (entryFiles.length === 0) {
     return {
       ok: false,
       files,
       error: "No runnable website entry file was created in the project workspace.",
+    };
+  }
+
+  // The blank workspace ships a welcome screen under the entry filename
+  // (e.g. index.html). A run that stalled before replacing it must not
+  // pass this gate — read each candidate and reject the ones that still
+  // carry the welcome-screen marker. An unreadable file keeps the old
+  // filename-only signal so exotic transports do not newly fail.
+  let realEntryFound = false;
+  let welcomeOnly = false;
+  for (const entry of entryFiles) {
+    let content: string | null = null;
+    try {
+      content = (await transport.readFile(entry)).content;
+    } catch {
+      content = null;
+    }
+    if (content === null || !content.includes(WELCOME_SCREEN_MARKER)) {
+      realEntryFound = true;
+      break;
+    }
+    welcomeOnly = true;
+  }
+  if (!realEntryFound && welcomeOnly) {
+    return {
+      ok: false,
+      files,
+      error:
+        "The project workspace still shows the blank starter screen — no real project files were created.",
     };
   }
 

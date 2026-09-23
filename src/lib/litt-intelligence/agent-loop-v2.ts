@@ -216,6 +216,56 @@ function detectRepeatedCalls(
   return identical.length >= 3;
 }
 
+// ─── Mid-build stall recovery ─────────────────────────────────────
+
+/**
+ * A zero-tool-call reply is normally the model's final answer — but when
+ * the text itself announces more work ("Now, I'll create the Footer
+ * component"), accepting it as final silently stalls the build: the run
+ * reports finished/Idle with the work half done, no error, and no
+ * recovery. These markers detect the announcement so the loop can nudge
+ * the model to emit the tool calls it promised instead of stopping.
+ */
+const CONTINUATION_MARKERS: RegExp[] = [
+  /\bnow,?\s+i(?:'ll| will)\b/i,
+  /\bnext,?\s+i(?:'ll| will)\b/i,
+  /\bi(?:'ll| will)\s+now\s+(?:create|add|write|build|generate|update|fix|implement|continue|finish|handle|proceed)\b/i,
+  /\blet me\s+(?:create|add|write|build|generate|update|fix|continue|finish)\b/i,
+  /\bmoving on to\b/i,
+  /\bup next\b/i,
+];
+
+/** How many times a run may nudge a stalled model before failing honestly. */
+const MAX_CONTINUATION_NUDGES = 2;
+
+export function announcesMoreWork(text: string): boolean {
+  return CONTINUATION_MARKERS.some((re) => re.test(text));
+}
+
+type ZeroCallResolution =
+  | { action: "final" }
+  | { action: "nudge"; nudgeMessage: string }
+  | { action: "stall" };
+
+/**
+ * Decide what a zero-tool-call model reply means. Plain prose is the
+ * final answer. Prose that announces more work gets bounded nudges to
+ * emit the promised tool calls; when the nudges are exhausted the run
+ * must fail honestly rather than claim completion.
+ */
+export function resolveZeroToolCalls(text: string, nudgesUsed: number): ZeroCallResolution {
+  if (!announcesMoreWork(text)) return { action: "final" };
+  if (nudgesUsed < MAX_CONTINUATION_NUDGES) {
+    return {
+      action: "nudge",
+      nudgeMessage:
+        "You announced further work but emitted no tool calls, so nothing more was executed. " +
+        "Continue now: emit the tool calls for the next step.",
+    };
+  }
+  return { action: "stall" };
+}
+
 // ─── Tool definition conversion ───────────────────────────────────
 
 function toToolDefinition(tool: LiTTToolDefinition): ToolDefinition {
@@ -455,6 +505,9 @@ export async function runAgentLoopV2(
   let checkpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
   const toolCallLog: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }> = [];
   let completedDeployment: CompletedDeployment | null = null;
+  // Bounded recovery when the model announces more work but emits no tool
+  // calls (the silent mid-build stall) — see resolveZeroToolCalls.
+  let continuationNudges = 0;
 
   // Check if any mutations have been requested (for checkpoint logic)
   let mutationBatchPending = false;
@@ -529,7 +582,12 @@ export async function runAgentLoopV2(
       break;
     }
 
-    // If no tool calls, we're done — the LLM produced a final answer
+    // A zero-tool-call reply is normally the model's final answer — unless
+    // the text announces more work it never started. Accepting that as
+    // final is the silent mid-build stall: the run reports finished/Idle
+    // with half the build done, no error, and no recovery. Nudge the
+    // model (bounded) to emit the promised tool calls; when the nudges
+    // are exhausted, fail honestly instead of claiming completion.
     if (llmResponse.toolCalls.length === 0) {
       // Quality gate: the visual judge may demand another design pass
       // before this answer is accepted as final.
@@ -545,6 +603,32 @@ export async function runAgentLoopV2(
         )
       ) {
         continue;
+      }
+      const zeroCallText = llmResponse.text ?? "";
+      const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges);
+      if (resolution.action === "nudge") {
+        continuationNudges++;
+        localProgress.emit({
+          type: "status",
+          summary:
+            "The model announced more work but emitted no tool calls — asking it to continue...",
+        });
+        llmMessages.push({ role: "assistant", content: zeroCallText });
+        llmMessages.push({ role: "user", content: resolution.nudgeMessage });
+        continue;
+      }
+      if (resolution.action === "stall") {
+        cancelled = true;
+        cancelReason =
+          "The model announced further work but produced no tool calls after retrying; stopping instead of claiming the build is complete.";
+        finalText =
+          "I stopped mid-build: I announced more work but could not produce the next actions. " +
+          "Your project and everything completed so far are preserved — try again to continue.";
+        localProgress.emit({
+          type: "status",
+          summary: "Stopping: the model announced more work but produced no tool calls.",
+        });
+        break;
       }
       finalText = llmResponse.text;
       // Emit a reasoning summary so LiTT Live shows the final reasoning step
@@ -1509,6 +1593,9 @@ export async function resumeAgentLoopV2(
   let completedDeployment: CompletedDeployment | null = null;
   let mutationBatchPending = false;
   let batchHasMutation = false;
+  // Bounded recovery when the model announces more work but emits no tool
+  // calls (the silent mid-build stall) — see resolveZeroToolCalls.
+  let continuationNudges = 0;
 
   // Execute the approved/rejected tool FIRST, then continue the loop
   localProgress.emit({ type: "phase", phase: "execute", step: stepsUsed });
@@ -1746,6 +1833,12 @@ export async function resumeAgentLoopV2(
       break;
     }
 
+    // A zero-tool-call reply is normally the model's final answer — unless
+    // the text announces more work it never started. Accepting that as
+    // final is the silent mid-build stall: the run reports finished/Idle
+    // with half the build done, no error, and no recovery. Nudge the
+    // model (bounded) to emit the promised tool calls; when the nudges
+    // are exhausted, fail honestly instead of claiming completion.
     if (llmResponse.toolCalls.length === 0) {
       if (
         await maybeInspectBeforeFinal(
@@ -1759,6 +1852,32 @@ export async function resumeAgentLoopV2(
         )
       ) {
         continue;
+      }
+      const zeroCallText = llmResponse.text ?? "";
+      const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges);
+      if (resolution.action === "nudge") {
+        continuationNudges++;
+        localProgress.emit({
+          type: "status",
+          summary:
+            "The model announced more work but emitted no tool calls — asking it to continue...",
+        });
+        llmMessages.push({ role: "assistant", content: zeroCallText });
+        llmMessages.push({ role: "user", content: resolution.nudgeMessage });
+        continue;
+      }
+      if (resolution.action === "stall") {
+        cancelled = true;
+        cancelReason =
+          "The model announced further work but produced no tool calls after retrying; stopping instead of claiming the build is complete.";
+        finalText =
+          "I stopped mid-build: I announced more work but could not produce the next actions. " +
+          "Your project and everything completed so far are preserved — try again to continue.";
+        localProgress.emit({
+          type: "status",
+          summary: "Stopping: the model announced more work but produced no tool calls.",
+        });
+        break;
       }
       finalText = llmResponse.text;
       break;

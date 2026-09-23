@@ -743,3 +743,59 @@ describe("Launch Flow: quality-loop pass-through", () => {
     expect(mainConfig.qualityLoop).toBeUndefined();
   });
 });
+
+describe("Launch Flow: artifact gate rejects the blank welcome screen", () => {
+  function welcomeTransport(): WorkspaceTransport {
+    return createMockTransport({
+      listFiles: vi.fn().mockResolvedValue({
+        entries: [{ name: "index.html", type: "file" }],
+      }),
+      readFile: vi.fn().mockResolvedValue({
+        content:
+          "<!-- LITT-WELCOME-SCREEN: blank-state of the LiTT builder. Not a project, not project content. -->\n<html><body>Welcome to LiTT</body></html>",
+        size: 128,
+      }),
+    });
+  }
+
+  it("fails when the only entry file still carries the welcome-screen marker", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(welcomeTransport());
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("blank starter screen");
+  });
+
+  it("passes when the entry file is a real project file", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const transport = createMockTransport({
+      listFiles: vi.fn().mockResolvedValue({
+        entries: [{ name: "index.html", type: "file" }],
+      }),
+      readFile: vi.fn().mockResolvedValue({
+        content: "<html><body><h1>North Shore Outdoor Co.</h1></body></html>",
+        size: 64,
+      }),
+    });
+    const check = await verifyProjectArtifacts(transport);
+    expect(check.ok).toBe(true);
+  });
+
+  it("passes when the entry file cannot be read (filename signal preserved)", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const transport = createMockTransport({
+      listFiles: vi.fn().mockResolvedValue({
+        entries: [{ name: "index.html", type: "file" }],
+      }),
+      readFile: vi.fn().mockRejectedValue(new Error("read failed")),
+    });
+    const check = await verifyProjectArtifacts(transport);
+    expect(check.ok).toBe(true);
+  });
+
+  it("still fails when no entry file exists at all", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(createMockTransport());
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("No runnable website entry file");
+  });
+});

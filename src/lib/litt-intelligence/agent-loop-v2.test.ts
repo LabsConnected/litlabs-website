@@ -6,7 +6,7 @@ vi.mock("./llm-tool-calling", async (importOriginal) => ({
   callLLMWithTools: vi.fn(),
 }));
 
-import { runAgentLoopV2, resumeAgentLoopV2, type ResumeInput } from "./agent-loop-v2";
+import { runAgentLoopV2, resumeAgentLoopV2, announcesMoreWork, resolveZeroToolCalls, type ResumeInput } from "./agent-loop-v2";
 import { callLLMWithTools, AgentBudgetExhaustedError } from "./llm-tool-calling";
 import { toolRegistry } from "./tool-registry";
 
@@ -662,5 +662,132 @@ describe("runAgentLoopV2 — multi-minute run with repeated file patches", () =>
     } finally {
       filesWriteDef.timeoutMs = originalTimeout;
     }
+  });
+});
+
+describe("runAgentLoopV2 — mid-build stall recovery", () => {
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("detects announced-but-unstarted work in a zero-tool-call reply", () => {
+    expect(
+      announcesMoreWork(
+        "The Contact form component has been created with validation. Now, I'll create the Footer component.",
+      ),
+    ).toBe(true);
+    expect(announcesMoreWork("Services section done. Next, I'll build the testimonials carousel.")).toBe(true);
+    expect(announcesMoreWork("Let me generate the hero images.")).toBe(true);
+  });
+
+  it("does not treat plain prose as announced work", () => {
+    expect(announcesMoreWork("Done — the site is complete.")).toBe(false);
+    expect(announcesMoreWork("I did not run any tools and nothing was changed.")).toBe(false);
+    expect(announcesMoreWork("")).toBe(false);
+  });
+
+  it("bounds the recovery nudges, then reports a stall instead of finishing", () => {
+    const text = "Now, I'll create the Footer component.";
+    expect(resolveZeroToolCalls(text, 0).action).toBe("nudge");
+    expect(resolveZeroToolCalls(text, 1).action).toBe("nudge");
+    expect(resolveZeroToolCalls(text, 2).action).toBe("stall");
+    expect(resolveZeroToolCalls("Done.", 0).action).toBe("final");
+  });
+
+  it("nudges the model when it announces more work but emits no tool calls", async () => {
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "The Contact form component has been created with validation. Now, I'll create the Footer component.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "Done.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      });
+
+    const result = await runAgentLoopV2(
+      "Build the North Shore Outdoor Co. website",
+      fakeTransport,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+      },
+    );
+
+    // The stall was recovered: the loop asked the model to continue
+    // instead of reporting finished with half the build done.
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(2);
+    const secondCallMessages = vi.mocked(callLLMWithTools).mock.calls[1][1] as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(
+      secondCallMessages.some((m) => m.role === "user" && m.content.includes("emitted no tool calls")),
+    ).toBe(true);
+    expect(result.finalText).toBe("Done.");
+    expect(result.cancelled).toBe(false);
+    expect(
+      result.events.some(
+        (e) => e.type === "status" && typeof e.summary === "string" && e.summary.includes("asking it to continue"),
+      ),
+    ).toBe(true);
+  });
+
+  it("fails honestly when the model keeps announcing work it never starts", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "Services section done. Next, I'll build the testimonials carousel.",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test-model",
+    });
+
+    const result = await runAgentLoopV2(
+      "Build the North Shore Outdoor Co. website",
+      fakeTransport,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+        maxSteps: 10,
+      },
+    );
+
+    // Bounded nudges (2), then an honest stop — never a silent "finished".
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(3);
+    expect(result.cancelled).toBe(true);
+    expect(result.cancelReason).toContain("no tool calls");
+    expect(result.finalText).toContain("stopped mid-build");
+    expect(result.events.some((e) => e.type === "cancelled")).toBe(true);
+  });
+
+  it("still accepts a plain prose reply as the final answer", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "Done — the site is complete.",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test-model",
+    });
+
+    const result = await runAgentLoopV2(
+      "Build the North Shore Outdoor Co. website",
+      fakeTransport,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+      },
+    );
+
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(1);
+    expect(result.finalText).toBe("Done — the site is complete.");
+    expect(result.cancelled).toBe(false);
   });
 });
