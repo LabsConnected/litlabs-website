@@ -40,7 +40,7 @@ export const LITT_MODEL_ALIASES: StudioModel[] = [
     description: "Best model for the task. Routes automatically.",
     apiProvider: "gemini",
     apiModel: "gemini-3.6-flash",
-    bitsLabel: "~1–5 BITS",
+    bitsLabel: "~1–5 LiTTBits",
   },
   {
     id: "litt-fast",
@@ -54,7 +54,7 @@ export const LITT_MODEL_ALIASES: StudioModel[] = [
     description: "Quick answers and simple tasks.",
     apiProvider: "groq",
     apiModel: "openai/gpt-oss-120b",
-    bitsLabel: "Low BITS",
+    bitsLabel: "Low LiTTBits",
   },
   {
     id: "litt-balanced",
@@ -68,7 +68,7 @@ export const LITT_MODEL_ALIASES: StudioModel[] = [
     description: "Everyday work with good quality and speed.",
     apiProvider: "gemini",
     apiModel: "gemini-3.6-flash",
-    bitsLabel: "Standard BITS",
+    bitsLabel: "Standard LiTTBits",
   },
   {
     id: "litt-reasoning",
@@ -82,7 +82,7 @@ export const LITT_MODEL_ALIASES: StudioModel[] = [
     description: "Complex planning, analysis, and multi-step reasoning.",
     apiProvider: "openrouter-deepseek",
     apiModel: "nvidia/nemotron-3-ultra-550b-a55b:free",
-    bitsLabel: "Higher BITS",
+    bitsLabel: "Higher LiTTBits",
   },
   {
     id: "litt-code",
@@ -96,7 +96,7 @@ export const LITT_MODEL_ALIASES: StudioModel[] = [
     description: "Development + debugging.",
     apiProvider: "openrouter-qwen",
     apiModel: "nvidia/nemotron-3-super-120b-a12b:free",
-    bitsLabel: "Low BITS",
+    bitsLabel: "Low LiTTBits",
   },
   {
     id: "litt-research",
@@ -110,7 +110,7 @@ export const LITT_MODEL_ALIASES: StudioModel[] = [
     description: "Web research, summarization, and information gathering.",
     apiProvider: "gemini",
     apiModel: "gemini-3.6-flash",
-    bitsLabel: "Standard BITS",
+    bitsLabel: "Standard LiTTBits",
   },
 ];
 
@@ -137,8 +137,8 @@ export const CHAT_MODELS: StudioModel[] = [
   { id: "openrouter-free", name: "OpenRouter Free", provider: "openrouter", cost: "free", speed: "medium", icon: "🎁", category: "advanced", apiProvider: "openrouter-free", apiModel: "openrouter/free", bitsLabel: "Included" },
   { id: "deepseek-free", name: "Nemotron Ultra 550B", provider: "openrouter", cost: "free", speed: "medium", icon: "🐍", category: "advanced", apiProvider: "openrouter-deepseek", apiModel: "nvidia/nemotron-3-ultra-550b-a55b:free", bitsLabel: "Included" },
   { id: "llama-free", name: "Gemma 4 31B", provider: "openrouter", cost: "free", speed: "medium", icon: "🦙", category: "advanced", apiProvider: "openrouter-llama", apiModel: "google/gemma-4-31b-it:free", bitsLabel: "Included" },
-  { id: "groq-llama-70b", name: "Groq Llama 70B", provider: "groq", cost: "free", speed: "fast", icon: "🚀", category: "advanced", apiProvider: "groq", apiModel: "openai/gpt-oss-120b", bitsLabel: "Low BITS" },
-  { id: "qwen-coder", name: "Nemotron Super 120B", provider: "openrouter", cost: "free", speed: "fast", icon: "⌨️", category: "advanced", apiProvider: "openrouter-qwen", apiModel: "nvidia/nemotron-3-super-120b-a12b:free", bitsLabel: "Low BITS" },
+  { id: "groq-llama-70b", name: "Groq Llama 70B", provider: "groq", cost: "free", speed: "fast", icon: "🚀", category: "advanced", apiProvider: "groq", apiModel: "openai/gpt-oss-120b", bitsLabel: "Low LiTTBits" },
+  { id: "qwen-coder", name: "Nemotron Super 120B", provider: "openrouter", cost: "free", speed: "fast", icon: "⌨️", category: "advanced", apiProvider: "openrouter-qwen", apiModel: "nvidia/nemotron-3-super-120b-a12b:free", bitsLabel: "Low LiTTBits" },
   { id: "gemini-creative", name: "Gemini Creative", provider: "gemini", cost: "free", speed: "fast", icon: "🎨", category: "advanced", apiModel: "gemini-3.6-flash", bitsLabel: "Included" },
   { id: "gemini-vision", name: "Gemini Vision", provider: "gemini", cost: "free", speed: "fast", icon: "👁️", category: "advanced", apiModel: "gemini-3.6-flash", bitsLabel: "Included" },
 ];

@@ -471,7 +471,7 @@ export default function AudioTool() {
           </div>
           <div className="flex items-center gap-2">
             <span className="rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-[10px] font-black text-accent">
-              {coinBalance ?? "—"} BITS
+              {coinBalance ?? "—"} LiTTBits
             </span>
             <span className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black" style={{ borderColor: "rgba(255,255,255,0.08)", color: genStatus === "generating" ? "#F97316" : "var(--color-accent)" }}>
               <span className="h-1.5 w-1.5 rounded-full" style={{ background: genStatus === "generating" ? "#F97316" : "var(--color-accent)" }} />
@@ -573,7 +573,7 @@ export default function AudioTool() {
                   <span>{voice}</span>
                   <span>{delivery}</span>
                   <span>{pacing}</span>
-                  <span>{COST} BITS</span>
+                  <span>{COST} LiTTBits</span>
                 </div>
               </div>
             ) : genStatus === "generating" ? (
@@ -657,7 +657,7 @@ export default function AudioTool() {
               className="ml-auto flex items-center gap-2 rounded-xl bg-accent px-5 py-2 text-xs font-black text-on-accent shadow-accent-glow transition hover:bg-accent-strong hover:scale-[1.02] active:scale-95 disabled:opacity-40"
               style={{ minHeight: 40 }}
             >
-              {isGenerating ? <><Loader2 size={14} className="animate-spin" /> Generating...</> : <><Sparkles size={14} /> Generate Voice · {COST} BITS</>}
+              {isGenerating ? <><Loader2 size={14} className="animate-spin" /> Generating...</> : <><Sparkles size={14} /> Generate Voice · {COST} LiTTBits</>}
             </button>
           </div>
 
@@ -741,7 +741,7 @@ export default function AudioTool() {
                   </div>
                   <div className="flex items-center justify-between rounded-lg border px-3 py-2 text-[10px]" style={{ borderColor: "color-mix(in srgb, var(--color-accent) 20%, transparent)", background: "color-mix(in srgb, var(--color-accent) 5%, transparent)" }}>
                     <span className="text-white/40">Cost</span>
-                    <span className="font-black" style={{ color: "var(--color-accent)" }}>{COST} BITS</span>
+                    <span className="font-black" style={{ color: "var(--color-accent)" }}>{COST} LiTTBits</span>
                   </div>
                 </div>
               )}
