@@ -1,5 +1,5 @@
-﻿import { RouteLoading } from "@/components/route-loading";
+import ProfileShell from "@/components/page-shells/ProfileShell";
 
 export default function Loading() {
-  return <RouteLoading label="Loading Profile" />;
+  return <ProfileShell />;
 }

@@ -60,12 +60,12 @@ export function InteractiveProductDemo() {
 
   return (
     <div className="w-full">
-      {/* Honesty label — this walkthrough is a simulation, not a live mission. */}
+      {/* Honesty label — this walkthrough is a demo, not a live mission. */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <span className="text-[10px] font-black uppercase tracking-[0.18em] text-white/30">
           Interactive product demonstration
         </span>
-        <span className="text-[10px] font-bold text-white/20">Illustrative simulation</span>
+        <span className="text-[10px] font-bold text-white/20">Demo</span>
       </div>
 
       <div

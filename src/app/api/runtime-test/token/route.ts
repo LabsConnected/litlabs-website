@@ -1,5 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
 import { createTerminalToken } from "@/lib/terminal-auth";
+import { isDeployed } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,14 +9,22 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/runtime-test/token
  *
- * TEMPORARY: Mints a terminal token for the /runtime-test acceptance page.
- * This route is NOT protected by Clerk auth — it exists only for OS-2D.2
- * browser acceptance testing and will be deleted after the proof is complete.
+ * Local-only helper for the /runtime-test acceptance page.
+ * Requires a Clerk session, mints a token for that user, and never
+ * returns internal service credentials. Deployed environments 404.
  *
- * In production, terminal tokens are issued via /api/terminal/token which
- * requires Clerk authentication.
+ * Production command traffic goes through /api/studio/command.
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
+  if (isDeployed()) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  const { userId } = await auth(req);
+  if (!userId || userId === "anonymous-dev") {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const secret = process.env.TERMINAL_AUTH_SECRET ?? "";
   if (secret.length < 32) {
     return NextResponse.json(
@@ -23,12 +33,6 @@ export async function GET() {
     );
   }
 
-  const { token, expiresAt } = createTerminalToken("runtime-test-user");
-
-  // Also return the internal service key for the test page to trigger commands.
-  // This is ONLY acceptable because this route is temporary and unprotected.
-  // In production, command triggering goes through /api/studio/command with Clerk auth.
-  const internalKey = process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
-
-  return NextResponse.json({ token, expiresAt, internalKey });
+  const { token, expiresAt } = createTerminalToken(userId);
+  return NextResponse.json({ token, expiresAt });
 }

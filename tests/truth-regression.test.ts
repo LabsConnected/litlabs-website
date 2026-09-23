@@ -111,7 +111,7 @@ describe("Billable cost claims are accurate", () => {
     //
     // VideoTool: "Estimated cost" label + "{cost} BITS" on Generate button
     // ImageTool: "{providerCost} 🪙" on provider + batch total
-    // AudioTool: "{COST} BITS" on generate button
+    // AudioTool: "{COST} LiTTBits" on generate button
     // MusicTool: "{cost} LBC" on generate button
     const fs = await import("fs/promises");
     const path = await import("path");
@@ -135,7 +135,7 @@ describe("Billable cost claims are accurate", () => {
     // Each tool must render a cost indicator before generation.
     expect(videoSrc).toContain("Estimated cost");
     expect(imageSrc).toMatch(/providerCost.*🪙|🪙.*providerCost/);
-    expect(audioSrc).toContain("BITS");
+    expect(audioSrc).toContain("LiTTBits");
     expect(musicSrc).toContain("LBC");
   });
 

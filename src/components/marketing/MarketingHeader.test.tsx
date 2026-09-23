@@ -16,32 +16,14 @@ vi.mock("./BrandMark", () => ({
 
 import MarketingHeader from "./MarketingHeader";
 
-// Larry's site audit (2026-09-22, issue #469): lead with the product —
-// Studio → How it works → Pricing first. "Community" is intentionally omitted
-// until the /discover feed is seeded. Labels and hrefs must be unchanged;
-// only the order is asserted here.
-const EXPECTED_ORDER = [
-  "Studio",
-  "How it works",
-  "Pricing",
-  "Capabilities",
-  "Creations",
-  "CLI",
-  "FAQ",
-];
+// Larry's site audit (2026-09-23 round 2): nav cut to four items —
+// Studio · Capabilities · Pricing · Docs. Labels and hrefs must match.
+const EXPECTED_ORDER = ["Studio", "Capabilities", "Pricing", "Docs"];
 
-const EXPECTED_HREFS = [
-  "/studio",
-  "/#how-it-works",
-  "/pricing",
-  "/#what-we-do",
-  "/#creations",
-  "/cli",
-  "/#faq",
-];
+const EXPECTED_HREFS = ["/studio", "/#what-we-do", "/pricing", "/docs"];
 
-describe("MarketingHeader nav order (issue #469)", () => {
-  it("renders the desktop nav in Larry's required order", () => {
+describe("MarketingHeader nav order (audit round 2)", () => {
+  it("renders the desktop nav with exactly the four required items", () => {
     render(<MarketingHeader />);
     const nav = screen.getByLabelText("Primary navigation");
     const links = within(nav).getAllByRole("link");
@@ -49,12 +31,10 @@ describe("MarketingHeader nav order (issue #469)", () => {
     expect(links.map((l) => l.getAttribute("href"))).toEqual(EXPECTED_HREFS);
   });
 
-  it("omits the Community link until the Discover feed is seeded", () => {
+  it("links Docs to the public /docs route", () => {
     render(<MarketingHeader />);
-    expect(
-      screen.queryByRole("link", { name: "Community" }),
-      "Community must not appear in the nav while /discover is empty",
-    ).toBeNull();
+    const link = screen.getByRole("link", { name: "Docs" });
+    expect(link.getAttribute("href")).toBe("/docs");
   });
 
   it("renders the mobile menu in the same order", async () => {
@@ -67,8 +47,8 @@ describe("MarketingHeader nav order (issue #469)", () => {
       EXPECTED_ORDER,
     );
     expect(
-      within(mobileNav).queryByRole("link", { name: /Community/ }),
-      "Community must not appear in the mobile nav while /discover is empty",
-    ).toBeNull();
+      within(mobileNav).getByRole("link", { name: /Docs/ }),
+      "Docs must appear in the mobile nav",
+    ).toHaveAttribute("href", "/docs");
   });
 });

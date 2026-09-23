@@ -24,7 +24,7 @@ export const runtime = "nodejs";
  *
  * Phase 4: when a session is present, attaches `burn` — the real
  * accumulator reading ({ billableMinutes, modelCalls, bits, live }).
- * The chip renders it (e.g. "Browser · Live · 3 min · 135 BITS"). When
+ * The chip renders it (e.g. "Browser · Live · 3 min · 135 LiTTBits"). When
  * nothing is known, burn is null and the chip shows no burn rather
  * than a fake number.
  */

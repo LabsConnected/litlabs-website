@@ -25,6 +25,7 @@ export type FunnelEvent =
   | "plan_activated"
   | "returning_user"
   | "hero_cta_click"
+  | "tour_cta_click"
   | "watch_litt_click"
   | "pricing_link_click"
   | "github_connect_started"

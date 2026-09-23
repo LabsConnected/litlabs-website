@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useCallback, useState } from "react";
+import { Zap } from "lucide-react";
 import { useCanvasStore, executeAction } from "../../stores/useCanvasStore";
 import { BlockRenderer } from "./BlockRenderer";
 import { RevisionHistory } from "./RevisionHistory";
+import { ActionPanel } from "./ActionPanel";
 import { cn } from "@/lib/utils";
 import type { ArtifactAction, CanvasBlock, Canvas } from "@/lib/canvas/types";
 
@@ -42,6 +44,7 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showPromoteConfirm, setShowPromoteConfirm] = useState(false);
+  const [showActionPanel, setShowActionPanel] = useState(false);
 
 
   const loadCanvases = useCallback(async () => {
@@ -202,7 +205,7 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/5 px-4 py-2.5">
         <div className="flex items-center gap-2 min-w-0">
@@ -357,6 +360,31 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
           </div>
         </div>
       )}
+
+      {/* "What LiTT can do" — floating trigger, thumb-zone bottom-right */}
+      <button
+        onClick={() => setShowActionPanel(true)}
+        aria-label="What LiTT can do"
+        title="What LiTT can do"
+        className="absolute bottom-4 right-4 z-30 flex h-11 w-11 items-center justify-center rounded-full border border-accent/40 bg-accent/20 text-accent shadow-lg backdrop-blur transition-all hover:bg-accent/30 active:scale-95"
+      >
+        <Zap size={18} />
+      </button>
+
+      {/* Action panel sheet */}
+      <ActionPanel
+        open={showActionPanel}
+        onClose={() => setShowActionPanel(false)}
+        projectId={activeCanvas?.projectId ?? null}
+        onActionSelect={(action) => {
+          void executeAction(action).then((result) => {
+            if (!result.ok) {
+              setError(result.error ?? "Action failed");
+            }
+            onActionExecuted?.(action);
+          });
+        }}
+      />
     </div>
   );
 }

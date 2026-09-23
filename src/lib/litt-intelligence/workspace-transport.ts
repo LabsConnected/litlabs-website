@@ -369,7 +369,7 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
 
   // ── Command execution ──
 
-  async exec(command: string, timeoutMs = 30_000): Promise<ExecResult> {
+  async exec(command: string, timeoutMs = 30_000, stdin?: string): Promise<ExecResult> {
     const t0 = Date.now();
     const resp = await fetch(
       `${terminalBase()}/internal/workspace/${this.workspaceId}/exec`,
@@ -379,7 +379,7 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
           "Content-Type": "application/json",
           "X-Internal-Service-Key": internalServiceKey(),
         },
-        body: JSON.stringify({ command, userId: this.userId, timeout: timeoutMs }),
+        body: JSON.stringify({ command, userId: this.userId, timeout: timeoutMs, stdin }),
         signal: AbortSignal.timeout(timeoutMs + 5_000),
       },
     );
@@ -467,8 +467,7 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
     } else {
       await this.exec("git add -A");
     }
-    const escapedMsg = message.replace(/"/g, '\\"');
-    const result = await this.exec(`git commit -m "${escapedMsg}"`);
+    const result = await this.exec("git commit --file=-", 30_000, message);
     if (result.exitCode !== 0) {
       return { committed: false };
     }

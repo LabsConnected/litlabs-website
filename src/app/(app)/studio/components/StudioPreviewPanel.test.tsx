@@ -282,6 +282,47 @@ describe("StudioPreviewPanel", () => {
     });
   });
 
+  describe("project secrets wiring (regression: must stay mounted)", () => {
+    it("toolbar key toggle opens and closes the secrets editor", async () => {
+      mockFetch(() => jsonResponse({ runtimeStatus: "ready", previewUrl: "/api/studio-projects/project-1/preview/proxy", runtimeError: null }));
+      render(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName={null} branch="main" workspaceStatus="ready" />);
+
+      await screen.findByTitle("Demo preview");
+
+      // Panel starts hidden.
+      expect(screen.queryByTestId("studio-secrets-panel")).toBeNull();
+
+      fireEvent.click(screen.getByTestId("preview-secrets-toggle"));
+      await waitFor(() => {
+        expect(screen.getByTestId("preview-secrets-section")).toBeTruthy();
+        expect(screen.getByTestId("studio-secrets-panel")).toBeTruthy();
+      });
+
+      // Toggling again closes it.
+      fireEvent.click(screen.getByTestId("preview-secrets-toggle"));
+      await waitFor(() => {
+        expect(screen.queryByTestId("studio-secrets-panel")).toBeNull();
+      });
+    });
+
+    it("auth-config failure CTA opens the secrets editor", async () => {
+      mockFetch(() => jsonResponse({
+        runtimeStatus: "failed",
+        previewUrl: null,
+        runtimeError: "CLERK_SECRET_KEY is missing.",
+        runtimeErrorCode: "preview_clerk_config_error",
+      }));
+      render(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName={null} branch={null} workspaceStatus="ready" />);
+
+      const cta = await screen.findByTestId("preview-add-keys");
+      fireEvent.click(cta);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("studio-secrets-panel")).toBeTruthy();
+      });
+    });
+  });
+
   it("header toolbar scrolls horizontally so action buttons stay reachable on narrow phones", async () => {
     mockFetch(() => jsonResponse({ runtimeStatus: "ready", previewUrl: "/api/studio-projects/project-1/preview/proxy", runtimeError: null }));
     render(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName={null} branch="main" workspaceStatus="ready" />);

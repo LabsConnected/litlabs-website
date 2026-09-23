@@ -272,6 +272,29 @@ export const ArtifactActionSchema = z.discriminatedUnion("type", [
     type: z.literal("project.promote"),
     canvasId: z.string().uuid(),
   }),
+  // ─── Studio UI actions (executed client-side, no Canvas API call) ──
+  // These surface existing Studio capabilities through the ActionPanel
+  // and chat chips. They are handled in useCanvasStore.executeAction by
+  // dispatching DOM events the owning components listen for.
+  z.object({
+    type: z.literal("studio.inspect_element"),
+  }),
+  z.object({
+    type: z.literal("studio.open_terminal"),
+  }),
+  z.object({
+    type: z.literal("studio.deploy_site"),
+    projectId: z.string(),
+  }),
+  z.object({
+    type: z.literal("studio.browse_files"),
+    projectId: z.string(),
+  }),
+  z.object({
+    type: z.literal("studio.open_file"),
+    projectId: z.string(),
+    path: z.string().min(1),
+  }),
 ]);
 export type ArtifactAction = z.infer<typeof ArtifactActionSchema>;
 
