@@ -145,6 +145,34 @@ describe("ActionRun persistence boundary", () => {
     expect(payload.toolId).toBe("browser.eval");
   });
 
+  it("redacts every canonical secret-named key at any depth in event payloads", async () => {
+    await appendActionEvent({
+      runId: runRow.id,
+      userId: "user-one",
+      type: "browser.action.failed",
+      payload: {
+        nested: {
+          secret: "s1",
+          password: "p1",
+          token: "t1",
+          authorization: "a1",
+          cookie: "c1",
+          apiKey: "k1",
+          CLERK_SECRET_KEY: "ck1",
+          deeper: { private_key: "pk1", api_key: "ak1" },
+        },
+        safe: "keep-me",
+      },
+    });
+
+    const rpcInput = mocks.rpc.mock.calls[0][1] as Record<string, unknown>;
+    const payload = JSON.stringify(rpcInput.p_payload);
+    for (const raw of ["s1", "p1", "t1", "a1", "c1", "k1", "ck1", "pk1", "ak1"]) {
+      expect(payload).not.toContain(`"${raw}"`);
+    }
+    expect(payload).toContain('"safe":"keep-me"');
+  });
+
   it("sanitizes activity messages on event+activity writes", async () => {
     await recordActionEventActivity({
       runId: runRow.id,
