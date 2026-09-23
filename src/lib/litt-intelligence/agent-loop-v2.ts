@@ -25,6 +25,7 @@ import { buildPatchRecoveryMessage, validateApplyPatchInputs, validateFilesWrite
 import { computeWorkspaceChange } from "./workspace-change-producer";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { toolRegistry } from "./tool-registry";
+import type { ActionExecutionContext } from "@/lib/action-runtime";
 import { resolveAvailableCapabilities } from "./capabilities";
 import type { LiTTToolDefinition } from "./types";
 import {
@@ -73,8 +74,14 @@ export interface AgentLoopConfig {
    * must never supply it itself.
    */
   conversationId?: string;
-  /** Parent ActionRun owning browser work; injected server-side. */
+  /** Parent ActionRun owning this work; injected server-side. */
   actionRunId?: string;
+  /**
+   * Canonical execution context for the entire run. Prefer this over the
+   * legacy actionRunId field: it carries tenant, conversation, and project
+   * identity together so tool handlers never reconstruct them from inputs.
+   */
+  actionContext?: ActionExecutionContext;
   /**
    * Opt-in to the LiTT quality loop (gated UNDERSTAND→VERIFY stages +
    * visual-quality judge). When enabled, the loop records stage evidence
@@ -235,6 +242,29 @@ function toToolDefinition(tool: LiTTToolDefinition): ToolDefinition {
  * it) — the server injects the real authenticated userId here, overriding
  * anything the model passed.
  */
+/**
+ * Trusted execution context for the whole run — built ONCE from
+ * server-authenticated config and passed DOWN through ToolRegistry.
+ * The ActionRun identity is never a model-visible tool input.
+ */
+function actionContextFrom(cfg: {
+  actionContext?: ActionExecutionContext;
+  actionRunId?: string;
+  userId?: string;
+  conversationId?: string;
+  projectId?: string;
+}): ActionExecutionContext | undefined {
+  if (cfg.actionContext) return cfg.actionContext;
+  return cfg.actionRunId && cfg.userId
+    ? {
+        actionRunId: cfg.actionRunId,
+        userId: cfg.userId,
+        conversationId: cfg.conversationId,
+        projectId: cfg.projectId,
+      }
+    : undefined;
+}
+
 function withUserScopeForBrowserTools(
   toolId: string,
   inputs: Record<string, unknown>,
@@ -817,7 +847,7 @@ export async function runAgentLoopV2(
           availableCapabilities,
           transport,
           signal: cfg.signal,
-          actionRunId: cfg.actionRunId,
+          actionContext: actionContextFrom(cfg),
         });
 
         if (execResult.ok) {
@@ -1195,6 +1225,8 @@ export interface DeferredToolBatchContext {
   conversationId?: string;
   /** Parent ActionRun for server-side ActionExecutionContext propagation. */
   actionRunId?: string;
+  /** Full trusted context propagated to ToolRegistry.execute. */
+  actionContext?: ActionExecutionContext;
 }
 
 export interface DeferredToolBatchResult {
@@ -1383,7 +1415,7 @@ export async function executeDeferredToolCalls(
         hasApproval: !permResult.requiresApproval,
         transport: ctx.transport,
         signal: ctx.signal,
-        actionRunId: ctx.actionRunId,
+        actionContext: ctx.actionContext ?? actionContextFrom(ctx),
       });
 
       if (execResult.ok) {
@@ -1541,7 +1573,7 @@ export async function resumeAgentLoopV2(
         availableCapabilities,
         transport,
         signal: cfg.signal,
-        actionRunId: cfg.actionRunId,
+        actionContext: actionContextFrom(cfg),
       });
 
       if (execResult.ok) {
@@ -1678,6 +1710,7 @@ export async function resumeAgentLoopV2(
       userId: cfg.userId,
       conversationId: cfg.conversationId,
       actionRunId: cfg.actionRunId,
+      actionContext: actionContextFrom(cfg),
     });
     hasInterveningMutation = deferredState.hasInterveningMutation;
     cancelled = deferredState.cancelled;
@@ -1917,7 +1950,7 @@ export async function resumeAgentLoopV2(
           availableCapabilities,
           transport,
           signal: cfg.signal,
-          actionRunId: cfg.actionRunId,
+          actionContext: actionContextFrom(cfg),
         });
 
         if (execResult.ok) {
