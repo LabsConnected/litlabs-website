@@ -1,5 +1,5 @@
-import { LoadingBar } from "@/components/ui/LoadingBar";
+import StudioShell from "@/components/page-shells/StudioShell";
 
 export default function StudioLoading() {
-  return <LoadingBar label="Loading Studio" />;
+  return <StudioShell />;
 }

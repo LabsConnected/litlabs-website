@@ -18,6 +18,7 @@ import { useConversationStore } from "../stores/useConversationStore";
 import { useLiTTRealtimeSession } from "../hooks/useLiTTRealtimeSession";
 import type { LiTTLiveSessionContext } from "@/lib/litt/live/types";
 import type { ArtifactAction } from "@/lib/canvas/types";
+import { STUDIO_EVENT_OPEN_DOCK, STUDIO_EVENT_REQUEST_DEPLOY } from "@/lib/canvas/panel-actions";
 import { INITIAL_RUNTIME_STATE, deriveExecutionHint } from "@/lib/projects/runtime-state";
 import { useLiTTRuntime } from "@/hooks/useLiTTRuntime";
 
@@ -558,6 +559,33 @@ function CommandStudioContent() {
     window.addEventListener("studio:ask-litt", handler);
     return () => window.removeEventListener("studio:ask-litt", handler);
   }, [isMobileLitt]);
+
+  // Canvas ActionPanel events — the studio.* ArtifactActions execute
+  // client-side: executeAction dispatches these DOM events and the owning
+  // surfaces react. Deploy routes through the existing ask-litt path
+  // (pre-fill the composer, user confirms before the agent run starts);
+  // the deploy itself still goes through the ApprovalCard gate.
+  useEffect(() => {
+    const openDock = (e: Event) => {
+      const tab = (e as CustomEvent).detail?.tab as StudioDockTab | undefined;
+      if (tab === "activity" || tab === "files" || tab === "terminal" || tab === "inspector" || tab === "media") {
+        handleOpenDockTab(tab);
+      }
+    };
+    const requestDeploy = () => {
+      window.dispatchEvent(
+        new CustomEvent("studio:ask-litt", {
+          detail: { prompt: "Deploy this project to production" },
+        }),
+      );
+    };
+    window.addEventListener(STUDIO_EVENT_OPEN_DOCK, openDock);
+    window.addEventListener(STUDIO_EVENT_REQUEST_DEPLOY, requestDeploy);
+    return () => {
+      window.removeEventListener(STUDIO_EVENT_OPEN_DOCK, openDock);
+      window.removeEventListener(STUDIO_EVENT_REQUEST_DEPLOY, requestDeploy);
+    };
+  }, [handleOpenDockTab]);
 
   // Dock open helpers — both are OPEN actions (switch tab + ensure
   // open), never a toggle-closed. The dock's own close button and the

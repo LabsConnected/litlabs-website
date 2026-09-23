@@ -39,4 +39,16 @@ describe("LiTT intent router", () => {
       expect(output.result.requirements.needsApproval).toBe(true);
     }
   });
+
+  it("passes conversational messages to chat without clarification", async () => {
+    for (const prompt of ["What is LiTTree?", "Hello", "how does this work?"]) {
+      const output = await routeIntent({ prompt, context: {} });
+      expect(output.type).toBe("intent");
+      if (output.type === "intent") {
+        expect(output.result.primaryIntent).toBe("chat");
+        expect(output.result.ambiguity).toBe("none");
+        expect(output.result.requirements.needsProject).toBe(false);
+      }
+    }
+  });
 });

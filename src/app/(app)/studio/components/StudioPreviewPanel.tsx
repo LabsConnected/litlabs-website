@@ -1,11 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Copy, ExternalLink, Eye, KeyRound, Loader2, Monitor, MousePointer2, RefreshCw, RotateCcw, Smartphone, Square, Tablet, X } from "lucide-react";
+import { Check, Copy, ExternalLink, Eye, Loader2, Monitor, MousePointer2, RefreshCw, RotateCcw, Smartphone, Square, Tablet, X } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { formatSourceSummary } from "@/lib/projects/project-source";
 import { useExecutionStore } from "../stores/useExecutionStore";
-import { StudioSecretsPanel } from "./StudioSecretsPanel";
 
 /**
  * Preview states — the five canonical states the UI explicitly supports.
@@ -190,9 +189,6 @@ export default function StudioPreviewPanel({
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [startPhase, setStartPhase] = useState<StartPhase>(null);
-  // Project secrets editor (Clerk keys for the preview runtime). Toggled
-  // from the toolbar; auto-opened from the auth-config error CTA.
-  const [secretsOpen, setSecretsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const selectionCleanupRef = useRef<(() => void) | null>(null);
@@ -525,6 +521,15 @@ export default function StudioPreviewPanel({
     window.addEventListener("studio:files-changed", handler);
     return () => window.removeEventListener("studio:files-changed", handler);
   }, [projectId, loadStatus]);
+
+  // The canvas ActionPanel's "Inspect element" action dispatches this event.
+  // Enabling selection mode is enough — the inspector bridge enables itself
+  // on iframe load, so this just turns the click-to-select UI back on.
+  useEffect(() => {
+    const handler = () => setSelectionMode(true);
+    window.addEventListener("studio:activate-inspector", handler);
+    return () => window.removeEventListener("studio:activate-inspector", handler);
+  }, []);
 
   // Auto-poll while starting, restarting, or loading — BOUNDED. A start that
   // never resolves becomes a terminal "failed" instead of an infinite
@@ -896,23 +901,6 @@ export default function StudioPreviewPanel({
             {urlCopied ? <Check size={12} className="pointer-events-none" style={{ color: "#48EE38" }} /> : <Copy size={12} className="pointer-events-none" />}
           </button>
         )}
-        {/* Project secrets — Clerk keys for the preview runtime */}
-        <button
-          type="button"
-          onClick={() => setSecretsOpen((v) => !v)}
-          disabled={!projectId}
-          className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8 disabled:opacity-40"
-          style={{
-            backgroundColor: secretsOpen ? "rgba(114,242,56,0.12)" : "transparent",
-            color: secretsOpen ? "var(--litt-primary)" : "var(--text-muted)",
-          }}
-          aria-label="Project secrets"
-          aria-pressed={secretsOpen}
-          title="Project secrets (Clerk keys for the preview)"
-          data-testid="preview-secrets-toggle"
-        >
-          <KeyRound size={12} className="pointer-events-none" />
-        </button>
         {/* Maximize */}
         {isLive && (
           <button
@@ -927,20 +915,6 @@ export default function StudioPreviewPanel({
           </button>
         )}
       </div>
-      {/* Project secrets section — collapsible, above the preview surface */}
-      {secretsOpen && projectId && (
-        <div
-          className="max-h-[45%] shrink-0 overflow-y-auto border-b"
-          style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}
-          data-testid="preview-secrets-section"
-        >
-          <StudioSecretsPanel
-            projectId={projectId}
-            getToken={getToken}
-            onKeysChanged={() => void loadStatus(true)}
-          />
-        </div>
-      )}
       {selectedElement && (
         <div
           className="flex shrink-0 items-center gap-2 border-b px-2.5 py-1.5 text-[10px]"
@@ -1013,34 +987,17 @@ export default function StudioPreviewPanel({
             {/* Retry button for unreachable/failed states. not_started is
                 handled by auto-start — no manual button needed. */}
             {["unreachable", "failed"].includes(state) && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => void preparePreview()}
-                  disabled={!projectId || state === "starting" || state === "restarting"}
-                  className="flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-[10px] font-bold disabled:opacity-40"
-                  style={{ backgroundColor: "var(--litt-primary)", color: "#000" }}
-                  data-testid="preview-prepare"
-                >
-                  <RotateCcw size={11} className="pointer-events-none" />
-                  {state === "failed" ? "Restart preview" : "Retry"}
-                </button>
-                {/* Auth-config failure → the fix is the project's Clerk keys.
-                    This button now opens the real secrets editor (shipped
-                    with project secrets; the copy above already points here). */}
-                {state === "failed" && isAuthConfigError && projectId && (
-                  <button
-                    type="button"
-                    onClick={() => setSecretsOpen(true)}
-                    className="flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-[10px] font-bold transition hover:bg-white/8"
-                    style={{ borderColor: "var(--studio-border)", color: "var(--text-secondary)" }}
-                    data-testid="preview-add-keys"
-                  >
-                    <KeyRound size={11} className="pointer-events-none" />
-                    Add Clerk keys
-                  </button>
-                )}
-              </>
+              <button
+                type="button"
+                onClick={() => void preparePreview()}
+                disabled={!projectId || state === "starting" || state === "restarting"}
+                className="flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-[10px] font-bold disabled:opacity-40"
+                style={{ backgroundColor: "var(--litt-primary)", color: "#000" }}
+                data-testid="preview-prepare"
+              >
+                <RotateCcw size={11} className="pointer-events-none" />
+                {state === "failed" ? "Restart preview" : "Retry"}
+              </button>
             )}
           </div>
         )}

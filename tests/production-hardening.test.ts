@@ -128,15 +128,21 @@ describe("Navigation routes Music to Studio", () => {
     expect(labels).not.toContain("Music");
   });
 
-  it("the /create hub links Music & Audio to the real Studio music mode", async () => {
+  it("the /create hub routes Music & Audio through intent routing", async () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
       path.resolve("src/components/create/CreateExperience.tsx"),
       "utf-8",
     );
+    // The hub seeds a prompt and classifies it via /api/litt/intent instead
+    // of hardcoding dead ?mode= links (Studio ignores ?mode=).
     expect(content).toContain('label: "Music & Audio"');
-    expect(content).toContain("/studio?tool=chat&mode=music");
+    expect(content).toContain('seed: "Make me a song"');
+    expect(content).toContain("/api/litt/intent");
+    // The router push carries the classified primaryIntent as ?intent=
+    // (the intent router classifies "Make me a song" as music).
+    expect(content).toContain('params.set("intent"');
   });
 });
 

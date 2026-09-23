@@ -1115,7 +1115,7 @@ function DetailSettings({ agent }: { agent: AgentDefinition }) {
           </div>
           <div>
             <div className="opacity-50 mb-0.5" style={{ color: T.textMuted }}>Per-run cost</div>
-            <div className="font-bold" style={{ color: T.textColor }}>{agent.cost.perRun} BITS</div>
+            <div className="font-bold" style={{ color: T.textColor }}>{agent.cost.perRun} LiTTBits</div>
           </div>
         </div>
       </div>

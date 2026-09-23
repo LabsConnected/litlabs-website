@@ -60,7 +60,18 @@ function intentForPrompt(prompt: string, context: RouterInput["context"]): {
     add(context.recentIntents[0]);
   }
 
-  const primaryIntent = intents[0] ?? "project_action";
+  // Conversational messages (greetings, general questions) are not project
+  // actions — without this they fall through to "project_action" with
+  // material ambiguity and get clarification-blocked even though there is
+  // nothing to clarify. Chat passes straight to the model.
+  const isConversational =
+    intents.length === 0 &&
+    (/\?\s*$/.test(prompt) ||
+      /^(hello|hi|hey|yo|good (morning|afternoon|evening)|thanks|thank you|what is|what are|what's|who is|who's|how (do|does|can|to|about)|why|when|where|which|can you|could you|do you|are you|is there|tell me about|explain)\b/i.test(
+        prompt,
+      ));
+
+  const primaryIntent = isConversational ? "chat" : intents[0] ?? "project_action";
   const secondaryIntents = intents.slice(1);
   const finalPrimary = intents.length > 1 ? "mixed" : primaryIntent;
   return {

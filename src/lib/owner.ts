@@ -102,7 +102,7 @@ export const SIMULATION_OPTIONS: { value: SimulatedPlan; label: string; descript
   { value: "starter", label: "Starter", description: "1 project, 500 LiTTBits, no terminal/voice/premium" },
   { value: "creator_beta", label: "Creator Beta", description: "5 projects, 6K LiTTBits, voice + GitHub" },
   { value: "pro_builder_beta", label: "Pro Builder Beta", description: "25 projects, 20K LiTTBits, terminal + premium models" },
-  { value: "zero_bits", label: "Zero-BITS Test", description: "Owner access but balance treated as 0 — tests insufficient-credit behavior" },
+  { value: "zero_bits", label: "Zero-LiTTBits Test", description: "Owner access but balance treated as 0 — tests insufficient-credit behavior" },
 ];
 
 export const VALID_SIMULATIONS: ReadonlySet<SimulatedPlan> = new Set(SIMULATION_OPTIONS.map((o) => o.value));

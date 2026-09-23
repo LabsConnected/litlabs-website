@@ -157,7 +157,7 @@ describe("LLM Cost Engine", () => {
     expect(free.label).toBe("Included");
 
     const paid = getEstimatedBitsRange("groq", "llama-3.3-70b-versatile", false);
-    expect(paid.label).toMatch(/BITS/);
+    expect(paid.label).toMatch(/LiTTBits/);
   });
 });
 

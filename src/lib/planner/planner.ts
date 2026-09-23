@@ -63,6 +63,15 @@ function addCreativeSteps(planId: string, result: IntentRouterResult, steps: Rou
 export function buildPlan(prompt: string, result: IntentRouterResult): ExecutionPlan {
   const planId = `plan_${randomUUID()}`;
   const steps: RouterStep[] = [];
+
+  // Conversational turns need no project work — a single respond step keeps
+  // the plan honest instead of fabricating inspect/build steps.
+  if (result.primaryIntent === "chat") {
+    steps.push(step(planId, "respond", "respond", "chat", []));
+    validatePlan({ id: planId, schemaVersion: "1.0", prompt, primaryIntent: result.primaryIntent, steps, createdAt: new Date().toISOString() });
+    return { id: planId, schemaVersion: "1.0", prompt, primaryIntent: result.primaryIntent, steps, createdAt: new Date().toISOString() };
+  }
+
   const needsProject = result.requirements.needsProject;
   let tail: string[] = [];
 

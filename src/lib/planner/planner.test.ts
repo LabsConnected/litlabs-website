@@ -36,4 +36,15 @@ describe("LiTT planner", () => {
     expect(plan.steps.find((step) => step.type === "deploy_project")?.approval).toBe("before_external_write");
     expect(plan.steps.find((step) => step.type === "publish_project")?.approval).toBe("before_publish");
   });
+
+  it("plans conversational turns as a single respond step", () => {
+    const plan = buildPlan(
+      "What is LiTTree?",
+      result({ primaryIntent: "chat", secondaryIntents: [], requirements: { needsProject: false, needsFiles: false, needsApproval: false, needsExternalService: false } }),
+    );
+    expect(plan.steps).toHaveLength(1);
+    expect(plan.steps[0].type).toBe("respond");
+    expect(plan.steps[0].intent).toBe("chat");
+    expect(() => validatePlan(plan)).not.toThrow();
+  });
 });

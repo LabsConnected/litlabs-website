@@ -11,7 +11,8 @@ export type LiTTIntent =
   | "research"
   | "agent_task"
   | "project_action"
-  | "mixed";
+  | "mixed"
+  | "chat";
 
 export type ActionVerb =
   | "create"
@@ -31,6 +32,7 @@ export type ApprovalPolicy =
   | "before_publish";
 
 export type StepType =
+  | "respond"
   | "create_project"
   | "inspect_project"
   | "generate_brand_direction"
