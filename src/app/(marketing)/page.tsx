@@ -14,13 +14,13 @@ export const revalidate = 60;
 
 export const metadata: Metadata = {
   ...buildMetadata({
-    title: "Bring the idea. LiTT builds the rest.",
+    title: "LiTT — AI Project Operator & Creative Workspace",
     description:
-      "LiTT plans, builds, edits real projects, uses tools, verifies the work, and helps you ship—all from one workspace. Free to start, no credit card required.",
+      "LiTT plans, builds, edits real projects, uses tools, verifies work, and helps you ship from one workspace. Build apps, media, and workflows at litlabs.net.",
     path: "/",
     index: true,
   }),
-  title: { absolute: "Bring the idea. LiTT builds the rest. | LiTTree LabStudios" },
+  title: { absolute: "LiTT — AI Project Operator & Creative Workspace | LiTTree LabStudios" },
 };
 
 const homeSchema = {
@@ -71,6 +71,48 @@ const homeSchema = {
         "@id": `${SITE_URL}/#organization`,
       },
       inLanguage: "en-US",
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": `${SITE_URL}/#litt-application`,
+      name: "LiTT",
+      applicationCategory: "DeveloperApplication",
+      operatingSystem: "Web",
+      url: SITE_URL,
+      description:
+        "LiTT plans, builds, edits real projects, uses tools, verifies the work, and helps you ship—all from one workspace.",
+      publisher: {
+        "@id": `${SITE_URL}/#organization`,
+      },
+      offers: [
+        {
+          "@type": "Offer",
+          name: "Starter",
+          price: "0",
+          priceCurrency: "USD",
+          url: absoluteUrl("/pricing"),
+          description:
+            "Free forever. 500 AI credits (one-time), 1 active project.",
+        },
+        {
+          "@type": "Offer",
+          name: "Creator Beta",
+          price: "15",
+          priceCurrency: "USD",
+          url: absoluteUrl("/pricing"),
+          description:
+            "Beta pricing. Research, write, and market with AI agents. 6,000 AI credits monthly, 5 active projects.",
+        },
+        {
+          "@type": "Offer",
+          name: "Pro Builder Beta",
+          price: "39",
+          priceCurrency: "USD",
+          url: absoluteUrl("/pricing"),
+          description:
+            "Beta pricing. Build, debug, and deploy with full AI tooling. 20,000 AI credits monthly, 25 active projects.",
+        },
+      ],
     },
   ],
 };

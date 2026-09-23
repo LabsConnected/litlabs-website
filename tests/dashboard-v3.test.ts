@@ -196,29 +196,37 @@ describe("Dashboard v3 — Continue Working", () => {
   });
 
   it("has empty state when no project", () => {
-    expect(src).toContain("Ready to build something");
+    expect(src).toContain("Start with an idea and LiTT will take it from description to a real workspace.");
   });
 });
 
 describe("Dashboard v3 — Quick Start", () => {
   const src = readSrc("QuickStart.tsx");
+  const createSrc = fs.readFileSync(
+    path.resolve(__dirname, "../src/components/create/CreateExperience.tsx"),
+    "utf-8",
+  );
 
-  it("has six creation types (Website, App, Game, Image, Video, Music)", () => {
-    expect(src).toContain("Website");
-    expect(src).toContain("App");
-    expect(src).toContain("Game");
-    expect(src).toContain("Image");
-    expect(src).toContain("Video");
-    expect(src).toContain("Music");
+  it("has the canonical seven creation types", () => {
+    for (const label of ["Website", "Image", "Video", "Music & Audio", "Code", "Design", "Game"]) {
+      expect(createSrc).toContain(label);
+    }
+    expect(src).not.toContain("Smartphone");
+  });
+
+  it("uses the shared CreateExperience flow", () => {
+    expect(src).toContain("CreateExperience");
+    expect(createSrc).toContain("quick-create");
   });
 
   it("links to real studio routes", () => {
-    expect(src).toContain("/studio?tool=");
+    expect(createSrc).toContain("/studio?");
   });
 
-  it("is responsive (grid-cols-2 md:grid-cols-3)", () => {
-    expect(src).toContain("grid-cols-2");
-    expect(src).toContain("md:grid-cols-3");
+  it("is responsive and touch-friendly", () => {
+    expect(createSrc).toContain("grid-cols-2");
+    expect(createSrc).toContain("sm:grid-cols-3");
+    expect(createSrc).toContain("min-h-24");
   });
 });
 
@@ -437,7 +445,10 @@ describe("Dashboard v3 — Developer Drawer (real info)", () => {
 describe("Dashboard v3 — Responsive", () => {
   const dashboardSrc = readSrc("Dashboard.tsx");
   const mediaDockSrc = readSrc("MediaDock.tsx");
-  const quickStartSrc = readSrc("QuickStart.tsx");
+  const quickStartSrc = fs.readFileSync(
+    path.resolve(__dirname, "../src/components/create/CreateExperience.tsx"),
+    "utf-8",
+  );
 
   it("Dashboard has mobile padding (px-4 md:px-6)", () => {
     expect(dashboardSrc).toContain("px-4");
@@ -454,8 +465,9 @@ describe("Dashboard v3 — Responsive", () => {
     expect(mediaDockSrc).toContain("md:hidden");
   });
 
-  it("QuickStart reflows on mobile (grid-cols-2 → md:grid-cols-3)", () => {
+  it("Quick Create reflows on mobile and preserves touch targets", () => {
     expect(quickStartSrc).toContain("grid-cols-2");
-    expect(quickStartSrc).toContain("md:grid-cols-3");
+    expect(quickStartSrc).toContain("sm:grid-cols-3");
+    expect(quickStartSrc).toContain("min-h-24");
   });
 });

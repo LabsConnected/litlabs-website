@@ -634,9 +634,9 @@ async function settleLedgerWrite(args: {
       amount: -args.bits,
       type: "spend",
       reason:
-        `Agent browser session — ${args.billableMinutes} min × ${BROWSER_MINUTE_BITS} BITS` +
+        `Agent browser session — ${args.billableMinutes} min × ${BROWSER_MINUTE_BITS} LiTTBits` +
         (args.modelCalls > 0
-          ? ` + ${args.modelCalls} model calls × ${BROWSER_MODEL_CALL_BITS} BITS`
+          ? ` + ${args.modelCalls} model calls × ${BROWSER_MODEL_CALL_BITS} LiTTBits`
           : ""),
       idempotencyKey,
       rating: buildChargeRating({

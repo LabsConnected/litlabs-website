@@ -1,5 +1,5 @@
-import { LoadingBar } from "@/components/ui/LoadingBar";
+import DashboardShell from "@/components/page-shells/DashboardShell";
 
 export default function DashboardLoading() {
-  return <LoadingBar label="Loading Dashboard" />;
+  return <DashboardShell />;
 }

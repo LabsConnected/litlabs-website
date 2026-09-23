@@ -315,11 +315,31 @@ const isProtectedRouteInner = createRouteMatcher([
  * /u/[handle] pages. Signed-out visitors' server fetches carry no session
  * cookie, so without this exemption the profile page would 401 for guests.
  * The route is GET-only and returns public profile fields + counts.
+ *
+ * Demo lane (PR1, feat/demo-lane): /demo is the anonymous limited LiTT demo
+ * rendered in the Studio visual shell. Exemptions are deliberately narrow:
+ *   - GET /demo (the page only — never /studio(.*) or any other protected route)
+ *   - POST /api/demo/* (the demo chat API only; GET/PUT/DELETE stay protected)
+ * The chat route enforces its own server-side session + IP rate limits,
+ * message ceiling, pinned free-tier provider, and kill switch.
  */
 const isProtectedRoute = (req: NextRequest) => {
   if (
     req.method === "GET" &&
     req.nextUrl.pathname.startsWith("/api/users/by-username/")
+  ) {
+    return false;
+  }
+  const pathname = req.nextUrl.pathname;
+  if (
+    req.method === "GET" &&
+    (pathname === "/demo" || pathname.startsWith("/demo/"))
+  ) {
+    return false;
+  }
+  if (
+    req.method === "POST" &&
+    (pathname === "/api/demo" || pathname.startsWith("/api/demo/"))
   ) {
     return false;
   }

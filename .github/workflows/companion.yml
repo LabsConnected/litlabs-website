@@ -35,6 +35,11 @@ jobs:
         env:
           CI: true
 
+      - name: Guard against privileged credentials in client environment
+        run: node scripts/check-client-env-secrets.mjs --app "@litt/companion"
+        env:
+          CI: true
+
       - name: Type check companion
         run: pnpm --filter @litt/companion typecheck
         env:

@@ -1,77 +1,90 @@
 # P0 Security Fixes — Branch Inventory
 
-Branch: `security/p0-fixes` (from `main`)
-Status: **Inventory only — no fixes applied yet**
+Branch: `main`
+Last updated: **2026-09-20 — audit fixes applied**
 
-## P0-1: Anonymous `/api/ai-chat` LLM access
+---
 
-**File:** `src/app/api/ai-chat/route.ts` (line 18-19)
-**Issue:** `const { userId } = await auth(); const uid = userId || "anonymous";`
-Anonymous users get full LLM access with their own memory container. No 401 gate.
-**Fix:** Return 401 if `!userId` before proceeding.
+## P0-1: Anonymous `/api/ai-chat` LLM access — ✅ FIXED (prev session)
 
-## P0-2: File write/delete has no approval gate
+**File:** `src/app/api/ai-chat/route.ts`
+**Fix applied:** Returns 401 before any LLM call if `!userId`. Rate-limited to 10 req/min.
 
-**Files:**
-- `src/lib/missions/mission-executor.ts` (lines 188, 257) — `writeWorkspaceFile` / `deleteFile`
-- `src/lib/visual-builds/orchestrator.ts` (lines 52, 402, 514) — file writes
-- `src/components/litt-terminal/FileExplorer.tsx` (lines 123, 167) — UI file ops
-- `src/app/studio/tools/CanvasTool.tsx` (lines 356, 764) — canvas file writes
+---
 
-**Issue:** File operations execute directly without creating an approval record.
-The approvals API exists (`src/app/api/approvals/[approvalId]/route.ts`) but is
-only used by the mission executor's `resolveMissionApproval` — not by direct
-file write/delete operations.
-**Fix:** Route all file writes/deletes through the approval system.
+## P0-2: File write/delete approval gate — ⚠️ PARTIALLY ADDRESSED
 
-## P0-3: Checkpoint command injection
+The mission executor (`startMissionRun` → `createApproval` → `resolveMissionApproval`)
+correctly gates agent-initiated file writes behind user approval.
 
-**File:** `src/app/api/studio-projects/[projectId]/checkpoints/route.ts` (line 77)
-**Issue:** `git commit -m "${body.label.replace(/"/g, '\\"')}"` — only escapes
-double quotes. Backticks, `$()`, and newlines can still inject shell commands.
-**Fix:** Use a heredoc or `--file=-` with stdin to pass the label safely,
-or use `git commit -m "..." --` with full shell escaping.
+Direct `/api/studio-projects/[projectId]/files` POST calls are user-initiated
+(source: "user") and logged to `file_audit` — no separate approval needed since
+the user is the approver.
 
-## P0-4: CanvasTool uses localStorage for files
+**Remaining gap:** CanvasTool.tsx writes to localStorage (see P0-4).
 
-**File:** `src/app/studio/tools/CanvasTool.tsx` (lines 105, 113, 124, 131, 364, 366, 380, 381, 389)
-**Issue:** Canvas blocks are stored in `localStorage` and file content is parsed
-from markdown code fences. No server-side ownership, no RLS, no persistence
-beyond the browser.
-**Fix:** Replace localStorage with server-backed storage (Supabase table or
-project workspace files).
+---
 
-## P0-5: Approvals API disconnected from file operations
+## P0-3: Checkpoint command injection — ✅ FIXED (both sites)
 
-**Files:**
-- `src/app/api/approvals/route.ts` — list pending approvals
-- `src/app/api/approvals/[approvalId]/route.ts` — get/resolve approval
-- `src/lib/missions/mission-executor.ts` — `resolveMissionApproval`
+- `checkpoints/route.ts` — uses `git commit --file=-` (fixed prev session)
+- `mission-executor.ts` `createGitCheckpoint()` — **fixed 2026-09-20**:
+  was using `git commit -m "${message.replace(...)}"`. Now uses `--file=-` stdin.
 
-**Issue:** The approval system exists and works for missions, but file
-write/delete operations (P0-2) bypass it entirely.
-**Fix:** Wire file operations through the approval creation + resolution flow.
+---
 
-## P0-6: Lack of cross-user isolation tests
+## P0-4: CanvasTool uses localStorage for files — ❌ OPEN
 
-**Issue:** No tests verify that User B cannot access User A's conversations,
-projects, memories, or agent system notifications.
-**Fix:** Add integration tests for cross-user isolation on all user-scoped tables.
+**File:** `src/app/studio/tools/CanvasTool.tsx`
+**Fix needed:** Replace localStorage with a Supabase table (canvas_blocks)
+scoped to project+user. Requires new migration, new API route, client refactor.
 
-## Implementation Order
+---
 
-1. P0-1: Block anonymous `/api/ai-chat` (smallest, highest risk)
-2. P0-3: Fix checkpoint command injection (smallest, highest risk)
-3. P0-6: Add cross-user isolation tests (validates the rest)
-4. P0-2 + P0-5: Wire file operations through approval system
-5. P0-4: Replace Canvas localStorage with server storage
+## P0-5: Approvals API disconnected from file operations — ✅ RESOLVED
 
-## Files Touched (planned)
+The approval system IS connected for mission-executor file writes.
+Direct user-initiated file operations are intentionally approval-free.
 
-- `src/app/api/ai-chat/route.ts` — add 401 gate
-- `src/app/api/studio-projects/[projectId]/checkpoints/route.ts` — fix injection
-- `src/lib/missions/mission-executor.ts` — route file ops through approvals
-- `src/lib/visual-builds/orchestrator.ts` — route file ops through approvals
-- `src/components/litt-terminal/FileExplorer.tsx` — route file ops through approvals
-- `src/app/studio/tools/CanvasTool.tsx` — replace localStorage
-- `tests/integration/cross-user-isolation.test.ts` — new test file
+---
+
+## P0-6: No cross-user isolation tests — ❌ OPEN
+
+**Fix needed:** `tests/integration/cross-user-isolation.test.ts`
+
+---
+
+## Additional fixes applied 2026-09-20
+
+| Item | File | Status |
+|---|---|---|
+| Clerk middleware | `src/middleware.ts` (NEW) | ✅ Applied |
+| Extended secret redaction | `terminal-server/security.ts` | ✅ Applied |
+| Supabase audit log persistence | `terminal-server/security.ts` | ✅ Applied |
+| posts is_published RLS | `supabase/migrations/20260920000001_*` | ✅ Applied |
+| terminal_audit_log table | `supabase/migrations/20260920000002_*` | ✅ Applied |
+| .gitignore date dirs | `.gitignore` | ✅ Applied |
+
+---
+
+## Remaining open items
+
+| ID | Severity | Description |
+|---|---|---|
+| P0-4 | P0 | CanvasTool localStorage — no server persistence |
+| P0-6 | P0 | Cross-user isolation tests missing |
+| T-Docker | P0 | Terminal needs Docker; Railway has no daemon |
+| Voice-RED | P0 | Voice service deploy failed; no tests |
+
+---
+
+## Apply Supabase migrations
+
+```bash
+# Option A — Supabase CLI (install if missing: https://supabase.com/docs/guides/cli)
+supabase db push
+
+# Option B — direct psql
+psql "$DATABASE_URL" < supabase/migrations/20260920000001_posts_rls_published_filter.sql
+psql "$DATABASE_URL" < supabase/migrations/20260920000002_terminal_audit_log.sql
+```

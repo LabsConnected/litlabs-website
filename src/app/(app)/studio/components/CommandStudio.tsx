@@ -18,6 +18,7 @@ import { useConversationStore } from "../stores/useConversationStore";
 import { useLiTTRealtimeSession } from "../hooks/useLiTTRealtimeSession";
 import type { LiTTLiveSessionContext } from "@/lib/litt/live/types";
 import type { ArtifactAction } from "@/lib/canvas/types";
+import { STUDIO_EVENT_OPEN_DOCK, STUDIO_EVENT_REQUEST_DEPLOY } from "@/lib/canvas/panel-actions";
 import { INITIAL_RUNTIME_STATE, deriveExecutionHint } from "@/lib/projects/runtime-state";
 import { useLiTTRuntime } from "@/hooks/useLiTTRuntime";
 
@@ -55,6 +56,7 @@ import ProjectNameDialog from "./ProjectNameDialog";
 import { MediaUtilityDock } from "@/components/media/MediaUtilityDock";
 import {
   mapLegacyToolToDestination,
+  mapMediaIntentToDestination,
   destinationToLegacyTool,
   resolveCreatorDestination,
   workspaceStageToMode,
@@ -226,6 +228,12 @@ function CommandStudioContent() {
   const [createMode, setCreateMode] = useState<CreateMode>(
     initial.destination === "create" ? (initial.mode as CreateMode) ?? "image" : "image",
   );
+  // Bumped only when a prompt-carrying image/video draft is written for an
+  // intent. Creators consume drafts in a mount-only effect (VideoTool /
+  // ImageTool), so a repeat intent while the creator is already mounted
+  // needs a remount (via the WorkspaceComponent key) to read the new draft.
+  // Promptless navigation never touches it — no gratuitous remounts.
+  const [creatorDraftEpoch, setCreatorDraftEpoch] = useState(0);
   const [moreMode, setMoreMode] = useState<MoreMode>(
     initial.destination === "more" ? (initial.mode as MoreMode) ?? "plugins" : "plugins",
   );
@@ -552,6 +560,33 @@ function CommandStudioContent() {
     return () => window.removeEventListener("studio:ask-litt", handler);
   }, [isMobileLitt]);
 
+  // Canvas ActionPanel events — the studio.* ArtifactActions execute
+  // client-side: executeAction dispatches these DOM events and the owning
+  // surfaces react. Deploy routes through the existing ask-litt path
+  // (pre-fill the composer, user confirms before the agent run starts);
+  // the deploy itself still goes through the ApprovalCard gate.
+  useEffect(() => {
+    const openDock = (e: Event) => {
+      const tab = (e as CustomEvent).detail?.tab as StudioDockTab | undefined;
+      if (tab === "activity" || tab === "files" || tab === "terminal" || tab === "inspector" || tab === "media") {
+        handleOpenDockTab(tab);
+      }
+    };
+    const requestDeploy = () => {
+      window.dispatchEvent(
+        new CustomEvent("studio:ask-litt", {
+          detail: { prompt: "Deploy this project to production" },
+        }),
+      );
+    };
+    window.addEventListener(STUDIO_EVENT_OPEN_DOCK, openDock);
+    window.addEventListener(STUDIO_EVENT_REQUEST_DEPLOY, requestDeploy);
+    return () => {
+      window.removeEventListener(STUDIO_EVENT_OPEN_DOCK, openDock);
+      window.removeEventListener(STUDIO_EVENT_REQUEST_DEPLOY, requestDeploy);
+    };
+  }, [handleOpenDockTab]);
+
   // Dock open helpers — both are OPEN actions (switch tab + ensure
   // open), never a toggle-closed. The dock's own close button and the
   // header dock toggle close it. Files, Inspector, and Terminal live in
@@ -629,7 +664,9 @@ function CommandStudioContent() {
       setScreenDock((v) => ({ ...v, open: true }));
       return;
     }
-    const mapped = mapLegacyToolToDestination(tool, command);
+    const mapped = ["image", "video", "audio", "music"].includes(tool)
+      ? mapMediaIntentToDestination(tool as "image" | "video" | "audio" | "music")
+      : mapLegacyToolToDestination(tool, command);
     setDestination(mapped.destination);
     if (mapped.destination === "studio") {
       setStudioMode((mapped.mode as StudioMode) ?? "work");
@@ -639,7 +676,19 @@ function CommandStudioContent() {
       if (tool === "build") setWorkSurface("builder");
       else if (!mapped.openDrawer) setWorkSurface("conversation");
     }
-    if (mapped.destination === "create") setCreateMode((mapped.mode as CreateMode) ?? "image");
+    if (mapped.destination === "create") {
+      setCreateMode((mapped.mode as CreateMode) ?? "image");
+      if (command.trim() && (tool === "image" || tool === "video")) {
+        try {
+          sessionStorage.setItem(`litlabs:${tool}:draft`, JSON.stringify({ prompt: command.trim() }));
+          // Remount the already-active creator so its mount-only draft
+          // effect picks up the new prompt. No-op when it mounts fresh.
+          setCreatorDraftEpoch((n) => n + 1);
+        } catch {
+          // Draft handoff is best-effort; the creator remains usable if storage is unavailable.
+        }
+      }
+    }
     if (mapped.destination === "missions") setMissionMode((mapped.mode as MissionMode) ?? "overview");
     if (mapped.destination === "more") setMoreMode((mapped.mode as MoreMode) ?? "plugins");
     if (mapped.openDrawer) {
@@ -1963,10 +2012,7 @@ function CommandStudioContent() {
                   <div className="min-h-0 min-w-0 flex-1 overflow-auto pb-28 lg:pb-0">
                     <MediaWorkspacePanel
                       projectId={capabilities.projectId}
-                      onOpenCreate={() => {
-                        setDestination("create");
-                        setCreateMode("image");
-                      }}
+                      onOpenCreate={() => handleOpenDockTab("media")}
                     />
                   </div>
                 ) : WorkspaceComponent ? (
@@ -1974,12 +2020,14 @@ function CommandStudioContent() {
                     {studioCreator ? (
                       <StudioCreatorHost>
                         <WorkspaceComponent
+                          key={creatorDraftEpoch}
                           projectId={capabilities.projectId}
                           initialPrompt={activeLegacyTool === "video" ? videoStudioPrompt : imageStudioPrompt}
                         />
                       </StudioCreatorHost>
                     ) : (
                       <WorkspaceComponent
+                        key={creatorDraftEpoch}
                         projectId={capabilities.projectId}
                         initialPrompt={activeLegacyTool === "video" ? videoStudioPrompt : imageStudioPrompt}
                       />
@@ -2491,7 +2539,7 @@ function MediaWorkspacePanel({
             No {modeLabel.toLowerCase()} artifacts yet
           </p>
           <p className="mt-1 text-xs">
-            Generate in Create — your image, video, and audio tools live there.
+            Use the media tools in this workspace to create an image, video, or audio asset.
           </p>
           <button
             type="button"
@@ -2503,7 +2551,7 @@ function MediaWorkspacePanel({
               border: "1px solid rgba(77,255,98,0.3)",
             }}
           >
-            Open Create
+            Open media tools
           </button>
         </div>
       </div>

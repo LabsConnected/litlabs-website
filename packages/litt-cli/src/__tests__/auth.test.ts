@@ -947,7 +947,7 @@ describe("Auth Config", () => {
 
   it("uses default issuer when LITT_CLERK_ISSUER not set", () => {
     delete process.env.LITT_CLERK_ISSUER;
-    expect(getIssuer()).toBe("https://clerk.litlabs.net");
+    expect(getIssuer()).toBe("https://www.litlabs.net/__clerk");
   });
 
   it("uses default terminal URL when LITT_TERMINAL_URL not set", () => {
@@ -966,7 +966,7 @@ describe("Auth Config", () => {
     delete process.env.LITT_CLERK_ISSUER;
     const config = resolveAuthConfig();
     expect(config.clientId).toBe("YWeGjVVwoNnX4RTY");
-    expect(config.issuer).toBe("https://clerk.litlabs.net");
+    expect(config.issuer).toBe("https://www.litlabs.net/__clerk");
   });
 
   // ── Env overrides ──
@@ -1270,7 +1270,7 @@ describe("Browser Launcher", () => {
 
 describe("Windows Browser Launcher — quoting", () => {
   const TEST_URL =
-    "https://clerk.litlabs.net/oauth/authorize?response_type=code&client_id=test&redirect_uri=http%3A%2F%2F127.0.0.1%3A12345%2Fcallback&state=abc&code_challenge=xyz&code_challenge_method=S256";
+    "https://www.litlabs.net/__clerk/oauth/authorize?response_type=code&client_id=test&redirect_uri=http%3A%2F%2F127.0.0.1%3A12345%2Fcallback&state=abc&code_challenge=xyz&code_challenge_method=S256";
 
   it("buildWindowsStartCommand produces NO literal single quotes", async () => {
     const { buildWindowsStartCommand } = await import("../lib/auth/browser-launcher.js");
@@ -1318,7 +1318,7 @@ describe("Windows Browser Launcher — quoting", () => {
 
   it("encoded values (%3A, %2F) survive intact", async () => {
     const { buildWindowsStartCommand } = await import("../lib/auth/browser-launcher.js");
-    const urlWithEncoding = "https://clerk.litlabs.net/oauth/authorize?redirect_uri=http%3A%2F%2F127.0.0.1%3A12345%2Fcallback";
+    const urlWithEncoding = "https://www.litlabs.net/__clerk/oauth/authorize?redirect_uri=http%3A%2F%2F127.0.0.1%3A12345%2Fcallback";
     const cmd = buildWindowsStartCommand(urlWithEncoding);
     expect(cmd).toContain("http%3A%2F%2F127.0.0.1%3A12345%2Fcallback");
   });
@@ -1587,7 +1587,7 @@ describe("Safe Defaults — Auth Gate", () => {
     expect(() => resolveAuthConfig()).not.toThrow();
     const config = resolveAuthConfig();
     expect(config.clientId).toBe("YWeGjVVwoNnX4RTY");
-    expect(config.issuer).toBe("https://clerk.litlabs.net");
+    expect(config.issuer).toBe("https://www.litlabs.net/__clerk");
   });
 
   it("absence of env overrides does NOT disable mandatory authentication", () => {
@@ -1672,7 +1672,7 @@ describe("No Secrets in CLI Default Config", () => {
     const config = resolveAuthConfig();
     // Only public values: issuer URL + public OAuth client_id
     expect(config.clientId).toBe("YWeGjVVwoNnX4RTY");
-    expect(config.issuer).toBe("https://clerk.litlabs.net");
+    expect(config.issuer).toBe("https://www.litlabs.net/__clerk");
     // No secret-looking patterns
     expect(config.clientId).not.toMatch(/sk_|secret|CLERK_SECRET|TERMINAL_AUTH|SERVICE_ROLE/i);
     expect(config.issuer).not.toMatch(/secret|key|token/i);

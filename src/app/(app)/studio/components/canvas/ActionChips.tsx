@@ -21,6 +21,9 @@ interface ActionChipsProps {
  * - canvas.rename → "Rename Canvas"
  * - task.create → "Create Task"
  * - project.promote → "Promote to Project"
+ * - studio.inspect_element → "Inspect element"
+ * - studio.open_terminal → "Open terminal"
+ * - studio.deploy_site → "Publish site"
  */
 export function ActionChips({ actions, onExecute }: ActionChipsProps) {
   const [executed, setExecuted] = useState<Set<number>>(new Set());
@@ -84,6 +87,12 @@ function getActionLabel(action: ArtifactAction): string {
       return "Create Task";
     case "project.promote":
       return "Promote to Project";
+    case "studio.inspect_element":
+      return "Inspect element";
+    case "studio.open_terminal":
+      return "Open terminal";
+    case "studio.deploy_site":
+      return "Publish site";
   }
 }
 
@@ -103,5 +112,11 @@ function getActionIcon(action: ArtifactAction): string {
       return "✓";
     case "project.promote":
       return "🚀";
+    case "studio.inspect_element":
+      return "🔍";
+    case "studio.open_terminal":
+      return "⌨️";
+    case "studio.deploy_site":
+      return "📤";
   }
 }

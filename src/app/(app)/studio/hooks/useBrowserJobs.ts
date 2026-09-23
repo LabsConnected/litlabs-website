@@ -19,6 +19,10 @@ export interface BrowserJobStep {
   label: string;
   status: "pending" | "running" | "completed" | "failed";
   detail?: string;
+  /** Exact page the browser was on for this step (route-accurate provenance). */
+  url?: string;
+  /** Screenshot captured for this step — only the newest step keeps one. */
+  screenshotUrl?: string | null;
 }
 
 export interface BrowserJobProgress {

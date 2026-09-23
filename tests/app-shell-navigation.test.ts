@@ -2,7 +2,7 @@
  * AppShell navigation regression tests.
  *
  * Verifies the ONE canonical authenticated global nav:
- *   Main: Home · Studio · Create · Assets · Agents · Missions · More
+ *   Main: Home · Studio · Assets · Agents · Missions · More
  *   More: Projects · Games · Discover · Marketplace · Showcase · Wallet ·
  *         CLI · Docs · Deployments · Settings · Profile
  *
@@ -26,7 +26,6 @@ describe("AppShell Navigation", () => {
       expect(labels).toEqual([
         "Home",
         "Studio",
-        "Create",
         "Assets",
         "Agents",
         "Missions",
@@ -38,7 +37,6 @@ describe("AppShell Navigation", () => {
       expect(hrefs).toEqual([
         "/dashboard",
         "/studio",
-        "/create",
         "/studio?tool=assets",
         "/studio?tool=agents",
         "/studio?tool=workflows",
@@ -47,7 +45,7 @@ describe("AppShell Navigation", () => {
 
     it("no competing legacy nav bars remain (single flat main list)", () => {
       // One source of truth — no sectioned groups duplicating the bar.
-      expect(APP_NAV_MAIN.length).toBe(6);
+      expect(APP_NAV_MAIN.length).toBe(5);
       expect(getVisibleMainNav()).toEqual(APP_NAV_MAIN);
     });
   });
@@ -160,9 +158,10 @@ describe("AppShell Navigation", () => {
       ).toBe(false);
     });
 
-    it("Create is active on /create", () => {
-      expect(isAppNavActive("/create", search, "/create")).toBe(true);
-      expect(isAppNavActive("/dashboard", search, "/create")).toBe(false);
+    it("Dashboard owns creation and /create is no longer a nav destination", () => {
+      expect(APP_NAV_MAIN.some((item) => item.label === "Create")).toBe(false);
+      expect(isAppNavActive("/dashboard", search, "/dashboard")).toBe(true);
+      expect(isAppNavActive("/create", search, "/dashboard")).toBe(false);
     });
 
     it("Settings is active on /settings and /settings/*", () => {

@@ -179,9 +179,20 @@ export async function probeOllamaRoute(
   const attempts: OllamaRouteAttempt[] = [];
 
   for (const candidate of candidates) {
+    // An explicit controller plus a ref'd timer, NOT AbortSignal.timeout():
+    // that helper's timer is unref'd, so when a probe is the only work left
+    // the event loop drains before the abort ever fires and this promise
+    // never settles. Real fetch hides it (an open socket refs the loop); an
+    // injected fetch does not, which is why it surfaces under the test runner.
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort(
+        new DOMException(`The operation was aborted after ${timeoutMs}ms`, "TimeoutError"),
+      );
+    }, timeoutMs);
     try {
       const response = await doFetch(`${candidate.endpoint}/api/tags`, {
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: controller.signal,
       });
       if (!response.ok) {
         attempts.push({ ...candidate, ok: false, error: `HTTP ${response.status}` });
@@ -209,6 +220,8 @@ export async function probeOllamaRoute(
         ok: false,
         error: error instanceof Error ? error.message : String(error),
       });
+    } finally {
+      clearTimeout(timer);
     }
   }
 

@@ -170,6 +170,64 @@ async function connectAndWait(
   return ws;
 }
 
+function stubVoiceConn(secretFp?: string) {
+  const conn = {
+    token: "test-token",
+    expiresAt: Date.now() + 120000,
+    endpoint: "ws://localhost:4002/voice",
+    littVoice: "litt-voice-id",
+    sparkVoice: "spark-voice-id",
+    secretFp,
+  };
+  // connect() calls getVoiceConnection() then getVoiceConnection(true) — one
+  // stubbed value per call, then the default mock factory resumes.
+  vi.mocked(getVoiceConnection).mockResolvedValueOnce(conn).mockResolvedValueOnce(conn);
+}
+
+function stubVoiceHealth(authSecretFp: string | null) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      expect(url).toBe("http://localhost:4002/health");
+      return {
+        ok: true,
+        json: async () => (authSecretFp === null ? {} : { authSecretFp }),
+      };
+    }),
+  );
+}
+
+// Drives connect() through two consecutive pre-session 4001 closes and
+// returns the thrown error.
+async function doubleClose4001(
+  firstReason = "Invalid or expired token",
+  secondReason = "Invalid or expired token",
+): Promise<Error> {
+  const { result } = renderHook(() => useInworldSession({}));
+  const connectPromise = result.current.connect();
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  const firstWs = MockWebSocket.instances[MockWebSocket.instances.length - 1]!;
+  act(() => firstWs.__fireClose(4001, firstReason));
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  const secondWs = MockWebSocket.instances[MockWebSocket.instances.length - 1]!;
+  act(() => secondWs.__fireClose(4001, secondReason));
+  let caught: unknown = null;
+  await act(async () => {
+    try {
+      await connectPromise;
+    } catch (e) {
+      caught = e;
+    }
+  });
+  return caught as Error;
+}
+
 describe("useInworldSession — TTS state machine", () => {
   beforeEach(() => {
     MockWebSocket.instances = [];
@@ -515,6 +573,57 @@ describe("useInworldSession — TTS state machine", () => {
     expect(caught).toBeInstanceOf(Error);
     expect(useVoiceStore.getState().state).toBe("error");
     expect(result.current.isConnected).toBe(false);
+    // The thrown error must carry the surfaced diagnosis — VoiceSessionContext
+    // displays the thrown message, so the raw transport error must not leak.
+    expect((caught as Error).message).not.toContain(
+      "Voice connection closed before session was ready",
+    );
+  });
+
+  it("double-4001 with mismatched credential fingerprints names the Railway fix", async () => {
+    stubVoiceConn("webfingerprint");
+    stubVoiceHealth("proxyfingerprint");
+    const err = await doubleClose4001();
+
+    expect(err.message).toContain("different credentials");
+    expect(err.message).toContain("VOICE_AUTH_SECRET");
+    expect(err.message).toContain("localhost:4002");
+    expect(err.message).toContain('The voice server said: "Invalid or expired token"');
+    expect(err.message).not.toContain("Voice connection closed before session was ready");
+    // The hook's surfaced error state matches the thrown message.
+    expect(useVoiceStore.getState().error).toBe(err.message);
+  });
+
+  it("double-4001 with matching fingerprints suggests restarting the voice server", async () => {
+    stubVoiceConn("samefingerprint");
+    stubVoiceHealth("samefingerprint");
+    const err = await doubleClose4001();
+
+    expect(err.message).toContain("stale configuration");
+    expect(err.message).toContain("restart the voice-server service");
+  });
+
+  it("double-4001 with an unreachable voice server names the outage", async () => {
+    stubVoiceConn("webfingerprint");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network down");
+      }),
+    );
+    const err = await doubleClose4001();
+
+    expect(err.message).toContain("didn't answer its health check");
+    expect(err.message).toContain("localhost:4002");
+  });
+
+  it("double-4001 without comparable fingerprints falls back to the generic auth message", async () => {
+    stubVoiceConn("webfingerprint");
+    stubVoiceHealth(null); // old proxy build predates authSecretFp
+    const err = await doubleClose4001();
+
+    expect(err.message).toContain("could not be verified");
+    expect(err.message).toContain('The voice server said: "Invalid or expired token"');
   });
 
   it("transcript events update the store and call onTranscript", async () => {

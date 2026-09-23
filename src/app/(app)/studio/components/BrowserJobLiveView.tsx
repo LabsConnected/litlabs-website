@@ -58,15 +58,26 @@ function isDataImage(value: unknown): value is string {
 /**
  * Collect labeled, timestamped snapshots for the timeline:
  *  - every job event carrying metadata.screenshotUrl (base64 data URL)
+ *  - per-step screenshots recorded by the executor, captioned with the
+ *    EXACT URL they were captured at — route-accurate by construction
+ *    (the server prunes older step screenshots, so only the freshest
+ *    frames are here)
  *  - the job result's screenshotUrl (final snapshot)
+ * Identical frames emitted through multiple channels are shown once.
  * Sorted oldest → newest; the last one is the "latest snapshot".
  */
 export function collectSnapshots(job: BrowserJob, events: AgentJobEvent[]): Snapshot[] {
   const snapshots: Snapshot[] = [];
+  const seen = new Set<string>();
+  const push = (s: Snapshot) => {
+    if (seen.has(s.url)) return;
+    seen.add(s.url);
+    snapshots.push(s);
+  };
   for (const event of events) {
     const url = (event.metadata as Record<string, unknown> | undefined)?.screenshotUrl;
     if (isDataImage(url)) {
-      snapshots.push({
+      push({
         id: `event-${event.id}`,
         url,
         caption: event.message || "Snapshot",
@@ -74,9 +85,22 @@ export function collectSnapshots(job: BrowserJob, events: AgentJobEvent[]): Snap
       });
     }
   }
+  for (let i = 0; i < job.progress.steps.length; i++) {
+    const step = job.progress.steps[i];
+    if (isDataImage(step.screenshotUrl)) {
+      push({
+        id: `step-${i}`,
+        url: step.screenshotUrl,
+        caption: step.url
+          ? `Captured at ${step.url}`
+          : `Screenshot from step ${i + 1} (“${step.label}”)`,
+        createdAt: job.completedAt ?? job.createdAt,
+      });
+    }
+  }
   const resultUrl = (job.result as Record<string, unknown> | null)?.screenshotUrl;
   if (isDataImage(resultUrl)) {
-    snapshots.push({
+    push({
       id: "result",
       url: resultUrl,
       caption: "Final snapshot",

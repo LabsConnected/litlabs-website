@@ -25,6 +25,14 @@ describe("StudioPreviewPanel", () => {
     act(() => useExecutionStore.getState().reset());
   });
 
+  it("explains how to start when no project is selected", () => {
+    render(<StudioPreviewPanel projectId={null} projectName={null} repositoryName={null} branch={null} workspaceStatus={null} />);
+
+    expect(screen.getByText("Select a project")).toBeInTheDocument();
+    expect(screen.getByText("Choose an existing project or start a blank project to launch a preview.")).toBeInTheDocument();
+    expect(screen.queryByText("Preparing your preview automatically…")).toBeNull();
+  });
+
   it("does not claim readiness before the preview API reports a URL", async () => {
     mockFetch(() => jsonResponse({ runtimeStatus: "not_started", previewUrl: null, runtimeError: null }));
     render(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName={null} branch="main" workspaceStatus="ready" />);

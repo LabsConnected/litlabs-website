@@ -11,10 +11,19 @@ import { z } from "zod";
 const coreSchema = z.object({
   NEXT_PUBLIC_SITE_URL: z.string().url().optional().default("https://litlabs.net"),
   NEXT_PUBLIC_SUPABASE_URL: z.string().min(1, "NEXT_PUBLIC_SUPABASE_URL is required"),
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(10, "NEXT_PUBLIC_SUPABASE_ANON_KEY is required"),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(10, "SUPABASE_SERVICE_ROLE_KEY is required"),
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: z.string().min(10).optional(),
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(10).optional(),
+  SUPABASE_SECRET_KEY: z.string().min(10).optional(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(10).optional(),
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: z.string().min(10, "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is required"),
   CLERK_SECRET_KEY: z.string().min(10, "CLERK_SECRET_KEY is required"),
+}).superRefine((value, ctx) => {
+  if (!value.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY && !value.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    ctx.addIssue({ code: "custom", path: ["NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"], message: "A Supabase publishable key is required" });
+  }
+  if (!value.SUPABASE_SECRET_KEY && !value.SUPABASE_SERVICE_ROLE_KEY) {
+    ctx.addIssue({ code: "custom", path: ["SUPABASE_SECRET_KEY"], message: "A Supabase secret key is required" });
+  }
 });
 
 // Variables required only in production deployments.
@@ -84,6 +93,21 @@ const optionalAISchema = z.object({
   LITT_OLLAMA_URL: z.string().optional(),
   OLLAMA_MODEL: z.string().optional(),
   LITT_DISABLE_OLLAMA: z.string().optional(),
+});
+
+// Demo lane (anonymous limited /demo) — all optional, validated loosely.
+const optionalDemoSchema = z.object({
+  DEMO_ENABLED: z.string().optional(),
+  DEMO_KILL_SWITCH: z.string().optional(),
+  DEMO_MAX_MESSAGES: z.string().optional(),
+  DEMO_MAX_TOKENS: z.string().optional(),
+  DEMO_MODEL_PROVIDER: z.string().optional(),
+  DEMO_SESSION_TTL_SECONDS: z.string().optional(),
+  DEMO_SESSION_SECRET: z.string().optional(),
+  DEMO_SESSION_PER_MINUTE: z.string().optional(),
+  DEMO_IP_PER_MINUTE: z.string().optional(),
+  DEMO_MAX_HISTORY_ENTRIES: z.string().optional(),
+  DEMO_MAX_MESSAGE_CHARS: z.string().optional(),
 });
 
 // Optional integration keys.
@@ -177,7 +201,7 @@ const adminSchema = z.object({
 /*  Validation logic                                                   */
 /* ------------------------------------------------------------------ */
 
-export type EnvCategory = "core" | "production" | "public" | "ai" | "integration" | "terminal" | "admin";
+export type EnvCategory = "core" | "production" | "public" | "ai" | "integration" | "terminal" | "admin" | "demo";
 
 export interface EnvValidationResult {
   valid: boolean;
@@ -280,6 +304,7 @@ export function validateEnv(): EnvValidationResult[] {
   results.push(validateCategory("integration", optionalIntegrationSchema, "[integration]"));
   results.push(validateCategory("terminal", terminalSchema, "[terminal]"));
   results.push(validateCategory("admin", adminSchema, "[admin]"));
+  results.push(validateCategory("demo", optionalDemoSchema, "[demo]"));
 
   return results;
 }
@@ -304,8 +329,26 @@ export function getMissingRequiredVars(): string[] {
   const coreResult = coreSchema.safeParse(process.env);
   if (!coreResult.success) {
     for (const issue of coreResult.error.issues) {
-      missing.push(String(issue.path.join(".")));
+      // Keep the legacy name in diagnostics for the secret-key alias group.
+      // Existing deployment tooling and health checks look for
+      // SUPABASE_SERVICE_ROLE_KEY, while newer environments may provide the
+      // equivalent SUPABASE_SECRET_KEY instead.
+      if (issue.path[0] === "SUPABASE_SECRET_KEY") {
+        missing.push("SUPABASE_SERVICE_ROLE_KEY");
+      } else {
+        missing.push(String(issue.path.join(".")));
+      }
     }
+  }
+  // Zod can collapse the two accepted secret-key aliases into a single
+  // refinement issue depending on the loaded environment. Keep this
+  // summary deterministic for deployment checks.
+  if (
+    !process.env.SUPABASE_SERVICE_ROLE_KEY &&
+    !process.env.SUPABASE_SECRET_KEY &&
+    !missing.includes("SUPABASE_SERVICE_ROLE_KEY")
+  ) {
+    missing.push("SUPABASE_SERVICE_ROLE_KEY");
   }
   if (process.env.NODE_ENV === "production") {
     const prodResult = productionSchema.safeParse(process.env);

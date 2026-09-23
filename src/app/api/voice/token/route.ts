@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
-import { createHmac } from "crypto";
+import { createHash, createHmac } from "crypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -88,6 +88,12 @@ export async function GET(request: NextRequest) {
         littVoice,
         sparkVoice: sparkVoice || littVoice,
         configured: true,
+        // Non-reversible fingerprint of the signing secret. Lets the client
+        // compare it against the voice proxy's own fingerprint to detect a
+        // VOICE_AUTH_SECRET mismatch — the #1 cause of WebSocket close 4001.
+        // 12 hex chars of SHA-256: enough to compare, useless for recovering
+        // a >= 32-char secret.
+        secretFp: createHash("sha256").update(secret).digest("hex").slice(0, 12),
         details: {
           apiKey: true,
           littVoice: true,

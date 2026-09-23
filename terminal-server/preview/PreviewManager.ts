@@ -22,10 +22,59 @@
 import { execFile, spawn, type ChildProcess } from "child_process";
 import { createHash } from "crypto";
 import { existsSync, readFileSync, statSync } from "fs";
+import { createServer as createTcpServer } from "net";
 import { delimiter as PATH_DELIMITER, dirname, join, resolve } from "path";
 import { promisify } from "util";
+import { parse as parseDotenv } from "dotenv";
 import { getWorkspace, type WorkspaceDescriptor } from "../workspace/WorkspaceManager";
 import { resolveBindHost } from "../network-bind";
+
+/**
+ * Environment variables that may be inherited from the terminal server.
+ * Workspace-specific configuration is loaded separately from the workspace.
+ */
+export const PREVIEW_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "USER",
+  "SHELL",
+  "LANG",
+  "LC_ALL",
+  "TZ",
+  "NODE_ENV",
+  "DEBUG",
+  "LOG_LEVEL",
+  "SystemRoot",
+  "ComSpec",
+  "TEMP",
+  "TMP",
+] as const;
+
+export function buildPreviewEnv(
+  projectEnv: Record<string, string> = {},
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of PREVIEW_ENV_ALLOWLIST) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  Object.assign(env, projectEnv);
+  return env;
+}
+
+function loadWorkspaceEnv(root: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const filename of [".env", ".env.local"]) {
+    const path = join(root, filename);
+    if (!existsSync(path)) continue;
+    try {
+      Object.assign(env, parseDotenv(readFileSync(path)));
+    } catch {
+      // Workspace startup will surface invalid configuration through its normal diagnostics.
+    }
+  }
+  return env;
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -58,6 +107,18 @@ export interface PreviewRuntime {
   error: string | null;
   errorCode: PreviewErrorCode | null;
   logs: string[];
+  /**
+   * Fingerprint of the resolved Clerk project env this runtime started
+   * with (see fingerprintProjectEnv). Used to restart only when the env
+   * actually changed. Null for runtimes created before this field existed.
+   */
+  clerkEnvFingerprint: string | null;
+  /**
+   * The Clerk subset of projectEnv passed at start (extractClerkEnv).
+   * Persisted so an explicit restart re-resolves the same project env
+   * instead of silently dropping it.
+   */
+  clerkProjectEnv: Record<string, string> | null;
 }
 
 interface PreviewStartInput {
@@ -66,6 +127,19 @@ interface PreviewStartInput {
   framework?: string;
   command?: string;
   packageManager?: string;
+  /**
+   * Project-configured environment (e.g. Clerk keys resolved from the
+   * project's secret store by the web app). Only the Clerk subset is
+   * ever extracted — see extractClerkEnv. Merged BELOW workspace
+   * .env/.env.local, which keep Next.js dev precedence.
+   */
+  projectEnv?: Record<string, string>;
+  /**
+   * Bypass the reuse-a-healthy-runtime optimization and always tear
+   * down + restart. Used by explicit restart (the user asked for a
+   * fresh dev server, not a no-op).
+   */
+  forceRestart?: boolean;
 }
 
 /**
@@ -80,6 +154,7 @@ export type PreviewErrorCode =
   | "preview_port_never_ready"
   | "preview_spawn_error"
   | "preview_no_free_port"
+  | "preview_port_conflict"
   | "preview_no_dev_command"
   | "preview_dependency_install_failed"
   | "preview_root_route_missing"
@@ -129,12 +204,58 @@ const runtimes = new Map<string, PreviewRuntime>();
 
 const usedPorts = new Set<number>();
 
-function allocatePort(): number {
+/** True when nothing is bound to `port` on `host` right now. */
+export function isPortFree(port: number, host: string): Promise<boolean> {
+  return new Promise((resolvePromise) => {
+    const test = createTcpServer();
+    test.once("error", () => resolvePromise(false));
+    test.once("listening", () => {
+      test.close(() => resolvePromise(true));
+    });
+    test.listen(port, host);
+  });
+}
+
+/**
+ * Poll until `port` accepts a bind on `host` — i.e. no process owns it —
+ * up to timeoutMs. Returns false while still occupied.
+ */
+async function waitForPortFree(
+  port: number,
+  host: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await isPortFree(port, host)) return true;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
+  }
+  return isPortFree(port, host);
+}
+
+/**
+ * Allocate a preview port that is actually bindable — not merely absent
+ * from the in-process usedPorts set.
+ *
+ * The old allocator trusted usedPorts alone: after a terminal-server
+ * restart the set is empty while orphaned dev servers still hold
+ * 4100-4200. `next dev --port <p>` then auto-increments ("Port 4100 is
+ * in use, trying 4101") and the runtime kept pointing at the squatter —
+ * the health probe and the iframe proxy both talked to the wrong
+ * process, which is how a dead port could read "Preview ready" while
+ * serving "Cannot GET /".
+ */
+export async function allocateFreePort(): Promise<number> {
+  const bindHost = previewBindHost();
   for (let port = PORT_RANGE_START; port <= PORT_RANGE_END; port++) {
-    if (!usedPorts.has(port)) {
-      usedPorts.add(port);
-      return port;
-    }
+    if (usedPorts.has(port)) continue;
+    // The child binds `bindHost`; the probe and proxy reach the server
+    // via 127.0.0.1. A squatter on either interface makes the port
+    // unsafe to hand out — skip it.
+    if (!(await isPortFree(port, bindHost))) continue;
+    if (bindHost !== "127.0.0.1" && !(await isPortFree(port, "127.0.0.1"))) continue;
+    usedPorts.add(port);
+    return port;
   }
   throw new PreviewError(
     "preview_no_free_port",
@@ -144,6 +265,56 @@ function allocatePort(): number {
 
 function releasePort(port: number): void {
   usedPorts.delete(port);
+}
+
+/**
+ * Extract the port a dev server actually bound from one output line.
+ * Covers the two truthful announcements:
+ *   Next.js : "⚠ Port 4100 is in use, trying 4101 instead."
+ *   Next/Vite/…: "- Local:   http://localhost:4101" / "➜  Local:  http://127.0.0.1:5174/"
+ * Returns null when the line carries no bound-port information.
+ */
+export function detectBoundPort(line: string): number | null {
+  const trying = /port\s+\d+\s+is\s+in\s+use,?\s+trying\s+(\d{2,5})/i.exec(line);
+  if (trying) return Number(trying[1]);
+  // Host may be a name, IPv4, or bracketed IPv6 — the port is the last
+  // ":digits" before the path/end.
+  const local = /\bLocal:\s+https?:\/\/[\w.\-[\]:]+:(\d{2,5})(?:[/?]|$)/i.exec(line);
+  if (local) return Number(local[1]);
+  return null;
+}
+
+/**
+ * Retarget the runtime when the dev server announces a bound port
+ * different from the allocated one — `next dev` auto-increments on
+ * EADDRINUSE instead of failing. Keeping runtime.port on the squatter
+ * would route the probe and the iframe proxy to the wrong process.
+ *
+ * If the announced port is already allocated to another preview, the
+ * child landed on a foreign dev server — adopting it would serve
+ * another workspace's app (tenant crossover), so fail instead.
+ */
+export function adoptBoundPort(runtime: PreviewRuntime, bound: number): void {
+  if (bound === runtime.port) return;
+  if (bound < 1024 || bound > 65535) return;
+  if (runtime.status !== "starting" && runtime.status !== "ready") return;
+  if (usedPorts.has(bound)) {
+    runtime.status = "failed";
+    runtime.errorCode = "preview_port_conflict";
+    runtime.error =
+      `Dev server bound port ${bound}, which is already allocated to ` +
+      "another preview runtime. Restart preview to allocate a fresh port.";
+    pushLog(runtime, `[preview] Port conflict — dev server bound ${bound}, already allocated to another workspace`);
+    return;
+  }
+  pushLog(
+    runtime,
+    `[preview] Allocated port ${runtime.port} was taken — dev server ` +
+      `actually bound ${bound}; retargeting runtime and proxy`,
+  );
+  releasePort(runtime.port);
+  usedPorts.add(bound);
+  runtime.port = bound;
 }
 
 // ─── Robust PATH construction ──────────────────────────────────────
@@ -288,13 +459,12 @@ function redactDiagnosticText(value: unknown): string {
 
 // ─── Clerk configuration validation ────────────────────────────────
 //
-// The preview runtime inherits the terminal-server's process.env via
-// `...process.env`. If the terminal-server has a stale, rotated, or
-// malformed CLERK_SECRET_KEY, the preview's Clerk middleware crashes
-// with a 500 ("Handshake token verification failed: secret-key-invalid").
+// The preview runtime must not inherit the terminal-server's process.env.
+// A stale, rotated, or malformed terminal-server CLERK_SECRET_KEY can make
+// the preview's Clerk middleware crash with a 500.
 //
-// Next.js does NOT override already-set process.env values with .env*
-// files, so the inherited (stale) key wins over any workspace .env.local.
+// Workspace .env files are loaded explicitly into the isolated preview env so
+// Next.js does not accidentally prefer a terminal-server value.
 //
 // These validators run BEFORE spawning the dev server so we surface a
 // truthful, deterministic configuration error instead of a generic
@@ -497,12 +667,91 @@ export function fingerprintClerkEnv(
   };
 }
 
+// ─── Project env resolution (Clerk) ────────────────────────────────
+//
+// Since PR #444 the preview child inherits ONLY the allowlisted container
+// vars plus the workspace's own .env/.env.local. That isolation is
+// deliberate (a user workspace must never inherit the terminal server's
+// production secrets), but it leaves Clerk workspaces with no way to get
+// their own keys when the container clone has no .env.local.
+//
+// The web app resolves the project's configured Clerk keys from its
+// secret store and passes them as `projectEnv` on preview start. Only
+// the Clerk subset is ever extracted — everything else stays out of the
+// child process. Merge precedence (lowest → highest):
+//   container allowlist < project secrets < workspace .env < .env.local
+// which mirrors Next.js dev semantics: local files win.
+
+/**
+ * Extract the Clerk subset from an arbitrary env map (e.g. decrypted
+ * project secrets). Maps CLERK_PUBLISHABLE_KEY to
+ * NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY when the latter is absent, cleans
+ * values, and drops empties. Never includes non-Clerk keys.
+ */
+export function extractClerkEnv(
+  source: Record<string, string>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  const secret = cleanEnvValue(source.CLERK_SECRET_KEY);
+  if (secret) out.CLERK_SECRET_KEY = secret;
+  const publishable = cleanEnvValue(
+    source.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? source.CLERK_PUBLISHABLE_KEY,
+  );
+  if (publishable) out.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = publishable;
+  return out;
+}
+
+/**
+ * Resolve the project-level env for a preview spawn: project secrets
+ * first, then the workspace's own .env/.env.local on top.
+ */
+export function resolvePreviewProjectEnv(
+  projectEnv: Record<string, string> | undefined,
+  workspaceRoot: string,
+): Record<string, string> {
+  return {
+    ...extractClerkEnv(projectEnv ?? {}),
+    ...loadWorkspaceEnv(workspaceRoot),
+  };
+}
+
+/**
+ * Stable fingerprint of the resolved Clerk project env, for change
+ * detection. Safe to log — it's a hash, never the values.
+ */
+export function fingerprintProjectEnv(env: Record<string, string>): string {
+  const subset = extractClerkEnv(env);
+  const keys = Object.keys(subset).sort();
+  if (keys.length === 0) return "none";
+  return createHash("sha256")
+    .update(keys.map((k) => `${k}=${subset[k]}`).join("\n"))
+    .digest("hex")
+    .slice(0, 16);
+}
+
+/**
+ * Decide whether an existing preview runtime can be reused instead of
+ * torn down and restarted. Only when it is healthy (ready/starting),
+ * its process is still alive, and the resolved Clerk env is
+ * byte-identical to what it started with. A null stored fingerprint
+ * (pre-upgrade runtime) never matches — it takes the full restart path.
+ */
+export function shouldReuseRuntime(
+  existing: Pick<PreviewRuntime, "status" | "clerkEnvFingerprint" | "process">,
+  newFingerprint: string,
+): boolean {
+  if (!existing.clerkEnvFingerprint) return false;
+  if (existing.status !== "ready" && existing.status !== "starting") return false;
+  const proc = existing.process;
+  if (!proc || proc.exitCode !== null || proc.killed) return false;
+  return existing.clerkEnvFingerprint === newFingerprint;
+}
+
 async function installWorkspaceDependencies(
   root: string,
   packageManager: string,
   executable: string,
-): Promise<void> {
-  if (!existsSync(join(root, "package.json")) || packageManager === "npx") return;
+): Promise<void> {  if (!existsSync(join(root, "package.json")) || packageManager === "npx") return;
 
   const args = executable === "corepack"
     ? ["pnpm", "install", "--prefer-offline"]
@@ -514,11 +763,11 @@ async function installWorkspaceDependencies(
   const childPath = buildChildPath(root);
   const nodeBinDir = process.env.NODE_BIN_DIR?.trim();
   const env: Record<string, string> = {
-    ...process.env,
+    ...buildPreviewEnv(loadWorkspaceEnv(root)),
     PATH: nodeBinDir ? `${nodeBinDir}${PATH_DELIMITER}${childPath}` : childPath,
     NODE_ENV: "development",
     NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
-  } as Record<string, string>;
+  };
 
   const resolvedExecutable = lookupExecutable(executable, childPath, process.platform === "win32") ?? executable;
   try {
@@ -654,13 +903,17 @@ interface HealthProbeResult {
 }
 
 export async function probeHealth(
-  port: number,
+  port: number | (() => number),
   timeoutMs: number,
 ): Promise<HealthProbeResult> {
+  // Accept a resolver so the probe follows a port the dev server moved
+  // to (adoptBoundPort) instead of polling the squatter that took the
+  // allocated port.
+  const currentPort = () => (typeof port === "function" ? port() : port);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const resp = await fetch(`http://127.0.0.1:${port}/`, {
+      const resp = await fetch(`http://127.0.0.1:${currentPort()}/`, {
         signal: AbortSignal.timeout(3000),
       });
       if (resp.ok) {
@@ -822,10 +1075,35 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
   if (ws.userId !== userId) throw new Error("Forbidden");
   if (!ws.ready) throw new Error("Workspace not ready");
 
+  // Resolve the project env BEFORE touching any existing runtime, so a
+  // healthy runtime whose env is unchanged can be reused instead of
+  // torn down. Precedence: project secrets < .env < .env.local.
+  const clerkProjectEnv = extractClerkEnv(input.projectEnv ?? {});
+  const projectEnv = resolvePreviewProjectEnv(input.projectEnv, ws.root);
+  const newFingerprint = fingerprintProjectEnv(projectEnv);
+  const storedClerkEnv =
+    Object.keys(clerkProjectEnv).length > 0 ? clerkProjectEnv : null;
+
   // Stop existing runtime if any — wait for the process to exit so
-  // the port is released before we try to rebind.
+  // the port is released before we try to rebind. A healthy runtime
+  // whose resolved env is unchanged is reused as-is (no disruptive
+  // restart) — unless the caller forced a restart or the requested
+  // framework/command differs from what is running. Anything else
+  // takes the full stop + start path.
   const existing = runtimes.get(workspaceId);
   const preservedLogs = existing?.logs ?? [];
+  const configMatches =
+    !existing ||
+    ((input.framework === undefined || input.framework === existing.framework) &&
+      (input.command === undefined || input.command === existing.command));
+  if (
+    !input.forceRestart &&
+    existing &&
+    configMatches &&
+    shouldReuseRuntime(existing, newFingerprint)
+  ) {
+    return existing;
+  }
   if (existing) {
     await stopPreviewAndWait(workspaceId);
   }
@@ -869,7 +1147,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
         },
       );
       // Record a failed runtime so the status endpoint can report it.
-      const port = allocatePort();
+      const port = await allocateFreePort();
       const runtime: PreviewRuntime = {
         workspaceId,
         userId,
@@ -881,6 +1159,8 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
         status: "failed",
         startedAt: Date.now(),
         lastHealthCheck: null,
+        clerkEnvFingerprint: newFingerprint,
+        clerkProjectEnv: storedClerkEnv,
         error: err.message,
         errorCode: err.code,
         logs: [
@@ -905,7 +1185,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
     );
   }
 
-  const port = allocatePort();
+  const port = await allocateFreePort();
 
   // Build the actual command, replacing $PORT with the allocated port
   const actualCommand = detected.command.replace("$PORT", String(port));
@@ -916,8 +1196,10 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
 
   // Bind host follows the parent terminal-server's own resolved policy —
   // see previewBindHost() / ../network-bind.ts.
+  // Project env (project secrets, then workspace .env/.env.local) is
+  // merged over the allowlisted container vars — never the reverse.
   const env: Record<string, string> = {
-    ...process.env,
+    ...buildPreviewEnv(projectEnv),
     PATH: childPath,
     PORT: String(port),
     HOSTNAME: previewBindHost(),
@@ -929,7 +1211,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
     // TypeScript deps during dev server startup. Without this, pnpm rejects
     // the auto-install with ERR_PNPM_ADDING_TO_ROOT.
     NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
-  } as Record<string, string>;
+  };
 
   // Service users on Railway often lack nvm-installed Node/pnpm in PATH.
   // Prepend the Node bin directory so package manager binaries are found.
@@ -974,14 +1256,15 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
       {
         cwd: ws.root,
         suggestedRemediation:
-          "Check that CLERK_SECRET_KEY starts with sk_test_ or sk_live_, " +
-          "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY starts with pk_test_ or pk_live_, " +
-          "both are from the same Clerk environment, and neither has " +
-          "whitespace or quotes. If the secret was recently rotated, " +
-          "update it in the terminal-server Railway env or workspace .env.local.",
+          "Provide both keys for this project — via its Studio project " +
+          "secrets, the workspace .env.local, or the terminal-server " +
+          "Railway env. Check that CLERK_SECRET_KEY starts with sk_test_ " +
+          "or sk_live_, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY starts with " +
+          "pk_test_ or pk_live_, both are from the same Clerk environment, " +
+          "and neither has whitespace or quotes.",
       },
     );
-    const failedPort = allocatePort();
+    const failedPort = await allocateFreePort();
     const fingerprint = fingerprintClerkEnv(env);
     const failedRuntime: PreviewRuntime = {
       workspaceId,
@@ -994,6 +1277,8 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
       status: "failed",
       startedAt: Date.now(),
       lastHealthCheck: null,
+      clerkEnvFingerprint: newFingerprint,
+      clerkProjectEnv: storedClerkEnv,
       error: err.message,
       errorCode: err.code,
       logs: [
@@ -1019,6 +1304,8 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
     status: "starting",
     startedAt: Date.now(),
     lastHealthCheck: null,
+    clerkEnvFingerprint: newFingerprint,
+    clerkProjectEnv: storedClerkEnv,
     error: null,
     errorCode: null,
     logs: [...preservedLogs],
@@ -1055,12 +1342,24 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
 
   child.stdout?.on("data", (data: Buffer) => {
     const lines = data.toString("utf-8").split("\n").filter(Boolean);
-    for (const line of lines) pushLog(runtime, line);
+    for (const line of lines) {
+      pushLog(runtime, line);
+      // Dev servers that auto-increment on EADDRINUSE (next dev: "Port
+      // 4100 is in use, trying 4101") announce the port they actually
+      // bound — retarget the runtime so the probe and proxy never point
+      // at the squatter on the allocated port.
+      const bound = detectBoundPort(line);
+      if (bound) adoptBoundPort(runtime, bound);
+    }
   });
 
   child.stderr?.on("data", (data: Buffer) => {
     const lines = data.toString("utf-8").split("\n").filter(Boolean);
-    for (const line of lines) pushLog(runtime, `[stderr] ${line}`);
+    for (const line of lines) {
+      pushLog(runtime, `[stderr] ${line}`);
+      const bound = detectBoundPort(line);
+      if (bound) adoptBoundPort(runtime, bound);
+    }
   });
 
   child.on("exit", (code, signal) => {
@@ -1084,7 +1383,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
       runtime.status = "failed";
     }
     runtime.process = null;
-    releasePort(port);
+    releasePort(runtime.port);
   });
 
   child.on("error", (err) => {
@@ -1093,16 +1392,18 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
     runtime.errorCode = "preview_spawn_error";
     runtime.error = err.message;
     runtime.process = null;
-    releasePort(port);
+    releasePort(runtime.port);
   });
 
-  // Health probe in background — don't block the response
-  probeHealth(port, HEALTH_PROBE_TIMEOUT_MS)
+  // Health probe in background — don't block the response. The resolver
+  // follows runtime.port so a dev server that announced a different
+  // bound port (auto-increment) is probed where it actually listens.
+  probeHealth(() => runtime.port, HEALTH_PROBE_TIMEOUT_MS)
     .then((result) => {
       runtime.lastHealthCheck = Date.now();
       if (result.healthy && runtime.status === "starting") {
         runtime.status = "ready";
-        pushLog(runtime, `[preview] Health check passed — ready on port ${port}`);
+        pushLog(runtime, `[preview] Health check passed — ready on port ${runtime.port}`);
       } else if (result.rootRouteMissing && runtime.status === "starting") {
         runtime.status = "failed";
         runtime.errorCode = "preview_root_route_missing";
@@ -1209,11 +1510,25 @@ export async function stopPreviewAndWait(workspaceId: string): Promise<void> {
     rt.process = null;
     await exitPromise;
   }
-  releasePort(rt.port);
+  // The tracked child exiting does not guarantee the port is free — a
+  // detached grandchild (pnpm → next dev) can keep it bound, and that
+  // squatter would then be re-allocated to the next preview and serve
+  // it the wrong app. Wait briefly for the OS to release it; if an
+  // orphan survives, allocateFreePort will simply skip this port.
+  const port = rt.port;
+  if (await waitForPortFree(port, previewBindHost(), 5000)) {
+    pushLog(rt, `[preview] Port ${port} released`);
+  } else {
+    pushLog(rt, `[preview] Port ${port} still bound after stop — an orphaned process may still own it`);
+  }
+  releasePort(port);
   pushLog(rt, "[preview] Stopped (waited for exit)");
 }
 
-export async function restartPreview(workspaceId: string): Promise<PreviewRuntime> {
+export async function restartPreview(
+  workspaceId: string,
+  projectEnv?: Record<string, string>,
+): Promise<PreviewRuntime> {
   const rt = runtimes.get(workspaceId);
   if (!rt) throw new Error("No preview runtime to restart");
 
@@ -1226,39 +1541,69 @@ export async function restartPreview(workspaceId: string): Promise<PreviewRuntim
   await stopPreviewAndWait(workspaceId);
 
   // Wait for the port to actually be free. The OS may hold the socket
-  // in TIME_WAIT even after the process exits. Poll until the port is
-  // available or timeout.
+  // in TIME_WAIT even after the process exits — and a detached
+  // grandchild can keep it bound indefinitely.
   const port = rt.port;
-  for (let i = 0; i < 10; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    try {
-      const net = require("net");
-      const testServer = net.createServer();
-      await new Promise<void>((resolve, reject) => {
-        testServer.once("error", reject);
-        testServer.once("listening", () => {
-          testServer.close(() => resolve());
-        });
-        testServer.listen(port, previewBindHost());
-      });
-      pushLog(rt, `[preview] Port ${port} is free after ${(i + 1) * 500}ms`);
-      break;
-    } catch {
-      pushLog(rt, `[preview] Port ${port} still in use, waiting... (${i + 1}/10)`);
-      if (i === 9) {
-        pushLog(rt, `[preview] Port ${port} never freed up, proceeding anyway`);
-      }
-    }
+  if (await waitForPortFree(port, previewBindHost(), 5000)) {
+    pushLog(rt, `[preview] Port ${port} is free`);
+  } else {
+    pushLog(rt, `[preview] Port ${port} never freed up — allocation will skip it if still bound`);
   }
 
-  // Start again with same config
+  // Start again with same config. A freshly provided projectEnv wins;
+  // otherwise reuse the env this runtime was started with, so an
+  // explicit restart never silently drops the resolved Clerk keys.
+  // forceRestart bypasses the reuse-a-healthy-runtime optimization —
+  // an explicit restart always means a fresh dev server.
   return startPreview({
     workspaceId,
     userId: rt.userId,
     framework: rt.framework,
     command: rt.command,
     packageManager: "pnpm",
+    projectEnv: projectEnv ?? rt.clerkProjectEnv ?? undefined,
+    forceRestart: true,
   });
+}
+
+/**
+ * Restart the preview ONLY if the resolved project env changed since
+ * the runtime started. Returns whether a restart happened.
+ *
+ * This is the hook for secret rotation: when the project's configured
+ * Clerk keys change, the caller re-resolves them and calls this — the
+ * preview is recreated with the new env, without a disruptive restart
+ * when nothing changed. When no runtime exists, nothing happens and
+ * the caller should start one normally.
+ */
+export async function ensurePreviewEnv(
+  workspaceId: string,
+  userId: string,
+  projectEnv?: Record<string, string>,
+): Promise<{ restarted: boolean; runtime: PreviewRuntime | null }> {
+  const ws = getWorkspace(workspaceId);
+  if (!ws) {
+    throw new PreviewError(
+      "preview_workspace_not_found",
+      `Workspace not found: ${workspaceId}`,
+      { cwd: null },
+    );
+  }
+  if (ws.userId !== userId) throw new Error("Forbidden");
+  if (!ws.ready) throw new Error("Workspace not ready");
+
+  const existing = runtimes.get(workspaceId);
+  if (!existing) return { restarted: false, runtime: null };
+
+  const newFingerprint = fingerprintProjectEnv(
+    resolvePreviewProjectEnv(projectEnv, ws.root),
+  );
+  if (shouldReuseRuntime(existing, newFingerprint)) {
+    return { restarted: false, runtime: existing };
+  }
+
+  const runtime = await startPreview({ workspaceId, userId, projectEnv });
+  return { restarted: true, runtime };
 }
 
 /**

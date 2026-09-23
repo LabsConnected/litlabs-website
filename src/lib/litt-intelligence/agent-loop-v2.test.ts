@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { WorkspaceTransport } from "./workspace-transport";
 
 vi.mock("./llm-tool-calling", async (importOriginal) => ({
@@ -8,6 +8,7 @@ vi.mock("./llm-tool-calling", async (importOriginal) => ({
 
 import { runAgentLoopV2, resumeAgentLoopV2, type ResumeInput } from "./agent-loop-v2";
 import { callLLMWithTools, AgentBudgetExhaustedError } from "./llm-tool-calling";
+import { toolRegistry } from "./tool-registry";
 
 const fakeTransport = {
   workspaceId: "ws-test",
@@ -495,5 +496,171 @@ describe("runAgentLoopV2 — files.write placeholder content never reaches the a
     expect(writeLog?.success).toBe(false);
     expect(writeLog?.mutating).toBe(true);
     expect(result.finalText).toContain("write failed");
+  });
+});
+
+describe("runAgentLoopV2 — multi-minute run with repeated file patches", () => {
+  // Production defect (2026-09-21): a website build ran ~7 minutes into
+  // file patch/edit operations, then vanished — "the previous run ended
+  // before it produced a result". Tool executions had no deadline, so a
+  // single wedged workspace call could strand the run outside every
+  // budget check. These tests pin both halves of the fix: a long
+  // patch-heavy run completes, and a wedged write fails the TOOL — never
+  // the run.
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function makePatchTransport(initialContent: string) {
+    let fileContent = initialContent;
+    const appliedPatches: Array<{ search: string; replace: string }> = [];
+    const transport = {
+      workspaceId: "ws-test",
+      userId: "u-test",
+      workspaceRoot: "/tmp/test",
+      projectId: "p-test",
+      readFile: vi.fn(async () => ({ content: fileContent, size: fileContent.length })),
+      applyPatch: vi.fn(async (_path: string, patches: Array<{ search: string; replace: string }>) => {
+        for (const p of patches) {
+          if (!fileContent.includes(p.search)) {
+            throw new Error(`search text not found`);
+          }
+          fileContent = fileContent.replace(p.search, p.replace);
+          appliedPatches.push(p);
+        }
+        return { applied: true };
+      }),
+      writeFile: vi.fn(async (_path: string, content: string) => {
+        fileContent = content;
+        return { saved: true };
+      }),
+      createCheckpointBeforeMutation: vi.fn(async () => null),
+    } as unknown as WorkspaceTransport;
+    return { transport, appliedPatches, getContent: () => fileContent };
+  }
+
+  it("completes a run that spends minutes issuing sequential apply_patch calls", async () => {
+    const { transport, appliedPatches, getContent } = makePatchTransport(
+      "<html><body><h1>v0</h1><p>a</p><p>b</p><p>c</p><p>d</p></body></html>",
+    );
+
+    // Each model round "takes" a minute of wall clock — the run's own
+    // deadline bookkeeping must see real elapsed time, so Date.now is
+    // advanced rather than faked wholesale.
+    let fakeNow = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => fakeNow);
+
+    let step = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async () => {
+      fakeNow += 60_000;
+      step += 1;
+      if (step <= 4) {
+        return {
+          text: "",
+          toolCalls: [{
+            toolCallId: `tc-patch-${step}`,
+            toolId: "apply_patch",
+            inputs: {
+              path: "index.html",
+              patches: [{ search: `<p>${"abcd"[step - 1]}</p>`, replace: `<p>patched-${step}</p>` }],
+            },
+          }],
+          finishReason: "tool_calls",
+          model: "test-model",
+        };
+      }
+      return {
+        text: "All four patches applied — the site is updated.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      };
+    });
+
+    const result = await runAgentLoopV2(
+      "patch the landing page copy",
+      transport,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "auto",
+        enableBuildFix: false,
+      },
+    );
+
+    expect(result.pendingApproval).toBeUndefined();
+    expect(result.cancelled).toBe(false);
+    expect(appliedPatches).toHaveLength(4);
+    expect(getContent()).toContain("patched-4");
+    expect(result.toolCalls.filter((t) => t.toolId === "apply_patch" && t.success)).toHaveLength(4);
+    expect(result.finalText).toContain("All four patches applied");
+    // The run simulated >4 minutes of work — inside the runtime budget.
+    expect(result.totalDurationMs).toBeGreaterThanOrEqual(4 * 60_000);
+  });
+
+  it("a wedged workspace write fails the tool, not the run", async () => {
+    // files.write declares timeoutMs — enforce a short bound for the test
+    // and restore it so the singleton stays clean for other tests.
+    const filesWriteDef = toolRegistry.get("files.write")!;
+    const originalTimeout = filesWriteDef.timeoutMs;
+    filesWriteDef.timeoutMs = 60;
+
+    const wedgedTransport = {
+      workspaceId: "ws-test",
+      userId: "u-test",
+      workspaceRoot: "/tmp/test",
+      projectId: "p-test",
+      // The exact production shape: the transport call never settles.
+      writeFile: vi.fn(() => new Promise<{ saved: boolean }>(() => {})),
+      createCheckpointBeforeMutation: vi.fn(async () => null),
+    } as unknown as WorkspaceTransport;
+
+    try {
+      vi.mocked(callLLMWithTools)
+        .mockResolvedValueOnce({
+          text: "",
+          toolCalls: [{
+            toolCallId: "tc-wedged",
+            toolId: "files.write",
+            inputs: { projectId: "p-test", path: "index.html", content: "<html>fresh</html>" },
+          }],
+          finishReason: "tool_calls",
+          model: "test-model",
+        })
+        .mockResolvedValueOnce({
+          text: "The write timed out — I retried and finished the site.",
+          toolCalls: [],
+          finishReason: "stop",
+          model: "test-model",
+        });
+
+      const result = await runAgentLoopV2(
+        "write the landing page",
+        wedgedTransport,
+        {
+          model: "test-model",
+          systemPrompt: "You are LiTT.",
+          executionMode: "auto",
+          enableBuildFix: false,
+        },
+      );
+
+      const writeCall = result.toolCalls.find((t) => t.toolId === "files.write");
+      expect(writeCall?.success).toBe(false);
+      expect(
+        result.events.some(
+          (e) => e.type === "tool_result" && e.toolId === "files.write" && e.success === false,
+        ),
+      ).toBe(true);
+      expect(result.cancelled).toBe(false);
+      expect(result.finalText).toContain("retried and finished");
+      expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(2);
+    } finally {
+      filesWriteDef.timeoutMs = originalTimeout;
+    }
   });
 });

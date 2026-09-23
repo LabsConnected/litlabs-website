@@ -49,10 +49,127 @@ export interface TranscriptMetadata {
 /**
  * Error thrown by a failed connection attempt, tagged with the WebSocket
  * close code (when the failure was a close event) so connect() can tell a
- * pre-session auth failure (4001) apart from other failure modes.
+ * pre-session auth failure (4001) apart from other failure modes. The close
+ * reason is captured too — the voice proxy distinguishes "Authentication
+ * required" (no token sent) from "Invalid or expired token" (bad signature).
  */
 interface VoiceConnectError extends Error {
   wsCloseCode?: number;
+  wsCloseReason?: string;
+}
+
+/**
+ * Result of the post-4001 credential diagnosis. When the voice proxy rejects
+ * a freshly-minted token (double 4001), the failure is NOT an expired cached
+ * credential — the client compares the VOICE_AUTH_SECRET fingerprint the
+ * token was signed with against the fingerprint the proxy reports on its
+ * public /health endpoint.
+ */
+type VoiceAuthDiagnosis =
+  | { kind: "secret-mismatch"; proxyHost: string }
+  | { kind: "secrets-match" }
+  | { kind: "proxy-unreachable"; proxyHost: string }
+  | { kind: "unknown" };
+
+/**
+ * Derive the voice proxy's public /health URL from its WebSocket endpoint
+ * (wss://host/voice -> https://host/health). Null when the endpoint is not
+ * a parseable ws(s) URL.
+ */
+function voiceProxyHealthUrl(endpoint: string): string | null {
+  try {
+    const url = new URL(endpoint);
+    if (url.protocol !== "ws:" && url.protocol !== "wss:") return null;
+    url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+    url.pathname = "/health";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Diagnose a double-4001 (the proxy rejected a freshly-minted token).
+ * Never throws — any failure to gather evidence degrades to "unknown".
+ */
+async function diagnoseVoiceAuthFailure(
+  endpoint: string,
+  webSecretFp?: string,
+): Promise<VoiceAuthDiagnosis> {
+  const healthUrl = voiceProxyHealthUrl(endpoint);
+  if (!healthUrl || !webSecretFp) return { kind: "unknown" };
+  let proxyHost = healthUrl;
+  try {
+    proxyHost = new URL(healthUrl).host;
+  } catch {
+    // keep the full URL as the identifier
+  }
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    let response: Response;
+    try {
+      response = await fetch(healthUrl, { cache: "no-store", signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!response.ok) return { kind: "proxy-unreachable", proxyHost };
+    const body = (await response.json().catch(() => null)) as {
+      authSecretFp?: string;
+    } | null;
+    const proxyFp = body?.authSecretFp;
+    // Proxy builds older than the fingerprint field have nothing to compare.
+    if (!proxyFp) return { kind: "unknown" };
+    return proxyFp === webSecretFp
+      ? { kind: "secrets-match" }
+      : { kind: "secret-mismatch", proxyHost };
+  } catch {
+    return { kind: "proxy-unreachable", proxyHost };
+  }
+}
+
+/**
+ * Build the user-facing message for a double-4001. Names the actual fix
+ * instead of the old generic "check the voice service configuration".
+ */
+function buildVoiceAuthFailureMessage(
+  diagnosis: VoiceAuthDiagnosis,
+  closeReason?: string,
+): string {
+  const reasonSuffix = closeReason ? ` The voice server said: "${closeReason}".` : "";
+  switch (diagnosis.kind) {
+    case "secret-mismatch":
+      return (
+        `Voice can't connect: the website and the voice server (${diagnosis.proxyHost}) ` +
+        `are using different credentials — the server rejected a freshly issued token.` +
+        reasonSuffix +
+        ` Fix: set the same VOICE_AUTH_SECRET (32+ characters) on the web service and the ` +
+        `voice-server service in Railway, then redeploy both.`
+      );
+    case "secrets-match":
+      return (
+        `Voice authentication failed even though the website and voice server share the ` +
+        `same credentials — the voice server is probably running with a stale ` +
+        `configuration.` +
+        reasonSuffix +
+        ` Fix: restart the voice-server service in Railway so it picks up its current variables.`
+      );
+    case "proxy-unreachable":
+      return (
+        `Voice authentication failed and the voice server (${diagnosis.proxyHost}) didn't ` +
+        `answer its health check — it may be down, unreachable, or still deploying.` +
+        reasonSuffix +
+        ` Fix: check that the voice-server service is running in Railway.`
+      );
+    default:
+      return (
+        `Voice authentication failed. Your voice credentials could not be verified — ` +
+        `please check the voice service configuration or sign in again.` +
+        reasonSuffix
+      );
+  }
 }
 
 interface UseInworldSessionReturn {
@@ -826,10 +943,12 @@ export function useInworldSession(
             if (!connectionOpen) {
               const err: VoiceConnectError = new Error(`Voice connection closed (code ${event.code}).`);
               err.wsCloseCode = event.code;
+              err.wsCloseReason = event.reason || undefined;
               reject(err);
             } else if (!sessionReady) {
               const err: VoiceConnectError = new Error(`Voice connection closed before session was ready (code ${event.code}).`);
               err.wsCloseCode = event.code;
+              err.wsCloseReason = event.reason || undefined;
               reject(err);
             } else {
               handleClose(event);
@@ -896,21 +1015,43 @@ export function useInworldSession(
 
         if (code === 4001) {
           setErrorState("Voice authentication failed (4001). Refreshing voice credentials…");
+          // Captured outside the try so the catch can diagnose even when the
+          // retry fails before/at credential refresh.
+          let retryEndpoint = "";
+          let retrySecretFp: string | undefined;
           try {
             const freshConn = await getVoiceConnection(true);
+            retryEndpoint = freshConn.endpoint;
+            retrySecretFp = freshConn.secretFp;
             await connectAttempt(freshConn);
             setErrorState(null);
             setError(null);
             return;
           } catch (retryErr) {
             const retryCode = (retryErr as VoiceConnectError).wsCloseCode;
-            const message = retryCode === 4001
-              ? "Voice authentication failed. Your voice credentials could not be verified — please check the voice service configuration or sign in again."
-              : retryErr instanceof Error ? retryErr.message : "Failed to connect";
+            const retryReason = (retryErr as VoiceConnectError).wsCloseReason;
+            let message: string;
+            if (retryCode === 4001) {
+              // A freshly-minted token was rejected too — this is NOT an
+              // expired cached credential. Diagnose before surfacing so the
+              // message names the actual fix instead of a generic auth error.
+              const diagnosis = await diagnoseVoiceAuthFailure(
+                retryEndpoint,
+                retrySecretFp,
+              );
+              message = buildVoiceAuthFailureMessage(diagnosis, retryReason);
+            } else {
+              message = retryErr instanceof Error ? retryErr.message : "Failed to connect";
+            }
             setErrorState(message);
             setError(message);
             setState("error");
-            throw retryErr instanceof Error ? retryErr : new Error(message);
+            // Throw the SAME message the hook surfaced: callers
+            // (VoiceSessionContext) display the thrown error's message, so
+            // throwing the raw transport error here would show "Voice
+            // connection closed before session was ready (code 4001)."
+            // instead of the diagnosis above.
+            throw new Error(message);
           }
         }
 
