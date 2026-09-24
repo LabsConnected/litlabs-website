@@ -23,6 +23,8 @@ interface ActionChipsProps {
  * - project.promote → "Promote to Project"
  * - studio.inspect_element → "Inspect element"
  * - studio.open_terminal → "Open terminal"
+ * - studio.browse_files → "Browse files"
+ * - studio.open_file → "Open file"
  * - studio.deploy_site → "Publish site"
  */
 export function ActionChips({ actions, onExecute }: ActionChipsProps) {
@@ -91,6 +93,10 @@ function getActionLabel(action: ArtifactAction): string {
       return "Inspect element";
     case "studio.open_terminal":
       return "Open terminal";
+    case "studio.browse_files":
+      return "Browse files";
+    case "studio.open_file":
+      return "Open file";
     case "studio.deploy_site":
       return "Publish site";
   }
@@ -116,6 +122,10 @@ function getActionIcon(action: ArtifactAction): string {
       return "🔍";
     case "studio.open_terminal":
       return "⌨️";
+    case "studio.browse_files":
+      return "📁";
+    case "studio.open_file":
+      return "📄";
     case "studio.deploy_site":
       return "📤";
   }

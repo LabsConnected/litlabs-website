@@ -12,7 +12,7 @@ describe("getVisibleMoreNav — flag-gated nav items", () => {
     expect(hrefs).toContain("/games");
     // The rest of More stays intact
     expect(hrefs).toEqual(
-      expect.arrayContaining(["/projects", "/marketplace", "/settings", "/profile"]),
+      expect.arrayContaining(["/projects", "/marketplace", "/docs", "/deployments"]),
     );
   });
 

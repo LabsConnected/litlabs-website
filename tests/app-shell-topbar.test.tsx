@@ -129,7 +129,7 @@ describe("AppShell top bar", () => {
     fireEvent.click(within(header).getAllByTestId("nav-more")[0]);
     const menu = document.querySelector('[role="menu"]');
     expect(menu).not.toBeNull();
-    for (const label of ["Projects", "Marketplace", "Wallet", "Settings", "CLI", "Docs", "Deployments", "Profile"]) {
+    for (const label of ["Projects", "Marketplace", "CLI", "Docs", "Deployments"]) {
       expect(within(menu as HTMLElement).getByText(label)).toBeTruthy();
     }
     // Games + Discover appear only when their flags are on; assert on the

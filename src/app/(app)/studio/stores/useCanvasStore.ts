@@ -5,6 +5,7 @@ import type { Canvas, CanvasBlock, ArtifactAction } from "@/lib/canvas/types";
 import {
   STUDIO_EVENT_ACTIVATE_INSPECTOR,
   STUDIO_EVENT_OPEN_DOCK,
+  STUDIO_EVENT_OPEN_FILE,
   STUDIO_EVENT_REQUEST_DEPLOY,
 } from "@/lib/canvas/panel-actions";
 
@@ -292,6 +293,24 @@ export async function executeAction(
         if (typeof window !== "undefined") {
           window.dispatchEvent(
             new CustomEvent(STUDIO_EVENT_OPEN_DOCK, { detail: { tab: "terminal" } }),
+          );
+        }
+        return { ok: true };
+      }
+      case "studio.browse_files": {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent(STUDIO_EVENT_OPEN_DOCK, { detail: { tab: "files" } }),
+          );
+        }
+        return { ok: true };
+      }
+      case "studio.open_file": {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent(STUDIO_EVENT_OPEN_FILE, {
+              detail: { projectId: action.projectId, path: action.path },
+            }),
           );
         }
         return { ok: true };

@@ -16,35 +16,14 @@ vi.mock("./BrandMark", () => ({
 
 import MarketingHeader from "./MarketingHeader";
 
-// Larry's site audit (2026-09-22, issue #469): lead with the product —
-// Studio → How it works → Pricing first. "Community" is back at the end now
-// that the /discover feed is seeded with LiTT-team welcome posts; it points
-// at /discover, the canonical route. Labels and hrefs must be unchanged;
-// only the order is asserted here.
-const EXPECTED_ORDER = [
-  "Studio",
-  "How it works",
-  "Pricing",
-  "Capabilities",
-  "Creations",
-  "CLI",
-  "FAQ",
-  "Community",
-];
+// Larry's site audit (2026-09-23 round 2): nav cut to four items —
+// Studio · Capabilities · Pricing · Docs. Labels and hrefs must match.
+const EXPECTED_ORDER = ["Studio", "Capabilities", "Pricing", "Docs"];
 
-const EXPECTED_HREFS = [
-  "/studio",
-  "/#how-it-works",
-  "/pricing",
-  "/#what-we-do",
-  "/#creations",
-  "/cli",
-  "/#faq",
-  "/discover",
-];
+const EXPECTED_HREFS = ["/studio", "/#what-we-do", "/pricing", "/docs"];
 
-describe("MarketingHeader nav order (issue #469)", () => {
-  it("renders the desktop nav in Larry's required order", () => {
+describe("MarketingHeader nav order (audit round 2)", () => {
+  it("renders the desktop nav with exactly the four required items", () => {
     render(<MarketingHeader />);
     const nav = screen.getByLabelText("Primary navigation");
     const links = within(nav).getAllByRole("link");
@@ -52,10 +31,10 @@ describe("MarketingHeader nav order (issue #469)", () => {
     expect(links.map((l) => l.getAttribute("href"))).toEqual(EXPECTED_HREFS);
   });
 
-  it("includes the Community link now that the Discover feed is seeded", () => {
+  it("links Docs to the public /docs route", () => {
     render(<MarketingHeader />);
-    const link = screen.getByRole("link", { name: "Community" });
-    expect(link.getAttribute("href")).toBe("/discover");
+    const link = screen.getByRole("link", { name: "Docs" });
+    expect(link.getAttribute("href")).toBe("/docs");
   });
 
   it("renders the mobile menu in the same order", async () => {
@@ -68,8 +47,8 @@ describe("MarketingHeader nav order (issue #469)", () => {
       EXPECTED_ORDER,
     );
     expect(
-      within(mobileNav).getByRole("link", { name: /Community/ }),
-      "Community must appear in the mobile nav now that /discover is seeded",
-    ).toHaveAttribute("href", "/discover");
+      within(mobileNav).getByRole("link", { name: /Docs/ }),
+      "Docs must appear in the mobile nav",
+    ).toHaveAttribute("href", "/docs");
   });
 });

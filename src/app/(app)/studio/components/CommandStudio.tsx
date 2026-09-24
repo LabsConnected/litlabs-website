@@ -18,7 +18,7 @@ import { useConversationStore } from "../stores/useConversationStore";
 import { useLiTTRealtimeSession } from "../hooks/useLiTTRealtimeSession";
 import type { LiTTLiveSessionContext } from "@/lib/litt/live/types";
 import type { ArtifactAction } from "@/lib/canvas/types";
-import { STUDIO_EVENT_OPEN_DOCK, STUDIO_EVENT_REQUEST_DEPLOY } from "@/lib/canvas/panel-actions";
+import { STUDIO_EVENT_OPEN_DOCK, STUDIO_EVENT_OPEN_FILE, STUDIO_EVENT_REQUEST_DEPLOY } from "@/lib/canvas/panel-actions";
 import { INITIAL_RUNTIME_STATE, deriveExecutionHint } from "@/lib/projects/runtime-state";
 import { useLiTTRuntime } from "@/hooks/useLiTTRuntime";
 
@@ -31,6 +31,7 @@ import { MobileCommandNav } from "./CommandStudioNav";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
 import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
+import { ActionRunStatusPanel } from "./ActionRunStatusPanel";
 import LiTTLiveActivity from "./LiTTLiveActivity";
 import LiTTPanel from "./LiTTPanel";
 import LiTTMobileSheet from "./litt/LiTTMobileSheet";
@@ -579,11 +580,21 @@ function CommandStudioContent() {
         }),
       );
     };
+    // Open a file from the ActionPanel's file tree: switch to the dock
+    // Files tab. The StudioProjectFiles instances listen for the same
+    // event and select the file themselves when the project matches.
+    const openFile = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { projectId?: string; path?: string } | undefined;
+      if (typeof detail?.path !== "string" || detail.path.length === 0) return;
+      handleOpenDockTab("files");
+    };
     window.addEventListener(STUDIO_EVENT_OPEN_DOCK, openDock);
     window.addEventListener(STUDIO_EVENT_REQUEST_DEPLOY, requestDeploy);
+    window.addEventListener(STUDIO_EVENT_OPEN_FILE, openFile);
     return () => {
       window.removeEventListener(STUDIO_EVENT_OPEN_DOCK, openDock);
       window.removeEventListener(STUDIO_EVENT_REQUEST_DEPLOY, requestDeploy);
+      window.removeEventListener(STUDIO_EVENT_OPEN_FILE, openFile);
     };
   }, [handleOpenDockTab]);
 
@@ -1615,6 +1626,7 @@ function CommandStudioContent() {
       ) : null}
       <StudioWorkSurface
         messages={conversation.messages}
+        conversationId={conversation.selectedConversationId ?? null}
         busy={conversation.busy}
         loading={conversation.loading}
         activeAgentId={conversation.activeAgentId}
@@ -2562,6 +2574,7 @@ function MediaWorkspacePanel({
 /* ── Studio/Work surface: empty state OR real transcript ──────── */
 function StudioWorkSurface({
   messages,
+  conversationId,
   busy,
   loading,
   activeAgentId,
@@ -2579,6 +2592,7 @@ function StudioWorkSurface({
   overflowDownloads = false,
 }: {
   messages: import("../stores/useStudioAgentStore").ChatMessage[];
+  conversationId: string | null;
   busy: boolean;
   loading: boolean;
   activeAgentId: import("../stores/useStudioAgentStore").AgentId;
@@ -2620,6 +2634,7 @@ function StudioWorkSurface({
           {fallbackNotice}
         </div>
       )}
+      {conversationId && <ActionRunStatusPanel conversationId={conversationId} busy={busy} />}
       {isEmpty ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <LiTEmptyState

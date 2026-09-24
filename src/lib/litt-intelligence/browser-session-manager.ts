@@ -23,7 +23,7 @@
 import "server-only";
 import { randomUUID } from "crypto";
 import { Stagehand } from "@browserbasehq/stagehand";
-import { supabaseAdmin } from "@/lib/supabase";
+import { getSupabaseAdmin, supabaseAdmin } from "@/lib/supabase";
 // Phase 4 — BITS metering: gates consulted per action, settlement on
 // close. Type-only in the other direction (browser-billing imports
 // BrowserSession as a type), so there is no runtime import cycle.
@@ -180,7 +180,19 @@ export async function dbGetSession(
 }
 
 export async function dbGetActiveSessions(userId: string): Promise<BrowserSession[]> {
-  if (!supabaseAdmin) return [];
+  try {
+    return await dbGetActiveSessionsStrict(userId);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Preflight variant: quota/concurrency callers must distinguish an empty
+ * result from an unavailable database and fail closed when the latter occurs.
+ */
+export async function dbGetActiveSessionsStrict(userId: string): Promise<BrowserSession[]> {
+  if (!getSupabaseAdmin()) throw new Error("Browser session persistence unavailable");
   const { data, error } = await supabaseAdmin
     .from("browser_sessions")
     .select("*")
@@ -188,7 +200,7 @@ export async function dbGetActiveSessions(userId: string): Promise<BrowserSessio
     .in("status", ["active", "paused", "human_control", "agent_control"])
     .order("created_at", { ascending: false });
 
-  if (error || !data) return [];
+  if (error || !data) throw new Error("Unable to load active browser sessions");
   return (data as Record<string, unknown>[]).map(rowToSession);
 }
 
@@ -708,7 +720,13 @@ export async function returnControl(
 export async function closeSession(
   sessionId: string,
   userId: string,
-): Promise<void> {
+): Promise<boolean> {
+  // Ownership is checked before touching the in-memory provider handle or
+  // changing the persisted row. A missing row is indistinguishable from an
+  // unowned row to callers, preventing cross-user session probing.
+  const owned = await getSession(sessionId, userId);
+  if (!owned) return false;
+
   const active = activeSessions.get(sessionId);
   const inMemorySession = active?.session ?? null;
   if (active) {
@@ -732,6 +750,7 @@ export async function closeSession(
       (await dbGetSession(sessionId, userId).catch(() => null)) ?? session;
     await settleBrowserSessionFromRow(row).catch(() => {});
   }
+  return true;
 }
 
 /**
@@ -965,8 +984,16 @@ export async function fetchLiveEmbedUrl(
  * Should be called periodically (e.g. via a cron job or on each new session start).
  */
 export async function closeIdleSessions(): Promise<number> {
+  return (await closeIdleSessionsCollecting()).length;
+}
+
+/**
+ * Idle-TTL close for sessions live in THIS process. Returns the sessions it
+ * actually closed so the sweeper can settle + reconcile each one.
+ */
+async function closeIdleSessionsCollecting(): Promise<BrowserSession[]> {
   const now = Date.now();
-  let closed = 0;
+  const closed: BrowserSession[] = [];
 
   for (const [sessionId, active] of activeSessions) {
     if (now - active.lastActivity > SESSION_IDLE_TIMEOUT_MS) {
@@ -980,7 +1007,7 @@ export async function closeIdleSessions(): Promise<number> {
       // idempotent — a later explicit close of the same session
       // settles 0 and replays nothing).
       await settleBrowserSession(active.session).catch(() => {});
-      closed++;
+      closed.push(active.session);
     }
   }
 
@@ -1068,12 +1095,30 @@ async function dbGetIdleActiveSessions(): Promise<BrowserSession[]> {
  *
  * Returns true when this caller closed the row.
  */
+interface ExpiredCloseOutcome {
+  closed: boolean;
+  bits: number;
+  /** Provider teardown failed after the row was won — the session may
+   *  still exist on the vendor side. An init failure means the provider
+   *  session is already gone (the goal), so it is NOT counted. */
+  providerCleanupFailed: boolean;
+  /** A non-replayed settle wrote the ledger for this session. */
+  billingSettled: boolean;
+}
+
 async function closeExpiredSessionRow(
   session: BrowserSession,
-): Promise<{ closed: boolean; bits: number }> {
+): Promise<ExpiredCloseOutcome> {
+  const none: ExpiredCloseOutcome = {
+    closed: false,
+    bits: 0,
+    providerCleanupFailed: false,
+    billingSettled: false,
+  };
   const won = await dbCloseSessionIfActive(session.id);
-  if (!won) return { closed: false, bits: 0 };
+  if (!won) return none;
 
+  let providerCleanupFailed = false;
   if (session.browserbaseSessionId && hasApiKey()) {
     try {
       const cleanup = new Stagehand({
@@ -1083,23 +1128,44 @@ async function closeExpiredSessionRow(
         logger: () => {},
       });
       await cleanup.init();
-      await cleanup.close().catch(() => {});
+      await cleanup.close().catch(() => {
+        providerCleanupFailed = true;
+      });
     } catch {
       // Provider session already gone — nothing to clean up.
     }
   }
 
   const settled = await settleBrowserSessionFromRow(session).catch(() => null);
-  return { closed: true, bits: settled && !settled.replayed ? settled.bits : 0 };
+  return {
+    closed: true,
+    bits: settled && !settled.replayed ? settled.bits : 0,
+    providerCleanupFailed,
+    billingSettled: !!settled && !settled.replayed && !settled.error,
+  };
 }
 
 export interface SweepIdleResult {
+  /** Sessions evaluated: in-memory registry + idle-expired DB rows. */
+  inspected: number;
+  /** Sessions found past the idle TTL (close targets). */
+  expired: number;
+  /** Logical closes won by this sweep (local + DB). */
+  closed: number;
   /** In-memory sessions closed on this instance (accumulator settle). */
   localClosed: number;
   /** DB-side rows closed (no local process owned them). */
   dbClosed: number;
-  /** BITS newly settled by the DB-side closes (0 on idempotent replays). */
+  /** BITS newly settled (0 on idempotent replays). */
   settledBits: number;
+  /** Sessions whose BITS settled non-replayed this sweep. */
+  billingSettled: number;
+  /** Closes whose provider teardown failed (row + billing still handled). */
+  providerCleanupFailed: number;
+  /** Attached ActionRuns reconciled (event recorded, failed, or terminal preserved). */
+  runtimeReconciled: number;
+  /** Attached runs whose reconciliation failed — logged, never silent. */
+  runtimeReconcileFailed: number;
 }
 
 /**
@@ -1119,26 +1185,62 @@ export interface SweepIdleResult {
  * winner and settle carries the session-scoped idempotency key.
  */
 export async function sweepIdleBrowserSessions(): Promise<SweepIdleResult> {
-  const localClosed = await closeIdleSessions().catch(() => 0);
+  const localInspected = activeSessions.size;
+  const localClosedSessions = await closeIdleSessionsCollecting().catch(() => [] as BrowserSession[]);
+  const localClosed = localClosedSessions.length;
 
   const rows = await dbGetIdleActiveSessions().catch(() => []);
   let dbClosed = 0;
   let settledBits = 0;
+  let providerCleanupFailed = 0;
+  let billingSettled = 0;
+  const closedSessions: BrowserSession[] = [...localClosedSessions];
+
   for (const row of rows) {
     // A local Stagehand may have been registered since the query ran —
     // this instance's closeIdleSessions owns that case.
     if (activeSessions.has(row.id)) continue;
-    const { closed, bits } = await closeExpiredSessionRow(row).catch(() => ({
-      closed: false,
-      bits: 0,
-    }));
-    if (closed) {
-      dbClosed++;
-      settledBits += bits;
+    const outcome = await closeExpiredSessionRow(row).catch(() => null);
+    if (!outcome?.closed) continue;
+    dbClosed++;
+    settledBits += outcome.bits;
+    if (outcome.providerCleanupFailed) providerCleanupFailed++;
+    if (outcome.billingSettled) billingSettled++;
+    closedSessions.push(row);
+  }
+
+  // Action Runtime reconciliation: only sessions THIS sweep actually
+  // closed are reconciled. The conditional close elects one winner, so
+  // concurrent sweepers can never emit duplicate lifecycle events.
+  const { reconcileSweptBrowserSession } = await import("@/lib/action-runtime/browser-sweep");
+  let runtimeReconciled = 0;
+  let runtimeReconcileFailed = 0;
+  for (const session of closedSessions) {
+    try {
+      const outcome = await reconcileSweptBrowserSession(session);
+      if (outcome !== "no_run") runtimeReconciled++;
+    } catch (error) {
+      runtimeReconcileFailed++;
+      console.error("[browser-session-sweep] ActionRun reconciliation failed", {
+        sessionId: session.id,
+        userId: session.userId,
+        errorType: error instanceof Error ? error.name : typeof error,
+      });
     }
   }
 
-  return { localClosed, dbClosed, settledBits };
+  return {
+    inspected: localInspected + rows.length,
+    expired: localClosed + rows.length,
+    closed: localClosed + dbClosed,
+    localClosed,
+    dbClosed,
+    settledBits,
+    billingSettled,
+    providerCleanupFailed,
+    runtimeReconciled,
+    runtimeReconcileFailed,
+  };
 }
 
 // ─── Live status (Phase 2: backs the Studio status chip) ──────────

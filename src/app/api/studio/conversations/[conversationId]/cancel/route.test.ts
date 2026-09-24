@@ -26,6 +26,16 @@ vi.mock("@/lib/studio/logger", () => ({
   studioLog: vi.fn(),
 }));
 
+vi.mock("@/lib/action-runtime", () => ({
+  requestActionRunCancellation: vi.fn(() =>
+    Promise.resolve({ id: "run-db-1", status: "waiting_for_user" }),
+  ),
+  findActiveActionRunForRequest: vi.fn(() => Promise.resolve(null)),
+  transitionActionRun: vi.fn(() => Promise.resolve({})),
+  isTerminalActionRunStatus: (s: string) =>
+    s === "completed" || s === "failed" || s === "cancelled",
+}));
+
 import { auth } from "@/lib/auth";
 import { getConversation } from "@/lib/studio/conversation-service";
 import {
@@ -34,6 +44,11 @@ import {
   resetExecutionRegistryForTests,
   getActiveExecution,
 } from "@/lib/studio/execution-registry";
+import {
+  findActiveActionRunForRequest,
+  requestActionRunCancellation,
+  transitionActionRun,
+} from "@/lib/action-runtime";
 import { POST } from "./route";
 
 function makeRequest(body?: Record<string, unknown>): NextRequest {
@@ -50,6 +65,11 @@ describe("POST /api/studio/conversations/[conversationId]/cancel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetExecutionRegistryForTests();
+    vi.mocked(findActiveActionRunForRequest).mockResolvedValue(null);
+    vi.mocked(requestActionRunCancellation).mockResolvedValue({
+      id: "run-db-1",
+      status: "waiting_for_user",
+    } as any);
 
     vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" } as any);
     vi.mocked(getConversation).mockResolvedValue({
@@ -88,6 +108,26 @@ describe("POST /api/studio/conversations/[conversationId]/cancel", () => {
     expect(data.cancelled).toBe(true);
     expect(data.status).toBe("aborted");
     expect(controller.signal.aborted).toBe(true);
+  });
+
+  it("binds explicit Stop to the durable parent ActionRun", async () => {
+    const controller = new AbortController();
+    registerExecution({
+      conversationId: "conv-123",
+      userId: "user_123",
+      clientRequestId: "req-runtime",
+      assistantMessageId: "msg-runtime",
+      actionRunId: "action-run-123",
+      controller,
+    });
+
+    const res = await POST(makeRequest({ clientRequestId: "req-runtime" }), params);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.cancelled).toBe(true);
+    expect(data.actionRunId).toBe("action-run-123");
+    expect(data.actionRunCancellation).toBe("requested");
+    expect(requestActionRunCancellation).toHaveBeenCalledWith("action-run-123", "user_123");
   });
 
   it("requires clientRequestId — rejects without touching the registry", async () => {
@@ -162,6 +202,98 @@ describe("POST /api/studio/conversations/[conversationId]/cancel", () => {
     const data = await res.json();
     expect(data.status).toBe("not_found");
     expect(controller.signal.aborted).toBe(false);
+  });
+
+  it("cancels the durable run on registry miss (cross-replica / paused run)", async () => {
+    // No local execution — the run is either on another replica or paused at
+    // an approval gate. The durable run resolved by exact request identity
+    // must still reach a terminal state.
+    vi.mocked(findActiveActionRunForRequest).mockResolvedValue({
+      id: "run-remote-9",
+      status: "waiting_for_user",
+    } as any);
+
+    const res = await POST(makeRequest({ clientRequestId: "req-remote" }), params);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.actionRunId).toBe("run-remote-9");
+    expect(data.actionRunCancellation).toBe("requested");
+    expect(findActiveActionRunForRequest).toHaveBeenCalledWith(
+      "user_123",
+      "conv-123",
+      "req-remote",
+    );
+    expect(requestActionRunCancellation).toHaveBeenCalledWith("run-remote-9", "user_123");
+    // Paused run — no executor will consume the stamp; settle it directly.
+    expect(transitionActionRun).toHaveBeenCalledWith(
+      "run-remote-9",
+      "user_123",
+      "cancelled",
+      { currentActivity: "Stopped by user" },
+    );
+  });
+
+  it("does not settle a DB-resolved run that is already terminal", async () => {
+    vi.mocked(findActiveActionRunForRequest).mockResolvedValue({
+      id: "run-done",
+      status: "waiting_for_user",
+    } as any);
+    vi.mocked(requestActionRunCancellation).mockResolvedValue({
+      id: "run-done",
+      status: "completed",
+    } as any);
+
+    const res = await POST(makeRequest({ clientRequestId: "req-done" }), params);
+    expect(res.status).toBe(200);
+    expect((await res.json()).actionRunCancellation).toBe("requested");
+    expect(transitionActionRun).not.toHaveBeenCalled();
+  });
+
+  it("a stale request id cannot reach a different run via the DB fallback", async () => {
+    // An active execution exists for a NEWER request. A cancel carrying an
+    // old clientRequestId must not find or cancel that run — the idempotency
+    // key match is exact.
+    const controller = new AbortController();
+    registerExecution({
+      conversationId: "conv-123",
+      userId: "user_123",
+      clientRequestId: "req-current",
+      assistantMessageId: "msg-1",
+      actionRunId: "run-current",
+      controller,
+    });
+
+    const res = await POST(makeRequest({ clientRequestId: "req-stale" }), params);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe("not_found");
+    expect(controller.signal.aborted).toBe(false);
+    expect(findActiveActionRunForRequest).toHaveBeenCalledWith(
+      "user_123",
+      "conv-123",
+      "req-stale",
+    );
+    expect(requestActionRunCancellation).not.toHaveBeenCalled();
+  });
+
+  it("registry hit keeps the single-path cancellation (no double settle)", async () => {
+    const controller = new AbortController();
+    registerExecution({
+      conversationId: "conv-123",
+      userId: "user_123",
+      clientRequestId: "req-local",
+      assistantMessageId: "msg-local",
+      actionRunId: "run-local",
+      controller,
+    });
+
+    const res = await POST(makeRequest({ clientRequestId: "req-local" }), params);
+    expect(res.status).toBe(200);
+    expect(controller.signal.aborted).toBe(true);
+    expect(requestActionRunCancellation).toHaveBeenCalledWith("run-local", "user_123");
+    // Local executor exists — launch flow settles the terminal transition.
+    expect(transitionActionRun).not.toHaveBeenCalled();
+    expect(findActiveActionRunForRequest).not.toHaveBeenCalled();
   });
 
   it("a pending cancellation pre-aborts a run that registers moments later (Stop race)", async () => {

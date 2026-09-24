@@ -45,6 +45,14 @@ import {
 } from "@/lib/litt-intelligence/canonical-runtime-context";
 import { detectAndExecuteTool } from "@/lib/litt-intelligence/tool-executor";
 import { deploymentEvidenceFrom } from "@/lib/studio/completion-evidence";
+import {
+  createActionRun,
+  requestActionRunCancellation,
+  transitionActionRun,
+  transitionActionRunEventActivity,
+  type ActionExecutionContext,
+  type ActionRun,
+} from "@/lib/action-runtime";
 import type { ConversationTurn } from "@/lib/litt-intelligence/turn-resolver";
 
 export const runtime = "nodejs";
@@ -587,6 +595,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   let agentRunId: string | null = null;
   let reservedCredits = 0;
   let reservationId: string | null = null;
+  let actionRun: ActionRun | null = null;
+  let actionContext: ActionExecutionContext | null = null;
   if (runtimeAgent?.agentInstanceId && clerkId) {
     // Estimate the maximum cost: per-run fee + estimated tokens
     const estimatedTokens = Math.ceil(finalPrompt.length / 4) + 2048; // prompt + max output
@@ -630,6 +640,53 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     agentRunId = reserveResult.runId;
     reservedCredits = reserveResult.reservedCredits;
     reservationId = reserveResult.reservationId;
+  }
+
+  // One execution-required user task is one durable ActionRun. The route —
+  // the authenticated orchestration boundary — creates/resolves it once and
+  // passes the full context down; lower-level tools must never rediscover
+  // or invent task identity from model inputs.
+  if (useV2 && v2Transport && v2Config) {
+    try {
+      actionRun = await createActionRun({
+        userId,
+        conversationId: conversation.id,
+        projectId: v2Transport.projectId,
+        kind: "composite",
+        currentActivity: "Preparing LiTT task",
+        idempotencyKey: `studio-message:${conversation.id}:${clientRequestId}`,
+      });
+      actionContext = {
+        actionRunId: actionRun.id,
+        userId,
+        conversationId: conversation.id,
+        projectId: v2Transport.projectId,
+      };
+      v2Config.actionContext = actionContext;
+    } catch (runErr) {
+      const safeMessage = "LiTT couldn't start durable task tracking for this request.";
+      studioLog("message:action_run_create_failed", {
+        conversationId: conversation.id,
+        projectId: conversation.projectId,
+        userId,
+        clientRequestId,
+        errorClass: runErr instanceof Error ? runErr.message : "unknown",
+      });
+      await updateMessageStatus(assistantMessage.id, userId, "failed", safeMessage);
+      if (agentRunId) {
+        settleRun(agentRunId, {
+          inputTokens: 0,
+          outputTokens: 0,
+          actualCredits: 0,
+          status: "failed",
+          error: "ACTION_RUNTIME_UNAVAILABLE",
+        }, reservedCredits, reservationId).catch(() => {});
+      }
+      return NextResponse.json(
+        { error: safeMessage, code: "ACTION_RUNTIME_UNAVAILABLE" },
+        { status: 503 },
+      );
+    }
   }
 
   const category = (body.category as ModelCategory | undefined) ?? "auto";
@@ -690,8 +747,26 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         userId,
         clientRequestId,
         assistantMessageId: assistantMessage.id,
+        actionRunId: actionRun?.id,
         controller: executionAbort,
       });
+
+      // If Stop raced ahead of stream registration, the pending stamp has
+      // already aborted the local controller. Reflect that explicit user
+      // cancellation on the durable parent run as soon as its binding is
+      // available.
+      if (executionAbort.signal.aborted && actionContext) {
+        try {
+          await requestActionRunCancellation(actionContext.actionRunId, actionContext.userId);
+        } catch (cancelErr) {
+          studioLog("message:action_run_cancel_request_failed", {
+            conversationId: conversation.id,
+            userId,
+            actionRunId: actionContext.actionRunId,
+            errorClass: cancelErr instanceof Error ? cancelErr.message : "unknown",
+          });
+        }
+      }
 
       // Safe enqueue — no-ops once the transport is detached so a dead
       // connection doesn't spam enqueue exceptions or abort execution.
@@ -739,6 +814,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           // ── V2 path: run agent loop INSIDE the stream with real-time events ──
           // The ProgressEmitter streams events to the SSE controller as they
           // happen, so the user can watch LiTT work in real-time.
+          if (actionContext && !executionAbort.signal.aborted) {
+            await transitionActionRunEventActivity({
+              runId: actionContext.actionRunId,
+              userId: actionContext.userId,
+              status: "working",
+              eventType: "run.started",
+              payload: { kind: "composite" },
+              message: "LiTT is working on the task",
+              patch: { currentActivity: "LiTT is working on the task" },
+            });
+          }
 
           const streamProgress = new ProgressEmitter((evt: ProgressEvent) => {
             // Stream each event to the client immediately
@@ -848,6 +934,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             evalMetadata: v2Config.evalMetadata,
             progress: streamProgress,
             signal: executionAbort.signal,
+            actionContext: actionContext ?? undefined,
+            conversationId: conversation.id,
           });
 
           v2Result = launchFlowResult.agentLoopResult ?? null;
@@ -874,12 +962,41 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 executionMode: canonicalCtx.executionMode,
                 systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
                 checkpointId: v2Result.checkpoint?.checkpointId ?? null,
+                actionRunId: actionContext?.actionRunId ?? null,
                 qualityLoopState: v2Result.qualityLoopState,
                 deferredToolCalls: v2Result.pendingApproval.deferredToolCalls,
                 stepsUsed: v2Result.pendingApproval.stepsUsedAtPause,
                 hadInterveningMutation: v2Result.pendingApproval.hadInterveningMutationAtPause,
               });
               pausedRunId = pausedRun.id;
+              if (actionContext) {
+                try {
+                  await transitionActionRunEventActivity({
+                    runId: actionContext.actionRunId,
+                    userId: actionContext.userId,
+                    status: "waiting_for_user",
+                    eventType: "approval.required",
+                    payload: {
+                      toolId: v2Result.pendingApproval.toolId,
+                      pausedRunId,
+                    },
+                    message: `Approval required for ${v2Result.pendingApproval.toolId}`,
+                    patch: {
+                      approvalReference: pausedRunId,
+                      currentActivity: `Approval required for ${v2Result.pendingApproval.toolId}`,
+                    },
+                  });
+                } catch (approvalRunErr) {
+                  pausedRunPersistFailed = true;
+                  studioLog("message:action_run_waiting_transition_failed", {
+                    conversationId: conversation.id,
+                    userId,
+                    actionRunId: actionContext.actionRunId,
+                    pausedRunId,
+                    errorClass: approvalRunErr instanceof Error ? approvalRunErr.message : "unknown",
+                  });
+                }
+              }
             } catch (pausedErr) {
               // If persistence fails, the gate cannot be resumed — there is
               // no pausedRunId for the Approve button to act on. Emitting
@@ -934,6 +1051,30 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 : "failed";
 
           const statusPersisted = await updateMessageStatus(assistantMessage.id, userId, finalMessageStatus, assistantText);
+          let actionRunPersistenceFailed = false;
+          if (actionContext && finalMessageStatus !== "awaiting_approval") {
+            try {
+              await transitionActionRun(actionContext.actionRunId, actionContext.userId, finalMessageStatus, {
+                currentActivity: finalMessageStatus === "completed"
+                  ? "Task completed"
+                  : finalMessageStatus === "cancelled"
+                    ? "Task cancelled by user"
+                    : "Task failed",
+                approvalReference: null,
+                failureCode: finalMessageStatus === "failed" ? "TASK_FAILED" : null,
+                failureMessage: finalMessageStatus === "failed" ? assistantText.slice(0, 500) : null,
+              });
+            } catch (settleErr) {
+              actionRunPersistenceFailed = true;
+              studioLog("message:action_run_settle_failed", {
+                conversationId: conversation.id,
+                userId,
+                actionRunId: actionContext.actionRunId,
+                status: finalMessageStatus,
+                errorClass: settleErr instanceof Error ? settleErr.message : "unknown",
+              });
+            }
+          }
           if (statusPersisted === false) {
             // The run reached a terminal state but the transcript row did
             // not learn it — the message stays 'streaming' and the GET
@@ -1032,6 +1173,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             v2: true,
             pendingApproval: actionableApproval ?? undefined,
             launchStatus: launchFlowResult?.status ?? undefined,
+            actionRunId: actionContext?.actionRunId,
+            actionRunPersistence: actionRunPersistenceFailed ? "failed" : "ok",
             previewUrl: launchFlowResult?.previewUrl ?? undefined,
             productionUrl: launchFlowResult?.productionUrl ?? undefined,
           });
@@ -1283,6 +1426,27 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           cancelledBySignal ? "cancelled" : "failed",
           cancelledBySignal ? assistantText || undefined : failureNote,
         );
+        if (actionContext) {
+          try {
+            await transitionActionRun(
+              actionContext.actionRunId,
+              actionContext.userId,
+              cancelledBySignal ? "cancelled" : "failed",
+              {
+                currentActivity: cancelledBySignal ? "Task cancelled by user" : "Task failed",
+                failureCode: cancelledBySignal ? null : "TASK_FAILED",
+                failureMessage: cancelledBySignal ? null : errorMsg.slice(0, 500),
+              },
+            );
+          } catch (settleErr) {
+            studioLog("message:action_run_error_settle_failed", {
+              conversationId: conversation.id,
+              userId,
+              actionRunId: actionContext.actionRunId,
+              errorClass: settleErr instanceof Error ? settleErr.message : "unknown",
+            });
+          }
+        }
         if (agentRunId) {
           settleRun(agentRunId, {
             inputTokens: 0,

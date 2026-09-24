@@ -123,7 +123,7 @@ export function MissionSequence() {
           Interactive product demonstration
         </span>
         <span className="text-[10px] font-bold text-white/20">
-          Illustrative simulation
+          Demo
         </span>
       </div>
 
