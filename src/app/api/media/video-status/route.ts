@@ -1,20 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { GoogleGenAI, GenerateVideosOperation } from "@google/genai";
-import { adjustWalletBalance } from "@/lib/wallet-ledger";
-import { isBillingExempt, getActiveSimulation } from "@/lib/owner";
-import { findJobByOperationId, markVideoJobRefunded } from "@/lib/video-jobs";
-import { getGenerationJobByProviderJobId, completeGenerationJob, updateGenerationJobMetadata, failGenerationJob } from "@/lib/generation/jobs";
+import { findJobByOperationId, markVideoJobRefunded, markVideoJobFailed } from "@/lib/video-jobs";
+import { refundVideoCharge } from "@/lib/video-refunds";
+import { getGenerationJobByProviderJobId, completeGenerationJob, updateGenerationJobMetadata, failGenerationJob, setGenerationRefundStatus } from "@/lib/generation/jobs";
+import type { RefundStatus } from "@/lib/generation/types";
 import { resolveInternalUserId } from "@/lib/generation/identity";
 import { uploadAudio } from "@/lib/r2";
-
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 export async function POST(req: NextRequest) {
   const { userId } = await auth(req);
   if (!userId)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!GEMINI_API_KEY)
+  // Read at request time (not module load) so key rotation and tests see
+  // the current value.
+  const geminiApiKey = process.env.GEMINI_API_KEY;
+  if (!geminiApiKey)
     return NextResponse.json(
       { error: "Gemini API key not configured" },
       { status: 500 },
@@ -32,9 +33,15 @@ export async function POST(req: NextRequest) {
       );
 
     // ── Server-authoritative cost resolution ──────────────────────
-    // Never trust client-supplied cost — resolve from the job store.
+    // Never trust client-supplied cost — resolve from the job records.
+    // The in-memory job is the fast path; the durable generation_jobs row
+    // is the cross-instance / post-restart fallback, so a refund is never
+    // gated on which instance handled the original request.
     const job = findJobByOperationId(operationName);
-    if (!job) {
+    const genRow = internalUserId
+      ? await getGenerationJobByProviderJobId(internalUserId, operationName)
+      : null;
+    if (!job && !genRow) {
       return NextResponse.json(
         { error: "Video job not found. Cost must be resolved server-side." },
         { status: 404 },
@@ -42,14 +49,27 @@ export async function POST(req: NextRequest) {
     }
 
     // Verify the job belongs to the authenticated user
-    if (job.userId !== userId) {
+    if (job && job.userId !== userId) {
+      return NextResponse.json(
+        { error: "Video job does not belong to this user." },
+        { status: 403 },
+      );
+    }
+    if (!job && genRow && genRow.userId !== internalUserId) {
       return NextResponse.json(
         { error: "Video job does not belong to this user." },
         { status: 403 },
       );
     }
 
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    // Charge-time truth: only refund when a debit actually happened.
+    // Billing-exempt requests record charged=false / littBitsCharged=0,
+    // so they can never be refunded — even if the exemption lapses
+    // between the charge and this poll.
+    const cost = job ? job.cost : genRow!.littBitsCharged;
+    const charged = job ? job.charged : genRow!.littBitsCharged > 0;
+
+    const ai = new GoogleGenAI({ apiKey: geminiApiKey });
     const op = new GenerateVideosOperation();
     op.name = operationName;
 
@@ -62,31 +82,61 @@ export async function POST(req: NextRequest) {
     }
 
     // If the operation failed (done but no video), refund the user
-    // using the server-authoritative cost from the job store.
+    // using the server-authoritative cost from the job records.
     let refunded = false;
+    let refundPending = false;
     if (updated.done && !videoUri) {
-      // Idempotent refund — can only happen once per job
-      const canRefund = markVideoJobRefunded(job.jobId);
-      // Skip refund for billing-exempt owner (they were never debited)
-      const refundSim = await getActiveSimulation().catch(() => null);
-      const refundExempt = isBillingExempt(userId, refundSim);
-      if (canRefund && job.cost > 0 && !refundExempt) {
-        await adjustWalletBalance({
-          clerkId: userId,
-          amount: job.cost,
-          type: "refund",
-          reason: `Video refund: ${job.model} operation failed (no video output)`,
-          idempotencyKey: `video_refund_${operationName}`,
-        });
-        refunded = true;
+      if (charged && cost > 0) {
+        const alreadyRefunded = genRow
+          ? genRow.refundStatus === "refunded"
+          : job!.refunded;
+        if (!alreadyRefunded) {
+          // Record the refund intent first so a crash or retry can observe
+          // it; the wallet idempotency key is the exactly-once arbiter, so
+          // concurrent polls across instances cannot double-credit.
+          if (genRow) await setGenerationRefundStatus(genRow.id, "pending");
+          const r = await refundVideoCharge({
+            clerkId: userId,
+            amount: cost,
+            reason: `Video refund: ${job?.model ?? genRow?.model ?? "video"} operation failed (no video output)`,
+            idempotencyKey: `video_refund_${operationName}`,
+          });
+          if (r.ok) {
+            if (genRow) await setGenerationRefundStatus(genRow.id, "refunded");
+            if (job) markVideoJobRefunded(job.jobId);
+            // `replayed` means another poll/instance already completed this
+            // refund — the money is back either way.
+            refunded = !r.replayed;
+          } else {
+            // Wallet unreachable: stays `pending` so the next poll retries.
+            if (genRow) await setGenerationRefundStatus(genRow.id, "pending");
+            refundPending = true;
+          }
+        }
       }
 
-      // Mark the generation job as failed.
-      // Uses internal UUID for lookup, NOT the Clerk ID.
-      if (internalUserId) {
-        const genJob = await getGenerationJobByProviderJobId(internalUserId, operationName);
-        if (genJob) {
-          await failGenerationJob(genJob.id, "Video generation failed — no video output");
+      if (job) markVideoJobFailed(job.jobId);
+
+      // Mark the durable generation job as failed with the refund outcome.
+      const refundStatus: RefundStatus = refunded
+        ? "refunded"
+        : refundPending
+          ? "pending"
+          : "none";
+      if (genRow) {
+        await failGenerationJob(
+          genRow.id,
+          "Video generation failed — no video output",
+          refundStatus,
+        );
+      } else if (internalUserId) {
+        const row = await getGenerationJobByProviderJobId(internalUserId, operationName);
+        if (row) {
+          await failGenerationJob(
+            row.id,
+            "Video generation failed — no video output",
+            refundStatus,
+          );
         }
       }
     }
@@ -134,7 +184,8 @@ export async function POST(req: NextRequest) {
       saved: durableUrl !== null,
       assetId,
       refunded,
-      cost: job.cost,
+      refundPending,
+      cost,
     });
   } catch (err: unknown) {
     return NextResponse.json(

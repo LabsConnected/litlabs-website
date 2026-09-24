@@ -20,6 +20,14 @@ export type VideoJob = {
   cost: number;
   status: "pending" | "done" | "failed";
   createdAt: number;
+  /**
+   * Whether a wallet debit actually happened for this job.
+   *
+   * MUST be false for billing-exempt requests (owner / simulated owner):
+   * no debit occurred, so the status routes must never issue a refund for
+   * them. Recording `true` here for an exempt request would let a later
+   * poll mint LiTTBits from nothing if the exemption lapses.
+   */
   charged: boolean;
   refunded: boolean;
 };

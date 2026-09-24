@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { pollAlibabaVideoTask, downloadVideo } from "@/lib/alibaba-video";
 import { uploadAudio } from "@/lib/r2";
-import { adjustWalletBalance } from "@/lib/wallet-ledger";
-import { isBillingExempt, getActiveSimulation } from "@/lib/owner";
-import { findJobByOperationId, markVideoJobRefunded } from "@/lib/video-jobs";
-import { getGenerationJobByProviderJobId, completeGenerationJob, updateGenerationJobMetadata } from "@/lib/generation/jobs";
+import { findJobByOperationId, markVideoJobRefunded, markVideoJobFailed } from "@/lib/video-jobs";
+import { refundVideoCharge } from "@/lib/video-refunds";
+import { getGenerationJobByProviderJobId, completeGenerationJob, updateGenerationJobMetadata, failGenerationJob, setGenerationRefundStatus } from "@/lib/generation/jobs";
+import type { RefundStatus } from "@/lib/generation/types";
 import { resolveInternalUserId } from "@/lib/generation/identity";
 
 export async function POST(req: NextRequest) {
@@ -22,9 +22,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing taskId" }, { status: 400 });
 
     // ── Server-authoritative cost resolution ──────────────────────
-    // Never trust client-supplied cost — resolve from the job store.
+    // Never trust client-supplied cost — resolve from the job records.
+    // The in-memory job is the fast path; the durable generation_jobs row
+    // is the cross-instance / post-restart fallback, so a refund is never
+    // gated on which instance handled the original request.
     const job = findJobByOperationId(taskId);
-    if (!job) {
+    const genRow = internalUserId
+      ? await getGenerationJobByProviderJobId(internalUserId, taskId)
+      : null;
+    if (!job && !genRow) {
       return NextResponse.json(
         { error: "Video job not found. Cost must be resolved server-side." },
         { status: 404 },
@@ -32,12 +38,25 @@ export async function POST(req: NextRequest) {
     }
 
     // Verify the job belongs to the authenticated user
-    if (job.userId !== userId) {
+    if (job && job.userId !== userId) {
       return NextResponse.json(
         { error: "Video job does not belong to this user." },
         { status: 403 },
       );
     }
+    if (!job && genRow && genRow.userId !== internalUserId) {
+      return NextResponse.json(
+        { error: "Video job does not belong to this user." },
+        { status: 403 },
+      );
+    }
+
+    // Charge-time truth: only refund when a debit actually happened.
+    // Billing-exempt requests record charged=false / littBitsCharged=0,
+    // so they can never be refunded — even if the exemption lapses
+    // between the charge and this poll.
+    const cost = job ? job.cost : genRow!.littBitsCharged;
+    const charged = job ? job.charged : genRow!.littBitsCharged > 0;
 
     const result = await pollAlibabaVideoTask(taskId);
 
@@ -73,7 +92,7 @@ export async function POST(req: NextRequest) {
           videoUrl: saved.publicUrl,
           storageKey: saved.storageKey,
           saved: true,
-          cost: job.cost,
+          cost,
           assetId,
         });
       } catch (saveErr) {
@@ -85,28 +104,60 @@ export async function POST(req: NextRequest) {
           videoUrl: result.videoUrl,
           saved: false,
           warning: saveErr instanceof Error ? saveErr.message : "R2 save failed",
-          cost: job.cost,
+          cost,
         });
       }
     }
 
     // If the task failed, refund the reserved LiTTBits
-    // using the server-authoritative cost from the job store.
+    // using the server-authoritative cost from the job records.
     let refunded = false;
+    let refundPending = false;
     if (result.taskStatus === "FAILED") {
-      const canRefund = markVideoJobRefunded(job.jobId);
-      // Skip refund for billing-exempt owner (they were never debited)
-      const alibabaSim = await getActiveSimulation().catch(() => null);
-      const alibabaExempt = isBillingExempt(userId, alibabaSim);
-      if (canRefund && job.cost > 0 && !alibabaExempt) {
-        await adjustWalletBalance({
-          clerkId: userId,
-          amount: job.cost,
-          type: "refund",
-          reason: `Video refund: ${job.model} task failed`,
-          idempotencyKey: `video_refund_${taskId}`,
-        });
-        refunded = true;
+      if (charged && cost > 0) {
+        const alreadyRefunded = genRow
+          ? genRow.refundStatus === "refunded"
+          : job!.refunded;
+        if (!alreadyRefunded) {
+          // Record the refund intent first so a crash or retry can observe
+          // it; the wallet idempotency key is the exactly-once arbiter, so
+          // concurrent polls across instances cannot double-credit.
+          if (genRow) await setGenerationRefundStatus(genRow.id, "pending");
+          const r = await refundVideoCharge({
+            clerkId: userId,
+            amount: cost,
+            reason: `Video refund: ${job?.model ?? genRow?.model ?? "video"} task failed`,
+            idempotencyKey: `video_refund_${taskId}`,
+          });
+          if (r.ok) {
+            if (genRow) await setGenerationRefundStatus(genRow.id, "refunded");
+            if (job) markVideoJobRefunded(job.jobId);
+            // `replayed` means another poll/instance already completed this
+            // refund — the money is back either way.
+            refunded = !r.replayed;
+          } else {
+            // Wallet unreachable: stays `pending` so the next poll retries.
+            if (genRow) await setGenerationRefundStatus(genRow.id, "pending");
+            refundPending = true;
+          }
+        }
+      }
+
+      if (job) markVideoJobFailed(job.jobId);
+
+      // Mark the durable generation job as failed with the refund outcome
+      // (previously the row was left stuck in "generating" forever).
+      const refundStatus: RefundStatus = refunded
+        ? "refunded"
+        : refundPending
+          ? "pending"
+          : "none";
+      if (genRow) {
+        await failGenerationJob(
+          genRow.id,
+          result.error ?? "Alibaba video task failed",
+          refundStatus,
+        );
       }
     }
 
@@ -116,7 +167,8 @@ export async function POST(req: NextRequest) {
       videoUrl: result.videoUrl,
       error: result.error,
       refunded,
-      cost: job.cost,
+      refundPending,
+      cost,
     });
   } catch (err: unknown) {
     return NextResponse.json(
