@@ -1,5 +1,6 @@
 export {
   attachBrowserSession,
+  supersedeBrowserSession,
   completeBrowserActionRun,
   failBrowserActionRun,
   findActiveBrowserActionRun,

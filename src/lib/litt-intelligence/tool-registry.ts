@@ -385,10 +385,25 @@ const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
         };
       }
 
-      const result = await m.getOrReuseAgentBrowserSession({ userId, task, conversationId });
+      // Hand the run's durable attachment to the get-or-reuse path so a
+      // session started on another replica (or before a restart) is
+      // re-attached instead of replaced — replacing it would trip the
+      // run's one-session attach guard (ACTION_BROWSER_SESSION_MISMATCH).
+      const result = await m.getOrReuseAgentBrowserSession({
+        userId,
+        task,
+        conversationId,
+        attachedSessionId: run.browserSessionId ?? undefined,
+      });
       if (result.ok) {
         try {
-          const actionRun = await runtime.attachBrowserSession(run, result.session);
+          const actionRun = result.supersededSessionId
+            ? await runtime.supersedeBrowserSession(
+                run,
+                result.session,
+                "Previously attached browser session was not reusable; started a fresh session.",
+              )
+            : await runtime.attachBrowserSession(run, result.session);
           return { ...result, actionRunId: actionRun.id };
         } catch (error) {
           const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "runtime_unavailable";
@@ -399,6 +414,19 @@ const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
             conversationId,
             actionRunId: run.id,
           });
+          // A fresh vendor session that could not be linked to the run
+          // must not be orphaned — it would keep billing minutes with no
+          // run owning it. Reused sessions are never closed here.
+          if (!result.reused) {
+            const { closeSession } = await import("./browser-session-manager");
+            await closeSession(result.session.id, userId).catch((cleanupError) => {
+              console.error("[action-runtime] orphaned browser session cleanup failed", {
+                sessionId: result.session.id,
+                userId,
+                errorType: cleanupError instanceof Error ? cleanupError.name : typeof cleanupError,
+              });
+            });
+          }
           return {
             ok: false,
             error: code,
