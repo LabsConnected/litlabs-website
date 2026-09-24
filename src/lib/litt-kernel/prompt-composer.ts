@@ -74,6 +74,7 @@ const MODE_GUIDANCE: Record<string, string> = {
   ship: `Mode: SHIP. This is high-risk. Require explicit approval before deploying. Verify the deployment URL after claiming success. Never claim "deployed" without a live URL.`,
   status: `Mode: STATUS. Report the verified state of the requested capability. If a capability is unknown, say so — do not guess. Use the capability context block below.`,
   learn: `Mode: LEARN. Explain the concept clearly. Use analogies and examples. Adjust depth to the user's apparent expertise. Do not require a Project.`,
+  browser: `Mode: BROWSER. Control the live browser session. Start or reuse the session, announce what you are doing, verify actions with snapshots, and close the session when the task is done. Hand control to the user for logins, CAPTCHAs, or anything sensitive. If the browser is unavailable, say so — never claim an action you did not perform.`,
 };
 
 // ─── Capability context block ───────────────────────────────────
