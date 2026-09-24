@@ -54,13 +54,7 @@ function renderReadyPreview() {
   );
 }
 
-async function postStyleProbe(payload: { tailwindDetected: boolean; styled: boolean }) {
-  // Let React commit the previewUrl-dependent style-probe message listener
-  // before dispatching: findByText("Preview ready") only proves the badge
-  // rendered, not that the listener subscribed. Under CI load the probe can
-  // land first and the badge never flips. (Same race fixed for the
-  // entry-missing listener in StudioPreviewPanel.entry-missing.test.tsx.)
-  await act(async () => Promise.resolve());
+function postStyleProbe(payload: { tailwindDetected: boolean; styled: boolean }) {
   act(() => {
     window.dispatchEvent(
       new MessageEvent("message", {
@@ -80,7 +74,7 @@ describe("StudioPreviewPanel — style probe honesty", () => {
   it("flips the badge when a Tailwind-intended preview renders unstyled", async () => {
     renderReadyPreview();
     await screen.findByText("Preview ready");
-    await postStyleProbe({ tailwindDetected: true, styled: false });
+    postStyleProbe({ tailwindDetected: true, styled: false });
     await screen.findByText("Preview styling failed to apply");
     expect(screen.queryByText("Preview ready")).toBeNull();
   });
@@ -88,7 +82,7 @@ describe("StudioPreviewPanel — style probe honesty", () => {
   it("keeps 'Preview ready' when Tailwind applied", async () => {
     renderReadyPreview();
     await screen.findByText("Preview ready");
-    await postStyleProbe({ tailwindDetected: true, styled: true });
+    postStyleProbe({ tailwindDetected: true, styled: true });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
@@ -99,7 +93,7 @@ describe("StudioPreviewPanel — style probe honesty", () => {
   it("keeps 'Preview ready' for pages without Tailwind intent", async () => {
     renderReadyPreview();
     await screen.findByText("Preview ready");
-    await postStyleProbe({ tailwindDetected: false, styled: true });
+    postStyleProbe({ tailwindDetected: false, styled: true });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
