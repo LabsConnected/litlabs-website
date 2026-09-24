@@ -445,6 +445,10 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  // P1-1: synchronous double-submit guard. React state updates are async,
+  // so two rapid taps on Generate before re-render would both pass the
+  // isWorking check and double-bill. A ref flips synchronously.
+  const generateInFlightRef = useRef(false);
   /* Auto-expand the mobile prompt box while typing (capped) */
   useEffect(() => {
     const el = promptRef.current;
@@ -990,8 +994,12 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
     }
   }, [history.length, handleClearHistory]);
 
-  const handleGenerate = useCallback(async () => {
-    if (!promptValid) {
+  // P1-1: promptOverride lets Regenerate call this directly with the
+  // prompt it just loaded — React state updates are async, so reading
+  // `prompt` here would see the stale pre-load value.
+  const handleGenerate = useCallback(async (promptOverride?: string) => {
+    const activePrompt = (promptOverride ?? prompt).trim();
+    if (activePrompt.length < 3) {
       setError("Enter a prompt to generate.");
       return;
     }
@@ -1000,6 +1008,19 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
       setError(`Need ${totalCost} 🪙, have ${coinBalance ?? 0}.`);
       return;
     }
+
+    // P1-1: synchronous double-submit guard — a ref flips instantly, while
+    // the isWorking state (used by the button's disabled prop) lags a
+    // render. Without this, two rapid taps both dispatch and double-bill.
+    if (generateInFlightRef.current) {
+      addLog("warn", "Generation already in flight — ignoring duplicate submit.");
+      return;
+    }
+    generateInFlightRef.current = true;
+    // P1-1: stable client-generated idempotency key for the logical
+    // operation. The server (image-service) claims idempotency on
+    // requestId, so a retry after a dropped response cannot double-charge.
+    const requestId = crypto.randomUUID();
 
     setError(null);
     setImgError(null);
@@ -1010,16 +1031,17 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
     );
 
     const finalPrompt = buildFinalPrompt(
-      prompt.trim(),
+      activePrompt,
       remixMode,
       !!referenceImage,
     );
 
+    try {
     for (let i = 0; i < batchSize; i++) {
       const localId = `gen_${Date.now()}_${i}`;
       const newGen: Generation = {
         id: localId,
-        prompt: prompt.trim(),
+        prompt: activePrompt,
         negativePrompt: negativePrompt.trim(),
         provider: providerId,
         status: "submitting",
@@ -1058,6 +1080,8 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
         } else {
           body.providerId = providerId;
         }
+        // P1-1: send the stable idempotency key — server dedupes replays.
+        body.requestId = requestId;
 
         if (referenceImage) {
           body.referenceUrl = referenceImage;
@@ -1068,6 +1092,11 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
           method: "POST",
           credentials: "include",
           body: JSON.stringify(body),
+          // P1-1: providers take longer than the 30s default — a client
+          // timeout while the server completes AND debits is the classic
+          // "nothing happened" report. Never auto-retry a billed POST.
+          timeoutMs: 120_000,
+          retries: 0,
         });
         const downloadUrl = data.downloadUrl as string;
         const thumbUrl = data.thumbUrl as string | undefined;
@@ -1140,6 +1169,10 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
     }
     setStatus("succeeded");
     addLog("info", `Batch complete`);
+    } finally {
+      // P1-1: always release the double-submit guard, even on throw.
+      generateInFlightRef.current = false;
+    }
   }, [
     prompt,
     negativePrompt,
@@ -1584,7 +1617,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                 </span>
               </div>
               <button
-                onClick={handleGenerate}
+                onClick={() => void handleGenerate()}
                 disabled={!promptValid || !canAfford || isWorking}
                 className="w-full min-h-[52px] rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed bg-accent text-on-accent hover:bg-accent-strong shadow-accent-glow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
                 data-testid="generate-image-button"
@@ -1611,7 +1644,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                   </div>
                   {!error.includes("✓") && (
                     <button
-                      onClick={handleGenerate}
+                      onClick={() => void handleGenerate()}
                       disabled={isWorking}
                       className="mt-2 w-full min-h-[44px] rounded-lg border font-bold flex items-center justify-center gap-2 disabled:opacity-40"
                       style={{ borderColor: "#f8514960", color: "#f85149" }}
@@ -2154,9 +2187,11 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                     addLog("info", "Prompt loaded for regenerate");
                     setTimeout(() => {
                       document.getElementById("image-mobile-scroller")?.scrollTo({ top: 0, behavior: "smooth" });
-                      setTimeout(() => {
-                        document.querySelector<HTMLButtonElement>('[data-testid="generate-image-button"]')?.click();
-                      }, 350);
+                      // P1-1: call the handler directly with the loaded
+                      // prompt. The old document.querySelector(...).click()
+                      // silently no-ops when the generate button is not
+                      // mounted — a true "tap, nothing happens" dead flow.
+                      void handleGenerate(g.prompt);
                     }, 60);
                   }}
                   disabled={isWorking}
@@ -3296,7 +3331,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
           {/* ── Generate button — always visible ── */}
           <div className="shrink-0 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-3 pt-2 space-y-2 border-t" style={{ borderColor: "var(--glass-border)", backgroundColor: "var(--glass-surface-3)" }}>
             <button
-              onClick={handleGenerate}
+              onClick={() => void handleGenerate()}
               disabled={!promptValid || !canAfford || isWorking}
               className="w-full h-11 rounded-xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all hover:scale-[1.01] disabled:opacity-40 disabled:cursor-not-allowed bg-accent text-on-accent hover:bg-accent-strong shadow-accent-glow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
               data-testid="generate-image-button"
@@ -3491,7 +3526,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                       <Wand2 size={9} /> Edit
                     </button>
                     <button
-                      onClick={handleGenerate}
+                      onClick={() => void handleGenerate()}
                       className="h-6 px-2.5 flex items-center gap-1 rounded border text-[9px] font-bold transition-all hover:opacity-80"
                       style={{
                         borderColor: T.borderColor + "50",
@@ -3729,7 +3764,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                     </p>
                     <div className="flex items-center justify-center gap-2">
                       <button
-                        onClick={handleGenerate}
+                        onClick={() => void handleGenerate()}
                         disabled={isWorking}
                         className="px-4 py-2 text-xs font-bold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
                         style={{

@@ -73,18 +73,24 @@ describe("P1-1: studio intent dead flows", () => {
   }
 
   describe("intent classification → correct routing", () => {
-    it("classifies image requests as generate_image carrying the original prompt", () => {
-      for (const text of [
-        "generate an image of a sunset",
-        "create an image of a dog",
-        "create a wallpaper",
-      ]) {
-        const intent = detectIntent(text);
-        expect(intent?.intent).toBe("generate_image");
-        // The original prompt travels on the intent so the Image Studio
-        // can prefill it — without it the request dies in routing (P1-1).
-        expect(intent?.prompt).toBe(text);
-      }
+    it.each([
+      ["generate an image of a sunset", "a sunset"],
+      ["create an image of a dog", "a dog"],
+      ["create a wallpaper", "create a wallpaper"],
+      // P1-1: natural phrasings route to generate_image with a cleaned
+      // prefill — the Image Studio box gets the subject, not the sentence.
+      ["generate a picture of a cat", "a cat"],
+      ["make me a photo of the lake", "the lake"],
+      ["make me a logo for my cafe", "my cafe"],
+      ["generate an illustration of a forest", "a forest"],
+      ["create a poster of a robot", "a robot"],
+      ["create a banner for the launch", "the launch"],
+    ])("classifies %s as generate_image with cleaned prefill %s", (text, prompt) => {
+      const intent = detectIntent(text);
+      expect(intent?.intent).toBe("generate_image");
+      // The cleaned prompt travels on the intent so the Image Studio can
+      // prefill it — without it the request dies in routing (P1-1).
+      expect(intent?.prompt).toBe(prompt);
     });
 
     it.each([
@@ -127,7 +133,9 @@ describe("P1-1: studio intent dead flows", () => {
       // onRouteToolAction("image") must NOT fire — the legacy "image"
       // tool id normalizes to the chat surface, which is the dead flow.
       expect(h.onOpenImageStudio).toHaveBeenCalledTimes(1);
-      expect(h.onOpenImageStudio).toHaveBeenCalledWith(text);
+      // P1-1: the cleaned prompt (subject only) is prefilled, not the
+      // raw chat sentence.
+      expect(h.onOpenImageStudio).toHaveBeenCalledWith("a sunset");
       expect(h.onRouteToolAction).not.toHaveBeenCalled();
       expect(h.onNavigate).not.toHaveBeenCalled();
     });
@@ -199,7 +207,9 @@ describe("P1-1: studio intent dead flows", () => {
       {
         text: "generate an image of a sunset",
         firedHandler: "onOpenImageStudio",
-        firedWith: ["generate an image of a sunset"],
+        // P1-1: the cleaned prompt (subject only) is prefilled, not the
+        // raw chat sentence.
+        firedWith: ["a sunset"],
         message: "Opening the image generator.",
       },
       {
