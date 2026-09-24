@@ -263,6 +263,33 @@ export async function findActiveActionRunForConversation(
 }
 
 /**
+ * Resolve the active (non-terminal) run for an exact Studio request. The
+ * in-process execution registry can only reach executions on THIS instance —
+ * multi-replica deployments and paused runs have no local AbortController —
+ * so cancellation falls back to the durable row keyed by the request's
+ * idempotency key. Exact-key matching preserves the no-stale-cancel contract:
+ * a Stop for an old request can never terminate a newer run.
+ */
+export async function findActiveActionRunForRequest(
+  userId: string,
+  conversationId: string,
+  clientRequestId: string,
+): Promise<ActionRun | null> {
+  const { data, error } = await adminOrThrow()
+    .from("action_runs")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("conversation_id", conversationId)
+    .eq("idempotency_key", `studio-message:${conversationId}:${clientRequestId}`)
+    .not("status", "in", "(completed,failed,cancelled)")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw mapDatabaseError(error, "PERSISTENCE_UNAVAILABLE");
+  return data ? mapRun(data as ActionRunRow) : null;
+}
+
+/**
  * Batch lookup for GET-list recovery: all of a user's runs attached to any of
  * the given browser sessions. One query, never per-session N+1.
  */

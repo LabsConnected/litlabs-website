@@ -3,7 +3,12 @@ import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { getConversation } from "@/lib/studio/conversation-service";
 import { requestExecutionCancellation } from "@/lib/studio/execution-registry";
-import { requestActionRunCancellation } from "@/lib/action-runtime";
+import {
+  findActiveActionRunForRequest,
+  isTerminalActionRunStatus,
+  requestActionRunCancellation,
+  transitionActionRun,
+} from "@/lib/action-runtime";
 import { studioLog } from "@/lib/studio/logger";
 
 interface RouteParams {
@@ -69,9 +74,47 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   }
 
   let actionRunCancellation: "not_applicable" | "requested" | "failed" = "not_applicable";
-  if (result.actionRunId) {
+  let actionRunId = result.actionRunId ?? null;
+  const registryResolvedLocally = !!result.actionRunId;
+
+  // The in-process registry only reaches executions on THIS instance. On
+  // multi-replica deployments — and for runs paused at an approval gate,
+  // which have no live executor at all — a registry miss must not leave the
+  // durable run un-cancellable. Resolve the run by the request's exact
+  // idempotency key instead; a stale request id still cannot match a
+  // different run.
+  if (!actionRunId) {
     try {
-      await requestActionRunCancellation(result.actionRunId, userId);
+      const run = await findActiveActionRunForRequest(userId, conversation.id, clientRequestId);
+      actionRunId = run?.id ?? null;
+    } catch (error) {
+      studioLog("message:action_run_cancel_lookup_failed", {
+        conversationId: conversation.id,
+        projectId: conversation.projectId,
+        userId,
+        clientRequestId,
+        errorClass: error instanceof Error ? error.message : "unknown",
+      });
+    }
+  }
+
+  if (actionRunId) {
+    try {
+      const run = await requestActionRunCancellation(actionRunId, userId);
+      // A run paused at an approval gate (waiting_for_user / paused) has no
+      // live executor anywhere — nothing will ever consume the cancellation
+      // stamp. Settle it to the terminal state now; the approvals route
+      // already refuses to resume terminal runs.
+      if (!registryResolvedLocally && !isTerminalActionRunStatus(run.status)) {
+        try {
+          await transitionActionRun(actionRunId, userId, "cancelled", {
+            currentActivity: "Stopped by user",
+          });
+        } catch {
+          // Concurrent terminal transition already settled the run — the
+          // cancellation request still stands.
+        }
+      }
       actionRunCancellation = "requested";
     } catch (error) {
       actionRunCancellation = "failed";
@@ -92,14 +135,14 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     userId,
     clientRequestId,
     status: result.status,
-    actionRunId: result.actionRunId,
+    actionRunId: actionRunId ?? undefined,
     actionRunCancellation,
   });
 
   return NextResponse.json({
     cancelled: result.status === "aborted" || result.status === "recorded",
     status: result.status,
-    actionRunId: result.actionRunId,
+    actionRunId: actionRunId ?? undefined,
     actionRunCancellation,
   });
 }
