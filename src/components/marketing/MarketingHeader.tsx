@@ -14,19 +14,13 @@ type MarketingNavItem = {
   trackEvent?: FunnelEvent;
 };
 
-// Larry's site audit (2026-09-22, issue #469): lead with the product —
-// Studio → How it works → Pricing first. "Community" is back in the nav now
-// that the /discover feed is seeded with LiTT-team welcome posts (it renders
-// /discover, the canonical route; /community and /communities 308 there).
+// Larry's site audit (2026-09-23 round 2): cut the nav to four items —
+// Studio · Capabilities · Pricing · Docs. Developers bounce from clutter.
 const NAV_ITEMS: MarketingNavItem[] = [
   { label: "Studio", href: "/studio" },
-  { label: "How it works", href: "/#how-it-works" },
-  { label: "Pricing", href: "/pricing", trackEvent: "pricing_link_click" },
   { label: "Capabilities", href: "/#what-we-do" },
-  { label: "Creations", href: "/#creations" },
-  { label: "CLI", href: "/cli" },
-  { label: "FAQ", href: "/#faq" },
-  { label: "Community", href: "/discover" },
+  { label: "Pricing", href: "/pricing", trackEvent: "pricing_link_click" },
+  { label: "Docs", href: "/docs" },
 ];
 
 export default function MarketingHeader() {
