@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Save, Loader2 } from "lucide-react";
 import type { UserProfile } from "@/context/ProfileContext";
 
@@ -28,6 +28,21 @@ export function EditProfileDialog({
     location: profile.location,
     website: profile.website,
   }));
+
+  // Reset the form every time the dialog opens so it always reflects the
+  // current server-confirmed profile — never stale text from a previous
+  // edit (e.g. a save attempt that failed validation).
+  useEffect(() => {
+    if (open) {
+      setForm({
+        displayName: profile.displayName,
+        username: profile.username,
+        bio: profile.bio,
+        location: profile.location,
+        website: profile.website,
+      });
+    }
+  }, [open, profile]);
 
   if (!open) return null;
 

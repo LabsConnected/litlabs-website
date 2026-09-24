@@ -79,6 +79,11 @@ interface ProfileContextType {
   updateProfile: (updates: Partial<UserProfile>) => void;
   resetProfile: () => void;
   loading: boolean;
+  // Set when the debounced background sync POST failed (non-2xx or network
+  // error). The explicit edit flow in the profile page has its own error
+  // handling; this surfaces failures from the auto-sync so a rejected save
+  // can never look like it succeeded.
+  syncError: string | null;
 }
 
 const ProfileContext = createContext<ProfileContextType | undefined>(undefined);
@@ -126,6 +131,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [hydrated, setHydrated] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialLoadDone = useRef(false);
 
@@ -218,18 +224,48 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
 
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
+      // The sync body is deliberately restricted to fields the API accepts
+      // (name, username, bio, location, website, avatar_url). Cosmetic prefs
+      // (wallpaper, accentColor, sidebarStyle, …) are localStorage-only and
+      // never sent here.
       const body = profileToApi(profile);
-      getToken().then((token) => fetch("/api/settings/profile", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(body),
-      })).catch(() => {
-        // silent fail — localStorage has the data
-      });
+      getToken()
+        .then((token) =>
+          fetch("/api/settings/profile", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify(body),
+          }),
+        )
+        .then(async (res) => {
+          if (res.ok) {
+            // Server confirmed the save — clear any earlier sync error.
+            setSyncError(null);
+            return;
+          }
+          // Rejected save: surface it instead of pretending it worked.
+          // localStorage still has the data, but the server does not.
+          const data = await res.json().catch(() => ({}));
+          const serverError =
+            typeof data?.error === "string" && data.error
+              ? data.error
+              : null;
+          setSyncError(
+            serverError
+              ? `Profile sync failed: ${serverError}`
+              : `Profile sync failed (server returned ${res.status}). Your changes are saved on this device only.`,
+          );
+        })
+        .catch(() => {
+          // Network failure: honest, visible error — not a silent "success".
+          setSyncError(
+            "Profile sync failed — couldn't reach the server. Your changes are saved on this device only.",
+          );
+        });
     }, 2000);
 
     return () => {
@@ -247,7 +283,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
 
   return (
     <ProfileContext.Provider
-      value={{ profile, updateProfile, resetProfile, loading }}
+      value={{ profile, updateProfile, resetProfile, loading, syncError }}
     >
       {children}
     </ProfileContext.Provider>

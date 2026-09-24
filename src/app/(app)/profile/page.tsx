@@ -54,7 +54,7 @@ function ProfilePageInner() {
   const { isLoaded, isSignedIn } = useClerkAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { profile, updateProfile } = useProfile();
+  const { profile, updateProfile, syncError } = useProfile();
 
   const [saving, setSaving] = useState(false);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
@@ -247,6 +247,23 @@ function ProfilePageInner() {
   return (
     <div className="profile-page">
       <div className="profile-container">
+        {syncError && (
+          <p
+            role="alert"
+            style={{
+              fontSize: "12px",
+              fontWeight: 600,
+              color: "#fca5a5",
+              background: "rgba(248,113,113,0.08)",
+              border: "1px solid rgba(248,113,113,0.25)",
+              borderRadius: "10px",
+              padding: "10px 12px",
+              marginBottom: "12px",
+            }}
+          >
+            {syncError}
+          </p>
+        )}
         <ProfileCover
           coverUrl={profile.coverUrl}
           coverPreview={coverPreview}

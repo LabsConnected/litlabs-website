@@ -129,7 +129,29 @@ async function postHandler(req: NextRequest) {
       );
     }
 
-    const updatedUser = await updateUserProfile(clerkId, allowedUpdates);
+    let updatedUser;
+    try {
+      updatedUser = await updateUserProfile(clerkId, allowedUpdates);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      // updateUserProfile throws "User not found" when the row is missing.
+      // Report that honestly instead of a generic 500.
+      if (message === "User not found") {
+        return NextResponse.json({ error: "User not found" }, { status: 404 });
+      }
+      // Unique-violation on users.username (e.g. "duplicate key value
+      // violates unique constraint ... 23505"). Tell the client the name is
+      // taken so the UI can say so instead of claiming the save worked.
+      if (
+        /23505|duplicate key|unique constraint|already exists/i.test(message)
+      ) {
+        return NextResponse.json(
+          { error: "Username already taken" },
+          { status: 409 },
+        );
+      }
+      throw err;
+    }
 
     return NextResponse.json({
       message: "Profile updated successfully",
@@ -146,7 +168,7 @@ async function postHandler(req: NextRequest) {
         location: updatedUser.location,
       },
     });
-  } catch {
+    } catch {
     // Error updating profile:
     return NextResponse.json(
       { error: "Failed to update profile" },
