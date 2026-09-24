@@ -20,6 +20,12 @@
 import "server-only";
 import type { Entitlements } from "@/lib/entitlements";
 import type { PlanId } from "@/config/plans";
+import { isOwnerClerkId } from "@/lib/owner-identity";
+
+// Canonical identity check lives in @/lib/owner-identity (client-safe pure
+// env read) so client-bundled modules can share it. Re-exported here to
+// preserve the server-side import path every route already uses.
+export { isOwnerClerkId };
 
 // ─── Owner identification ───────────────────────────────────────────
 
@@ -65,19 +71,8 @@ export function getOwnerClerkId(): string | null {
 /**
  * Returns true if the given Clerk user ID is the platform owner.
  * Checks both LITTLABS_VAPI_OWNER_CLERK_ID and ADMIN_CLERK_IDS.
+ * Implementation: @/lib/owner-identity (shared, client-safe).
  */
-export function isOwnerClerkId(clerkId: string | null | undefined): boolean {
-  if (!clerkId) return false;
-  // Check LITTLABS_VAPI_OWNER_CLERK_ID
-  const ownerId = process.env[OWNER_CLERK_ID_ENV];
-  if (ownerId && clerkId === ownerId) return true;
-  // Check ADMIN_CLERK_IDS (comma-separated list)
-  const adminIds = (process.env.ADMIN_CLERK_IDS || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return adminIds.includes(clerkId);
-}
 
 // ─── Simulation types ───────────────────────────────────────────────
 
