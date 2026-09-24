@@ -15,6 +15,10 @@ import {
 } from "@/lib/litt-intelligence/browser-session-manager";
 import type { BrowserSession } from "@/lib/litt-intelligence/browser-session-manager";
 import { preflightBrowserStart } from "@/lib/litt-intelligence/browser-billing";
+import {
+  BROWSER_BETA_ONLY_MESSAGE,
+  isBrowserBetaAllowed,
+} from "@/lib/litt-intelligence/browser-agent";
 import { mapBrowserFailure } from "@/lib/action-runtime/safe-errors";
 import {
   attachBrowserSession,
@@ -202,6 +206,16 @@ async function handler(req: NextRequest) {
     switch (action) {
       // ── Start new session ──────────────────────────────────────
       case "start": {
+        // Private-beta gate — same check the agent's browser.start_session
+        // tool path enforces. Without this, any authenticated user could
+        // provision billable Browserbase sessions directly, bypassing the
+        // tool-level gate entirely.
+        if (!isBrowserBetaAllowed(userId)) {
+          return NextResponse.json(
+            { code: "beta_only", error: "beta_only", message: BROWSER_BETA_ONLY_MESSAGE },
+            { status: 403 },
+          );
+        }
         const task = typeof body.task === "string" ? body.task : undefined;
         const requestedProjectId = typeof body.projectId === "string" ? body.projectId : undefined;
         const requestedConversationId = typeof body.conversationId === "string" ? body.conversationId : undefined;

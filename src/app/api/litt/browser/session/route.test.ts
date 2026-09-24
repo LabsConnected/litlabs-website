@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   takeScreenshot: vi.fn(),
   closeIdleSessions: vi.fn(),
   preflightBrowserStart: vi.fn(),
+  isBrowserBetaAllowed: vi.fn(() => true),
   getActionRun: vi.fn(),
   startBrowserActionRun: vi.fn(),
   attachBrowserSession: vi.fn(),
@@ -50,6 +51,10 @@ vi.mock("@/lib/litt-intelligence/browser-session-manager", () => ({
 }));
 vi.mock("@/lib/litt-intelligence/browser-billing", () => ({
   preflightBrowserStart: mocks.preflightBrowserStart,
+}));
+vi.mock("@/lib/litt-intelligence/browser-agent", () => ({
+  isBrowserBetaAllowed: mocks.isBrowserBetaAllowed,
+  BROWSER_BETA_ONLY_MESSAGE: "Browser control is in private beta on this account, so I can't open a browser for you yet.",
 }));
 vi.mock("@/lib/action-runtime", () => ({
   getActionRun: mocks.getActionRun,
@@ -123,6 +128,7 @@ async function json(response: Response): Promise<Record<string, unknown>> {
 describe("POST /api/litt/browser/session", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.isBrowserBetaAllowed.mockReturnValue(true);
     mocks.auth.mockResolvedValue({ userId: "user-one" });
     mocks.dbGetActiveSessionsStrict.mockResolvedValue([]);
     mocks.preflightBrowserStart.mockResolvedValue({ ok: true });
@@ -167,6 +173,18 @@ describe("POST /api/litt/browser/session", () => {
   it("rejects invalid sessionId and actionRunId types", async () => {
     expect((await POST(request({ action: "pause", sessionId: 123 }))).status).toBe(400);
     expect((await POST(request({ action: "start", actionRunId: { id: "run-one" } }))).status).toBe(400);
+  });
+
+  it("denies session start for non-beta accounts before any cost accrues", async () => {
+    mocks.isBrowserBetaAllowed.mockReturnValue(false);
+    const response = await POST(request({ action: "start" }));
+    expect(response.status).toBe(403);
+    const body = await json(response);
+    expect(body.code).toBe("beta_only");
+    expect(mocks.startSession).not.toHaveBeenCalled();
+    expect(mocks.preflightBrowserStart).not.toHaveBeenCalled();
+    expect(mocks.startBrowserActionRun).not.toHaveBeenCalled();
+    expect(mocks.createActionRun).not.toHaveBeenCalled();
   });
 
   it("fails closed when billing active-session lookup is unavailable", async () => {
