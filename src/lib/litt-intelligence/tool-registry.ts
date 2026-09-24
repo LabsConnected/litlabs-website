@@ -430,7 +430,10 @@ const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
           return {
             ok: false,
             error: code,
-            message: "LiTT couldn't record the browser task state.",
+            message:
+              code === "ACTION_BROWSER_SESSION_MISMATCH"
+                ? "This task already has a different browser session attached to it, so LiTT couldn't link the new one. Reuse the attached session instead of starting another."
+                : "LiTT couldn't record the browser task state.",
           };
         }
       }
