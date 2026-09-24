@@ -135,7 +135,14 @@ vi.mock("@/lib/supabase", () => ({
 
       const deleteChain = {
         eq: vi.fn(() => ({
-          eq: vi.fn(async () => ({ error: mockInsertError })),
+          // P1-4: uninstallAgent now appends .select("id") to the delete so a
+          // zero-row delete is reported honestly instead of as a success.
+          eq: vi.fn(() => ({
+            select: vi.fn(async () => ({
+              data: mockInstallation ? [{ id: mockInstallation.id }] : [],
+              error: mockInsertError,
+            })),
+          })),
         })),
       };
 
