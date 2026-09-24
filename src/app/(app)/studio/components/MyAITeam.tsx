@@ -11,7 +11,8 @@ import { useAuthedFetch } from "@/lib/fetch-auth";
 import { Loader2, Lock, ArrowRight, Pause, Play, Settings, Trash2 } from "lucide-react";
 
 interface InstalledAgent {
-  id: string;
+  id: string; // user_agents installation row id (instance identity)
+  agentId: string; // marketplace agents.id — the id the install API routes on
   slug: string;
   name: string;
   isActive: boolean;
@@ -62,6 +63,7 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
       .then((data) => {
         const agents = (data.agents || []).map((a: Record<string, unknown>) => ({
           id: a.id as string,
+          agentId: ((a.agent as Record<string, unknown> | null)?.id as string) ?? "",
           slug: (a.agent as Record<string, unknown>)?.slug ?? a.slug ?? "",
           name: (a.agent as Record<string, unknown>)?.display_name ?? a.name ?? "",
           isActive: a.is_active as boolean,
@@ -90,11 +92,15 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
   );
 
   const handleTogglePause = useCallback(
-    async (agentInstanceId: string, currentStatus: string) => {
-      setActionLoading(agentInstanceId);
+    async (agentId: string, currentStatus: string) => {
+      // agentId is the marketplace agents.id — the install API routes on it.
+      // The user_agents installation row id (InstalledAgent.id) is NOT accepted
+      // by this endpoint.
+      if (!agentId) return;
+      setActionLoading(agentId);
       try {
         const action = currentStatus === "active" ? "disable" : "enable";
-        const res = await authedFetch(`/api/marketplace/agents/${agentInstanceId}/install`, {
+        const res = await authedFetch(`/api/marketplace/agents/${agentId}/install`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action }),
@@ -102,7 +108,7 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
         if (res.ok) {
           setInstalled((prev) =>
             prev.map((a) =>
-              a.id === agentInstanceId
+              a.agentId === agentId
                 ? { ...a, status: action === "enable" ? "active" : "paused", isActive: action === "enable" }
                 : a,
             ),
@@ -118,14 +124,19 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
   );
 
   const handleRemove = useCallback(
-    async (agentInstanceId: string) => {
-      setActionLoading(agentInstanceId);
+    async (agentId: string) => {
+      // agentId is the marketplace agents.id — the install API routes on it.
+      // The user_agents installation row id (InstalledAgent.id) is NOT accepted
+      // by this endpoint: sending it matches zero rows, and the backend now
+      // answers 404 so the UI cannot show a phantom uninstall.
+      if (!agentId) return;
+      setActionLoading(agentId);
       try {
-        const res = await authedFetch(`/api/marketplace/agents/${agentInstanceId}/install`, {
+        const res = await authedFetch(`/api/marketplace/agents/${agentId}/install`, {
           method: "DELETE",
         });
         if (res.ok) {
-          setInstalled((prev) => prev.filter((a) => a.id !== agentInstanceId));
+          setInstalled((prev) => prev.filter((a) => a.agentId !== agentId));
         }
       } catch {
         // silent
@@ -257,10 +268,10 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
                       <div className="ml-auto flex items-center gap-1">
                         <button
                           type="button"
-                          disabled={actionLoading === installedAgent.id}
+                          disabled={actionLoading === installedAgent.agentId}
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleTogglePause(installedAgent.id, installedAgent.status);
+                            handleTogglePause(installedAgent.agentId, installedAgent.status);
                           }}
                           className="rounded px-1.5 py-0.5 text-[9px] font-bold text-white/40 transition hover:text-white/60 disabled:opacity-30"
                           title={installedAgent.status === "active" ? "Pause" : "Resume"}
@@ -276,10 +287,10 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
                         </Link>
                         <button
                           type="button"
-                          disabled={actionLoading === installedAgent.id}
+                          disabled={actionLoading === installedAgent.agentId}
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleRemove(installedAgent.id);
+                            handleRemove(installedAgent.agentId);
                           }}
                           className="rounded px-1.5 py-0.5 text-[9px] font-bold text-white/40 transition hover:text-red-400 disabled:opacity-30"
                           title="Remove"

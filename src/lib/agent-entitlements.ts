@@ -698,13 +698,19 @@ export async function uninstallAgent(
   const internalUserId = await resolveInternalUserId(clerkId);
   if (!internalUserId) return { success: false, error: "user_not_found" };
 
-  const { error } = await supabaseAdmin
+  // P1-4 honesty: select the deleted rows. A delete that matches zero rows
+  // must NOT report success — otherwise the UI shows an uninstall that
+  // never happened (e.g. a caller sending the installation row id instead
+  // of the marketplace agent id).
+  const { data, error } = await supabaseAdmin
     .from("user_agents")
     .delete()
     .eq("user_id", internalUserId)
-    .eq("agent_id", agentId);
+    .eq("agent_id", agentId)
+    .select("id");
 
   if (error) return { success: false, error: "uninstall_failed" };
+  if (!data || data.length === 0) return { success: false, error: "not_installed" };
   return { success: true };
 }
 

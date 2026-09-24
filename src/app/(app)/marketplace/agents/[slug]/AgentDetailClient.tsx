@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Loader2, ArrowRight, Ban, Clock } from "lucide-react";
 import type { PlanId } from "@/config/plans";
 import { isFeatureEnabled } from "@/config/feature-flags";
+import { useAuthedFetch } from "@/lib/fetch-auth";
 
 type AgentState =
   | "buy"
@@ -28,6 +29,7 @@ export function AgentDetailClient({ slug, name, color, minimumPlan }: Props) {
   const [busy, setBusy] = useState(false);
   const [agentId, setAgentId] = useState<string | null>(null);
   const [instanceId, setInstanceId] = useState<string | null>(null);
+  const authedFetch = useAuthedFetch();
 
   useEffect(() => {
     // Resolve agent DB ID from slug via the marketplace items API
@@ -84,11 +86,18 @@ export function AgentDetailClient({ slug, name, color, minimumPlan }: Props) {
     if (!agentId) return;
     setBusy(true);
     try {
-      await fetch(`/api/marketplace/agents/${agentId}/install`, { method: "DELETE" });
-      setState("install");
+      // P1-4: auth the request like the other handlers, and only flip the
+      // UI state to "install" when the server confirms the uninstall.
+      const res = await authedFetch(`/api/marketplace/agents/${agentId}/install`, { method: "DELETE" });
+      if (res.ok) {
+        setState("install");
+      } else {
+        const data = await res.json().catch(() => ({}));
+        console.error("Uninstall failed:", data.error ?? res.status);
+      }
     } catch { /* network */ }
     finally { setBusy(false); }
-  }, [agentId]);
+  }, [agentId, authedFetch]);
 
   if (busy) {
     return (

@@ -137,6 +137,10 @@ async function deleteHandler(
 
   const result = await uninstallAgent(clerkId, agentId);
   if (!result.success) {
+    // P1-4: zero rows deleted = nothing was installed — answer 404 so the
+    // client cannot show a phantom uninstall success.
+    if (result.error === "not_installed") return notFound("Agent not installed");
+    if (result.error === "user_not_found") return notFound("User not found");
     return NextResponse.json({ error: result.error }, { status: 400 });
   }
 
