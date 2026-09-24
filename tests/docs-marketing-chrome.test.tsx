@@ -24,7 +24,8 @@ describe("/docs layout", () => {
     );
 
     // Header: brand link + primary nav landmark.
-    expect(screen.getByRole("link", { name: /LiTTree LabStudios home/i })).toBeTruthy();
+    const header = screen.getByRole("banner");
+    expect(within(header).getByRole("link", { name: /LiTTree LabStudios home/i })).toBeTruthy();
     expect(screen.getByRole("navigation", { name: /primary navigation/i })).toBeTruthy();
 
     // Page content renders between header and footer.

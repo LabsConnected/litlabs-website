@@ -18,7 +18,7 @@ export function BrandLogo({
 }: BrandLogoProps) {
   const iconSrc =
     variant === "full"
-      ? "/branding/littree-labstudios-litlabs-net.png"
+      ? "/branding/littree-labstudios-logo.png"
       : "/branding/littree-crystal-mark.png";
 
   return (
@@ -30,10 +30,10 @@ export function BrandLogo({
       <Image
         src={iconSrc}
         alt="LiTTree LabStudios Logo"
-        width={size}
+        width={variant === "full" ? size * 3 : size}
         height={size}
         priority
-        sizes={`${size}px`}
+        sizes={variant === "full" ? `${size * 3}px` : `${size}px`}
         className="shrink-0 rounded-lg object-contain drop-shadow-[0_0_10px_rgba(139,92,246,0.55)]"
       />
 

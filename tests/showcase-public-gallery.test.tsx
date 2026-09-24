@@ -50,7 +50,8 @@ describe("LayoutShell hybrid-public chrome for /showcase", () => {
       </LayoutShell>,
     );
 
-    expect(screen.getByRole("link", { name: /LiTTree LabStudios home/i })).toBeTruthy();
+    const header = screen.getByRole("banner");
+    expect(within(header).getByRole("link", { name: /LiTTree LabStudios home/i })).toBeTruthy();
     expect(screen.getByRole("navigation", { name: /primary navigation/i })).toBeTruthy();
     expect(screen.getByTestId("showcase-content")).toBeTruthy();
     expect(screen.getByRole("contentinfo")).toBeTruthy();

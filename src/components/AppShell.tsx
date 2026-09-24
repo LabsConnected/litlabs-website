@@ -437,7 +437,7 @@ function TopBar() {
     >
       {/* Main bar row */}
       <div className="flex h-14 items-center gap-2 px-3 md:gap-3 md:px-4">
-        <BrandLogo href="/dashboard" size={30} showText />
+        <BrandLogo href="/dashboard" size={30} showText={false} variant="full" />
 
         {/* Desktop nav — canonical main items + More overflow */}
         <nav className="ml-2 hidden items-center gap-0.5 md:flex" aria-label="Primary">
