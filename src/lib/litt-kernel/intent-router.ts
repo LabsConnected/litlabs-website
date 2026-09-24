@@ -32,9 +32,51 @@ const MODE_PATTERNS: ModePattern[] = [
     mode: "status",
     patterns: [
       /\b(is|are|does|do|can|could|will|would)\b.*\b(working|connected|online|offline|available|ready|broken|down|up|status|configured|enabled|disabled)\b/i,
-      /\b(voice|microphone|mic|tts|camera|terminal|github|deployment|supabase|stripe|vercel|cloudflare)\b.*\b(working|connected|status|broken|down)\b/i,
+      /\b(voice|microphone|mic|tts|camera|terminal|github|deployment|supabase|stripe|vercel|cloudflare|browser)\b.*\b(working|connected|status|broken|down)\b/i,
       /\b(check|verify|test)\b.*\b(capabilit|connection|status|voice|terminal)\b/i,
     ],
+    domains: ["platform"],
+  },
+
+  // ─── browser: live browser session control ───────────────────
+  // Browser-control intent is execution, not chat: without this lane,
+  // "open a live browser session" fell through to think mode →
+  // requiresExecution:false → the V1 read-only loop, which has no
+  // browser tools — the model then confabulated "browser sessions
+  // aren't available." Placed after status (so "is the browser
+  // working?" stays a status question) and before ship/build (a
+  // passing "browser" mention inside a build request must stay build —
+  // these patterns require the browser to be the action's target).
+  {
+    mode: "browser",
+    patterns: [
+      // Session lifecycle — browser is the object of a launch verb:
+      // "open a live browser", "start a browser session",
+      // "launch a browser and go to example.com", "spin up a browser".
+      /\b(open|launch|start|spawn|spin\s*up|fire\s*up|boot)\b[^.!?]{0,40}\bbrowser\b/i,
+      // Explicit session/lane mentions: "browser.session.start",
+      // "a browser session", "the live browser".
+      /\bbrowser[._\s-]*session\b/i,
+      /\b(live|remote|headless)\s+browser\b/i,
+      // Control handoff: "take over the browser", "take control of the
+      // browser", "let me drive the browser", "give control back",
+      // "hand the browser over".
+      /\b(take\s*over|take\s+control|let\s+me\s+(drive|take|control))\b[^.!?]{0,40}\bbrowser\b/i,
+      /\bbrowser\b[^.!?]{0,30}\b(control|drive|take\s*over)\b/i,
+      /\b(give|hand|return|pass)\b[^.!?]{0,20}\bcontrol\b/i,
+      // Navigation through the browser: "go to X in the browser",
+      // "navigate the browser to the preview", "browse this site for
+      // me", "use the browser to check the dashboard". The gap classes
+      // allow "." because navigation targets are usually URLs —
+      // "go to https://example.com in the browser" must still match.
+      /\b(go|navigate|visit|browse|surf|head)\b[^!?]{0,50}\bbrowser\b/i,
+      /\bbrowser\b[^.!?]{0,30}\b(go\s*to|navigate|visit|open|drive)\b/i,
+      /\buse\b[^.!?]{0,20}\bbrowser\b/i,
+      /\bbrowse\b[^.!?]{0,40}\b(site|page|url|link|for\s+me)\b/i,
+      /\b(open|visit|check|go\s*to|navigate\s*to|look\s*at|show\s+me|take\s+(me\s+)?to)\b[^!?]{0,60}\bin\s+the\s+browser\b/i,
+    ],
+    requiresProject: false,
+    requiresExecution: true,
     domains: ["platform"],
   },
 

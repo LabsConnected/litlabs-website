@@ -30,7 +30,8 @@ export type LiTTMode =
   | "review"
   | "ship"
   | "status"
-  | "learn";
+  | "learn"
+  | "browser";
 
 // ─── Truth & Confidence ─────────────────────────────────────────
 
