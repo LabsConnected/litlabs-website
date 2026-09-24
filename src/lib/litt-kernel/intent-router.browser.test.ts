@@ -26,6 +26,8 @@ describe("classifyIntent — browser lane", () => {
       "take over the browser for me",
       "can you open a live browser session and go to example.com",
       "spin up a browser",
+      "can you spin up a browser",
+      "can you bring up a browser for me",
       "fire up a remote browser",
       "use the browser to check the dashboard",
       "navigate the browser to the preview URL",
@@ -52,6 +54,15 @@ describe("classifyIntent — browser lane", () => {
       expect(classifyIntent("the browser looks broken").mode).toBe("status");
     });
 
+    it("'up' as a status predicate stays status", () => {
+      // The modal+"up" collision fix: "up" is a status word only as the
+      // predicate, not as part of a phrasal launch verb.
+      expect(classifyIntent("is the server up").mode).toBe("status");
+      expect(classifyIntent("is it back up yet?").mode).toBe("status");
+      expect(classifyIntent("will it be up soon").mode).toBe("status");
+      expect(classifyIntent("the browser is up").mode).toBe("status");
+    });
+
     it("'what browser do you use?' stays a knowledge question", () => {
       const result = classifyIntent("what browser do you use?");
       expect(result.mode).not.toBe("browser");
@@ -61,10 +72,7 @@ describe("classifyIntent — browser lane", () => {
     it("a build request that mentions a browser artifact stays build", () => {
       expect(classifyIntent("add a browser settings page to the app").mode).toBe("build");
       expect(classifyIntent("build me a website with a browser preview").mode).toBe("build");
-      // "browser extension" is not a recognized build artifact noun, so
-      // this currently classifies as think — a pre-existing router gap,
-      // not the browser lane's job. The invariant is: not browser.
-      expect(classifyIntent("build a browser extension").mode).not.toBe("browser");
+      expect(classifyIntent("build a browser extension").mode).toBe("build");
     });
 
     it("a media/design request mentioning browser stays create", () => {
