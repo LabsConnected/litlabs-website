@@ -86,6 +86,50 @@ export async function attachBrowserSession(run: ActionRun, session: BrowserSessi
   return attachBrowserSessionToRun(run.id, run.userId, session.id, session.browserbaseSessionId);
 }
 
+/**
+ * Replace a dead run↔session attachment with a fresh session.
+ *
+ * The strict one-session-per-run invariant (enforced by
+ * attachBrowserSession) breaks cross-instance recovery: when the
+ * attached session is no longer reusable (provider-side expiry, idle
+ * TTL, or a server restart on another replica), starting a replacement
+ * session must not fail with ACTION_BROWSER_SESSION_MISMATCH. The
+ * caller must have already established that the previous attachment is
+ * dead — this function does not re-check liveness, it records the
+ * supersede as a durable `browser.session.updated` event so the
+ * replacement is auditable.
+ */
+export async function supersedeBrowserSession(
+  run: ActionRun,
+  session: BrowserSession,
+  reason: string,
+): Promise<ActionRun> {
+  if (isTerminalActionRunStatus(run.status)) {
+    throw new ActionRuntimeError("Cannot attach a browser session to a terminal run", "ACTION_RUN_TERMINAL");
+  }
+  const supersededSessionId = run.browserSessionId;
+  const updated = await attachBrowserSessionToRun(run.id, run.userId, session.id, session.browserbaseSessionId);
+  if (supersededSessionId && supersededSessionId !== session.id) {
+    await appendActionEvent({
+      runId: run.id,
+      userId: run.userId,
+      type: "browser.session.updated",
+      payload: {
+        browserSessionId: session.id,
+        supersededSessionId,
+        reason,
+      },
+    }).catch((error) => {
+      console.error("[action-runtime] supersede event could not be recorded", {
+        runId: run.id,
+        supersededSessionId,
+        errorType: error instanceof Error ? error.name : typeof error,
+      });
+    });
+  }
+  return updated;
+}
+
 /** Records browser failure without terminating composite/agent/studio parents. */
 export async function recordBrowserFailure(
   context: BrowserActionContext,

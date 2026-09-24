@@ -45,8 +45,10 @@ import {
   closeSession,
   closeIdleSessions,
   getStagehand,
+  getOrReattachStagehand,
   pauseSession,
   dbGetActiveSessions,
+  dbGetSession,
   type BrowserSession,
 } from "./browser-session-manager";
 import { browserToolHandlers } from "./browser-tool-handlers";
@@ -141,10 +143,30 @@ export interface StartAgentBrowserSessionOptions {
   task?: string;
   conversationId?: string;
   projectId?: string;
+  /**
+   * The ActionRun's durable browserSessionId, when the caller already
+   * resolved a run. Lets the get-or-reuse path re-attach to the run's
+   * session across server instances/restarts instead of starting a new
+   * vendor session that the run's attach guard would then reject with
+   * ACTION_BROWSER_SESSION_MISMATCH.
+   */
+  attachedSessionId?: string;
 }
 
 export type StartAgentBrowserSessionResult =
-  | { ok: true; session: BrowserSession; message: string; reused: boolean }
+  | {
+      ok: true;
+      session: BrowserSession;
+      message: string;
+      reused: boolean;
+      /**
+       * Set when a fresh session was started because the previously
+       * attached session (this id) was no longer reusable. The caller
+       * must supersede the run's attachment instead of plain-attaching,
+       * or the attach guard will throw ACTION_BROWSER_SESSION_MISMATCH.
+       */
+      supersededSessionId?: string;
+    }
   | {
       ok: false;
       error:
@@ -305,6 +327,47 @@ export async function getOrReuseAgentBrowserSession(
         `Reusing your active browser session (session ${existing.id}) — ` +
         "no new session started.",
     };
+  }
+
+  // Cross-instance recovery: the run may already be attached to a session
+  // whose Stagehand lives in another process (different Railway replica or
+  // a restart since the session started). getActiveSession only sees
+  // in-process handles, so without this the path below would start a
+  // second vendor session and the run's attach guard would reject it
+  // with ACTION_BROWSER_SESSION_MISMATCH. Re-attach to the durable
+  // session first — transparent when the provider session is still alive.
+  if (options.attachedSessionId) {
+    const dailyMinutes = await getDailyBrowserMinutesUsed(options.userId);
+    if (dailyMinutes >= DAILY_BROWSER_MINUTES_QUOTA) {
+      await pauseSession(options.attachedSessionId, options.userId).catch(() => {});
+      return {
+        ok: false,
+        error: "quota_exhausted",
+        message: QUOTA_PAUSED_MESSAGE,
+      };
+    }
+    const reattached = await getOrReattachStagehand(options.attachedSessionId, options.userId).catch(() => null);
+    if (reattached?.stagehand) {
+      const session = await dbGetSession(options.attachedSessionId, options.userId).catch(() => null);
+      if (session) {
+        return {
+          ok: true,
+          session,
+          reused: true,
+          message:
+            `Re-attached to your existing browser session (session ${session.id}) — ` +
+            "no new session started.",
+        };
+      }
+    }
+    // The attached session is gone (expired/closed at the provider or
+    // past the idle TTL): start fresh, and tell the caller to supersede
+    // the dead attachment instead of plain-attaching.
+    const fresh = await startAgentBrowserSession(options);
+    if (fresh.ok) {
+      return { ...fresh, supersededSessionId: options.attachedSessionId };
+    }
+    return fresh;
   }
 
   return startAgentBrowserSession(options);

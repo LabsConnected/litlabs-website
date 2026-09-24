@@ -39,6 +39,7 @@ vi.mock("./run-store", () => mocks);
 
 import {
   attachBrowserSession,
+  supersedeBrowserSession,
   findActiveBrowserActionRun,
   markBrowserRunPersistenceDegraded,
   markBrowserSessionControl,
@@ -316,6 +317,39 @@ describe("run ownership, attachment, and terminal-state guards", () => {
     expect(mocks.recordActionEventActivity).not.toHaveBeenCalled();
     expect(mocks.transitionActionRunEventActivity).not.toHaveBeenCalled();
     expect(mocks.appendActionEvent).not.toHaveBeenCalled();
+  });
+
+  it("supersedes a dead attachment instead of throwing MISMATCH", async () => {
+    const fresh = fakeSession({ id: "session-new", browserbaseSessionId: "provider-new" });
+    mocks.attachBrowserSessionToRun.mockResolvedValue({ ...run, browserSessionId: "session-new" });
+    mocks.appendActionEvent.mockResolvedValue({});
+
+    const updated = await supersedeBrowserSession(
+      { ...run, browserSessionId: "session-old" },
+      fresh,
+      "Previously attached browser session was not reusable; started a fresh session.",
+    );
+
+    expect(updated.browserSessionId).toBe("session-new");
+    expect(mocks.attachBrowserSessionToRun).toHaveBeenCalledWith("run-one", "user-one", "session-new", "provider-new");
+    expect(mocks.appendActionEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-one",
+        userId: "user-one",
+        type: "browser.session.updated",
+        payload: expect.objectContaining({
+          browserSessionId: "session-new",
+          supersededSessionId: "session-old",
+        }),
+      }),
+    );
+  });
+
+  it("supersede refuses a terminal run", async () => {
+    await expect(
+      supersedeBrowserSession({ ...run, status: "completed" }, fakeSession({ id: "session-new" }), "stale"),
+    ).rejects.toMatchObject({ code: "ACTION_RUN_TERMINAL" });
+    expect(mocks.attachBrowserSessionToRun).not.toHaveBeenCalled();
   });
 
   it.each(["completed", "failed", "cancelled"] as const)("refuses to record browser work on a %s run", async (status) => {
