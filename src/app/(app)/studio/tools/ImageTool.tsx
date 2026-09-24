@@ -445,6 +445,10 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  // P1-1: synchronous double-submit guard. React state updates are async,
+  // so two rapid taps on Generate before re-render would both pass the
+  // isWorking check and double-bill. A ref flips synchronously.
+  const generateInFlightRef = useRef(false);
   /* Auto-expand the mobile prompt box while typing (capped) */
   useEffect(() => {
     const el = promptRef.current;
@@ -990,8 +994,12 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
     }
   }, [history.length, handleClearHistory]);
 
-  const handleGenerate = useCallback(async () => {
-    if (!promptValid) {
+  // P1-1: promptOverride lets Regenerate call this directly with the
+  // prompt it just loaded — React state updates are async, so reading
+  // `prompt` here would see the stale pre-load value.
+  const handleGenerate = useCallback(async (promptOverride?: string) => {
+    const activePrompt = (promptOverride ?? prompt).trim();
+    if (activePrompt.length < 3) {
       setError("Enter a prompt to generate.");
       return;
     }
@@ -1000,6 +1008,19 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
       setError(`Need ${totalCost} 🪙, have ${coinBalance ?? 0}.`);
       return;
     }
+
+    // P1-1: synchronous double-submit guard — a ref flips instantly, while
+    // the isWorking state (used by the button's disabled prop) lags a
+    // render. Without this, two rapid taps both dispatch and double-bill.
+    if (generateInFlightRef.current) {
+      addLog("warn", "Generation already in flight — ignoring duplicate submit.");
+      return;
+    }
+    generateInFlightRef.current = true;
+    // P1-1: stable client-generated idempotency key for the logical
+    // operation. The server (image-service) claims idempotency on
+    // requestId, so a retry after a dropped response cannot double-charge.
+    const requestId = crypto.randomUUID();
 
     setError(null);
     setImgError(null);
@@ -1010,16 +1031,17 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
     );
 
     const finalPrompt = buildFinalPrompt(
-      prompt.trim(),
+      activePrompt,
       remixMode,
       !!referenceImage,
     );
 
+    try {
     for (let i = 0; i < batchSize; i++) {
       const localId = `gen_${Date.now()}_${i}`;
       const newGen: Generation = {
         id: localId,
-        prompt: prompt.trim(),
+        prompt: activePrompt,
         negativePrompt: negativePrompt.trim(),
         provider: providerId,
         status: "submitting",
@@ -1058,6 +1080,8 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
         } else {
           body.providerId = providerId;
         }
+        // P1-1: send the stable idempotency key — server dedupes replays.
+        body.requestId = requestId;
 
         if (referenceImage) {
           body.referenceUrl = referenceImage;
@@ -1068,6 +1092,11 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
           method: "POST",
           credentials: "include",
           body: JSON.stringify(body),
+          // P1-1: providers take longer than the 30s default — a client
+          // timeout while the server completes AND debits is the classic
+          // "nothing happened" report. Never auto-retry a billed POST.
+          timeoutMs: 120_000,
+          retries: 0,
         });
         const downloadUrl = data.downloadUrl as string;
         const thumbUrl = data.thumbUrl as string | undefined;
@@ -1140,6 +1169,10 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
     }
     setStatus("succeeded");
     addLog("info", `Batch complete`);
+    } finally {
+      // P1-1: always release the double-submit guard, even on throw.
+      generateInFlightRef.current = false;
+    }
   }, [
     prompt,
     negativePrompt,
@@ -1584,7 +1617,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                 </span>
               </div>
               <button
-                onClick={handleGenerate}
+                onClick={() => void handleGenerate()}
                 disabled={!promptValid || !canAfford || isWorking}
                 className="w-full min-h-[52px] rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed bg-accent text-on-accent hover:bg-accent-strong shadow-accent-glow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
                 data-testid="generate-image-button"
@@ -1611,7 +1644,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                   </div>
                   {!error.includes("✓") && (
                     <button
-                      onClick={handleGenerate}
+                      onClick={() => void handleGenerate()}
                       disabled={isWorking}
                       className="mt-2 w-full min-h-[44px] rounded-lg border font-bold flex items-center justify-center gap-2 disabled:opacity-40"
                       style={{ borderColor: "#f8514960", color: "#f85149" }}
@@ -2154,9 +2187,11 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                     addLog("info", "Prompt loaded for regenerate");
                     setTimeout(() => {
                       document.getElementById("image-mobile-scroller")?.scrollTo({ top: 0, behavior: "smooth" });
-                      setTimeout(() => {
-                        document.querySelector<HTMLButtonElement>('[data-testid="generate-image-button"]')?.click();
-                      }, 350);
+                      // P1-1: call the handler directly with the loaded
+                      // prompt. The old document.querySelector(...).click()
+                      // silently no-ops when the generate button is not
+                      // mounted — a true "tap, nothing happens" dead flow.
+                      void handleGenerate(g.prompt);
                     }, 60);
                   }}
                   disabled={isWorking}
@@ -3296,7 +3331,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
           {/* ── Generate button — always visible ── */}
           <div className="shrink-0 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-3 pt-2 space-y-2 border-t" style={{ borderColor: "var(--glass-border)", backgroundColor: "var(--glass-surface-3)" }}>
             <button
-              onClick={handleGenerate}
+              onClick={() => void handleGenerate()}
               disabled={!promptValid || !canAfford || isWorking}
               className="w-full h-11 rounded-xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all hover:scale-[1.01] disabled:opacity-40 disabled:cursor-not-allowed bg-accent text-on-accent hover:bg-accent-strong shadow-accent-glow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
               data-testid="generate-image-button"
@@ -3491,7 +3526,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                       <Wand2 size={9} /> Edit
                     </button>
                     <button
-                      onClick={handleGenerate}
+                      onClick={() => void handleGenerate()}
                       className="h-6 px-2.5 flex items-center gap-1 rounded border text-[9px] font-bold transition-all hover:opacity-80"
                       style={{
                         borderColor: T.borderColor + "50",
@@ -3596,33 +3631,135 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                             <span className="mr-auto text-[10px] text-white/70 line-clamp-1 max-w-[40%]">
                               {currentResult.prompt}
                             </span>
-                            {[
-                              { label: "Download", icon: Download, onClick: () => handleDownload(currentResult.fileUrl!, currentResult.prompt) },
-                              { label: "Edit", icon: Wand2, onClick: () => { setPrompt(currentResult.prompt); } },
-                              { label: "Variations", icon: Copy, onClick: handleGenerate },
-                              { label: "Upscale", icon: Maximize2, onClick: () => handleQuickAction(", 4k upscale, ultra high resolution, enhanced details") },
-                              { label: "Remove BG", icon: Eraser, onClick: () => handleQuickAction(", remove background, transparent background, isolated subject") },
-                              { label: "Use as Ref", icon: Layers, onClick: () => handleUseAsReference(currentResult.fileUrl!) },
-                              { label: useInProjectState[currentResult.id] === "saving" ? "Saving…" : "Use in Project", icon: Palette, onClick: () => { if (currentResult.fileUrl) void handleUseInProject(currentResult.fileUrl, currentResult.id, currentResult.prompt); } },
-                              { label: "Delete", icon: Trash2, onClick: () => deleteGeneration(currentResult.id) },
-                            ].map((action) => (
-                              <button
-                                key={action.label}
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); action.onClick(); }}
-                                className="flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-bold transition hover:bg-white/20"
-                                style={{
-                                  backgroundColor: action.label === "Delete" ? "rgba(248,81,73,.12)" : "rgba(255,255,255,.09)",
-                                  border: action.label === "Delete" ? "1px solid rgba(248,81,73,.2)" : "1px solid rgba(255,255,255,.12)",
-                                  color: action.label === "Delete" ? "rgba(248,81,73,.9)" : "rgba(255,255,255,.8)",
-                                }}
-                                aria-label={action.label}
-                                title={action.label}
-                              >
-                                <action.icon size={10} className="pointer-events-none" />
-                                <span className="hidden sm:inline">{action.label}</span>
-                              </button>
-                            ))}
+                            {/* P1-1: explicit buttons — the actions array pattern trips the react-hooks/refs rule once handleGenerate reads the in-flight ref */}
+                            <button
+                              key={"Download"}
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleDownload(currentResult.fileUrl!, currentResult.prompt); }}
+                              className="flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-bold transition hover:bg-white/20"
+                              style={{
+                                backgroundColor: "rgba(255,255,255,.09)",
+                                border: "1px solid rgba(255,255,255,.12)",
+                                color: "rgba(255,255,255,.8)",
+                              }}
+                              aria-label={"Download"}
+                              title={"Download"}
+                            >
+                              <Download size={10} className="pointer-events-none" />
+                              <span className="hidden sm:inline">{"Download"}</span>
+                            </button>
+                            <button
+                              key={"Edit"}
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setPrompt(currentResult.prompt); }}
+                              className="flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-bold transition hover:bg-white/20"
+                              style={{
+                                backgroundColor: "rgba(255,255,255,.09)",
+                                border: "1px solid rgba(255,255,255,.12)",
+                                color: "rgba(255,255,255,.8)",
+                              }}
+                              aria-label={"Edit"}
+                              title={"Edit"}
+                            >
+                              <Wand2 size={10} className="pointer-events-none" />
+                              <span className="hidden sm:inline">{"Edit"}</span>
+                            </button>
+                            <button
+                              key={"Variations"}
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleGenerate(); }}
+                              className="flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-bold transition hover:bg-white/20"
+                              style={{
+                                backgroundColor: "rgba(255,255,255,.09)",
+                                border: "1px solid rgba(255,255,255,.12)",
+                                color: "rgba(255,255,255,.8)",
+                              }}
+                              aria-label={"Variations"}
+                              title={"Variations"}
+                            >
+                              <Copy size={10} className="pointer-events-none" />
+                              <span className="hidden sm:inline">{"Variations"}</span>
+                            </button>
+                            <button
+                              key={"Upscale"}
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleQuickAction(", 4k upscale, ultra high resolution, enhanced details"); }}
+                              className="flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-bold transition hover:bg-white/20"
+                              style={{
+                                backgroundColor: "rgba(255,255,255,.09)",
+                                border: "1px solid rgba(255,255,255,.12)",
+                                color: "rgba(255,255,255,.8)",
+                              }}
+                              aria-label={"Upscale"}
+                              title={"Upscale"}
+                            >
+                              <Maximize2 size={10} className="pointer-events-none" />
+                              <span className="hidden sm:inline">{"Upscale"}</span>
+                            </button>
+                            <button
+                              key={"Remove BG"}
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleQuickAction(", remove background, transparent background, isolated subject"); }}
+                              className="flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-bold transition hover:bg-white/20"
+                              style={{
+                                backgroundColor: "rgba(255,255,255,.09)",
+                                border: "1px solid rgba(255,255,255,.12)",
+                                color: "rgba(255,255,255,.8)",
+                              }}
+                              aria-label={"Remove BG"}
+                              title={"Remove BG"}
+                            >
+                              <Eraser size={10} className="pointer-events-none" />
+                              <span className="hidden sm:inline">{"Remove BG"}</span>
+                            </button>
+                            <button
+                              key={"Use as Ref"}
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleUseAsReference(currentResult.fileUrl!); }}
+                              className="flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-bold transition hover:bg-white/20"
+                              style={{
+                                backgroundColor: "rgba(255,255,255,.09)",
+                                border: "1px solid rgba(255,255,255,.12)",
+                                color: "rgba(255,255,255,.8)",
+                              }}
+                              aria-label={"Use as Ref"}
+                              title={"Use as Ref"}
+                            >
+                              <Layers size={10} className="pointer-events-none" />
+                              <span className="hidden sm:inline">{"Use as Ref"}</span>
+                            </button>
+                            <button
+                              key={useInProjectState[currentResult.id] === "saving" ? "Saving\u2026" : "Use in Project"}
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); if (currentResult.fileUrl) void handleUseInProject(currentResult.fileUrl, currentResult.id, currentResult.prompt); }}
+                              className="flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-bold transition hover:bg-white/20"
+                              style={{
+                                backgroundColor: "rgba(255,255,255,.09)",
+                                border: "1px solid rgba(255,255,255,.12)",
+                                color: "rgba(255,255,255,.8)",
+                              }}
+                              aria-label={useInProjectState[currentResult.id] === "saving" ? "Saving\u2026" : "Use in Project"}
+                              title={useInProjectState[currentResult.id] === "saving" ? "Saving\u2026" : "Use in Project"}
+                            >
+                              <Palette size={10} className="pointer-events-none" />
+                              <span className="hidden sm:inline">{useInProjectState[currentResult.id] === "saving" ? "Saving\u2026" : "Use in Project"}</span>
+                            </button>
+                            <button
+                              key={"Delete"}
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); deleteGeneration(currentResult.id); }}
+                              className="flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-bold transition hover:bg-white/20"
+                              style={{
+                                backgroundColor: "rgba(248,81,73,.12)",
+                                border: "1px solid rgba(248,81,73,.2)",
+                                color: "rgba(248,81,73,.9)",
+                              }}
+                              aria-label={"Delete"}
+                              title={"Delete"}
+                            >
+                              <Trash2 size={10} className="pointer-events-none" />
+                              <span className="hidden sm:inline">{"Delete"}</span>
+                            </button>
                           </div>
                           {useInProjectError[currentResult.id] && (
                             <p className="text-[10px] font-semibold text-red-300" role="alert" data-testid="use-in-project-error-desktop">
@@ -3729,7 +3866,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                     </p>
                     <div className="flex items-center justify-center gap-2">
                       <button
-                        onClick={handleGenerate}
+                        onClick={() => void handleGenerate()}
                         disabled={isWorking}
                         className="px-4 py-2 text-xs font-bold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
                         style={{
