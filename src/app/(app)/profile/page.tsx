@@ -15,6 +15,7 @@ import { ProfileOverview } from "./_components/ProfileOverview";
 import { ProfileRightRail } from "./_components/ProfileRightRail";
 import { EditProfileDialog } from "./_components/EditProfileDialog";
 import { CreatorActionPanel } from "./_components/CreatorActionPanel";
+import ProfilePosts from "@/components/feed/ProfilePosts";
 
 /**
  * The server is the source of truth for persisted profile data.
@@ -57,6 +58,7 @@ function ProfilePageInner() {
   const { profile, updateProfile, syncError } = useProfile();
 
   const [saving, setSaving] = useState(false);
+  const [dbUserId, setDbUserId] = useState<string | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
@@ -70,6 +72,26 @@ function ProfilePageInner() {
       router.push("/sign-in?redirect_url=/profile");
     }
   }, [isLoaded, isSignedIn, router]);
+
+  // The posts tab needs the database user id (posts are keyed by user_id,
+  // not the Clerk id). The canonical /api/settings/profile GET returns it
+  // as `user.id`.
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/settings/profile");
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled && res.ok && typeof data?.user?.id === "string") {
+          setDbUserId(data.user.id);
+        }
+      } catch {
+        /* posts tab shows its own loading state until this resolves */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isLoaded, isSignedIn]);
 
   const uploadAndSave = useCallback(
     async (file: File, field: "avatar_url" | "cover_url") => {
@@ -321,11 +343,21 @@ function ProfilePageInner() {
           </div>
         )}
 
-        {(activeTab === "artifacts" ||
-          activeTab === "posts" ||
-          activeTab === "activity") && (
+        {(activeTab === "artifacts" || activeTab === "activity") && (
           <div style={{ marginTop: "24px" }}>
             <ProfileOverview />
+          </div>
+        )}
+
+        {activeTab === "posts" && (
+          <div style={{ marginTop: "24px" }}>
+            {dbUserId ? (
+              <ProfilePosts authorId={dbUserId} />
+            ) : (
+              <div className="flex items-center justify-center py-16 text-sm" style={{ color: "var(--text-muted)" }}>
+                Loading posts…
+              </div>
+            )}
           </div>
         )}
 
