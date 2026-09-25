@@ -111,6 +111,7 @@ function phaseHeadline(phase: ExecutionPhase): string {
     case "testing": return "Checking the build";
     case "verifying": return "Verifying";
     case "awaiting_approval": return "Waiting for your approval";
+    case "awaiting_input": return "Waiting for your answer";
     default: return "Working";
   }
 }

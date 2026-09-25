@@ -74,6 +74,7 @@ export const PHASE_META: Record<ExecutionPhase, { label: string; color: string }
   done: { label: "Complete", color: "var(--litt-primary)" },
   cancelled: { label: "Cancelled", color: "var(--error)" },
   awaiting_approval: { label: "Approval needed", color: AMBER },
+  awaiting_input: { label: "Awaiting input", color: AMBER },
 };
 
 /* ── Collapsible card shell ─────────────────────────────────────── */
@@ -324,8 +325,8 @@ export default function MissionCards({
         <MetaLine
           label="Status"
           value={
-            <span style={{ color: isRunning ? ACCENT : "var(--text-muted)" }}>
-              {isRunning ? `Step ${toolCalls.length + 1} in progress` : "Idle"}
+            <span style={{ color: isRunning || phase === "awaiting_input" ? ACCENT : "var(--text-muted)" }}>
+              {isRunning ? `Step ${toolCalls.length + 1} in progress` : phase === "awaiting_input" ? "Awaiting input" : "Idle"}
             </span>
           }
         />

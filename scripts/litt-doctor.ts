@@ -15,7 +15,13 @@
  * Exit code 0 = all healthy, 1 = one or more failures.
  */
 
-import "dotenv/config";
+import { config as loadEnv } from "dotenv";
+
+// Next.js loads .env.local before .env; mirror that behavior so the local
+// doctor evaluates the same configuration as the web app without overriding
+// variables already supplied by the shell or deployment platform.
+loadEnv({ path: ".env.local" });
+loadEnv();
 
 // ─── CLI Args ───────────────────────────────────────────────────────
 
@@ -121,7 +127,7 @@ async function checkMemory(): Promise<void> {
 
   // Supabase
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
   const supabaseOk = !!supabaseUrl && !!supabaseServiceKey;
   check("Memory", "Supabase connected", supabaseOk ? "pass" : "warn",
     supabaseUrl ? `url configured (${supabaseUrl.slice(0, 20)}...)` : "NOT CONFIGURED");
@@ -282,12 +288,17 @@ async function checkWorkspace(): Promise<void> {
   }
 
   // Execution available (check for terminal server config)
-  const terminalUrl = process.env.NEXT_PUBLIC_TERMINAL_SERVER_URL || process.env.TERMINAL_SERVER_URL;
+  const terminalUrl =
+    process.env.NEXT_PUBLIC_TERMINAL_SERVER_URL ||
+    process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL ||
+    process.env.NEXT_PUBLIC_TERMINAL_WS_URL ||
+    process.env.TERMINAL_SERVER_URL ||
+    process.env.TERMINAL_SERVER_INTERNAL_URL;
   check("Workspace", "workspace transport", terminalUrl ? "pass" : "warn",
     terminalUrl ? "url configured" : "no terminal server URL");
 
   // Write surface (check Supabase service role — never print the key)
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
   check("Workspace", "write surface available", serviceKey ? "pass" : "warn",
     serviceKey ? "service role key set" : "NOT SET");
 }

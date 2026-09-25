@@ -157,6 +157,22 @@ export default defineConfig({
   },
 
   projects: [
+    // ── LiTT agent smoke tests ──
+    // Kept in tests/ so the autonomous builder can own a small, stable loop
+    // without coupling its selectors to authenticated Studio state.
+    {
+      name: "litt-smoke",
+      testDir: "./tests",
+      testMatch: /[\\/]litt-smoke\.spec\.ts$/,
+      use: {
+        ...devices["Desktop Chrome"],
+        // NOTE: javaScriptEnabled must stay on — the landing hero hydrates
+        // client-side (mounted gate on the CTA), so a JS-disabled run only
+        // ever sees the "Loading..." fallback and can never pass.
+        storageState: { cookies: [], origins: [] },
+      },
+    },
+
     // ── Core blocking tests (deterministic, no external deps) ──
     // Homepage, pricing, marketplace, signup, protected routes, navigation,
     // security, accessibility, error states, API health

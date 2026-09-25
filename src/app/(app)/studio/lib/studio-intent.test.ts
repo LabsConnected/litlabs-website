@@ -77,6 +77,8 @@ describe("P1-1: studio intent dead flows", () => {
       for (const text of [
         "generate an image of a sunset",
         "create an image of a dog",
+        "make me a pic",
+        "make me a picture of a dog",
         "create a wallpaper",
       ]) {
         const intent = detectIntent(text);

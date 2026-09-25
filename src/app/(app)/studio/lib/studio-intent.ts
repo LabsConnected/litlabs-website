@@ -50,7 +50,7 @@ export function extractMediaPrompt(input: string, media: "image" | "video"): str
     );
   }
   return text
-    .replace(/^(?:please\s+)?(?:generate|create|make)\s+(?:(?:me|us)\s+)?(?:(?:a|an|the)\s+)?(?:image|wallpaper)\s*(?:of\s+|about\s+|showing\s+)?/i, "")
+    .replace(/^(?:please\s+)?(?:generate|create|make)\s+(?:(?:me|us)\s+)?(?:(?:a|an|the)\s+)?(?:image|picture|pic|photo|wallpaper)\s*(?:of\s+|about\s+|showing\s+)?/i, "")
     .trim() || text;
 }
 
@@ -170,11 +170,12 @@ const INTENT_PATTERNS: IntentPattern[] = [
     intent: "generate_image",
     tool: "image",
     patterns: [
-      /\bgenerate?\b.*\bimage\b/i,
-      /\bcreate\b.*\bimage\b/i,
-      /\bmake\b.*\bimage\b/i,
+      /\bgenerate?\b.*\b(?:image|picture|pic|photo)\b/i,
+      /\bcreate\b.*\b(?:image|picture|pic|photo)\b/i,
+      /\bmake\b.*\b(?:image|picture|pic|photo)\b/i,
       /\bgenerate?\b.*\bwallpaper\b/i,
       /\bcreate\b.*\bwallpaper\b/i,
+      /\bmake\b.*\bwallpaper\b/i,
     ],
   },
   {

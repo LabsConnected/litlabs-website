@@ -195,6 +195,17 @@ describe("MissionCards", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows Awaiting input instead of Complete after a clarifying question", () => {
+    act(() => {
+      useExecutionStore.getState().setPhase("awaiting_input");
+    });
+
+    render(<MissionCards {...makeProps()} />);
+
+    expect(screen.getAllByText("Awaiting input")).not.toHaveLength(0);
+    expect(screen.queryByText("Complete")).not.toBeInTheDocument();
+  });
+
   describe("showActions={false} (mobile Build status sheet)", () => {
     it("hides the Next Actions card but keeps Mission and Checkpoints", () => {
       render(<MissionCards {...makeProps({ showActions: false })} />);

@@ -93,7 +93,7 @@ function runFn(fn: string, args: string[], env: NodeJS.ProcessEnv): { status: nu
   }
 }
 
-describe("litt-local bootstrap — detection", () => {
+describe.skipIf(process.platform === "win32")("litt-local bootstrap — detection", () => {
   let root: string;
 
   beforeEach(() => {
@@ -149,7 +149,7 @@ describe("litt-local bootstrap — detection", () => {
   });
 });
 
-describe("litt-local bootstrap — end-to-end scenarios", () => {
+describe.skipIf(process.platform === "win32")("litt-local bootstrap — end-to-end scenarios", () => {
   let root: string;
   let pnpmBinDir: string;
   let logFile: string;
@@ -259,7 +259,7 @@ exit 0
   });
 });
 
-describe("litt-local — sourcing the script never launches it", () => {
+describe.skipIf(process.platform === "win32")("litt-local — sourcing the script never launches it", () => {
   it("sourcing defines functions without running litt_local_main (no termux.env, no curl, no exec)", () => {
     // If sourcing auto-ran litt_local_main, this would fail trying to
     // source $HOME/.config/litt/termux.env under a HOME that doesn't

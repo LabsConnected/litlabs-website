@@ -48,7 +48,8 @@
     "test:ghl-payload": "tsx scripts/test-ghl-payload.ts",
     "audit:product-truth": "tsx scripts/audit-product-truth.ts",
     "mobile:build": "pnpm --filter @litt/companion build:android",
-    "litt:doctor": "tsx scripts/litt-doctor.ts"
+    "litt:doctor": "tsx scripts/litt-doctor.ts",
+    "litt:dev": "powershell -ExecutionPolicy Bypass -File scripts/litt-dev.ps1"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1085.0",

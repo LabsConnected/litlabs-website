@@ -154,6 +154,19 @@ describe("detectScreenshotIntent", () => {
     );
   });
 
+  it("does not fire when screenshot appears inside a long coding task", () => {
+    expect(
+      detectScreenshotIntent(
+        "Fix the desktop project-selector dropdown regression shown in the screenshot. " +
+          "Inspect the component, update the popover positioning, and add a Playwright regression test.",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not fire when the user asks which site to screenshot", () => {
+    expect(detectScreenshotIntent("Which site should I screenshot? Send a URL.")).toBe(false);
+  });
+
   it("does not fire on unrelated chat", () => {
     expect(detectScreenshotIntent("what's the weather like?")).toBe(false);
     expect(detectScreenshotIntent("help me build a landing page")).toBe(false);

@@ -181,7 +181,7 @@ describe("parseToolCalls", () => {
     );
     assert.equal(calls.length, 1);
     assert.equal(calls[0].toolId, "project.status");
-    assert.deepEqual(calls[0].inputs, { verbose: "true" });
+    assert.deepEqual(calls[0].inputs, { verbose: true });
   });
 
   it("deduplicates an XML envelope against its fenced twin", () => {
@@ -194,7 +194,12 @@ describe("parseToolCalls", () => {
   });
 
   it("does not extract an envelope whose payload is not a call", () => {
-    assert.deepEqual(parseToolCalls("<tool_call>example</tool_call>"), []);
+    // Prose payloads with a lone leading word are not calls (a bare token
+    // is only a tool id when it constitutes the whole envelope body).
+    assert.deepEqual(
+      parseToolCalls("<tool_call>example of a non-call payload</tool_call>"),
+      [],
+    );
   });
 });
 

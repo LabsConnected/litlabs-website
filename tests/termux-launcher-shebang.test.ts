@@ -53,15 +53,18 @@ function writeLauncherTo(dest: string, env: NodeJS.ProcessEnv): string {
   return fs.readFileSync(dest, "utf8");
 }
 
-describe("termux launcher shebang", () => {
+describe.skipIf(process.platform === "win32")("termux launcher shebang", () => {
   let fakeTermuxRoot: string;
   let fakeBashPath: string;
   let scratchDir: string;
 
   beforeAll(() => {
+    // Forward slashes: these paths are consumed by POSIX bash subprocesses
+    // ([$PREFIX/bin/bash -x checks), where Windows backslashes break the
+    // literal path concatenation inside the sourced shell scripts.
     fakeTermuxRoot = fs.mkdtempSync(path.join(os.tmpdir(), "litt-fake-prefix-"));
     fs.mkdirSync(path.join(fakeTermuxRoot, "bin"), { recursive: true });
-    fakeBashPath = path.join(fakeTermuxRoot, "bin", "bash");
+    fakeBashPath = `${fakeTermuxRoot}/bin/bash`;
     fs.writeFileSync(fakeBashPath, "#!/bin/sh\nexit 0\n");
     fs.chmodSync(fakeBashPath, 0o755);
 
@@ -99,7 +102,13 @@ describe("termux launcher shebang", () => {
 
     expect(content.split("\n")[0]).toBe(`#!${fakeBashPath}`);
     expect(content).toContain("LiTT launcher");
-    expect(fs.statSync(dest).mode & 0o111).not.toBe(0);
+    // Unix exec bits are not representable on NTFS (mode & 0o111 is
+    // always 0 on win32), so the chmod check only applies off Windows.
+    if (process.platform !== "win32") {
+      expect(fs.statSync(dest).mode & 0o111).not.toBe(0);
+    } else {
+      expect(fs.existsSync(dest)).toBe(true);
+    }
   });
 
   it("writes a launcher with the standard shebang off Termux", () => {
