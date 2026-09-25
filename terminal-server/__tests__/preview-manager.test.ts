@@ -841,6 +841,22 @@ describe("PreviewManager — project env resolution", () => {
     expect(resolved.CLERK_SECRET_KEY).toBe("sk_test_from_secrets");
   });
 
+  it("resolvePreviewProjectEnv does not let an empty .env value clobber a project secret", () => {
+    writeFileSync(
+      join(tmpRoot, ".env"),
+      "CLERK_SECRET_KEY=\nNEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=   \n",
+    );
+    const resolved = resolvePreviewProjectEnv(
+      {
+        CLERK_SECRET_KEY: "sk_test_from_secrets",
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_from_secrets",
+      },
+      tmpRoot,
+    );
+    expect(resolved.CLERK_SECRET_KEY).toBe("sk_test_from_secrets");
+    expect(resolved.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY).toBe("pk_test_from_secrets");
+  });
+
   it("fingerprintProjectEnv is stable, order-insensitive, and never contains values", () => {
     const a = fingerprintProjectEnv({
       CLERK_SECRET_KEY: "sk_test_aaa",
