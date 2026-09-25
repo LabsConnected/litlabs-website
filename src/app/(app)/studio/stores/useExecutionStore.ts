@@ -105,6 +105,14 @@ export interface PendingApproval {
    */
   conversationId?: string;
   inputs?: Record<string, unknown>;
+  /**
+   * The conversation the gate belongs to. Approval POSTs must go to this
+   * conversation — a pausedRunId posted to a different conversation
+   * deterministic-403s ("Conversation mismatch"). Set wherever the gate
+   * is created; readers fall back to the selected conversation for gates
+   * created before conversation binding existed.
+   */
+  conversationId?: string;
 }
 
 /**
@@ -524,6 +532,8 @@ export function feedSSEEventToExecutionStore(
     reason?: string;
     pausedRunId?: string;
     inputs?: Record<string, unknown>;
+    /** Conversation the SSE stream belongs to — gates bind to it. */
+    conversationId?: string;
     label?: string;
     gitSha?: string;
     check?: string;
@@ -641,6 +651,7 @@ export function feedSSEEventToExecutionStore(
         // mismatched pair with "Conversation mismatch").
         conversationId,
         inputs: evt.inputs,
+        conversationId: evt.conversationId,
       });
       break;
 
