@@ -704,15 +704,24 @@ export function extractClerkEnv(
 /**
  * Resolve the project-level env for a preview spawn: project secrets
  * first, then the workspace's own .env/.env.local on top.
+ *
+ * An empty (or whitespace-only) value in the workspace files is a
+ * placeholder, not an intentional unset — it must never clobber a real
+ * project secret. A non-empty workspace value still wins, preserving the
+ * documented precedence (project secrets < .env < .env.local).
  */
 export function resolvePreviewProjectEnv(
   projectEnv: Record<string, string> | undefined,
   workspaceRoot: string,
 ): Record<string, string> {
-  return {
+  const merged: Record<string, string> = {
     ...extractClerkEnv(projectEnv ?? {}),
-    ...loadWorkspaceEnv(workspaceRoot),
   };
+  for (const [key, value] of Object.entries(loadWorkspaceEnv(workspaceRoot))) {
+    if (cleanEnvValue(value) === "" && key in merged) continue;
+    merged[key] = value;
+  }
+  return merged;
 }
 
 /**
