@@ -1081,6 +1081,7 @@ function CommandStudioContent() {
         toolId: opts.runResult.pendingApproval.toolId,
         reason: opts.runResult.pendingApproval.reason,
         pausedRunId: opts.runResult.pendingApproval.pausedRunId,
+        conversationId: conversation.selectedConversationId ?? undefined,
       });
       return;
     }
@@ -1189,6 +1190,7 @@ function CommandStudioContent() {
         reason: data.reason ?? pending.reason,
         pausedRunId: data.pausedRunId,
         inputs: pending.inputs,
+        conversationId: pending.conversationId ?? conversation.selectedConversationId ?? undefined,
       });
     } catch (err) {
       exec.failApproval(

@@ -27,7 +27,7 @@ import {
   serializeConversationToUrl,
   shouldDeferConversationUrlSync,
 } from "../stores/useConversationStore";
-import { useExecutionStore, feedSSEEventToExecutionStore } from "../stores/useExecutionStore";
+import { useExecutionStore, feedSSEEventToExecutionStore, type PendingApproval } from "../stores/useExecutionStore";
 import { mobileDiag } from "../lib/mobileDiagnostics";
 import {
   reconcileRunState,
@@ -55,7 +55,7 @@ export interface SendResult {
   persisted: boolean;
   reply?: string;
   errorKind?: SendErrorKind;
-  pendingApproval?: { toolId: string; reason: string; pausedRunId?: string; inputs?: Record<string, unknown> } | null;
+  pendingApproval?: PendingApproval | null;
   /** True when the assistant ended by asking the user for missing information. */
   awaitingInput?: boolean;
   /**
@@ -342,7 +342,7 @@ export function useCanonicalConversation({
           // Rehydration binds to the conversation being loaded — the gate's
           // resume POSTs must target its own conversation, not the selection
           // at click time.
-          conversationId: conversationId,
+          conversationId,
           inputs: lastAssistant.pendingApproval.inputs,
         });
       }
@@ -1374,7 +1374,7 @@ export function useCanonicalConversation({
         let buffer = "";
         let donePayload: Record<string, unknown> | null = null;
         let errorPayload: { message?: string; code?: string; revision?: number; partialText?: string } | null = null;
-        let pendingApprovalState: { toolId: string; reason: string; pausedRunId?: string; inputs?: Record<string, unknown> } | null = null;
+        let pendingApprovalState: { toolId: string; reason: string; pausedRunId?: string; inputs?: Record<string, unknown>; conversationId?: string } | null = null;
         const toolActivity: Array<{ toolId: string; success?: boolean; summary: string }> = [];
 
         const flushUpdate = () => {
@@ -1439,6 +1439,7 @@ export function useCanonicalConversation({
                   reason: evt.reason ?? "Approval required",
                   pausedRunId: evt.pausedRunId,
                   inputs: evt.inputs,
+                  conversationId: activeConversationId,
                 };
               } else if (evt.type === "checkpoint" && evt.label) {
                 toolActivity.push({

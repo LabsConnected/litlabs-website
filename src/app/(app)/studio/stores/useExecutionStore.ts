@@ -524,6 +524,8 @@ export function feedSSEEventToExecutionStore(
     reason?: string;
     pausedRunId?: string;
     inputs?: Record<string, unknown>;
+    /** Conversation the SSE stream belongs to — gates bind to it. */
+    conversationId?: string;
     label?: string;
     gitSha?: string;
     check?: string;
@@ -639,7 +641,7 @@ export function feedSSEEventToExecutionStore(
         // POST must target THIS conversation even if the user switches or
         // creates a conversation before clicking (the server 403s any
         // mismatched pair with "Conversation mismatch").
-        conversationId,
+        conversationId: conversationId ?? evt.conversationId,
         inputs: evt.inputs,
       });
       break;
