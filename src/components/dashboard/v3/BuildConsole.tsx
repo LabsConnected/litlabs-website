@@ -60,7 +60,7 @@ export function BuildConsole() {
 
         <div className="mt-4 flex flex-wrap gap-2">
           {SUGGESTIONS.map(({ label, href, icon: Icon, color }) => (
-            <button key={label} type="button" onClick={() => router.push(href)} className="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold text-zinc-300 transition hover:-translate-y-0.5 hover:text-white" style={{ borderColor: `${color}40`, background: `${color}0d` }}>
+            <button key={label} type="button" onClick={() => router.push(href)} className="inline-flex items-center gap-2 rounded-full border px-3.5 py-2.5 text-xs font-semibold text-zinc-300 transition hover:-translate-y-0.5 hover:text-white active:translate-y-0" style={{ borderColor: `${color}40`, background: `${color}0d` }}>
               <Icon size={14} style={{ color }} /> {label}
             </button>
           ))}
