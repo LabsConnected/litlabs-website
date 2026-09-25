@@ -24,7 +24,8 @@ export default function StudioTerminalDrawer({ projectId, repositoryName, branch
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [terminalSession, setTerminalSession] = useState<TerminalSessionState>(() => {
     if (typeof window === "undefined") return "not_started";
-    return localStorage.getItem("litt:terminalAutoStart") === "1" ? "connecting" : "not_started";
+    // Auto-attach by default — only stay parked when the user explicitly opted out.
+    return localStorage.getItem("litt:terminalAutoStart") === "0" ? "not_started" : "connecting";
   });
 
   // Auto-prepare workspace when projectId is available
@@ -47,8 +48,8 @@ export default function StudioTerminalDrawer({ projectId, repositoryName, branch
         if (cancelled) return;
         if (res.ok) {
           setWorkspaceStatus("ready");
-          // Auto-start terminal if previously connected
-          if (typeof window !== "undefined" && localStorage.getItem("litt:terminalAutoStart") === "1") {
+          // Auto-start terminal unless the user explicitly opted out.
+          if (typeof window !== "undefined" && localStorage.getItem("litt:terminalAutoStart") !== "0") {
             setTerminalSession("connecting");
           }
         } else {
@@ -181,7 +182,10 @@ export default function StudioTerminalDrawer({ projectId, repositoryName, branch
             visible={visible}
             onConnectionChange={(connected) => {
               setTerminalSession(connected ? "connected" : "disconnected");
-              try { localStorage.setItem("litt:terminalAutoStart", connected ? "1" : "0"); } catch {}
+              // Remember successful connects so the terminal keeps auto-attaching.
+              // Transient disconnects must NOT opt the user out — only an
+              // explicit "0" in localStorage disables auto-start.
+              try { if (connected) localStorage.setItem("litt:terminalAutoStart", "1"); } catch {}
             }}
           />
         ) : workspaceStatus === "ready" && terminalSession === "not_started" ? (

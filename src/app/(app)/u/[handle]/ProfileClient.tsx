@@ -6,7 +6,7 @@ import { MapPin, Link2, ArrowLeft } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import type { ProfileDTO } from "@/lib/social-server";
 import FollowButton from "./FollowButton";
-import ProfilePosts from "./ProfilePosts";
+import ProfilePosts from "@/components/feed/ProfilePosts";
 
 type TabId = "posts" | "about";
 
