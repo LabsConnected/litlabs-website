@@ -128,7 +128,7 @@ describe("Navigation routes Music to Studio", () => {
     expect(labels).not.toContain("Music");
   });
 
-  it("the /create hub links Music & Audio to the real Studio music mode", async () => {
+  it("the /create hub routes Music & Audio through intent routing to Studio", async () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
@@ -136,7 +136,11 @@ describe("Navigation routes Music to Studio", () => {
       "utf-8",
     );
     expect(content).toContain('label: "Music & Audio"');
-    expect(content).toContain("/studio?tool=chat&mode=music");
+    expect(content).toContain('seed: "Make me a song"');
+    // Tiles no longer carry a static mode=music link — the seed prompt
+    // posts to /api/litt/intent and lands in Studio with the routed intent.
+    expect(content).toContain("/api/litt/intent");
+    expect(content).toContain('params.set("intent", payload.result.primaryIntent)');
   });
 });
 
