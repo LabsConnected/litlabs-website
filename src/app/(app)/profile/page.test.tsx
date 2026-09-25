@@ -264,6 +264,10 @@ describe("P1-5 profile save honesty", () => {
       if (String(url) === "/api/settings/profile" && (!init || !init.method || init.method === "GET")) {
         return jsonResponse({ user: { id: "db-user-1" } }, true, 200);
       }
+      // The profile header fetches real stats on mount — not part of the save retry.
+      if (String(url).includes("/api/profile/stats")) {
+        return jsonResponse({ stats: null }, true, 200);
+      }
       attempts += 1;
       if (attempts === 1) return jsonResponse({ error: "first fail" }, false, 500);
       return jsonResponse({ message: "ok", user: serverUser }, true, 200);
