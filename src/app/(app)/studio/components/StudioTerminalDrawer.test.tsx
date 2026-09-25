@@ -23,8 +23,17 @@ describe("StudioTerminalDrawer", () => {
     expect(screen.getByText(/Workspace provisioning/i)).toBeDefined();
   });
 
-  it("shows terminal session not started initially", () => {
+  it("auto-attaches the terminal by default (no explicit opt-out)", () => {
+    localStorage.removeItem("litt:terminalAutoStart");
+    render(<StudioTerminalDrawer projectId="proj-1" />);
+    // "Not started" must NOT appear — the session begins connecting immediately.
+    expect(screen.queryByText(/Not started/i)).toBeNull();
+  });
+
+  it("stays parked only when the user explicitly opted out", () => {
+    localStorage.setItem("litt:terminalAutoStart", "0");
     render(<StudioTerminalDrawer projectId="proj-1" />);
     expect(screen.getByText(/Not started/i)).toBeDefined();
+    localStorage.removeItem("litt:terminalAutoStart");
   });
 });

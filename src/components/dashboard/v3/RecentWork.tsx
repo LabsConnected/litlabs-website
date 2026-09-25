@@ -29,9 +29,10 @@ const STATUS_CONFIG: Record<DashboardProject["status"], { label: string; color: 
   unknown: { label: "Unknown", color: "#71717a" },
 };
 
-function timeAgo(dateStr: string | null): string {
-  if (!dateStr) return "—";
+function timeAgo(dateStr: string | null): string | null {
+  if (!dateStr) return null;
   const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return null;
   const diff = Date.now() - date.getTime();
   if (diff < 0) return "just now";
   const minutes = Math.floor(diff / 60000);
@@ -109,7 +110,7 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
       }}
     >
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium uppercase tracking-widest" style={{ color: "#71717a" }}>
+        <h3 className="text-sm font-bold uppercase tracking-[.18em] text-zinc-300">
           Recent Work
         </h3>
         <Link
@@ -165,6 +166,7 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
             const studioHref = project.repository
               ? `/studio?project=${encodeURIComponent(project.id)}`
               : "/studio";
+            const updatedAgo = timeAgo(project.updatedAt);
 
             return (
               <div
@@ -173,7 +175,10 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
                 onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(24,24,27,0.5)")}
                 onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
               >
-                <Link href={studioHref} className="flex min-w-0 flex-1 items-center gap-3">
+                <Link
+                  href={studioHref}
+                  className="flex min-w-0 flex-1 items-center gap-3 transition-transform active:scale-[0.99]"
+                >
                   <div
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded"
                     style={{ background: "rgba(30,30,34,0.8)", color: "#a1a1aa" }}
@@ -194,9 +199,11 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
                         />
                       )}
                     </h4>
-                    <p className="mt-0.5 font-mono text-xs" style={{ color: "#71717a" }}>
-                      Updated {timeAgo(project.updatedAt)}
-                    </p>
+                    {updatedAgo ? (
+                      <p className="mt-0.5 font-mono text-xs" style={{ color: "#71717a" }}>
+                        Updated {updatedAgo}
+                      </p>
+                    ) : null}
                   </div>
                 </Link>
 
