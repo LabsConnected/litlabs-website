@@ -180,6 +180,13 @@ export async function POST(
     return NextResponse.json({ error: "Approval not found or expired" }, { status: 404 });
   }
 
+  // The gate belongs to the conversation it was paused in. Check this
+  // BEFORE any idempotent/early-return path below — a resolved gate must
+  // not leak its status under a different conversation URL.
+  if (pausedRun.conversationId !== conversationId) {
+    return NextResponse.json({ error: "Conversation mismatch" }, { status: 403 });
+  }
+
   // The approval is subordinate to its durable parent task. If Stop already
   // settled that task, this gate is historical evidence — not a button that
   // can resurrect a cancelled run.
@@ -255,12 +262,7 @@ export async function POST(
     }
   }
 
-  // 2. Verify conversation ownership
-  if (pausedRun.conversationId !== conversationId) {
-    return NextResponse.json({ error: "Conversation mismatch" }, { status: 403 });
-  }
-
-  // 3. Resolve the approval (single-use, atomic). A controlled retry
+  // 2. Resolve the approval (single-use, atomic). A controlled retry
   // reuses the existing record — the approval was already granted.
   const resolved =
     retriedApproval ?? (await resolvePausedRun(pausedRunId, userId, body.decision));
@@ -271,7 +273,7 @@ export async function POST(
     );
   }
 
-  // 4. For REJECTED: no resumed execution needed — return immediately.
+  // 3. For REJECTED: no resumed execution needed — return immediately.
   // Close out the awaiting transcript message so a refresh doesn't show a
   // gate that was already decided.
   if (body.decision === "rejected") {
@@ -302,7 +304,7 @@ export async function POST(
     });
   }
 
-  // 5. For APPROVED: validate workspace, then start detached execution.
+  // 4. For APPROVED: validate workspace, then start detached execution.
   // The approved operation's identity rides the transport so tools with
   // idempotent side effects (image.generate billing) derive a stable
   // operation key from it — a retried approval replays, never double-debits.
@@ -331,7 +333,7 @@ export async function POST(
     );
   }
 
-  // 6. Verify workspace hasn't changed in a way that invalidates the approval
+  // 5. Verify workspace hasn't changed in a way that invalidates the approval
   try {
     const verified = await verifyProjectWorkspace(resolved.projectId, userId);
     if (verified.workspaceId !== resolved.workspaceId) {
@@ -367,7 +369,7 @@ export async function POST(
     );
   }
 
-  // 7. Mark the run as "processing" (atomic — prevents duplicate executions)
+  // 6. Mark the run as "processing" (atomic — prevents duplicate executions)
   // The claim mints this executor's fencing token: renewals and terminal
   // writes below are conditioned on it, so a superseded or stale-marked
   // executor can never overwrite the truth this claim owns.
@@ -385,7 +387,7 @@ export async function POST(
     }, { status: 202 });
   }
 
-  // 8. Start the resumed execution DETACHED from this HTTP request.
+  // 7. Start the resumed execution DETACHED from this HTTP request.
   // Railway's long-running Node process keeps this promise alive after
   // the response is sent. The result is persisted to the DB so the client
   // can poll GET for completion.
@@ -773,7 +775,7 @@ export async function POST(
       clearInterval(heartbeat);
     });
 
-  // 9. Return 202 Accepted immediately — the execution continues in the background
+  // 8. Return 202 Accepted immediately — the execution continues in the background
   return NextResponse.json({
     resolved: true,
     decision: "approved",
@@ -802,10 +804,13 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { pausedRunId } = await params;
+  const { conversationId, pausedRunId } = await params;
   const pausedRun = await getPausedRun(pausedRunId, userId);
   if (!pausedRun) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  if (pausedRun.conversationId !== conversationId) {
+    return NextResponse.json({ error: "Conversation mismatch" }, { status: 403 });
   }
 
   return NextResponse.json({

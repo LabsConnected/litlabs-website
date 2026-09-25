@@ -128,7 +128,10 @@ export default defineConfig({
           // `pnpm start`, which can take longer than the old 60 s limit.
           // Dev-server mode was already 120 s; match it for consistency.
           timeout: 120_000,
-          reuseExistingServer: true,
+          // CI must always bind the server it launched for this run — reusing
+          // an existing server risks testing stale state from an earlier job
+          // or a stray local dev server. Local runs may reuse.
+          reuseExistingServer: !process.env.CI,
           cwd: ".",
           env: (() => {
             const env: Record<string, string> = {};
@@ -139,7 +142,14 @@ export default defineConfig({
             }
             env.CI = "true";
             env.PLAYWRIGHT_TEST = "true";
-            env.PLAYWRIGHT_AUTH_DISABLED = "true";
+            // Middleware-level auth bypass is only valid when NO auth-capable
+            // project is in the run. With real Clerk credentials + test users,
+            // authenticated projects must see real enforcement — e.g. the
+            // /wallet 307 redirect in billing.spec is a middleware guarantee
+            // the bypass would silently invalidate.
+            if (authProjects.length === 0 && localMobileAcceptanceProject.length === 0) {
+              env.PLAYWRIGHT_AUTH_DISABLED = "true";
+            }
             env.HOSTNAME = "0.0.0.0";
             env.PORT = "3001";
             return env;

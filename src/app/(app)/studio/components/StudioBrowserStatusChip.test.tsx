@@ -98,9 +98,12 @@ describe("StudioBrowserStatusChip — cooperative control", () => {
     expect(returnControl).toHaveBeenCalledTimes(1);
   });
 
-  it("shows no control buttons when disconnected", () => {
-    render(<StudioBrowserStatusChip />);
-    expect(screen.getByText("Browser · Disconnected")).toBeTruthy();
+  it("renders nothing when there is no session", () => {
+    const { container } = render(<StudioBrowserStatusChip />);
+    // No session = no chip. A permanent "Disconnected" pill would be noise
+    // for users who never started a browser session.
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByTestId("browser-status-chip")).toBeNull();
     expect(screen.queryByTestId("browser-take-control")).toBeNull();
     expect(screen.queryByTestId("browser-resume")).toBeNull();
   });
