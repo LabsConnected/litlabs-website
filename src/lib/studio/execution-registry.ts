@@ -25,6 +25,8 @@ export interface ActiveExecution {
   /** Exact request identity — always present (the messages route requires it). */
   clientRequestId: string;
   assistantMessageId: string;
+  /** Durable parent ActionRun bound to this execution, when V2 runtime tracking is active. */
+  actionRunId?: string;
   startedAt: number;
 }
 
@@ -82,6 +84,7 @@ export function registerExecution(input: {
   userId: string;
   clientRequestId: string;
   assistantMessageId: string;
+  actionRunId?: string;
   controller: AbortController;
 }): { key: string } {
   const entry: ActiveExecution = {
@@ -91,6 +94,7 @@ export function registerExecution(input: {
     conversationId: input.conversationId,
     clientRequestId: input.clientRequestId,
     assistantMessageId: input.assistantMessageId,
+    actionRunId: input.actionRunId,
     startedAt: Date.now(),
   };
   executions.set(input.conversationId, entry);
@@ -154,6 +158,26 @@ export function resetExecutionRegistryForTests(): void {
 }
 
 /**
+ * Snapshot every non-stale active execution, dropping stale bookkeeping
+ * from killed processes. Used by the graceful shutdown routine
+ * (SIGTERM/SIGINT) so a deployment cutover can abort and write back
+ * every in-flight run instead of leaving transcripts frozen as
+ * streaming.
+ */
+export function snapshotActiveExecutions(): ActiveExecution[] {
+  const now = Date.now();
+  const out: ActiveExecution[] = [];
+  for (const [conversationId, entry] of executions) {
+    if (now - entry.startedAt > STALE_EXECUTION_MS) {
+      executions.delete(conversationId);
+      continue;
+    }
+    out.push(entry);
+  }
+  return out;
+}
+
+/**
  * Request cancellation of the active execution for a conversation.
  *
  * Cancellation is ALWAYS keyed to the exact clientRequestId — there is no
@@ -176,7 +200,7 @@ export function requestExecutionCancellation(
   conversationId: string,
   userId: string,
   clientRequestId: string,
-): { status: CancelOutcome } {
+): { status: CancelOutcome; actionRunId?: string } {
   const entry = getActiveExecution(conversationId);
   if (entry) {
     if (entry.userId !== userId) {
@@ -190,7 +214,7 @@ export function requestExecutionCancellation(
     if (!entry.controller.signal.aborted) {
       entry.controller.abort(new Error("Cancelled by user"));
     }
-    return { status: "aborted" };
+    return { status: "aborted", actionRunId: entry.actionRunId };
   }
 
   const stamps = prunePendingCancels(conversationId);

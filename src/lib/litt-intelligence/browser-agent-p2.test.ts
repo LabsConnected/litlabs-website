@@ -23,7 +23,9 @@ vi.mock("./browser-session-manager", () => ({
   closeSession: vi.fn(),
   closeIdleSessions: vi.fn(),
   getStagehand: vi.fn(),
+  getOrReattachStagehand: vi.fn(),
   dbGetActiveSessions: vi.fn(),
+  dbGetSession: vi.fn(),
   executeBrowserAction: vi.fn(),
   logBlockedBrowserNavigation: vi.fn(),
 }));
@@ -38,7 +40,9 @@ import {
   startSession,
   closeIdleSessions,
   getStagehand,
+  getOrReattachStagehand,
   dbGetActiveSessions,
+  dbGetSession,
   executeBrowserAction,
   logBlockedBrowserNavigation,
 } from "./browser-session-manager";
@@ -50,7 +54,9 @@ const CONV = "conv-abc";
 const mockStartSession = vi.mocked(startSession);
 const mockCloseIdleSessions = vi.mocked(closeIdleSessions);
 const mockGetStagehand = vi.mocked(getStagehand);
+const mockGetOrReattachStagehand = vi.mocked(getOrReattachStagehand);
 const mockDbGetActiveSessions = vi.mocked(dbGetActiveSessions);
+const mockDbGetSession = vi.mocked(dbGetSession);
 const mockExecuteBrowserAction = vi.mocked(executeBrowserAction);
 const mockLogBlocked = vi.mocked(logBlockedBrowserNavigation);
 
@@ -83,6 +89,8 @@ beforeEach(() => {
   mockCloseIdleSessions.mockResolvedValue(0);
   mockDbGetActiveSessions.mockResolvedValue([]);
   mockGetStagehand.mockReturnValue(null);
+  mockGetOrReattachStagehand.mockResolvedValue({ stagehand: null, outcome: "not_found" });
+  mockDbGetSession.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -191,6 +199,74 @@ describe("getOrReuseAgentBrowserSession", () => {
       expect(result.error).toBe("beta_only");
       expect(result.message).toBe(BROWSER_BETA_ONLY_MESSAGE);
     }
+    expect(mockStartSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("getOrReuseAgentBrowserSession cross-instance recovery", () => {
+  // Regression tests for the ACTION_BROWSER_SESSION_MISMATCH failure:
+  // when the run is already attached to a session whose Stagehand lives
+  // in another server process, the start path must re-attach (or start
+  // fresh and mark the dead attachment superseded) instead of starting
+  // a second vendor session that the run's attach guard then rejects.
+  it("re-attaches to the run's attached session when no in-process handle exists", async () => {
+    const attached = fakeSession({ id: "session-cross" });
+    mockGetOrReattachStagehand.mockResolvedValue({ stagehand: {} as never, outcome: "attached" });
+    mockDbGetSession.mockResolvedValue(attached);
+
+    const result = await getOrReuseAgentBrowserSession({
+      userId: OWNER_ID,
+      conversationId: CONV,
+      attachedSessionId: "session-cross",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.reused).toBe(true);
+      expect(result.session.id).toBe("session-cross");
+      expect(result.supersededSessionId).toBeUndefined();
+    }
+    // No second vendor session started — the existing one is reused.
+    expect(mockStartSession).not.toHaveBeenCalled();
+    expect(mockGetOrReattachStagehand).toHaveBeenCalledWith("session-cross", OWNER_ID);
+  });
+
+  it("starts fresh and marks the dead attachment superseded when the provider session is gone", async () => {
+    const fresh = fakeSession({ id: "session-fresh" });
+    mockGetOrReattachStagehand.mockResolvedValue({ stagehand: null, outcome: "expired" });
+    mockStartSession.mockResolvedValue(fresh);
+
+    const result = await getOrReuseAgentBrowserSession({
+      userId: OWNER_ID,
+      conversationId: CONV,
+      attachedSessionId: "session-dead",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.reused).toBe(false);
+      expect(result.session.id).toBe("session-fresh");
+      expect(result.supersededSessionId).toBe("session-dead");
+    }
+    expect(mockStartSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores attachedSessionId when an in-process session is already live", async () => {
+    mockDbGetActiveSessions.mockResolvedValue([fakeSession()]);
+    mockGetStagehand.mockReturnValue({} as never);
+
+    const result = await getOrReuseAgentBrowserSession({
+      userId: OWNER_ID,
+      conversationId: CONV,
+      attachedSessionId: "session-1",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.reused).toBe(true);
+      expect(result.session.id).toBe("session-1");
+    }
+    expect(mockGetOrReattachStagehand).not.toHaveBeenCalled();
     expect(mockStartSession).not.toHaveBeenCalled();
   });
 });

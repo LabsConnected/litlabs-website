@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { getLiveSessionStatus } from "@/lib/litt-intelligence/browser-session-manager";
 import { getBurnSnapshot } from "@/lib/litt-intelligence/browser-billing";
+import { mapBrowserFailure } from "@/lib/action-runtime/safe-errors";
 
 export const runtime = "nodejs";
 
@@ -23,7 +24,7 @@ export const runtime = "nodejs";
  *
  * Phase 4: when a session is present, attaches `burn` — the real
  * accumulator reading ({ billableMinutes, modelCalls, bits, live }).
- * The chip renders it (e.g. "Browser · Live · 3 min · 135 BITS"). When
+ * The chip renders it (e.g. "Browser · Live · 3 min · 135 LiTTBits"). When
  * nothing is known, burn is null and the chip shows no burn rather
  * than a fake number.
  */
@@ -44,9 +45,14 @@ async function handler(req: NextRequest) {
     }
     return NextResponse.json({ ...status, burn });
   } catch (err) {
+    const failure = mapBrowserFailure(err, "BROWSER_STATUS_FAILED");
+    console.error("[browser-status] probe failed", {
+      code: failure.code,
+      userId,
+    });
     return NextResponse.json(
-      { error: "Internal server error", detail: err instanceof Error ? err.message : String(err) },
-      { status: 500 },
+      { code: failure.code, message: "LiTT couldn't check the browser status right now." },
+      { status: 503 },
     );
   }
 }

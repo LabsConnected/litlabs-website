@@ -3,7 +3,7 @@
 /**
  * OwnerTestModeIndicator — owner/test-role badge + dropdown that lets the
  * platform owner switch between testing as OWNER, Starter, Creator,
- * Pro Builder, or Zero-BITS.
+ * Pro Builder, or Zero-LiTTBits.
  *
  * Two placement modes:
  *   - `inline` (recommended): renders in normal flow inside a header/action

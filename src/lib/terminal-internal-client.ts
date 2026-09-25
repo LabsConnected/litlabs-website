@@ -205,7 +205,17 @@ export interface PreviewStartResponse {
 export async function startPreviewInternal(
   workspaceId: string,
   userId: string,
-  options?: { framework?: string; command?: string; packageManager?: string },
+  options?: {
+    framework?: string;
+    command?: string;
+    packageManager?: string;
+    /**
+     * Project-configured env subset (e.g. Clerk keys resolved from the
+     * project's secret store). The terminal server extracts and injects
+     * only what the preview runtime needs; values are never logged.
+     */
+    projectEnv?: Record<string, string>;
+  },
 ): Promise<PreviewStartResponse> {
   const key = INTERNAL_KEY();
   if (key.length < 32) {
@@ -243,6 +253,45 @@ export async function startPreviewInternal(
   }
 
   return (await resp.json()) as PreviewStartResponse;
+}
+
+/**
+ * Restart the terminal-server preview ONLY if the provided project env
+ * differs from what the running preview started with. Lets the web app
+ * react to secret rotation without a disruptive restart when nothing
+ * changed. Never echoes env values back.
+ */
+export async function ensurePreviewEnvInternal(
+  workspaceId: string,
+  userId: string,
+  projectEnv?: Record<string, string>,
+): Promise<{ restarted: boolean; status: string }> {
+  const key = INTERNAL_KEY();
+  if (key.length < 32) {
+    throw new Error("TERMINAL_INTERNAL_SERVICE_KEY not configured");
+  }
+
+  const url = `${TERMINAL_BASE()}/internal/workspace/${encodeURIComponent(workspaceId)}/preview/ensure-env`;
+  const resp = await fetchWithTimeout(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Internal-Service-Key": key,
+      },
+      body: JSON.stringify({ userId, projectEnv }),
+    },
+    TERMINAL_TIMEOUTS.restartPreview,
+    "POST /internal/workspace/{id}/preview/ensure-env",
+  );
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "Unknown error");
+    throw new Error(`Preview ensure-env failed (${resp.status}): ${text}`);
+  }
+
+  return (await resp.json()) as { restarted: boolean; status: string };
 }
 
 /**
@@ -388,7 +437,7 @@ export async function getPreviewLogsInternal(
  * The browser uses this URL to access the running dev server.
  */
 export function buildPreviewProxyUrl(workspaceId: string): string {
-  const base = TERMINAL_BASE();
+  const base = TERMINAL_BASE().replace(/\/+$/, "");
   const token = process.env.PREVIEW_ACCESS_TOKEN ?? "";
   const tokenParam = token ? `?token=${encodeURIComponent(token)}` : "";
 

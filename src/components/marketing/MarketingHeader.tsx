@@ -3,21 +3,37 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowRight, ChevronRight, Menu, X } from "lucide-react";
-import { track } from "@/lib/analytics";
+import { track, type FunnelEvent } from "@/lib/analytics";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { BrandLogo } from "@/components/branding/BrandLogo";
 
-const NAV_ITEMS = [
-  { label: "Capabilities", href: "/#what-we-do" },
-  { label: "How it works", href: "/#how-it-works" },
+type MarketingNavItem = {
+  label: string;
+  href: string;
+  /** Analytics event fired on click (with the render source), if any. */
+  trackEvent?: FunnelEvent;
+};
+
+// Larry's site audit (2026-09-23 round 2): cut the nav to four items —
+// Studio · Capabilities · Pricing · Docs. Developers bounce from clutter.
+const NAV_ITEMS: MarketingNavItem[] = [
   { label: "Studio", href: "/studio" },
-  { label: "CLI", href: "/cli" },
-  { label: "Creations", href: "/#creations" },
-  { label: "FAQ", href: "/#faq" },
-  { label: "Community", href: "/discover" },
-] as const;
+  { label: "Capabilities", href: "/#what-we-do" },
+  { label: "Pricing", href: "/pricing", trackEvent: "pricing_link_click" },
+  { label: "Docs", href: "/docs" },
+];
 
 export default function MarketingHeader() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const { isLoaded, isSignedIn } = useClerkAuth();
+  // Swap auth CTAs only after hydration — Clerk state is client-only,
+  // so render the signed-out CTAs on first paint to avoid a mismatch.
+  const signedIn = mounted && isLoaded && isSignedIn;
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -30,30 +46,46 @@ export default function MarketingHeader() {
   return (
     <header className="litt-site-header fixed inset-x-0 top-0 z-50 border-b border-white/8">
       <div className="mx-auto flex h-[68px] max-w-[1500px] items-center justify-between px-5 lg:px-8">
-        <BrandLogo href="/" size={42} showText={false} variant="full" className="max-w-[190px]" />
+        <BrandLogo
+          href="/"
+          size={42}
+          showText={false}
+          variant="full"
+          className="max-w-[190px]"
+        />
 
         <nav aria-label="Primary navigation" className="hidden items-center gap-7 text-[13px] font-bold text-white/55 lg:flex">
-          {NAV_ITEMS.map((item) =>
-            item.href.startsWith("#") ? (
-              <a key={item.href} href={item.href} className="litt-nav-link">
+          {NAV_ITEMS.map((item) => {
+            const onClick = item.trackEvent
+              ? () => track(item.trackEvent as FunnelEvent, { source: "nav" })
+              : undefined;
+            return item.href.startsWith("#") ? (
+              <a key={item.href} href={item.href} className="litt-nav-link" onClick={onClick}>
                 {item.label}
               </a>
             ) : (
-              <Link key={item.href} href={item.href} className="litt-nav-link">
+              <Link key={item.href} href={item.href} className="litt-nav-link" onClick={onClick}>
                 {item.label}
               </Link>
-            ),
-          )}
-          <Link href="/pricing" className="litt-nav-link" onClick={() => track("pricing_link_click", { source: "nav" })}>Pricing</Link>
+            );
+          })}
         </nav>
 
         <div className="flex items-center gap-2">
-          <Link href="/sign-in" className="hidden px-3 py-2 text-sm font-bold text-white/55 transition hover:text-white sm:block">
-            Sign in
-          </Link>
-          <Link href="/sign-up" className="litt-primary-button !min-h-10 !px-4 !py-2 text-sm" onClick={() => track("hero_cta_click", { source: "header" })}>
-            Start free <ArrowRight size={14} />
-          </Link>
+          {signedIn ? (
+            <Link href="/studio" className="litt-primary-button !min-h-10 !px-4 !py-2 text-sm" onClick={() => track("hero_cta_click", { source: "header" })}>
+              Open Studio <ArrowRight size={14} />
+            </Link>
+          ) : (
+            <>
+              <Link href="/sign-in" className="hidden px-3 py-2 text-sm font-bold text-white/55 transition hover:text-white sm:block">
+                Sign in
+              </Link>
+              <Link href="/sign-up" className="litt-primary-button !min-h-10 !px-4 !py-2 text-sm" onClick={() => track("hero_cta_click", { source: "header" })}>
+                Start free <ArrowRight size={14} />
+              </Link>
+            </>
+          )}
           <button
             type="button"
             aria-label={menuOpen ? "Close menu" : "Open menu"}
@@ -74,12 +106,16 @@ export default function MarketingHeader() {
           className="border-t border-white/8 bg-[#05070d]/96 px-5 py-4 backdrop-blur-2xl lg:hidden"
         >
           <div className="mx-auto grid max-w-[1500px] gap-1">
-            {NAV_ITEMS.map((item) =>
-              item.href.startsWith("#") ? (
+            {NAV_ITEMS.map((item) => {
+              const onClick = () => {
+                setMenuOpen(false);
+                if (item.trackEvent) track(item.trackEvent, { source: "mobile_nav" });
+              };
+              return item.href.startsWith("#") ? (
                 <a
                   key={item.href}
                   href={item.href}
-                  onClick={() => setMenuOpen(false)}
+                  onClick={onClick}
                   className="flex items-center justify-between rounded-xl px-3 py-3 text-sm font-bold text-white/72 hover:bg-white/5 hover:text-white"
                 >
                   {item.label} <ChevronRight size={15} />
@@ -88,16 +124,13 @@ export default function MarketingHeader() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  onClick={() => setMenuOpen(false)}
+                  onClick={onClick}
                   className="flex items-center justify-between rounded-xl px-3 py-3 text-sm font-bold text-white/72 hover:bg-white/5 hover:text-white"
                 >
                   {item.label} <ChevronRight size={15} />
                 </Link>
-              ),
-            )}
-            <Link href="/pricing" onClick={() => { setMenuOpen(false); track("pricing_link_click", { source: "mobile_nav" }); }} className="flex items-center justify-between rounded-xl px-3 py-3 text-sm font-bold text-white/72 hover:bg-white/5 hover:text-white">
-              Pricing <ChevronRight size={15} />
-            </Link>
+              );
+            })}
           </div>
         </nav>
       )}

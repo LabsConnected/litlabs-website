@@ -4,6 +4,11 @@ import { registerInternalTools, toolRegistry } from "@/lib/litt-intelligence/too
 import type { WorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import type { AgentLoopResult } from "@/lib/litt-intelligence/agent-loop-v2";
 import type { BuildFixLoopResult } from "@/lib/litt-intelligence/build-fix-loop";
+import { recordActionEventActivity } from "@/lib/action-runtime";
+
+vi.mock("@/lib/action-runtime", () => ({
+  recordActionEventActivity: vi.fn(() => Promise.resolve({})),
+}));
 
 // ─── Mocks ──────────────────────────────────────────────────────────
 
@@ -96,6 +101,7 @@ function makeOptions(overrides: Partial<LaunchFlowOptions> = {}): LaunchFlowOpti
 
 describe("Launch Flow: no-mutation reprompt", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     toolRegistry.clear();
     registerInternalTools();
   });
@@ -113,6 +119,8 @@ describe("Launch Flow: no-mutation reprompt", () => {
     const result = await runLaunchFlow(options);
 
     expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    expect(runAgentLoop.mock.calls[0][2]).toMatchObject({ requireToolCallOnFirstStep: true });
+    expect(runAgentLoop.mock.calls[1][2]).toMatchObject({ requireToolCallOnFirstStep: true });
     expect(String(runAgentLoop.mock.calls[1][0])).toContain("did not write any project files");
     expect(result.success).toBe(true);
     expect(result.status).toBe("preview_ready");
@@ -125,6 +133,79 @@ describe("Launch Flow: no-mutation reprompt", () => {
     await runLaunchFlow(options);
 
     expect(runAgentLoop).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates the same trusted parent ActionRun context through reprompts", async () => {
+    const actionContext = {
+      actionRunId: "run-composite",
+      userId: "trusted-user",
+      conversationId: "conv-parent",
+      projectId: "trusted-project",
+    };
+    const runAgentLoop = vi.fn()
+      .mockResolvedValueOnce(successAgentResult({ toolCalls: [] }))
+      .mockResolvedValueOnce(successAgentResult({
+        toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
+      }));
+    const options = makeOptions({
+      requiresExecution: true,
+      runAgentLoop,
+      actionContext,
+      conversationId: "conv-parent",
+    });
+
+    await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    for (const call of runAgentLoop.mock.calls) {
+      expect(call[2]).toMatchObject({
+        userId: "user-test",
+        conversationId: "conv-parent",
+        actionContext: {
+          actionRunId: "run-composite",
+          userId: "user-test",
+          conversationId: "conv-parent",
+          projectId: "proj-test",
+        },
+      });
+    }
+    expect(recordActionEventActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-composite",
+        userId: "user-test",
+        type: "preview.started",
+      }),
+    );
+    expect(recordActionEventActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-composite",
+        userId: "user-test",
+        type: "preview.ready",
+      }),
+    );
+  });
+
+  it("does not provision an untracked preview when the started event cannot persist", async () => {
+    const transport = createMockTransport();
+    vi.mocked(recordActionEventActivity).mockRejectedValue(new Error("event insert failed"));
+    const options = makeOptions({
+      transport,
+      runAgentLoop: vi.fn().mockResolvedValue(successAgentResult({
+        toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
+      })),
+      actionContext: {
+        actionRunId: "run-composite",
+        userId: "user-test",
+        conversationId: "conv-parent",
+        projectId: "proj-test",
+      },
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(transport.startPreview).not.toHaveBeenCalled();
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("event insert failed");
   });
 
   it("reprompts at most once even if the second pass also writes nothing", async () => {
@@ -199,6 +280,7 @@ describe("Launch Flow: approval pause runs preview", () => {
 
 describe("Launch Flow: approval pause before any mutation", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     toolRegistry.clear();
     registerInternalTools();
   });
@@ -266,6 +348,7 @@ describe("Launch Flow: approval pause before any mutation", () => {
 
 describe("Launch Flow: rejected preview start", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     toolRegistry.clear();
     registerInternalTools();
   });
@@ -659,9 +742,10 @@ describe("Launch Flow: budget limits", () => {
     expect(config.maxOutputChars).toBe(200_000);
     expect(config.maxSteps).toBe(40);
     // Runtime budget must still be the real bound (allow 1ms timing slack
-    // for the elapsed-time subtraction before the agent loop starts)
-    expect(config.maxRuntimeMs).toBeGreaterThanOrEqual(599_000);
-    expect(config.maxRuntimeMs).toBeLessThanOrEqual(600_000);
+    // for the elapsed-time subtraction before the agent loop starts).
+    // Budget is 30 minutes (was 10) — a real multi-file build needs the room.
+    expect(config.maxRuntimeMs).toBeGreaterThanOrEqual(1_799_000);
+    expect(config.maxRuntimeMs).toBeLessThanOrEqual(1_800_000);
   });
 
   it("passes maxOutputChars to the repair agent loop too", async () => {
@@ -684,8 +768,8 @@ describe("Launch Flow: budget limits", () => {
     expect(runAgentLoop.mock.calls.length).toBeGreaterThanOrEqual(2);
     const repairConfig = runAgentLoop.mock.calls[1][2] as Record<string, unknown>;
     expect(repairConfig.maxOutputChars).toBe(200_000);
-    // Repair must not restart the global runtime budget
-    expect(repairConfig.maxRuntimeMs).toBeLessThanOrEqual(600_000);
+    // Repair must not restart the global runtime budget (30 minutes)
+    expect(repairConfig.maxRuntimeMs).toBeLessThanOrEqual(1_800_000);
   });
 });
 
@@ -710,6 +794,7 @@ describe("Launch Flow: preservation of existing project work", () => {
 
 describe("Launch Flow: quality-loop pass-through", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     toolRegistry.clear();
     registerInternalTools();
   });
@@ -738,5 +823,61 @@ describe("Launch Flow: quality-loop pass-through", () => {
 
     const mainConfig = runAgentLoop.mock.calls[0][2] as Record<string, unknown>;
     expect(mainConfig.qualityLoop).toBeUndefined();
+  });
+});
+
+describe("Launch Flow: artifact gate rejects the blank welcome screen", () => {
+  function welcomeTransport(): WorkspaceTransport {
+    return createMockTransport({
+      listFiles: vi.fn().mockResolvedValue({
+        entries: [{ name: "index.html", type: "file" }],
+      }),
+      readFile: vi.fn().mockResolvedValue({
+        content:
+          "<!-- LITT-WELCOME-SCREEN: blank-state of the LiTT builder. Not a project, not project content. -->\n<html><body>Welcome to LiTT</body></html>",
+        size: 128,
+      }),
+    });
+  }
+
+  it("fails when the only entry file still carries the welcome-screen marker", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(welcomeTransport());
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("blank starter screen");
+  });
+
+  it("passes when the entry file is a real project file", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const transport = createMockTransport({
+      listFiles: vi.fn().mockResolvedValue({
+        entries: [{ name: "index.html", type: "file" }],
+      }),
+      readFile: vi.fn().mockResolvedValue({
+        content: "<html><body><h1>North Shore Outdoor Co.</h1></body></html>",
+        size: 64,
+      }),
+    });
+    const check = await verifyProjectArtifacts(transport);
+    expect(check.ok).toBe(true);
+  });
+
+  it("passes when the entry file cannot be read (filename signal preserved)", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const transport = createMockTransport({
+      listFiles: vi.fn().mockResolvedValue({
+        entries: [{ name: "index.html", type: "file" }],
+      }),
+      readFile: vi.fn().mockRejectedValue(new Error("read failed")),
+    });
+    const check = await verifyProjectArtifacts(transport);
+    expect(check.ok).toBe(true);
+  });
+
+  it("still fails when no entry file exists at all", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(createMockTransport());
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("No runnable website entry file");
   });
 });

@@ -54,24 +54,41 @@ describe("StudioPreviewPanel — preview-entry-missing message", () => {
     act(() => useExecutionStore.getState().reset());
   });
 
-  it("re-checks preview status immediately when the proxy reports the entry route missing", async () => {
-    const fetchSpy = renderReadyPreview();
-    await screen.findByTitle("Demo preview");
-    const callsAfterReady = fetchSpy.mock.calls.length;
-    expect(callsAfterReady).toBeGreaterThan(0);
+  it(
+    "re-checks preview status immediately when the proxy reports the entry route missing",
+    // 20s: the default 5s test timeout kills this test under CI load before
+    // the waitFor below can finish (flaked 2026-09-22).
+    { timeout: 20000 },
+    async () => {
+      const fetchSpy = renderReadyPreview();
+      await screen.findByTitle("Demo preview");
+      const callsAfterReady = fetchSpy.mock.calls.length;
+      expect(callsAfterReady).toBeGreaterThan(0);
 
-    window.dispatchEvent(
-      new MessageEvent("message", {
-        origin: PREVIEW_ORIGIN,
-        data: { source: "litt-preview", type: "preview-entry-missing", workspaceId: "ws_1" },
-      }),
-    );
+      // Let React commit the previewUrl-dependent message listener before
+      // dispatching; findByTitle only proves the iframe node exists.
+      await act(async () => Promise.resolve());
+      act(() => {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            origin: PREVIEW_ORIGIN,
+            data: { source: "litt-preview", type: "preview-entry-missing", workspaceId: "ws_1" },
+          }),
+        );
+      });
 
-    // The badge must not wait for the 30s poll — a status re-check fires now.
-    await vi.waitFor(() => {
-      expect(fetchSpy.mock.calls.length).toBeGreaterThan(callsAfterReady);
-    });
-  });
+      // The badge must not wait for the 30s poll — a status re-check fires now.
+      // Generous timeout: the handler awaits authHeaders() before fetch, and
+      // this flakes under CI load with the default 1s timeout (2026-09-21).
+      // 10s still proves "immediate" versus the 30s poll interval.
+      await vi.waitFor(
+        () => {
+          expect(fetchSpy.mock.calls.length).toBeGreaterThan(callsAfterReady);
+        },
+        { timeout: 10000 },
+      );
+    },
+  );
 
   it("ignores the message from a foreign origin", async () => {
     const fetchSpy = renderReadyPreview();

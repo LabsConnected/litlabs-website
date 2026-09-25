@@ -27,6 +27,9 @@ import { X, Terminal, GitBranch, Rocket, ChevronRight } from "lucide-react";
 import { AnimatedBackground } from "./AnimatedBackground";
 import { ProjectPulseBar } from "./ProjectPulseBar";
 import { QuickStart } from "./QuickStart";
+import { BuildConsole } from "./BuildConsole";
+import { LiveProjectStatus } from "./LiveProjectStatus";
+import { AgentActivity } from "./AgentActivity";
 import { RecentWork } from "./RecentWork";
 import { RecentMedia } from "./RecentMedia";
 import { MediaDock } from "./MediaDock";
@@ -139,16 +142,22 @@ export function Dashboard() {
         className="relative z-10 flex-1 overflow-y-auto px-4 pb-28 pt-6 md:px-6 md:pb-32"
       >
         <div className="mx-auto grid max-w-7xl grid-cols-1 gap-6 lg:grid-cols-12">
+          <div className="flex flex-col gap-6 lg:col-span-12">
+            <BuildConsole />
+          </div>
+
           {/* Left column: universal LiTT command center */}
           <div className="flex flex-col gap-6 lg:col-span-7">
             <QuickStart
               initialPrompt={searchParams.get("prompt") ?? ""}
               initialIntent={searchParams.get("intent") ?? searchParams.get("type")}
             />
+            <AgentActivity items={missionControl.data?.activity ?? []} loading={missionControl.loading} />
           </div>
 
-          {/* Right column: Recent Work + Recent Media */}
+          {/* Runtime + assets */}
           <div className="flex flex-col gap-6 lg:col-span-5">
+            <LiveProjectStatus project={currentProject} pulseItems={pulseItems} loading={missionControl.loading} />
             <RecentWork
               projects={recentProjects}
               loading={missionControl.loading}

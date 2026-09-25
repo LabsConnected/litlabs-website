@@ -5,7 +5,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { ArrowUpRight, Sparkles } from "lucide-react";
 
 const PRODUCT_LINKS = [
-  { href: "/marketplace", label: "Agents" },
+  { href: "/studio?tool=agents", label: "Agents" },
   { href: "/studio", label: "Studio" },
   { href: "/cli", label: "CLI" },
   { href: "/showcase", label: "Showcase" },

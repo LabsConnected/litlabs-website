@@ -15,6 +15,7 @@ import { resolveProject, buildProjectContextBlock, buildStudioContext } from "@/
 import { recallMemories, formatMemoryContext } from "@/lib/studio/memory-service";
 import { getConversation, listMessages } from "@/lib/studio/conversation-service";
 import { adaptLegacyCapability } from "@/lib/litt-kernel";
+import { isBrowserBetaAllowed } from "@/lib/litt-intelligence/browser-agent";
 import type { CapabilityRecord } from "@/lib/litt-kernel";
 import type { RawCapabilities } from "@/lib/capabilities/translate";
 import type { AgentSlug } from "@/lib/studio/types";
@@ -84,6 +85,18 @@ function resolveMode(req: LiTTRunRequest, isCompanionSurface: boolean): LiTTMode
   if (req.agentMode) return req.agentMode;
   if (isCompanionSurface) return "companion";
   return "studio";
+}
+
+/**
+ * The agent-browser capability, truthfully scoped to this user: ready
+ * only when the private-beta gate passes AND the provider is configured.
+ * A registered-but-unavailable record lets the Kernel explain "browser
+ * is unavailable for this account" instead of pretending the capability
+ * does not exist.
+ */
+function browserCapabilityRecord(userId: string | null): CapabilityRecord {
+  const ready = Boolean(userId && isBrowserBetaAllowed(userId) && process.env.BROWSERBASE_API_KEY);
+  return adaptLegacyCapability({ id: "browser", name: "Browser", status: ready ? "ready" : "unavailable" });
 }
 
 /**
@@ -203,6 +216,7 @@ export async function resolveRequestContext(
   if (hint.voiceTransportConnected) {
     kernelCapabilities.push(adaptLegacyCapability({ id: "voice", status: "ready", name: "Voice" }));
   }
+  kernelCapabilities.push(browserCapabilityRecord(uid));
 
   return {
     userId: uid,
@@ -279,6 +293,7 @@ export function buildRunContextFromStudio(args: {
   if (hint.voiceTransportConnected) {
     kernelCapabilities.push(adaptLegacyCapability({ id: "voice", status: "ready", name: "Voice" }));
   }
+  kernelCapabilities.push(browserCapabilityRecord(userId));
 
   // Reuse the studio-resolved project fields as a ResolvedProject-compatible object.
   const project = {

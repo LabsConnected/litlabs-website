@@ -7,20 +7,110 @@ import { GoogleGenAI } from "@google/genai";
 import { submitAlibabaVideoTask, isAlibabaConfigured } from "@/lib/alibaba-video";
 import { getVideoModel, getVideoModelPricing } from "@/lib/studio-models";
 import { createVideoJob } from "@/lib/video-jobs";
+import { refundVideoCharge } from "@/lib/video-refunds";
 import { calculateRetailBits } from "@/lib/generation/cost-engine";
 import { buildChargeRating } from "@/lib/billing/canonical-pricing";
 import {
   createGenerationJob,
   getGenerationJobByRequestId,
   updateGenerationJobStatus,
+  updateGenerationJobMetadata,
+  failGenerationJob,
+  setGenerationRefundStatus,
 } from "@/lib/generation/jobs";
+import type { RefundStatus } from "@/lib/generation/types";
 import { resolveInternalUserId } from "@/lib/generation/identity";
 
 // ── Route configuration ──────────────────────────────────────────
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+// Read at request time (not module load) so tests and key rotation see the
+// current value, and a missing key fails before any debit.
+
+// ── Staged-refund helpers (P1-3) ─────────────────────────────────
+// The pipeline stages are: validation → debit → provider submission →
+// outcome polling. Every stage that can hold user LiTTBits records its
+// outcome on the durable generation_jobs row so a refund is never lost.
+
+/**
+ * Create the durable generation_jobs row BEFORE the debit, in `queued`
+ * state. Returns the row id, or null when it could not be recorded —
+ * in which case the caller must fail WITHOUT debiting.
+ */
+async function createQueuedVideoRow(opts: {
+  internalUserId: string;
+  provider: string;
+  model: string;
+  prompt: string;
+  requestId: string;
+  littBitsCharged: number;
+  aspectRatio: string;
+  resolution: string;
+  duration: number;
+}): Promise<string | null> {
+  const row = await createGenerationJob({
+    id: crypto.randomUUID(),
+    userId: opts.internalUserId,
+    modality: "video",
+    provider: opts.provider,
+    model: opts.model,
+    prompt: opts.prompt ?? "",
+    requestId: opts.requestId,
+    littBitsCharged: opts.littBitsCharged,
+    metadata: {
+      aspectRatio: opts.aspectRatio,
+      resolution: opts.resolution,
+      duration: opts.duration,
+    },
+  });
+  return row ? row.id : null;
+}
+
+/**
+ * Settle a failed provider submission: refund the debit (bounded retries,
+ * exactly-once via the wallet idempotency key), record the outcome on the
+ * durable row, and build the honest error to surface.
+ *
+ * Never throws — the refund outcome is always recorded, so a `pending`
+ * refund can be completed by a later retry with the same requestId.
+ */
+async function settleFailedSubmission(opts: {
+  genRowId: string | null;
+  userId: string;
+  exempt: boolean;
+  cost: number;
+  modelLabel: string;
+  requestId: string;
+  submitErr: unknown;
+}): Promise<Error> {
+  let refundStatus: RefundStatus = "none";
+  if (!opts.exempt) {
+    const r = await refundVideoCharge({
+      clerkId: opts.userId,
+      amount: opts.cost,
+      reason: `Video refund: ${opts.modelLabel} submission failed`,
+      idempotencyKey: `video:refund:${opts.requestId}`,
+    });
+    refundStatus = r.ok ? "refunded" : "pending";
+  }
+  if (opts.genRowId) {
+    const msg =
+      opts.submitErr instanceof Error
+        ? opts.submitErr.message
+        : "Video submission failed";
+    await failGenerationJob(opts.genRowId, msg, refundStatus);
+  }
+  const baseMsg =
+    opts.submitErr instanceof Error
+      ? opts.submitErr.message
+      : "Video submission failed";
+  return new Error(
+    refundStatus === "pending"
+      ? `${baseMsg} (LiTTBits charge of ${opts.cost} is pending automatic refund)`
+      : baseMsg,
+  );
+}
 
 async function handler(req: NextRequest) {
   const { userId } = await auth(req);
@@ -91,6 +181,27 @@ async function handler(req: NextRequest) {
         replayed: true,
       });
     }
+    // A previous attempt failed after debiting but its refund never
+    // completed (recorded as `pending`). The client is retrying with the
+    // same requestId: take another shot at completing that refund now.
+    // The wallet idempotency key makes this exactly-once.
+    if (
+      existingJob &&
+      existingJob.status === "failed" &&
+      existingJob.refundStatus === "pending" &&
+      existingJob.littBitsCharged > 0
+    ) {
+      const rr = await refundVideoCharge({
+        clerkId: userId,
+        amount: existingJob.littBitsCharged,
+        reason: `Video refund retry: ${existingJob.model} submission failed`,
+        idempotencyKey: `video:refund:${requestId}`,
+      });
+      await setGenerationRefundStatus(
+        existingJob.id,
+        rr.ok ? "refunded" : "pending",
+      );
+    }
 
     // ── Validate capabilities ──────────────────────────────────────
     const caps = videoModel.capabilities;
@@ -120,6 +231,10 @@ async function handler(req: NextRequest) {
       duration = nearest;
     }
 
+    // Prompt is required for both providers — validated before any debit.
+    if (!prompt?.trim())
+      return NextResponse.json({ error: "Prompt required" }, { status: 400 });
+
     // ── Alibaba HappyHorse path (image-to-video) ──────────────────────
     if (isHappyHorse) {
       if (!isAlibabaConfigured())
@@ -145,29 +260,74 @@ async function handler(req: NextRequest) {
         const balances = await getCreditBalances(userId);
         if (balances.total < cost)
           return NextResponse.json({ error: `Need ${cost} LiTTBits` }, { status: 402 });
+      }
 
-        // Reserve LiTTBits (atomic debit — refunded on failure).
-        // Keyed on requestId so client retries can never double-charge.
-        const reservation = await adjustWalletBalance({
-          clerkId: userId,
-          amount: -cost,
-          type: "spend",
-          reason: `Video: ${videoModel.label} — Alibaba i2v`,
-          idempotencyKey: `video:charge:${requestId}`,
-          rating: buildChargeRating({
-            capability: "video",
-            provider: "alibaba",
-            model,
-            providerCostMicros: costResult.providerCostCents * 10_000,
-            bitsCharged: cost,
-            lane: "generation",
-          }),
-          usage: { videoSeconds: Number(duration) || 0 },
+      // Staged refunds: record the durable job row BEFORE the debit so
+      // every later stage has a persistent anchor for charge/refund state.
+      // If the row cannot be recorded, fail WITHOUT debiting.
+      // Billing-exempt requests record 0 charged (nothing was debited).
+      let genRowId: string | null = null;
+      if (internalUserId) {
+        genRowId = await createQueuedVideoRow({
+          internalUserId,
+          provider: "alibaba",
+          model,
+          prompt: prompt.trim(),
+          requestId,
+          littBitsCharged: exempt ? 0 : cost,
+          aspectRatio,
+          resolution,
+          duration: Number(duration),
         });
+        if (!genRowId) {
+          return NextResponse.json(
+            { error: "Could not record the video job. No LiTTBits were charged — please retry." },
+            { status: 500 },
+          );
+        }
+      }
+
+      // Reserve LiTTBits (atomic debit — refunded on failure).
+      // Keyed on requestId so client retries can never double-charge.
+      if (!exempt) {
+        let reservation;
+        try {
+          reservation = await adjustWalletBalance({
+            clerkId: userId,
+            amount: -cost,
+            type: "spend",
+            reason: `Video: ${videoModel.label} — Alibaba i2v`,
+            idempotencyKey: `video:charge:${requestId}`,
+            rating: buildChargeRating({
+              capability: "video",
+              provider: "alibaba",
+              model,
+              providerCostMicros: costResult.providerCostCents * 10_000,
+              bitsCharged: cost,
+              lane: "generation",
+            }),
+            usage: { videoSeconds: Number(duration) || 0 },
+          });
+        } catch (debitErr) {
+          // The debit itself failed — nothing was charged.
+          if (genRowId) {
+            await failGenerationJob(
+              genRowId,
+              debitErr instanceof Error ? debitErr.message : "Debit failed",
+              "none",
+            );
+          }
+          throw debitErr;
+        }
 
         if (reservation.replayed) {
           return NextResponse.json(
-            { error: "This video request was already processed." },
+            {
+              error:
+                existingJob?.status === "failed"
+                  ? "This video request already failed and its LiTTBits were refunded. Please start a new request."
+                  : "This video request was already processed.",
+            },
             { status: 409 },
           );
         }
@@ -183,7 +343,9 @@ async function handler(req: NextRequest) {
           duration: Math.min(Math.max(Number(duration) || 5, 3), 15),
         });
 
-        // Store job for server-authoritative refund tracking
+        // Store job for server-authoritative refund tracking.
+        // `charged` reflects reality: billing-exempt requests never debit,
+        // so the status routes must never refund them.
         const jobId = `alibaba_${result.taskId}`;
         createVideoJob({
           jobId,
@@ -194,36 +356,19 @@ async function handler(req: NextRequest) {
           cost,
           status: "pending",
           createdAt: Date.now(),
-          charged: true,
+          charged: !exempt,
           refunded: false,
         });
 
-        // Create a persistent generation_jobs row so this video
-        // generation is visible in the Asset Lake once completed.
+        // Move the durable row to generating with the provider job id.
         // The status route will mark it completed with the durable URL.
-        // Uses internal UUID for user_id, NOT the Clerk ID.
-        if (internalUserId) {
-          const genJobId = crypto.randomUUID();
-          await createGenerationJob({
-            id: genJobId,
-            userId: internalUserId,
-            modality: "video",
-            provider: "alibaba",
-            model,
-            prompt: prompt?.trim() ?? "",
-            requestId,
-            littBitsCharged: cost,
-            metadata: {
-              providerJobId: result.taskId,
-              videoJobId: jobId,
-              aspectRatio,
-              resolution,
-              duration: Number(duration),
-            },
-          });
-          // Mark as generating — the status route completes it.
-          await updateGenerationJobStatus(genJobId, "generating", {
+        if (genRowId) {
+          await updateGenerationJobStatus(genRowId, "generating", {
             providerJobId: result.taskId,
+          });
+          await updateGenerationJobMetadata(genRowId, {
+            providerJobId: result.taskId,
+            videoJobId: jobId,
           });
         }
 
@@ -235,22 +380,25 @@ async function handler(req: NextRequest) {
           balance: alibabaBalance,
         });
       } catch (submitErr) {
-        // Refund the reserved LiTTBits on submission failure (skip if exempt)
-        if (!exempt) {
-          await adjustWalletBalance({
-            clerkId: userId,
-            amount: cost,
-            type: "refund",
-            reason: `Video refund: ${videoModel.label} submission failed`,
-            idempotencyKey: `video:refund:${requestId}`,
-          });
-        }
-        throw submitErr;
+        // Staged refund: the debit happened but the provider never accepted
+        // the job. Refund with bounded retries; the outcome is recorded on
+        // the durable row so a pending refund is never silently lost.
+        throw await settleFailedSubmission({
+          genRowId,
+          userId,
+          exempt,
+          cost,
+          modelLabel: videoModel.label,
+          requestId,
+          submitErr,
+        });
       }
     }
 
     // ── Google Veo path (default) ─────────────────────────────────────
-    if (!GEMINI_API_KEY)
+    // Key check before any debit: missing key → 500 with 0 charged.
+    const geminiApiKey = process.env.GEMINI_API_KEY;
+    if (!geminiApiKey)
       return NextResponse.json(
         { error: "Gemini API key not configured" },
         { status: 500 },
@@ -271,41 +419,78 @@ async function handler(req: NextRequest) {
       }
     }
 
-    if (!prompt?.trim())
-      return NextResponse.json({ error: "Prompt required" }, { status: 400 });
+    // Staged refunds: record the durable job row BEFORE the debit (see
+    // the Alibaba path above for the rationale).
+    let veoGenRowId: string | null = null;
+    if (internalUserId) {
+      veoGenRowId = await createQueuedVideoRow({
+        internalUserId,
+        provider: "veo",
+        model,
+        prompt: prompt.trim(),
+        requestId,
+        littBitsCharged: veoExempt ? 0 : cost,
+        aspectRatio,
+        resolution,
+        duration: Number(duration),
+      });
+      if (!veoGenRowId) {
+        return NextResponse.json(
+          { error: "Could not record the video job. No LiTTBits were charged — please retry." },
+          { status: 500 },
+        );
+      }
+    }
 
     // Reserve LiTTBits (atomic debit — refunded on failure).
     // Keyed on requestId so client retries can never double-charge.
     let reservation: { balance: number; replayed: boolean } | null = null;
     if (!veoExempt) {
-      const res = await adjustWalletBalance({
-        clerkId: userId,
-        amount: -cost,
-        type: "spend",
-        reason: `Video: ${videoModel.label} — Veo generation`,
-        idempotencyKey: `video:charge:${requestId}`,
-        rating: buildChargeRating({
-          capability: "video",
-          provider: "veo",
-          model,
-          providerCostMicros: costResult.providerCostCents * 10_000,
-          bitsCharged: cost,
-          lane: "generation",
-        }),
-        usage: { videoSeconds: Number(duration) || 0 },
-      });
+      try {
+        const res = await adjustWalletBalance({
+          clerkId: userId,
+          amount: -cost,
+          type: "spend",
+          reason: `Video: ${videoModel.label} — Veo generation`,
+          idempotencyKey: `video:charge:${requestId}`,
+          rating: buildChargeRating({
+            capability: "video",
+            provider: "veo",
+            model,
+            providerCostMicros: costResult.providerCostCents * 10_000,
+            bitsCharged: cost,
+            lane: "generation",
+          }),
+          usage: { videoSeconds: Number(duration) || 0 },
+        });
 
-      if (res.replayed) {
-        return NextResponse.json(
-          { error: "This video request was already processed." },
-          { status: 409 },
-        );
+        if (res.replayed) {
+          return NextResponse.json(
+            {
+              error:
+                existingJob?.status === "failed"
+                  ? "This video request already failed and its LiTTBits were refunded. Please start a new request."
+                  : "This video request was already processed.",
+            },
+            { status: 409 },
+          );
+        }
+        reservation = res;
+      } catch (debitErr) {
+        // The debit itself failed — nothing was charged.
+        if (veoGenRowId) {
+          await failGenerationJob(
+            veoGenRowId,
+            debitErr instanceof Error ? debitErr.message : "Debit failed",
+            "none",
+          );
+        }
+        throw debitErr;
       }
-      reservation = res;
     }
 
     try {
-      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+      const ai = new GoogleGenAI({ apiKey: geminiApiKey });
 
       const config: Record<string, unknown> = {
         numberOfVideos: 1,
@@ -337,7 +522,8 @@ async function handler(req: NextRequest) {
         );
       }
 
-      // Store job for server-authoritative refund tracking
+      // Store job for server-authoritative refund tracking.
+      // `charged` reflects reality: billing-exempt requests never debit.
       const jobId = `veo_${operation.name}`;
       createVideoJob({
         jobId,
@@ -348,36 +534,19 @@ async function handler(req: NextRequest) {
         cost,
         status: "pending",
         createdAt: Date.now(),
-        charged: true,
+        charged: !veoExempt,
         refunded: false,
       });
 
-      // Create a persistent generation_jobs row so this video
-      // generation is visible in the Asset Lake once completed.
+      // Move the durable row to generating with the provider operation id.
       // The status route will mark it completed with the durable URL.
-      // Uses internal UUID for user_id, NOT the Clerk ID.
-      if (internalUserId) {
-        const genJobId = crypto.randomUUID();
-        await createGenerationJob({
-          id: genJobId,
-          userId: internalUserId,
-          modality: "video",
-          provider: "veo",
-          model,
-          prompt: prompt.trim(),
-          requestId,
-          littBitsCharged: cost,
-          metadata: {
-            providerJobId: operation.name,
-            videoJobId: jobId,
-            aspectRatio,
-            resolution,
-            duration: Number(duration),
-          },
-        });
-        // Mark as generating — the status route completes it.
-        await updateGenerationJobStatus(genJobId, "generating", {
+      if (veoGenRowId) {
+        await updateGenerationJobStatus(veoGenRowId, "generating", {
           providerJobId: operation.name,
+        });
+        await updateGenerationJobMetadata(veoGenRowId, {
+          providerJobId: operation.name,
+          videoJobId: jobId,
         });
       }
 
@@ -388,17 +557,18 @@ async function handler(req: NextRequest) {
         balance: reservation ? reservation.balance : null,
       });
     } catch (genErr) {
-      // Refund the reserved LiTTBits on generation failure (skip if exempt)
-      if (reservation) {
-        await adjustWalletBalance({
-          clerkId: userId,
-          amount: cost,
-          type: "refund",
-          reason: `Video refund: ${videoModel.label} generation failed`,
-          idempotencyKey: `video:refund:${requestId}`,
-        });
-      }
-      throw genErr;
+      // Staged refund: the debit happened but the provider never accepted
+      // the job. Refund with bounded retries; the outcome is recorded on
+      // the durable row so a pending refund is never silently lost.
+      throw await settleFailedSubmission({
+        genRowId: veoGenRowId,
+        userId,
+        exempt: veoExempt,
+        cost,
+        modelLabel: videoModel.label,
+        requestId,
+        submitErr: genErr,
+      });
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Video generation failed";

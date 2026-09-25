@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -7,47 +7,22 @@ import { useTheme } from "@/context/ThemeContext";
 import {
   ArrowRight,
   AlertTriangle,
-  Bot,
-  Code2,
-  FileText,
   FolderKanban,
   GitPullRequest,
-  Image,
+  Loader2,
   Play,
-  Plus,
   RefreshCw,
   Search,
   Sparkles,
   Trash2,
   X,
 } from "lucide-react";
-
-const QUICK_ACTIONS = [
-  {
-    label: "Continue in Studio",
-    description: "Chat with LiTT, create media, and run a focused mission.",
-    href: "/studio",
-    icon: Sparkles,
-  },
-  {
-    label: "Open code workspace",
-    description: "Inspect files, scan code, and prepare a verified change.",
-    href: "/code",
-    icon: Code2,
-  },
-  {
-    label: "Mission Forge",
-    description: "Build reusable Missions by connecting LiTT, tools, approvals, and outputs.",
-    href: "/studio?tool=workflows",
-    icon: Bot,
-  },
-  {
-    label: "Review artifacts",
-    description: "Find images, previews, and saved outputs in one place.",
-    href: "/library/files",
-    icon: Image,
-  },
-];
+import {
+  describeProjectState,
+  sortProjectsRecentFirst,
+  readLastOpenedProject,
+  recordLastOpenedProject,
+} from "@/lib/projects/project-state";
 
 type Project = {
   id: string;
@@ -58,30 +33,24 @@ type Project = {
   workspaceStatus: string;
   runtimeStatus: string;
   updatedAt: string;
+  workspaceError?: string | null;
+  runtimeError?: string | null;
 };
 
-function projectStatus(project: Project): { label: string; color: string } {
-  if (["failed", "error"].includes(project.workspaceStatus) || project.runtimeStatus === "failed") {
-    return { label: "Needs attention", color: "#f87171" };
-  }
-  if (["provisioning", "preparing"].includes(project.workspaceStatus) || project.runtimeStatus === "starting") {
-    return { label: "Preparing", color: "#fbbf24" };
-  }
-  if (project.workspaceStatus === "ready" && project.runtimeStatus === "ready") {
-    return { label: "Preview ready", color: "#34d399" };
-  }
-  if (project.workspaceStatus === "ready") {
-    return { label: "Ready", color: "#60a5fa" };
-  }
-  return { label: "Setup needed", color: "#a78bfa" };
-}
+type Installation = {
+  id: number;
+  account: string | null;
+};
 
 export default function ProjectsPage() {
   const { resolvedColors: T } = useTheme();
   const [projects, setProjects] = useState<Project[]>([]);
+  const [installations, setInstallations] = useState<Installation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [lastOpenedId, setLastOpenedId] = useState<string | null>(null);
   // Project deletion (multi-select + confirm). Deletion itself is performed
   // by the existing DELETE /api/studio-projects/[projectId] endpoint, which
   // verifies ownership; related rows cascade in the database.
@@ -100,7 +69,7 @@ export default function ProjectsPage() {
       if (!res.ok) throw new Error(data?.error || "Projects are unavailable right now.");
       const canonical = Array.isArray(data.projects) ? data.projects : [];
       const legacy = Array.isArray(data.legacyOnly) ? data.legacyOnly : [];
-      setProjects([...canonical, ...legacy]);
+      setProjects(sortProjectsRecentFirst([...canonical, ...legacy]));
     } catch (err) {
       if ((err as { name?: string })?.name !== "AbortError") {
         setError("We couldn’t load your projects. Your work is safe—try again in a moment.");
@@ -115,6 +84,45 @@ export default function ProjectsPage() {
     void fetchProjects(controller.signal);
     return () => controller.abort();
   }, [fetchProjects]);
+
+  useEffect(() => {
+    setLastOpenedId(readLastOpenedProject());
+  }, []);
+
+  useEffect(() => {
+    // GitHub installations drive the "connected accounts" chips; failure
+    // is non-fatal — the projects list is what matters.
+    fetch("/api/github/installations")
+      .then((r) => r.json().catch(() => ({})))
+      .then((data) => setInstallations(data.installations || []))
+      .catch(() => setInstallations([]));
+  }, []);
+
+  const handleOpenProject = useCallback((id: string) => {
+    recordLastOpenedProject(id);
+    setLastOpenedId(id);
+  }, []);
+
+  const retrySetup = useCallback(
+    async (projectId: string) => {
+      setRetryingId(projectId);
+      setNotice(null);
+      try {
+        const res = await fetch(
+          `/api/studio-projects/${encodeURIComponent(projectId)}/workspace/prepare`,
+          { method: "POST" },
+        );
+        if (!res.ok) throw new Error("retry failed");
+        await fetchProjects();
+        setNotice("Setup restarted — this usually takes a minute or two.");
+      } catch {
+        setNotice("Couldn’t restart setup. Try again in a moment.");
+      } finally {
+        setRetryingId(null);
+      }
+    },
+    [fetchProjects],
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -218,44 +226,6 @@ export default function ProjectsPage() {
                 <GitPullRequest size={16} /> Connect a repository
               </Link>
             </div>
-          </div>
-        </section>
-
-        <section className="mt-8">
-          <div className="mb-4 flex items-end justify-between gap-4">
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: T.accentColor }}>
-                Continue working
-              </p>
-              <h2 className="mt-1 text-xl font-black" style={{ color: T.headerColor }}>
-                Pick up without hunting through menus
-              </h2>
-            </div>
-            <Link href="/studio" className="hidden items-center gap-1 text-xs font-bold sm:inline-flex" style={{ color: T.accentColor }}>
-              New Run <Plus size={14} />
-            </Link>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {QUICK_ACTIONS.map((action) => {
-              const Icon = action.icon;
-              return (
-                <Link
-                  key={action.href}
-                  href={action.href}
-                  className="group flex min-h-28 items-start gap-4 rounded-2xl border p-4 transition-transform hover:-translate-y-0.5"
-                  style={{ backgroundColor: `${T.boxBg}b8`, borderColor: `${T.borderColor}45` }}
-                >
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl" style={{ backgroundColor: `${T.accentColor}14`, color: T.accentColor }}>
-                    <Icon size={20} />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-black" style={{ color: T.headerColor }}>{action.label}</span>
-                    <span className="mt-1 block text-xs leading-relaxed" style={{ color: T.textMuted }}>{action.description}</span>
-                  </span>
-                  <ArrowRight size={16} className="mt-1 shrink-0 opacity-35 transition-transform group-hover:translate-x-1 group-hover:opacity-100" />
-                </Link>
-              );
-            })}
           </div>
         </section>
 
@@ -374,13 +344,16 @@ export default function ProjectsPage() {
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {filtered.map((project) => {
-                const status = projectStatus(project);
+                const state = describeProjectState(project);
                 const isSelected = selected.has(project.id);
+                const isResumable = !selectMode && lastOpenedId === project.id;
                 return (
                   <Link
                     key={project.id}
                     href={selectMode ? "#" : `/studio?project=${encodeURIComponent(project.id)}`}
-                    onClick={selectMode ? (e) => { e.preventDefault(); toggleSelect(project.id); } : undefined}
+                    onClick={selectMode
+                      ? (e) => { e.preventDefault(); toggleSelect(project.id); }
+                      : () => handleOpenProject(project.id)}
                     aria-pressed={selectMode ? isSelected : undefined}
                     className={`group relative flex flex-col gap-3 rounded-2xl border p-4 transition-transform hover:-translate-y-0.5 ${selectMode && isSelected ? "ring-2 ring-accent/60" : ""}`}
                     style={{ backgroundColor: `${T.boxBg}b8`, borderColor: `${T.borderColor}45` }}
@@ -405,8 +378,20 @@ export default function ProjectsPage() {
                           {project.githubFullName || (project.sourceType === "blank" ? "LiTT project" : "Template project")}
                         </div>
                       </div>
-                      <span className="shrink-0 rounded-full px-2.5 py-1 text-[9px] font-black uppercase" style={{ backgroundColor: `${status.color}18`, color: status.color, border: `1px solid ${status.color}35` }}>{status.label}</span>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {isResumable && (
+                          <span className="rounded-full px-2.5 py-1 text-[9px] font-black uppercase" style={{ backgroundColor: `${T.accentColor}18`, color: T.accentColor, border: `1px solid ${T.accentColor}45` }}>
+                            Resume
+                          </span>
+                        )}
+                        <span className="rounded-full px-2.5 py-1 text-[9px] font-black uppercase" style={{ backgroundColor: `${state.color}18`, color: state.color, border: `1px solid ${state.color}35` }}>{state.label}</span>
+                      </div>
                     </div>
+                    {state.detail && (
+                      <p className="text-[11px] leading-relaxed" style={{ color: state.color }}>
+                        {state.detail}
+                      </p>
+                    )}
                     <div className="flex items-center justify-between gap-3 text-[11px]" style={{ color: T.textMuted }}>
                       <span className="truncate">{project.githubBranch ? `Branch: ${project.githubBranch}` : `Updated ${new Date(project.updatedAt).toLocaleDateString()}`}</span>
                       {selectMode ? (
@@ -415,6 +400,22 @@ export default function ProjectsPage() {
                         </span>
                       ) : (
                         <span className="inline-flex shrink-0 items-center gap-2">
+                          {state.canRetry && (
+                            <button
+                              type="button"
+                              aria-label={`Retry setup for ${project.name || "Untitled project"}`}
+                              title="Retry setup"
+                              disabled={retryingId === project.id}
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); void retrySetup(project.id); }}
+                              className="inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-[11px] font-black disabled:opacity-50"
+                              style={{ borderColor: `${T.accentColor}55`, color: T.accentColor }}
+                            >
+                              {retryingId === project.id
+                                ? <Loader2 size={12} className="animate-spin" />
+                                : <RefreshCw size={12} />}
+                              {retryingId === project.id ? "Retrying…" : "Retry setup"}
+                            </button>
+                          )}
                           <button
                             type="button"
                             aria-label={`Delete ${project.name || "Untitled project"}`}
@@ -424,7 +425,7 @@ export default function ProjectsPage() {
                           >
                             <Trash2 size={14} />
                           </button>
-                          <span className="inline-flex items-center gap-1 font-bold" style={{ color: T.accentColor }}>Open <ArrowRight size={12} /></span>
+                          <span className="inline-flex items-center gap-1 font-bold" style={{ color: T.accentColor }}>{isResumable ? "Resume" : "Open"} <ArrowRight size={12} /></span>
                         </span>
                       )}
                     </div>
@@ -433,23 +434,33 @@ export default function ProjectsPage() {
               })}
             </div>
           )}
-        </section>
 
-        <section className="mt-8 grid gap-3 md:grid-cols-3">
-          {[
-            { label: "Files", detail: "Browse project and uploaded files", href: "/library/files", icon: FileText },
-            { label: "Runs", detail: "Start a traceable Studio mission", href: "/studio", icon: Play },
-            { label: "New project", detail: "Start with a blank project or describe what to build", href: "/studio", icon: Plus },
-          ].map((item) => {
-            const Icon = item.icon;
-            return (
-              <Link key={item.label} href={item.href} className="rounded-2xl border p-4 hover:opacity-85" style={{ borderColor: `${T.borderColor}40`, backgroundColor: `${T.boxBg}75` }}>
-                <Icon size={18} style={{ color: T.accentColor }} />
-                <div className="mt-3 text-sm font-black" style={{ color: T.headerColor }}>{item.label}</div>
-                <div className="mt-1 text-xs" style={{ color: T.textMuted }}>{item.detail}</div>
-              </Link>
-            );
-          })}
+          {installations.length > 0 && (
+            <div className="mt-8">
+              <div
+                className="text-[10px] font-black uppercase tracking-widest mb-3"
+                style={{ color: T.textMuted }}
+              >
+                Connected GitHub accounts
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {installations.map((i) => (
+                  <div
+                    key={String(i.id)}
+                    className="flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold"
+                    style={{
+                      borderColor: `${T.accentColor}25`,
+                      color: T.textColor,
+                      backgroundColor: `${T.accentColor}08`,
+                    }}
+                  >
+                    <GitPullRequest size={10} style={{ color: T.accentColor }} />
+                    {i.account ?? `Installation ${i.id}`}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
       </div>
 

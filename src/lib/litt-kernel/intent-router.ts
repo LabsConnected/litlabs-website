@@ -31,10 +31,59 @@ const MODE_PATTERNS: ModePattern[] = [
   {
     mode: "status",
     patterns: [
-      /\b(is|are|does|do|can|could|will|would)\b.*\b(working|connected|online|offline|available|ready|broken|down|up|status|configured|enabled|disabled)\b/i,
-      /\b(voice|microphone|mic|tts|camera|terminal|github|deployment|supabase|stripe|vercel|cloudflare)\b.*\b(working|connected|status|broken|down)\b/i,
+      // Bare "up" is NOT in this word list: modal + "up" also matches
+      // phrasal launch verbs ("can you spin up a browser"), which must
+      // reach the browser lane. "up" as a status word is covered by the
+      // predicate pattern below instead.
+      /\b(is|are|does|do|can|could|will|would)\b.*\b(working|connected|online|offline|available|ready|broken|down|status|configured|enabled|disabled)\b/i,
+      // "up" only counts as a status word when it is the predicate —
+      // "is the server up", "is it back up", "will it be up".
+      /\b(is|are|was|were|be|being|still|back|come|comes|coming|stay|stays|staying)\b[^.!?]{0,30}\bup\b/i,
+      /\b(voice|microphone|mic|tts|camera|terminal|github|deployment|supabase|stripe|vercel|cloudflare|browser)\b.*\b(working|connected|status|broken|down)\b/i,
       /\b(check|verify|test)\b.*\b(capabilit|connection|status|voice|terminal)\b/i,
     ],
+    domains: ["platform"],
+  },
+
+  // ─── browser: live browser session control ───────────────────
+  // Browser-control intent is execution, not chat: without this lane,
+  // "open a live browser session" fell through to think mode →
+  // requiresExecution:false → the V1 read-only loop, which has no
+  // browser tools — the model then confabulated "browser sessions
+  // aren't available." Placed after status (so "is the browser
+  // working?" stays a status question) and before ship/build (a
+  // passing "browser" mention inside a build request must stay build —
+  // these patterns require the browser to be the action's target).
+  {
+    mode: "browser",
+    patterns: [
+      // Session lifecycle — browser is the object of a launch verb:
+      // "open a live browser", "start a browser session",
+      // "launch a browser and go to example.com", "spin up a browser".
+      /\b(open|launch|start|spawn|spin\s*up|fire\s*up|boot|bring\s*up)\b[^.!?]{0,40}\bbrowser\b/i,
+      // Explicit session/lane mentions: "browser.session.start",
+      // "a browser session", "the live browser".
+      /\bbrowser[._\s-]*session\b/i,
+      /\b(live|remote|headless)\s+browser\b/i,
+      // Control handoff: "take over the browser", "take control of the
+      // browser", "let me drive the browser", "give control back",
+      // "hand the browser over".
+      /\b(take\s*over|take\s+control|let\s+me\s+(drive|take|control))\b[^.!?]{0,40}\bbrowser\b/i,
+      /\bbrowser\b[^.!?]{0,30}\b(control|drive|take\s*over)\b/i,
+      /\b(give|hand|return|pass)\b[^.!?]{0,20}\bcontrol\b/i,
+      // Navigation through the browser: "go to X in the browser",
+      // "navigate the browser to the preview", "browse this site for
+      // me", "use the browser to check the dashboard". The gap classes
+      // allow "." because navigation targets are usually URLs —
+      // "go to https://example.com in the browser" must still match.
+      /\b(go|navigate|visit|browse|surf|head)\b[^!?]{0,50}\bbrowser\b/i,
+      /\bbrowser\b[^.!?]{0,30}\b(go\s*to|navigate|visit|open|drive)\b/i,
+      /\buse\b[^.!?]{0,20}\bbrowser\b/i,
+      /\bbrowse\b[^.!?]{0,40}\b(site|page|url|link|for\s+me)\b/i,
+      /\b(open|visit|check|go\s*to|navigate\s*to|look\s*at|show\s+me|take\s+(me\s+)?to)\b[^!?]{0,60}\bin\s+the\s+browser\b/i,
+    ],
+    requiresProject: false,
+    requiresExecution: true,
     domains: ["platform"],
   },
 
@@ -75,7 +124,10 @@ const MODE_PATTERNS: ModePattern[] = [
       // catching "site visit" / "I want to shop".
       /\b(want|need|would like|looking for|get me|give me)\b.*\b(landing page|landing site|website|web ?site|web ?app|home ?page|web ?page|blog|portfolio|dashboard|app)\b/i,
       // "gimme" is colloquial "give me" — "gimme a portfolio site" is a build.
-      /\b(build|create|make|generate|scaffold|set up|gimme)\b.*\b(website|web ?site|web ?app|site|landing site|landing page|homepage|web page|webpage|blog|portfolio|store|shop|dashboard|app)\b/i,
+      // "extension" is a build artifact (browser/IDE extensions are
+      // code) — "build a browser extension" must stay build, not
+      // browser-session control.
+      /\b(build|create|make|generate|scaffold|set up|gimme)\b.*\b(website|web ?site|web ?app|site|landing site|landing page|homepage|web page|webpage|blog|portfolio|store|shop|dashboard|app|extension)\b/i,
       // Question-form desire: "what about a landing page for my barbershop?"
       // has no build verb, so it fell through to create's bare artifact-noun
       // pattern — a chat reply, nothing built.

@@ -101,7 +101,7 @@ export function auditCommand(
   // block or delay command execution in the calling path.
   getSupabase().then((sb) => {
     if (!sb) return;
-    sb.from("terminal_audit_log")
+    sb.from("terminal_command_audit_log")
       .insert({
         user_id: userId,
         session_id: sessionId,

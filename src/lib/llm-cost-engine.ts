@@ -341,9 +341,9 @@ export function getEstimatedBitsRange(
 
   let label: string;
   if (maxBits <= 1) label = "Included";
-  else if (maxBits <= 5) label = "Low BITS";
-  else if (maxBits <= 15) label = "Standard BITS";
-  else label = "Premium BITS";
+  else if (maxBits <= 5) label = "Low LiTTBits";
+  else if (maxBits <= 15) label = "Standard LiTTBits";
+  else label = "Premium LiTTBits";
 
   return { min: minBits, max: maxBits, label };
 }

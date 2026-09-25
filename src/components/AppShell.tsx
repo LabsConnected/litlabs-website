@@ -5,7 +5,7 @@
  *
  * Top-bar navigation everywhere (product direction 2026-09-15):
  *   - One sticky glass top bar on all viewports: logo, primary nav,
- *     LiTT status, BITS balance, and the identity dock.
+ *     LiTT status, LiTTBits balance, and the identity dock.
  *   - Mobile gets a second horizontally-scrollable nav strip under the
  *     bar. Studio keeps its own mobile chrome, so the strip is skipped
  *     there (the single-row bar with logo + account stays).
@@ -480,14 +480,14 @@ function TopBar() {
           </span>
         </div>
 
-        {/* BITS — signed-in users */}
+        {/* LiTTBits — signed-in users */}
         {isSignedIn && (
           <span
             className="hidden text-[11px] font-bold sm:block"
             style={{ color: T.textMuted }}
-            title="Your BITS balance"
+            title="Your LiTTBits balance"
           >
-            {balance.toLocaleString()} <span style={{ color: T.accentColor }}>BITS</span>
+            {balance.toLocaleString()} <span style={{ color: T.accentColor }}>LiTTBits</span>
           </span>
         )}
 

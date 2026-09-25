@@ -87,6 +87,14 @@ const BUDGETS: Record<LiTTMode, ExecutionBudget> = {
     maximumAgents: 1,
     maximumReflectionPasses: 1,
   },
+  browser: {
+    maximumCostCents: 40,
+    maximumLatencyMs: 120000,
+    minimumQuality: 0.8,
+    maximumToolCalls: 8,
+    maximumAgents: 1,
+    maximumReflectionPasses: 1,
+  },
 };
 
 // ─── Mode defaults ──────────────────────────────────────────────
@@ -154,6 +162,14 @@ const MODE_DEFAULTS: Record<LiTTMode, ModeDefaults> = {
     defaultModelProfile: "default-teaching",
     defaultBudget: BUDGETS.learn,
     defaultSpecialists: ["teacher"],
+    parallelAllowed: false,
+  },
+  browser: {
+    defaultSkills: ["browser.session", "browser.navigate"],
+    defaultTools: ["browser"],
+    defaultModelProfile: "default-coding",
+    defaultBudget: BUDGETS.browser,
+    defaultSpecialists: [],
     parallelAllowed: false,
   },
 };

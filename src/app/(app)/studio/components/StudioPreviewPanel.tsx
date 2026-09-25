@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Copy, ExternalLink, Eye, Loader2, Monitor, MousePointer2, RefreshCw, RotateCcw, Smartphone, Square, Tablet, X } from "lucide-react";
+import { Check, Copy, ExternalLink, Eye, KeyRound, Loader2, Monitor, MousePointer2, RefreshCw, RotateCcw, Smartphone, Square, Tablet, X } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { formatSourceSummary } from "@/lib/projects/project-source";
 import { useExecutionStore } from "../stores/useExecutionStore";
+import { StudioSecretsPanel } from "./StudioSecretsPanel";
 
 /**
  * Preview states — the five canonical states the UI explicitly supports.
@@ -184,11 +185,19 @@ export default function StudioPreviewPanel({
   const [logsOpen, setLogsOpen] = useState(false);
   const [iframeFailed, setIframeFailed] = useState(false);
   const [urlCopied, setUrlCopied] = useState(false);
+  // Style-probe result from the injected inspector script: whether the
+  // preview page intends Tailwind (browser CDN) and whether its utilities
+  // actually applied. A Tailwind-intended page that renders unstyled (the
+  // v4 @import trap) must never keep the green "Preview ready" badge.
+  const [styleProbe, setStyleProbe] = useState<{ tailwindDetected: boolean; styled: boolean } | null>(null);
   const [selectionMode, setSelectionMode] = useState(true);
   const [selectedElement, setSelectedElement] = useState<PreviewSelection | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [startPhase, setStartPhase] = useState<StartPhase>(null);
+  // Project secrets editor (Clerk keys for the preview runtime). Toggled
+  // from the toolbar; auto-opened from the auth-config error CTA.
+  const [secretsOpen, setSecretsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const selectionCleanupRef = useRef<(() => void) | null>(null);
@@ -480,6 +489,35 @@ export default function StudioPreviewPanel({
     return () => window.removeEventListener("message", handler);
   }, []);
 
+  // Style-probe listener: the injected inspector script reports whether
+  // Tailwind utilities actually applied in the preview frame. The probe
+  // runs on every frame load, so reset on previewUrl change — a stale
+  // "styled" verdict must never mask a fresh unstyled page.
+  useEffect(() => {
+    if (!projectId || !previewUrl) return;
+    setStyleProbe(null);
+    let previewOrigin: string;
+    try {
+      previewOrigin = new URL(previewUrl, window.location.href).origin;
+    } catch {
+      return;
+    }
+    const handler = (event: MessageEvent) => {
+      if (event.origin !== previewOrigin) return;
+      const data = event.data as { source?: unknown; type?: unknown; payload?: unknown } | null;
+      if (!data || data.source !== "litt-inspector" || data.type !== "style-probe") return;
+      const p = data.payload as { tailwindDetected?: unknown; styled?: unknown } | null;
+      setStyleProbe({
+        tailwindDetected: p?.tailwindDetected === true,
+        // A malformed payload must not false-alarm: only an explicit
+        // styled:false on a Tailwind-intended page counts as a failure.
+        styled: p?.styled !== false,
+      });
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [projectId, previewUrl]);
+
   // The terminal-server proxy serves an honest error page (instead of the
   // backend's white "Cannot GET /") when the dev server 404s the entry
   // path at proxy time, and that page postMessages us. Flip the badge
@@ -521,6 +559,15 @@ export default function StudioPreviewPanel({
     window.addEventListener("studio:files-changed", handler);
     return () => window.removeEventListener("studio:files-changed", handler);
   }, [projectId, loadStatus]);
+
+  // The canvas ActionPanel's "Inspect element" action dispatches this event.
+  // Enabling selection mode is enough — the inspector bridge enables itself
+  // on iframe load, so this just turns the click-to-select UI back on.
+  useEffect(() => {
+    const handler = () => setSelectionMode(true);
+    window.addEventListener("studio:activate-inspector", handler);
+    return () => window.removeEventListener("studio:activate-inspector", handler);
+  }, []);
 
   // Auto-poll while starting, restarting, or loading — BOUNDED. A start that
   // never resolves becomes a terminal "failed" instead of an infinite
@@ -737,9 +784,12 @@ export default function StudioPreviewPanel({
 
   const displayUrl = previewUrl ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}studioRefresh=${frameKey}` : null;
   const isAuthConfigError = errorCode === "preview_clerk_config_error" || errorCode === "preview_auth_config_error";
-  const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (iframeFailed ? "Preview failed to load" : "Preview ready") : state === "stale" ? "Preview may be stale" : state === "not_started" ? "Preview not started" : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : "Preview failed to start") : "Preview runtime unreachable";
-  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "not_started" ? "Preparing your preview automatically…" : state === "unreachable" ? (error ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (error ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — update the Clerk keys in the terminal-server Railway env or workspace .env.local.") : error ?? "The dev server failed to start. Try restarting it.") : error ?? "The preview surface reports only real project runtime state.";
-  const dotColor = STATUS_DOT_COLOR[state];
+  // The v4 @import trap: a Tailwind-intended preview that renders unstyled
+  // must surface honestly — never a green "Preview ready" over dead CSS.
+  const stylingFailed = state === "ready" && styleProbe?.tailwindDetected === true && styleProbe.styled === false;
+  const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (iframeFailed ? "Preview failed to load" : stylingFailed ? "Preview styling failed to apply" : "Preview ready") : state === "stale" ? "Preview may be stale" : state === "not_started" ? "Preview not started" : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : "Preview failed to start") : "Preview runtime unreachable";
+  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "not_started" ? "Preparing your preview automatically…" : state === "unreachable" ? (error ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (error ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : error ?? "The dev server failed to start. Try restarting it.") : error ?? "The preview surface reports only real project runtime state.";
+  const dotColor = stylingFailed ? STATUS_DOT_COLOR.stale : STATUS_DOT_COLOR[state];
   const isLive = state === "ready" || state === "stale";
   const sourceSummary = formatSourceSummary({
     kind: sourceKind,
@@ -892,6 +942,23 @@ export default function StudioPreviewPanel({
             {urlCopied ? <Check size={12} className="pointer-events-none" style={{ color: "#48EE38" }} /> : <Copy size={12} className="pointer-events-none" />}
           </button>
         )}
+        {/* Project secrets — Clerk keys for the preview runtime */}
+        <button
+          type="button"
+          onClick={() => setSecretsOpen((v) => !v)}
+          disabled={!projectId}
+          className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8 disabled:opacity-40"
+          style={{
+            backgroundColor: secretsOpen ? "rgba(114,242,56,0.12)" : "transparent",
+            color: secretsOpen ? "var(--litt-primary)" : "var(--text-muted)",
+          }}
+          aria-label="Project secrets"
+          aria-pressed={secretsOpen}
+          title="Project secrets (Clerk keys for the preview)"
+          data-testid="preview-secrets-toggle"
+        >
+          <KeyRound size={12} className="pointer-events-none" />
+        </button>
         {/* Maximize */}
         {isLive && (
           <button
@@ -906,6 +973,20 @@ export default function StudioPreviewPanel({
           </button>
         )}
       </div>
+      {/* Project secrets section — collapsible, above the preview surface */}
+      {secretsOpen && projectId && (
+        <div
+          className="max-h-[45%] shrink-0 overflow-y-auto border-b"
+          style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}
+          data-testid="preview-secrets-section"
+        >
+          <StudioSecretsPanel
+            projectId={projectId}
+            getToken={getToken}
+            onKeysChanged={() => void loadStatus(true)}
+          />
+        </div>
+      )}
       {selectedElement && (
         <div
           className="flex shrink-0 items-center gap-2 border-b px-2.5 py-1.5 text-[10px]"
@@ -978,17 +1059,34 @@ export default function StudioPreviewPanel({
             {/* Retry button for unreachable/failed states. not_started is
                 handled by auto-start — no manual button needed. */}
             {["unreachable", "failed"].includes(state) && (
-              <button
-                type="button"
-                onClick={() => void preparePreview()}
-                disabled={!projectId || state === "starting" || state === "restarting"}
-                className="flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-[10px] font-bold disabled:opacity-40"
-                style={{ backgroundColor: "var(--litt-primary)", color: "#000" }}
-                data-testid="preview-prepare"
-              >
-                <RotateCcw size={11} className="pointer-events-none" />
-                {state === "failed" ? "Restart preview" : "Retry"}
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => void preparePreview()}
+                  disabled={!projectId || state === "starting" || state === "restarting"}
+                  className="flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-[10px] font-bold disabled:opacity-40"
+                  style={{ backgroundColor: "var(--litt-primary)", color: "#000" }}
+                  data-testid="preview-prepare"
+                >
+                  <RotateCcw size={11} className="pointer-events-none" />
+                  {state === "failed" ? "Restart preview" : "Retry"}
+                </button>
+                {/* Auth-config failure → the fix is the project's Clerk keys.
+                    This button now opens the real secrets editor (shipped
+                    with project secrets; the copy above already points here). */}
+                {state === "failed" && isAuthConfigError && projectId && (
+                  <button
+                    type="button"
+                    onClick={() => setSecretsOpen(true)}
+                    className="flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-[10px] font-bold transition hover:bg-white/8"
+                    style={{ borderColor: "var(--studio-border)", color: "var(--text-secondary)" }}
+                    data-testid="preview-add-keys"
+                  >
+                    <KeyRound size={11} className="pointer-events-none" />
+                    Add Clerk keys
+                  </button>
+                )}
+              </>
             )}
           </div>
         )}

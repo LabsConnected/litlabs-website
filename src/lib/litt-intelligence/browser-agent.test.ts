@@ -254,7 +254,7 @@ describe("runOneShotScreenshot", () => {
     vi.clearAllMocks();
     process.env.LITTLABS_VAPI_OWNER_CLERK_ID = OWNER_ID;
     mockStartSession.mockResolvedValue(fakeSession());
-    mockCloseSession.mockResolvedValue(undefined);
+    mockCloseSession.mockResolvedValue(true);
     // Phase 4: preflight passes by default here too.
     mockPreflightBrowserStart.mockResolvedValue({ ok: true });
     mockDbGetActiveSessions.mockResolvedValue([]);

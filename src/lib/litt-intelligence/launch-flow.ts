@@ -22,6 +22,11 @@ import { runAgentLoopV2, type AgentLoopResult, type AgentLoopConfig, DEFAULT_LOO
 import { toolRegistry } from "./tool-registry";
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import type { BuildFixLoopResult } from "./build-fix-loop";
+import {
+  recordActionEventActivity,
+  type ActionEventInput,
+  type ActionExecutionContext,
+} from "@/lib/action-runtime";
 import { ProgressEmitter } from "./progress-events";
 import { buildPreviewProxyUrl } from "@/lib/terminal-internal-client";
 import {
@@ -72,6 +77,14 @@ export interface LaunchFlowOptions {
   signal?: AbortSignal;
   progress?: ProgressEmitter;
   evalMetadata?: LLMCallMetadata;
+  /**
+   * Canonical parent run context created by the authenticated orchestrator.
+   * Launch flow must propagate it to every agent-loop pass so files,
+   * terminal, preview, deployment, and browser work share one ActionRun.
+   */
+  actionContext?: ActionExecutionContext;
+  /** Conversation scope for trusted context/user-scoped tools. */
+  conversationId?: string;
   /** Injected for tests. */
   runAgentLoop?: (
     userMessage: string,
@@ -142,6 +155,22 @@ function hasAppliedMutation(result: AgentLoopResult): boolean {
   });
 }
 
+async function recordPreviewRuntimeEvent(
+  actionContext: ActionExecutionContext | undefined,
+  type: ActionEventInput["type"],
+  payload: Record<string, string>,
+  message: string,
+): Promise<void> {
+  if (!actionContext) return;
+  await recordActionEventActivity({
+    runId: actionContext.actionRunId,
+    userId: actionContext.userId,
+    type,
+    payload,
+    message,
+  });
+}
+
 async function startAndWaitForPreview(
   transport: WorkspaceTransport,
   opts: {
@@ -150,32 +179,100 @@ async function startAndWaitForPreview(
     signal?: AbortSignal;
   },
   progress: ProgressEmitter,
+  actionContext?: ActionExecutionContext,
 ): Promise<"ready" | "failed" | "timeout"> {
+  let terminalEventRecorded = false;
+  let previewStartPersistFailed = false;
+  const recordTerminal = async (
+    type: "preview.ready" | "preview.failed",
+    payload: Record<string, string>,
+    message: string,
+  ) => {
+    terminalEventRecorded = true;
+    await recordPreviewRuntimeEvent(actionContext, type, payload, message);
+  };
+
   try {
+    try {
+      await recordPreviewRuntimeEvent(
+        actionContext,
+        "preview.started",
+        { workspaceId: transport.workspaceId },
+        "Starting project preview",
+      );
+    } catch (persistError) {
+      console.error("[action-runtime] preview start could not be persisted; preview start aborted", {
+        runId: actionContext?.actionRunId,
+        workspaceId: transport.workspaceId,
+        errorClass: persistError instanceof Error ? persistError.message : String(persistError),
+      });
+      previewStartPersistFailed = true;
+      throw persistError;
+    }
     await transport.startPreview();
-  } catch {
+  } catch (error) {
     // A rejected start request (e.g. preview_no_dev_command on a workspace
     // with no servable entry) is a normal "failed" outcome — returning it
     // lets callers run the repair loop or surface a pending approval
-    // instead of escaping as a generic launch crash.
+    // instead of escaping as a generic launch crash. A runtime persistence
+    // failure is different: it remains an explicit error and never retries
+    // hidden untracked work.
     progress.emit({ type: "preview_status", status: "failed", healthy: false });
+    if (!terminalEventRecorded) {
+      await recordTerminal(
+        "preview.failed",
+        { error: error instanceof Error ? error.message.slice(0, 300) : "preview_start_failed" },
+        "Project preview failed to start",
+      );
+    }
+    if (previewStartPersistFailed) throw error;
     return "failed";
   }
 
-  const deadline = Date.now() + opts.maxWaitMs;
-  while (Date.now() < deadline) {
-    checkSignal(opts.signal);
+  try {
+    const deadline = Date.now() + opts.maxWaitMs;
+    while (Date.now() < deadline) {
+      checkSignal(opts.signal);
 
-    const status = await transport.getPreviewStatus();
-    progress.emit({ type: "preview_status", status: status.status, healthy: status.status === "ready" && !status.error });
+      const status = await transport.getPreviewStatus();
+      progress.emit({ type: "preview_status", status: status.status, healthy: status.status === "ready" && !status.error });
 
-    if (status.status === "ready" && !status.error) return "ready";
-    if (status.status === "failed" || status.error) return "failed";
+      if (status.status === "ready" && !status.error) {
+        await recordTerminal(
+          "preview.ready",
+          { workspaceId: transport.workspaceId, ...(status.port ? { port: String(status.port) } : {}) },
+          "Project preview is ready",
+        );
+        return "ready";
+      }
+      if (status.status === "failed" || status.error) {
+        await recordTerminal(
+          "preview.failed",
+          { error: (status.error ?? `Preview status ${status.status}`).slice(0, 300) },
+          "Project preview failed",
+        );
+        return "failed";
+      }
 
-    await sleep(opts.pollIntervalMs);
+      await sleep(opts.pollIntervalMs);
+    }
+
+    await recordTerminal(
+      "preview.failed",
+      { error: "preview_ready_timeout" },
+      "Project preview timed out",
+    );
+    return "timeout";
+  } catch (error) {
+    if (!terminalEventRecorded) {
+      await recordTerminal(
+        "preview.failed",
+        { error: error instanceof Error ? error.message.slice(0, 300) : "preview_wait_failed" },
+        "Project preview failed",
+      );
+    }
+    throw error;
   }
-
-  return "timeout";
 }
 
 export interface ProjectArtifactCheck {
@@ -202,12 +299,22 @@ const WEBSITE_ENTRY_FILES = new Set([
 ]);
 
 /**
+ * Marker comment the platform seeds into blank-workspace entry files
+ * (source of truth: terminal-server/workspace/welcome-screen.ts
+ * WELCOME_SCREEN_MARKER). A build that stalled before replacing the
+ * starter leaves this marker behind — the filename check alone cannot
+ * tell a real project from the welcome screen, so entry candidates are
+ * read and rejected when the marker is still present.
+ */
+const WELCOME_SCREEN_MARKER = "LITT-WELCOME-SCREEN";
+
+/**
  * Verify that a website build produced a real entry artifact in the bound
  * workspace. This deliberately asks the workspace transport rather than
  * trusting tool-call metadata or the model's final prose.
  */
 export async function verifyProjectArtifacts(
-  transport: Pick<WorkspaceTransport, "listFiles">,
+  transport: Pick<WorkspaceTransport, "listFiles" | "readFile">,
 ): Promise<ProjectArtifactCheck> {
   const files: string[] = [];
   const queue: Array<{ path: string; depth: number }> = [{ path: ".", depth: 0 }];
@@ -241,13 +348,43 @@ export async function verifyProjectArtifacts(
     };
   }
 
-  const normalized = new Set(files.map((file) => file.toLowerCase()));
-  const hasEntry = [...WEBSITE_ENTRY_FILES].some((file) => normalized.has(file));
-  if (!hasEntry) {
+  const entryFiles = [...WEBSITE_ENTRY_FILES]
+    .map((entry) => files.find((file) => file.toLowerCase() === entry))
+    .filter((file): file is string => file !== undefined);
+  if (entryFiles.length === 0) {
     return {
       ok: false,
       files,
       error: "No runnable website entry file was created in the project workspace.",
+    };
+  }
+
+  // The blank workspace ships a welcome screen under the entry filename
+  // (e.g. index.html). A run that stalled before replacing it must not
+  // pass this gate — read each candidate and reject the ones that still
+  // carry the welcome-screen marker. An unreadable file keeps the old
+  // filename-only signal so exotic transports do not newly fail.
+  let realEntryFound = false;
+  let welcomeOnly = false;
+  for (const entry of entryFiles) {
+    let content: string | null = null;
+    try {
+      content = (await transport.readFile(entry)).content;
+    } catch {
+      content = null;
+    }
+    if (content === null || !content.includes(WELCOME_SCREEN_MARKER)) {
+      realEntryFound = true;
+      break;
+    }
+    welcomeOnly = true;
+  }
+  if (!realEntryFound && welcomeOnly) {
+    return {
+      ok: false,
+      files,
+      error:
+        "The project workspace still shows the blank starter screen — no real project files were created.",
     };
   }
 
@@ -263,6 +400,7 @@ export async function ensureProjectPreviewReady(
   transport: WorkspaceTransport,
   options: { maxWaitMs?: number; pollIntervalMs?: number } = {},
   progress: ProgressEmitter = new ProgressEmitter(),
+  actionContext?: ActionExecutionContext,
 ): Promise<{ ok: boolean; files: string[]; error?: string }> {
   let artifacts: ProjectArtifactCheck = { ok: false, files: [] };
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -280,6 +418,7 @@ export async function ensureProjectPreviewReady(
         pollIntervalMs: options.pollIntervalMs ?? 1_000,
       },
       progress,
+      actionContext,
     );
     if (status !== "ready") {
       const runtime = await transport.getPreviewStatus().catch(() => null);
@@ -309,6 +448,17 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
   const steps: string[] = [];
   let runtimeRepairAttempts = 0;
   const maxRuntimeRepairAttempts = options.maxRuntimeRepairAttempts ?? 2;
+  // Tenant/project identity is reconstructed from authenticated launch-flow
+  // options, never trusted from a forwarded object. The actionRunId itself is
+  // the only value taken from the orchestrator's context.
+  const actionContext: ActionExecutionContext | undefined = options.actionContext
+    ? {
+        actionRunId: options.actionContext.actionRunId,
+        userId: options.userId,
+        conversationId: options.actionContext.conversationId ?? options.conversationId,
+        projectId: options.projectId,
+      }
+    : undefined;
 
   let lastAgentLoopResult: AgentLoopResult | undefined;
 
@@ -349,6 +499,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           model: options.model,
           executionMode: options.executionMode ?? "act",
           enableBuildFix: options.enableBuildFix ?? true,
+          requireToolCallOnFirstStep: options.requiresExecution === true,
           evalMetadata: options.evalMetadata,
           // Always bounded by the global launch budget — a reprompt must not
           // restart the clock.
@@ -362,6 +513,9 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           maxSteps: 40,
           maxOutputChars: 200_000,
           signal,
+          userId: options.userId,
+          conversationId: actionContext?.conversationId ?? options.conversationId,
+          actionContext,
           // Quality loop: gate the main build phase when the caller opted in.
           // (The repair phase below runs without it — it is a bounded
           // sub-task of the already-gated build, not a new build.)
@@ -392,6 +546,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
                 signal,
               },
               progress,
+              actionContext,
             ).then((previewStatus) => {
               if (previewStatus === "ready") {
                 const previewUrl = (options.buildPreviewUrl ?? buildPreviewProxyUrl)(transport.workspaceId);
@@ -564,6 +719,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
         signal,
       },
       progress,
+      actionContext,
     );
 
     // Runtime repair loop
@@ -598,6 +754,9 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           maxRuntimeMs: Math.max(0, startTime + DEFAULT_LOOP_CONFIG.maxRuntimeMs - Date.now()),
           maxOutputChars: 200_000,
           signal,
+          userId: options.userId,
+          conversationId: actionContext?.conversationId ?? options.conversationId,
+          actionContext,
         },
         progress,
       );
@@ -660,6 +819,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           signal,
         },
         progress,
+        actionContext,
       );
     }
 

@@ -25,6 +25,7 @@ import { buildPatchRecoveryMessage, validateApplyPatchInputs, validateFilesWrite
 import { computeWorkspaceChange } from "./workspace-change-producer";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { toolRegistry } from "./tool-registry";
+import type { ActionExecutionContext } from "@/lib/action-runtime";
 import { resolveAvailableCapabilities } from "./capabilities";
 import type { LiTTToolDefinition } from "./types";
 import {
@@ -56,6 +57,8 @@ export interface AgentLoopConfig {
   model?: string;
   systemPrompt: string;
   enableBuildFix: boolean;
+  /** Require a structured tool call on the first model turn of an execution flow. */
+  requireToolCallOnFirstStep?: boolean;
   evalMetadata?: LLMCallMetadata;
   /** Upstream/client AbortSignal propagated to all provider calls. */
   signal?: AbortSignal;
@@ -71,6 +74,14 @@ export interface AgentLoopConfig {
    * must never supply it itself.
    */
   conversationId?: string;
+  /** Parent ActionRun owning this work; injected server-side. */
+  actionRunId?: string;
+  /**
+   * Canonical execution context for the entire run. Prefer this over the
+   * legacy actionRunId field: it carries tenant, conversation, and project
+   * identity together so tool handlers never reconstruct them from inputs.
+   */
+  actionContext?: ActionExecutionContext;
   /**
    * Opt-in to the LiTT quality loop (gated UNDERSTAND→VERIFY stages +
    * visual-quality judge). When enabled, the loop records stage evidence
@@ -92,8 +103,8 @@ export interface AgentLoopConfig {
 }
 
 export const DEFAULT_LOOP_CONFIG: AgentLoopConfig = {
-  maxSteps: 20,
-  maxRuntimeMs: 600_000, // 10 minutes — enough for full build+preview+deploy
+  maxSteps: 50,
+  maxRuntimeMs: 1_800_000, // 30 minutes — a real multi-file build needs the room (was 10 min)
   maxOutputChars: 50_000,
   maxRetries: 2,
   executionMode: "act",
@@ -214,6 +225,56 @@ function detectRepeatedCalls(
   return identical.length >= 3;
 }
 
+// ─── Mid-build stall recovery ─────────────────────────────────────
+
+/**
+ * A zero-tool-call reply is normally the model's final answer — but when
+ * the text itself announces more work ("Now, I'll create the Footer
+ * component"), accepting it as final silently stalls the build: the run
+ * reports finished/Idle with the work half done, no error, and no
+ * recovery. These markers detect the announcement so the loop can nudge
+ * the model to emit the tool calls it promised instead of stopping.
+ */
+const CONTINUATION_MARKERS: RegExp[] = [
+  /\bnow,?\s+i(?:'ll| will)\b/i,
+  /\bnext,?\s+i(?:'ll| will)\b/i,
+  /\bi(?:'ll| will)\s+now\s+(?:create|add|write|build|generate|update|fix|implement|continue|finish|handle|proceed)\b/i,
+  /\blet me\s+(?:create|add|write|build|generate|update|fix|continue|finish)\b/i,
+  /\bmoving on to\b/i,
+  /\bup next\b/i,
+];
+
+/** How many times a run may nudge a stalled model before failing honestly. */
+const MAX_CONTINUATION_NUDGES = 2;
+
+export function announcesMoreWork(text: string): boolean {
+  return CONTINUATION_MARKERS.some((re) => re.test(text));
+}
+
+type ZeroCallResolution =
+  | { action: "final" }
+  | { action: "nudge"; nudgeMessage: string }
+  | { action: "stall" };
+
+/**
+ * Decide what a zero-tool-call model reply means. Plain prose is the
+ * final answer. Prose that announces more work gets bounded nudges to
+ * emit the promised tool calls; when the nudges are exhausted the run
+ * must fail honestly rather than claim completion.
+ */
+export function resolveZeroToolCalls(text: string, nudgesUsed: number): ZeroCallResolution {
+  if (!announcesMoreWork(text)) return { action: "final" };
+  if (nudgesUsed < MAX_CONTINUATION_NUDGES) {
+    return {
+      action: "nudge",
+      nudgeMessage:
+        "You announced further work but emitted no tool calls, so nothing more was executed. " +
+        "Continue now: emit the tool calls for the next step.",
+    };
+  }
+  return { action: "stall" };
+}
+
 // ─── Tool definition conversion ───────────────────────────────────
 
 function toToolDefinition(tool: LiTTToolDefinition): ToolDefinition {
@@ -231,6 +292,29 @@ function toToolDefinition(tool: LiTTToolDefinition): ToolDefinition {
  * it) — the server injects the real authenticated userId here, overriding
  * anything the model passed.
  */
+/**
+ * Trusted execution context for the whole run — built ONCE from
+ * server-authenticated config and passed DOWN through ToolRegistry.
+ * The ActionRun identity is never a model-visible tool input.
+ */
+function actionContextFrom(cfg: {
+  actionContext?: ActionExecutionContext;
+  actionRunId?: string;
+  userId?: string;
+  conversationId?: string;
+  projectId?: string;
+}): ActionExecutionContext | undefined {
+  if (cfg.actionContext) return cfg.actionContext;
+  return cfg.actionRunId && cfg.userId
+    ? {
+        actionRunId: cfg.actionRunId,
+        userId: cfg.userId,
+        conversationId: cfg.conversationId,
+        projectId: cfg.projectId,
+      }
+    : undefined;
+}
+
 function withUserScopeForBrowserTools(
   toolId: string,
   inputs: Record<string, unknown>,
@@ -453,6 +537,9 @@ export async function runAgentLoopV2(
   let checkpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
   const toolCallLog: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }> = [];
   let completedDeployment: CompletedDeployment | null = null;
+  // Bounded recovery when the model announces more work but emits no tool
+  // calls (the silent mid-build stall) — see resolveZeroToolCalls.
+  let continuationNudges = 0;
 
   // Check if any mutations have been requested (for checkpoint logic)
   let mutationBatchPending = false;
@@ -467,11 +554,13 @@ export async function runAgentLoopV2(
     }
 
     stepsUsed++;
+    const stepStartTime = Date.now();
     localProgress.emit({ type: "phase", phase: "call_llm", step: stepsUsed });
     localProgress.emit({ type: "status", summary: `Step ${stepsUsed}: reasoning with ${cfg.model ?? "default model"}` });
 
     // Call LLM with tools (with automatic fallback)
     let llmResponse;
+    const llmStartTime = Date.now();
     try {
       llmResponse = await callLLMWithTools(
         cfg.systemPrompt,
@@ -481,20 +570,25 @@ export async function runAgentLoopV2(
           model: cfg.model,
           temperature: 0.15,
           maxTokens: 4096,
+          toolChoice: cfg.requireToolCallOnFirstStep && stepsUsed === 1 ? "required" : "auto",
           evalMetadata: cfg.evalMetadata,
           deadlineMs: startTime + cfg.maxRuntimeMs,
           signal: cfg.signal,
         },
       );
+      const llmDurationMs = Date.now() - llmStartTime;
       if (llmResponse.responseShape && llmResponse.provider) {
         localProgress.emit({ type: "model_response", provider: llmResponse.provider, model: llmResponse.model, ...llmResponse.responseShape, finishReason: llmResponse.finishReason });
       }
-      // Emit model routing event so LiTT Live shows which provider/model was actually used
+      // Emit model routing event so LiTT Live shows which provider/model was actually used.
+      // latencyMs records how long the model call took, so a slow step can be
+      // attributed to the model call vs tool execution (tool_result has durationMs).
       localProgress.emit({
         type: "model_routing",
         model: llmResponse.model,
         provider: llmResponse.provider ?? "unknown",
         fallbackFrom: cfg.model && llmResponse.model !== cfg.model ? cfg.model : undefined,
+        latencyMs: llmDurationMs,
       });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -520,7 +614,12 @@ export async function runAgentLoopV2(
       break;
     }
 
-    // If no tool calls, we're done — the LLM produced a final answer
+    // A zero-tool-call reply is normally the model's final answer — unless
+    // the text announces more work it never started. Accepting that as
+    // final is the silent mid-build stall: the run reports finished/Idle
+    // with half the build done, no error, and no recovery. Nudge the
+    // model (bounded) to emit the promised tool calls; when the nudges
+    // are exhausted, fail honestly instead of claiming completion.
     if (llmResponse.toolCalls.length === 0) {
       // Quality gate: the visual judge may demand another design pass
       // before this answer is accepted as final.
@@ -536,6 +635,32 @@ export async function runAgentLoopV2(
         )
       ) {
         continue;
+      }
+      const zeroCallText = llmResponse.text ?? "";
+      const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges);
+      if (resolution.action === "nudge") {
+        continuationNudges++;
+        localProgress.emit({
+          type: "status",
+          summary:
+            "The model announced more work but emitted no tool calls — asking it to continue...",
+        });
+        llmMessages.push({ role: "assistant", content: zeroCallText });
+        llmMessages.push({ role: "user", content: resolution.nudgeMessage });
+        continue;
+      }
+      if (resolution.action === "stall") {
+        cancelled = true;
+        cancelReason =
+          "The model announced further work but produced no tool calls after retrying; stopping instead of claiming the build is complete.";
+        finalText =
+          "I stopped mid-build: I announced more work but could not produce the next actions. " +
+          "Your project and everything completed so far are preserved — try again to continue.";
+        localProgress.emit({
+          type: "status",
+          summary: "Stopping: the model announced more work but produced no tool calls.",
+        });
+        break;
       }
       finalText = llmResponse.text;
       // Emit a reasoning summary so LiTT Live shows the final reasoning step
@@ -801,10 +926,12 @@ export async function runAgentLoopV2(
 
       try {
         // Use the registry's execute method, passing transport for V2 handlers
-        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId, cfg.conversationId), {
+        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId ?? actionContextFrom(cfg)?.userId, cfg.conversationId ?? actionContextFrom(cfg)?.conversationId), {
           hasApproval: !permResult.requiresApproval,
           availableCapabilities,
           transport,
+          signal: cfg.signal,
+          actionContext: actionContextFrom(cfg),
         });
 
         if (execResult.ok) {
@@ -896,6 +1023,15 @@ export async function runAgentLoopV2(
     if (!batchHasMutation) {
       mutationBatchPending = false;
     }
+
+    // Per-step timing: total step duration + cumulative elapsed, so the work log
+    // can show exactly where the minutes went on a slow build.
+    localProgress.emit({
+      type: "step_timing",
+      step: stepsUsed,
+      stepDurationMs: Date.now() - stepStartTime,
+      elapsedMs: Date.now() - startTime,
+    });
   }
 
   // Run build-fix loop if mutations were made and enabled
@@ -903,7 +1039,7 @@ export async function runAgentLoopV2(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg)),
     });
   }
 
@@ -1171,6 +1307,10 @@ export interface DeferredToolBatchContext {
    * multi-turn session reuse (mirrors AgentLoopConfig.conversationId).
    */
   conversationId?: string;
+  /** Parent ActionRun for server-side ActionExecutionContext propagation. */
+  actionRunId?: string;
+  /** Full trusted context propagated to ToolRegistry.execute. */
+  actionContext?: ActionExecutionContext;
 }
 
 export interface DeferredToolBatchResult {
@@ -1355,9 +1495,11 @@ export async function executeDeferredToolCalls(
 
     let result: ToolCallResult;
     try {
-      const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, ctx.userId, ctx.conversationId), {
+      const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, ctx.userId ?? ctx.actionContext?.userId, ctx.conversationId ?? ctx.actionContext?.conversationId), {
         hasApproval: !permResult.requiresApproval,
         transport: ctx.transport,
+        signal: ctx.signal,
+        actionContext: ctx.actionContext ?? actionContextFrom(ctx),
       });
 
       if (execResult.ok) {
@@ -1489,6 +1631,9 @@ export async function resumeAgentLoopV2(
   let completedDeployment: CompletedDeployment | null = null;
   let mutationBatchPending = false;
   let batchHasMutation = false;
+  // Bounded recovery when the model announces more work but emits no tool
+  // calls (the silent mid-build stall) — see resolveZeroToolCalls.
+  let continuationNudges = 0;
 
   // Execute the approved/rejected tool FIRST, then continue the loop
   localProgress.emit({ type: "phase", phase: "execute", step: stepsUsed });
@@ -1510,10 +1655,12 @@ export async function resumeAgentLoopV2(
         error: "Cancelled by user",
       };
     } else try {
-      const execResult = await toolRegistry.execute(resume.toolId, withUserScopeForBrowserTools(resume.toolId, resume.inputs, cfg.userId, cfg.conversationId), {
+      const execResult = await toolRegistry.execute(resume.toolId, withUserScopeForBrowserTools(resume.toolId, resume.inputs, cfg.userId ?? actionContextFrom(cfg)?.userId, cfg.conversationId ?? actionContextFrom(cfg)?.conversationId), {
         hasApproval: true,
         availableCapabilities,
         transport,
+        signal: cfg.signal,
+        actionContext: actionContextFrom(cfg),
       });
 
       if (execResult.ok) {
@@ -1649,6 +1796,8 @@ export async function resumeAgentLoopV2(
       state: deferredState,
       userId: cfg.userId,
       conversationId: cfg.conversationId,
+      actionRunId: cfg.actionRunId,
+      actionContext: actionContextFrom(cfg),
     });
     hasInterveningMutation = deferredState.hasInterveningMutation;
     cancelled = deferredState.cancelled;
@@ -1693,6 +1842,7 @@ export async function resumeAgentLoopV2(
           model: cfg.model,
           temperature: 0.15,
           maxTokens: 4096,
+          toolChoice: cfg.requireToolCallOnFirstStep && stepsUsed === 1 ? "required" : "auto",
           evalMetadata: cfg.evalMetadata,
           deadlineMs: startTime + cfg.maxRuntimeMs,
           signal: cfg.signal,
@@ -1724,6 +1874,12 @@ export async function resumeAgentLoopV2(
       break;
     }
 
+    // A zero-tool-call reply is normally the model's final answer — unless
+    // the text announces more work it never started. Accepting that as
+    // final is the silent mid-build stall: the run reports finished/Idle
+    // with half the build done, no error, and no recovery. Nudge the
+    // model (bounded) to emit the promised tool calls; when the nudges
+    // are exhausted, fail honestly instead of claiming completion.
     if (llmResponse.toolCalls.length === 0) {
       if (
         await maybeInspectBeforeFinal(
@@ -1737,6 +1893,32 @@ export async function resumeAgentLoopV2(
         )
       ) {
         continue;
+      }
+      const zeroCallText = llmResponse.text ?? "";
+      const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges);
+      if (resolution.action === "nudge") {
+        continuationNudges++;
+        localProgress.emit({
+          type: "status",
+          summary:
+            "The model announced more work but emitted no tool calls — asking it to continue...",
+        });
+        llmMessages.push({ role: "assistant", content: zeroCallText });
+        llmMessages.push({ role: "user", content: resolution.nudgeMessage });
+        continue;
+      }
+      if (resolution.action === "stall") {
+        cancelled = true;
+        cancelReason =
+          "The model announced further work but produced no tool calls after retrying; stopping instead of claiming the build is complete.";
+        finalText =
+          "I stopped mid-build: I announced more work but could not produce the next actions. " +
+          "Your project and everything completed so far are preserved — try again to continue.";
+        localProgress.emit({
+          type: "status",
+          summary: "Stopping: the model announced more work but produced no tool calls.",
+        });
+        break;
       }
       finalText = llmResponse.text;
       break;
@@ -1882,10 +2064,12 @@ export async function resumeAgentLoopV2(
 
       let result: ToolCallResult;
       try {
-        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId, cfg.conversationId), {
+        const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId ?? actionContextFrom(cfg)?.userId, cfg.conversationId ?? actionContextFrom(cfg)?.conversationId), {
           hasApproval: !permResult.requiresApproval,
           availableCapabilities,
           transport,
+          signal: cfg.signal,
+          actionContext: actionContextFrom(cfg),
         });
 
         if (execResult.ok) {
@@ -1948,7 +2132,7 @@ export async function resumeAgentLoopV2(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg)),
     });
   }
 
@@ -2039,6 +2223,7 @@ export function createAutonomousRepairCallback(
   // deployment set so repair tools (files.patch, checkpoint.*) cannot fail
   // closed as "incapable" — the same unified-gate guarantee as the main loop.
   availableCapabilities: string[] = resolveAvailableCapabilities({ transport }),
+  actionContext?: ActionExecutionContext,
 ): (attempt: number, errors: string) => Promise<boolean> {
   const permissionEngine = new PermissionEngine();
   return async (attempt: number, errors: string) => {
@@ -2102,11 +2287,22 @@ export function createAutonomousRepairCallback(
           }
 
           try {
-            const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {
-              hasApproval: true,
-              availableCapabilities,
-              transport,
-            });
+            const execResult = await toolRegistry.execute(
+              toolCall.toolId,
+              withUserScopeForBrowserTools(
+                toolCall.toolId,
+                toolCall.inputs,
+                actionContext?.userId,
+                actionContext?.conversationId,
+              ),
+              {
+                hasApproval: true,
+                availableCapabilities,
+                transport,
+                signal,
+                actionContext,
+              },
+            );
 
             // Same domain-failure normalization as the main loop: a
             // handler returning { success: false } is a failed repair

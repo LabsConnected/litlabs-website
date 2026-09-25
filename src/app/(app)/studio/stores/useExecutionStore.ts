@@ -132,6 +132,14 @@ interface ExecutionStore {
   isRunning: boolean;
   currentStep: number;
   pendingApproval: PendingApproval | null;
+  /**
+   * pausedRunIds whose gates have reached a terminal decision (approved /
+   * rejected) on this client. A late or duplicated `pending_approval` SSE
+   * event for one of these IDs must NOT re-arm the gate — the run already
+   * completed and re-mounting would leave a stuck "Approval waiting" badge
+   * with no live card to clear it. Bounded to the most recent 50.
+   */
+  resolvedPausedRunIds: string[];
   /** Client-side approval lifecycle phase — the card stays mounted through all of them. */
   approvalPhase: ApprovalPhase;
   /** Backend error shown on the card when approvalPhase is "failed". */
@@ -268,6 +276,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   isRunning: false,
   currentStep: 0,
   pendingApproval: null,
+  resolvedPausedRunIds: [],
   approvalPhase: "idle",
   approvalError: null,
   approvalRetryable: true,
@@ -396,8 +405,17 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
         success: decision === "approved",
       });
     }
+    // A decided gate is dead — remember its pausedRunId so a late or
+    // duplicated `pending_approval` SSE event for the same gate can never
+    // re-arm it (which would strand a stuck "Approval waiting" badge with
+    // no live approval card to clear it).
+    const resolvedId = pending?.pausedRunId;
+    const resolvedPausedRunIds = resolvedId
+      ? [...get().resolvedPausedRunIds.filter((id) => id !== resolvedId), resolvedId].slice(-50)
+      : get().resolvedPausedRunIds;
     set({
       pendingApproval: null,
+      resolvedPausedRunIds,
       phase: "editing",
       approvalPhase: "idle",
       approvalError: null,
@@ -480,6 +498,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       isRunning: false,
       currentStep: 0,
       pendingApproval: null,
+      resolvedPausedRunIds: [],
       approvalPhase: "idle",
       approvalError: null,
       approvalRetryable: true,
@@ -605,6 +624,13 @@ export function feedSSEEventToExecutionStore(
       break;
 
     case "pending_approval":
+      // A gate that already reached a terminal decision on this client is
+      // dead — a late or duplicated event for the same pausedRunId must not
+      // re-arm it. Re-arming would strand a stuck "Approval waiting" badge
+      // with no live approval card to clear it.
+      if (evt.pausedRunId && s.resolvedPausedRunIds.includes(evt.pausedRunId)) {
+        break;
+      }
       s.setPendingApproval({
         toolId: evt.toolId ?? "",
         reason: evt.reason ?? "Approval required",
@@ -631,6 +657,11 @@ export function feedSSEEventToExecutionStore(
         summary: `Completed in ${evt.totalSteps ?? evt.step ?? 0} steps`,
         step: evt.totalSteps ?? evt.step,
       });
+      // A finished streamed run has no live approval gate — a run that
+      // pauses at a gate returns early without emitting "finished", so any
+      // pendingApproval still set here is stale and would strand the
+      // "Approval waiting" badge. Clear it without fabricating a decision.
+      s.setPendingApproval(null);
       s.setPhase("done");
       s.collapseLowLevel();
       break;

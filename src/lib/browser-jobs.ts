@@ -24,6 +24,7 @@
 
 import { randomUUID } from "crypto";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { legalSourcesFor } from "./browser-job-states";
 
 // ─── Constants ──────────────────────────────────────────────────
 
@@ -95,6 +96,18 @@ export interface JobStep {
   label: string;
   status: "pending" | "running" | "completed" | "failed";
   detail?: string;
+  /**
+   * The exact page the browser was on for this step.
+   * Route-accurate provenance for the Studio job card — the screenshot
+   * shown for a step is only ever captioned with this URL.
+   */
+  url?: string;
+  /**
+   * Screenshot captured for this step (data URL). To keep the stored
+   * progress payload small, only the newest step with a screenshot keeps
+   * one — earlier steps are pruned when a new screenshot is recorded.
+   */
+  screenshotUrl?: string | null;
 }
 
 export interface CreateJobInput {
@@ -359,16 +372,21 @@ export async function updateJobSession(
 
 /**
  * Mark a job as completed with a result.
+ *
+ * Enforces the state machine: only a job in `running` or `approved`
+ * may transition to `completed`. Any other current status (including
+ * an already-terminal one) makes this a no-op — returns false so the
+ * caller can tell a racing executor did NOT own the transition.
  */
 export async function completeJob(
   jobId: string,
   result: Record<string, unknown>,
-): Promise<void> {
+): Promise<boolean> {
   const admin = getSupabaseAdmin();
-  if (!admin) return;
+  if (!admin) return false;
 
   const now = new Date().toISOString();
-  await admin
+  const { data, error } = await admin
     .from("browser_jobs")
     .update({
       status: "completed",
@@ -377,18 +395,26 @@ export async function completeJob(
       completed_at: now,
       updated_at: now,
     })
-    .eq("id", jobId);
+    .eq("id", jobId)
+    .in("status", legalSourcesFor("completed"))
+    .select("id")
+    .single();
+
+  return !error && !!data;
 }
 
 /**
  * Mark a job as failed with an error message.
+ *
+ * Enforces the state machine: a terminal job cannot be failed again.
+ * Returns false when the transition was illegal (no-op), true when applied.
  */
-export async function failJob(jobId: string, error: string): Promise<void> {
+export async function failJob(jobId: string, error: string): Promise<boolean> {
   const admin = getSupabaseAdmin();
-  if (!admin) return;
+  if (!admin) return false;
 
   const now = new Date().toISOString();
-  await admin
+  const { data, error: dbError } = await admin
     .from("browser_jobs")
     .update({
       status: "failed",
@@ -396,7 +422,12 @@ export async function failJob(jobId: string, error: string): Promise<void> {
       completed_at: now,
       updated_at: now,
     })
-    .eq("id", jobId);
+    .eq("id", jobId)
+    .in("status", legalSourcesFor("failed"))
+    .select("id")
+    .single();
+
+  return !dbError && !!data;
 }
 
 /**
@@ -540,10 +571,36 @@ export function buildInitialProgress(steps: string[]): JobProgress {
 
 /**
  * Advance progress to a specific step.
+ *
+ * `extras.url` records the exact page the browser was on for this step.
+ * `extras.screenshotUrl` attaches a screenshot to this step — when a new
+ * screenshot is recorded, older steps' screenshots are pruned so the
+ * stored progress payload stays small (only the newest screenshot is
+ * kept). The Studio card therefore can only ever show a screenshot
+ * captioned with the URL it was actually captured at.
  */
-export function advanceProgress(progress: JobProgress, stepIndex: number, status: JobStep["status"], detail?: string): JobProgress {
+export function advanceProgress(
+  progress: JobProgress,
+  stepIndex: number,
+  status: JobStep["status"],
+  detail?: string,
+  extras?: { url?: string; screenshotUrl?: string | null },
+): JobProgress {
   const steps = progress.steps.map((s, i) => {
-    if (i === stepIndex) return { ...s, status, detail };
+    if (i === stepIndex) {
+      return {
+        ...s,
+        status,
+        detail,
+        ...(extras?.url !== undefined ? { url: extras.url } : {}),
+        ...(extras?.screenshotUrl !== undefined ? { screenshotUrl: extras.screenshotUrl } : {}),
+      };
+    }
+    // Prune older screenshots once a newer one arrives
+    if (extras?.screenshotUrl && s.screenshotUrl) {
+      const { screenshotUrl: _pruned, ...rest } = s;
+      return rest;
+    }
     return s;
   });
   return { ...progress, step: stepIndex, steps };

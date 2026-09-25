@@ -50,7 +50,7 @@ export function extractMediaPrompt(input: string, media: "image" | "video"): str
     );
   }
   return text
-    .replace(/^(?:please\s+)?(?:generate|create|make)\s+(?:(?:me|us)\s+)?(?:(?:a|an|the)\s+)?(?:image|picture|pic|photo|wallpaper)\s*(?:of\s+|about\s+|showing\s+)?/i, "")
+    .replace(/^(?:please\s+)?(?:generate|create|make)\s+(?:(?:me|us)\s+)?(?:(?:a|an|the)\s+)?(?:image|wallpaper|picture|pic|photo|logo|drawing|artwork|illustration|banner|poster)\s*(?:of\s+|about\s+|showing\s+|for\s+)?/i, "")
     .trim() || text;
 }
 
@@ -176,6 +176,8 @@ const INTENT_PATTERNS: IntentPattern[] = [
       /\bgenerate?\b.*\bwallpaper\b/i,
       /\bcreate\b.*\bwallpaper\b/i,
       /\bmake\b.*\bwallpaper\b/i,
+      // P1-1: natural phrasings — "generate a picture", "make me a logo".
+      /\b(generate|create|make)\b.*\b(picture|photo|logo|drawing|artwork|illustration|banner|poster)\b/i,
     ],
   },
   {
@@ -267,7 +269,9 @@ function buildIntentResult(
         message: "Opening Terminal to run that command.",
       };
     case "generate_image":
-      return { intent, tool, message: "", prompt: originalText };
+      // P1-1: prefill the REAL surface with the cleaned-up prompt, not the
+      // raw sentence — same as generate_video below.
+      return { intent, tool, message: "", prompt: extractMediaPrompt(originalText, "image") };
     case "generate_video":
       return { intent, tool, message: "", prompt: extractMediaPrompt(originalText, "video") };
     case "generate_code":

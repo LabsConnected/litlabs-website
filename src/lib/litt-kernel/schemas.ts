@@ -17,6 +17,7 @@ export const LiTTModeSchema = z.enum([
   "ship",
   "status",
   "learn",
+  "browser",
 ]);
 
 export const TruthClassSchema = z.enum([

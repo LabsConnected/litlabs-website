@@ -260,8 +260,8 @@ export default function GamesPage() {
               <h2 className="mt-2 text-xl font-black sm:text-2xl">Game building is coming to Studio</h2>
               <p className="mt-2 max-w-md text-sm text-white/65">We&apos;re teaching LiTT&apos;s agents to design, code, and ship original mini-games — no engine setup required. Today, start with game art in the image tool.</p>
             </div>
-            <Link href="/studio?tool=image" className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-accent px-5 py-3 text-sm font-black text-on-accent transition-colors hover:bg-accent-strong">
-              <Wand2 size={16} /> Open Studio
+            <Link href="/studio?creator=image" className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-accent px-5 py-3 text-sm font-black text-on-accent transition-colors hover:bg-accent-strong">
+              <Wand2 size={16} /> Open Image Studio
             </Link>
           </div>
         </section>

@@ -184,6 +184,21 @@ describe("parseToolCalls", () => {
     assert.deepEqual(calls[0].inputs, { verbose: true });
   });
 
+  it("parses a bare namespaced no-arg tool call", () => {
+    const calls = parseToolCalls("<tool_call>project.status</tool_call>");
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].toolId, "project.status");
+    assert.deepEqual(calls[0].inputs, {});
+  });
+
+  it("does not treat prose as a bare tool call", () => {
+    assert.deepEqual(
+      parseToolCalls("<tool_call>example of a non-call payload</tool_call>"),
+      [],
+    );
+  });
+
   it("deduplicates an XML envelope against its fenced twin", () => {
     const content =
       '<tool_call>{"name":"project.status","arguments":{}}</tool_call>\n' +
@@ -191,15 +206,6 @@ describe("parseToolCalls", () => {
     const calls = parseToolCalls(content);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].toolId, "project.status");
-  });
-
-  it("does not extract an envelope whose payload is not a call", () => {
-    // Prose payloads with a lone leading word are not calls (a bare token
-    // is only a tool id when it constitutes the whole envelope body).
-    assert.deepEqual(
-      parseToolCalls("<tool_call>example of a non-call payload</tool_call>"),
-      [],
-    );
   });
 });
 

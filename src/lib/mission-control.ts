@@ -93,13 +93,10 @@ export type MissionControlResponse = {
 /*  Owner resolution                                                   */
 /* ------------------------------------------------------------------ */
 
-export function isOwnerClerkId(clerkId: string): boolean {
-  const ids = (process.env.ADMIN_CLERK_IDS || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return ids.includes(clerkId);
-}
+// Canonical owner identity check — shared with @/lib/owner via
+// @/lib/owner-identity (client-safe pure env read). Re-exported here to
+// keep the historical "@/lib/mission-control" import path working.
+export { isOwnerClerkId } from "@/lib/owner-identity";
 
 /* ------------------------------------------------------------------ */
 /*  Canonical active project runtime                                   */

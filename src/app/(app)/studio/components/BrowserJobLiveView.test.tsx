@@ -95,6 +95,65 @@ describe("collectSnapshots", () => {
   });
 });
 
+describe("collectSnapshots — step provenance", () => {
+  const STEP_URL = "https://app.gohighlevel.com/v2/location/abc/workflows";
+
+  function jobWithStepScreenshot() {
+    return jobFixture({
+      result: null,
+      progress: {
+        step: 1,
+        totalSteps: 2,
+        steps: [
+          { label: "Start browser session", status: "completed" },
+          {
+            label: "Navigate to workflows",
+            status: "completed",
+            url: STEP_URL,
+            screenshotUrl: "data:image/png;base64,STEP1",
+          },
+        ],
+      },
+    });
+  }
+
+  it("captions step screenshots with the exact URL captured — route-accurate", () => {
+    const snaps = collectSnapshots(jobWithStepScreenshot(), []);
+    expect(snaps).toHaveLength(1);
+    expect(snaps[0]).toMatchObject({
+      id: "step-1",
+      url: "data:image/png;base64,STEP1",
+      caption: `Captured at ${STEP_URL}`,
+    });
+  });
+
+  it("dedupes a frame emitted both as an event and on a step", () => {
+    const snaps = collectSnapshots(jobWithStepScreenshot(), [
+      eventFixture({ metadata: { screenshotUrl: "data:image/png;base64,STEP1" } }),
+    ]);
+    const urls = snaps.map((s) => s.url);
+    expect(urls.filter((u) => u === "data:image/png;base64,STEP1")).toHaveLength(1);
+  });
+
+  it("falls back to step label when the URL was not recorded", () => {
+    const snaps = collectSnapshots(
+      jobFixture({
+        result: null,
+        progress: {
+          step: 0,
+          totalSteps: 1,
+          steps: [
+            { label: "Start browser session", status: "completed", screenshotUrl: "data:image/png;base64,NOURL" },
+          ],
+        },
+      }),
+      [],
+    );
+    expect(snaps).toHaveLength(1);
+    expect(snaps[0].caption).toContain("Start browser session");
+  });
+});
+
 describe("BrowserJobLiveView", () => {
   it("renders the honest fallback when the live view is unavailable", async () => {
     fetchMock.mockResolvedValue(

@@ -51,6 +51,7 @@ vi.mock("@/lib/studio/conversation-service", () => ({
   listMessages: vi.fn(() => []),
   insertMessage: vi.fn(),
   updateMessageStatus: vi.fn(),
+  touchStreamingMessage: vi.fn(() => Promise.resolve(true)),
 }));
 
 vi.mock("@/lib/studio/agent-registry", () => ({
@@ -114,6 +115,15 @@ vi.mock("@/lib/litt-runtime", () => ({
 vi.mock("@/lib/litt-intelligence/launch-flow", () => ({
   runLaunchFlow: vi.fn(),
 }));
+
+const actionRuntimeMocks = vi.hoisted(() => ({
+  createActionRun: vi.fn(),
+  transitionActionRunEventActivity: vi.fn(),
+  transitionActionRun: vi.fn(),
+  requestActionRunCancellation: vi.fn(),
+}));
+
+vi.mock("@/lib/action-runtime", () => actionRuntimeMocks);
 
 vi.mock("@/lib/litt-intelligence/agent-loop", () => ({
   runAgentLoop: vi.fn(),
@@ -262,10 +272,25 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
       error: null,
     }) as any);
     vi.mocked(updateMessageStatus).mockResolvedValue(true as any);
+    actionRuntimeMocks.createActionRun.mockResolvedValue({
+      id: "action-run-123",
+      userId: "user_123",
+      projectId: "proj-123",
+      conversationId: "conv-123",
+      kind: "composite",
+      status: "queued",
+    } as any);
+    actionRuntimeMocks.transitionActionRunEventActivity.mockResolvedValue({} as any);
+    actionRuntimeMocks.transitionActionRun.mockResolvedValue({} as any);
+    actionRuntimeMocks.requestActionRunCancellation.mockResolvedValue({} as any);
   });
 
   it("emits exactly one terminal `done` event and `[DONE]` marker on successful V2 run with fallback", async () => {
-    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({
+      projectId: "proj-123",
+      userId: "user_123",
+      workspaceId: "ws-123",
+    } as any);
 
     // Simulate a multi-step launch flow with provider fallback that succeeds
     vi.mocked(runLaunchFlow).mockImplementation(async (opts: any) => {
@@ -321,7 +346,36 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
     const doneEvents = events.filter((e) => e.type === "done");
     expect(doneEvents.length).toBe(1);
     expect(doneEvents[0].assistantMessage.status).toBe("completed");
+    expect(doneEvents[0].actionRunId).toBe("action-run-123");
+    expect(doneEvents[0].actionRunPersistence).toBe("ok");
     expect(doneEvents[0].previewUrl).toBe("https://preview.example.com");
+
+    // The authenticated route creates ONE composite parent run and passes
+    // that exact context into launch flow — no tool re-discovers run identity.
+    expect(actionRuntimeMocks.createActionRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user_123",
+        conversationId: "conv-123",
+        kind: "composite",
+        idempotencyKey: expect.stringMatching(/^studio-message:conv-123:/),
+      }),
+    );
+    const launchOptions = vi.mocked(runLaunchFlow).mock.calls[0][0];
+    expect(launchOptions.actionContext).toEqual({
+      actionRunId: "action-run-123",
+      userId: "user_123",
+      conversationId: "conv-123",
+      projectId: "proj-123",
+    });
+    expect(actionRuntimeMocks.transitionActionRunEventActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "action-run-123", status: "working", eventType: "run.started" }),
+    );
+    expect(actionRuntimeMocks.transitionActionRun).toHaveBeenCalledWith(
+      "action-run-123",
+      "user_123",
+      "completed",
+      expect.objectContaining({ currentActivity: "Task completed" }),
+    );
 
     // `[DONE]` marker present
     expect(raw).toContain("data: [DONE]");
@@ -542,6 +596,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
           conversationId: "conv-123",
           toolId: "deploy.production",
           toolCallId: "tc-1",
+          actionRunId: "action-run-123",
         }),
       );
     });
@@ -553,6 +608,14 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         expect.anything(),
       );
     });
+    expect(actionRuntimeMocks.transitionActionRunEventActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "action-run-123",
+        status: "waiting_for_user",
+        eventType: "approval.required",
+        payload: expect.objectContaining({ pausedRunId: "paused-1" }),
+      }),
+    );
     expect(updateMessageStatus).not.toHaveBeenCalledWith(
       expect.any(String),
       "user_123",
@@ -808,12 +871,13 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
     // No `done` events (error path)
     expect(events.filter((e) => e.type === "done")).toHaveLength(0);
 
-    // Message status updated to failed
+    // Message status updated to failed — with the real error persisted as
+    // content, not an empty body that collapses to the generic fallback.
     expect(updateMessageStatus).toHaveBeenCalledWith(
       expect.any(String),
       "user_123",
       "failed",
-      undefined,
+      expect.stringContaining("Provider connection refused"),
     );
 
     // The failed execution was unregistered — cleanup runs on every path.
@@ -867,7 +931,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
       expect.any(String),
       "user_123",
       "failed",
-      undefined,
+      expect.stringContaining("empty response"),
     );
     expect(getActiveExecution("conv-123")).toBeNull();
   });
@@ -1174,6 +1238,7 @@ describe("GET /api/studio/conversations/[conversationId]/messages — approval r
       },
     ] as any);
     vi.mocked(getPendingPausedRunForConversation).mockResolvedValue(null);
+    vi.mocked(getLatestPausedRunForConversation).mockResolvedValue(null);
     vi.mocked(updateMessageStatus).mockResolvedValue(true);
 
     const res = await GET(new NextRequest("http://localhost/api/studio/conversations/conv-123/messages"), {
@@ -1185,10 +1250,127 @@ describe("GET /api/studio/conversations/[conversationId]/messages — approval r
       "m-stale",
       "user_123",
       "failed",
-      "The previous run ended before it produced a result.",
+      expect.stringContaining("ended before it produced a result"),
     );
     expect(body.messages.at(-1).status).toBe("failed");
     expect(body.messages.at(-1).content).toContain("ended before it produced a result");
+  });
+
+  it("does not condemn a stale streaming message while its resumed run is still processing", async () => {
+    // A paused message persists as 'streaming' when the
+    // 'awaiting_approval' status write failed, and a resumed run never
+    // registers in the in-process execution registry — without the
+    // durable run check this message would be marked failed while the
+    // approved run was still working.
+    const messageCreated = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    vi.mocked(listMessages).mockResolvedValue([
+      {
+        id: "m-resumed",
+        role: "assistant",
+        content: "",
+        status: "streaming",
+        createdAt: messageCreated,
+        updatedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+      },
+    ] as any);
+    vi.mocked(getPendingPausedRunForConversation).mockResolvedValue(null);
+    vi.mocked(getLatestPausedRunForConversation).mockResolvedValue({
+      id: "paused-live",
+      status: "approved",
+      runStatus: "processing",
+      toolId: "files.write",
+      reason: "Mutation requires approval in ACT mode",
+      inputs: { path: "index.html" },
+      createdAt: new Date(Date.parse(messageCreated) + 5_000).toISOString(),
+    } as any);
+
+    const res = await GET(new NextRequest("http://localhost/api/studio/conversations/conv-123/messages"), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    const body = await res.json();
+
+    expect(updateMessageStatus).not.toHaveBeenCalled();
+    expect(body.messages.at(-1).status).toBe("streaming");
+  });
+
+  it("surfaces the real run error for a stale streaming message whose resumed run failed", async () => {
+    const messageCreated = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    vi.mocked(listMessages).mockResolvedValue([
+      {
+        id: "m-dead",
+        role: "assistant",
+        content: "",
+        status: "streaming",
+        createdAt: messageCreated,
+        updatedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+      },
+    ] as any);
+    vi.mocked(getPendingPausedRunForConversation).mockResolvedValue(null);
+    vi.mocked(getLatestPausedRunForConversation).mockResolvedValue({
+      id: "paused-dead",
+      status: "approved",
+      runStatus: "failed",
+      runError: "Execution stalled (no progress)",
+      toolId: "apply_patch",
+      reason: "Mutation requires approval in ACT mode",
+      inputs: { path: "index.html" },
+      createdAt: new Date(Date.parse(messageCreated) + 5_000).toISOString(),
+    } as any);
+    vi.mocked(updateMessageStatus).mockResolvedValue(true);
+
+    const res = await GET(new NextRequest("http://localhost/api/studio/conversations/conv-123/messages"), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    const body = await res.json();
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      "m-dead",
+      "user_123",
+      "failed",
+      expect.stringContaining("Execution stalled (no progress)"),
+    );
+    expect(body.messages.at(-1).status).toBe("failed");
+    expect(body.messages.at(-1).content).not.toContain("ended before it produced a result");
+  });
+
+  it("reconciles a stale streaming message to the resumed run's completed result", async () => {
+    const messageCreated = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    vi.mocked(listMessages).mockResolvedValue([
+      {
+        id: "m-done",
+        role: "assistant",
+        content: "",
+        status: "streaming",
+        createdAt: messageCreated,
+        updatedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+      },
+    ] as any);
+    vi.mocked(getPendingPausedRunForConversation).mockResolvedValue(null);
+    vi.mocked(getLatestPausedRunForConversation).mockResolvedValue({
+      id: "paused-done",
+      status: "approved",
+      runStatus: "completed",
+      runResult: { finalText: "Updated the footer with the literal brand name." },
+      toolId: "apply_patch",
+      reason: "Mutation requires approval in ACT mode",
+      inputs: { path: "index.html" },
+      createdAt: new Date(Date.parse(messageCreated) + 5_000).toISOString(),
+    } as any);
+    vi.mocked(updateMessageStatus).mockResolvedValue(true);
+
+    const res = await GET(new NextRequest("http://localhost/api/studio/conversations/conv-123/messages"), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    const body = await res.json();
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      "m-done",
+      "user_123",
+      "completed",
+      "Updated the footer with the literal brand name.",
+    );
+    expect(body.messages.at(-1).status).toBe("completed");
+    expect(body.messages.at(-1).content).toBe("Updated the footer with the literal brand name.");
   });
 
   it("does not clear a recent streaming message while registration may still be racing", async () => {

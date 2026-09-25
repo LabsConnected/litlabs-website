@@ -1,5 +1,5 @@
 import { createServer } from "http";
-import { createHmac } from "crypto";
+import { createHash, createHmac } from "crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { resolveBindHost } from "./network-bind.mjs";
 
@@ -120,6 +120,13 @@ const server = createServer(async (req, res) => {
           inworldConfigured,
           authConfigured,
         },
+        // Non-reversible fingerprint of this proxy's VOICE_AUTH_SECRET so the
+        // web client can detect a website/proxy credential mismatch (the #1
+        // cause of WebSocket close 4001). 12 hex chars of SHA-256: enough to
+        // compare, useless for recovering a >= 32-char secret.
+        authSecretFp: VOICE_AUTH_SECRET
+          ? createHash("sha256").update(VOICE_AUTH_SECRET).digest("hex").slice(0, 12)
+          : null,
         reasons: allReady
           ? []
           : [

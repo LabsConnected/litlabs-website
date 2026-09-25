@@ -99,12 +99,13 @@ describe("GET /api/litt/browser/status", () => {
     expect(mockStatus).toHaveBeenCalledWith("owner_clerk_123", undefined);
   });
 
-  it("returns 500 (not a fake state) when the probe throws", async () => {
+  it("returns 503 (not a fake state) when the probe throws", async () => {
     mockStatus.mockRejectedValue(new Error("boom"));
     const res = await GET(req("http://localhost/api/litt/browser/status"));
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(503);
     const json = await res.json();
     expect(json.state).toBeUndefined();
+    expect(json.code).toBe("BROWSER_STATUS_FAILED");
   });
 
   it("attaches the real burn snapshot when a session is present (Phase 4)", async () => {

@@ -576,7 +576,7 @@ export function ProfileOverview({
               title="No projects yet"
               desc="Start with a prompt, a repository, or a template."
               actionLabel="Start a project"
-              actionHref="/projects/new"
+              actionHref="/create"
             />
           )}
         </Card>
@@ -610,7 +610,7 @@ export function ProfileOverview({
           <SectionHeader
             title="Recent Artifacts"
             action="View all"
-            actionHref="/library"
+            actionHref="/library/files"
           />
           <EmptyState
             icon={<ImageIcon size={36} />}

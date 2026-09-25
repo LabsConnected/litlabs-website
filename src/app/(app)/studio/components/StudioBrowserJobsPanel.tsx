@@ -1,17 +1,21 @@
 "use client";
 
 /**
- * StudioBrowserJobsPanel — live browser agent job viewer.
+ * StudioBrowserJobsPanel — one persistent job card per browser job.
  *
- * Shows:
- *   - List of recent browser jobs with status badges and progress bars
- *   - Selected job detail with step-by-step progress
- *   - Live browser view with a deterministic availability rule (Phase 6:
- *     owner-checked /live-view endpoint; honest labeled-snapshot
- *     fallback, never a broken iframe)
- *   - Live activity log from SSE event stream (/api/browser/jobs/:id/events)
- *   - Action controls: Cancel (queued/awaiting), Approve (awaiting_approval)
- *   - Error and result display
+ * Truthfulness contract (LiTT polish program, PR #1):
+ *   - The state badge comes ONLY from the job state machine
+ *     (`describeJobState` in src/lib/browser-job-states). A job reads
+ *     "Succeeded" only when it actually reached `completed`; a failed
+ *     job surfaces its real error — never "no errors", never silent.
+ *   - Screenshots are route-accurate: the snapshot timeline only ever
+ *     captions a screenshot with the exact URL it was captured at
+ *     (`step.url`, collected in `collectSnapshots`). When no screenshot
+ *     exists the card says so honestly — no stock image, no stale frame.
+ *   - Terminal states are final: a finished job's card never changes.
+ *   - When an active job exists and nothing is selected, the most
+ *     recent active job opens automatically — the user who triggered
+ *     it watches real progress immediately, on one persistent card.
  *
  * Data sources:
  *   - useBrowserJobs() — polls /api/browser/jobs for job list + status
@@ -39,12 +43,17 @@ import {
 } from "lucide-react";
 import { useBrowserJobs, type BrowserJob, type BrowserJobStep } from "../hooks/useBrowserJobs";
 import { useBrowserJobEvents, type AgentJobEvent } from "../hooks/useBrowserJobEvents";
+import { describeJobState, type JobDisplayState } from "@/lib/browser-job-states";
+import type { JobStatus } from "@/lib/browser-jobs";
 import BrowserJobLiveView from "./BrowserJobLiveView";
 
-const ACTIVE_STATUSES = new Set(["queued", "running", "awaiting_approval", "approved"]);
-const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
+const ACTIVE_STATUSES = new Set<JobStatus>(["queued", "running", "awaiting_approval", "approved"]);
 
-function statusIcon(status: BrowserJob["status"]) {
+function displayState(status: JobStatus): JobDisplayState {
+  return describeJobState(status);
+}
+
+function statusIcon(status: JobStatus) {
   if (status === "completed") return <CheckCircle2 size={12} style={{ color: "#22c55e" }} />;
   if (status === "failed") return <XCircle size={12} style={{ color: "#ef4444" }} />;
   if (status === "cancelled") return <Square size={10} style={{ color: "var(--text-muted)" }} />;
@@ -53,20 +62,7 @@ function statusIcon(status: BrowserJob["status"]) {
   return <Clock size={12} style={{ color: "var(--text-muted)" }} />;
 }
 
-function statusLabel(status: BrowserJob["status"]): string {
-  switch (status) {
-    case "queued": return "Queued";
-    case "running": return "Running";
-    case "awaiting_approval": return "Needs Approval";
-    case "approved": return "Approved";
-    case "completed": return "Completed";
-    case "failed": return "Failed";
-    case "cancelled": return "Cancelled";
-    default: return status;
-  }
-}
-
-function statusColor(status: BrowserJob["status"]): string {
+function statusColor(status: JobStatus): string {
   if (status === "completed") return "#22c55e";
   if (status === "failed") return "#ef4444";
   if (status === "cancelled") return "var(--text-muted)";
@@ -110,7 +106,7 @@ function duration(job: BrowserJob): string {
   return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`;
 }
 
-// ─── Job Row ─────────────────────────────────────────────────
+// ─── Job Row (list index) ───────────────────────────────────────
 
 function JobRow({
   job,
@@ -126,6 +122,7 @@ function JobRow({
     ? Math.round((progress.step / progress.totalSteps) * 100)
     : 0;
   const risk = riskBadge(job.riskLevel);
+  const state = displayState(job.status);
 
   return (
     <button
@@ -150,18 +147,18 @@ function JobRow({
       </div>
       <div className="mt-1 flex items-center gap-2">
         <span className="text-[9px]" style={{ color: statusColor(job.status) }}>
-          {statusLabel(job.status)}
+          {state.label}
         </span>
         <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
           · {timeAgo(job.createdAt)}
         </span>
-        {ACTIVE_STATUSES.has(job.status) && progress.totalSteps > 0 && (
+        {state.active && progress.totalSteps > 0 && (
           <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
             · {progress.step}/{progress.totalSteps}
           </span>
         )}
       </div>
-      {ACTIVE_STATUSES.has(job.status) && progress.totalSteps > 0 && (
+      {state.active && progress.totalSteps > 0 && (
         <div className="mt-1.5 h-0.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: "var(--studio-border)" }}>
           <div
             className="h-full rounded-full transition-all duration-500"
@@ -173,7 +170,7 @@ function JobRow({
   );
 }
 
-// ─── Step Item ───────────────────────────────────────────────
+// ─── Step Item ─────────────────────────────────────────────────
 
 function StepItem({ step, index }: { step: BrowserJobStep; index: number }) {
   const icon = step.status === "completed"
@@ -199,6 +196,15 @@ function StepItem({ step, index }: { step: BrowserJobStep; index: number }) {
         {step.detail && (
           <div className="mt-0.5 text-[9px]" style={{ color: "var(--text-muted)" }}>
             {step.detail}
+          </div>
+        )}
+        {step.url && (
+          <div
+            className="mt-0.5 truncate text-[9px] font-mono"
+            style={{ color: "var(--text-muted)" }}
+            title={`Page visited: ${step.url}`}
+          >
+            {step.url}
           </div>
         )}
       </div>
@@ -251,7 +257,7 @@ function EventItem({ event }: { event: AgentJobEvent }) {
 }
 
 // ─── Activity Log ─────────────────────────────────────────────
-// Presentational: the SSE subscription lives in JobDetail so the live
+// Presentational: the SSE subscription lives in JobCard so the live
 // view and the log share one event stream (one EventSource per job).
 function ActivityLog({
   events,
@@ -308,9 +314,9 @@ function ActivityLog({
   );
 }
 
-// ─── Job Detail ──────────────────────────────────────────────
+// ─── Job Card (the ONE persistent surface) ─────────────────────
 
-function JobDetail({
+function JobCard({
   job,
   onCancel,
   onApprove,
@@ -326,6 +332,7 @@ function JobDetail({
     ? Math.round((progress.step / progress.totalSteps) * 100)
     : 0;
   const risk = riskBadge(job.riskLevel);
+  const state = displayState(job.status);
   const canCancel = job.status === "queued" || job.status === "awaiting_approval";
   const canApprove = job.status === "awaiting_approval";
   // One SSE subscription per selected job, shared by the live view
@@ -333,8 +340,8 @@ function JobDetail({
   const { events, connected, error: eventsError } = useBrowserJobEvents(job.jobId);
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Header */}
+    <div className="flex h-full flex-col" data-testid="browser-job-card">
+      {/* Header — the single explicit state badge, from the state machine */}
       <div className="shrink-0 border-b px-3 py-2.5" style={{ borderColor: "var(--studio-border)" }}>
         <div className="flex items-center gap-2">
           <button
@@ -350,10 +357,18 @@ function JobDetail({
             {job.goal || jobTypeLabel(job.jobType)}
           </span>
         </div>
-        <div className="mt-1.5 flex items-center gap-2 pl-8">
+        <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-8">
           {statusIcon(job.status)}
-          <span className="text-[10px] font-bold" style={{ color: statusColor(job.status) }}>
-            {statusLabel(job.status)}
+          <span
+            data-testid="job-state-badge"
+            className="rounded-full px-2 py-0.5 text-[9px] font-black"
+            style={{
+              color: statusColor(job.status),
+              backgroundColor: `${statusColor(job.status)}14`,
+              border: `1px solid ${statusColor(job.status)}40`,
+            }}
+          >
+            {state.label}
           </span>
           <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>·</span>
           <span className="text-[9px]" style={{ color: risk.color }}>{risk.label}</span>
@@ -378,42 +393,51 @@ function JobDetail({
         </div>
       )}
 
-      {/* Live View — Phase 6: deterministic availability rule backed by
-          the owner-checked /live-view endpoint; honest snapshot fallback,
-          never a broken iframe. */}
+      {/* Browser view — live when available, otherwise the snapshot
+          timeline (route-accurate: every screenshot is captioned with
+          the URL it was captured at). */}
       <BrowserJobLiveView job={job} events={events} />
 
-      {/* Steps */}
-      {progress.steps.length > 0 && (
-        <div className="flex-1 overflow-y-auto px-3 py-2">
+      {/* Scrollable card body */}
+      <div className="flex-1 overflow-y-auto">
+        {/* Steps */}
+        <div className="px-3 py-2">
           <div className="text-[9px] font-black uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
             Steps
           </div>
-          <div className="mt-1">
-            {progress.steps.map((step, i) => (
-              <StepItem key={i} step={step} index={i} />
-            ))}
-          </div>
+          {progress.steps.length > 0 ? (
+            <div className="mt-1">
+              {progress.steps.map((step, i) => (
+                <StepItem key={i} step={step} index={i} />
+              ))}
+            </div>
+          ) : (
+            <div className="mt-1 text-[10px]" style={{ color: "var(--text-muted)" }}>
+              No steps yet — they appear here as the job starts working.
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
-      {/* Live Activity Log (SSE) — the step stream backing the fallback */}
+      {/* Live Activity Log (SSE) */}
       <ActivityLog events={events} connected={connected} error={eventsError} />
 
-      {/* Error */}
-      {job.error && job.status === "failed" && (
+      {/* Error — always surfaced honestly, never "no errors" */}
+      {job.status === "failed" && (
         <div className="shrink-0 mx-3 mb-2 rounded-lg border p-2" style={{ borderColor: "#ef444440", backgroundColor: "#ef444408" }}>
           <div className="flex items-center gap-1.5 text-[9px] font-black uppercase" style={{ color: "#ef4444" }}>
             <AlertTriangle size={10} />
             Error
           </div>
           <div className="mt-1 text-[10px] font-mono" style={{ color: "var(--text-secondary)" }}>
-            {job.error}
+            {job.error
+              ? job.error
+              : "The job failed, but no error message was recorded."}
           </div>
         </div>
       )}
 
-      {/* Result summary */}
+      {/* Result summary — shown only when the job actually succeeded */}
       {job.result && job.status === "completed" && (
         <div className="shrink-0 mx-3 mb-2 rounded-lg border p-2" style={{ borderColor: "#22c55e40", backgroundColor: "#22c55e08" }}>
           <div className="flex items-center gap-1.5 text-[9px] font-black uppercase" style={{ color: "#22c55e" }}>
@@ -448,15 +472,15 @@ function JobDetail({
             Cancel
           </button>
         )}
-        {ACTIVE_STATUSES.has(job.status) && !canCancel && !canApprove && (
+        {state.active && !canCancel && !canApprove && (
           <div className="flex items-center gap-1.5 text-[10px]" style={{ color: "var(--text-muted)" }}>
             <Loader2 size={11} className="animate-spin" />
             Executing...
           </div>
         )}
-        {TERMINAL_STATUSES.has(job.status) && (
+        {state.terminal && (
           <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-            {timeAgo(job.completedAt ?? job.createdAt)}
+            {state.label} {timeAgo(job.completedAt ?? job.createdAt)}
           </div>
         )}
       </div>
@@ -489,6 +513,15 @@ export default function StudioBrowserJobsPanel() {
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
   }, [jobs]);
+
+  // One persistent card: when an active job exists and nothing is
+  // selected, open the most recent active job automatically — the user
+  // who triggered it watches real progress immediately, no tap needed.
+  useEffect(() => {
+    if (selectedJobId === null && sortedJobs.length > 0 && ACTIVE_STATUSES.has(sortedJobs[0].status)) {
+      selectJob(sortedJobs[0].jobId);
+    }
+  }, [selectedJobId, sortedJobs, selectJob]);
 
   return (
     <div className="flex h-full flex-col">
@@ -531,7 +564,7 @@ export default function StudioBrowserJobsPanel() {
             <Loader2 size={18} className="animate-spin" style={{ color: "var(--text-muted)" }} />
           </div>
         ) : selectedJob ? (
-          <JobDetail
+          <JobCard
             job={selectedJob}
             onCancel={() => cancelJob(selectedJob.jobId)}
             onApprove={() => approveJob(selectedJob.jobId)}

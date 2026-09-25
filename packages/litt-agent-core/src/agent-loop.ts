@@ -525,12 +525,16 @@ function parseXmlEnvelopeBody(attrs: string, body: string): ParsedToolCall | nul
   const hasPairs = Object.keys(inputs).length > 0;
 
   // 2. Tool name: `name="..."` attribute wins; otherwise a leading bare
-  //    token is a tool id when it constitutes the whole body (bare no-arg
-  //    call), when arg structure follows, or when a JSON body follows it —
-  //    a lone word alongside other prose in an envelope tag is not a call.
+  //    token is only a tool id when arg structure or a JSON body follows
+  //    it, or when it is a namespaced id filling the whole body — a lone
+  //    word in an envelope-looking tag is not a call.
   let name = attrs.match(/name\s*=\s*["']([^"']+)["']/i)?.[1]?.trim() ?? "";
   const lead = body.match(/^\s*([a-zA-Z][a-zA-Z0-9_.-]*)/)?.[1] ?? "";
-  if (!name && lead && (hasPairs || body.trim() === lead || body.includes("{"))) {
+  // `<tool_call>project.status</tool_call>` — a no-arg call. The dot is
+  // what separates a tool id from prose: "hello world" leads with "hello"
+  // and never qualifies.
+  const bareToolId = lead.includes(".") && body.trim() === lead;
+  if (!name && lead && (hasPairs || body.includes("{") || bareToolId)) {
     name = lead;
   }
   if (!name) return null;

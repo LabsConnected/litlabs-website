@@ -161,6 +161,24 @@ export async function updateGenerationJobStatus(
 }
 
 /**
+ * Set a generation job's refund_status without touching anything else.
+ * Used by the staged video-refund flow to record none → pending →
+ * refunded transitions independently of the job's lifecycle status.
+ */
+export async function setGenerationRefundStatus(
+  jobId: string,
+  refundStatus: RefundStatus,
+): Promise<void> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return;
+
+  await admin
+    .from("generation_jobs")
+    .update({ refund_status: refundStatus })
+    .eq("id", jobId);
+}
+
+/**
  * Mark a generation job as failed and record the error.
  */
 export async function failGenerationJob(

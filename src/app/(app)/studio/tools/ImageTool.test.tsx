@@ -2,6 +2,7 @@ import "@testing-library/jest-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MockInstance } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { apiFetch } from "@/lib/api-response";
 import ImageTool from "./ImageTool";
 
 /**
@@ -326,5 +327,98 @@ describe("P1-1: chat image intent prefill", () => {
     fireEvent.change(input, { target: { value: "second prompt — edited" } });
     rerender(<ImageTool initialPrompt="second prompt" />);
     expect(input).toHaveValue("second prompt — edited");
+  });
+});
+
+describe("P1-1: generate flow (idempotency, no double-submit, honest errors)", () => {
+  const apiFetchMock = vi.mocked(apiFetch);
+  const UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    studioCtx.projectId = PROJECT_ID;
+    localStorage.clear();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(JSON.stringify({}), { status: 200 }),
+    );
+    apiFetchMock.mockImplementation((async (input: string | URL) => {
+      if (String(input).includes("/api/media/generate")) {
+        return {
+          downloadUrl: "https://cdn.example.com/gen.png",
+          free: true,
+          cost: 0,
+        };
+      }
+      return {};
+    }) as typeof apiFetch);
+  });
+
+  function startGenerate(promptText = "a sunset over the lake") {
+    render(<ImageTool />);
+    const input = screen.getAllByTestId("image-prompt-input")[0];
+    fireEvent.change(input, { target: { value: promptText } });
+    fireEvent.click(screen.getAllByTestId("generate-image-button")[0]);
+  }
+
+  function generateCalls() {
+    return apiFetchMock.mock.calls.filter(([url]) =>
+      String(url).includes("/api/media/generate"),
+    );
+  }
+
+  it("sends a stable client requestId with a long timeout and no auto-retry", async () => {
+    startGenerate();
+    await waitFor(() => {
+      expect(generateCalls().length).toBe(1);
+    });
+    const [, options] = generateCalls()[0];
+    const body = JSON.parse((options as RequestInit).body as string);
+    expect(body.requestId).toMatch(UUID_RE);
+    expect(options).toMatchObject({ timeoutMs: 120_000, retries: 0 });
+  });
+
+  it("ignores a rapid double-submit — exactly one billed request", async () => {
+    render(<ImageTool />);
+    const input = screen.getAllByTestId("image-prompt-input")[0];
+    fireEvent.change(input, { target: { value: "a sunset over the lake" } });
+    const btn = screen.getAllByTestId("generate-image-button")[0];
+    fireEvent.click(btn);
+    fireEvent.click(btn);
+    await waitFor(() => {
+      expect(generateCalls().length).toBe(1);
+    });
+    // Let the first request fully resolve — a duplicate billed request
+    // would show up as a second /api/media/generate call.
+    await new Promise((r) => setTimeout(r, 150));
+    expect(generateCalls().length).toBe(1);
+  });
+
+  it("Regenerate issues a fresh idempotent request with the loaded prompt", async () => {
+    seedHistory();
+    render(<ImageTool />);
+    fireEvent.click(screen.getByLabelText("Preview: a test image"));
+    expect(screen.getByTestId("image-preview")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Regenerate"));
+    await waitFor(() => {
+      expect(generateCalls().length).toBe(1);
+    });
+    const [, options] = generateCalls()[0];
+    const body = JSON.parse((options as RequestInit).body as string);
+    expect(body.prompt).toContain("a test image");
+    expect(body.requestId).toMatch(UUID_RE);
+  });
+
+  it("provider failure shows the error honestly — no fake success", async () => {
+    apiFetchMock.mockImplementation((async (input: string | URL) => {
+      if (String(input).includes("/api/media/generate")) {
+        throw new Error("Provider overloaded");
+      }
+      return {};
+    }) as typeof apiFetch);
+    startGenerate();
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("Provider overloaded");
+    });
   });
 });

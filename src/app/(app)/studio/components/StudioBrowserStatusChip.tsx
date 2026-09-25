@@ -39,9 +39,9 @@ function dotColor(state: string, humanControl: boolean): string {
 
 function label(state: string, humanControl: boolean, burn: { billableMinutes: number; bits: number } | null): string {
   // Phase 4 — live burn display, e.g. "Browser · Live · 3 min · 135
-  // BITS". The numbers come from the real session accumulator via the
+  // LiTTBits". The numbers come from the real session accumulator via the
   // status probe; burn is null (and the segment omitted) when unknown.
-  const burnSeg = burn ? ` · ${burn.billableMinutes} min · ${burn.bits} BITS` : "";
+  const burnSeg = burn ? ` · ${burn.billableMinutes} min · ${burn.bits} LiTTBits` : "";
   if (humanControl) return `Browser · You have control${burnSeg}`;
   if (state === "live") return `Browser · Live${burnSeg}`;
   if (state === "idle") return `Browser · Idle${burnSeg}`;

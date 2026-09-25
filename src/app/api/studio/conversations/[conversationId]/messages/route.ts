@@ -9,6 +9,7 @@ import {
   listMessages,
   insertMessage,
   updateMessageStatus,
+  touchStreamingMessage,
 } from "@/lib/studio/conversation-service";
 import { resolveAgent, isValidAgentSlug } from "@/lib/studio/agent-registry";
 import { buildStudioContext } from "@/lib/studio/project-resolver";
@@ -44,6 +45,14 @@ import {
 } from "@/lib/litt-intelligence/canonical-runtime-context";
 import { detectAndExecuteTool } from "@/lib/litt-intelligence/tool-executor";
 import { deploymentEvidenceFrom } from "@/lib/studio/completion-evidence";
+import {
+  createActionRun,
+  requestActionRunCancellation,
+  transitionActionRun,
+  transitionActionRunEventActivity,
+  type ActionExecutionContext,
+  type ActionRun,
+} from "@/lib/action-runtime";
 import type { ConversationTurn } from "@/lib/litt-intelligence/turn-resolver";
 
 export const runtime = "nodejs";
@@ -57,6 +66,11 @@ interface RouteParams {
 // inserting the message, leaving it as "streaming" would render a permanent
 // "LiTT is thinking" bubble on the next load.
 const STALE_STREAMING_MESSAGE_MS = 2 * 60 * 1000;
+
+// How often the running execution heartbeats the assistant message's
+// updated_at. Well under the staleness window so a live run is never
+// misjudged, even across instances or after registry pruning.
+const STREAM_LIVENESS_MS = 30_000;
 
 // Anaphoric follow-ups ("build it", "do that again but lime") name no target.
 // With a project in context, steer the model to ask a short, targeted
@@ -581,6 +595,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   let agentRunId: string | null = null;
   let reservedCredits = 0;
   let reservationId: string | null = null;
+  let actionRun: ActionRun | null = null;
+  let actionContext: ActionExecutionContext | null = null;
   if (runtimeAgent?.agentInstanceId && clerkId) {
     // Estimate the maximum cost: per-run fee + estimated tokens
     const estimatedTokens = Math.ceil(finalPrompt.length / 4) + 2048; // prompt + max output
@@ -600,8 +616,15 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     );
 
     if (!reserveResult.ok) {
-      // Insufficient balance — abort BEFORE the model call
-      await updateMessageStatus(assistantMessage.id, userId, "failed");
+      // Insufficient balance — abort BEFORE the model call. Persist the
+      // reason so a reload shows what actually happened, not an empty
+      // failed bubble.
+      await updateMessageStatus(
+        assistantMessage.id,
+        userId,
+        "failed",
+        reserveResult.error || "Insufficient LiTTBits balance — purchase credits to run this agent.",
+      );
       return NextResponse.json(
         {
           error: reserveResult.error || "Insufficient LiTTBits balance",
@@ -617,6 +640,53 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     agentRunId = reserveResult.runId;
     reservedCredits = reserveResult.reservedCredits;
     reservationId = reserveResult.reservationId;
+  }
+
+  // One execution-required user task is one durable ActionRun. The route —
+  // the authenticated orchestration boundary — creates/resolves it once and
+  // passes the full context down; lower-level tools must never rediscover
+  // or invent task identity from model inputs.
+  if (useV2 && v2Transport && v2Config) {
+    try {
+      actionRun = await createActionRun({
+        userId,
+        conversationId: conversation.id,
+        projectId: v2Transport.projectId,
+        kind: "composite",
+        currentActivity: "Preparing LiTT task",
+        idempotencyKey: `studio-message:${conversation.id}:${clientRequestId}`,
+      });
+      actionContext = {
+        actionRunId: actionRun.id,
+        userId,
+        conversationId: conversation.id,
+        projectId: v2Transport.projectId,
+      };
+      v2Config.actionContext = actionContext;
+    } catch (runErr) {
+      const safeMessage = "LiTT couldn't start durable task tracking for this request.";
+      studioLog("message:action_run_create_failed", {
+        conversationId: conversation.id,
+        projectId: conversation.projectId,
+        userId,
+        clientRequestId,
+        errorClass: runErr instanceof Error ? runErr.message : "unknown",
+      });
+      await updateMessageStatus(assistantMessage.id, userId, "failed", safeMessage);
+      if (agentRunId) {
+        settleRun(agentRunId, {
+          inputTokens: 0,
+          outputTokens: 0,
+          actualCredits: 0,
+          status: "failed",
+          error: "ACTION_RUNTIME_UNAVAILABLE",
+        }, reservedCredits, reservationId).catch(() => {});
+      }
+      return NextResponse.json(
+        { error: safeMessage, code: "ACTION_RUNTIME_UNAVAILABLE" },
+        { status: 503 },
+      );
+    }
   }
 
   const category = (body.category as ModelCategory | undefined) ?? "auto";
@@ -677,8 +747,26 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         userId,
         clientRequestId,
         assistantMessageId: assistantMessage.id,
+        actionRunId: actionRun?.id,
         controller: executionAbort,
       });
+
+      // If Stop raced ahead of stream registration, the pending stamp has
+      // already aborted the local controller. Reflect that explicit user
+      // cancellation on the durable parent run as soon as its binding is
+      // available.
+      if (executionAbort.signal.aborted && actionContext) {
+        try {
+          await requestActionRunCancellation(actionContext.actionRunId, actionContext.userId);
+        } catch (cancelErr) {
+          studioLog("message:action_run_cancel_request_failed", {
+            conversationId: conversation.id,
+            userId,
+            actionRunId: actionContext.actionRunId,
+            errorClass: cancelErr instanceof Error ? cancelErr.message : "unknown",
+          });
+        }
+      }
 
       // Safe enqueue — no-ops once the transport is detached so a dead
       // connection doesn't spam enqueue exceptions or abort execution.
@@ -705,6 +793,16 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         safeEnqueue(encoder.encode(": keepalive\n\n"));
       }, 15_000);
 
+      // Durable liveness for the run itself: the 'streaming' message's
+      // updated_at is bumped while this process is alive and working, so a
+      // stale timestamp is proof the executor is gone — on THIS or any
+      // other instance. The update is status-guarded and can never
+      // resurrect a terminal/awaiting_approval write that already landed.
+      const livenessTimer = setInterval(() => {
+        touchStreamingMessage(assistantMessage.id, userId).catch(() => {});
+      }, STREAM_LIVENESS_MS);
+      (livenessTimer as { unref?: () => void }).unref?.();
+
       let assistantText = "";
       let reasoningText = "";
       // Actual provider that produced the last model response — surfaced
@@ -716,6 +814,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           // ── V2 path: run agent loop INSIDE the stream with real-time events ──
           // The ProgressEmitter streams events to the SSE controller as they
           // happen, so the user can watch LiTT work in real-time.
+          if (actionContext && !executionAbort.signal.aborted) {
+            await transitionActionRunEventActivity({
+              runId: actionContext.actionRunId,
+              userId: actionContext.userId,
+              status: "working",
+              eventType: "run.started",
+              payload: { kind: "composite" },
+              message: "LiTT is working on the task",
+              patch: { currentActivity: "LiTT is working on the task" },
+            });
+          }
 
           const streamProgress = new ProgressEmitter((evt: ProgressEvent) => {
             // Stream each event to the client immediately
@@ -796,6 +905,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               safeEvent({ type: "deploy_result", success: evt.success, productionUrl: evt.productionUrl, error: evt.error });
             } else if (evt.type === "deploy_verify") {
               safeEvent({ type: "deploy_verify", url: evt.url, success: evt.success, detail: evt.detail });
+            } else if (evt.type === "step_timing") {
+              safeEvent({ type: "step_timing", step: evt.step, stepDurationMs: evt.stepDurationMs, elapsedMs: evt.elapsedMs });
             }
           });
 
@@ -823,6 +934,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             evalMetadata: v2Config.evalMetadata,
             progress: streamProgress,
             signal: executionAbort.signal,
+            actionContext: actionContext ?? undefined,
+            conversationId: conversation.id,
           });
 
           v2Result = launchFlowResult.agentLoopResult ?? null;
@@ -849,12 +962,41 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 executionMode: canonicalCtx.executionMode,
                 systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
                 checkpointId: v2Result.checkpoint?.checkpointId ?? null,
+                actionRunId: actionContext?.actionRunId ?? null,
                 qualityLoopState: v2Result.qualityLoopState,
                 deferredToolCalls: v2Result.pendingApproval.deferredToolCalls,
                 stepsUsed: v2Result.pendingApproval.stepsUsedAtPause,
                 hadInterveningMutation: v2Result.pendingApproval.hadInterveningMutationAtPause,
               });
               pausedRunId = pausedRun.id;
+              if (actionContext) {
+                try {
+                  await transitionActionRunEventActivity({
+                    runId: actionContext.actionRunId,
+                    userId: actionContext.userId,
+                    status: "waiting_for_user",
+                    eventType: "approval.required",
+                    payload: {
+                      toolId: v2Result.pendingApproval.toolId,
+                      pausedRunId,
+                    },
+                    message: `Approval required for ${v2Result.pendingApproval.toolId}`,
+                    patch: {
+                      approvalReference: pausedRunId,
+                      currentActivity: `Approval required for ${v2Result.pendingApproval.toolId}`,
+                    },
+                  });
+                } catch (approvalRunErr) {
+                  pausedRunPersistFailed = true;
+                  studioLog("message:action_run_waiting_transition_failed", {
+                    conversationId: conversation.id,
+                    userId,
+                    actionRunId: actionContext.actionRunId,
+                    pausedRunId,
+                    errorClass: approvalRunErr instanceof Error ? approvalRunErr.message : "unknown",
+                  });
+                }
+              }
             } catch (pausedErr) {
               // If persistence fails, the gate cannot be resumed — there is
               // no pausedRunId for the Approve button to act on. Emitting
@@ -908,7 +1050,42 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 ? "completed"
                 : "failed";
 
-          await updateMessageStatus(assistantMessage.id, userId, finalMessageStatus, assistantText);
+          const statusPersisted = await updateMessageStatus(assistantMessage.id, userId, finalMessageStatus, assistantText);
+          let actionRunPersistenceFailed = false;
+          if (actionContext && finalMessageStatus !== "awaiting_approval") {
+            try {
+              await transitionActionRun(actionContext.actionRunId, actionContext.userId, finalMessageStatus, {
+                currentActivity: finalMessageStatus === "completed"
+                  ? "Task completed"
+                  : finalMessageStatus === "cancelled"
+                    ? "Task cancelled by user"
+                    : "Task failed",
+                approvalReference: null,
+                failureCode: finalMessageStatus === "failed" ? "TASK_FAILED" : null,
+                failureMessage: finalMessageStatus === "failed" ? assistantText.slice(0, 500) : null,
+              });
+            } catch (settleErr) {
+              actionRunPersistenceFailed = true;
+              studioLog("message:action_run_settle_failed", {
+                conversationId: conversation.id,
+                userId,
+                actionRunId: actionContext.actionRunId,
+                status: finalMessageStatus,
+                errorClass: settleErr instanceof Error ? settleErr.message : "unknown",
+              });
+            }
+          }
+          if (statusPersisted === false) {
+            // The run reached a terminal state but the transcript row did
+            // not learn it — the message stays 'streaming' and the GET
+            // reconciler is the only line of defense left. Log loudly so
+            // this is diagnosable instead of surfacing as a mystery
+            // "previous run ended" later.
+            studioLog(`message:terminal_status_write_failed mid=${assistantMessage.id}`, {
+              conversationId: conversation.id,
+              status: finalMessageStatus,
+            });
+          }
           if (agentRunId) {
             const actualCredits = runtimeAgent
               ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
@@ -996,6 +1173,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             v2: true,
             pendingApproval: actionableApproval ?? undefined,
             launchStatus: launchFlowResult?.status ?? undefined,
+            actionRunId: actionContext?.actionRunId,
+            actionRunPersistence: actionRunPersistenceFailed ? "failed" : "ok",
             previewUrl: launchFlowResult?.previewUrl ?? undefined,
             productionUrl: launchFlowResult?.productionUrl ?? undefined,
           });
@@ -1100,7 +1279,10 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             v1MessageStatus,
             v1MarkupHit
               ? "The model produced a tool call in a format this run cannot execute, so nothing was executed."
-              : assistantText || undefined,
+              : assistantText ||
+                  (v1Empty
+                    ? "The model returned an empty response — nothing was produced. Send the request again to retry."
+                    : undefined),
           );
           if (agentRunId) {
             const actualCredits = runtimeAgent
@@ -1232,12 +1414,39 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         if (!cancelledBySignal) {
           console.error(`[messages-route:${rid}] Stream failed:`, errorMsg, err instanceof Error ? err.stack : "");
         }
+        // Persist WHY the run failed on the transcript row — a failed
+        // message with empty content collapses to the generic stale-stream
+        // fallback on reload and the real error is only in logs.
+        const failureNote = assistantText.trim().length > 0
+          ? `${assistantText.trimEnd()}\n\nThe run failed: ${errorMsg}`
+          : `The run failed before it could produce a result: ${errorMsg}`;
         await updateMessageStatus(
           assistantMessage.id,
           userId,
           cancelledBySignal ? "cancelled" : "failed",
-          cancelledBySignal ? assistantText || undefined : undefined,
+          cancelledBySignal ? assistantText || undefined : failureNote,
         );
+        if (actionContext) {
+          try {
+            await transitionActionRun(
+              actionContext.actionRunId,
+              actionContext.userId,
+              cancelledBySignal ? "cancelled" : "failed",
+              {
+                currentActivity: cancelledBySignal ? "Task cancelled by user" : "Task failed",
+                failureCode: cancelledBySignal ? null : "TASK_FAILED",
+                failureMessage: cancelledBySignal ? null : errorMsg.slice(0, 500),
+              },
+            );
+          } catch (settleErr) {
+            studioLog("message:action_run_error_settle_failed", {
+              conversationId: conversation.id,
+              userId,
+              actionRunId: actionContext.actionRunId,
+              errorClass: settleErr instanceof Error ? settleErr.message : "unknown",
+            });
+          }
+        }
         if (agentRunId) {
           settleRun(agentRunId, {
             inputTokens: 0,
@@ -1281,6 +1490,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         }
       } finally {
         clearInterval(heartbeatTimer);
+        clearInterval(livenessTimer);
         unregisterExecution(conversation.id, executionKey);
         if (!transportOpen) {
           studioLog("message:execution_finished_after_disconnect", {
@@ -1360,14 +1570,33 @@ async function getHandler(req: NextRequest, routeCtx: RouteParams) {
           pausedRunId: pendingRun.id,
           inputs: pendingRun.inputs,
         };
-      } else if (
-        lastAssistant.status === "awaiting_approval" &&
-        !getActiveExecution(conversation.id)
-      ) {
+      } else if (!getActiveExecution(conversation.id)) {
+        // A 'streaming' message is only condemned once it has gone quiet:
+        // the running execution heartbeats updated_at every ~30s, so a
+        // fresh timestamp means the run is provably alive on SOME instance
+        // (or its send is still racing registration). 'awaiting_approval'
+        // carries no such liveness signal — the gate state is checked
+        // immediately.
+        const streamingStale =
+          lastAssistant.status === "streaming" &&
+          Boolean(lastAssistant.updatedAt) &&
+          Number.isFinite(Date.parse(lastAssistant.updatedAt)) &&
+          Date.now() - Date.parse(lastAssistant.updatedAt) > STALE_STREAMING_MESSAGE_MS;
+        const consultRun =
+          lastAssistant.status === "awaiting_approval" || streamingStale;
+
         // The open turn has no resumable gate — the pause died without a
         // writeback (TTL expiry, or a decision writeback that missed).
         // Reconcile the message to a truthful terminal state instead of
         // leaving "Waiting for your approval" mounted forever.
+        //
+        // A paused message can also persist as 'streaming' when the
+        // 'awaiting_approval' status write failed, and a resumed run never
+        // registers in the in-process execution registry — so the durable
+        // run record is consulted for EITHER status before the message is
+        // condemned. The run row is authoritative for what happened: its
+        // runError/runResult carry the real outcome, never a generic
+        // fallback.
         //
         // Precision guard: the latest run is only this message's gate when
         // it was created after the message. Without this, a STALE run from
@@ -1377,12 +1606,18 @@ async function getHandler(req: NextRequest, routeCtx: RouteParams) {
         // and the user sees "expired before a decision was made" within
         // seconds of the request (2026-09-18 defect). An unrelated run
         // leaves the message alone instead of writing a bogus note.
-        const latestRun = await getLatestPausedRunForConversation(conversation.id, userId);
+        const latestRun = consultRun
+          ? await getLatestPausedRunForConversation(conversation.id, userId)
+          : null;
         const gateRun =
           latestRun &&
           pausedRunBelongsToMessage(latestRun.createdAt, lastAssistant.createdAt)
             ? latestRun
             : null;
+        // A pending gate that missed the pending lookup, or an approved run
+        // still processing/just claimed, owns this message's writeback —
+        // leave the message alone while the resumed run is in flight.
+        let ownedByLiveRun = false;
         if (gateRun?.status === "expired") {
           const note = `${lastAssistant.content || "Approval was required."}\n\nThis approval expired before a decision was made — send the request again to continue.`;
           const persisted = await updateMessageStatus(lastAssistant.id, userId, "cancelled", note);
@@ -1427,31 +1662,31 @@ async function getHandler(req: NextRequest, routeCtx: RouteParams) {
             lastAssistant.status = status;
             lastAssistant.content = note;
           }
+        } else if (gateRun) {
+          ownedByLiveRun = true;
         }
         // approved/processing gates own their writeback — leave the
         // message alone while the resumed run is in flight.
-      } else if (
-        lastAssistant.status === "streaming" &&
-        lastAssistant.updatedAt &&
-        Number.isFinite(Date.parse(lastAssistant.updatedAt)) &&
-        Date.now() - Date.parse(lastAssistant.updatedAt) > STALE_STREAMING_MESSAGE_MS &&
-        !getActiveExecution(conversation.id)
-      ) {
-        // No active execution and no resumable approval means the stream is
-        // stale. Persist a truthful terminal state so reload cannot resurrect
-        // the message as an active thinking indicator.
-        const fallbackContent = lastAssistant.content?.trim()
-          ? lastAssistant.content
-          : "The previous run ended before it produced a result.";
-        const persisted = await updateMessageStatus(
-          lastAssistant.id,
-          userId,
-          "failed",
-          fallbackContent,
-        );
-        if (persisted !== false) {
-          lastAssistant.status = "failed";
-          lastAssistant.content = fallbackContent;
+
+        if (!ownedByLiveRun && !gateRun && streamingStale) {
+          // No active execution, no durable run record, and the message
+          // stopped reporting — the executor is gone (process restart,
+          // crash, or an execution that outlived its in-memory registry
+          // entry). Persist a truthful terminal state so reload cannot
+          // resurrect the message as an active thinking indicator.
+          const fallbackContent = lastAssistant.content?.trim()
+            ? lastAssistant.content
+            : "The previous run ended before it produced a result — the server lost the execution before it could write an outcome (a restart or crash). Retry the request to run it again.";
+          const persisted = await updateMessageStatus(
+            lastAssistant.id,
+            userId,
+            "failed",
+            fallbackContent,
+          );
+          if (persisted !== false) {
+            lastAssistant.status = "failed";
+            lastAssistant.content = fallbackContent;
+          }
         }
       }
     } catch {

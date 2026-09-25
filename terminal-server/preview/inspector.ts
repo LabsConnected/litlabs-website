@@ -6,8 +6,13 @@
  * support element selection we inject a small script into proxied HTML
  * documents that implements a postMessage protocol:
  *
- *   child → parent: { source: "litt-inspector", type: "ready"|"hover"|"select", payload }
+ *   child → parent: { source: "litt-inspector", type: "ready"|"hover"|"select"|"style-probe", payload }
  *   parent → child: { source: "litt-inspector", type: "enable"|"disable"|"clear", token }
+ *
+ * The "style-probe" message reports whether Tailwind utilities actually
+ * applied ({ tailwindDetected, styled }): when the page loads the Tailwind
+ * browser build but renders unstyled (the v4 @import trap), Studio must not
+ * keep showing a green "Preview ready" badge.
  *
  * Inbound commands are only accepted from window.parent and must carry
  * the preview access token (the same token already required to load the
@@ -144,6 +149,54 @@ const INSPECTOR_SCRIPT = `(function () {
   function clear() {
     if (selectedEl) { restore(selectedEl, selectedPrev); selectedEl = null; selectedPrev = null; }
   }
+
+  // Style probe (P0: Tailwind v4 @import trap). The Tailwind browser build
+  // silently compiles zero utilities when a text/tailwindcss block carries
+  // any @import without tailwindcss — the page renders fully unstyled with
+  // no error. The parent cannot see the frame's DOM (cross-origin), so the
+  // injected script probes itself: if the page intends Tailwind (browser
+  // CDN script or a text/tailwindcss block present), drop a hidden probe
+  // element carrying a core utility class and check getComputedStyle.
+  // Poll briefly because the browser build compiles asynchronously after
+  // load — a slow CDN must not be misreported as a styling failure.
+  function tailwindIntent() {
+    try {
+      if (document.querySelector('script[src*="tailwindcss"]')) return true;
+      if (document.querySelector('style[type="text/tailwindcss"]')) return true;
+    } catch (e) {}
+    return false;
+  }
+  function runStyleProbe() {
+    if (!tailwindIntent()) {
+      post("style-probe", { tailwindDetected: false, styled: true });
+      return;
+    }
+    var probe = document.createElement("div");
+    probe.setAttribute("class", "hidden");
+    probe.setAttribute("aria-hidden", "true");
+    probe.setAttribute("style", "position:absolute;left:-9999px;top:0;width:1px;height:1px;overflow:hidden;");
+    var host = document.body || document.documentElement;
+    try { host.appendChild(probe); } catch (e) { post("style-probe", { tailwindDetected: true, styled: false }); return; }
+    var attempts = 0;
+    function done(styled) {
+      try { if (probe.parentNode) probe.parentNode.removeChild(probe); } catch (e) {}
+      post("style-probe", { tailwindDetected: true, styled: styled });
+    }
+    function check() {
+      var display = "";
+      try { display = window.getComputedStyle(probe).display; } catch (e) {}
+      if (display === "none") { done(true); return; }
+      attempts++;
+      if (attempts >= 10) { done(false); return; }
+      window.setTimeout(check, 1000);
+    }
+    window.setTimeout(check, 1500);
+  }
+  function scheduleStyleProbe() {
+    window.setTimeout(runStyleProbe, 0);
+  }
+  if (document.readyState === "complete") scheduleStyleProbe();
+  else window.addEventListener("load", scheduleStyleProbe);
 
   window.addEventListener("message", function (event) {
     if (event.source !== window.parent) return;

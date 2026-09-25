@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo, Suspense, memo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef, Suspense, memo } from "react";
 import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
@@ -146,6 +146,17 @@ function MarketplaceInner() {
   const [loadError, setLoadError] = useState(false);
   const [activeTab, setActiveTab] = useState<"marketplace" | "beta">("marketplace");
   const [authTimedOut, setAuthTimedOut] = useState(false);
+  const tabBarRef = useRef<HTMLDivElement>(null);
+
+  // "Beta Access" must visibly respond: switch to the beta tab AND bring
+  // it into view. The tab bar sits below the fold from the hero button,
+  // so a bare state change reads as a dead click.
+  const goToBeta = useCallback(() => {
+    setActiveTab("beta");
+    requestAnimationFrame(() => {
+      tabBarRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, []);
 
   // Sync tab from URL after hydration to avoid SSR/client mismatch (React #418)
   useEffect(() => {
@@ -474,7 +485,7 @@ function MarketplaceInner() {
                 Start Building Free <ArrowRight size={14} />
               </Link>
             )}
-            <button onClick={() => setActiveTab("beta")} className="inline-flex items-center gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-2.5 text-sm font-bold text-amber-300 transition hover:bg-amber-400/15">
+            <button onClick={goToBeta} className="inline-flex items-center gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-2.5 text-sm font-bold text-amber-300 transition hover:bg-amber-400/15">
               Beta Access
             </button>
           </div>
@@ -482,7 +493,7 @@ function MarketplaceInner() {
       </div>
 
       {/* === TAB BAR === */}
-      <div className="border-b border-white/10 px-4 sm:px-6">
+      <div ref={tabBarRef} className="scroll-mt-24 border-b border-white/10 px-4 sm:px-6">
         <ProductFrame className="flex gap-2">
           <button
             onClick={() => setActiveTab("marketplace")}
@@ -493,7 +504,7 @@ function MarketplaceInner() {
             Browse
           </button>
           <button
-            onClick={() => setActiveTab("beta")}
+            onClick={goToBeta}
             className={`border-b-2 px-4 py-3 text-sm font-bold transition ${
               activeTab === "beta" ? "border-amber-400 text-amber-300" : "border-transparent text-white/40 hover:text-white/70"
             }`}
@@ -773,9 +784,11 @@ function MarketplaceInner() {
                   </div>
                 ))}
               </div>
-              <Link href="/pricing" className="mt-4 flex w-full items-center justify-center rounded-xl bg-amber-400 py-2 text-xs font-black text-black transition hover:scale-[1.02]">
+              {/* Not offered on /pricing — a dead link there would mislead,
+                  so this is an honest disabled state, not a Link. */}
+              <span aria-disabled="true" className="mt-4 flex w-full cursor-not-allowed items-center justify-center rounded-xl bg-amber-400/40 py-2 text-xs font-black text-black/60">
                 Currently Unavailable
-              </Link>
+              </span>
             </div>
           </div>
 

@@ -392,9 +392,11 @@ test.describe("Landing page — LiTT operator homepage", () => {
     }
   });
 
-  test("product proof section exists and does not advertise a missing recording", async ({ page }) => {
+  test("product proof section exists inside the merged creations block and does not advertise a missing recording", async ({ page }) => {
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
-    const proofSection = page.locator("#real-proof");
+    // RealProductProof was folded into CreationsSection (one #creations
+    // section): the trailer proof renders above the demo cards.
+    const proofSection = page.locator("#creations");
     await expect(proofSection).toBeVisible();
     await expect(proofSection).toContainText("See LiTT work on a real project");
     // The section renders either the real trailer video or the honest
