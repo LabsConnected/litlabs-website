@@ -90,7 +90,7 @@ export function RecentMedia({ items, loading, error, mediaActions }: RecentMedia
         className="flex items-center justify-between border-b pb-3"
         style={{ borderColor: "rgba(255,255,255,0.06)" }}
       >
-        <h3 className="text-sm font-medium uppercase tracking-widest" style={{ color: "#71717a" }}>
+        <h3 className="text-sm font-bold uppercase tracking-[.18em] text-zinc-300">
           Recent Media
         </h3>
         <div className="flex gap-3 text-xs font-medium md:gap-4">
@@ -98,7 +98,7 @@ export function RecentMedia({ items, loading, error, mediaActions }: RecentMedia
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className="pb-1 transition-colors"
+              className="px-1 py-2 transition-colors"
               style={{
                 color: activeTab === tab.id ? "#a78bfa" : "#71717a",
                 borderBottom: activeTab === tab.id ? "1px solid #a78bfa" : "1px solid transparent",

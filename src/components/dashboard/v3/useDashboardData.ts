@@ -290,12 +290,8 @@ export function derivePulseItems(
       clickable: true,
     });
   } else {
-    items.push({
-      id: "railway",
-      label: "Railway Unknown",
-      state: "unknown",
-      clickable: true,
-    });
+    // No Railway health reported — omit the chip rather than showing
+    // "Railway Unknown" (infra jargon with no actionable signal).
   }
 
   // Build status from project workspace state
