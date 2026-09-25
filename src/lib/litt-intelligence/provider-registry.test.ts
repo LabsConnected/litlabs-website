@@ -276,6 +276,69 @@ describe("provider registry — model hints", () => {
   });
 });
 
+describe("provider registry — openrouter auto-router tool exclusion", () => {
+  it("excludes openrouter/free from tool-required plans", () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(TOOL_REQ);
+    const or = plan.providers.find((p) => p.provider === "openrouter");
+    expect(or).toBeDefined();
+    expect(or!.models).not.toContain("openrouter/free");
+    // The explicitly-named free tool-callers remain as candidates.
+    expect(or!.models.length).toBeGreaterThan(0);
+    expect(or!.models).toContain("nvidia/nemotron-3.5-lightning:free");
+  });
+
+  it("keeps openrouter/free eligible when tools are not required", () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes({ tools: false });
+    const or = plan.providers.find((p) => p.provider === "openrouter");
+    expect(or!.models).toContain("openrouter/free");
+  });
+
+  it("an explicit openrouter/free hint cannot resurrect the auto-router on tool-required requests", () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(TOOL_REQ, { model: "openrouter/free" });
+    const or = plan.providers.find((p) => p.provider === "openrouter");
+    expect(or!.models).not.toContain("openrouter/free");
+    // The drop is surfaced, not silent — the caller logs model_hint_dropped.
+    expect(plan.droppedModelHint).toBe("openrouter/free");
+  });
+
+  it("honours an explicit openrouter/free hint when tools are not required", () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes({ tools: false }, { model: "openrouter/free" });
+    const or = plan.providers.find((p) => p.provider === "openrouter");
+    expect(or!.models[0]).toBe("openrouter/free");
+    expect(plan.droppedModelHint).toBeUndefined();
+  });
+
+  it("OPENROUTER_MODEL=openrouter/free override cannot force the auto-router into a tool-required plan", () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "x");
+    vi.stubEnv("OPENROUTER_MODEL", "openrouter/free");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(TOOL_REQ);
+    const or = plan.providers.find((p) => p.provider === "openrouter");
+    expect(or!.models).not.toContain("openrouter/free");
+  });
+
+  it("fails truthfully at the plan level when no tool-capable provider remains", () => {
+    // No credentials anywhere — every provider is excluded with an honest
+    // reason rather than the plan pretending a route exists. The launch
+    // flow turns this empty plan into TOOL_EXECUTION_UNAVAILABLE upstream.
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(TOOL_REQ);
+    expect(plan.providers).toHaveLength(0);
+    expect(plan.excluded.length).toBeGreaterThan(0);
+    for (const e of plan.excluded) {
+      expect(e.reason).toBeTruthy();
+    }
+  });
+});
+
 describe("provider registry — failure classification", () => {
   it("classifies 401 as provider-scope auth_invalid", () => {
     const f = classifyHttpFailure(401, '{"error":"invalid key"}');

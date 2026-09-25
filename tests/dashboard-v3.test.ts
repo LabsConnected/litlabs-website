@@ -3,7 +3,7 @@
  *
  * Verifies that the new dashboard:
  *   - Renders the v3 Dashboard (not v2 MissionControlDashboard)
- *   - Includes Continue Working, Quick Start, Recent Work, Recent Media
+ *   - Includes Quick Create, Recent Work, Recent Media
  *   - Uses the real MediaHubProvider (via useMediaDock) — no new provider
  *   - MediaDock consumes MediaHub + MusicPlayerContext (no duplicate state)
  *   - Command palette has real destinations/actions (no dead commands)
@@ -25,8 +25,8 @@ function readSrc(filename: string): string {
 describe("Dashboard v3 — composition", () => {
   const dashboardSrc = readSrc("Dashboard.tsx");
 
-  it("renders ContinueWorking section", () => {
-    expect(dashboardSrc).toContain("ContinueWorking");
+  it("does not render the retired ContinueWorking section", () => {
+    expect(dashboardSrc).not.toContain("ContinueWorking");
   });
 
   it("renders QuickStart section", () => {
@@ -166,40 +166,6 @@ describe("Dashboard v3 — DashboardView wiring", () => {
   });
 });
 
-describe("Dashboard v3 — Continue Working", () => {
-  const src = readSrc("ContinueWorking.tsx");
-
-  it("shows project name, branch, and status", () => {
-    expect(src).toContain("project.name");
-    expect(src).toContain("project.branch");
-    expect(src).toContain("project.status");
-  });
-
-  it("has Open Studio action (real route)", () => {
-    expect(src).toContain("Open Studio");
-    expect(src).toContain("/studio");
-  });
-
-  it("has Preview action (conditional on previewState)", () => {
-    expect(src).toContain("Preview");
-    expect(src).toContain("previewState");
-  });
-
-  it("has timeAgo display for last edited", () => {
-    expect(src).toContain("timeAgo");
-    expect(src).toContain("updatedAt");
-  });
-
-  it("has loading skeleton state", () => {
-    expect(src).toContain("loading");
-    expect(src).toContain("animate-pulse");
-  });
-
-  it("has empty state when no project", () => {
-    expect(src).toContain("Start with an idea and LiTT will take it from description to a real workspace.");
-  });
-});
-
 describe("Dashboard v3 — Quick Start", () => {
   const src = readSrc("QuickStart.tsx");
   const createSrc = fs.readFileSync(
@@ -219,8 +185,10 @@ describe("Dashboard v3 — Quick Start", () => {
     expect(createSrc).toContain("quick-create");
   });
 
-  it("links to real studio routes", () => {
-    expect(createSrc).toContain("/studio?");
+  it("uses suggestion seeds instead of bypassing the intent router", () => {
+    expect(createSrc).toContain("seed:");
+    expect(createSrc).toContain('fetch(\"/api/litt/intent\"');
+    expect(createSrc).not.toContain('href: \"/studio?');
   });
 
   it("is responsive and touch-friendly", () => {

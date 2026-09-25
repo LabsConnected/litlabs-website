@@ -267,6 +267,14 @@ const execState = vi.hoisted(() => {
     setPhase: vi.fn(),
     setPendingApproval: vi.fn((approval: unknown) => { state.pendingApproval = approval; }),
     resolveApproval: vi.fn(() => { state.pendingApproval = null; }),
+    beginApprovalSubmit: vi.fn(() => { state.approvalPhase = "submitting"; }),
+    approvalAccepted: vi.fn(() => { state.approvalPhase = "executing"; }),
+    failApproval: vi.fn((error: string, retryable?: boolean, opts?: { expired?: boolean }) => {
+      state.approvalPhase = "failed";
+      state.approvalError = error;
+      state.approvalRetryable = retryable ?? true;
+      state.approvalExpired = opts?.expired ?? false;
+    }),
     setCheckpoint: vi.fn(),
     collapseEvent: vi.fn(),
     collapseLowLevel: vi.fn(),
@@ -567,6 +575,24 @@ describe("CommandStudio — canvas-first 2-zone layout", () => {
 
     expect(screen.queryByTestId("studio-completion")).toBeNull();
   });
+
+  it("does NOT show a Done completion card when the assistant asks a clarifying question", async () => {
+    globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+    sendMock.mockResolvedValueOnce({
+      accepted: true,
+      persisted: true,
+      reply: "Which project should I update?",
+      awaitingInput: true,
+    });
+
+    const { user } = await renderCommandStudio();
+    await user.type(screen.getByTestId("studio-command-input"), "Fix the dropdown");
+    await user.click(screen.getByTestId("studio-send-button"));
+    await waitFor(() => expect(sendMock).toHaveBeenCalled());
+    await settle();
+
+    expect(screen.queryByTestId("studio-completion")).toBeNull();
+  });
 });
 
 describe("CommandStudio — approval gate convergence", () => {
@@ -696,6 +722,85 @@ describe("CommandStudio — approval gate convergence", () => {
     const { submitApprovalAndPoll } = await import("../lib/approval-polling");
     expect(convState.reportSendError).not.toHaveBeenCalled();
     expect(submitApprovalAndPoll).not.toHaveBeenCalled();
+  });
+
+  it("posts the approval to the gate's OWN conversation, not the current selection", async () => {
+    globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+    // Production defect: the gate mounted in conv-1, the user then opened
+    // another conversation, and clicking Approve posted the pausedRunId to
+    // the newly selected conversation — the server 403'd with "Conversation
+    // mismatch" and the card dead-ended as unretryable. The POST must
+    // always target the conversation the gate was issued in.
+    convState.selectedConversationId = "conv-2";
+    execState.state.pendingApproval = {
+      toolId: "files.write",
+      reason: "Mutation requires approval in ACT mode",
+      pausedRunId: "paused-1",
+      conversationId: "conv-1",
+    };
+    execState.state.events = [
+      { id: "e1", seq: 0, ts: Date.now(), type: "approval_required", summary: "Approval needed: files write" },
+    ];
+    const { user } = await renderCommandStudio();
+    await settle();
+
+    await user.click(screen.getByTestId("litt-tab-live"));
+    await settle();
+    await user.click(screen.getByRole("button", { name: /^approve$/i }));
+    await settle();
+
+    const { submitApprovalAndPoll } = await import("../lib/approval-polling");
+    expect(submitApprovalAndPoll).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: "conv-1", pausedRunId: "paused-1" }),
+    );
+  });
+
+  it("falls back to the selected conversation for gates mounted before binding existed", async () => {
+    globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+    // Legacy gates carry no conversationId — the selection is the only
+    // identity available, so the previous behavior must hold for them.
+    convState.selectedConversationId = "conv-1";
+    execState.state.pendingApproval = {
+      toolId: "files.write",
+      reason: "Mutation requires approval",
+      pausedRunId: "paused-1",
+    };
+    execState.state.events = [
+      { id: "e1", seq: 0, ts: Date.now(), type: "approval_required", summary: "Approval needed: files write" },
+    ];
+    const { user } = await renderCommandStudio();
+    await settle();
+
+    await user.click(screen.getByTestId("litt-tab-live"));
+    await settle();
+    await user.click(screen.getByRole("button", { name: /^approve$/i }));
+    await settle();
+
+    const { submitApprovalAndPoll } = await import("../lib/approval-polling");
+    expect(submitApprovalAndPoll).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: "conv-1", pausedRunId: "paused-1" }),
+    );
+  });
+
+  it("watches the gate's OWN conversation even after the selection changes", async () => {
+    globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+    // The server-authoritative watcher polls the paused run's status — it
+    // must poll the gate's conversation, or a selection change silently
+    // disarms convergence (404-ish GETs against the wrong conversation).
+    convState.selectedConversationId = "conv-2";
+    execState.state.pendingApproval = {
+      toolId: "project.deploy",
+      reason: "Sensitive action",
+      pausedRunId: "paused-1",
+      conversationId: "conv-1",
+    };
+    await renderCommandStudio();
+    await settle();
+
+    const { watchApprovalResolution } = await import("../lib/approval-polling");
+    expect(watchApprovalResolution).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: "conv-1", pausedRunId: "paused-1" }),
+    );
   });
 
   it("keeps the honest 'could not be resumed' error when the mounted gate has no pausedRunId", async () => {

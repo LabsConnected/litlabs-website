@@ -88,29 +88,29 @@ export const BROWSER_UNAVAILABLE_MESSAGE =
 // ─── Chat intent (Phase 1) ─────────────────────────────────────────
 
 /**
- * Screenshot trigger phrases. Kept narrow on purpose: "screenshot" is an
- * explicit verb, and "what does <url> look like" only fires when a URL or
- * bare domain is present (extractScreenshotUrl must find one).
+ * Screenshot requests must be short, explicit commands. A broad substring
+ * match lets words in a longer coding task hijack the request into browser
+ * control before the code agent can see it.
  */
-const SCREENSHOT_TRIGGER_PHRASES = [
-  "screenshot",
-  "screen shot",
-  "screen capture",
-  "capture the page",
-  "capture this page",
-];
+const SCREENSHOT_COMMAND = /^(?:(?:take|grab|capture|get)\s*)?(?:a\s+)?screen(?:shot|\s+shot|\s+capture)\b/i;
+const SCREENSHOT_URL = /\bhttps?:\/\/|\b[\w-]+\.(?:com|net|org|io|dev|app)\b/i;
+const SCREENSHOT_TASK_CUES = /\b(fix|bug|regression|refactor|test)\b/i;
 
 /**
  * True when the message asks LiTT to screenshot a page.
  */
 export function detectScreenshotIntent(message: string): boolean {
-  const lower = (message ?? "").toLowerCase();
-  if (SCREENSHOT_TRIGGER_PHRASES.some((kw) => lower.includes(kw))) return true;
-  // "what does example.com look like" — only with a URL/domain present.
-  if (/\bwhat does\b.+\blook like\b/i.test(message) && extractScreenshotUrl(message)) {
-    return true;
+  const text = (message ?? "").trim();
+  if (!text) return false;
+
+  // "what does example.com look like" is a separate, constrained question form.
+  if (/\bwhat does\b.+\blook like\b/i.test(text)) {
+    return Boolean(extractScreenshotUrl(text));
   }
-  return false;
+
+  const looksLikeTask = text.length > 200 || /\n/.test(text) || SCREENSHOT_TASK_CUES.test(text);
+  return SCREENSHOT_COMMAND.test(text) && !looksLikeTask &&
+    (SCREENSHOT_URL.test(text) || text.length < 60);
 }
 
 /**

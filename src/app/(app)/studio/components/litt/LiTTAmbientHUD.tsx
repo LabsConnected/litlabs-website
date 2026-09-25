@@ -77,6 +77,7 @@ const PHASE_ICON: Record<ExecutionPhase, ComponentType<{ size?: number; strokeWi
   done: CheckCircle2,
   cancelled: XCircle,
   awaiting_approval: AlertTriangle,
+  awaiting_input: AlertTriangle,
 };
 
 const PHASE_COLOR: Record<ExecutionPhase, string> = {
@@ -89,6 +90,7 @@ const PHASE_COLOR: Record<ExecutionPhase, string> = {
   done: "var(--litt-primary)",
   cancelled: "var(--error)",
   awaiting_approval: "#e3b341",
+  awaiting_input: "#e3b341",
 };
 
 export interface LiTTAmbientHUDProps {

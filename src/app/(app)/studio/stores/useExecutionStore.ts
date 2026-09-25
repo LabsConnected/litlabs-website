@@ -22,7 +22,8 @@ export type ExecutionPhase =
   | "verifying"
   | "done"
   | "cancelled"
-  | "awaiting_approval";
+  | "awaiting_approval"
+  | "awaiting_input";
 
 export interface ExecutionEvent {
   id: string;
@@ -92,6 +93,17 @@ export interface PendingApproval {
   toolId: string;
   reason: string;
   pausedRunId?: string;
+  /**
+   * Conversation the paused run belongs to, captured at mount time.
+   * The Approve/Reject POST must go to THIS conversation — the one the
+   * pausedRunId was issued in — not whichever conversation happens to be
+   * selected when the user clicks. Posting to a different conversation
+   * deterministically 403s with "Conversation mismatch" (the server
+   * verifies the paused run's stored conversationId), which used to
+   * dead-end the card as unretryable when the user switched or created a
+   * conversation after the gate mounted.
+   */
+  conversationId?: string;
   inputs?: Record<string, unknown>;
 }
 
@@ -368,6 +380,12 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       approvalRetryable: true,
       approvalExpired: false,
     });
+    // Clear the failed-lifecycle fields when the gate is removed entirely
+    // (approval: null) — previously they could survive a null gate and
+    // reattach to the next gate that mounts.
+    if (!approval) {
+      set({ approvalPhase: "idle", approvalError: null, approvalRetryable: true, approvalExpired: false });
+    }
     if (approval) {
       get().addEvent({
         type: "approval_required",
@@ -532,6 +550,13 @@ export function feedSSEEventToExecutionStore(
     error?: string;
     productionUrl?: string;
   },
+  /**
+   * Conversation whose run produced this event — stamped onto any approval
+   * gate mounted from it, so the Approve/Reject POST targets the paused
+   * run's own conversation instead of whichever conversation is selected
+   * at click time (a mismatch deterministic-403s as "Conversation mismatch").
+   */
+  conversationId?: string,
   store = useExecutionStore,
 ) {
   const s = store.getState();
@@ -610,6 +635,11 @@ export function feedSSEEventToExecutionStore(
         toolId: evt.toolId ?? "",
         reason: evt.reason ?? "Approval required",
         pausedRunId: evt.pausedRunId,
+        // Bind the gate to the conversation whose run paused — the resume
+        // POST must target THIS conversation even if the user switches or
+        // creates a conversation before clicking (the server 403s any
+        // mismatched pair with "Conversation mismatch").
+        conversationId,
         inputs: evt.inputs,
       });
       break;

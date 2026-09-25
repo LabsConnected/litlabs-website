@@ -48,6 +48,15 @@ import type { WorkspaceStage, CreatorKind } from "@/app/(app)/studio/lib/studio-
 
 // ─── Contract types ──────────────────────────────────────────────
 
+export interface StudioSelection {
+  elementId: string;
+  componentName?: string;
+  sourceFile?: string;
+  route?: string;
+  content?: string;
+  styles?: Record<string, unknown>;
+}
+
 export interface StudioContextValue {
   /** Stable session identity (controlled — from conversationId or deterministic fallback). */
   sessionId: string;
@@ -66,6 +75,9 @@ export interface StudioContextValue {
 
   /** Active asset ID (canonical, source-qualified), or null (provider-owned). */
   activeAssetId: string | null;
+
+  /** Shared selection carried across Preview, Design, Code, and Chat. */
+  selection: StudioSelection | null;
 }
 
 export interface StudioContextActions {
@@ -84,6 +96,9 @@ export interface StudioContextActions {
 
   /** Set the active asset ID (provider-owned state). */
   setActiveAssetId: (id: string | null) => void;
+
+  /** Preserve the same selected element across Studio surfaces. */
+  setSelection: (selection: StudioSelection | null) => void;
 }
 
 export type StudioContextApi = StudioContextValue & StudioContextActions;
@@ -109,12 +124,18 @@ export interface StudioContextProviderProps {
   /** Authoritative creator, or null (controlled). */
   creator: CreatorKind | null;
 
+  /** Shared selection (controlled by CommandStudio). */
+  selection?: StudioSelection | null;
+
   /**
    * Callback to delegate workspace mode changes into the existing
    * routing state (CommandStudio's setStudioMode via
    * workspaceStageToMode).
    */
   onWorkspaceModeChange?: (mode: WorkspaceStage) => void;
+
+  /** Selection changes from Preview/Design are shared by all surfaces. */
+  onSelectionChange?: (selection: StudioSelection | null) => void;
 
   /**
    * Callback to delegate creator changes into the existing routing
@@ -136,7 +157,9 @@ export function StudioContextProvider({
   sessionId,
   workspaceMode,
   creator,
+  selection = null,
   onWorkspaceModeChange,
+  onSelectionChange,
   onCreatorChange,
 }: StudioContextProviderProps) {
   const [activeFile, setActiveFile] = useState<string | null>(null);
@@ -150,8 +173,9 @@ export function StudioContextProvider({
       prevProjectIdRef.current = projectId;
       setActiveFile(null);
       setActiveAssetId(null);
+      onSelectionChange?.(null);
     }
-  }, [projectId]);
+  }, [onSelectionChange, projectId]);
 
   // Public: setWorkspaceMode delegates to existing routing.
   const setWorkspaceMode = useCallback(
@@ -171,6 +195,13 @@ export function StudioContextProvider({
     [onCreatorChange],
   );
 
+  const setSelection = useCallback(
+    (next: StudioSelection | null) => {
+      onSelectionChange?.(next);
+    },
+    [onSelectionChange],
+  );
+
   const value: StudioContextApi = useMemo(
     () => ({
       sessionId,
@@ -179,10 +210,12 @@ export function StudioContextProvider({
       creator,
       activeFile,
       activeAssetId,
+      selection,
       setWorkspaceMode,
       setCreator,
       setActiveFile,
       setActiveAssetId,
+      setSelection,
     }),
     [
       sessionId,
@@ -191,8 +224,10 @@ export function StudioContextProvider({
       creator,
       activeFile,
       activeAssetId,
+      selection,
       setWorkspaceMode,
       setCreator,
+      setSelection,
     ],
   );
 

@@ -661,7 +661,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
         if (!pausedApproval && !hasAppliedMutation(agentResult)) {
           return baseResult({
             status: "failed",
-            finalText: "Tool execution unavailable: the selected model did not produce an executable tool call, so no project files were changed.",
+            finalText: "Tool execution unavailable: no available model produced a file-writing tool call after two attempts, so no project files were changed. Try a model with stronger tool-calling support (e.g. Gemini).",
             error: "TOOL_EXECUTION_UNAVAILABLE",
             repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
             runtimeRepairAttempts,

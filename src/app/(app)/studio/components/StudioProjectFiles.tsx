@@ -198,7 +198,8 @@ export default function StudioProjectFiles({
     let response: Response | undefined;
     try {
       response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`, {
-        ...(await authHeaders()),
+        credentials: "include",
+        headers: await authHeaders(),
         signal: AbortSignal.timeout(20_000),
       });
       const payload = await response.json().catch(() => null) as Record<string, unknown> | null;

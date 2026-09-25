@@ -80,6 +80,7 @@ describe("P1-1: studio intent dead flows", () => {
       // P1-1: natural phrasings route to generate_image with a cleaned
       // prefill — the Image Studio box gets the subject, not the sentence.
       ["generate a picture of a cat", "a cat"],
+      ["make me a pic", "make me a pic"],
       ["make me a photo of the lake", "the lake"],
       ["make me a logo for my cafe", "my cafe"],
       ["generate an illustration of a forest", "a forest"],

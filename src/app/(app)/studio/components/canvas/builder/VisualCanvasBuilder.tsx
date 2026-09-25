@@ -13,6 +13,8 @@ import { getProjectTypeMeta, type ProjectType } from "./projectTypes";
 import { useConnectionSummary } from "@/app/(app)/studio/hooks/useConnectionSummary";
 import { useResizableWidth } from "@/app/(app)/studio/hooks/useResizableWidth";
 import ResizeHandle from "@/app/(app)/studio/components/shell/ResizeHandle";
+import { useStudioContext } from "@/app/(app)/studio/context/StudioContext";
+import { ProjectDesignSurface } from "../../ProjectDesignSurface";
 
 const HTML_FILE_ICONS: Record<string, LucideIcon> = {
   "index.html": FileCode,
@@ -58,6 +60,7 @@ function HtmlFileList() {
 }
 
 export function VisualCanvasBuilder() {
+  const { projectId: activeProjectId } = useStudioContext();
   const loadDocument = useCanvasBuilderStore((s) => s.loadDocument);
   const selectedNodeId = useCanvasBuilderStore((s) => s.selectedNodeId);
   const removeNode = useCanvasBuilderStore((s) => s.removeNode);
@@ -192,6 +195,12 @@ export function VisualCanvasBuilder() {
     maxWidth: 420,
     direction: "right",
   });
+
+  // Existing projects are project-first. The canvas-only starter flow is
+  // reserved for a genuinely project-less creation session.
+  if (activeProjectId || serverProjectId) {
+    return <ProjectDesignSurface />;
+  }
 
   // HTML/CSS/JS mode — render the file editor with live preview
   if (typeMeta.editor === "html") {

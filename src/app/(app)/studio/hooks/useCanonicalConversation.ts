@@ -56,6 +56,8 @@ export interface SendResult {
   reply?: string;
   errorKind?: SendErrorKind;
   pendingApproval?: { toolId: string; reason: string; pausedRunId?: string; inputs?: Record<string, unknown> } | null;
+  /** True when the assistant ended by asking the user for missing information. */
+  awaitingInput?: boolean;
   /**
    * P1-1: when true, the composer must NOT render the "Done · No files
    * changed" completion card for this send. Used by intents whose real
@@ -67,6 +69,10 @@ export interface SendResult {
 
 const ACTIVE_PROJECT_KEY_PREFIX = "litt:active-project-id";
 const OPTIMISTIC_CONVERSATION_ID_PREFIX = "pending_";
+
+function endsWithClarifyingQuestion(reply: string): boolean {
+  return reply.trim().endsWith("?");
+}
 
 /**
  * Build a user-scoped localStorage key for the active project ID.
@@ -333,6 +339,10 @@ export function useCanonicalConversation({
           toolId: lastAssistant.pendingApproval.toolId,
           reason: lastAssistant.pendingApproval.reason,
           pausedRunId: lastAssistant.pendingApproval.pausedRunId,
+          // Rehydration binds to the conversation being loaded — the gate's
+          // resume POSTs must target its own conversation, not the selection
+          // at click time.
+          conversationId: conversationId,
           inputs: lastAssistant.pendingApproval.inputs,
         });
       }
@@ -417,7 +427,15 @@ export function useCanonicalConversation({
           reasoning: opts.partialReasoning || undefined,
           status: "completed",
         });
-        return finish({ accepted: true, persisted: true, reply: content });
+        // A reconciled completion can still be a clarifying question — the
+        // transport dropped mid-stream but the run finished asking the user
+        // for input. Flag it so the composer never renders a Done card.
+        return finish({
+          accepted: true,
+          persisted: true,
+          reply: content,
+          awaitingInput: endsWithClarifyingQuestion(content),
+        });
       }
       case "awaiting_approval": {
         const pa = persistedAssistant?.pendingApproval ?? null;
@@ -1288,7 +1306,12 @@ export function useCanonicalConversation({
             if (data.usedFallbackModel) {
               setFallbackNotice(`${selectedModel.label} was unavailable. This response used ${data.usedFallbackModel}.`);
             }
-            return { accepted: true, persisted: true, reply: assistantMsg.content };
+            return {
+              accepted: true,
+              persisted: true,
+              reply: assistantMsg.content,
+              awaitingInput: endsWithClarifyingQuestion(assistantMsg.content),
+            };
           }
           if (data?.duplicate) {
             const s2 = getStore();
@@ -1307,7 +1330,12 @@ export function useCanonicalConversation({
                 createdAt: assistantMsg.createdAt,
               });
               s2.setRevision(data.revision ?? expectedRevision);
-              return { accepted: true, persisted: true, reply: assistantMsg.content };
+              return {
+                accepted: true,
+                persisted: true,
+                reply: assistantMsg.content,
+                awaitingInput: endsWithClarifyingQuestion(assistantMsg.content),
+              };
             }
             s2.setMessages(
               activeConversationId,
@@ -1437,8 +1465,11 @@ export function useCanonicalConversation({
                 };
               }
 
-              // Feed every event into the execution store for the LiTT Live panel
-              feedSSEEventToExecutionStore(evt);
+              // Feed every event into the execution store for the LiTT Live
+              // panel — the conversation id is stamped onto any approval
+              // gate the event mounts so resume POSTs target the paused
+              // run's own conversation even if the selection changes later.
+              feedSSEEventToExecutionStore(evt, activeConversationId);
             } catch {
               // ignore malformed chunk
             }
@@ -1543,7 +1574,12 @@ export function useCanonicalConversation({
             return { accepted: true, persisted: true, reply: assistantMsg.content, pendingApproval: pendingApprovalState };
           }
 
-          return { accepted: true, persisted: true, reply: assistantMsg.content };
+          return {
+            accepted: true,
+            persisted: true,
+            reply: assistantMsg.content,
+            awaitingInput: endsWithClarifyingQuestion(assistantMsg.content),
+          };
         }
 
         // Stream ended without an explicit done/error event. The transport

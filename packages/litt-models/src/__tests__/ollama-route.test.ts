@@ -304,7 +304,13 @@ describe("probeOllamaRoute — timeout behavior", () => {
       if (url.startsWith("http://localhost:11434")) {
         // Never resolves on its own — only the AbortSignal ends it.
         return new Promise<Response>((_resolve, reject) => {
+          // Keep the event loop alive until the abort fires: the probe's
+          // AbortSignal.timeout() timer is unref'd, so without a live
+          // handle node may drain the loop and cancel this still-pending
+          // promise before the short timeout ever elapses (flaky CI).
+          const keepAlive = setInterval(() => {}, 5);
           init?.signal?.addEventListener("abort", () => {
+            clearInterval(keepAlive);
             const err = new Error("The operation was aborted");
             err.name = "AbortError";
             reject(err);
@@ -330,7 +336,11 @@ describe("probeOllamaRoute — timeout behavior", () => {
     ];
     const fetchImpl = (async (_input: string | URL, init?: { signal?: AbortSignal }) => {
       return new Promise<Response>((_resolve, reject) => {
+        // Same keep-alive as above: AbortSignal.timeout() timers are
+        // unref'd, so a live handle is required for deterministic aborts.
+        const keepAlive = setInterval(() => {}, 5);
         init?.signal?.addEventListener("abort", () => {
+          clearInterval(keepAlive);
           const err = new Error("The operation was aborted");
           err.name = "AbortError";
           reject(err);

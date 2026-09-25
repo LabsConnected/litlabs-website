@@ -54,6 +54,7 @@ const PHASE_CONFIG: Record<ExecutionPhase, { label: string; icon: ComponentType<
   done: { label: "Complete", icon: CheckCircle2, color: "var(--litt-primary)" },
   cancelled: { label: "Cancelled", icon: XCircle, color: "var(--error)" },
   awaiting_approval: { label: "Approval needed", icon: AlertTriangle, color: "#e3b341" },
+  awaiting_input: { label: "Awaiting input", icon: AlertTriangle, color: "#e3b341" },
 };
 
 /* ── Props ─────────────────────────────────────────────────────── */

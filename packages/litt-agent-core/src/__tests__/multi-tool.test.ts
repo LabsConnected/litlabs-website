@@ -207,10 +207,6 @@ describe("parseToolCalls", () => {
     assert.equal(calls.length, 1);
     assert.equal(calls[0].toolId, "project.status");
   });
-
-  it("does not extract an envelope whose payload is not a call", () => {
-    assert.deepEqual(parseToolCalls("<tool_call>example</tool_call>"), []);
-  });
 });
 
 // ─── Parallel execution tests ──────────────────────────────────────

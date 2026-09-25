@@ -34,6 +34,8 @@ import { verifyResult } from "./result-verifier";
 import { auditRun } from "./audit-service";
 import { detectActions, createLiTTStream, buildSseHeaders } from "./response-stream";
 import type { LiTTRunRequest, LiTTRunResult, ResolvedRunContext, BuiltPrompt } from "./types";
+import { routeIntent, type IntentRouterResult, type RouterOutput } from "@/lib/intent-router";
+import { buildPlan } from "@/lib/planner";
 
 export interface RunLiTTOptions {
   httpRequest: NextRequest;
@@ -42,6 +44,7 @@ export interface RunLiTTOptions {
 
 export interface RunLiTTOutcome {
   ctx: ResolvedRunContext;
+  intent?: IntentRouterResult;
   prompt: BuiltPrompt;
   runtimeAgent: RuntimeAgent | null;
   result: ExecutionResult;
@@ -53,6 +56,31 @@ export interface RunLiTTOutcome {
  * Returns null for builtin agents (the prompt builder falls back to the
  * builtin agent prompt + Kernel system prompt).
  */
+async function routeRunIntent(ctx: ResolvedRunContext, req: LiTTRunRequest): Promise<RouterOutput> {
+  const recentIntents = Array.isArray(req.runtimeContext?.recentIntents)
+    ? req.runtimeContext.recentIntents.filter((intent): intent is import("@/lib/intent-router").LiTTIntent => typeof intent === "string")
+    : undefined;
+  return routeIntent({
+    prompt: req.message,
+    context: {
+      activeProjectId: ctx.projectId ?? undefined,
+      recentIntents,
+      deploymentState: ctx.project ? "none" : undefined,
+    },
+  });
+}
+
+/**
+ * The global companion is site Q&A, not the Studio mutation pipeline.
+ * Routing it through the intent router turns casual questions
+ * ("What is LiTTree?") into a Studio interrogation ("What should LiTT work
+ * on? Tell me the project..."), so companion-surface requests bypass
+ * routing entirely and carry no intent/plan.
+ */
+function isCompanionSurfaceRequest(req: LiTTRunRequest): boolean {
+  return req.pageContext?.surface === "global_companion";
+}
+
 async function resolveAgentForRun(
   ctx: ResolvedRunContext,
   req: LiTTRunRequest,
@@ -115,6 +143,16 @@ export async function runLiTT(options: RunLiTTOptions): Promise<{
     };
   }
 
+  const routed = isCompanionSurfaceRequest(options.req) ? null : await routeRunIntent(ctx, options.req);
+  if (routed?.type === "clarification") {
+    const clarification = routed.request.question;
+    return {
+      status: 200,
+      body: { text: clarification, provider: "intent-router", model: "deterministic", latencyMs: 0 },
+      outcome: { ctx, prompt: {} as BuiltPrompt, runtimeAgent: null, result: {} as ExecutionResult, verifiedText: clarification },
+    };
+  }
+  const plan = routed ? buildPlan(options.req.message, routed.result) : undefined;
   const runtimeAgent = await resolveAgentForRun(ctx, options.req);
   const prompt = buildPrompt(ctx, options.req, runtimeAgent);
   const toolPlan = buildToolPlan(prompt.kernelResult, ctx);
@@ -167,8 +205,10 @@ export async function runLiTT(options: RunLiTTOptions): Promise<{
       latencyMs: result.latencyMs,
       reasoning: result.reasoning,
       actions,
+      intent: routed?.result,
+      plan,
     },
-    outcome: { ctx, prompt, runtimeAgent, result, verifiedText },
+    outcome: { ctx, intent: routed?.result, prompt, runtimeAgent, result, verifiedText },
   };
 }
 
@@ -186,12 +226,25 @@ export async function runLiTTStream(options: RunLiTTOptions): Promise<Response> 
     );
   }
 
+  const routed = isCompanionSurfaceRequest(options.req) ? null : await routeRunIntent(ctx, options.req);
+  const { event, done } = createLiTTStream();
+  if (routed?.type === "clarification") {
+    const clarification = routed.request.question;
+    const clarificationStream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(event({ type: "text", text: clarification }));
+        controller.enqueue(event({ type: "done", provider: "intent-router", model: "deterministic", latencyMs: 0 }));
+        controller.enqueue(done());
+        controller.close();
+      },
+    });
+    return new Response(clarificationStream, { headers: buildSseHeaders() });
+  }
+  const plan = routed ? buildPlan(options.req.message, routed.result) : undefined;
   const runtimeAgent = await resolveAgentForRun(ctx, options.req);
   const prompt = buildPrompt(ctx, options.req, runtimeAgent);
   const toolPlan = buildToolPlan(prompt.kernelResult, ctx);
   void toolPlan;
-
-  const { event, done } = createLiTTStream();
   const req = options.req;
 
   const stream = new ReadableStream({
@@ -247,6 +300,8 @@ export async function runLiTTStream(options: RunLiTTOptions): Promise<Response> 
             latencyMs: result.latencyMs,
             actions,
             reasoning: reasoningText || undefined,
+            intent: routed?.result,
+            plan,
           }),
         );
       } catch (err) {

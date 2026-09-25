@@ -659,12 +659,28 @@ export function planBasicRoutes(
     if (def.provider === "byok") {
       models = [opts.byokModel || process.env.OPENAI_MODEL || "gpt-4o"];
     }
+    // The OpenRouter auto-router ("openrouter/free") delegates to a random
+    // small model that consistently fails to emit structured tool calls.
+    // When the caller requires tool execution, remove it from the candidate
+    // list so only the explicitly-named free models (nvidia/nemotron, etc.)
+    // are attempted. If those also fail to call tools, the launch-flow
+    // re-prompt produces a clear error rather than silently returning prose.
+    if (def.provider === "openrouter" && requirements.tools) {
+      models = models.filter((m) => m !== "openrouter/free");
+    }
     if (hint?.kind === "route" && hint.provider === def.provider) {
       // Honour the requested model first inside its provider when it is
       // eligible under the cost policy (free OR models, direct providers).
       const idx = models.indexOf(hint.model);
       if (idx >= 0) models.splice(idx, 1);
-      models.unshift(hint.model);
+      if (def.provider === "openrouter" && requirements.tools && hint.model === "openrouter/free") {
+        // An explicit hint must not resurrect the auto-router the tools
+        // filter just removed — it cannot emit tool calls. Surface the
+        // drop so the caller can report it instead of silently swapping.
+        droppedModelHint = opts.model;
+      } else {
+        models.unshift(hint.model);
+      }
     }
 
     providers.push({

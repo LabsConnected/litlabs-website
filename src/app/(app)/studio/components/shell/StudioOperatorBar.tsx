@@ -35,6 +35,7 @@ const PHASE_META: Record<ExecutionPhase, { label: string; icon: ComponentType<{ 
   done: { label: "Complete", icon: CheckCircle2, color: "var(--color-accent)" },
   cancelled: { label: "Cancelled", icon: XCircle, color: "#ef4444" },
   awaiting_approval: { label: "Waiting for approval", icon: AlertTriangle, color: "#e3b341" },
+  awaiting_input: { label: "Awaiting input", icon: AlertTriangle, color: "#e3b341" },
 };
 
 export interface StudioOperatorBarProps {

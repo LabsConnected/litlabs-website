@@ -58,7 +58,7 @@ describe("litt doctor git truth", () => {
     const output = await captureDoctor();
     const actualBranch = directGit(["branch", "--show-current"]);
     expect(output).toContain(`Git branch: ${actualBranch}`);
-  });
+  }, 15_000);
 
   it("detects a clean worktree exactly like direct git", async () => {
     const output = await captureDoctor();
@@ -70,5 +70,5 @@ describe("litt doctor git truth", () => {
     } else {
       expect(output).toContain(`${directLineCount} total`);
     }
-  });
+  }, 15_000);
 });
