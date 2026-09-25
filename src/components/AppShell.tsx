@@ -408,7 +408,7 @@ function TopBar() {
   const searchParams = useSearchParams();
   const { resolvedColors: T } = useTheme();
   const { isSignedIn } = useClerkAuth();
-  const { balance } = useWallet();
+  const { balance, isLoading: walletLoading, isError: walletError } = useWallet();
   const littHealth = useLittHealth();
 
   // Studio manages its own mobile chrome (header, bottom nav, composer),
@@ -480,14 +480,24 @@ function TopBar() {
           </span>
         </div>
 
-        {/* LiTTBits — signed-in users */}
+        {/* LiTTBits — signed-in users. Never flash "0" while loading. */}
         {isSignedIn && (
           <span
             className="hidden text-[11px] font-bold sm:block"
             style={{ color: T.textMuted }}
             title="Your LiTTBits balance"
           >
-            {balance.toLocaleString()} <span style={{ color: T.accentColor }}>LiTTBits</span>
+            {walletLoading ? (
+              <span
+                className="inline-block h-3 w-14 animate-pulse rounded align-middle"
+                style={{ background: "rgba(255,255,255,0.08)" }}
+                aria-label="Loading balance"
+              />
+            ) : walletError ? (
+              <>-- <span style={{ color: T.accentColor }}>LiTTBits</span></>
+            ) : (
+              <>{balance.toLocaleString()} <span style={{ color: T.accentColor }}>LiTTBits</span></>
+            )}
           </span>
         )}
 

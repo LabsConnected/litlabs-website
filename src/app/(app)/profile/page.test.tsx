@@ -258,7 +258,12 @@ describe("P1-5 profile save honesty", () => {
 
   it("retry: fail then succeed ends with persisted server values", async () => {
     let attempts = 0;
-    vi.mocked(fetch).mockImplementation(async () => {
+    vi.mocked(fetch).mockImplementation(async (url: any, init: any) => {
+      // The posts tab GETs the DB user id on mount — not part of the save retry.
+      // (The dialog save POSTs to the same URL, so match on method.)
+      if (String(url) === "/api/settings/profile" && (!init || !init.method || init.method === "GET")) {
+        return jsonResponse({ user: { id: "db-user-1" } }, true, 200);
+      }
       attempts += 1;
       if (attempts === 1) return jsonResponse({ error: "first fail" }, false, 500);
       return jsonResponse({ message: "ok", user: serverUser }, true, 200);

@@ -125,6 +125,21 @@ export function Dashboard() {
       style={{ background: "#0a0a0a" }}
       data-testid="dashboard-v3"
     >
+      {/* Card entrance — subtle staggered rise on first paint only.
+          Disabled entirely under prefers-reduced-motion. */}
+      <style>{`
+        @media (prefers-reduced-motion: no-preference) {
+          @keyframes dashboard-card-in {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+          .dashboard-card-in {
+            animation: dashboard-card-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+            will-change: opacity, transform;
+          }
+        }
+      `}</style>
+
       {/* Animated background */}
       <AnimatedBackground />
 
@@ -143,32 +158,44 @@ export function Dashboard() {
       >
         <div className="mx-auto grid max-w-7xl grid-cols-1 gap-6 lg:grid-cols-12">
           <div className="flex flex-col gap-6 lg:col-span-12">
-            <BuildConsole />
+            <div className="dashboard-card-in" style={{ animationDelay: "0ms" }}>
+              <BuildConsole />
+            </div>
           </div>
 
           {/* Left column: universal LiTT command center */}
           <div className="flex flex-col gap-6 lg:col-span-7">
-            <QuickStart
-              initialPrompt={searchParams.get("prompt") ?? ""}
-              initialIntent={searchParams.get("intent") ?? searchParams.get("type")}
-            />
-            <AgentActivity items={missionControl.data?.activity ?? []} loading={missionControl.loading} />
+            <div className="dashboard-card-in" style={{ animationDelay: "60ms" }}>
+              <QuickStart
+                initialPrompt={searchParams.get("prompt") ?? ""}
+                initialIntent={searchParams.get("intent") ?? searchParams.get("type")}
+              />
+            </div>
+            <div className="dashboard-card-in" style={{ animationDelay: "120ms" }}>
+              <AgentActivity items={missionControl.data?.activity ?? []} loading={missionControl.loading} />
+            </div>
           </div>
 
           {/* Runtime + assets */}
           <div className="flex flex-col gap-6 lg:col-span-5">
-            <LiveProjectStatus project={currentProject} pulseItems={pulseItems} loading={missionControl.loading} />
-            <RecentWork
-              projects={recentProjects}
-              loading={missionControl.loading}
-              onOpenTerminal={handleOpenTerminal}
-            />
-            <RecentMedia
-              items={dashboardMedia.items}
-              loading={dashboardMedia.loading}
-              error={dashboardMedia.error}
-              mediaActions={mediaActions}
-            />
+            <div className="dashboard-card-in" style={{ animationDelay: "120ms" }}>
+              <LiveProjectStatus project={currentProject} pulseItems={pulseItems} loading={missionControl.loading} />
+            </div>
+            <div className="dashboard-card-in" style={{ animationDelay: "180ms" }}>
+              <RecentWork
+                projects={recentProjects}
+                loading={missionControl.loading}
+                onOpenTerminal={handleOpenTerminal}
+              />
+            </div>
+            <div className="dashboard-card-in" style={{ animationDelay: "240ms" }}>
+              <RecentMedia
+                items={dashboardMedia.items}
+                loading={dashboardMedia.loading}
+                error={dashboardMedia.error}
+                mediaActions={mediaActions}
+              />
+            </div>
           </div>
         </div>
       </main>
