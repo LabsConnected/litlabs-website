@@ -105,14 +105,6 @@ export interface PendingApproval {
    */
   conversationId?: string;
   inputs?: Record<string, unknown>;
-  /**
-   * The conversation the gate belongs to. Approval POSTs must go to this
-   * conversation — a pausedRunId posted to a different conversation
-   * deterministic-403s ("Conversation mismatch"). Set wherever the gate
-   * is created; readers fall back to the selected conversation for gates
-   * created before conversation binding existed.
-   */
-  conversationId?: string;
 }
 
 /**
@@ -649,9 +641,8 @@ export function feedSSEEventToExecutionStore(
         // POST must target THIS conversation even if the user switches or
         // creates a conversation before clicking (the server 403s any
         // mismatched pair with "Conversation mismatch").
-        conversationId,
+        conversationId: conversationId ?? evt.conversationId,
         inputs: evt.inputs,
-        conversationId: evt.conversationId,
       });
       break;
 

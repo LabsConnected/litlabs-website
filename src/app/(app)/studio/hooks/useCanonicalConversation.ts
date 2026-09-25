@@ -342,9 +342,8 @@ export function useCanonicalConversation({
           // Rehydration binds to the conversation being loaded — the gate's
           // resume POSTs must target its own conversation, not the selection
           // at click time.
-          conversationId: conversationId,
-          inputs: lastAssistant.pendingApproval.inputs,
           conversationId,
+          inputs: lastAssistant.pendingApproval.inputs,
         });
       }
     } catch {
