@@ -51,8 +51,12 @@ function label(state: string, humanControl: boolean, burn: { billableMinutes: nu
 
 export default function StudioBrowserStatusChip({
   conversationId,
+  active = false,
 }: {
   conversationId?: string;
+  /** True while an agent run is in flight — keeps polling so a session the
+   *  run starts gets discovered. Idle views do not poll. */
+  active?: boolean;
 }) {
   const {
     status,
@@ -63,13 +67,18 @@ export default function StudioBrowserStatusChip({
     liveViewUrl,
     takeControl,
     returnControl,
-  } = useBrowserSessionStatus(conversationId);
+  } = useBrowserSessionStatus(conversationId, { active });
 
   const humanControl = status.controller === "human";
   const agentControl =
     status.controller === "agent" || status.controller == null;
   const hasSession =
     (status.state === "live" || status.state === "idle") && status.sessionId;
+
+  // No session = nothing to show. The chip exists to expose control of a
+  // real session; a permanent "Disconnected" pill for users who have never
+  // started a browser is noise, not status.
+  if (!hasSession) return null;
   const showStop = hasSession;
   // Take control is offered while the agent holds the session; Resume
   // only while the human holds it. Control transfers flip only after the

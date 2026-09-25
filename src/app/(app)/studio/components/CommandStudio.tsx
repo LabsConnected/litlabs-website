@@ -32,6 +32,7 @@ import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
 import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
 import { ActionRunStatusPanel } from "./ActionRunStatusPanel";
+import StudioBrowserStatusChip from "./StudioBrowserStatusChip";
 import LiTTLiveActivity from "./LiTTLiveActivity";
 import LiTTPanel from "./LiTTPanel";
 import LiTTMobileSheet from "./litt/LiTTMobileSheet";
@@ -1740,6 +1741,13 @@ function CommandStudioContent() {
           />
         </div>
       )}
+      {/* Browser session chip — mounted above the composer per its design.
+          Renders only while a real browser session exists; polls only during
+          an active run or live session (beta-gated, owner-only backend). */}
+      <StudioBrowserStatusChip
+        conversationId={conversation.selectedConversationId ?? undefined}
+        active={conversation.busy}
+      />
       <CommandComposer
         value={composerValue}
         onChange={setComposerValue}

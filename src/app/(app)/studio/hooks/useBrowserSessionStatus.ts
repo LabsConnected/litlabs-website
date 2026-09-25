@@ -81,7 +81,7 @@ function parseStatus(json: unknown): BrowserSessionStatus {
   };
 }
 
-export function useBrowserSessionStatus(conversationId?: string) {
+export function useBrowserSessionStatus(conversationId?: string, opts?: { active?: boolean }) {
   const [status, setStatus] = useState<BrowserSessionStatus>(UNKNOWN);
   const [error, setError] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
@@ -116,7 +116,16 @@ export function useBrowserSessionStatus(conversationId?: string) {
 
   useEffect(() => {
     mountedRef.current = true;
+    // One-shot probe always runs so a persistent session from a previous
+    // page load is discovered without requiring a run to be active.
     void fetchStatus();
+
+    // Ongoing polling only while it can change something: a live session
+    // (burn/control state) or an active agent run (a session the run may
+    // start). Idle Studio views must not poll a beta-gated endpoint.
+    if (!opts?.active && !status.sessionId) {
+      return () => { mountedRef.current = false; };
+    }
 
     const id = window.setInterval(() => {
       if (document.visibilityState === "visible") {
@@ -134,7 +143,7 @@ export function useBrowserSessionStatus(conversationId?: string) {
       window.clearInterval(id);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [fetchStatus]);
+  }, [fetchStatus, opts?.active, status.sessionId]);
 
   const stop = useCallback(async () => {
     const sessionId = status.sessionId;

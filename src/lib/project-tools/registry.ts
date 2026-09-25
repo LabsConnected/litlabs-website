@@ -51,6 +51,10 @@ import {
 } from "@/lib/studio/workspace-capability";
 import { resolveRecipient } from "@/lib/vapi-recipient-policy";
 import { VAPI_TOOL_DEFINITIONS } from "@/lib/vapi-tool-definitions";
+import { ensureWorkspaceAlive, provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
+import { SecretBroker } from "@/lib/terminal-v1/secret-broker";
+import { extractClerkEnvFromSecrets } from "@/lib/preview-clerk-env";
+import { startPreviewInternal, buildPreviewProxyUrl } from "@/lib/terminal-internal-client";
 import {
   createJob,
   getJob,
@@ -530,30 +534,89 @@ export const toolRunProjectChecks: ToolHandler = async (userId, args) => {
   });
 };
 
-/** create_preview — mark the project preview ready and return the proxy URL. */
+/**
+ * create_preview — REALLY start the preview dev server.
+ * Mirrors POST /api/studio-projects/[projectId]/preview: provisions the
+ * workspace, spawns the dev server on the terminal server, and only reports
+ * ready after its HTTP health probe passes. Never marks "ready" optimistically.
+ */
 export const toolCreatePreview: ToolHandler = async (userId, args) => {
   const projectId = str(args.project_id);
   if (!projectId) return fail("create_preview requires a project_id.");
 
   const project = await getProject(projectId, userId);
   if (!project) return fail(`Project ${projectId} not found or not owned by the configured owner.`);
-  if (!project.workspaceId || !project.workspaceRoot) {
-    return fail("Project workspace is not provisioned; cannot create a preview.");
-  }
 
   const branch = optStr(args.branch) ?? project.githubBranch ?? project.githubDefaultBranch ?? null;
-  const proxyUrl = `/api/studio-projects/${projectId}/preview/proxy`;
-  const updated = await updateProjectRuntime(projectId, userId, {
-    runtimeStatus: "ready",
-    previewUrl: proxyUrl,
+
+  let workspaceId = project.workspaceId;
+  try {
+    if (!workspaceId || !project.workspaceRoot) {
+      workspaceId = await provisionWorkspaceForProject(projectId, userId);
+    } else {
+      workspaceId = (await ensureWorkspaceAlive(projectId, userId, workspaceId)).workspaceId;
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Workspace provisioning failed";
+    await updateProjectRuntime(projectId, userId, {
+      runtimeStatus: "failed",
+      previewUrl: null,
+      runtimeError: message,
+    });
+    return fail(`Preview cannot start: ${message}`);
+  }
+
+  await updateProjectRuntime(projectId, userId, {
+    runtimeStatus: "starting",
+    previewUrl: null,
     runtimeError: null,
   });
 
-  return ok(projectId, "Preview marked ready. The proxy URL is available now.", {
-    runtimeStatus: updated?.runtimeStatus ?? "ready",
-    previewUrl: proxyUrl,
-    branch,
-  });
+  // Resolve the project's Clerk keys so the preview runtime uses the
+  // project's secrets, not the terminal-server container env. Fail-soft:
+  // the preview's own validation surfaces the configuration error.
+  let projectEnv: Record<string, string> = {};
+  try {
+    const broker = new SecretBroker();
+    const secrets = await broker.resolveForSandbox(userId, projectId);
+    projectEnv = extractClerkEnvFromSecrets(secrets);
+  } catch {
+    projectEnv = {};
+  }
+
+  try {
+    const result = await startPreviewInternal(workspaceId, userId, {
+      framework: project.framework ?? undefined,
+      command: project.developmentCommand ?? undefined,
+      packageManager: project.packageManager ?? undefined,
+      projectEnv,
+    });
+
+    const previewUrl = result.status === "ready" ? buildPreviewProxyUrl(workspaceId) : null;
+    await updateProjectRuntime(projectId, userId, {
+      runtimeStatus: result.status,
+      previewUrl,
+      runtimeError: null,
+    });
+
+    if (result.status !== "ready") {
+      return fail(`Preview dev server did not reach ready (status: ${result.status}).`);
+    }
+    return ok(projectId, "Preview dev server is running and healthy.", {
+      runtimeStatus: "ready",
+      previewUrl,
+      branch,
+      port: result.port,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Preview start failed";
+    await updateProjectRuntime(projectId, userId, {
+      runtimeStatus: "failed",
+      previewUrl: null,
+      runtimeError: message,
+    });
+    return fail(`Preview start failed: ${message}`);
+  }
 };
 
 /** get_deployment_status — read recent deployments, optionally by environment. */

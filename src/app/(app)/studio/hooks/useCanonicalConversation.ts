@@ -70,6 +70,11 @@ export interface SendResult {
 const ACTIVE_PROJECT_KEY_PREFIX = "litt:active-project-id";
 const OPTIMISTIC_CONVERSATION_ID_PREFIX = "pending_";
 
+// Slow re-poll cadence for non-terminal reconciles: covers long builds and
+// mobile-backgrounded tabs without a manual reload, while staying cheap.
+const RUN_RE_POLL_INTERVAL_MS = 30_000;
+const RUN_RE_POLL_WINDOW_MS = 15 * 60_000;
+
 function endsWithClarifyingQuestion(reply: string): boolean {
   return reply.trim().endsWith("?");
 }
@@ -200,6 +205,18 @@ export function useCanonicalConversation({
   // execution. Survives the end of the fetch/reader lifecycle — transport
   // lifetime != execution lifetime on the client side too.
   const activeRunRef = useRef<ActiveRun | null>(null);
+  // Slow re-poll for runs that reconcile to a non-terminal state. Builds can
+  // legitimately run far longer than reconcileRunState's ~8-attempt budget —
+  // without this the bubble freezes "streaming" and only a reload resolves it.
+  // Single-flight: keyed by clientRequestId so a superseded run is dropped.
+  const repollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const repollKeyRef = useRef<string | null>(null);
+  const repollDeadlineRef = useRef(0);
+  const reconcileAndApplyRef = useRef<((run: ActiveRun, opts: {
+    preferCancelled?: boolean;
+    partialText?: string;
+    partialReasoning?: string;
+  }) => Promise<{ sendResult: SendResult; state: ReconcileResult["state"] }>) | null>(null);
   // Prefer the caller's shared capabilities; the internal instance is
   // disabled then so Studio runs exactly one capability/runtime poll stack.
   const { capabilities: internalCapabilities } = useConnectionSummary({ disabled: Boolean(externalCapabilities) });
@@ -356,6 +373,33 @@ export function useCanonicalConversation({
   // disconnect, so the persisted assistant message — not the broken
   // stream — is the source of truth for what actually happened.
   //
+  const clearRunRepoll = useCallback(() => {
+    if (repollTimerRef.current) clearTimeout(repollTimerRef.current);
+    repollTimerRef.current = null;
+    repollKeyRef.current = null;
+    repollDeadlineRef.current = 0;
+  }, []);
+
+  // Re-poll the canonical endpoint on a slow cadence while a run is
+  // non-terminal. Bounded by repollDeadlineRef so an abandoned run cannot
+  // poll forever.
+  const scheduleRunRepoll = useCallback((run: ActiveRun) => {
+    if (repollTimerRef.current && repollKeyRef.current === run.clientRequestId) return;
+    clearRunRepoll();
+    const now = Date.now();
+    if (repollDeadlineRef.current < now) repollDeadlineRef.current = now + RUN_RE_POLL_WINDOW_MS;
+    repollKeyRef.current = run.clientRequestId;
+    repollTimerRef.current = setTimeout(() => {
+      repollTimerRef.current = null;
+      repollKeyRef.current = null;
+      // The run identity may have been superseded (new send) or released
+      // (terminal state) since this timer was scheduled — only re-reconcile
+      // while it is still the tracked active run.
+      if (activeRunRef.current?.clientRequestId !== run.clientRequestId) return;
+      void reconcileAndApplyRef.current?.(run, {});
+    }, RUN_RE_POLL_INTERVAL_MS);
+  }, [clearRunRepoll]);
+
   // Returns the SendResult to surface plus the raw reconcile state so
   // callers can decide run lifecycle (e.g. whether Stop is still viable).
   const reconcileAndApply = useCallback(async (
@@ -399,6 +443,20 @@ export function useCanonicalConversation({
       activeRunRef.current?.clientRequestId === run.clientRequestId
     ) {
       activeRunRef.current = null;
+      // Terminal canonical state releases the composer lock. The send-path
+      // finally does this idempotently; the recover/repoll paths (no send in
+      // flight) would otherwise leave busy/streaming stuck true forever.
+      getStore().setStreaming(false);
+      setBusy(false);
+    }
+
+    // Non-terminal canonical states get a slow re-poll so a long-running
+    // execution resolves to its real outcome without a manual reload.
+    // Terminal states cancel any outstanding poll for this run.
+    if (result.state === "running" || result.state === "unknown") {
+      scheduleRunRepoll(run);
+    } else if (repollKeyRef.current === run.clientRequestId) {
+      clearRunRepoll();
     }
 
     const s = getStore();
@@ -505,7 +563,12 @@ export function useCanonicalConversation({
         return finish({ accepted: false, persisted: true, errorKind: "network" });
       }
     }
-  }, [getStore, authHeaders, setSendError]);
+  }, [getStore, authHeaders, setSendError, setBusy, scheduleRunRepoll, clearRunRepoll]);
+
+  useEffect(() => { reconcileAndApplyRef.current = reconcileAndApply; }, [reconcileAndApply]);
+
+  // No dangling repoll timers after unmount.
+  useEffect(() => clearRunRepoll, [clearRunRepoll]);
 
   // Recover a run interrupted by a page refresh (or tab crash) mid-run.
   // After loadMessages, a persisted message may still be "streaming" even
@@ -518,7 +581,9 @@ export function useCanonicalConversation({
   const recoverInterruptedRuns = useCallback(async (conversationId: string) => {
     const store = getStore();
     const messages = store.messagesByConversationId[conversationId] ?? [];
-    const streamingAssistant = messages.find(
+    // Bind to the LATEST streaming assistant — a stale earlier streaming row
+    // must not steal the Stop binding from the run that is actually live.
+    const streamingAssistant = messages.findLast(
       (m) => m.role === "assistant" && m.status === "streaming",
     );
     if (!streamingAssistant) return;
@@ -702,7 +767,11 @@ export function useCanonicalConversation({
     if (conversationId !== s.selectedConversationId) {
       if (conversationId && s.conversations.some((c) => c.id === conversationId)) {
         s.selectConversation(conversationId);
-        void loadMessages(conversationId);
+        // Recovering interrupted runs is required here, not just on initial
+        // load — navigating to a conversation with an in-flight run (sidebar
+        // click, back button) must re-bind Stop and reconcile the bubble,
+        // not show a permanently-streaming orphan.
+        void loadMessages(conversationId).then(() => recoverInterruptedRuns(conversationId));
       } else if (!conversationId && s.selectedConversationId) {
         s.selectConversation(null);
       }
@@ -714,7 +783,7 @@ export function useCanonicalConversation({
       setActiveAgentId(agentSlug);
     }
     isSyncingFromUrl.current = false;
-  }, [searchParams, getStore, loadMessages, setActiveAgentId]);
+  }, [searchParams, getStore, loadMessages, recoverInterruptedRuns, setActiveAgentId]);
 
   // Sync URL when state changes
   useEffect(() => {
