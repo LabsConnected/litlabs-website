@@ -15,9 +15,13 @@ import {
 } from "lucide-react";
 import { useRef } from "react";
 import type { UserProfile } from "@/context/ProfileContext";
+import type { ProfileStats } from "@/lib/profile-stats";
+import { formatStatCount } from "@/lib/profile-stats";
 
 interface ProfileIdentityProps {
   profile: UserProfile;
+  /** Real counters from /api/profile/stats. null = still loading, "unknown" renders as —. */
+  stats?: ProfileStats | null;
   isOwner: boolean;
   saving: boolean;
   avatarPreview: string | null;
@@ -28,17 +32,20 @@ interface ProfileIdentityProps {
   onEditProfile: () => void;
 }
 
-const STATS = [
-  { label: "Followers", key: "followers", value: "2.4K" },
-  { label: "Following", key: "following", value: "186" },
-  { label: "Projects", key: "projects", value: "38" },
-  { label: "Agents", key: "agents", value: "12" },
-  { label: "Artifacts", key: "artifacts", value: "146" },
-  { label: "Views", key: "views", value: "22K" },
-];
+/**
+ * Stat definitions — values come from the database via /api/profile/stats.
+ * There are no placeholder numbers here: unknown counts render as "—".
+ */
+const STAT_DEFS = [
+  { label: "Followers", key: "followers" },
+  { label: "Following", key: "following" },
+  { label: "Posts", key: "posts" },
+  { label: "Projects", key: "projects" },
+] as const;
 
 export function ProfileIdentity({
   profile,
+  stats,
   isOwner,
   saving,
   avatarPreview,
@@ -205,12 +212,14 @@ export function ProfileIdentity({
         </div>
       </div>
 
-      {/* Stats strip */}
+      {/* Stats strip — real counts only; "—" while loading or unknown. */}
       <div className="profile-stats-strip">
-        {STATS.map((s, i) => (
+        {STAT_DEFS.map((s, i) => (
           <div key={s.key} className="stat-item">
             {i > 0 && <div className="stat-divider" />}
-            <div className="stat-value">{s.value}</div>
+            <div className="stat-value" aria-live="polite">
+              {stats ? formatStatCount(stats[s.key]) : <span className="stat-shimmer">—</span>}
+            </div>
             <div className="stat-label">{s.label}</div>
           </div>
         ))}
@@ -454,6 +463,23 @@ export function ProfileIdentity({
           font-weight: 750;
           color: #f5f5f7;
           line-height: 1;
+        }
+        .stat-shimmer {
+          display: inline-block;
+          min-width: 1.2em;
+          border-radius: 4px;
+          color: transparent;
+          background: linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.08) 75%);
+          background-size: 200% 100%;
+          animation: stat-shimmer 1.4s ease-in-out infinite;
+          user-select: none;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .stat-shimmer { animation: none; }
+        }
+        @keyframes stat-shimmer {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
         }
         .stat-label {
           font-size: 11px;

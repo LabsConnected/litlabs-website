@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useProfile } from "@/context/ProfileContext";
 import type { UserProfile } from "@/context/ProfileContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import type { ProfileStats } from "@/lib/profile-stats";
 import Link from "next/link";
 
 import { ProfileCover } from "./_components/ProfileCover";
@@ -66,6 +67,28 @@ function ProfilePageInner() {
   const [editOpen, setEditOpen] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Real profile counters — null while loading or when unavailable.
+  const [stats, setStats] = useState<ProfileStats | null>(null);
+
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/profile/stats", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (!cancelled && data && typeof data === "object") {
+          setStats(data.stats ?? null);
+        }
+      } catch {
+        /* fail-soft: the strip shows "—" */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoaded, isSignedIn]);
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) {
@@ -303,6 +326,7 @@ function ProfilePageInner() {
 
         <ProfileIdentity
           profile={profile}
+          stats={stats}
           isOwner={true}
           saving={saving}
           avatarPreview={avatarPreview}
