@@ -34,6 +34,16 @@ export interface RewritePreviewUrlsOptions {
 /** Schemes/protocols that must never be rewritten. */
 const NON_LOCAL = /^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i;
 
+/**
+ * Absolute URLs that point back at the dev server (or any loopback). The
+ * app builds these from the Host it sees — 127.0.0.1:<port> after the
+ * proxy rewrites the Host header — and a browser hitting them would try
+ * to reach the VIEWER's own machine. Re-home the path inside the mount
+ * instead: it is the same content through the proxy, and it also keeps a
+ * previewed app from ever addressing localhost on the viewer's device.
+ */
+const LOOPBACK_ABSOLUTE = /^https?:\/\/(?:127\.0\.0\.1|0\.0\.0\.0|localhost|\[::1\])(?::\d+)?(\/[^?#]*)?([?#].*)?$/i;
+
 /** Attributes whose value is a single URL. */
 const URL_ATTRS = /(\b(?:src|href|action|poster|formaction|data|background)\s*=\s*)("([^"]*)"|'([^']*)')/gi;
 
@@ -50,7 +60,25 @@ const CSS_URL = /url\(\s*("([^"]*)"|'([^']*)'|([^'")]*))\s*\)/gi;
  */
 function rewriteOne(raw: string, mount: string, baseUrl: URL, token: string): string {
   const value = raw.trim();
-  if (!value || NON_LOCAL.test(value)) return raw;
+  if (!value) return raw;
+
+  // Absolute loopback URLs (http://127.0.0.1:<port>/x, http://localhost/x)
+  // are the app addressing itself through the Host it observed — re-home
+  // the path inside the mount so the request lands back on the proxied
+  // dev server instead of the viewer's own machine.
+  const loopback = LOOPBACK_ABSOLUTE.exec(value);
+  if (loopback) {
+    const path = `${loopback[1] ?? "/"}${loopback[2] ?? ""}`;
+    const hashIndex = path.indexOf("#");
+    const fragment = hashIndex >= 0 ? path.slice(hashIndex) : "";
+    const head = hashIndex >= 0 ? path.slice(0, hashIndex) : path;
+    const withToken = token && !/[?&]token=/.test(head)
+      ? `${head}${head.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`
+      : head;
+    return `${mount}${withToken}${fragment}`;
+  }
+
+  if (NON_LOCAL.test(value)) return raw;
   const hasToken = /[?&]token=/.test(value);
 
   let absolutePath: string;
@@ -107,9 +135,78 @@ export function rewritePreviewAssetUrls(html: string, opts: RewritePreviewUrlsOp
 
   out = out.replace(CSS_URL, (m, _full, dq, sq, bare) => {
     const value = dq ?? sq ?? bare ?? "";
-    if (!value || NON_LOCAL.test(value.trim())) return m;
+    if (!value) return m;
     const quote = dq !== undefined ? '"' : sq !== undefined ? "'" : "";
     return `url(${quote}${rewrite(value)}${quote})`;
+  });
+
+  // Root-absolute runtime paths embedded in inline scripts and RSC/JSON
+  // payloads (self.__next_f.push chunks carry "/_next/…" strings). The
+  // attribute passes above can't see quoted literals — same rule as for
+  // JS bodies: mount them, cookie/referer supplies auth.
+  out = rewritePreviewJsUrls(out, { workspaceId: opts.workspaceId, token: opts.token });
+
+  return out;
+}
+
+/**
+ * Rewrite root-absolute dev-runtime paths inside JavaScript (and inline
+ * HTML script/JSON) bodies. Next.js hard-codes "/_next/…" literals for
+ * webpack's publicPath, dynamic chunk imports, next/image, HMR and dev
+ * tooling — inside the iframe they would resolve to the terminal-server
+ * origin root and escape the /preview/:workspaceId mount entirely.
+ *
+ * Only a quote character directly before the slash counts — ordinary
+ * prose mentioning these paths mid-string is left alone, and the already
+ * rewritten /preview/<ws>/_next/… output never re-matches. No token is
+ * appended to prefix literals (publicPath is concatenated with chunk
+ * names; a ?token= would corrupt the path) — those requests authenticate
+ * through the preview cookie / same-origin Referer. The HMR socket path
+ * is a leaf, so it does carry the token: WebSocket upgrades on browsers
+ * that block third-party cookies still need a query param to auth.
+ */
+export function rewritePreviewJsUrls(
+  js: string,
+  opts: { workspaceId: string; token: string },
+): string {
+  const mount = `/preview/${encodeURIComponent(opts.workspaceId)}`;
+  const tokenQuery = opts.token ? `?token=${encodeURIComponent(opts.token)}` : "";
+  return js
+    .replace(
+      /(["'`])\/_next\/webpack-hmr\b/g,
+      `$1${mount}/_next/webpack-hmr${tokenQuery}`,
+    )
+    .replace(/(["'`])\/(_next\/|__nextjs)/g, `$1${mount}/$2`);
+}
+
+/**
+ * Rewrite url() references and @import strings inside a proxied CSS body.
+ * Next/Tailwind emit url(/_next/static/media/…) for fonts and assets —
+ * left alone they escape the mount (404 → missing fonts) or hit the
+ * terminal origin unauthenticated (401). Relative refs resolve against
+ * the stylesheet's own path inside the mount.
+ */
+export function rewritePreviewCssUrls(
+  css: string,
+  opts: { workspaceId: string; token: string; cssPath: string },
+): string {
+  const mount = `/preview/${encodeURIComponent(opts.workspaceId)}`;
+  const cssPath = opts.cssPath.startsWith("/") ? opts.cssPath : `/${opts.cssPath}`;
+  const baseUrl = new URL(`https://preview.local${mount}${cssPath}`);
+  const rewrite = (raw: string) => rewriteOne(raw, mount, baseUrl, opts.token);
+
+  let out = css.replace(CSS_URL, (m, _full, dq, sq, bare) => {
+    const value = dq ?? sq ?? bare ?? "";
+    if (!value) return m;
+    const quote = dq !== undefined ? '"' : sq !== undefined ? "'" : "";
+    return `url(${quote}${rewrite(value)}${quote})`;
+  });
+
+  // @import "theme.css" — the bare-string form url() can't catch.
+  out = out.replace(/(@import\s+)("([^"]*)"|'([^']*)')/gi, (_m, prefix, _quoted, dq, sq) => {
+    const value = dq ?? sq ?? "";
+    const quote = dq !== undefined ? '"' : "'";
+    return `${prefix}${quote}${rewrite(value)}${quote}`;
   });
 
   return out;

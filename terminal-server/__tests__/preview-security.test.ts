@@ -16,8 +16,12 @@ describe("preview proxy security", () => {
   it("strips authentication and forwarding headers while preserving safe request headers", () => {
     const headers = new Headers({
       accept: "text/html",
+      "accept-encoding": "gzip, br",
       authorization: "Bearer production-token",
-      cookie: "__session=production-cookie",
+      // Preview credential cookies are terminal-server credentials — they
+      // must never reach the workspace. Ordinary app cookies (the app's own
+      // session on the iframe origin) pass through so in-preview auth works.
+      cookie: "__litt_preview_ws1=preview-token; __session=app-session-cookie",
       "cf-connecting-ip": "203.0.113.10",
       "cf-ray": "production-ray",
       forwarded: "host=terminal.litlabs.net",
@@ -34,10 +38,11 @@ describe("preview proxy security", () => {
       accept: "text/html",
       "user-agent": "preview-test",
       host: "127.0.0.1:4123",
+      cookie: "__session=app-session-cookie",
     });
     for (const key of [
+      "accept-encoding",
       "authorization",
-      "cookie",
       "cf-connecting-ip",
       "cf-ray",
       "forwarded",

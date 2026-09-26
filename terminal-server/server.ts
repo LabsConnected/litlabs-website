@@ -74,7 +74,11 @@ function sanitizeProjectEnv(value: unknown): Record<string, string> | undefined 
   }
   return out;
 }
-import { registerPreviewProxyRoute } from "./preview/proxy";
+import {
+  registerPreviewProxyRoute,
+  registerPreviewFallbackRoute,
+  handlePreviewUpgrade,
+} from "./preview/proxy";
 import { registerWorkspaceRoutes } from "./workspace-routes";
 import { dispatchCommand } from "./command-bridge";
 import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manager";
@@ -215,6 +219,19 @@ const io = new Server(server, {
   },
   pingTimeout: 60000,
   pingInterval: 25000,
+  // Preview WebSocket upgrades (dev-server HMR) are handled by our own
+  // listener below — engine.io must not destroy sockets it doesn't own.
+  destroyUpgrade: false,
+});
+
+// Preview HMR WebSocket tunnel. socket.io owns /socket.io/* upgrades;
+// /preview/<ws>/* upgrades and cookie-scoped escaped paths go to the
+// workspace dev server; anything else is closed (the behavior the old
+// engine.io destroyUpgrade default provided).
+server.on("upgrade", (req, socket, head) => {
+  if ((req.url ?? "").startsWith("/socket.io/")) return;
+  if (handlePreviewUpgrade(req, socket, head)) return;
+  socket.destroy();
 });
 
 // ─── Canonical runtime authority ──────────────────────────────────
@@ -1846,6 +1863,13 @@ io.on("connection", (socket) => {
     ptyManager.kill(sessionId, "client_disconnect", userId);
   });
 });
+
+// Escaped preview subresources — root-absolute URLs the app built
+// ("/_next/…", "/@vite/…", "/favicon.ico") land on the terminal origin
+// outside the /preview/:workspaceId mount. Registered LAST so it can
+// never shadow a real route; requests without a valid preview context
+// fall through to Express's default 404 untouched.
+registerPreviewFallbackRoute(app);
 
 server.listen(PORT, BIND.host, () => {
   console.log(`🔥 LiTTree Terminal Server running on http://${BIND.host}:${PORT} (bind: ${BIND.reason})`);
