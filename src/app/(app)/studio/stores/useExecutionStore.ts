@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import type { StructuredDiagnostic } from "@/lib/litt-intelligence/diagnostic-parser";
 
 /**
  * Execution Store — single source of truth for LiTT's live execution state.
@@ -63,6 +64,8 @@ export interface ExecutionEvent {
   check?: string;
   /** Error count for build results */
   errorCount?: number;
+  /** Structured compiler/lint/test diagnostics from the real command output. */
+  diagnostics?: StructuredDiagnostic[];
   /** Phase */
   phase?: ExecutionPhase;
   /** Step number within the agent loop */
@@ -536,6 +539,14 @@ export function feedSSEEventToExecutionStore(
     check?: string;
     passed?: boolean;
     errorCount?: number;
+    diagnostics?: StructuredDiagnostic[];
+    diff?: string;
+    status?: "changed" | "unchanged" | "unknown";
+    files?: string[];
+    additions?: number;
+    deletions?: number;
+    checkpointSha?: string;
+    unknownReason?: string;
     phase?: string;
     step?: number;
     durationMs?: number;
@@ -591,6 +602,17 @@ export function feedSSEEventToExecutionStore(
       }
       break;
 
+    case "workspace_change":
+      s.addEvent({
+        type: "status",
+        summary: evt.status === "changed"
+          ? `${evt.files?.length ?? 0} file${evt.files?.length === 1 ? "" : "s"} changed (+${evt.additions ?? 0}/-${evt.deletions ?? 0})`
+          : evt.status === "unchanged" ? "No workspace changes detected" : "Workspace changes could not be verified",
+        filePath: evt.files?.[0],
+        diff: evt.diff,
+      });
+      break;
+
     case "checkpoint":
       s.setCheckpoint({ label: evt.label ?? "", gitSha: evt.gitSha ?? "" });
       break;
@@ -611,6 +633,7 @@ export function feedSSEEventToExecutionStore(
         check: evt.check,
         success: evt.passed,
         errorCount: evt.errorCount,
+        diagnostics: evt.diagnostics,
       });
       break;
 

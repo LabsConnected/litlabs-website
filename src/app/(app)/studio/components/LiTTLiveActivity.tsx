@@ -543,7 +543,8 @@ function ActivityRow({
     return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   }, [event.ts]);
 
-  const hasDetails = (event.diff || event.filePath || event.check) && !event.collapsed;
+  const hasDiagnostics = (event.diagnostics?.length ?? 0) > 0;
+  const hasDetails = (event.diff || event.filePath || event.check || hasDiagnostics) && !event.collapsed;
   const isClickable = !!(
     (event.filePath && onOpenFile) ||
     (event.diff && onOpenDiff) ||
@@ -602,6 +603,16 @@ function ActivityRow({
             )}
             {event.check && (
               <span>{event.success === false ? `${event.errorCount ?? 0} error${(event.errorCount ?? 0) !== 1 ? "s" : ""}` : "Passed"}</span>
+            )}
+            {hasDiagnostics && (
+              <div className="mt-1 space-y-0.5" data-testid="execution-diagnostics">
+                {event.diagnostics?.slice(0, 5).map((diagnostic, index) => (
+                  <div key={`${diagnostic.file ?? "diagnostic"}-${diagnostic.line ?? 0}-${index}`} className="font-mono" style={{ color: diagnostic.severity === "error" ? "#ef4444" : "#e3b341" }}>
+                    {diagnostic.file ? `${diagnostic.file}${diagnostic.line ? `:${diagnostic.line}` : ""}: ` : ""}{diagnostic.message}
+                  </div>
+                ))}
+                {(event.diagnostics?.length ?? 0) > 5 && <div>+ {(event.diagnostics?.length ?? 0) - 5} more diagnostics</div>}
+              </div>
             )}
             {event.diff && (
               <button

@@ -79,6 +79,11 @@ export interface WorkspaceChangeEvidence {
   status: WorkspaceChangeStatus;
   /** Paths that differ, when the diff could enumerate them. */
   files?: string[];
+  /** The actual unified diff from the workspace, never model-authored. */
+  diff?: string;
+  /** File-level line counts derived from the unified diff. */
+  additions?: number;
+  deletions?: number;
   /** The checkpoint the comparison was made against. */
   checkpointSha?: string;
   /** Whether restoring that checkpoint is still possible. */

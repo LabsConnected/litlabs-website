@@ -32,7 +32,13 @@ function status(partial: Partial<GitStatusResult> = {}): GitStatusResult {
   };
 }
 
-const probe = (impl: () => Promise<GitStatusResult>) => ({ gitStatus: vi.fn(impl) });
+const probe = (
+  impl: () => Promise<GitStatusResult>,
+  diff = "",
+) => ({
+  gitStatus: vi.fn(impl),
+  gitDiff: vi.fn(async () => ({ diff })),
+});
 
 describe("computeWorkspaceChange", () => {
   // 1. checkpoint + empty diff → no changes
@@ -58,6 +64,18 @@ describe("computeWorkspaceChange", () => {
 
     expect(result.status).toBe("changed");
     expect(result.files).toEqual(["index.html"]);
+  });
+
+  it("includes the real unified diff and line counts", async () => {
+    const diff = "--- a/index.html\n+++ b/index.html\n-old\n+new\n+line";
+    const result = await computeWorkspaceChange(
+      probe(async () => status({ modified: [{ path: "index.html", status: "M" }], clean: false }), diff),
+      CHECKPOINT,
+    );
+
+    expect(result.diff).toBe(diff);
+    expect(result.additions).toBe(2);
+    expect(result.deletions).toBe(1);
   });
 
   // 3. multiple files → full evidence
