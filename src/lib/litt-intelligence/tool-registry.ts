@@ -293,6 +293,10 @@ const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
     const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.close"];
     return ((inputs: Record<string, unknown>) => h({ sessionId: inputs.sessionId as string, userId: inputs.userId as string }, inputs)) as ToolHandler;
   },
+  "browser.download": async () => {
+    const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.download"];
+    return ((inputs: Record<string, unknown>) => h({ sessionId: inputs.sessionId as string, userId: inputs.userId as string }, inputs)) as ToolHandler;
+  },
   // browser.start_session is the entry point: it provisions the sessionId
   // the other browser.* tools require. Beta-gated inside the handler.
   // Phase 2: get-or-reuse — an existing live session for this conversation
@@ -2444,6 +2448,41 @@ export function registerInternalTools(): void {
         enabled: true,
       },
       handler: lazyHandlers["browser.upload"],
+    },
+    {
+      tool: {
+        id: "browser.download",
+        name: "Browser Download File",
+        description: "Download a file through the browser session. Either give a direct file URL (fetched inside the session so its cookies/auth apply) or a clickable element (selector/testId/ariaLabel) that starts a download. The file is saved server-side per session; the result reports filename, byte size, and saved path. Requires user approval.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string" },
+            userId: { type: "string" },
+            url: { type: "string" },
+            selector: { type: "string" },
+            testId: { type: "string" },
+            ariaLabel: { type: "string" },
+            role: { type: "string" },
+            text: { type: "string" },
+            filename: { type: "string" },
+          },
+          required: ["sessionId", "userId"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["browser:control"],
+        risk: "medium",
+        approvalPolicy: MUTATION_APPROVAL,
+        timeoutMs: 90000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: "draft",
+        enabled: true,
+      },
+      handler: lazyHandlers["browser.download"],
     },
     {
       tool: {
