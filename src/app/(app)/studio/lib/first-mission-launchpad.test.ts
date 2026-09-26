@@ -316,4 +316,20 @@ describe("deriveFirstMissionLaunchpadState", () => {
     executionAvailable: true,
     readAccess: true,
   });
+
+  it("carries the project id through so the empty state can persist the business profile", () => {
+    const withProject = deriveFirstMissionLaunchpadState({
+      runtime: verifiedRuntime,
+      runtimeLoading: false,
+      providerHealth: "available",
+    });
+    expect(withProject.projectId).toBe("project-1");
+
+    const withoutProject = deriveFirstMissionLaunchpadState({
+      runtime: runtime({ phase: "idle" }),
+      runtimeLoading: false,
+      providerHealth: "available",
+    });
+    expect(withoutProject.projectId).toBeNull();
+  });
 });
