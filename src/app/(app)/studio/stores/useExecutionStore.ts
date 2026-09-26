@@ -22,6 +22,7 @@ export type ExecutionPhase =
   | "testing"
   | "verifying"
   | "done"
+  | "failed"
   | "cancelled"
   | "awaiting_approval"
   | "awaiting_input";
@@ -683,8 +684,11 @@ export function feedSSEEventToExecutionStore(
 
     case "finished":
       s.addEvent({
-        type: "finished",
-        summary: `Completed in ${evt.totalSteps ?? evt.step ?? 0} steps`,
+        type: evt.success === false ? "tool_error" : "finished",
+        summary: evt.success === false
+          ? "Verification incomplete — completion was not declared"
+          : `Completed in ${evt.totalSteps ?? evt.step ?? 0} steps`,
+        success: evt.success !== false,
         step: evt.totalSteps ?? evt.step,
       });
       // A finished streamed run has no live approval gate — a run that
@@ -692,7 +696,7 @@ export function feedSSEEventToExecutionStore(
       // pendingApproval still set here is stale and would strand the
       // "Approval waiting" badge. Clear it without fabricating a decision.
       s.setPendingApproval(null);
-      s.setPhase("done");
+      s.setPhase(evt.success === false ? "failed" : "done");
       s.collapseLowLevel();
       break;
 

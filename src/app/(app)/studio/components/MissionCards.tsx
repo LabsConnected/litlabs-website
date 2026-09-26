@@ -72,6 +72,7 @@ export const PHASE_META: Record<ExecutionPhase, { label: string; color: string }
   testing: { label: "Testing", color: AMBER },
   verifying: { label: "Verifying", color: "var(--litt-primary)" },
   done: { label: "Complete", color: "var(--litt-primary)" },
+  failed: { label: "Needs verification", color: "var(--error)" },
   cancelled: { label: "Cancelled", color: "var(--error)" },
   awaiting_approval: { label: "Approval needed", color: AMBER },
   awaiting_input: { label: "Awaiting input", color: AMBER },
