@@ -102,7 +102,7 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
 
   return (
     <section
-      className="flex flex-col gap-3 rounded-xl border p-5"
+      className="flex flex-col gap-4 rounded-2xl border p-5 md:p-6"
       style={{
         background: "rgba(18,18,21,0.7)",
         borderColor: "rgba(255,255,255,0.06)",
@@ -110,17 +110,17 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
       }}
     >
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-bold uppercase tracking-[.18em] text-zinc-300">
-          Recent Work
-        </h3>
+        <h2 className="text-sm font-bold uppercase tracking-[.18em] text-zinc-300">
+          Recent projects
+        </h2>
         <Link
           href="/projects"
-          className="text-xs transition-colors"
-          style={{ color: "#a78bfa" }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = "#c4b5fd")}
-          onMouseLeave={(e) => (e.currentTarget.style.color = "#a78bfa")}
+          className="text-xs font-medium transition-colors"
+          style={{ color: "#a8ff2f" }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = "#c6ff70")}
+          onMouseLeave={(e) => (e.currentTarget.style.color = "#a8ff2f")}
         >
-          View All
+          View all
         </Link>
       </div>
 
@@ -149,11 +149,11 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
             <a
               href="#dashboard-guided-start"
               className="rounded-md px-3 py-2 text-xs font-bold transition hover:brightness-110"
-              style={{ background: "#a78bfa", color: "#0a0012" }}
+              style={{ background: "#a8ff2f", color: "#0c1204" }}
             >
               Start with an idea
             </a>
-            <Link href="/projects" className="text-xs font-medium" style={{ color: "#a78bfa" }}>
+            <Link href="/projects" className="text-xs font-medium" style={{ color: "#a8ff2f" }}>
               Browse projects
             </Link>
           </div>
@@ -195,7 +195,7 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
                         <Pin
                           size={10}
                           className="ml-1.5 inline shrink-0"
-                          style={{ color: "#a78bfa", fill: "#a78bfa" }}
+                          style={{ color: "#a8ff2f", fill: "#a8ff2f" }}
                         />
                       )}
                     </h4>
@@ -228,7 +228,7 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
                   <div ref={openMenu === project.id ? menuRef : undefined} className="relative">
                     <button
                       onClick={() => setOpenMenu(openMenu === project.id ? null : project.id)}
-                      className="flex items-center justify-center rounded p-1 opacity-0 transition-opacity group-hover:opacity-100"
+                      className="flex items-center justify-center rounded p-2 opacity-100 transition-opacity md:p-1 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
                       style={{ color: "#71717a" }}
                       aria-label="Project options"
                     >

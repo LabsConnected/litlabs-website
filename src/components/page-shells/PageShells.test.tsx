@@ -101,20 +101,29 @@ describe("StudioShell", () => {
 });
 
 describe("DashboardShell", () => {
-  it("renders the v3 dashboard composition regions", () => {
+  it("renders the v3 launchpad composition regions", () => {
     render(<DashboardShell />);
     expect(screen.getByTestId("dashboard-shell")).toHaveAttribute(
       "aria-label",
       "Loading Dashboard",
     );
-    expect(screen.getByTestId("dashboard-shell-pulsebar")).toBeInTheDocument();
-    expect(screen.getByTestId("dashboard-shell-hero")).toBeInTheDocument();
-    const quickstart = screen.getByTestId("dashboard-shell-quickstart");
-    // 6 quick-start cards × (icon + label) shimmer blocks
-    expect(quickstart.querySelectorAll(".animate-pulse").length).toBe(12);
+    // Utility row (Home + Search/Developer pills), the universal composer
+    // card with its shortcut chips, recent projects — no ops telemetry,
+    // no pulsebar, no hero.
+    expect(screen.getByTestId("dashboard-shell-utility")).toBeInTheDocument();
+    expect(screen.getByTestId("dashboard-shell-composer")).toBeInTheDocument();
+    // 7 creation-type shortcut chip skeletons.
+    expect(
+      screen.getByTestId("dashboard-shell-chips").childElementCount,
+    ).toBe(7);
     expect(screen.getByTestId("dashboard-shell-recent-work")).toBeInTheDocument();
-    expect(screen.getByTestId("dashboard-shell-recent-media")).toBeInTheDocument();
     expect(screen.getByTestId("dashboard-shell-mediadock")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("dashboard-shell-pulsebar"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("dashboard-shell-recent-media"),
+    ).not.toBeInTheDocument();
     expectNoFakeContent();
   });
 });
