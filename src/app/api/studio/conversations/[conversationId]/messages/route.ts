@@ -694,19 +694,20 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         currentActivity: "Preparing LiTT task",
         idempotencyKey: `studio-message:${conversation.id}:${clientRequestId}`,
       });
+      const createdActionRunId = actionRun.id;
       actionContext = {
-        actionRunId: actionRun.id,
+        actionRunId: createdActionRunId,
         userId,
         conversationId: conversation.id,
         projectId: v2Transport.projectId,
       };
-      await attachActionRunToConversationTask(userId, conversation.id, actionRun.id).catch((taskErr) => {
+      await attachActionRunToConversationTask(userId, conversation.id, createdActionRunId).catch((taskErr) => {
         // Task persistence is an association layer; a migration/runtime issue
         // must not prevent the canonical ActionRun from executing.
         studioLog("message:task_attach_failed", {
           conversationId: conversation.id,
           userId,
-          actionRunId: actionRun.id,
+          actionRunId: createdActionRunId,
           errorClass: taskErr instanceof Error ? taskErr.message : "unknown",
         });
       });
