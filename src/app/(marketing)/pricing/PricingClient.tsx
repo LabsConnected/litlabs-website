@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import SmartLink from "@/components/marketing/SmartLink";
 import styles from "./pricing.module.css";
@@ -12,7 +12,11 @@ import {
   type PlanDefinition,
   type PlanId,
 } from "@/config/plans";
-import { pricingGuestCheckoutUrl } from "@/lib/pricing-guest-checkout";
+import {
+  pricingGuestCheckoutUrl,
+  savePendingPlanCheckout,
+  takePendingPlanCheckout,
+} from "@/lib/pricing-guest-checkout";
 
 type Accent = "neutral" | "cyan" | "purple";
 
@@ -236,6 +240,9 @@ export default function PricingClient() {
   const { isSignedIn } = useClerkAuth();
   const [loading, setLoading] = useState<PlanId | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Guards the post-sign-in checkout resume so it fires at most once
+  // (StrictMode double-effects, re-renders, repeat visits).
+  const resumedRef = useRef(false);
 
   useEffect(() => {
     track("pricing_viewed");
@@ -246,6 +253,9 @@ export default function PricingClient() {
       if (plan.billingType === "free") return;
       if (!isSignedIn) {
         track("signup_started", { source: "pricing", plan: plan.id });
+        // Remember the choice across the sign-in redirect so checkout
+        // resumes instead of dropping the visitor back here empty-handed.
+        savePendingPlanCheckout(plan.id);
         // redirect_url (not redirect) — sign-in only honors redirect_url,
         // and the value must survive the same-origin validator.
         window.location.href = pricingGuestCheckoutUrl();
@@ -274,6 +284,20 @@ export default function PricingClient() {
     },
     [isSignedIn],
   );
+
+  // Resume a checkout that was interrupted by sign-in: the visitor clicked
+  // "Choose Creator"/"Choose Pro" while signed out, signed in, and landed
+  // back here. Take them straight to checkout for the plan they picked
+  // instead of making them find and click the button a second time.
+  useEffect(() => {
+    if (!isSignedIn || resumedRef.current) return;
+    const pendingId = takePendingPlanCheckout();
+    if (!pendingId) return;
+    const pendingPlan = (PLANS as Record<string, PlanDefinition | undefined>)[pendingId];
+    if (!pendingPlan || pendingPlan.billingType === "free") return;
+    resumedRef.current = true;
+    void handleCheckout(pendingPlan);
+  }, [isSignedIn, handleCheckout]);
 
   return (
     <main className={styles.page}>
