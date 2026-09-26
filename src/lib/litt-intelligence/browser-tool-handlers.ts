@@ -17,6 +17,9 @@
  */
 
 import "server-only";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
   executeBrowserAction,
   closeSession,
@@ -667,6 +670,152 @@ export async function browserUpload(
 }
 
 /**
+ * browser.download — Download a file through the browser session
+ *
+ * Two trigger modes:
+ *   1. `url` — navigate to a direct file URL inside the session (the
+ *      session's cookies/auth apply) and capture the download event.
+ *   2. element target (selector/testId/ariaLabel/role/text) — click the
+ *      element and capture the download it starts.
+ *
+ * The navigate-time URL policy (§5.3) applies to mode 1 before the
+ * browser is touched. Files land in a per-session server-side
+ * directory (BROWSER_DOWNLOAD_DIR or the OS temp dir) and the result
+ * reports filename, byte size, and saved path so the agent can narrate
+ * honestly and hand the file onward. A 100 MB guard discards abusive
+ * downloads.
+ */
+const BROWSER_DOWNLOAD_MAX_BYTES = 100 * 1024 * 1024;
+
+function browserDownloadDir(sessionId: string): string {
+  const base =
+    process.env.BROWSER_DOWNLOAD_DIR || path.join(os.tmpdir(), "litt-browser-downloads");
+  return path.join(base, sessionId);
+}
+
+function sanitizeDownloadFilename(raw: string): string {
+  const base = path.basename(raw).replace(/[\0-\x1f\x7f]/g, "").trim();
+  const cleaned = base.replace(/[\\/]/g, "_").slice(0, 180);
+  return cleaned || "download";
+}
+
+export async function browserDownload(
+  ctx: BrowserToolContext,
+  inputs: {
+    url?: string;
+    selector?: string;
+    testId?: string;
+    ariaLabel?: string;
+    role?: string;
+    text?: string;
+    filename?: string;
+  },
+): Promise<BrowserActionResult> {
+  return executeBrowserAction(
+    ctx.sessionId,
+    ctx.userId,
+    "browser.download",
+    inputs,
+    async (stagehand) => {
+      const page = stagehand.context.pages()[0] as PlaywrightPage;
+      if (!page) return { success: false, error: "No page available", durationMs: 0 };
+
+      const dir = browserDownloadDir(ctx.sessionId);
+      await fs.promises.mkdir(dir, { recursive: true });
+
+      let download: {
+        suggestedFilename(): string;
+        saveAs(path: string): Promise<void>;
+      };
+      try {
+        if (inputs.url) {
+          const normalized = normalizeBrowserUrl(inputs.url);
+          if (!normalized) {
+            return {
+              success: false,
+              error: `Download blocked: "${inputs.url}" is not a valid web address.`,
+              durationMs: 0,
+            };
+          }
+          const policy = checkBrowserUrlPolicy(normalized);
+          if (!policy.allowed) {
+            await logBlockedBrowserNavigation(
+              ctx.sessionId,
+              ctx.userId,
+              normalized,
+              policy.reason ?? "blocked by URL policy",
+            );
+            return {
+              success: false,
+              error: `Download blocked: ${policy.reason}.`,
+              durationMs: 0,
+            };
+          }
+          [download] = await Promise.all([
+            page.waitForEvent("download", { timeout: 60_000 }),
+            page.goto(normalized, { waitUntil: "domcontentloaded" }),
+          ]);
+        } else {
+          const selector = resolveSelector(inputs);
+          if (!selector || selector.startsWith("text=")) {
+            return {
+              success: false,
+              error:
+                "A download URL or a clickable element (CSS selector, testId, or ariaLabel) is required",
+              durationMs: 0,
+            };
+          }
+          const el = await page.$(selector);
+          if (!el) {
+            return {
+              success: false,
+              error: `Download trigger not found: ${selector}`,
+              durationMs: 0,
+            };
+          }
+          [download] = await Promise.all([
+            page.waitForEvent("download", { timeout: 60_000 }),
+            el.click(),
+          ]);
+        }
+      } catch (e) {
+        return {
+          success: false,
+          error: `No download started: ${e instanceof Error ? e.message : String(e)}`,
+          durationMs: 0,
+        };
+      }
+
+      const filename = sanitizeDownloadFilename(
+        typeof inputs.filename === "string" && inputs.filename.trim()
+          ? inputs.filename
+          : download.suggestedFilename() || "download",
+      );
+      const savedPath = path.join(dir, filename);
+      await download.saveAs(savedPath);
+      const stat = await fs.promises.stat(savedPath).catch(() => null);
+      if (!stat) {
+        return { success: false, error: "Download finished but the file is missing.", durationMs: 0 };
+      }
+      if (stat.size > BROWSER_DOWNLOAD_MAX_BYTES) {
+        await fs.promises.unlink(savedPath).catch(() => {});
+        return {
+          success: false,
+          error: `Downloaded file (${stat.size} bytes) exceeds the 100 MB limit and was discarded.`,
+          durationMs: 0,
+        };
+      }
+
+      return {
+        success: true,
+        data: { filename, bytes: stat.size, savedPath },
+        durationMs: 0,
+      };
+    },
+  );
+}
+
+/**
  * browser.back — Navigate back in browser history
  */
 export async function browserBack(
@@ -867,6 +1016,19 @@ export const browserToolHandlers: Record<string, BrowserToolHandler> = {
         testId?: string;
         ariaLabel?: string;
         filePath: string;
+      },
+    ),
+  "browser.download": (ctx, inputs) =>
+    browserDownload(
+      ctx,
+      inputs as {
+        url?: string;
+        selector?: string;
+        testId?: string;
+        ariaLabel?: string;
+        role?: string;
+        text?: string;
+        filename?: string;
       },
     ),
   "browser.back": (ctx, inputs) => browserBack(ctx, inputs),

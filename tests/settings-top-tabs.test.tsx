@@ -121,11 +121,15 @@ describe("SettingsPage top-bar conversion", () => {
   it("keeps the locked-section unlock behavior (click switches control mode)", () => {
     render(<SettingsPage />);
     // "AI & Models" requires pro mode; in standard mode its tab offers
-    // to switch modes instead of opening the section.
+    // to switch modes instead of opening the section. The locked label
+    // names the (free) mode explicitly so locks are never mistaken for
+    // a paywall (settings audit, 2026-09-26).
     const lockedTab = getTabButtons().find((b) =>
-      b.getAttribute("aria-label")?.includes("switch to Pro mode to unlock"),
+      b
+        .getAttribute("aria-label")
+        ?.includes("locked. Activate Pro mode (free) to unlock"),
     );
-    expect(lockedTab).not.toBeNull();
+    expect(lockedTab).toBeDefined();
     expect(lockedTab!.textContent).toContain("AI & Models");
 
     fireEvent.click(lockedTab!);

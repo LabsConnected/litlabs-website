@@ -1,19 +1,20 @@
 "use client";
 
 /**
- * Dashboard — LiTT's home / control center (v3).
+ * Dashboard — LiTT's home launchpad (v3).
  *
- * Composition:
- *   - AnimatedBackground (subtle WebGL shader)
- *   - ProjectPulseBar (real deployment/build/test/branch/terminal status
- *     + command-palette search trigger; global nav lives in AppShell)
- *   - Main content grid:
- *       Left:  universal QuickStart command center
- *       Right: RecentWork + RecentMedia
- *   - MediaDock (persistent footer — collapsed/expanded, real MediaHub + LiTT audio)
- *   - CommandPalette (Ctrl+K — real destinations/actions)
- *   - FocusMode (overlay — reduces noise, emphasizes project + media + next action)
- *   - DeveloperDrawer (real project/runtime info — no fake green checks)
+ * Deliberately minimal. The hierarchy, in order:
+ *   1. One universal "What do you want to make?" composer
+ *   2. Creation type shortcuts
+ *   3. Recent projects
+ *   4. Only actionable warnings/status (ActionNeededStrip renders nothing
+ *      unless something genuinely needs attention)
+ *
+ * Runtime telemetry — live project status, agent activity, recent media,
+ * terminal/build/deploy state, branch/repository info — lives in Studio at
+ * /studio/mission-control. The Developer drawer stays collapsed by default
+ * and opens only through the explicit Developer button. No empty panels,
+ * no disconnected states, no idle telemetry.
  *
  * Data comes from real authenticated APIs via useDashboardData hooks.
  * Media comes from the existing MediaHubProvider + MusicPlayerContext
@@ -22,16 +23,13 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { X, Terminal, GitBranch, Rocket, ChevronRight } from "lucide-react";
+import Link from "next/link";
+import { X, Terminal, GitBranch, Rocket, ChevronRight, Search, Wrench } from "lucide-react";
 
 import { AnimatedBackground } from "./AnimatedBackground";
-import { ProjectPulseBar } from "./ProjectPulseBar";
-import { QuickStart } from "./QuickStart";
 import { BuildConsole } from "./BuildConsole";
-import { LiveProjectStatus } from "./LiveProjectStatus";
-import { AgentActivity } from "./AgentActivity";
+import { ActionNeededStrip } from "./ActionNeededStrip";
 import { RecentWork } from "./RecentWork";
-import { RecentMedia } from "./RecentMedia";
 import { MediaDock } from "./MediaDock";
 import { CommandPalette } from "./CommandPalette";
 import { useMediaDock } from "./useMediaDock";
@@ -42,7 +40,9 @@ import {
   derivePulseItems,
   deriveRecentProjects,
 } from "./useDashboardData";
-import type { PulseItem, DashboardProject } from "./types";
+import type { DashboardProject } from "./types";
+
+const LIME = "#a8ff2f";
 
 export function Dashboard() {
   const router = useRouter();
@@ -90,18 +90,6 @@ export function Dashboard() {
     router.push("/studio?tool=terminal");
   }, [router]);
 
-  const handlePulseItemClick = useCallback(
-    (item: PulseItem) => {
-      // Terminal items open terminal, deployment items open dev drawer
-      if (item.id === "terminal") {
-        handleOpenTerminal();
-      } else {
-        setDevDrawerOpen(true);
-      }
-    },
-    [handleOpenTerminal],
-  );
-
   const handleOpenFocusMode = useCallback(() => {
     setFocusModeOpen(true);
   }, []);
@@ -115,8 +103,8 @@ export function Dashboard() {
   }, []);
 
   // ── Media dock visibility ───────────────────────────────────────
-  // The dock is always visible at the bottom (even when nothing is
-  // playing — it shows an empty state with "Open Queue" CTA).
+  // The dock renders only when there is something to play or a queue —
+  // no persistent "nothing playing" bar (MediaDock returns null when empty).
   const showDock = true;
 
   return (
@@ -143,59 +131,78 @@ export function Dashboard() {
       {/* Animated background */}
       <AnimatedBackground />
 
-      {/* Project pulse bar — status + command-palette trigger. Global nav
-          lives in AppShell; the dashboard does not render a second nav. */}
-      <ProjectPulseBar
-        items={pulseItems}
-        loading={missionControl.loading}
-        onItemClick={handlePulseItemClick}
-        onOpenCommandPalette={() => setCommandPaletteOpen(true)}
-      />
-
-      {/* Main content */}
+      {/* Main content — one calm centered column */}
       <main
-        className="relative z-10 flex-1 overflow-y-auto px-4 pb-28 pt-6 md:px-6 md:pb-32"
+        className="relative z-10 flex-1 overflow-y-auto px-4 pb-28 pt-5 md:px-6 md:pb-32 md:pt-7"
       >
-        <div className="mx-auto grid max-w-7xl grid-cols-1 gap-6 lg:grid-cols-12">
-          <div className="flex flex-col gap-6 lg:col-span-12">
-            <div className="dashboard-card-in" style={{ animationDelay: "0ms" }}>
-              <BuildConsole />
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 md:gap-7">
+          {/* Utility row — calm, right-aligned. The Developer drawer stays
+              collapsed until this explicit button is tapped. */}
+          <div className="flex items-center justify-between">
+            <p
+              className="text-[13px] font-medium tracking-wide"
+              style={{ color: "#52525b" }}
+              aria-hidden
+            >
+              Home
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCommandPaletteOpen(true)}
+                className="inline-flex min-h-10 items-center gap-2 rounded-full border px-3.5 text-[13px] font-medium transition hover:text-white"
+                style={{
+                  borderColor: "rgba(255,255,255,.08)",
+                  background: "rgba(18,18,21,.6)",
+                  color: "#a1a1aa",
+                }}
+                aria-label="Search (Ctrl+K)"
+              >
+                <Search size={14} aria-hidden />
+                <span className="hidden sm:inline">Search</span>
+                <kbd
+                  className="hidden rounded border px-1 py-px font-mono text-[10px] md:inline"
+                  style={{ borderColor: "rgba(255,255,255,.1)", color: "#71717a" }}
+                >
+                  ⌘K
+                </kbd>
+              </button>
+              <button
+                type="button"
+                onClick={handleOpenDeveloperDrawer}
+                data-testid="developer-entry"
+                className="inline-flex min-h-10 items-center gap-2 rounded-full border px-3.5 text-[13px] font-medium transition hover:text-white"
+                style={{
+                  borderColor: "rgba(255,255,255,.08)",
+                  background: "rgba(18,18,21,.6)",
+                  color: "#a1a1aa",
+                }}
+                aria-label="Open Developer and Diagnostics"
+                title="Developer / Diagnostics"
+              >
+                <Wrench size={14} aria-hidden />
+                <span className="hidden sm:inline">Developer</span>
+              </button>
             </div>
           </div>
 
-          {/* Left column: universal LiTT command center */}
-          <div className="flex flex-col gap-6 lg:col-span-7">
-            <div className="dashboard-card-in" style={{ animationDelay: "60ms" }}>
-              <QuickStart
-                initialPrompt={searchParams.get("prompt") ?? ""}
-                initialIntent={searchParams.get("intent") ?? searchParams.get("type")}
-              />
-            </div>
-            <div className="dashboard-card-in" style={{ animationDelay: "120ms" }}>
-              <AgentActivity items={missionControl.data?.activity ?? []} loading={missionControl.loading} />
-            </div>
+          {/* Actionable warnings only — renders nothing when all is well */}
+          <div className="dashboard-card-in" style={{ animationDelay: "0ms" }}>
+            <ActionNeededStrip items={pulseItems} loading={missionControl.loading} />
           </div>
 
-          {/* Runtime + assets */}
-          <div className="flex flex-col gap-6 lg:col-span-5">
-            <div className="dashboard-card-in" style={{ animationDelay: "120ms" }}>
-              <LiveProjectStatus project={currentProject} pulseItems={pulseItems} loading={missionControl.loading} />
-            </div>
-            <div className="dashboard-card-in" style={{ animationDelay: "180ms" }}>
-              <RecentWork
-                projects={recentProjects}
-                loading={missionControl.loading}
-                onOpenTerminal={handleOpenTerminal}
-              />
-            </div>
-            <div className="dashboard-card-in" style={{ animationDelay: "240ms" }}>
-              <RecentMedia
-                items={dashboardMedia.items}
-                loading={dashboardMedia.loading}
-                error={dashboardMedia.error}
-                mediaActions={mediaActions}
-              />
-            </div>
+          {/* 1 + 2: universal composer + creation type shortcuts */}
+          <div className="dashboard-card-in" style={{ animationDelay: "60ms" }}>
+            <BuildConsole initialPrompt={searchParams.get("prompt") ?? ""} />
+          </div>
+
+          {/* 3: recent projects */}
+          <div className="dashboard-card-in" style={{ animationDelay: "120ms" }}>
+            <RecentWork
+              projects={recentProjects}
+              loading={missionControl.loading}
+              onOpenTerminal={handleOpenTerminal}
+            />
           </div>
         </div>
       </main>
@@ -245,11 +252,10 @@ export function Dashboard() {
         />
       )}
 
-      {/* Developer Drawer (slide-over) */}
+      {/* Developer Drawer (slide-over — collapsed until explicitly opened) */}
       {devDrawerOpen && (
         <DeveloperDrawer
           project={currentProject}
-          pulseItems={pulseItems}
           loading={missionControl.loading}
           onClose={() => setDevDrawerOpen(false)}
           onOpenTerminal={handleOpenTerminal}
@@ -332,10 +338,10 @@ function QueuePanel({
                   className="flex items-center gap-3 rounded-md border p-3 transition-colors"
                   style={{
                     borderColor: item.isActive
-                      ? "rgba(167,139,250,0.2)"
+                      ? "rgba(168,255,47,0.25)"
                       : "rgba(255,255,255,0.04)",
                     background: item.isActive
-                      ? "rgba(167,139,250,0.06)"
+                      ? "rgba(168,255,47,0.06)"
                       : "transparent",
                   }}
                   onMouseEnter={(e) => {
@@ -456,21 +462,27 @@ function UrlInputFooter({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Paste YouTube, Spotify, or audio URL…"
-          className="min-w-0 flex-1 rounded-md border px-3 py-2 text-sm outline-none transition focus:border-[#a78bfa]"
+          className="min-w-0 flex-1 rounded-md border px-3 py-2 text-sm outline-none transition"
           style={{
             backgroundColor: "rgba(18,18,21,0.8)",
             borderColor: "rgba(255,255,255,0.06)",
             color: "#fafafa",
           }}
+          onFocus={(e) => {
+            e.currentTarget.style.borderColor = "rgba(168,255,47,.5)";
+          }}
+          onBlur={(e) => {
+            e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)";
+          }}
           aria-label="Media URL input"
         />
         <button
           type="submit"
-          className="shrink-0 rounded-md px-4 py-2 text-sm font-bold transition hover:opacity-80"
+          className="shrink-0 rounded-md px-4 py-2 text-sm font-bold transition hover:brightness-110"
           style={{
-            backgroundColor: "rgba(167,139,250,0.15)",
-            color: "#a78bfa",
-            border: "1px solid rgba(167,139,250,0.25)",
+            backgroundColor: "rgba(168,255,47,0.14)",
+            color: LIME,
+            border: "1px solid rgba(168,255,47,0.3)",
           }}
         >
           Play
@@ -558,9 +570,9 @@ function FocusMode({
               href={studioHref}
               className="mt-6 inline-flex items-center gap-2 rounded-md px-6 py-3 text-sm font-medium transition-colors"
               style={{
-                background: "#a78bfa",
-                color: "#0a0012",
-                boxShadow: "0 0 20px rgba(167,139,250,0.3)",
+                background: LIME,
+                color: "#0c1204",
+                boxShadow: "0 0 20px rgba(168,255,47,0.3)",
               }}
             >
               Open Studio
@@ -618,7 +630,7 @@ function FocusMode({
                 ) : (
                   <div
                     className="flex h-full w-full items-center justify-center"
-                    style={{ color: "#a78bfa" }}
+                    style={{ color: LIME }}
                   >
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M9 18V5l12-2v13" />
@@ -727,7 +739,7 @@ function FocusMode({
                     color: "#a1a1aa",
                   }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = "rgba(167,139,250,0.3)";
+                    e.currentTarget.style.borderColor = "rgba(168,255,47,0.35)";
                     e.currentTarget.style.color = "#fafafa";
                   }}
                   onMouseLeave={(e) => {
@@ -746,17 +758,15 @@ function FocusMode({
   );
 }
 
-// ── Developer Drawer ──────────────────────────────────────────────
+// ── Developer Drawer (collapsed until explicitly opened) ──────────
 
 function DeveloperDrawer({
   project,
-  pulseItems,
   loading,
   onClose,
   onOpenTerminal,
 }: {
   project: DashboardProject | null;
-  pulseItems: PulseItem[];
   loading: boolean;
   onClose: () => void;
   onOpenTerminal: () => void;
@@ -782,9 +792,14 @@ function DeveloperDrawer({
           className="flex shrink-0 items-center justify-between border-b px-4 py-3"
           style={{ borderColor: "rgba(255,255,255,0.06)" }}
         >
-          <h3 className="text-sm font-bold" style={{ color: "#fafafa" }}>
-            Developer
-          </h3>
+          <div>
+            <h3 className="text-sm font-bold" style={{ color: "#fafafa" }}>
+              Developer
+            </h3>
+            <p className="mt-0.5 text-[11px]" style={{ color: "#52525b" }}>
+              Diagnostics &amp; runtime info
+            </p>
+          </div>
           <button
             onClick={onClose}
             className="flex items-center justify-center rounded p-1 transition-colors hover:bg-white/5"
@@ -851,67 +866,30 @@ function DeveloperDrawer({
                 icon={<Terminal size={14} />}
               />
 
-              {/* Status pulse items */}
-              <div className="pt-2">
-                <p
-                  className="mb-2 text-xs font-bold uppercase tracking-widest"
-                  style={{ color: "#52525b" }}
-                >
-                  Status
-                </p>
-                <div className="space-y-1.5">
-                  {pulseItems.map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex items-center justify-between rounded-md border px-3 py-2"
-                      style={{
-                        borderColor: "rgba(255,255,255,0.04)",
-                        background: "rgba(18,18,21,0.4)",
-                      }}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="h-1.5 w-1.5 rounded-full"
-                          style={{
-                            background: getPulseColor(item.state),
-                            opacity: item.state === "unknown" ? 0.5 : 1,
-                          }}
-                        />
-                        <span
-                          className="text-xs font-medium"
-                          style={{ color: "#a1a1aa" }}
-                        >
-                          {item.label}
-                        </span>
-                      </div>
-                      {item.detail && (
-                        <span
-                          className="truncate text-[10px] font-mono"
-                          style={{ color: "#52525b" }}
-                          title={item.detail}
-                        >
-                          {item.detail}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
               {/* Actions */}
-              <div className="pt-2">
+              <div className="flex flex-col gap-2 pt-2">
                 <button
                   onClick={onOpenTerminal}
                   className="flex w-full items-center justify-center gap-2 rounded-md border py-2.5 text-sm font-medium transition-colors"
                   style={{
-                    borderColor: "rgba(167,139,250,0.2)",
-                    background: "rgba(167,139,250,0.06)",
-                    color: "#a78bfa",
+                    borderColor: "rgba(168,255,47,0.25)",
+                    background: "rgba(168,255,47,0.07)",
+                    color: LIME,
                   }}
                 >
                   <Terminal size={16} />
                   Open Terminal
                 </button>
+                <Link
+                  href="/studio/mission-control"
+                  className="flex w-full items-center justify-center gap-2 rounded-md border py-2.5 text-sm font-medium transition-colors hover:bg-white/5"
+                  style={{
+                    borderColor: "rgba(255,255,255,0.08)",
+                    color: "#a1a1aa",
+                  }}
+                >
+                  Mission control — status, activity &amp; media
+                </Link>
               </div>
             </div>
           )}
@@ -955,20 +933,4 @@ function DevInfoCard({
       </span>
     </div>
   );
-}
-
-function getPulseColor(state: PulseItem["state"]): string {
-  switch (state) {
-    case "live":
-    case "passing":
-      return "#34d399";
-    case "building":
-      return "#f59e0b";
-    case "failed":
-      return "#ef4444";
-    case "idle":
-      return "#a1a1aa";
-    default:
-      return "#71717a";
-  }
 }

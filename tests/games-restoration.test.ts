@@ -67,16 +67,16 @@ describe("Games enabled — Navigation & Feature Flags", () => {
   });
 
   describe("Dashboard quick launch (v3)", () => {
-    // The v2 MissionControlDashboard was retired; QuickStart is the live
-    // creation-tile surface on the dashboard.
-    it("QuickStart has a Game creation tile linked to a real surface", () => {
+    // The v2 MissionControlDashboard was retired; the dashboard composer's
+    // shortcut chips are the live creation surface.
+    it("BuildConsole has a Game creation chip linked to a real surface", () => {
       const content = readFileSync(
-        join(ROOT, "src/components/create/CreateExperience.tsx"),
+        join(ROOT, "src/components/dashboard/v3/BuildConsole.tsx"),
         "utf8",
       );
       expect(content).toContain('"Game"');
       expect(content).toContain("Gamepad2");
-      expect(content).toContain("/studio");
+      expect(content).toContain("/studio?creator=game");
     });
   });
 });
@@ -117,11 +117,11 @@ describe("Games Restoration — Route Files Exist", () => {
 });
 
 describe("Games Restoration — Icon Support", () => {
-  it("the shared Dashboard CreateExperience renders a gamepad icon for the Game tile", () => {
+  it("the dashboard composer renders a gamepad icon for the Game chip", () => {
     // dashboard-v2-utils (v2 Icon component) was retired with the v2
     // dashboard; lucide's Gamepad2 is the live game icon.
     const content = readFileSync(
-      join(ROOT, "src/components/create/CreateExperience.tsx"),
+      join(ROOT, "src/components/dashboard/v3/BuildConsole.tsx"),
       "utf8",
     );
     expect(content).toContain("Gamepad2");

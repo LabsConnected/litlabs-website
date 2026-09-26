@@ -33,6 +33,7 @@ import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
 import { ActionRunStatusPanel } from "./ActionRunStatusPanel";
 import StudioBrowserStatusChip from "./StudioBrowserStatusChip";
+import { ChatBrowserLiveView } from "./ChatBrowserLiveView";
 import LiTTLiveActivity from "./LiTTLiveActivity";
 import LiTTPanel from "./LiTTPanel";
 import LiTTMobileSheet from "./litt/LiTTMobileSheet";
@@ -2688,6 +2689,7 @@ function StudioWorkSurface({
         </div>
       )}
       {conversationId && <ActionRunStatusPanel conversationId={conversationId} busy={busy} />}
+      {conversationId && <ChatBrowserLiveView conversationId={conversationId} />}
       {isEmpty ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <LiTEmptyState

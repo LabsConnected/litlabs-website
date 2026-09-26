@@ -278,7 +278,7 @@ describe("Marketplace state distinctions", () => {
 
     await waitFor(
       () => {
-        expect(screen.getByText("No tools available yet.")).toBeTruthy();
+        expect(screen.getByText("No capabilities listed yet. Check back soon.")).toBeTruthy();
       },
       { timeout: 3000 },
     );

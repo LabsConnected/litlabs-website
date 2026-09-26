@@ -51,6 +51,16 @@ describe("GET /api/posts", () => {
     expect(body.posts).toBeUndefined();
     expect(body.mock).toBeUndefined();
   });
+
+  it("returns an honest 500 (not a fake-empty feed) when the database errors", async () => {
+    handlerFn = () => ({ data: null, error: { message: "db down" } });
+    const res = await GET(req("http://localhost:3000/api/posts?tab=for-you&limit=10"));
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toMatch(/Couldn't load the feed/);
+    expect(body.posts).toBeUndefined();
+    expect(body.mock).toBeUndefined();
+  });
 });
 
 describe("POST /api/posts", () => {

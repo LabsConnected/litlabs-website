@@ -1095,7 +1095,13 @@ export async function runAgentLoopV2(
   }
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
-    ...(cancelled ? { reason: cancelReason ?? "Unknown" } : { totalSteps: stepsUsed, totalDurationMs: Date.now() - startTime }),
+    ...(cancelled
+      ? { reason: cancelReason ?? "Unknown" }
+      : {
+          totalSteps: stepsUsed,
+          totalDurationMs: Date.now() - startTime,
+          success: qualityFinale ? qualityFinale.verdict.ok : true,
+        }),
   } as ProgressEvent);
 
   return {
@@ -2184,7 +2190,13 @@ export async function resumeAgentLoopV2(
   }
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
-    ...(cancelled ? { reason: cancelReason ?? "Unknown" } : { totalSteps: stepsUsed, totalDurationMs: Date.now() - startTime }),
+    ...(cancelled
+      ? { reason: cancelReason ?? "Unknown" }
+      : {
+          totalSteps: stepsUsed,
+          totalDurationMs: Date.now() - startTime,
+          success: qualityFinale ? qualityFinale.verdict.ok : true,
+        }),
   } as ProgressEvent);
 
   return {

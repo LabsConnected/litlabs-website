@@ -189,8 +189,18 @@ export { MAX_JUDGE_TEXT_CHARS };
 
 // ─── Screenshot capture ───────────────────────────────────────────
 
-/** Returns a PNG data URL, or null when capture is unavailable/failed. */
-export type ScreenshotCapturer = (url: string) => Promise<string | null>;
+/** Machine facts collected alongside the screenshot. */
+export interface ScreenshotEvidence {
+  imageDataUrl: string;
+  browserInspected: true;
+  styleHealthy: boolean;
+  consoleClean: boolean;
+  consoleErrors?: string[];
+  styleProbe?: { tailwindDetected: boolean; styled: boolean };
+}
+
+/** Returns a screenshot plus machine evidence, or null when capture fails. */
+export type ScreenshotCapturer = (url: string) => Promise<string | ScreenshotEvidence | null>;
 
 /**
  * Default capturer: a fresh headless browser via the existing
@@ -199,7 +209,7 @@ export type ScreenshotCapturer = (url: string) => Promise<string | null>;
  * launch failure, navigation timeout — yields null so the loop can record
  * "visual evidence unavailable" honestly instead of fabricating a score.
  */
-export async function defaultScreenshotCapturer(url: string): Promise<string | null> {
+export async function defaultScreenshotCapturer(url: string): Promise<string | ScreenshotEvidence | null> {
   try {
     const { startSession, getStagehand, closeSession } = await import(
       "./browser-session-manager"
@@ -213,10 +223,38 @@ export async function defaultScreenshotCapturer(url: string): Promise<string | n
       if (!stagehand) return null;
       const page = stagehand.context.pages()[0];
       if (!page) return null;
+      const consoleErrors: string[] = [];
+      page.on("console", (message: { type?: () => string; text?: () => string }) => {
+        if (message.type?.() === "error" && consoleErrors.length < 50) {
+          consoleErrors.push(message.text?.().slice(0, 500) ?? "Browser console error");
+        }
+      });
       await page.goto(url, { waitUntil: "domcontentloaded", timeoutMs: 30_000 });
+      const styleProbe = await page.evaluate(() => {
+        const tailwindDetected = Boolean(
+          document.querySelector('script[src*="tailwindcss"]') ||
+          document.querySelector('style[type="text/tailwindcss"]'),
+        );
+        if (!tailwindDetected) return { tailwindDetected: false, styled: true };
+        const probe = document.createElement("div");
+        probe.className = "hidden";
+        probe.setAttribute("aria-hidden", "true");
+        probe.style.cssText = "position:absolute;left:-9999px;top:0;width:1px;height:1px;overflow:hidden;";
+        (document.body || document.documentElement).appendChild(probe);
+        const styled = window.getComputedStyle(probe).display === "none";
+        probe.remove();
+        return { tailwindDetected: true, styled };
+      });
       const shot = await page.screenshot({ type: "png" });
       const buf = Buffer.isBuffer(shot) ? shot : Buffer.from(shot as Uint8Array);
-      return `data:image/png;base64,${buf.toString("base64")}`;
+      return {
+        imageDataUrl: `data:image/png;base64,${buf.toString("base64")}`,
+        browserInspected: true,
+        styleHealthy: styleProbe.styled,
+        consoleClean: consoleErrors.length === 0,
+        consoleErrors,
+        styleProbe,
+      };
     } finally {
       await closeSession(session.id, "quality-loop").catch(() => undefined);
     }
@@ -251,6 +289,12 @@ export interface JudgeOutcome {
   status: "scored" | "unavailable";
   scorecard?: VisualScorecard;
   verdict?: JudgeVerdict;
+  /** Machine browser/style facts, present when capture reached the page. */
+  browserInspected?: boolean;
+  styleHealthy?: boolean;
+  consoleClean?: boolean;
+  consoleErrors?: string[];
+  styleProbe?: { tailwindDetected: boolean; styled: boolean };
   /** Set when status is "unavailable" — why no scorecard exists. */
   reason?: string;
 }
@@ -288,9 +332,15 @@ function buildJudgePrompt(context: JudgeContext): string {
  */
 export async function runVisualJudge(options: JudgeOptions): Promise<JudgeOutcome> {
   let screenshot = options.screenshot;
+  let captureEvidence: ScreenshotEvidence | null = null;
   if (!screenshot && options.capture) {
     try {
-      screenshot = await options.capture(options.context.previewUrl);
+      const captured = await options.capture(options.context.previewUrl);
+      if (typeof captured === "string") screenshot = captured;
+      else if (captured) {
+        captureEvidence = captured;
+        screenshot = captured.imageDataUrl;
+      }
     } catch {
       screenshot = null;
     }
@@ -299,9 +349,27 @@ export async function runVisualJudge(options: JudgeOptions): Promise<JudgeOutcom
   if (!screenshot) {
     return {
       status: "unavailable",
+      browserInspected: false,
       reason:
-        "No screenshot could be captured of the preview (browser capture unavailable or failed). " +
-        "Visual critique skipped — no score was fabricated.",
+        "Verification unavailable: No screenshot could be captured of the preview (browser capture unavailable or failed). " +
+        "Visual inspection did not pass and no success was declared.",
+    };
+  }
+
+  if (captureEvidence?.styleHealthy === false || captureEvidence?.consoleClean === false) {
+    const consoleReason = captureEvidence?.consoleClean === false
+      ? ` Browser console reported ${captureEvidence.consoleErrors?.length ?? 1} error(s).`
+      : "";
+    return {
+      status: "unavailable",
+      browserInspected: true,
+      styleHealthy: captureEvidence.styleHealthy,
+      consoleClean: captureEvidence.consoleClean,
+      consoleErrors: captureEvidence.consoleErrors,
+      styleProbe: captureEvidence.styleProbe,
+      reason:
+        `${captureEvidence.styleHealthy === false ? "Preview styling failed to apply." : "Preview runtime errors blocked verification."} ` +
+        `Browser inspection reached the page, but visual verification is blocked until the root cause is repaired.${consoleReason}`,
     };
   }
 
@@ -326,6 +394,11 @@ export async function runVisualJudge(options: JudgeOptions): Promise<JudgeOutcom
   } catch (err) {
     return {
       status: "unavailable",
+      browserInspected: captureEvidence?.browserInspected ?? true,
+      styleHealthy: captureEvidence?.styleHealthy ?? true,
+      consoleClean: captureEvidence?.consoleClean ?? true,
+      consoleErrors: captureEvidence?.consoleErrors,
+      styleProbe: captureEvidence?.styleProbe,
       reason: `Visual judge call failed (${err instanceof Error ? err.message : String(err)}). No score was fabricated.`,
     };
   }
@@ -339,9 +412,21 @@ export async function runVisualJudge(options: JudgeOptions): Promise<JudgeOutcom
   } catch (err) {
     return {
       status: "unavailable",
+      browserInspected: captureEvidence?.browserInspected ?? true,
+      styleHealthy: captureEvidence?.styleHealthy ?? true,
+      styleProbe: captureEvidence?.styleProbe,
       reason: `Visual judge returned an unparseable scorecard (${err instanceof Error ? err.message : String(err)}). No score was fabricated.`,
     };
   }
 
-  return { status: "scored", scorecard, verdict: judgeScorecard(scorecard) };
+  return {
+    status: "scored",
+    scorecard,
+    verdict: judgeScorecard(scorecard),
+    browserInspected: captureEvidence?.browserInspected ?? true,
+    styleHealthy: captureEvidence?.styleHealthy ?? true,
+    consoleClean: captureEvidence?.consoleClean ?? true,
+    consoleErrors: captureEvidence?.consoleErrors,
+    styleProbe: captureEvidence?.styleProbe,
+  };
 }

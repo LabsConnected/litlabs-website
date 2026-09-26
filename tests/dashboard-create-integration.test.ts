@@ -7,25 +7,34 @@ const read = (file: string) => fs.readFileSync(path.join(root, file), "utf8");
 
 describe("Dashboard owns the canonical create experience", () => {
   const dashboard = read("src/components/dashboard/v3/Dashboard.tsx");
-  const quickStart = read("src/components/dashboard/v3/QuickStart.tsx");
-  const createExperience = read("src/components/create/CreateExperience.tsx");
+  const composer = read("src/components/dashboard/v3/BuildConsole.tsx");
   const legacyCreate = read("src/app/(app)/create/page.tsx");
   const navigation = read("src/lib/navigation.ts");
 
-  it("uses one shared prompt and creation flow", () => {
-    expect(quickStart).toContain("CreateExperience");
-    expect(dashboard).toContain('initialPrompt={searchParams.get("prompt")');
-    expect(createExperience).toContain('fetch("/api/litt/intent"');
-    expect(createExperience).toContain("params.set(\"intent\"");
-    expect(createExperience.match(/onSubmit=\{submit\}/g)).toHaveLength(1);
+  it("uses one universal composer on the dashboard", () => {
+    expect(dashboard).toContain("BuildConsole");
+    expect(dashboard).not.toContain("QuickStart");
+    expect(composer).toContain("What do you want to make?");
+    expect(composer).toContain('fetch("/api/litt/intent"');
+    expect(composer).toContain('params.set("intent"');
+    expect(composer.match(/onSubmit=\{submit\}/g)).toHaveLength(1);
   });
 
-  it("exposes all seven suggestion chips without bypassing the router", () => {
-    for (const label of ["Website", "Image", "Video", "Music & Audio", "Code", "Design", "Game"]) {
-      expect(createExperience).toContain(`label: "${label}"`);
+  it("honors deep-link prompts from the legacy /create redirect", () => {
+    expect(dashboard).toContain('initialPrompt={searchParams.get("prompt")');
+    expect(composer).toContain("initialPrompt");
+  });
+
+  it("exposes creation-type shortcuts without bypassing the router", () => {
+    for (const label of ["Website", "Image", "Video", "Music", "Code", "Design", "Game"]) {
+      expect(composer).toContain(`label: "${label}"`);
     }
-    expect(createExperience.match(/seed: "/g)?.length).toBe(7);
-    expect(createExperience).not.toContain('href: "/studio?');
+    // Media/game chips deep-link into Studio's authoritative creator
+    // surfaces; the typed prompt always goes through the intent router.
+    for (const creator of ["image", "video", "music", "game"]) {
+      expect(composer).toContain(`href: "/studio?creator=${creator}"`);
+    }
+    expect(composer).toContain('fetch("/api/litt/intent"');
   });
 
   it("redirects legacy /create links to Dashboard and preserves query params", () => {

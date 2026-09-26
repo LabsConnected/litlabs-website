@@ -30,9 +30,11 @@ import {
 import { ProgressEmitter } from "./progress-events";
 import { buildPreviewProxyUrl } from "@/lib/terminal-internal-client";
 import {
+  buildRedesignPrompt,
   noteBuildArtifacts,
   notePreviewReady,
   restoreQualityLoopSession,
+  runQualityInspection,
   snapshotQualityLoopSession,
 } from "./quality-loop-flow";
 
@@ -490,7 +492,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
     emitStep(progress, steps, "Planning and generating the project...");
     progress.emit({ type: "phase", phase: "call_llm", step: 1 });
 
-    const runPhase1 = (message: string) =>
+    const runPhase1 = (message: string, qualityState = options.qualityLoop?.state) =>
       (options.runAgentLoop ?? runAgentLoopV2)(
         message,
         transport,
@@ -519,7 +521,9 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           // Quality loop: gate the main build phase when the caller opted in.
           // (The repair phase below runs without it — it is a bounded
           // sub-task of the already-gated build, not a new build.)
-          qualityLoop: options.qualityLoop,
+          qualityLoop: options.qualityLoop
+            ? { ...options.qualityLoop, state: qualityState }
+            : undefined,
         },
         progress,
       );
@@ -849,14 +853,77 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
     const previewUrl = (options.buildPreviewUrl ?? buildPreviewProxyUrl)(transport.workspaceId);
     progress.emit({ type: "preview_result", success: true, previewUrl });
 
-    if (agentResult.qualityLoopState) {
-      const qualitySession = restoreQualityLoopSession(agentResult.qualityLoopState);
+    let qualitySession = agentResult.qualityLoopState
+      ? restoreQualityLoopSession(agentResult.qualityLoopState)
+      : null;
+    if (qualitySession) {
       notePreviewReady(qualitySession, previewUrl);
+
+      // Visual evidence is collected only after the preview is genuinely
+      // reachable. A server-ready response is not a visual pass: the real
+      // browser capture also runs the style probe and the visual judge.
+      const maxVisualRepairAttempts = 2;
+      let visualRepairAttempts = 0;
+      let inspection = await runQualityInspection(qualitySession);
+      while (inspection.needsRedesign && visualRepairAttempts < maxVisualRepairAttempts) {
+        visualRepairAttempts++;
+        progress.emit({
+          type: "repair_attempt",
+          attempt: visualRepairAttempts,
+          maxAttempts: maxVisualRepairAttempts,
+        });
+        emitStep(
+          progress,
+          steps,
+          `Preview visual verification failed — repair attempt ${visualRepairAttempts}/${maxVisualRepairAttempts}...`,
+        );
+        // The current inspection is consumed; a repaired preview must be
+        // captured again, never reused from the failed pass.
+        qualitySession.inspectionRan = false;
+        const repairResult = await runPhase1(
+          buildRedesignPrompt(inspection, visualRepairAttempts),
+          snapshotQualityLoopSession(qualitySession),
+        );
+        agentResult = repairResult;
+        lastAgentLoopResult = agentResult;
+        if (repairResult.qualityLoopState) {
+          qualitySession = restoreQualityLoopSession(repairResult.qualityLoopState);
+        }
+        if (repairResult.pendingApproval || repairResult.cancelled || repairResult.modelFailed) break;
+        qualitySession.inspectionRan = false;
+        progress.emit({ type: "preview_start" });
+        const repairedPreview = await startAndWaitForPreview(
+          transport,
+          {
+            maxWaitMs: options.maxPreviewWaitMs ?? 120_000,
+            pollIntervalMs: options.previewPollIntervalMs ?? 2_000,
+            signal,
+          },
+          progress,
+          actionContext,
+        );
+        if (repairedPreview !== "ready") break;
+        notePreviewReady(qualitySession, previewUrl);
+        inspection = await runQualityInspection(qualitySession);
+      }
+
       agentResult = {
         ...agentResult,
         qualityLoopState: snapshotQualityLoopSession(qualitySession),
       };
       lastAgentLoopResult = agentResult;
+
+      if (!inspection.ran || inspection.needsRedesign) {
+        const verificationMessage = inspection.reason ||
+          "Verification unavailable: the browser could not provide passing visual evidence.";
+        return baseResult({
+          status: "failed",
+          finalText: `${verificationMessage} The preview is not verified; no completion claim was made.`,
+          error: "VISUAL_VERIFICATION_INCOMPLETE",
+          repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
+          runtimeRepairAttempts,
+        });
+      }
     }
 
     // Phase 1 paused for approval — preview is live; return the pause now.

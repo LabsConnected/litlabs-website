@@ -362,8 +362,8 @@ export default function BrowserJobLiveView({
           <div className="mt-1 overflow-hidden rounded-lg border" style={{ borderColor: "var(--studio-border)" }}>
             <iframe
               src={probe.embedUrl}
-              className="w-full"
-              style={{ height: 220, border: "none", backgroundColor: "#0a0b10" }}
+              className="aspect-video min-h-[220px] w-full md:min-h-[320px]"
+              style={{ border: "none", backgroundColor: "#0a0b10" }}
               title="Live browser view — streaming the agent's browser"
               allow="clipboard-read; clipboard-write"
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
@@ -374,10 +374,10 @@ export default function BrowserJobLiveView({
               href={probe.openUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-1 inline-flex items-center gap-1 text-[9px] font-bold hover:underline"
+              className="mt-1 inline-flex min-h-[44px] items-center gap-1.5 px-2 text-[12px] font-bold hover:underline"
               style={{ color: LIME }}
             >
-              <ExternalLink size={9} />
+              <ExternalLink size={12} />
               Open in new tab
             </a>
           )}

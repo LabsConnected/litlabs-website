@@ -1,26 +1,15 @@
 "use client";
 
 import { MapPin, Globe, CalendarDays } from "lucide-react";
+import { useUser } from "@clerk/nextjs";
 import type { UserProfile } from "@/context/ProfileContext";
 
-const SKILLS = [
-  "AI Development",
-  "Agent Architecture",
-  "Web Development",
-  "Creative Tooling",
-  "Automation",
-  "Prompt Engineering",
-  "Product Design",
-];
-
-const ACHIEVEMENTS = [
-  { icon: "🚀", label: "First Deployment" },
-  { icon: "🤖", label: "Agent Architect" },
-  { icon: "🏗️", label: "Studio Builder" },
-  { icon: "⚡", label: "Prompt Engineer" },
-  { icon: "🌱", label: "Early Creator" },
-  { icon: "🏆", label: "Marketplace Seller" },
-];
+function formatJoined(date: Date): string {
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    year: "numeric",
+  });
+}
 
 function Card({
   children,
@@ -69,6 +58,8 @@ interface Props {
 }
 
 export function ProfileRightRail({ profile }: Props) {
+  const { user } = useUser();
+  const joinedLabel = user?.createdAt ? formatJoined(user.createdAt) : null;
   return (
     <div className="right-rail">
       {/* About */}
@@ -111,154 +102,19 @@ export function ProfileRightRail({ profile }: Props) {
               {profile.website.replace(/^https?:\/\//, "")}
             </a>
           )}
-          <span
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              fontSize: "12px",
-              color: "#71717a",
-            }}
-          >
-            <CalendarDays size={13} /> Joined 2024
-          </span>
-        </div>
-      </Card>
-
-      {/* Creator Level */}
-      <Card>
-        <SectionTitle>Creator Level</SectionTitle>
-        <div>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "baseline",
-              marginBottom: "8px",
-            }}
-          >
+          {joinedLabel && (
             <span
-              style={{ fontSize: "22px", fontWeight: 800, color: "#f5f5f7" }}
-            >
-              Level 18
-            </span>
-            <span style={{ fontSize: "12px", color: "#71717a" }}>72%</span>
-          </div>
-          <div
-            style={{
-              height: "6px",
-              borderRadius: "999px",
-              background: "rgba(255,255,255,0.06)",
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                height: "100%",
-                width: "72%",
-                borderRadius: "999px",
-                background: "linear-gradient(90deg, #a855f7, #30e7ff)",
-              }}
-            />
-          </div>
-          <p style={{ fontSize: "11px", color: "#71717a", marginTop: "8px" }}>
-            Next unlock: Custom profile environment
-          </p>
-          <div style={{ display: "flex", gap: "16px", marginTop: "14px" }}>
-            {[
-              { label: "Branches", value: "12", desc: "Agents" },
-              { label: "Fruits", value: "38", desc: "Projects" },
-              { label: "Roots", value: "64", desc: "Memories" },
-            ].map((s) => (
-              <div key={s.label} style={{ textAlign: "center" }}>
-                <div
-                  style={{
-                    fontSize: "16px",
-                    fontWeight: 750,
-                    color: "#f5f5f7",
-                  }}
-                >
-                  {s.value}
-                </div>
-                <div
-                  style={{
-                    fontSize: "10px",
-                    color: "#a855f7",
-                    fontWeight: 700,
-                    letterSpacing: "0.06em",
-                  }}
-                >
-                  {s.label}
-                </div>
-                <div style={{ fontSize: "10px", color: "#52525b" }}>
-                  {s.desc}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </Card>
-
-      {/* Skills */}
-      <Card>
-        <SectionTitle>Skills</SectionTitle>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-          {SKILLS.map((s) => (
-            <span
-              key={s}
-              style={{
-                fontSize: "11px",
-                fontWeight: 600,
-                padding: "4px 10px",
-                borderRadius: "999px",
-                border: "1px solid rgba(255,255,255,0.1)",
-                background: "rgba(255,255,255,0.04)",
-                color: "#a1a1aa",
-              }}
-            >
-              {s}
-            </span>
-          ))}
-        </div>
-      </Card>
-
-      {/* Achievements */}
-      <Card>
-        <SectionTitle>Achievements</SectionTitle>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: "8px",
-          }}
-        >
-          {ACHIEVEMENTS.map((a) => (
-            <div
-              key={a.label}
-              title={a.label}
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: "8px",
-                padding: "8px 10px",
-                borderRadius: "10px",
-                background: "rgba(255,255,255,0.03)",
-                border: "1px solid rgba(255,255,255,0.06)",
+                gap: "6px",
+                fontSize: "12px",
+                color: "#71717a",
               }}
             >
-              <span style={{ fontSize: "18px" }}>{a.icon}</span>
-              <span
-                style={{
-                  fontSize: "11px",
-                  color: "#a1a1aa",
-                  fontWeight: 600,
-                  lineHeight: 1.3,
-                }}
-              >
-                {a.label}
-              </span>
-            </div>
-          ))}
+              <CalendarDays size={13} /> Joined {joinedLabel}
+            </span>
+          )}
         </div>
       </Card>
 

@@ -39,11 +39,13 @@ export default function MarketplaceDocsClient() {
 
       <DocH2 id="what-it-is">What you&apos;ll find</DocH2>
       <DocP>
-        Each listing describes one capability in development: what it will
-        do, which assistant it&apos;s for, and its status.{" "}
-        <strong>In development</strong> means we&apos;re actively building
-        it; <strong>Coming soon</strong> means it&apos;s planned but work
-        hasn&apos;t started.
+        Each listing describes one capability: what it does, what it needs
+        (like a GitHub connection), and what it costs. Every card has one
+        clear state:{" "}
+        <strong>Install</strong>{" "}when it&apos;s ready to add,{" "}
+        <strong>Installed</strong>{" "}once you&apos;ve added it, or{" "}
+        <strong>Coming soon</strong>{" "}while it&apos;s still being built.
+        Tap a card for the full details — version, requirements, and provider.
       </DocP>
 
       <DocH2 id="installing">When installs go live</DocH2>

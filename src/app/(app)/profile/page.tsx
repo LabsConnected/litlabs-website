@@ -291,6 +291,22 @@ function ProfilePageInner() {
 
   return (
     <div className="profile-page">
+      {/* Full-bleed cover: sits outside the padded content container so the
+          banner wallpaper fills edge-to-edge like the homepage hero. */}
+      <ProfileCover
+        coverUrl={profile.coverUrl}
+        coverPreview={coverPreview}
+        isOwner={true}
+        saving={saving}
+        uploadError={uploadError}
+        onFileSelect={handleCoverSelect}
+        onConfirm={confirmCoverUpload}
+        onCancel={() => {
+          setCoverFile(null);
+          setCoverPreview(null);
+          setUploadError(null);
+        }}
+      />
       <div className="profile-container">
         {syncError && (
           <p
@@ -309,21 +325,6 @@ function ProfilePageInner() {
             {syncError}
           </p>
         )}
-        <ProfileCover
-          coverUrl={profile.coverUrl}
-          coverPreview={coverPreview}
-          isOwner={true}
-          saving={saving}
-          uploadError={uploadError}
-          onFileSelect={handleCoverSelect}
-          onConfirm={confirmCoverUpload}
-          onCancel={() => {
-            setCoverFile(null);
-            setCoverPreview(null);
-            setUploadError(null);
-          }}
-        />
-
         <ProfileIdentity
           profile={profile}
           stats={stats}
@@ -350,20 +351,20 @@ function ProfilePageInner() {
 
         {(activeTab === "overview" || activeTab === "about") && (
           <div className="profile-content-grid" style={{ marginTop: "24px" }}>
-            <ProfileOverview hasProjects hasAgents />
+            <ProfileOverview />
             <ProfileRightRail profile={profile} />
           </div>
         )}
 
         {activeTab === "projects" && (
           <div style={{ marginTop: "24px" }}>
-            <ProfileOverview hasProjects />
+            <ProfileOverview />
           </div>
         )}
 
         {activeTab === "agents" && (
           <div style={{ marginTop: "24px" }}>
-            <ProfileOverview hasAgents />
+            <ProfileOverview />
           </div>
         )}
 

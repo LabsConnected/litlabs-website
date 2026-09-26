@@ -85,13 +85,15 @@ export const STAGE_REQUIREMENTS: Record<QualityStage, StageRequirement> = {
   },
   inspect: {
     stage: "inspect",
-    evidence: "Screenshot of the running preview captured for review.",
-    skippable: true,
+    evidence: "Machine-captured screenshot of the running preview with a passing style probe.",
+    // Once a preview exists, visual inspection is mandatory for UI/site
+    // missions. A missing browser is verification-unavailable, never a pass.
+    skippable: false,
   },
   critique: {
     stage: "critique",
-    evidence: "Visual-quality scorecard across all nine dimensions.",
-    skippable: true,
+    evidence: "Machine-captured screenshot reviewed by the visual judge with a passing scorecard.",
+    skippable: false,
   },
   fix: {
     stage: "fix",

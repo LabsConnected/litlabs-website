@@ -116,7 +116,7 @@ export function MediaDock({ dock, actions, onOpenQueue, onOpenFocusMode }: Media
             ) : (
               <div className="flex h-full w-full items-center justify-center">
                 {dock.source === "litt" ? (
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a8ff2f" strokeWidth="2">
                     <path d="M9 18V5l12-2v13" />
                     <circle cx="6" cy="18" r="3" />
                     <circle cx="18" cy="16" r="3" />
@@ -254,10 +254,10 @@ export function MediaDock({ dock, actions, onOpenQueue, onOpenFocusMode }: Media
               background: "rgba(18,18,21,0.6)",
               color: "#fafafa",
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.borderColor = "rgba(167,139,250,0.3)")}
+            onMouseEnter={(e) => (e.currentTarget.style.borderColor = "rgba(168,255,47,0.3)")}
             onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)")}
           >
-            <Focus size={16} style={{ color: "#a78bfa" }} />
+            <Focus size={16} style={{ color: "#a8ff2f" }} />
             Focus
           </button>
         </div>

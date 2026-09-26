@@ -45,10 +45,21 @@ function state(input: FirstMissionLaunchpadInput) {
   return deriveFirstMissionLaunchpadState(input);
 }
 
+const readyRuntime = runtime({
+  ...project,
+  phase: "ready",
+  workspaceId: "workspace-1",
+  workspaceStatus: "ready",
+  workspaceProvisioned: true,
+  terminalConnected: true,
+  executionAvailable: true,
+  readAccess: true,
+});
+
 const renderCases = [
   {
     name: "no project",
-    expected: "Start blank project",
+    expected: "Get started",
     input: { runtime: runtime({ phase: "idle" }), runtimeLoading: false, providerHealth: "available" as const },
   },
   {
@@ -67,7 +78,7 @@ const renderCases = [
   },
   {
     name: "workspace failed",
-    expected: "Retry workspace",
+    expected: "Try again",
     input: {
       runtime: runtime({
         ...project,
@@ -82,7 +93,7 @@ const renderCases = [
   },
   {
     name: "provider unavailable",
-    expected: "Configure provider",
+    expected: "Connect AI",
     input: {
       runtime: runtime({
         ...project,
@@ -98,7 +109,7 @@ const renderCases = [
   },
   {
     name: "terminal disconnected",
-    expected: "Connect terminal",
+    expected: "Connect",
     input: {
       runtime: runtime({
         ...project,
@@ -114,18 +125,9 @@ const renderCases = [
   },
   {
     name: "fully ready",
-    expected: "Prepare read-only inspection",
+    expected: "Look over my project first",
     input: {
-      runtime: runtime({
-        ...project,
-        phase: "ready",
-        workspaceId: "workspace-1",
-        workspaceStatus: "ready",
-        workspaceProvisioned: true,
-        terminalConnected: true,
-        executionAvailable: true,
-        readAccess: true,
-      }),
+      runtime: readyRuntime,
       runtimeLoading: false,
       providerHealth: "available" as const,
     },
@@ -147,7 +149,7 @@ describe("LiTEmptyState truthful launchpad", () => {
       if (testCase.expected) {
         expect(primaryActions[0]).toHaveTextContent(testCase.expected);
       } else {
-        expect(screen.getAllByText(/remain unavailable until the workspace reports ready/i).length).toBeGreaterThan(0);
+        expect(screen.getAllByText(/still getting set up/i).length).toBeGreaterThan(0);
       }
     });
   }
@@ -171,15 +173,7 @@ describe("LiTEmptyState truthful launchpad", () => {
   it("dispatches the derived action without submitting a mission", () => {
     const onPrimaryAction = vi.fn();
     const launchpadState = state({
-      runtime: runtime({
-        ...project,
-        phase: "ready",
-        workspaceId: "workspace-1",
-        workspaceStatus: "ready",
-        workspaceProvisioned: true,
-        terminalConnected: true,
-        executionAvailable: true,
-      }),
+      runtime: readyRuntime,
       runtimeLoading: false,
       providerHealth: "available",
     });
@@ -190,7 +184,7 @@ describe("LiTEmptyState truthful launchpad", () => {
         onPrimaryAction={onPrimaryAction}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Prepare read-only inspection" }));
+    fireEvent.click(screen.getByRole("button", { name: "Look over my project first" }));
 
     expect(onPrimaryAction).toHaveBeenCalledOnce();
     expect(onPrimaryAction).toHaveBeenCalledWith("prepare_inspection");
@@ -209,5 +203,132 @@ describe("LiTEmptyState truthful launchpad", () => {
     );
 
     expect(screen.getByTestId("litt-presence")).toHaveAttribute("data-variant", "empty-state");
+  });
+});
+
+describe("LiTEmptyState first-run first screen", () => {
+  function renderReady() {
+    return render(
+      <LiTEmptyState
+        launchpadState={state({
+          runtime: readyRuntime,
+          runtimeLoading: false,
+          providerHealth: "available",
+        })}
+        onPrimaryAction={vi.fn()}
+      />,
+    );
+  }
+
+  it("leads with the vision headline, not infrastructure", () => {
+    renderReady();
+    expect(
+      screen.getByRole("heading", { name: /what do you want LiTT to do\?/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders all five starter chips", () => {
+    renderReady();
+    const group = screen.getByTestId("first-mission-starter-chips");
+    expect(group).toBeInTheDocument();
+    for (const label of [
+      "Build my business website",
+      "Fix something broken",
+      "Make my site look better",
+      "Create something new",
+      "Surprise me",
+    ]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+    }
+  });
+
+  it("keeps the setup checks collapsed behind the status line by default", () => {
+    renderReady();
+    expect(screen.getByTestId("first-mission-status")).toHaveTextContent(/you're all set/i);
+    expect(screen.queryByTestId("first-mission-facts")).not.toBeInTheDocument();
+    expect(screen.queryByText("AI provider")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("first-mission-status"));
+    expect(screen.getByTestId("first-mission-facts")).toBeInTheDocument();
+    expect(screen.getByText("AI provider")).toBeInTheDocument();
+  });
+
+  it("shows a jargon-free getting-ready status while checking", () => {
+    render(
+      <LiTEmptyState
+        launchpadState={state({
+          runtime: runtime({ phase: "resolving" }),
+          runtimeLoading: false,
+          providerHealth: undefined,
+        })}
+        onPrimaryAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("first-mission-status")).toHaveTextContent(/getting things ready/i);
+  });
+
+  it("primes the composer through studio:ask-litt without submitting", () => {
+    const onPrimaryAction = vi.fn();
+    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+    render(
+      <LiTEmptyState
+        launchpadState={state({
+          runtime: readyRuntime,
+          runtimeLoading: false,
+          providerHealth: "available",
+        })}
+        onPrimaryAction={onPrimaryAction}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Surprise me" }));
+
+    expect(onPrimaryAction).not.toHaveBeenCalled();
+    expect(dispatchSpy).toHaveBeenCalledOnce();
+    const event = dispatchSpy.mock.calls[0][0] as CustomEvent;
+    expect(event.type).toBe("studio:ask-litt");
+    expect(event.detail.prompt).toBe("Surprise me — build something cool");
+    dispatchSpy.mockRestore();
+  });
+
+  it("transplants the describe-once box onto the first screen", () => {
+    renderReady();
+    expect(screen.getByTestId("first-mission-describe-box")).toBeInTheDocument();
+    expect(screen.getByLabelText("Describe your business")).toBeInTheDocument();
+  });
+
+  it("keeps infrastructure nouns out of the default first screen", () => {
+    renderReady();
+    const root = screen.getByTestId("empty-state");
+    expect(root.textContent).not.toMatch(/AI provider/i);
+    // "Terminal"/"Deployment"/"Workspace" only live behind the collapsed checks.
+    expect(screen.queryByText("Terminal")).not.toBeInTheDocument();
+    expect(screen.queryByText("Deployment")).not.toBeInTheDocument();
+  });
+
+  it("hides starter chips and shows the blocker message when blocked", () => {
+    render(
+      <LiTEmptyState
+        launchpadState={state({
+          runtime: runtime({ phase: "idle" }),
+          runtimeLoading: false,
+          runtimeError: "boom",
+          providerHealth: "available",
+        })}
+        onPrimaryAction={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("first-mission-starter-chips")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("first-mission-describe-box")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Something needs attention" }),
+    ).toBeInTheDocument();
+  });
+
+  it("tells the truth that choosing only fills the chat box", () => {
+    renderReady();
+    expect(
+      screen.getByText(/choosing one fills in the chat box — nothing runs until you send it/i),
+    ).toBeInTheDocument();
   });
 });

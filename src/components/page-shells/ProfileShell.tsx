@@ -8,15 +8,15 @@ import { Shimmer } from "./Shimmer";
  *
  * Mirrors ProfilePage's real layout (src/app/(app)/profile/page.tsx):
  *   - ProfileCover banner (280px desktop / 170px mobile)
- *   - ProfileIdentity: avatar ring, name/level, username, bio, meta chips,
+ *   - ProfileIdentity: avatar ring, name, username, bio, meta chips,
  *     action buttons
  *   - ProfileTabs bar (overview/projects/agents/artifacts/posts/activity/about)
  *   - content grid (1fr + 340px right rail):
  *       ProfileOverview sections + ProfileRightRail sections
  *   - CreatorActionPanel
  *
- * Skeleton blocks only — no display name, username, bio, skills,
- * achievements, or level text.
+ * Skeleton blocks only — no display name, username, bio, or other
+ * profile text.
  */
 export default function ProfileShell() {
   const { tokens } = useTheme();
@@ -82,7 +82,7 @@ export default function ProfileShell() {
         {/* Content grid: overview + 340px right rail */}
         <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-[1fr_340px]">
           <div className="flex min-w-0 flex-col gap-5" data-testid="profile-shell-overview">
-            {["Featured Work", "Recent Projects"].map((section) => (
+            {["Recent Projects", "Published Agents"].map((section) => (
               <div
                 key={section}
                 className="rounded-2xl border p-5"
@@ -103,7 +103,7 @@ export default function ProfileShell() {
           </div>
 
           <div className="flex min-w-0 flex-col gap-5" data-testid="profile-shell-right-rail">
-            {["About", "Creator Level", "Skills"].map((section) => (
+            {["About", "Availability", "Social Links"].map((section) => (
               <div
                 key={section}
                 className="rounded-2xl border p-5"

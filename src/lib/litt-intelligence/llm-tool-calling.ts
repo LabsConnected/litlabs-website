@@ -1616,8 +1616,22 @@ export function buildAssistantToolCallMessage(
 
 /**
  * Convert tool result to a human-readable summary for progress events.
+ *
+ * Honesty rule: a handler payload that reports { success: false } is
+ * summarized as a failure naming the error — the chat progress list
+ * (red dot + this summary) must never read as a success when the tool
+ * failed. This is the user-facing half of the "never silently claim an
+ * action happened" contract; the model-facing half is
+ * buildToolResultMessage's `Error: …` content.
  */
 export function summarizeToolResult(toolId: string, result: unknown): string {
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    const obj = result as Record<string, unknown>;
+    if (obj.success === false) {
+      const err = typeof obj.error === "string" && obj.error.trim() ? obj.error.trim() : "unknown error";
+      return `Failed: ${err}`.slice(0, 200);
+    }
+  }
   if (typeof result === "string") return result.slice(0, 200);
   if (result && typeof result === "object") {
     const obj = result as Record<string, unknown>;

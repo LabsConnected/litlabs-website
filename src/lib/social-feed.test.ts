@@ -214,4 +214,26 @@ describe("listPosts", () => {
     const res = await listPosts({ viewerDbId: null, tab: "for-you", limit: 500 });
     expect(res.posts.length).toBeLessThanOrEqual(25);
   });
+
+  it("throws on DB failure instead of returning a fake-empty feed", async () => {
+    const failing = createMockSupabase(() => ({
+      data: null,
+      error: { message: "db down" },
+    }));
+    mockClient.from.mockImplementationOnce(failing.from);
+    await expect(
+      listPosts({ viewerDbId: null, tab: "for-you", limit: 10 }),
+    ).rejects.toThrow(/Failed to load feed posts: db down/);
+  });
+
+  it("throws when the trending query fails", async () => {
+    const failing = createMockSupabase(() => ({
+      data: null,
+      error: { message: "db down" },
+    }));
+    mockClient.from.mockImplementationOnce(failing.from);
+    await expect(
+      listPosts({ viewerDbId: null, tab: "trending", limit: 10 }),
+    ).rejects.toThrow(/Failed to load trending posts: db down/);
+  });
 });

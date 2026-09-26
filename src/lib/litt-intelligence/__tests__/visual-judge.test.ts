@@ -157,6 +157,25 @@ describe("runVisualJudge honesty", () => {
     expect(outcome.scorecard).toBeUndefined();
   });
 
+  it("blocks a reached but unstyled preview before the judge can say it looks good", async () => {
+    const outcome = await runVisualJudge({
+      screenshot: null,
+      capture: async () => ({
+        imageDataUrl: "data:image/png;base64,AAA",
+        browserInspected: true,
+        styleHealthy: false,
+        consoleClean: true,
+        styleProbe: { tailwindDetected: true, styled: false },
+      }),
+      context: ctx,
+      judgeCall: async () => ({ text: cardJson(), model: "must-not-run" }),
+    });
+    expect(outcome.status).toBe("unavailable");
+    expect(outcome.browserInspected).toBe(true);
+    expect(outcome.styleHealthy).toBe(false);
+    expect(outcome.reason).toMatch(/styling failed/i);
+  });
+
   it("returns unavailable when the judge call fails", async () => {
     const outcome = await runVisualJudge({
       screenshot: "data:image/png;base64,AAA",

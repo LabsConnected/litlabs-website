@@ -54,6 +54,12 @@ export interface FirstMissionLaunchpadState {
   primaryAction: FirstMissionPrimaryAction | null;
   mutationActionsAllowed: boolean;
   inspectionEvidence: FirstMissionToolResult[];
+  /**
+   * Active project id (null when there is no project yet). Lets the empty
+   * state persist the business profile straight to the project; without one
+   * the describe box stashes a pending intake instead.
+   */
+  projectId: string | null;
 }
 
 export interface FirstMissionToolResult {
@@ -156,9 +162,9 @@ function isWorkspaceFailure(runtime: ProjectRuntimeState): boolean {
     || status === "error";
 }
 
-export function deriveFirstMissionLaunchpadState(
-  input: FirstMissionLaunchpadInput,
-): FirstMissionLaunchpadState {
+type LaunchpadStateWithoutProject = Omit<FirstMissionLaunchpadState, "projectId">;
+
+function deriveLaunchpad(input: FirstMissionLaunchpadInput): LaunchpadStateWithoutProject {
   const { runtime, runtimeLoading, runtimeError, providerHealth } = input;
   const facts = factsFor(runtime, providerHealth);
   const blocked = { mutationActionsAllowed: false, inspectionEvidence: [] };
@@ -166,9 +172,9 @@ export function deriveFirstMissionLaunchpadState(
   if (runtimeLoading || runtime.phase === "resolving" || providerHealth === undefined) {
     return {
       key: "checking",
-      eyebrow: "Checking prerequisites",
-      title: "Verifying your first mission path",
-      description: "LiTT is checking project, workspace, provider, and terminal evidence before enabling an action.",
+      eyebrow: "Getting things ready",
+      title: "What do you want LiTT to do?",
+      description: "LiTT is getting set up — just a few seconds.",
       facts,
       primaryAction: null,
       ...blocked,
@@ -178,9 +184,9 @@ export function deriveFirstMissionLaunchpadState(
   if (runtime.phase === "unauthenticated") {
     return {
       key: "blocked",
-      eyebrow: "Sign-in required",
-      title: "Studio cannot verify this session",
-      description: "Sign in again before starting a project or mission.",
+      eyebrow: "Sign-in needed",
+      title: "Please sign in again",
+      description: "Your session expired. Sign in again to keep going.",
       facts,
       primaryAction: null,
       ...blocked,
@@ -190,8 +196,8 @@ export function deriveFirstMissionLaunchpadState(
   if (runtimeError) {
     return {
       key: "blocked",
-      eyebrow: "Verification unavailable",
-      title: "Runtime status could not be verified",
+      eyebrow: "Couldn't check status",
+      title: "Something needs attention",
       description: runtimeError,
       facts,
       primaryAction: null,
@@ -202,11 +208,11 @@ export function deriveFirstMissionLaunchpadState(
   if (!runtime.projectId || runtime.phase === "idle") {
     return {
       key: "no_project",
-      eyebrow: "No project selected",
-      title: "Start with a blank project",
-      description: "A project is required before LiTT can verify a workspace, terminal, preview, or deployment path.",
+      eyebrow: "Let's get started",
+      title: "What do you want LiTT to do?",
+      description: "Tell LiTT what you want in your own words — a website, a fix, a fresh look. Nothing runs until you say so.",
       facts,
-      primaryAction: action("start_blank_project", "Start blank project"),
+      primaryAction: action("start_blank_project", "Get started"),
       ...blocked,
     };
   }
@@ -214,11 +220,11 @@ export function deriveFirstMissionLaunchpadState(
   if (runtime.phase === "workspace_not_provisioned" || !runtime.workspaceId) {
     return {
       key: "workspace_missing",
-      eyebrow: "Workspace not prepared",
-      title: "Prepare the project workspace",
-      description: "The project exists, but no verified workspace is available for inspection or execution.",
+      eyebrow: "Almost ready",
+      title: "What do you want LiTT to do?",
+      description: "One quick setup step, then tell LiTT what to build.",
       facts,
-      primaryAction: action("prepare_workspace", "Prepare workspace"),
+      primaryAction: action("prepare_workspace", "Set up"),
       ...blocked,
     };
   }
@@ -227,20 +233,20 @@ export function deriveFirstMissionLaunchpadState(
     if (isWorkspaceFailure(runtime)) {
       return {
         key: "workspace_failed",
-        eyebrow: "Workspace preparation failed",
-        title: "Retry workspace preparation",
-        description: runtime.error?.message ?? "The workspace did not become ready. Retry the existing preparation flow.",
+        eyebrow: "Needs attention",
+        title: "Setup didn't finish",
+        description: runtime.error?.message ?? "The setup didn't complete. You can try again.",
         facts,
-        primaryAction: action("retry_workspace", "Retry workspace"),
+        primaryAction: action("retry_workspace", "Try again"),
         ...blocked,
       };
     }
 
     return {
       key: "workspace_preparing",
-      eyebrow: "Workspace preparation in progress",
-      title: "Waiting for verified workspace state",
-      description: "Inspection and terminal actions remain unavailable until the workspace reports ready.",
+      eyebrow: "Getting things ready",
+      title: "Setting things up",
+      description: "LiTT is preparing your space. This usually takes about a minute.",
       facts,
       primaryAction: null,
       ...blocked,
@@ -250,11 +256,11 @@ export function deriveFirstMissionLaunchpadState(
   if (providerHealth === "unavailable" || providerHealth === "locked") {
     return {
       key: "provider_unavailable",
-      eyebrow: "AI provider unavailable",
-      title: "Configure an AI provider",
-      description: "The workspace may be available, but LiTT cannot prepare a mission without a verified provider.",
+      eyebrow: "One more step",
+      title: "Connect your AI",
+      description: "LiTT needs an AI connection to do the work — it takes about a minute.",
       facts,
-      primaryAction: action("configure_provider", "Configure provider"),
+      primaryAction: action("configure_provider", "Connect AI"),
       ...blocked,
     };
   }
@@ -267,13 +273,11 @@ export function deriveFirstMissionLaunchpadState(
   ) {
     return {
       key: "terminal_disconnected",
-      eyebrow: "Terminal not connected",
-      title: "Connect the project terminal",
-      description: runtime.readAccess
-        ? "Read access is available, but command execution has not been verified. Connect the terminal before preparing the mission."
-        : "No verified terminal execution session is available.",
+      eyebrow: "One more step",
+      title: "Almost there",
+      description: "LiTT needs a live connection to run things. One tap to connect.",
       facts,
-      primaryAction: action("connect_terminal", "Connect terminal"),
+      primaryAction: action("connect_terminal", "Connect"),
       ...blocked,
     };
   }
@@ -286,9 +290,9 @@ export function deriveFirstMissionLaunchpadState(
     if (input.inspection.status === "running") {
       return {
         key: "inspection_running",
-        eyebrow: "Inspection in progress",
-        title: "Collecting read-only project evidence",
-        description: "LiTT is inspecting the project with read-only tools. Mutation and deployment actions remain unavailable.",
+        eyebrow: "Working on it",
+        title: "Looking over your project",
+        description: "LiTT is reading through the project to understand it. Nothing is being changed.",
         facts,
         primaryAction: null,
         mutationActionsAllowed: false,
@@ -299,9 +303,9 @@ export function deriveFirstMissionLaunchpadState(
     if (input.inspection.status === "failed") {
       return {
         key: "inspection_failed",
-        eyebrow: "Inspection failed",
-        title: "The first inspection did not complete",
-        description: "Mutation and deployment actions remain unavailable because the inspection run failed.",
+        eyebrow: "Needs attention",
+        title: "That didn't finish",
+        description: "LiTT couldn't finish looking over the project. You can still tell it what you want.",
         facts,
         primaryAction: null,
         mutationActionsAllowed: false,
@@ -312,9 +316,9 @@ export function deriveFirstMissionLaunchpadState(
     if (input.inspection.status === "cancelled") {
       return {
         key: "inspection_cancelled",
-        eyebrow: "Inspection cancelled",
-        title: "The first inspection was not completed",
-        description: "Mutation and deployment actions remain unavailable because the inspection run was cancelled.",
+        eyebrow: "Stopped",
+        title: "That was stopped",
+        description: "The look-over was stopped before it finished. Nothing was changed.",
         facts,
         primaryAction: null,
         mutationActionsAllowed: false,
@@ -325,9 +329,9 @@ export function deriveFirstMissionLaunchpadState(
     if (inspectionEvidence.length === 0 || !input.inspection.persistedAssistantResponse) {
       return {
         key: "inspection_incomplete",
-        eyebrow: "Inspection evidence incomplete",
-        title: "Completion could not be verified",
-        description: "A persisted response and at least one successful read-only tool result are required before mutation or deployment actions become available.",
+        eyebrow: "Almost",
+        title: "Couldn't verify everything",
+        description: "LiTT didn't get a complete picture. You can still describe what you want.",
         facts,
         primaryAction: null,
         mutationActionsAllowed: false,
@@ -337,9 +341,9 @@ export function deriveFirstMissionLaunchpadState(
 
     return {
       key: "inspection_proven",
-      eyebrow: "Inspection verified",
-      title: "Read-only inspection completed",
-      description: "The persisted response includes successful read-only tool evidence. Normal capability and approval gates now control further work.",
+      eyebrow: "Ready",
+      title: "What do you want LiTT to do?",
+      description: "LiTT has looked over the project. Tell it what you want in your own words.",
       facts,
       primaryAction: null,
       mutationActionsAllowed: true,
@@ -349,11 +353,20 @@ export function deriveFirstMissionLaunchpadState(
 
   return {
     key: "verified",
-    eyebrow: "Prerequisites verified",
-    title: "Prepare your first inspection",
-    description: "LiTT can prepare a read-only project inspection. The mission will be placed in the composer for your review and will not start automatically.",
+    eyebrow: "Ready",
+    title: "What do you want LiTT to do?",
+    description: "Tell LiTT what you want in your own words — a website, a fix, a fresh look.",
     facts,
-    primaryAction: action("prepare_inspection", "Prepare read-only inspection"),
+    primaryAction: action("prepare_inspection", "Look over my project first"),
     ...blocked,
+  };
+}
+
+export function deriveFirstMissionLaunchpadState(
+  input: FirstMissionLaunchpadInput,
+): FirstMissionLaunchpadState {
+  return {
+    ...deriveLaunchpad(input),
+    projectId: input.runtime.projectId ?? null,
   };
 }

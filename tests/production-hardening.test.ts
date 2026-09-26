@@ -128,19 +128,18 @@ describe("Navigation routes Music to Studio", () => {
     expect(labels).not.toContain("Music");
   });
 
-  it("the /create hub routes Music & Audio through intent routing to Studio", async () => {
+  it("the dashboard composer routes Music through a real Studio surface", async () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/components/create/CreateExperience.tsx"),
+      path.resolve("src/components/dashboard/v3/BuildConsole.tsx"),
       "utf-8",
     );
-    expect(content).toContain('label: "Music & Audio"');
-    expect(content).toContain('seed: "Make me a song"');
-    // Tiles no longer carry a static mode=music link — the seed prompt
-    // posts to /api/litt/intent and lands in Studio with the routed intent.
-    expect(content).toContain("/api/litt/intent");
-    expect(content).toContain('params.set("intent", payload.result.primaryIntent)');
+    // Music is a creation shortcut on the dashboard composer, deep-linked
+    // to Studio's authoritative music creator (not a dead chip, not a
+    // separate Music nav entry).
+    expect(content).toContain('label: "Music"');
+    expect(content).toContain('href: "/studio?creator=music"');
   });
 });
 

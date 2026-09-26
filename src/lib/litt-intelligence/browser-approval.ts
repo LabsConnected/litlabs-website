@@ -31,6 +31,7 @@ export const MUTATING_BROWSER_TOOLS = [
   "browser.scroll",
   "browser.press",
   "browser.upload",
+  "browser.download",
 ] as const;
 
 export type MutatingBrowserTool = (typeof MUTATING_BROWSER_TOOLS)[number];
@@ -145,6 +146,13 @@ export function describeBrowserAction(
       const filePath = str(inputs.filePath);
       const file = filePath ? quoted(filePath.split(/[\\/]/).pop() ?? filePath) : "a file";
       return `Upload ${file}${target ? ` to ${target}` : ""}${where}`;
+    }
+    case "browser.download": {
+      const url = str(inputs.url);
+      const file = str(inputs.filename);
+      const what = file ? quoted(file) : url ? `from ${truncate(url, 60)}` : "a file";
+      const via = target ? ` via ${target}` : "";
+      return `Download ${what}${via}${where}`;
     }
     default:
       return `${toolId.replace(/^browser\./, "Browser ")}${where}`;

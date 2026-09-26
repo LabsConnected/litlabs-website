@@ -28,7 +28,7 @@ export type ProgressEvent =
   | { type: "deploy_status"; status: string; deploymentId?: string }
   | { type: "deploy_result"; success: boolean; productionUrl?: string | null; error?: string }
   | { type: "deploy_verify"; url: string; success: boolean; detail?: string }
-  | { type: "finished"; totalSteps: number; totalDurationMs: number }
+  | { type: "finished"; totalSteps: number; totalDurationMs: number; success?: boolean }
   | { type: "cancelled"; reason: string }
   | { type: "model_routing"; model: string; provider: string; fallbackFrom?: string; category?: string; latencyMs?: number }
   | { type: "step_timing"; step: number; stepDurationMs: number; elapsedMs: number }

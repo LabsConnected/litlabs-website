@@ -33,6 +33,7 @@ const PHASE_META: Record<ExecutionPhase, { label: string; icon: ComponentType<{ 
   testing: { label: "Testing", icon: CheckCircle2, color: "#e3b341" },
   verifying: { label: "Verifying", icon: Shield, color: "var(--color-accent)" },
   done: { label: "Complete", icon: CheckCircle2, color: "var(--color-accent)" },
+  failed: { label: "Needs verification", icon: XCircle, color: "#ef4444" },
   cancelled: { label: "Cancelled", icon: XCircle, color: "#ef4444" },
   awaiting_approval: { label: "Waiting for approval", icon: AlertTriangle, color: "#e3b341" },
   awaiting_input: { label: "Awaiting input", icon: AlertTriangle, color: "#e3b341" },
