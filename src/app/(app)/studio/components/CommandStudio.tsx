@@ -27,7 +27,7 @@ import StudioDock, { type StudioDockTab } from "./StudioDock";
 import { ApprovalCard } from "./ApprovalCard";
 import MissionCards from "./MissionCards";
 import PersistentMusicPlayer from "./PersistentMusicPlayer";
-import { MobileCommandNav } from "./CommandStudioNav";
+import { MobileCommandNav, type MobileStudioSurface } from "./CommandStudioNav";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
 import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
@@ -535,6 +535,43 @@ function CommandStudioContent() {
       // ignore
     }
   }, [contextDrawerTab]);
+
+  // Mobile is a work-surface dock over the same conversation, execution,
+  // preview, file, and activity state used by desktop. Switching a surface
+  // never creates a second runtime or stops the active mission.
+  const handleMobileSurface = useCallback((surface: MobileStudioSurface) => {
+    setMobileBuildOpen(false);
+    if (surface === "chat") {
+      setMobileToolsOpen(false);
+      setLittActiveTab("chat");
+      setMobileLittOpen(true);
+      return;
+    }
+    if (surface === "activity") {
+      setMobileToolsOpen(false);
+      setLittActiveTab("live");
+      setMobileLittOpen(true);
+      return;
+    }
+    if (surface === "preview") {
+      setMobileLittOpen(false);
+      setMobileToolsOpen(false);
+      setContextDrawerOpen(false);
+      setDestination("studio");
+      setStudioMode("preview");
+      return;
+    }
+    if (surface === "files") {
+      setMobileLittOpen(false);
+      setMobileToolsOpen(false);
+      setContextDrawerTab("files");
+      setContextDrawerOpen(true);
+      return;
+    }
+    setLittActiveTab("chat");
+    setMobileLittOpen(true);
+    setMobileToolsOpen(true);
+  }, []);
 
   // Derived booleans for downstream components (must be after state declarations)
   // Activity is an OPEN action. It always opens the bottom dock on the
@@ -1601,6 +1638,15 @@ function CommandStudioContent() {
   const isCode = destination === "studio" && studioMode === "code";
   const isPreview = destination === "studio" && studioMode === "preview";
   const isMedia = destination === "studio" && studioMode === "media";
+  const mobileSurface: MobileStudioSurface | null = mobileToolsOpen
+    ? "more"
+    : mobileLittOpen
+      ? (littActiveTab === "live" ? "activity" : "chat")
+      : contextDrawerOpen && contextDrawerTab === "files"
+        ? "files"
+        : isPreview
+          ? "preview"
+          : null;
   // Canvas-first 2-zone layout: exactly one primary workspace surface at a
   // time. The live preview is the Preview workspace tab — never a second
   // column beside the workspace.
@@ -2266,8 +2312,15 @@ function CommandStudioContent() {
         {/* Persistent music player — survives tool switches while audio plays */}
         <PersistentMusicPlayer />
 
-        {/* Mobile bottom nav — 5 destinations */}
-        <MobileCommandNav active={destination} onSelect={handleSelectDestination} />
+        {/* Mobile work-surface dock — Chat / Preview / Files / Activity / More.
+            All surfaces operate on the same mission, conversation, preview,
+            browser, and execution stores as desktop. */}
+        <MobileCommandNav
+          active={destination}
+          onSelect={handleSelectDestination}
+          surface={mobileSurface}
+          onSelectSurface={handleMobileSurface}
+        />
 
         {/* Mobile LiTT FAB trigger (<1024px) — Phase C2.1. Secondary
             affordance now: the Chat|Canvas segmented switcher above is the

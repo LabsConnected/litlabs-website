@@ -8,6 +8,9 @@ import {
   FolderOpen,
   Bot,
   MoreHorizontal,
+  MessageSquare,
+  Eye,
+  Activity,
   Puzzle,
   Network,
   Terminal,
@@ -243,14 +246,29 @@ export default function CommandStudioNav({
   );
 }
 
-/* ── Mobile bottom tab bar — 6 destinations, premium ─────────── */
+export type MobileStudioSurface = "chat" | "preview" | "files" | "activity" | "more";
+
+/* ── Mobile bottom tab bar — work surfaces, not app destinations ── */
 export function MobileCommandNav({
   active,
   onSelect,
+  surface,
+  onSelectSurface,
 }: {
   active: StudioDestination;
   onSelect: (dest: StudioDestination) => void;
+  /** When provided, mobile is the shared work surface dock. */
+  surface?: MobileStudioSurface | null;
+  onSelectSurface?: (surface: MobileStudioSurface) => void;
 }) {
+  const surfaceItems: { id: MobileStudioSurface; label: string; icon: typeof MessageSquare }[] = [
+    { id: "chat", label: "Chat", icon: MessageSquare },
+    { id: "preview", label: "Preview", icon: Eye },
+    { id: "files", label: "Files", icon: FolderOpen },
+    { id: "activity", label: "Activity", icon: Activity },
+    { id: "more", label: "More", icon: MoreHorizontal },
+  ];
+
   return (
     <nav
       aria-label="Studio navigation"
@@ -264,52 +282,43 @@ export function MobileCommandNav({
         WebkitBackdropFilter: "blur(20px)",
       }}
     >
-      {/* Home — navigate back to dashboard */}
-      <Link
-        href="/dashboard"
-        className="flex flex-1 flex-col items-center justify-center gap-1 transition-colors"
-        style={{ color: "var(--text-muted)" }}
-        aria-label="Go to dashboard"
-      >
-        <Home size={20} strokeWidth={1.8} className="pointer-events-none" />
-        <span className="text-[10px] font-bold">Home</span>
-      </Link>
-
-      {NAV_ITEMS.map((item) => {
+      {onSelectSurface ? surfaceItems.map((item) => {
         const Icon = item.icon;
-        const isActive = active === item.id;
+        const isActive = surface === item.id;
         return (
           <button
             key={item.id}
             type="button"
-            onClick={() => onSelect(item.id)}
-            className="relative flex flex-1 flex-col items-center justify-center gap-1 transition-colors"
-            style={{
-              color: isActive ? "var(--color-accent)" : "var(--text-muted)",
-            }}
+            onClick={() => onSelectSurface(item.id)}
+            className="relative flex min-h-10 flex-1 flex-col items-center justify-center gap-1 transition-colors"
+            style={{ color: isActive ? "var(--color-accent)" : "var(--text-muted)" }}
             aria-label={item.label}
             aria-current={isActive ? "page" : undefined}
           >
-            {isActive && (
-              <span
-                className="absolute top-0 h-0.5 w-8 rounded-b-full"
-                style={{
-                  backgroundColor: "var(--color-accent)",
-                  boxShadow: "0 0 8px var(--color-accent)",
-                }}
-                aria-hidden
-              />
-            )}
-            <Icon
-              size={20}
-              strokeWidth={isActive ? 2.3 : 1.8}
-              className="pointer-events-none transition-transform"
-              style={isActive ? { transform: "scale(1.1)" } : undefined}
-            />
+            {isActive && <span className="absolute top-0 h-0.5 w-8 rounded-b-full" style={{ backgroundColor: "var(--color-accent)", boxShadow: "0 0 8px var(--color-accent)" }} aria-hidden />}
+            <Icon size={20} strokeWidth={isActive ? 2.3 : 1.8} className="pointer-events-none" />
             <span className="text-[10px] font-bold">{item.label}</span>
           </button>
         );
-      })}
+      }) : (
+        <>
+          <Link href="/dashboard" className="flex flex-1 flex-col items-center justify-center gap-1 transition-colors" style={{ color: "var(--text-muted)" }} aria-label="Go to dashboard">
+            <Home size={20} strokeWidth={1.8} className="pointer-events-none" />
+            <span className="text-[10px] font-bold">Home</span>
+          </Link>
+          {NAV_ITEMS.map((item) => {
+            const Icon = item.icon;
+            const isActive = active === item.id;
+            return (
+              <button key={item.id} type="button" onClick={() => onSelect(item.id)} className="relative flex flex-1 flex-col items-center justify-center gap-1 transition-colors" style={{ color: isActive ? "var(--color-accent)" : "var(--text-muted)" }} aria-label={item.label} aria-current={isActive ? "page" : undefined}>
+                {isActive && <span className="absolute top-0 h-0.5 w-8 rounded-b-full" style={{ backgroundColor: "var(--color-accent)", boxShadow: "0 0 8px var(--color-accent)" }} aria-hidden />}
+                <Icon size={20} strokeWidth={isActive ? 2.3 : 1.8} className="pointer-events-none" />
+                <span className="text-[10px] font-bold">{item.label}</span>
+              </button>
+            );
+          })}
+        </>
+      )}
     </nav>
   );
 }
