@@ -150,7 +150,7 @@ export interface WorkspaceTransport {
 
   // Git operations (built on exec)
   gitStatus(): Promise<GitStatusResult>;
-  gitDiff(options?: { staged?: boolean; path?: string }): Promise<{ diff: string }>;
+  gitDiff(options?: { staged?: boolean; path?: string; untracked?: boolean }): Promise<{ diff: string }>;
   gitLog(options?: { maxCount?: number }): Promise<{ commits: Array<{ sha: string; message: string; author: string; date: string }> }>;
   gitCommit(message: string, files?: string[]): Promise<{ committed: boolean; sha?: string }>;
 
@@ -441,7 +441,17 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
     };
   }
 
-  async gitDiff(options?: { staged?: boolean; path?: string }): Promise<{ diff: string }> {
+  async gitDiff(options?: { staged?: boolean; path?: string; untracked?: boolean }): Promise<{ diff: string }> {
+    // `git diff` omits untracked files. Compare each requested untracked
+    // path against /dev/null so newly-created files appear in the same real
+    // unified diff as tracked edits. The path came from git status, not the
+    // model, and is still passed as a single quoted shell argument.
+    if (options?.untracked && options.path) {
+      const safePath = JSON.stringify(options.path);
+      const result = await this.exec(`git diff --no-index -- /dev/null ${safePath}`);
+      return { diff: result.stdout };
+    }
+
     const parts = ["git diff"];
     if (options?.staged) parts.push("--staged");
     if (options?.path) parts.push(`-- ${options.path}`);

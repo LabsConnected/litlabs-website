@@ -9,6 +9,8 @@
  *   ○ Production build
  */
 
+import type { StructuredDiagnostic } from "./diagnostic-parser";
+
 export type ProgressEvent =
   | { type: "phase"; phase: AgentLoopPhase; step: number }
   | { type: "tool_start"; toolId: string; summary: string }
@@ -16,7 +18,8 @@ export type ProgressEvent =
   | { type: "approval_required"; toolId: string; reason: string }
   | { type: "checkpoint"; label: string; gitSha: string }
   | { type: "build_start"; check: string }
-  | { type: "build_result"; check: string; passed: boolean; errorCount?: number }
+  | { type: "build_result"; check: string; passed: boolean; errorCount?: number; diagnostics?: StructuredDiagnostic[] }
+  | { type: "workspace_change"; status: "changed" | "unchanged" | "unknown"; files?: string[]; diff?: string; additions?: number; deletions?: number; checkpointSha?: string; unknownReason?: string }
   | { type: "repair_attempt"; attempt: number; maxAttempts: number }
   | { type: "preview_start" }
   | { type: "preview_status"; status: string; healthy?: boolean }
