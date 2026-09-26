@@ -178,7 +178,7 @@ export const Feed = forwardRef<FeedHandle, { initialTab?: FeedTab }>(function Fe
         role="tablist"
         aria-label="Feed"
       >
-        <div className="mx-auto flex max-w-2xl">
+        <div className="mx-auto flex max-w-4xl">
           {TABS.map(({ id, label, icon: Icon }) => {
             const active = tab === id;
             return (
@@ -208,7 +208,7 @@ export const Feed = forwardRef<FeedHandle, { initialTab?: FeedTab }>(function Fe
         </div>
       </div>
 
-      <div className="mx-auto max-w-2xl min-w-0">
+      <div className="mx-auto max-w-4xl min-w-0">
         {initialLoading ? (
           <FeedSkeleton />
         ) : error ? (
