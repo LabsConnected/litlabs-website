@@ -22,9 +22,9 @@ import "server-only";
 import { getJob } from "@/lib/browser-jobs";
 import {
   dbGetSession,
-  fetchLiveEmbedUrl,
   type SessionStatus,
 } from "@/lib/litt-intelligence/browser-session-manager";
+import { resolveLiveEmbedUrl, __clearSessionLiveViewEmbedCache } from "./browser-session-live-view";
 import {
   resolveLiveViewAvailability,
   type JobStatusLike,
@@ -45,41 +45,9 @@ export interface JobLiveViewInfo extends LiveViewAvailability {
   checkedAt: string;
 }
 
-/** Cache of resolved embed URLs: sessionId → { url, fetchedAt }. */
-const embedUrlCache = new Map<string, { url: string; fetchedAt: number }>();
-const EMBED_URL_CACHE_TTL_MS = 5 * 60 * 1000;
-
-/**
- * Resolve the embeddable live URL for a session.
- *
- * 1. Stored `metadata.liveEmbedUrl` (written by startSession, Phase 6).
- * 2. Lazy fetch from the Browserbase Debug API for pre-Phase-6
- *    sessions — cached 5 minutes per session so the polling panel
- *    doesn't hammer the provider API.
- * 3. null (fail-soft) → the availability rule then refuses the
- *    iframe and the panel shows snapshots.
- */
-async function resolveEmbedUrl(
-  browserbaseSessionId: string | null,
-  storedEmbedUrl: unknown,
-): Promise<string | null> {
-  if (typeof storedEmbedUrl === "string" && storedEmbedUrl) {
-    return storedEmbedUrl;
-  }
-  if (!browserbaseSessionId) return null;
-
-  const cached = embedUrlCache.get(browserbaseSessionId);
-  if (cached && Date.now() - cached.fetchedAt < EMBED_URL_CACHE_TTL_MS) {
-    return cached.url;
-  }
-
-  const url = await fetchLiveEmbedUrl(browserbaseSessionId).catch(() => null);
-  if (url) {
-    embedUrlCache.set(browserbaseSessionId, { url, fetchedAt: Date.now() });
-  }
-  return url;
-}
-
+/** The embed-URL resolver (and its cache) is shared with the session
+ *  live-view module — one cache, one lazy-fetch path for both the
+ *  Studio browser-jobs panel and the chat-embedded panel. */
 function toSessionStatusLike(status: SessionStatus | null): SessionStatusLike | null {
   // SessionStatus and SessionStatusLike share the same literals.
   return status as SessionStatusLike | null;
@@ -106,7 +74,7 @@ export async function getJobLiveView(
     : null;
 
   const embedUrl = session
-    ? await resolveEmbedUrl(
+    ? await resolveLiveEmbedUrl(
         session.browserbaseSessionId,
         (session.metadata as Record<string, unknown> | undefined)?.liveEmbedUrl,
       )
@@ -132,7 +100,9 @@ export async function getJobLiveView(
   };
 }
 
-/** Test-only: clear the embed-URL cache between cases. */
+/** Test-only: clear the embed-URL cache between cases. Kept under the
+ *  original name so existing Phase 6 tests keep passing; delegates to
+ *  the shared resolver's cache. */
 export function __clearLiveViewEmbedCache(): void {
-  embedUrlCache.clear();
+  __clearSessionLiveViewEmbedCache();
 }
