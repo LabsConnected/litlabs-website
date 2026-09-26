@@ -15,7 +15,7 @@ import {
   Cpu, Bot, Mic, Plug, Zap, Bell, Coins, Shield, Gauge, Terminal,
   Search, ChevronRight, Check, Loader2, X,
   RotateCcw, ArrowLeft, Camera, Volume2,
-  Monitor, Moon, Sun,
+  Monitor, Moon, Sun, Lock,
 } from "lucide-react";
 import {
   useSettingsStore,
@@ -25,6 +25,16 @@ import {
   type ControlMode,
   type SettingsSection,
 } from "@/stores/useSettingsStore";
+import {
+  sectionMinMode,
+  isSectionLocked,
+  accentLabel,
+  themeModeLabel,
+  accountCardValue,
+  securityCardValue,
+  micCardValue,
+  resetAllLocalSettings,
+} from "./settingsHelpers";
 import {
   SettingsCard,
   SectionHeader,
@@ -382,20 +392,24 @@ function SettingsTabStrip({
           const isLocked = sIdx > modeIdx;
           const lockedMode = MODE_META[section.minMode];
 
-          if (isLocked && !hasSearch) {
+          // Locked sections show which (free) control mode unlocks them — the
+          // lock is progressive disclosure, never a paywall. Clicking switches
+          // the mode; it never navigates away on its own.
+          if (isLocked) {
             return (
               <button
                 key={section.id}
                 type="button"
                 onClick={() => onModeChange(section.minMode)}
                 className="flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-[13px] font-bold transition-all hover:bg-white/5"
-                style={{ opacity: 0.55, color: "rgba(255,255,255,0.5)" }}
-                aria-label={`${section.label} — switch to ${lockedMode.label} mode to unlock`}
-                title={`${section.label} — ${lockedMode.label} mode`}
+                style={{ opacity: 0.62, color: "rgba(255,255,255,0.55)" }}
+                aria-label={`${section.label} — locked. Activate ${lockedMode.label} mode (free) to unlock.`}
+                title={`${section.label} — locked. Activate ${lockedMode.label} mode (free) to unlock.`}
               >
                 <Icon size={14} className="pointer-events-none" style={{ color: `${lockedMode.color}80` }} />
                 <span className="whitespace-nowrap">{section.label}</span>
-                <span className="text-[10px]" aria-hidden>🔒</span>
+                <Lock size={11} className="pointer-events-none shrink-0" aria-hidden style={{ color: `${lockedMode.color}90` }} />
+                <span className="whitespace-nowrap text-[10px] font-bold" style={{ color: `${lockedMode.color}90` }}>{lockedMode.label}</span>
               </button>
             );
           }
@@ -484,7 +498,12 @@ function MobileSettingsSheet({
               <button
                 key={section.id}
                 type="button"
-                onClick={() => isLocked ? onModeChange(section.minMode) : onSectionClick(section.id)}
+                onClick={() => {
+                  // Locked rows switch to the (free) required mode AND navigate —
+                  // one tap, no mystery about what the lock means.
+                  if (isLocked) onModeChange(section.minMode);
+                  onSectionClick(section.id);
+                }}
                 className="flex min-h-14 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
                 style={{
                   borderColor: isActive ? "color-mix(in srgb, var(--color-accent) 45%, transparent)" : "rgba(255,255,255,0.1)",
@@ -492,7 +511,7 @@ function MobileSettingsSheet({
                   opacity: isLocked ? 0.72 : 1,
                 }}
                 aria-current={isActive ? "page" : undefined}
-                aria-label={isLocked ? `${section.label} — switch to ${lockedMode.label} mode to unlock` : section.label}
+                aria-label={isLocked ? `${section.label} — locked. Activate ${lockedMode.label} mode (free) to unlock.` : section.label}
               >
                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-accent/90">
                   <Icon size={16} className="pointer-events-none" />
@@ -501,7 +520,12 @@ function MobileSettingsSheet({
                   <span className={`block text-sm font-bold ${isActive ? "text-accent" : "text-white/90"}`}>{section.label}</span>
                   <span className="block truncate text-xs text-white/60">{section.description}</span>
                 </span>
-                {isLocked ? <span className="shrink-0 text-[10px] font-bold text-white/55">{lockedMode.label}</span> : isActive ? <Check size={16} className="shrink-0 text-accent" /> : <ChevronRight size={15} className="shrink-0 text-white/45" />}
+                {isLocked ? (
+                  <span className="flex shrink-0 items-center gap-1 text-[10px] font-bold" style={{ color: `${lockedMode.color}90` }}>
+                    <Lock size={10} aria-hidden />
+                    {lockedMode.label}
+                  </span>
+                ) : isActive ? <Check size={16} className="shrink-0 text-accent" /> : <ChevronRight size={15} className="shrink-0 text-white/45" />}
               </button>
             );
           })}
@@ -633,10 +657,12 @@ function SettingsContent({
 /* ── Overview ──────────────────────────────────────────────────────── */
 
 function OverviewSection({ T, controlMode }: { T: ReturnType<typeof useTheme>["resolvedColors"]; controlMode: ControlMode }) {
-  const { isSignedIn, sessionClaims } = useClerkAuthContext();
+  const { isSignedIn } = useClerkAuthContext();
+  const { user, isLoaded: userLoaded } = useUser();
+  const { theme } = useTheme();
   const { capabilities } = useConnectionSummary();
   const { selectedModel } = useStudioModelStore();
-  const { setActiveSection } = useSettingsStore();
+  const { setActiveSection, setControlMode } = useSettingsStore();
   const [micStatus, setMicStatus] = useState<"unknown" | "available" | "denied" | "error">("unknown");
 
   // Read existing permission state via Permissions API (no prompt).
@@ -674,17 +700,27 @@ function OverviewSection({ T, controlMode }: { T: ReturnType<typeof useTheme>["r
   const hasGitHub = connectedProviders.includes("repository");
   const hasTerminal = capabilities.terminalStatus === "connected";
 
+  // Cards that point at a mode-locked section unlock the (free) required mode
+  // on tap — the same rule as the tab strip, so the overview never silently
+  // bypasses a lock the nav bar enforces.
+  const goToSection = useCallback((sectionId: string) => {
+    if (isSectionLocked(sectionId, controlMode)) {
+      setControlMode(sectionMinMode(sectionId));
+    }
+    setActiveSection(sectionId);
+  }, [controlMode, setControlMode, setActiveSection]);
+
   const overviewCards = [
     {
       label: "Account",
-      value: isSignedIn ? `Signed in as ${sessionClaims?.name || sessionClaims?.username || "User"}` : "Not signed in",
+      value: accountCardValue({ isSignedIn, userLoaded, firstName: user?.firstName, username: user?.username }),
       action: "Manage account",
       section: "account",
       icon: <User size={14} />,
     },
     {
       label: "Appearance",
-      value: "Dark mode · " + T.accentColor,
+      value: `${themeModeLabel(theme.mode)} · ${accentLabel(theme.accent)}`,
       action: "Customize",
       section: "appearance",
       icon: <Palette size={14} />,
@@ -698,7 +734,7 @@ function OverviewSection({ T, controlMode }: { T: ReturnType<typeof useTheme>["r
     },
     {
       label: "Voice & Camera",
-      value: micStatus === "available" ? "Microphone available" : micStatus === "denied" ? "Microphone denied" : "Microphone unknown",
+      value: micCardValue(micStatus),
       action: "Open diagnostics",
       section: "voice-camera",
       icon: <Mic size={14} />,
@@ -719,7 +755,7 @@ function OverviewSection({ T, controlMode }: { T: ReturnType<typeof useTheme>["r
     },
     {
       label: "Security",
-      value: "2FA status · Last sign-in",
+      value: securityCardValue({ userLoaded, twoFactorEnabled: user?.twoFactorEnabled, lastSignInAt: user?.lastSignInAt }),
       action: "Review security",
       section: "privacy",
       icon: <Shield size={14} />,
@@ -728,36 +764,44 @@ function OverviewSection({ T, controlMode }: { T: ReturnType<typeof useTheme>["r
 
   const quickActions: { label: string; onClick: () => void; show: boolean }[] = [
     { label: "Test microphone", onClick: checkMic, show: micStatus !== "available" },
-    { label: "Connect GitHub", onClick: () => setActiveSection("connections"), show: !hasGitHub },
-    { label: "Change model", onClick: () => setActiveSection("ai-models"), show: true },
-    { label: "Manage account", onClick: () => setActiveSection("account"), show: isSignedIn },
-    { label: "Review usage", onClick: () => setActiveSection("billing"), show: true },
+    { label: "Connect GitHub", onClick: () => goToSection("connections"), show: !hasGitHub },
+    { label: "Change model", onClick: () => goToSection("ai-models"), show: true },
+    { label: "Manage account", onClick: () => goToSection("account"), show: isSignedIn },
+    { label: "Review usage", onClick: () => goToSection("billing"), show: true },
   ].filter((a) => a.show);
 
   return (
     <div className="w-full space-y-6">
       {/* Status cards */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3">
-        {overviewCards.map((card) => (
-          <button
-            key={card.label}
-            type="button"
-            onClick={() => setActiveSection(card.section)}
-            className="flex min-h-23 items-center justify-between rounded-2xl border px-5 py-4 text-left transition-all hover:bg-white/5"
-            style={{ borderColor: "rgba(255,255,255,0.06)", backgroundColor: "rgba(255,255,255,0.02)" }}
-          >
-            <div className="flex items-center gap-3 min-w-0">
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl" style={{ backgroundColor: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.5)" }}>
-                {card.icon}
-              </span>
-              <div className="min-w-0">
-                <div className="text-sm font-bold text-white/80">{card.label}</div>
-                <div className="mt-1 truncate text-xs leading-5 text-white/40">{card.value}</div>
+        {overviewCards.map((card) => {
+          const locked = isSectionLocked(card.section, controlMode);
+          const lockMode = MODE_META[sectionMinMode(card.section)];
+          return (
+            <button
+              key={card.label}
+              type="button"
+              onClick={() => goToSection(card.section)}
+              className="flex min-h-23 items-center justify-between rounded-2xl border px-5 py-4 text-left transition-all hover:bg-white/5"
+              style={{ borderColor: "rgba(255,255,255,0.06)", backgroundColor: "rgba(255,255,255,0.02)" }}
+              aria-label={locked ? `${card.label} — locked. Activate ${lockMode.label} mode (free) to unlock.` : `${card.label}: ${card.value}. ${card.action}.`}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl" style={{ backgroundColor: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.5)" }}>
+                  {card.icon}
+                </span>
+                <div className="min-w-0">
+                  <div className="text-sm font-bold text-white/80">{card.label}</div>
+                  <div className="mt-1 truncate text-xs leading-5 text-white/40">{card.value}</div>
+                </div>
               </div>
-            </div>
-            <span className="shrink-0 text-xs font-bold" style={{ color: T.accentColor }}>{card.action} →</span>
-          </button>
-        ))}
+              <span className="flex shrink-0 items-center gap-1.5 text-xs font-bold" style={{ color: locked ? `${lockMode.color}90` : T.accentColor }}>
+                {locked && <Lock size={11} className="pointer-events-none" aria-hidden />}
+                {locked ? lockMode.label : <>{card.action} →</>}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Quick actions */}
@@ -812,6 +856,7 @@ function AccountSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
 function AccountSectionClerk({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
   const { user, isLoaded } = useUser();
   const { openUserProfile, signOut } = useClerk();
+  const { data: billing, loading: billingLoading } = useBillingSummary();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadingPic, setUploadingPic] = useState(false);
   const [picError, setPicError] = useState<string | null>(null);
@@ -964,19 +1009,28 @@ function AccountSectionClerk({ T }: { T: ReturnType<typeof useTheme>["resolvedCo
         )}
       </SettingsCard>
 
-      {/* Plan & usage */}
+      {/* Plan & usage — real plan from billing, same source as the Billing section */}
       <SettingsCard title="Plan" description="Current subscription">
         <div className="flex items-center justify-between rounded-xl border px-4 py-3"
           style={{ borderColor: `${T.accentColor}30`, backgroundColor: `${T.accentColor}08` }}
         >
           <div>
-            <div className="text-sm font-black" style={{ color: T.accentColor }}>Free Plan</div>
-            <div className="text-[10px] text-white/40">Beta access</div>
+            <div className="text-sm font-black" style={{ color: T.accentColor }}>
+              {billingLoading ? "Loading…" : (billing?.plan?.name ?? "Starter")}
+            </div>
+            <div className="text-[10px] text-white/40">
+              {billing?.plan && billing.plan.monthlyPriceCents ? `$${(billing.plan.monthlyPriceCents / 100).toFixed(0)}/month` : "Free"}
+              {billing?.plan?.beta && " · Beta"}
+            </div>
           </div>
-          <Link href="/settings?section=billing" className="text-xs font-bold" style={{ color: T.accentColor }}
-            onClick={() => useSettingsStore.getState().setActiveSection("billing")}>
+          <button
+            type="button"
+            onClick={() => useSettingsStore.getState().setActiveSection("billing")}
+            className="text-xs font-bold"
+            style={{ color: T.accentColor }}
+          >
             Manage →
-          </Link>
+          </button>
         </div>
       </SettingsCard>
 
@@ -1893,7 +1947,7 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
     available: { color: "#22c55e", label: "Available", desc: "Microphone is ready" },
     denied: { color: "#ef4444", label: "Permission denied", desc: "Allow microphone access in your browser" },
     error: { color: "#ef4444", label: "Error", desc: "Microphone test failed. Check your device." },
-    unknown: { color: "#6b7280", label: "Unknown", desc: "Testing…" },
+    unknown: { color: "#6b7280", label: "Not tested", desc: "Tap “Test microphone” below to check — nothing runs until you do." },
   }[micStatus];
 
   const camStatusInfo = {
@@ -1901,7 +1955,7 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
     denied: { color: "#ef4444", label: "Permission denied", desc: "Allow camera access in your browser" },
     error: { color: "#ef4444", label: "Error", desc: "Camera test failed. Check your device." },
     unsupported: { color: "#6b7280", label: "Unsupported", desc: "Camera API not available on this device" },
-    unknown: { color: "#6b7280", label: "Unknown", desc: "Testing…" },
+    unknown: { color: "#6b7280", label: "Not tested", desc: "Tap “Test camera” below to check — nothing runs until you do." },
   }[cameraStatus];
 
   return (
@@ -2330,32 +2384,40 @@ type UsageData = {
   modelUsage: Array<{ model: string; calls: number; credits: number }>;
 };
 
-function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
+/* Shared subscription fetch — Account and Billing show the same real plan. */
+function useBillingSummary() {
   const [data, setData] = useState<BillingData | null>(null);
-  const [usage, setUsage] = useState<UsageData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [portalLoading, setPortalLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const res = await fetch("/api/billing/subscription", { cache: "no-store" });
-        if (res.ok) {
-          const json = await res.json();
-          if (!cancelled) setData(json);
-        }
+        if (res.ok && !cancelled) setData(await res.json());
       } catch {
-        // silent
+        // silent — callers fall back to neutral labels
       } finally {
         if (!cancelled) setLoading(false);
       }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return { data, loading };
+}
+
+function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
+  const { data, loading } = useBillingSummary();
+  const [usage, setUsage] = useState<UsageData | null>(null);
+  const [portalLoading, setPortalLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
       try {
         const res = await fetch("/api/litt/usage?range=month", { cache: "no-store" });
-        if (res.ok) {
-          const json = await res.json();
-          if (!cancelled) setUsage(json);
-        }
+        if (res.ok && !cancelled) setUsage(await res.json());
       } catch {
         // silent
       }
@@ -2516,12 +2578,35 @@ function PrivacySection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCol
   const [deleting, setDeleting] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [auditEntries, setAuditEntries] = useState<Array<{
+    id: string;
+    action?: string;
+    provider?: string;
+    status?: string;
+    createdAt?: string;
+  }> | null>(null);
+  const [auditFailed, setAuditFailed] = useState(false);
   const [privacy, updatePrivacy] = useLocalSettings("privacy", {
     analyticsOptIn: false,
     publicProfile: true,
     conversationStorage: true,
     memoryUsage: true,
   });
+
+  // Real audit entries — "No recent activity" only shows when the API
+  // actually returns an empty list, never as a hardcoded placeholder.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/settings/audit-log?limit=5", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+      .then((json) => {
+        if (!cancelled) setAuditEntries(Array.isArray(json.entries) ? json.entries : []);
+      })
+      .catch(() => {
+        if (!cancelled) setAuditFailed(true);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const handleExport = async () => {
     setExporting(true);
@@ -2648,7 +2733,34 @@ function PrivacySection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCol
       </SettingsCard>
 
       <SettingsCard title="Audit log" description="Recent account activity">
-        <p className="text-xs text-white/40">No recent activity logged.</p>
+        {auditEntries === null && !auditFailed && (
+          <p className="text-xs text-white/40">Loading activity…</p>
+        )}
+        {auditFailed && (
+          <p className="text-xs text-white/40">Couldn&apos;t load activity right now.</p>
+        )}
+        {auditEntries !== null && auditEntries.length === 0 && (
+          <p className="text-xs text-white/40">No recent activity.</p>
+        )}
+        {auditEntries !== null && auditEntries.length > 0 && (
+          <div className="space-y-2">
+            {auditEntries.map((entry) => (
+              <div key={entry.id} className="flex items-center justify-between gap-3 rounded-lg border border-white/5 bg-white/2 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="truncate text-xs font-bold text-white/80">{entry.action || "Activity"}</div>
+                  <div className="text-[10px] text-white/40">
+                    {[entry.provider, entry.createdAt ? new Date(entry.createdAt).toLocaleDateString() : null]
+                      .filter(Boolean)
+                      .join(" · ") || "—"}
+                  </div>
+                </div>
+                {entry.status && (
+                  <span className="shrink-0 text-[10px] font-bold capitalize text-white/50">{entry.status}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </SettingsCard>
     </div>
   );
@@ -2711,18 +2823,41 @@ function PerformanceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
 /* ── Advanced ──────────────────────────────────────────────────────── */
 
 function AdvancedSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
-  const [dev, updateDev] = useLocalSettings("developer", {
+  const { controlMode, setControlMode, setActiveSection } = useSettingsStore();
+  const [dev, updateDev, resetDev] = useLocalSettings("developer", {
     debugMode: false,
     verboseLogging: false,
     experimentalFeatures: false,
   });
-  const [flags, updateFlag] = useLocalSettings("feature-flags", {
+  const [flags, updateFlag, resetFlags] = useLocalSettings("feature-flags", {
     maintenanceMode: false,
     newRegistration: true,
     marketplace: true,
     betaMode: true,
     billingEnabled: false,
   });
+  const [confirmResetAll, setConfirmResetAll] = useState(false);
+  const [resetMsg, setResetMsg] = useState<string | null>(null);
+
+  // Every diagnostics row opens a real, working surface — no dead buttons.
+  const goToSection = useCallback((sectionId: string) => {
+    if (isSectionLocked(sectionId, controlMode)) {
+      setControlMode(sectionMinMode(sectionId));
+    }
+    setActiveSection(sectionId);
+  }, [controlMode, setControlMode, setActiveSection]);
+
+  const handleResetSection = useCallback(() => {
+    resetDev();
+    resetFlags();
+    setResetMsg("This section's settings were reset to defaults.");
+  }, [resetDev, resetFlags]);
+
+  const handleResetAll = useCallback(() => {
+    const removed = resetAllLocalSettings();
+    setResetMsg(`Removed ${removed} local setting${removed === 1 ? "" : "s"}. Reloading…`);
+    setTimeout(() => window.location.reload(), 1200);
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -2755,33 +2890,90 @@ function AdvancedSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCo
         </div>
       </SettingsCard>
 
-      <SettingsCard title="Diagnostics" description="System health and capability states">
+      <SettingsCard title="Diagnostics" description="Real health checks — every row opens a working surface">
         <div className="space-y-2">
-          {["Raw capability states", "Debug logs", "API configuration", "Terminal diagnostics", "Worker status", "Queue status", "Cache controls", "Database tools"].map((item) => (
-            <button key={item} type="button"
-              className="flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-xs font-bold transition-all hover:bg-white/5"
-              style={{ borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.7)" }}>
-              {item}
-              <ChevronRight size={12} className="pointer-events-none text-white/30" />
-            </button>
-          ))}
+          <Link
+            href="/settings/connections/diagnostics"
+            className="flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-xs font-bold transition-all hover:bg-white/5"
+            style={{ borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.7)" }}
+          >
+            <span>
+              Connection diagnostics
+              <span className="block text-[10px] font-medium text-white/35">Live integration health checks</span>
+            </span>
+            <ChevronRight size={12} className="pointer-events-none shrink-0 text-white/30" />
+          </Link>
+          {[
+            { label: "Voice connection test", desc: "End-to-end mic → voice pipeline test", section: "voice-camera" },
+            { label: "AI provider health", desc: "Model provider availability", section: "ai-models" },
+            { label: "Integration status", desc: "GitHub, AI keys, runtime services", section: "connections" },
+          ].map((item) => {
+            const locked = isSectionLocked(item.section, controlMode);
+            const lockMode = MODE_META[sectionMinMode(item.section)];
+            return (
+              <button
+                key={item.label}
+                type="button"
+                onClick={() => goToSection(item.section)}
+                className="flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-xs font-bold transition-all hover:bg-white/5"
+                style={{ borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.7)" }}
+                aria-label={locked ? `${item.label} — locked. Activate ${lockMode.label} mode (free) to unlock.` : item.label}
+              >
+                <span className="text-left">
+                  {item.label}
+                  <span className="block text-[10px] font-medium text-white/35">
+                    {item.desc}{locked ? ` · needs ${lockMode.label} mode` : ""}
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-1.5">
+                  {locked && <Lock size={11} className="pointer-events-none" aria-hidden style={{ color: `${lockMode.color}90` }} />}
+                  <ChevronRight size={12} className="pointer-events-none text-white/30" />
+                </span>
+              </button>
+            );
+          })}
         </div>
       </SettingsCard>
 
-      <SettingsCard title="Reset" description="Reset all settings">
+      <SettingsCard title="Reset" description="Reset settings to defaults">
         <div className="flex flex-wrap gap-2">
-          {[
-            { label: "Reset current section", scope: "section" },
-            { label: "Reset current page", scope: "page" },
-            { label: "Reset all settings", scope: "all" },
-          ].map((reset) => (
-            <button key={reset.scope} type="button"
-              className="flex items-center gap-1.5 rounded-lg border border-red-400/20 px-3 py-1.5 text-xs font-bold text-red-300 transition-all hover:bg-red-400/10">
+          <button
+            type="button"
+            onClick={handleResetSection}
+            className="flex items-center gap-1.5 rounded-lg border border-red-400/20 px-3 py-1.5 text-xs font-bold text-red-300 transition-all hover:bg-red-400/10"
+          >
+            <RotateCcw size={12} className="pointer-events-none" />
+            Reset this section
+          </button>
+          {confirmResetAll ? (
+            <>
+              <button
+                type="button"
+                onClick={handleResetAll}
+                className="rounded-lg bg-red-500 px-3 py-1.5 text-xs font-bold text-white transition-all hover:bg-red-600"
+              >
+                Confirm — erase all local settings
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmResetAll(false)}
+                className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-bold text-white/60 transition-all hover:bg-white/5"
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmResetAll(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-red-400/20 px-3 py-1.5 text-xs font-bold text-red-300 transition-all hover:bg-red-400/10"
+            >
               <RotateCcw size={12} className="pointer-events-none" />
-              {reset.label}
+              Reset all settings
             </button>
-          ))}
+          )}
         </div>
+        {resetMsg && <p className="mt-2 text-[10px] text-white/40">{resetMsg}</p>}
       </SettingsCard>
     </div>
   );
