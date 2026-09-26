@@ -12,6 +12,7 @@ import {
   MessageSquare,
   Pencil,
   Check,
+  X,
 } from "lucide-react";
 import { useRef, useState } from "react";
 import { useUser } from "@clerk/nextjs";
@@ -206,7 +207,13 @@ export function ProfileIdentity({
               </button>
               <button
                 className="btn-secondary"
-                aria-label="Share profile"
+                aria-label={
+                  shareState === "copied"
+                    ? "Profile link copied"
+                    : shareState === "failed"
+                      ? "Couldn't copy the profile link"
+                      : "Share profile"
+                }
                 onClick={handleShare}
                 title={
                   shareState === "copied"
@@ -217,7 +224,9 @@ export function ProfileIdentity({
                 }
               >
                 {shareState === "copied" ? (
-                  <Check size={14} />
+                  <Check size={14} style={{ color: "#34d399" }} />
+                ) : shareState === "failed" ? (
+                  <X size={14} style={{ color: "#f87171" }} />
                 ) : (
                   <Share2 size={14} />
                 )}

@@ -108,7 +108,22 @@ function EmptyState({
         background: "rgba(255,255,255,0.01)",
       }}
     >
-      <div style={{ color: "#3f3f46", marginBottom: "4px" }}>{icon}</div>
+      <div
+        style={{
+          width: "56px",
+          height: "56px",
+          borderRadius: "18px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "rgba(168,85,247,0.07)",
+          border: "1px solid rgba(168,85,247,0.16)",
+          color: "#a78bfa",
+          marginBottom: "6px",
+        }}
+      >
+        {icon}
+      </div>
       <p style={{ fontSize: "14px", fontWeight: 600, color: "#a1a1aa" }}>
         {title}
       </p>
