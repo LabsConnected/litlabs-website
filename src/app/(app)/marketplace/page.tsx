@@ -1,25 +1,18 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo, useRef, Suspense, memo } from "react";
-import Link from "next/link";
+import { useState, useCallback, useEffect, memo } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { useSearchParams } from "next/navigation";
 import { ProductFrame } from "@/components/ProductPageFrame";
 import {
-  Check,
-  ArrowRight,
-  Sparkles,
-  ShieldCheck,
-  Search as SearchIcon,
-  Wrench,
-  Zap,
-  FileText,
   Code2,
+  FileText,
   Palette,
   Plug,
+  Sparkles,
+  Wrench,
+  Zap,
 } from "lucide-react";
-import { AgentCard } from "./_components/AgentCard";
 
 // --- Types ---
 
@@ -43,11 +36,9 @@ type MarketplaceItem = {
   is_beta: boolean;
   price_cents: number;
   required_connections: string[];
-  // Agent-specific fields (null for non-agent items)
-  agent_id?: string | null;
-  agent_version_id?: string | null;
-  billing_model?: string | null;
-  risk_level?: string | null;
+  // Computed server-side from the capability registry: true only when the
+  // capability has a real executor. False for every item today.
+  installable: boolean;
 };
 
 type Installation = {
@@ -57,32 +48,10 @@ type Installation = {
   installed_at: string;
 };
 
-type MarketplaceStats = {
-  totalItems: number;
-  installedItems: number;
-  availableItems: number;
-  comingSoonItems: number;
-};
-
-// --- Item pricing state ---
-
-const ALL_ITEMS_FREE_DURING_BETA = false;
-
 // Bounds on first-load waits so a slow/stalled network or auth provider
-// can never leave the page spinning forever — see marketplace first-load
-// stall fix.
+// can never leave the page spinning forever.
 const ITEMS_FETCH_TIMEOUT_MS = 12000;
 const AUTH_LOAD_TIMEOUT_MS = 8000;
-
-// --- Category config ---
-
-const CATEGORIES = [
-  { id: "all", label: "All" },
-  { id: "development", label: "Development" },
-  { id: "creative", label: "Creative" },
-  { id: "automation", label: "Automation" },
-  { id: "integration", label: "Integrations" },
-] as const;
 
 const CATEGORY_COLORS: Record<string, string> = {
   development: "#818cf8",
@@ -101,16 +70,6 @@ const TYPE_LABELS: Record<MarketplaceItemType, string> = {
   agent: "Agent",
 };
 
-type SortOption = "featured" | "name" | "newest" | "price-low" | "price-high";
-
-const SORT_OPTIONS: { id: SortOption; label: string }[] = [
-  { id: "featured", label: "Featured" },
-  { id: "name", label: "Name A-Z" },
-  { id: "newest", label: "Newest" },
-  { id: "price-low", label: "Price: Low to High" },
-  { id: "price-high", label: "Price: High to Low" },
-];
-
 const TYPE_ICONS: Record<MarketplaceItemType, typeof Code2> = {
   skill: Zap,
   tool: Code2,
@@ -121,51 +80,21 @@ const TYPE_ICONS: Record<MarketplaceItemType, typeof Code2> = {
   agent: Sparkles,
 };
 
-const CONNECTION_LABELS: Record<string, string> = {
-  github: "GitHub repository",
-  terminal: "Terminal (PTY)",
-  vercel: "Vercel account",
-  supabase: "Supabase project",
-};
+// --- Page ---
 
-// --- Component ---
-
-function MarketplaceInner() {
+export default function Marketplace() {
   const { isLoaded, isSignedIn } = useClerkAuth();
   const { resolvedColors: T } = useTheme();
-  const searchParams = useSearchParams();
   const [items, setItems] = useState<MarketplaceItem[]>([]);
   const [installations, setInstallations] = useState<Map<string, Installation>>(new Map());
-  const [connectedProviders, setConnectedProviders] = useState<Set<string>>(new Set());
-  const [selectedCategory, setSelectedCategory] = useState<string>("all");
-  const [selectedType, setSelectedType] = useState<string>("all");
-  const [sortBy, setSortBy] = useState<SortOption>("featured");
-  const [searchQuery, setSearchQuery] = useState("");
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" | "info" } | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [activeTab, setActiveTab] = useState<"marketplace" | "beta">("marketplace");
   const [authTimedOut, setAuthTimedOut] = useState(false);
-  const tabBarRef = useRef<HTMLDivElement>(null);
-
-  // "Beta Access" must visibly respond: switch to the beta tab AND bring
-  // it into view. The tab bar sits below the fold from the hero button,
-  // so a bare state change reads as a dead click.
-  const goToBeta = useCallback(() => {
-    setActiveTab("beta");
-    requestAnimationFrame(() => {
-      tabBarRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  }, []);
-
-  // Sync tab from URL after hydration to avoid SSR/client mismatch (React #418)
-  useEffect(() => {
-    if (searchParams.get("tab") === "beta") setActiveTab("beta");
-  }, [searchParams]);
 
   // If the auth provider never reports isLoaded (slow/blocked script,
   // network blip), stop spinning after a bound and offer a retry instead
-  // of hanging indefinitely (see marketplace first-load stall fix).
+  // of hanging indefinitely.
   useEffect(() => {
     if (isLoaded) {
       setAuthTimedOut(false);
@@ -182,8 +111,7 @@ function MarketplaceInner() {
 
   // Load items from /api/marketplace/items. Bounded by a client-side
   // timeout — a stalled network or slow backend must surface the retry
-  // UI below instead of spinning forever (see marketplace first-load
-  // stall fix).
+  // UI below instead of spinning forever.
   const loadItems = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
@@ -208,7 +136,9 @@ function MarketplaceInner() {
     }
   }, []);
 
-  // Load installed items from /api/marketplace/installations
+  // Kept for the day items become installable (see `installable` on the
+  // item): the installations API stays live, but no install buttons render
+  // while nothing is installable.
   const loadInstalled = useCallback(async () => {
     if (!isSignedIn) return;
     try {
@@ -226,50 +156,23 @@ function MarketplaceInner() {
     }
   }, [isSignedIn]);
 
-  // Real connection status — required_connections on an item lists what it
-  // needs; a missing dep only exists when the provider isn't connected.
-  const loadConnections = useCallback(async () => {
-    if (!isSignedIn) return;
-    try {
-      const res = await fetch("/api/connections");
-      const data = await res.json();
-      if (Array.isArray(data.overview)) {
-        setConnectedProviders(
-          new Set(
-            data.overview
-              .filter((c: { isConnected?: boolean }) => c.isConnected)
-              .map((c: { provider: string }) => c.provider),
-          ),
-        );
-      }
-    } catch {
-      // silent — missing status means every requirement shows its setup CTA
-    }
-  }, [isSignedIn]);
-
-  // Root cause of the first-load stall: browsers pause
-  // requestAnimationFrame entirely while a tab is backgrounded/hidden (a
-  // link opened in a new background tab, a quick tab-switch during
-  // navigation, low-power mode, etc). This effect used to gate the very
-  // first items/installations fetch behind an rAF callback, so on an
-  // affected first load the fetch never even started and the page sat on
-  // the loading skeleton indefinitely — before the bounded timeouts below
-  // ever had anything in flight to time out. Fire the load directly.
   useEffect(() => {
     loadItems();
     if (isSignedIn) {
       loadInstalled();
-      loadConnections();
     }
-  }, [loadItems, loadInstalled, loadConnections, isSignedIn]);
+  }, [loadItems, loadInstalled, isSignedIn]);
 
+  // Kept for the day items become installable. Not rendered today — see
+  // the card below, which only shows an Install button when
+  // item.installable is true.
   const installItem = useCallback(async (item: MarketplaceItem) => {
     if (!isSignedIn) {
       showToast("Please sign in to install.", "error");
       return;
     }
-    if (item.status === "coming_soon") {
-      showToast("This capability is coming soon.", "info");
+    if (item.status === "coming_soon" || !item.installable) {
+      showToast("This capability isn't installable yet.", "info");
       return;
     }
     try {
@@ -278,7 +181,7 @@ function MarketplaceInner() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ itemId: item.id }),
       });
-      if (res.ok || res.status === 200) {
+      if (res.ok) {
         const data = await res.json();
         setInstallations((prev) => {
           const next = new Map(prev);
@@ -300,6 +203,8 @@ function MarketplaceInner() {
     }
   }, [isSignedIn]);
 
+  // Kept alongside installItem for the day installs are real. Not rendered
+  // today — see the note above.
   const uninstallItem = useCallback(async (item: MarketplaceItem) => {
     const inst = installations.get(item.id);
     if (!inst) return;
@@ -315,7 +220,7 @@ function MarketplaceInner() {
         showToast(`${item.name} removed`, "success");
       } else {
         // Server refused the delete: keep the item installed so the list
-        // stays truthful, and let the user retry via the Remove button.
+        // stays truthful, and let the user retry.
         const data = await res.json().catch(() => ({}));
         showToast(
           data.error || `Could not remove ${item.name}. Please try again.`,
@@ -332,67 +237,6 @@ function MarketplaceInner() {
       );
     }
   }, [installations]);
-
-  const toggleEnabled = useCallback(async (item: MarketplaceItem) => {
-    const inst = installations.get(item.id);
-    if (!inst) return;
-    try {
-      const res = await fetch(`/api/marketplace/installations/${inst.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: !inst.enabled }),
-      });
-      if (res.ok) {
-        setInstallations((prev) => {
-          const next = new Map(prev);
-          next.set(item.id, { ...inst, enabled: !inst.enabled });
-          return next;
-        });
-        showToast(`${item.name} ${!inst.enabled ? "enabled" : "disabled"}`, "info");
-      }
-    } catch {
-      showToast("Failed to update.", "error");
-    }
-  }, [installations]);
-
-  const filteredItems = useMemo(() => {
-    const filtered = items
-      .filter((item) => selectedCategory === "all" || item.category === selectedCategory)
-      .filter((item) => selectedType === "all" || item.item_type === selectedType)
-      .filter(
-        (item) =>
-          !searchQuery ||
-          item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          item.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          (item.author_name || "").toLowerCase().includes(searchQuery.toLowerCase()),
-      );
-
-    // Sort
-    switch (sortBy) {
-      case "name":
-        return [...filtered].sort((a, b) => a.name.localeCompare(b.name));
-      case "newest":
-        // No created_at in the type; featured-first as fallback
-        return [...filtered].sort((a, b) => Number(b.is_featured) - Number(a.is_featured));
-      case "price-low":
-        return [...filtered].sort((a, b) => (a.price_cents || 0) - (b.price_cents || 0));
-      case "price-high":
-        return [...filtered].sort((a, b) => (b.price_cents || 0) - (a.price_cents || 0));
-      case "featured":
-      default:
-        return [...filtered].sort((a, b) => Number(b.is_featured) - Number(a.is_featured));
-    }
-  }, [items, selectedCategory, selectedType, sortBy, searchQuery]);
-
-  const featuredItems = useMemo(() => filteredItems.filter((item) => item.is_featured), [filteredItems]);
-  const nonFeaturedItems = useMemo(() => filteredItems.filter((item) => !item.is_featured), [filteredItems]);
-
-  const stats = useMemo<MarketplaceStats>(() => ({
-    totalItems: items.length,
-    installedItems: installations.size,
-    availableItems: items.filter((i) => i.status === "available" || i.status === "beta").length,
-    comingSoonItems: items.filter((i) => i.status === "coming_soon").length,
-  }), [items, installations]);
 
   if (!isLoaded) {
     if (authTimedOut) {
@@ -439,406 +283,59 @@ function MarketplaceInner() {
       {/* === HEADER === */}
       <div className="border-b border-white/10 bg-gradient-to-b from-white/[.03] to-transparent px-4 py-8 sm:px-6 sm:py-10">
         <ProductFrame>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-black tracking-tight sm:text-3xl" style={{ color: T.headerColor }}>Marketplace</h1>
-            <span className="rounded-md border border-rose-400/30 bg-rose-400/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-rose-300">Beta</span>
-          </div>
+          <h1 className="text-2xl font-black tracking-tight sm:text-3xl" style={{ color: T.headerColor }}>Marketplace</h1>
           <p className="mt-2 max-w-xl text-sm text-white/55">
-            Extend LiTT with real tools, workflows, integrations, and creative packs.
+            Capabilities we&rsquo;re building into LiTT. They&rsquo;ll be installable here the moment they&rsquo;re real.
           </p>
+        </ProductFrame>
+      </div>
 
-          {/* Stats row — only show "Installed" for signed-in users */}
-          <div className="mt-6 flex flex-wrap gap-3">
-            {[
-              { label: "Available", value: stats.availableItems, icon: Sparkles },
-              ...(isSignedIn
-                ? [{ label: "Installed", value: stats.installedItems, icon: Check }]
-                : []),
-              { label: "Coming soon", value: stats.comingSoonItems, icon: ShieldCheck },
-            ].map((stat) => {
-              const Icon = stat.icon;
-              return (
-                <div key={stat.label} className="flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[.03] px-4 py-2.5">
-                  <Icon size={16} className="text-white/40" />
-                  <span className="text-lg font-black" style={{ color: T.headerColor }}>{stat.value}</span>
-                  <span className="text-[10px] uppercase tracking-wider text-white/40">{stat.label}</span>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* LiTT explainer */}
-          <div className="mt-5 flex flex-wrap gap-4 text-xs text-white/45">
-            <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-accent" />
-              LiTT uses installed engineering, research, automation, creative, and project tools
-            </span>
-          </div>
-
-          <div className="mt-5 flex gap-3">
-            {isSignedIn ? (
-              <Link href="/studio" className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-black text-black transition hover:bg-white/90">
-                Open in Studio <ArrowRight size={14} />
-              </Link>
-            ) : (
-              <Link href="/sign-up?redirect_url=%2Fstudio" className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-black text-black transition hover:bg-white/90">
-                Start Building Free <ArrowRight size={14} />
-              </Link>
-            )}
-            <button onClick={goToBeta} className="inline-flex items-center gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-2.5 text-sm font-bold text-amber-300 transition hover:bg-amber-400/15">
-              Beta Access
+      {/* === ROADMAP LIST === */}
+      <ProductFrame className="py-6">
+        {loadError ? (
+          <div className="py-12 text-center">
+            <p className="text-white/40">Marketplace couldn&rsquo;t load.</p>
+            <button
+              onClick={() => loadItems()}
+              className="mt-3 rounded-lg border border-white/10 px-4 py-2 text-sm text-white/60 hover:bg-white/5"
+            >
+              Retry
             </button>
           </div>
-        </ProductFrame>
-      </div>
-
-      {/* === TAB BAR === */}
-      <div ref={tabBarRef} className="scroll-mt-24 border-b border-white/10 px-4 sm:px-6">
-        <ProductFrame className="flex gap-2">
-          <button
-            onClick={() => setActiveTab("marketplace")}
-            className={`border-b-2 px-4 py-3 text-sm font-bold transition ${
-              activeTab === "marketplace" ? "border-accent text-accent" : "border-transparent text-white/40 hover:text-white/70"
-            }`}
-          >
-            Browse
-          </button>
-          <button
-            onClick={goToBeta}
-            className={`border-b-2 px-4 py-3 text-sm font-bold transition ${
-              activeTab === "beta" ? "border-amber-400 text-amber-300" : "border-transparent text-white/40 hover:text-white/70"
-            }`}
-          >
-            Beta Access
-          </button>
-        </ProductFrame>
-      </div>
-
-      {/* === MARKETPLACE TAB === */}
-      {activeTab === "marketplace" && (
-        <ProductFrame className="py-6">
-          {/* Filters + Search + Sort */}
-          <div className="mb-6 space-y-3">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              {/* Category filters */}
-              <div className="flex flex-wrap gap-2">
-                {CATEGORIES.map((cat) => (
-                  <button
-                    key={cat.id}
-                    onClick={() => setSelectedCategory(cat.id)}
-                    className={`rounded-lg border px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide transition ${
-                      selectedCategory === cat.id ? "border-accent/40 bg-accent/10 text-accent" : "border-white/10 text-white/45 hover:bg-white/5 hover:text-white/70"
-                    }`}
-                  >
-                    {cat.label}
-                  </button>
-                ))}
-              </div>
-              {/* Search + Sort */}
-              <div className="flex items-center gap-2">
-                <div className="relative w-full max-w-48">
-                  <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25" size={14} />
-                  <input
-                    type="text"
-                    placeholder="Search..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full rounded-xl border border-white/10 bg-white/5 py-2 pl-9 pr-3 text-sm text-white outline-none placeholder:text-white/25 focus:border-accent/40"
-                  />
-                </div>
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as SortOption)}
-                  className="rounded-xl border border-white/10 bg-white/5 py-2 pl-3 pr-7 text-xs font-bold text-white/70 outline-none focus:border-accent/40"
-                  aria-label="Sort by"
-                >
-                  {SORT_OPTIONS.map((opt) => (
-                    <option key={opt.id} value={opt.id} className="bg-[#0a0a0f] text-white">{opt.label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            {/* Type filter chips */}
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-white/30">Type:</span>
-              <button
-                onClick={() => setSelectedType("all")}
-                className={`rounded-md px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide transition ${
-                  selectedType === "all" ? "bg-white/15 text-white" : "text-white/40 hover:bg-white/5 hover:text-white/70"
-                }`}
-              >
-                All
-              </button>
-              {(Object.keys(TYPE_LABELS) as MarketplaceItemType[]).map((type) => {
-                const Icon = TYPE_ICONS[type];
-                return (
-                  <button
-                    key={type}
-                    onClick={() => setSelectedType(type)}
-                    className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide transition ${
-                      selectedType === type ? "bg-white/15 text-white" : "text-white/40 hover:bg-white/5 hover:text-white/70"
-                    }`}
-                  >
-                    <Icon size={10} /> {TYPE_LABELS[type]}
-                  </button>
-                );
-              })}
-            </div>
+        ) : loading ? (
+          <div className="py-12 text-center">
+            <p className="text-white/40">Loading capabilities...</p>
           </div>
-
-          {/* Featured section (unique items only, excluded from main list) */}
-          {featuredItems.length > 0 && !searchQuery && selectedCategory === "all" && (
-            <div className="mb-8">
-              <p className="mb-3 text-[10px] font-black uppercase tracking-[.25em] text-accent">Featured</p>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {featuredItems.map((item) => (
-                  item.item_type === "agent" ? (
-                    <AgentCard
-                      key={item.id}
-                      item={item}
-                      accentColor={T.accentColor}
-                      borderColor={T.borderColor}
-                      boxBg={T.boxBg}
-                      textMuted={T.textMuted}
-                      headerColor={T.headerColor}
-                      isSignedIn={isSignedIn}
-                      onSignInRequired={() => window.location.href = "/sign-in?redirect_url=%2Fmarketplace"}
-                      onToast={showToast}
-                    />
-                  ) : (
-                    <MarketplaceCard
-                      key={item.id}
-                      item={item}
-                      installation={installations.get(item.id)}
-                      onInstall={() => installItem(item)}
-                      onUninstall={() => uninstallItem(item)}
-                      onToggleEnabled={() => toggleEnabled(item)}
-                      isSignedIn={isSignedIn}
-                      connectedProviders={connectedProviders}
-                      accentColor={T.accentColor}
-                      borderColor={T.borderColor}
-                      boxBg={T.boxBg}
-                      textMuted={T.textMuted}
-                      headerColor={T.headerColor}
-                    />
-                  )
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* All items (excluding featured when featured is shown) */}
-          <div>
-            <p className="mb-3 text-[10px] font-black uppercase tracking-[.25em] text-white/40">
-              {searchQuery ? "Search results" : "All capabilities"}
-              <span className="ml-2 text-white/30">({filteredItems.length})</span>
-            </p>
-            {loadError ? (
-              <div className="py-12 text-center">
-                <p className="text-white/40">Marketplace couldn&rsquo;t load.</p>
-                <button
-                  onClick={() => loadItems()}
-                  className="mt-3 rounded-lg border border-white/10 px-4 py-2 text-sm text-white/60 hover:bg-white/5"
-                >
-                  Retry
-                </button>
-              </div>
-            ) : filteredItems.length === 0 ? (
-              <div className="py-12 text-center">
-                <p className="text-white/40">
-                  {loading
-                    ? "Loading capabilities..."
-                    : items.length === 0
-                      ? "No tools available yet."
-                      : `No items found matching "${searchQuery}".`}
-                </p>
-                {searchQuery && (
-                  <button onClick={() => { setSearchQuery(""); setSelectedCategory("all"); setSelectedType("all"); }} className="mt-3 rounded-lg border border-white/10 px-4 py-2 text-sm text-white/60 hover:bg-white/5">
-                    Clear filters
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {(searchQuery ? filteredItems : nonFeaturedItems).map((item) => (
-                  item.item_type === "agent" ? (
-                    <AgentCard
-                      key={item.id}
-                      item={item}
-                      accentColor={T.accentColor}
-                      borderColor={T.borderColor}
-                      boxBg={T.boxBg}
-                      textMuted={T.textMuted}
-                      headerColor={T.headerColor}
-                      isSignedIn={isSignedIn}
-                      onSignInRequired={() => window.location.href = "/sign-in?redirect_url=%2Fmarketplace"}
-                      onToast={showToast}
-                    />
-                  ) : (
-                    <MarketplaceCard
-                      key={item.id}
-                      item={item}
-                      installation={installations.get(item.id)}
-                      onInstall={() => installItem(item)}
-                      onUninstall={() => uninstallItem(item)}
-                      onToggleEnabled={() => toggleEnabled(item)}
-                      isSignedIn={isSignedIn}
-                      connectedProviders={connectedProviders}
-                      accentColor={T.accentColor}
-                      borderColor={T.borderColor}
-                      boxBg={T.boxBg}
-                      textMuted={T.textMuted}
-                      headerColor={T.headerColor}
-                    />
-                  )
-                ))}
-              </div>
-            )}
+        ) : items.length === 0 ? (
+          <div className="py-12 text-center">
+            <p className="text-white/40">No capabilities listed yet. Check back soon.</p>
           </div>
-        </ProductFrame>
-      )}
-
-      {/* === BETA TAB === */}
-      {activeTab === "beta" && (
-        <ProductFrame className="py-8">
-          {/* Beta status */}
-          <div className="rounded-2xl border border-amber-400/20 bg-linear-to-br from-amber-400/6 to-transparent p-6">
-            <div className="flex items-center gap-3">
-              <span className="text-2xl">🧪</span>
-              <div>
-                <div className="text-lg font-black text-amber-300">Founder Beta Access</div>
-                <div className="text-xs text-white/55">Core tools remain free while testing. Paid beta plans unlock higher limits and features.</div>
-              </div>
-            </div>
-            <p className="mt-4 text-sm leading-6 text-white/60">
-              Welcome to LiTTree Lab Studios Beta. Your feedback shapes what we build next.
-              Paid plans are available at founder pricing — well below future standard rates.
-            </p>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {items.map((item) => (
+              <MarketplaceCard
+                key={item.id}
+                item={item}
+                onInstall={() => installItem(item)}
+                accentColor={T.accentColor}
+                borderColor={T.borderColor}
+                boxBg={T.boxBg}
+                textMuted={T.textMuted}
+                headerColor={T.headerColor}
+              />
+            ))}
           </div>
-
-          {/* Plan cards */}
-          <div className="mt-6 grid gap-4 sm:grid-cols-2">
-            {/* Starter */}
-            <div className="rounded-2xl border border-white/10 bg-white/3 p-5">
-              <div className="text-xs font-black uppercase tracking-wider text-white/50">Starter</div>
-              <div className="mt-1 text-2xl font-black text-white">Free</div>
-              <div className="text-[10px] text-white/40">Free forever</div>
-              <div className="mt-3 space-y-1">
-                {["1 active project", "500 starter AI credits", "LiTT", "Basic tools"].map((f) => (
-                  <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
-                    <Check size={11} className="shrink-0 text-emerald-400" /> {f}
-                  </div>
-                ))}
-              </div>
-              <Link href="/studio" className="mt-4 flex w-full items-center justify-center rounded-xl border border-white/10 py-2 text-xs font-bold text-white/60 transition hover:bg-white/5">
-                Get Started
-              </Link>
-            </div>
-
-            {/* Creator Beta */}
-            <div className="rounded-2xl border-2 border-accent/30 bg-accent/5 p-5">
-              <div className="text-xs font-black uppercase tracking-wider text-accent">Creator Beta</div>
-              <div className="mt-1 text-2xl font-black text-white">$15/month</div>
-              <div className="text-[10px] text-white/40">Beta pricing · later $25</div>
-              <div className="mt-3 space-y-1">
-                {["5 active projects", "6,000 monthly AI credits", "GitHub connection", "Voice mode"].map((f) => (
-                  <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
-                    <Check size={11} className="shrink-0 text-accent" /> {f}
-                  </div>
-                ))}
-              </div>
-              <Link href="/pricing" className="mt-4 flex w-full items-center justify-center rounded-xl bg-accent py-2 text-xs font-black text-on-accent transition hover:scale-[1.02] hover:bg-accent-strong">
-                Subscribe
-              </Link>
-            </div>
-
-            {/* Pro Builder Beta */}
-            <div className="rounded-2xl border-2 border-accent/30 bg-accent/5 p-5">
-              <div className="text-xs font-black uppercase tracking-wider text-accent">Pro Builder Beta</div>
-              <div className="mt-1 text-2xl font-black text-white">$39/month</div>
-              <div className="text-[10px] text-white/40">Beta pricing · later $49</div>
-              <div className="mt-3 space-y-1">
-                {["25 active projects", "20,000 monthly AI credits", "Terminal runtime", "Vercel deployment"].map((f) => (
-                  <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
-                    <Check size={11} className="shrink-0 text-accent" /> {f}
-                  </div>
-                ))}
-              </div>
-              <Link href="/pricing" className="mt-4 flex w-full items-center justify-center rounded-xl bg-accent py-2 text-xs font-black text-on-accent transition hover:scale-[1.02] hover:bg-accent-strong">
-                Subscribe
-              </Link>
-            </div>
-
-            {/* Founding Member */}
-            <div className="rounded-2xl border-2 border-amber-400/40 bg-amber-400/5 p-5">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-black uppercase tracking-wider text-amber-400">Founding Member</div>
-                <span className="rounded-md bg-amber-400 px-1.5 py-0.5 text-[8px] font-black uppercase text-black">Limited</span>
-              </div>
-              <div className="mt-1 text-2xl font-black text-white">$149</div>
-              <div className="text-[10px] text-white/40">One-time · permanent Creator-level access</div>
-              <div className="mt-3 space-y-1">
-                {["Permanent Creator-level access", "Founder badge"].map((f) => (
-                  <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
-                    <Check size={11} className="shrink-0 text-amber-400" /> {f}
-                  </div>
-                ))}
-              </div>
-              {/* Not offered on /pricing — a dead link there would mislead,
-                  so this is an honest disabled state, not a Link. */}
-              <span aria-disabled="true" className="mt-4 flex w-full cursor-not-allowed items-center justify-center rounded-xl bg-amber-400/40 py-2 text-xs font-black text-black/60">
-                Currently Unavailable
-              </span>
-            </div>
-          </div>
-
-          {/* Marketplace item states */}
-          <div className="mt-6 rounded-2xl border border-white/10 bg-white/3 p-5">
-            <div className="text-xs font-black uppercase tracking-wider text-white/50">How Marketplace Items Work</div>
-            <div className="mt-3 space-y-2">
-              {[
-                { state: "Free", desc: "Core skills and tools — no charge", color: "text-emerald-300" },
-                { state: "Included", desc: "Included with Creator or Pro plan", color: "text-accent" },
-                { state: "Credit usage", desc: "External-cost tools charge AI credits per use", color: "text-violet-300" },
-                { state: "Coming soon", desc: "Not yet available", color: "text-amber-300" },
-              ].map((item) => (
-                <div key={item.state} className="flex items-center gap-2 text-[11px]">
-                  <span className={`font-bold ${item.color}`}>{item.state}</span>
-                  <span className="text-white/40">— {item.desc}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Feedback */}
-          <div className="mt-6 rounded-2xl border border-white/10 bg-white/3 p-5 text-center">
-            <div className="font-bold text-white">Beta Feedback</div>
-            <p className="mt-1 text-xs text-white/45">Found a bug? Have a feature request? Let us know.</p>
-            <div className="mt-4 flex justify-center gap-3">
-              <Link href="/studio?tool=chat" className="inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-bold text-on-accent transition hover:bg-accent-strong">
-                <Sparkles size={14} /> Report via LiTT
-              </Link>
-              <a href="mailto:beta@litlabs.net" className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-sm font-bold text-white/60 transition hover:bg-white/5">
-                Email Feedback
-              </a>
-            </div>
-          </div>
-        </ProductFrame>
-      )}
+        )}
+      </ProductFrame>
     </div>
   );
 }
 
-// --- Card component ---
+// --- Card ---
 
 const MarketplaceCard = memo(function MarketplaceCard({
   item,
-  installation,
   onInstall,
-  onUninstall,
-  onToggleEnabled,
-  isSignedIn,
-  connectedProviders,
   accentColor,
   borderColor,
   boxBg,
@@ -846,12 +343,7 @@ const MarketplaceCard = memo(function MarketplaceCard({
   headerColor,
 }: {
   item: MarketplaceItem;
-  installation: Installation | undefined;
   onInstall: () => void;
-  onUninstall: () => void;
-  onToggleEnabled: () => void;
-  isSignedIn: boolean;
-  connectedProviders: Set<string>;
   accentColor: string;
   borderColor: string;
   boxBg: string;
@@ -860,13 +352,7 @@ const MarketplaceCard = memo(function MarketplaceCard({
 }) {
   const categoryColor = CATEGORY_COLORS[item.category] || "#fbbf24";
   const TypeIcon = TYPE_ICONS[item.item_type] || Code2;
-  const isInstalled = !!installation;
-  const isEnabled = installation?.enabled ?? false;
   const isComingSoon = item.status === "coming_soon";
-  const missingConnections = item.required_connections.filter(
-    (c) => !connectedProviders.has(c),
-  );
-  const needsSetup = isInstalled && missingConnections.length > 0;
 
   return (
     <article
@@ -913,163 +399,31 @@ const MarketplaceCard = memo(function MarketplaceCard({
           </div>
         )}
 
-        {/* Compatibility */}
-        <div className="mt-3 flex items-center gap-2 text-[10px]" style={{ color: textMuted }}>
-          <span>Works with:</span>
-          {item.compatible_assistants.includes("litt") && (
-            <span className="rounded-md bg-accent/10 px-1.5 py-0.5 font-bold text-accent">LiTT</span>
-          )}
-        </div>
-
-        {/* Requirements — always listed; links to the connections settings
-            where the dependency can actually be connected. When the item is
-            installed and a dep is missing, the missing dep is highlighted. */}
-        {item.required_connections.length > 0 && (
-          <Link
-            href="/settings/connections"
-            className="mt-2 flex items-center gap-1.5 text-[10px] transition hover:opacity-80"
-            style={{ color: textMuted }}
-          >
-            <span>Requires:</span>
-            <span className="font-medium underline decoration-dotted" style={{ color: needsSetup ? "#fbbf24" : textMuted }}>
-              {item.required_connections.map((c) => CONNECTION_LABELS[c] || c).join(", ")}
-            </span>
-            <ArrowRight size={10} />
-          </Link>
-        )}
-
-        {/* Status badge + price */}
+        {/* Status badge + version */}
         <div className="mt-2 flex items-center gap-2 text-[10px]">
           {isComingSoon ? (
             <span className="rounded-md bg-amber-400/10 px-2 py-0.5 font-bold text-amber-300">Coming soon</span>
-          ) : isInstalled ? (
-            <span className="flex items-center gap-1 rounded-md bg-emerald-400/10 px-2 py-0.5 font-bold text-emerald-300">
-              <Check size={10} /> {isEnabled ? "Installed" : "Disabled"}
-            </span>
-          ) : item.is_beta ? (
-            <span className="rounded-md bg-rose-400/10 px-2 py-0.5 font-bold text-rose-300">Beta</span>
           ) : (
-            <span className="rounded-md bg-white/5 px-2 py-0.5 font-bold" style={{ color: textMuted }}>Available</span>
+            <span className="rounded-md bg-white/5 px-2 py-0.5 font-bold" style={{ color: textMuted }}>In development</span>
           )}
           <span className="text-[9px]" style={{ color: textMuted }}>v{item.version}</span>
-          {/* Price badge */}
-          {!isComingSoon && (
-            <span className="ml-auto rounded-md px-2 py-0.5 font-bold" style={{
-              backgroundColor: (item.price_cents || 0) === 0 ? "#10b98115" : `${categoryColor}15`,
-              color: (item.price_cents || 0) === 0 ? "#34d399" : categoryColor,
-            }}>
-              {(item.price_cents || 0) === 0
-                ? (ALL_ITEMS_FREE_DURING_BETA ? "Free (Beta)" : "Free")
-                : `$${(item.price_cents / 100).toFixed(2)}`}
-            </span>
-          )}
         </div>
 
-        {/* Action */}
-        <div className="mt-4 border-t pt-3" style={{ borderColor: borderColor + "20" }}>
-          {item.item_type === "agent" ? (
-            <Link
-              href={`/marketplace/agents/${item.slug}`}
-              className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-black text-black transition hover:scale-[1.02]"
-              style={{ background: categoryColor }}
-            >
-              <ArrowRight size={12} /> View Agent
-            </Link>
-          ) : isComingSoon ? (
-            <span
-              className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold"
-              style={{ background: borderColor + "10", color: textMuted }}
-            >
-              Coming soon
-            </span>
-          ) : !isSignedIn ? (
-            <Link
-              href={`/sign-in?redirect_url=${encodeURIComponent("/marketplace")}`}
-              className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-black text-black transition hover:scale-[1.02]"
-              style={{ background: categoryColor }}
-            >
-              {(item.price_cents || 0) === 0 ? "Sign in to install" : "Sign in to purchase"}
-            </Link>
-          ) : isInstalled ? (
-            <div className="flex gap-2">
-              {needsSetup ? (
-                // Capability needs a connected service before it can run —
-                // send the user to the real setup surface instead of a
-                // dead ?capability= studio link.
-                <Link
-                  href="/settings/connections"
-                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition hover:scale-[1.02]"
-                  style={{ background: categoryColor + "20", color: categoryColor }}
-                >
-                  <ArrowRight size={12} /> Set up connection
-                </Link>
-              ) : !isEnabled ? (
-                <button
-                  onClick={onToggleEnabled}
-                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold"
-                  style={{ background: borderColor + "20", color: textMuted }}
-                >
-                  Enable
-                </button>
-              ) : (
-                // Installed + enabled, no missing connections. Installed
-                // capabilities do not yet have a Studio activation surface —
-                // show the truthful state rather than a dead "Use in Studio"
-                // link whose ?capability= param nothing consumes.
-                <span
-                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold"
-                  style={{ background: borderColor + "10", color: textMuted }}
-                >
-                  <Check size={12} /> Active
-                </span>
-              )}
-              <button
-                onClick={onToggleEnabled}
-                className="rounded-xl border px-3 py-2.5 text-xs font-bold transition hover:bg-white/5"
-                style={{ borderColor: borderColor + "30", color: textMuted }}
-                aria-label={`Toggle ${item.name}`}
-              >
-                {isEnabled ? "Disable" : "Enable"}
-              </button>
-              <button
-                onClick={onUninstall}
-                className="rounded-xl border border-rose-400/30 px-3 py-2.5 text-xs font-bold text-rose-300 transition hover:bg-rose-400/10"
-                aria-label={`Uninstall ${item.name}`}
-              >
-                Remove
-              </button>
-            </div>
-          ) : (
+        {/* Install renders only when the capability has a real executor.
+            Nothing is installable today, so this stays hidden until then. */}
+        {item.installable && (
+          <div className="mt-4 border-t pt-3" style={{ borderColor: borderColor + "20" }}>
             <button
               onClick={onInstall}
               className="w-full rounded-xl py-2.5 text-xs font-black text-black transition hover:scale-[1.02]"
               style={{ background: categoryColor }}
               aria-label={`Install ${item.name}`}
             >
-              {(item.price_cents || 0) === 0
-                ? (ALL_ITEMS_FREE_DURING_BETA ? "Install — Free during beta" : "Install Free")
-                : `Install — $${(item.price_cents / 100).toFixed(2)}`}
+              Install
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </article>
   );
 });
-
-export default function Marketplace() {
-  return (
-    <Suspense
-      fallback={
-        <div className="flex min-h-screen items-center justify-center bg-[#0a0a0f]">
-          <div className="text-center">
-            <div className="mb-4 animate-pulse text-3xl">⚡</div>
-            <div className="text-sm font-bold text-white/50">Loading Marketplace...</div>
-          </div>
-        </div>
-      }
-    >
-      <MarketplaceInner />
-    </Suspense>
-  );
-}

@@ -1,6 +1,6 @@
-// P1-4: uninstall must only claim success when the server confirms deletion.
-// The page used to remove the item from state and toast "removed" before the
-// DELETE response was even checked — a failed DELETE still read as success.
+// Marketplace is now an honest roadmap page: every item shows its real
+// status, and an Install button renders ONLY when the API reports
+// item.installable (true only when the capability has a real executor).
 import { render, screen, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -24,33 +24,17 @@ vi.mock("@/context/ThemeContext", () => ({
   }),
 }));
 
-vi.mock("next/navigation", () => ({
-  useSearchParams: () => ({ get: () => null }),
-}));
-
 vi.mock("@/components/ProductPageFrame", () => ({
   ProductFrame: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock("./_components/AgentCard", () => ({
-  AgentCard: () => null,
-}));
-
 import MarketplacePage from "./page";
 
-const ITEM = {
-  id: "item1",
-  slug: "test-tool",
-  name: "Test Tool",
-  description: "A test marketplace tool",
-  item_type: "tool",
-  category: "development",
-  status: "available",
+const BASE = {
+  slug: "x",
   compatible_assistants: ["litt"],
-  capability_key: "test_tool",
-  version: "1.0.0",
-  icon: "wrench",
-  author_name: null,
+  capability_key: "test.key",
+  icon: "",
   is_featured: false,
   is_official: true,
   is_beta: false,
@@ -58,15 +42,51 @@ const ITEM = {
   required_connections: [],
 };
 
-const INSTALLATION = {
-  id: "inst1",
-  marketplace_item_id: "item1",
-  enabled: true,
-  installed_at: "2026-09-18T00:00:00.000Z",
+const ITEM_DEV = {
+  ...BASE,
+  id: "item1",
+  slug: "code-review",
+  name: "Code Review",
+  description: "Reviews code for issues",
+  item_type: "tool",
+  category: "development",
+  status: "available",
+  version: "1.0.0",
+  author_name: "LiTTree Labs",
+  installable: false,
 };
 
-// DELETE behaviour knob per test: "ok" | "fail500" | "throw"
-let deleteMode: "ok" | "fail500" | "throw" = "ok";
+const ITEM_SOON = {
+  ...BASE,
+  id: "item2",
+  slug: "vercel-deploy",
+  name: "Vercel Deploy",
+  description: "Deploys to Vercel",
+  item_type: "integration",
+  category: "integration",
+  status: "coming_soon",
+  version: "0.9.0",
+  author_name: "LiTTree Labs",
+  installable: false,
+};
+
+const ITEM_REAL = {
+  ...BASE,
+  id: "item3",
+  slug: "real-executor",
+  name: "Real Executor",
+  description: "Actually does the thing",
+  item_type: "workflow",
+  category: "automation",
+  status: "available",
+  version: "2.0.0",
+  author_name: "LiTTree Labs",
+  installable: true,
+};
+
+// Fetch behaviour knobs per test
+let itemsMode: "ok" | "empty" | "fail500" = "ok";
+let installMode: "ok" | "fail500" = "ok";
 
 function jsonResponse(body: unknown, init: { status?: number; ok?: boolean } = {}) {
   const status = init.status ?? 200;
@@ -79,92 +99,135 @@ function jsonResponse(body: unknown, init: { status?: number; ok?: boolean } = {
 }
 
 function installFetchMock() {
+  const calls: { url: string; init?: RequestInit }[] = [];
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-    if (url === "/api/marketplace/items") return jsonResponse({ items: [ITEM] });
-    if (url === "/api/marketplace/installations") return jsonResponse({ installations: [INSTALLATION] });
-    if (url === "/api/connections") return jsonResponse({ overview: [] });
-    if (url === "/api/marketplace/installations/inst1" && init?.method === "DELETE") {
-      if (deleteMode === "throw") throw new Error("network down");
-      if (deleteMode === "fail500")
-        return jsonResponse({}, { status: 500, ok: false });
-      return jsonResponse({ deleted: true }, { status: 200 });
+    calls.push({ url, init });
+    if (url === "/api/marketplace/items") {
+      if (itemsMode === "fail500") return jsonResponse({}, { status: 500, ok: false });
+      if (itemsMode === "empty") return jsonResponse({ items: [] });
+      return jsonResponse({ items: [ITEM_DEV, ITEM_SOON, ITEM_REAL] });
     }
+    if (url === "/api/marketplace/installations" && init?.method === "POST") {
+      if (installMode === "fail500") return jsonResponse({}, { status: 500, ok: false });
+      return jsonResponse({ installation: { id: "inst9" } }, { status: 200 });
+    }
+    if (url === "/api/marketplace/installations") return jsonResponse({ installations: [] });
     throw new Error(`unexpected fetch: ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
+  return { fetchMock, calls };
 }
 
-async function renderWithInstall() {
-  render(<MarketplacePage />);
-  // Wait for the item + installed card to appear after the three loads.
-  const removeButton = await screen.findByRole("button", { name: "Uninstall Test Tool" });
-  return removeButton;
-}
-
-describe("P1-4 marketplace uninstall honesty", () => {
+describe("marketplace roadmap page", () => {
   beforeEach(() => {
-    deleteMode = "ok";
+    itemsMode = "ok";
+    installMode = "ok";
     vi.useRealTimers();
     installFetchMock();
   });
 
-  it("removes the item and toasts success only after the server confirms (DELETE 200)", async () => {
-    const removeButton = await renderWithInstall();
+  it("shows the honest header and subtitle", async () => {
+    render(<MarketplacePage />);
+    expect(await screen.findByRole("heading", { name: "Marketplace" })).toBeInTheDocument();
+    expect(
+      await screen.findByText(/installable here the moment they’re real/i),
+    ).toBeInTheDocument();
+  });
+
+  it("lists every item with type, category, description, author and version", async () => {
+    render(<MarketplacePage />);
+    await screen.findByText("Code Review");
+    expect(screen.getByText("Vercel Deploy")).toBeInTheDocument();
+    expect(screen.getByText("Real Executor")).toBeInTheDocument();
+    // Type · category labels
+    expect(screen.getByText("Tool")).toBeInTheDocument();
+    expect(screen.getByText("Integration")).toBeInTheDocument();
+    expect(screen.getByText("Workflow")).toBeInTheDocument();
+    // Description, author, version
+    expect(screen.getByText("Reviews code for issues")).toBeInTheDocument();
+    expect(screen.getAllByText("LiTTree Labs").length).toBeGreaterThan(0);
+    expect(screen.getByText("v1.0.0")).toBeInTheDocument();
+    expect(screen.getByText("v0.9.0")).toBeInTheDocument();
+  });
+
+  it("badges coming_soon items as Coming soon and everything else as In development", async () => {
+    render(<MarketplacePage />);
+    await screen.findByText("Code Review");
+    expect(screen.getByText("Coming soon")).toBeInTheDocument();
+    expect(screen.getAllByText("In development")).toHaveLength(2);
+  });
+
+  it("renders an Install button only for the installable item", async () => {
+    render(<MarketplacePage />);
+    await screen.findByText("Code Review");
+    expect(
+      screen.getByRole("button", { name: "Install Real Executor" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Install Code Review" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Install Vercel Deploy" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("installs the installable item and toasts success", async () => {
+    const { calls } = installFetchMock();
+    render(<MarketplacePage />);
+    const installButton = await screen.findByRole("button", { name: "Install Real Executor" });
     await act(async () => {
-      removeButton.click();
+      installButton.click();
     });
-    // Item is gone from installed state → the card offers Install again.
-    await screen.findByRole("button", { name: "Install Test Tool" });
-    expect(screen.queryByRole("button", { name: "Uninstall Test Tool" })).not.toBeInTheDocument();
-    const toast = await screen.findByText("Test Tool removed");
+    const post = calls.find((c) => c.init?.method === "POST");
+    expect(post?.url).toBe("/api/marketplace/installations");
+    expect(JSON.parse(String(post?.init?.body))).toEqual({ itemId: "item3" });
+    const toast = await screen.findByText("Real Executor installed");
     expect(toast).toBeInTheDocument();
-    // Success toast styling (green), not error red.
     expect(toast).toHaveStyle({ backgroundColor: "#0a2e0a" });
   });
 
-  it("keeps the item installed and shows an error when the backend rejects the DELETE (500)", async () => {
-    deleteMode = "fail500";
-    const removeButton = await renderWithInstall();
+  it("shows an error toast when the install POST fails", async () => {
+    installMode = "fail500";
+    installFetchMock();
+    render(<MarketplacePage />);
+    const installButton = await screen.findByRole("button", { name: "Install Real Executor" });
     await act(async () => {
-      removeButton.click();
+      installButton.click();
     });
-    // Error is visible…
-    const toast = await screen.findByText("Could not remove Test Tool. Please try again.");
+    const toast = await screen.findByText("Install failed.");
     expect(toast).toBeInTheDocument();
     expect(toast).toHaveStyle({ backgroundColor: "#2e0a0a" });
-    // …and the item is still installed: the Remove button remains, no success toast.
-    expect(screen.getByRole("button", { name: "Uninstall Test Tool" })).toBeInTheDocument();
-    expect(screen.queryByText("Test Tool removed")).not.toBeInTheDocument();
+    expect(screen.queryByText("Real Executor installed")).not.toBeInTheDocument();
   });
 
-  it("keeps the item installed and shows an error when the network throws", async () => {
-    deleteMode = "throw";
-    const removeButton = await renderWithInstall();
+  it("shows the retry UI when items fail to load, and retry refetches", async () => {
+    itemsMode = "fail500";
+    installFetchMock();
+    render(<MarketplacePage />);
+    await screen.findByText("Marketplace couldn’t load.");
+    // Retry succeeds once the backend recovers.
+    itemsMode = "ok";
     await act(async () => {
-      removeButton.click();
+      screen.getByRole("button", { name: "Retry" }).click();
     });
-    const toast = await screen.findByText(
-      "Network error while removing Test Tool. It is still installed — please try again.",
-    );
-    expect(toast).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Uninstall Test Tool" })).toBeInTheDocument();
-    expect(screen.queryByText("Test Tool removed")).not.toBeInTheDocument();
+    await screen.findByText("Code Review");
   });
 
-  it("supports retry: fail then succeed ends removed with a success toast", async () => {
-    deleteMode = "fail500";
-    await renderWithInstall();
-    await act(async () => {
-      screen.getByRole("button", { name: "Uninstall Test Tool" }).click();
-    });
-    await screen.findByText("Could not remove Test Tool. Please try again.");
-    // Retry succeeds.
-    deleteMode = "ok";
-    await act(async () => {
-      screen.getByRole("button", { name: "Uninstall Test Tool" }).click();
-    });
-    await screen.findByRole("button", { name: "Install Test Tool" });
-    expect(await screen.findByText("Test Tool removed")).toBeInTheDocument();
+  it("shows an honest empty state when there are no items", async () => {
+    itemsMode = "empty";
+    installFetchMock();
+    render(<MarketplacePage />);
+    await screen.findByText("No capabilities listed yet. Check back soon.");
+  });
+
+  it("has no stats pills, tabs, filters, search, or pricing UI", async () => {
+    render(<MarketplacePage />);
+    await screen.findByText("Code Review");
+    expect(screen.queryByText("Available")).not.toBeInTheDocument();
+    expect(screen.queryByText("Installed")).not.toBeInTheDocument();
+    expect(screen.queryByText("Beta Access")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/search/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Featured")).not.toBeInTheDocument();
+    expect(screen.queryByText("Starter")).not.toBeInTheDocument();
   });
 });
