@@ -42,7 +42,7 @@ vi.mock("next/image", () => ({
 // jsdom has no clipboard; the share test stubs it.
 const clipboardWrite = vi.fn();
 
-import { PostCard } from "./PostCard";
+import { PostCard, isEdited } from "./PostCard";
 import type { PostDTO } from "./types";
 
 function makePost(overrides: Partial<PostDTO> = {}): PostDTO {
@@ -169,5 +169,20 @@ describe("PostCard", () => {
     render(<PostCard post={makePost()} onUpdate={vi.fn()} onDelete={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Open post" }));
     expect(routerPushMock).toHaveBeenCalledWith("/post/post_1");
+  });
+});
+
+describe("isEdited", () => {
+  it("is false for identical timestamps", () => {
+    const t = "2026-09-26T02:04:47.000Z";
+    expect(isEdited(t, t)).toBe(false);
+  });
+
+  it("is false for millisecond-level trigger jitter on a fresh post", () => {
+    expect(isEdited("2026-09-26T02:04:47.000Z", "2026-09-26T02:04:47.412Z")).toBe(false);
+  });
+
+  it("is true when the post was actually edited later", () => {
+    expect(isEdited("2026-09-26T02:04:47.000Z", "2026-09-26T02:09:12.000Z")).toBe(true);
   });
 });

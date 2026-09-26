@@ -32,6 +32,16 @@ import { CommentThread } from "./CommentThread";
 import { Toast, useToastState } from "./Toast";
 import { formatTimeAgo } from "./formatTimeAgo";
 
+/**
+ * Only show "edited" when updatedAt is meaningfully later than createdAt.
+ * DB triggers/serializers can leave the two a few milliseconds apart on a
+ * brand-new post, which used to tag every fresh post as "edited".
+ */
+export function isEdited(createdAt: string, updatedAt: string): boolean {
+  const delta = new Date(updatedAt).getTime() - new Date(createdAt).getTime();
+  return Number.isFinite(delta) && delta > 2000;
+}
+
 const VISIBILITY_ICON: Record<Visibility, typeof Globe> = {
   public: Globe,
   followers: Users,
@@ -378,7 +388,7 @@ export function PostCard({
           <div className="mt-0.5 flex items-center gap-1 text-[11px]" style={{ color: tokens.textMuted }}>
             <VisIcon size={12} />
             <span title={VISIBILITY_LABEL[post.visibility]}>{VISIBILITY_LABEL[post.visibility]}</span>
-            {post.updatedAt !== post.createdAt && <span title="Edited">· edited</span>}
+            {isEdited(post.createdAt, post.updatedAt) && <span title="Edited">· edited</span>}
           </div>
         </div>
 
