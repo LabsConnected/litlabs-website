@@ -6,7 +6,7 @@ import { buildMetadata } from "@/lib/seo";
 export const metadata: Metadata = buildMetadata({
   title: "Marketplace",
   description:
-    "Install specialist agents from the LiTT Marketplace to extend what LiTT can do — code, content, research, support, analytics, and more.",
+    "The LiTT Marketplace roadmap: capabilities being built into LiTT, and what installable will mean when executors land.",
   path: "/docs/marketplace",
   index: true,
 });
