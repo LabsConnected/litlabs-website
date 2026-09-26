@@ -1,9 +1,23 @@
+"use client";
+
 import { brand, color } from "@/lib/design/litt-tokens";
 import { SignUp } from "@clerk/nextjs";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { Suspense } from "react";
+import { getSafeRedirectUrl } from "@/lib/safe-redirect-url";
 import { SignupTracker } from "../SignupTracker";
 
-export default function SignUpPage() {
+/**
+ * Mirrors /sign-in: preserves the `redirect_url` query parameter (used by
+ * OAuth flows and deep links) instead of always dropping new users in
+ * /studio. Validated via getSafeRedirectUrl — an unvalidated redirect_url
+ * would be an open redirect.
+ */
+function SignUpContent() {
+  const searchParams = useSearchParams();
+  const redirectUrl = getSafeRedirectUrl(searchParams.get("redirect_url"));
+
   return (
     <div
       className="min-h-dvh flex items-center justify-center px-4 py-8"
@@ -28,14 +42,6 @@ export default function SignUpPage() {
             Verify your email, land in Studio, and give LiTT your first
             mission — you&apos;ll be building in under two minutes.
           </p>
-          <p
-            className="text-[11px] mt-2 leading-relaxed opacity-60"
-            style={{ color: "#94a3b8" }}
-          >
-            LiTT is for people 13 and older. Anyone under 18 should use it
-            with a parent or legal guardian. Paid features and business
-            services may require an adult account holder.
-          </p>
         </div>
 
         <div
@@ -43,6 +49,7 @@ export default function SignUpPage() {
           style={{ backgroundColor: "#1a1a24", border: "1px solid #2a2a3a" }}
         >
           <SignUp
+            forceRedirectUrl={redirectUrl}
             fallbackRedirectUrl="/studio"
             signInUrl="/sign-in"
             appearance={{
@@ -127,5 +134,17 @@ export default function SignUpPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SignUpPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-dvh" style={{ backgroundColor: "#0f0f14" }} />
+      }
+    >
+      <SignUpContent />
+    </Suspense>
   );
 }

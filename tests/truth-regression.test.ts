@@ -158,13 +158,15 @@ describe("Billable cost claims are accurate", () => {
     // The landing hero must not claim "Billable actions show their cost
     // before running" — that is false for chat (LLM calls are billed
     // post-hoc via chargeLlmUsage with actual token counts, no pre-run
-    // cost preview). The parent version has no such claim; this test
-    // guards against it being (re)introduced.
+    // cost preview). This test guards against it being (re)introduced.
+    // NOTE: points at the LIVE hero (src/components/landing/LandingHeroV3,
+    // rendered by HomePageClient). The stale duplicate that used to live
+    // under src/app/landing/_components was deleted.
     const fs = await import("fs/promises");
     const path = await import("path");
     const heroPath = path.resolve(
       process.cwd(),
-      "src/app/landing/_components/LandingHeroV3.tsx",
+      "src/components/landing/LandingHeroV3.tsx",
     );
     const src = await fs.readFile(heroPath, "utf-8");
     expect(src).not.toContain("Billable actions show their cost before running");
