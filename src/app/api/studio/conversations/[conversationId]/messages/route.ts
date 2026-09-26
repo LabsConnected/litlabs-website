@@ -886,7 +886,18 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             } else if (evt.type === "build_start") {
               safeEvent({ type: "build_start", check: evt.check });
             } else if (evt.type === "build_result") {
-              safeEvent({ type: "build_result", check: evt.check, passed: evt.passed, errorCount: evt.errorCount });
+              safeEvent({ type: "build_result", check: evt.check, passed: evt.passed, errorCount: evt.errorCount, diagnostics: evt.diagnostics });
+            } else if (evt.type === "workspace_change") {
+              safeEvent({
+                type: "workspace_change",
+                status: evt.status,
+                files: evt.files,
+                diff: evt.diff,
+                additions: evt.additions,
+                deletions: evt.deletions,
+                checkpointSha: evt.checkpointSha,
+                unknownReason: evt.unknownReason,
+              });
             } else if (evt.type === "phase") {
               safeEvent({ type: "phase", phase: evt.phase, step: evt.step });
             } else if (evt.type === "finished") {
@@ -1200,6 +1211,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                     mutating: c.mutating,
                   })),
                   deployment: deploymentEvidenceFrom(v2Result.toolCalls),
+                  workspaceChange: v2Result.workspaceChange ?? null,
                 },
               } : {}),
             },

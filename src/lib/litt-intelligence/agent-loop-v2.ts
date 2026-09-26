@@ -1074,11 +1074,6 @@ export async function runAgentLoopV2(
       ? `${effectiveFinalText}\n\nQuality check — ${qualityFinale.verdict.reason.charAt(0).toLowerCase()}${qualityFinale.verdict.reason.slice(1)}`
       : effectiveFinalText;
 
-  localProgress.emit({
-    type: cancelled ? "cancelled" : "finished",
-    ...(cancelled ? { reason: cancelReason ?? "Unknown" } : { totalSteps: stepsUsed, totalDurationMs: Date.now() - startTime }),
-  } as ProgressEvent);
-
   // What did this run actually do to the files?
   //
   // Tool success flags cannot answer that: a tool can write bytes and then
@@ -1094,6 +1089,14 @@ export async function runAgentLoopV2(
   const workspaceChange = checkpoint || attemptedMutation
     ? await computeWorkspaceChange(transport, checkpoint ?? null)
     : undefined;
+
+  if (workspaceChange) {
+    localProgress.emit({ type: "workspace_change", ...workspaceChange });
+  }
+  localProgress.emit({
+    type: cancelled ? "cancelled" : "finished",
+    ...(cancelled ? { reason: cancelReason ?? "Unknown" } : { totalSteps: stepsUsed, totalDurationMs: Date.now() - startTime }),
+  } as ProgressEvent);
 
   return {
     finalText: gatedFinalText,
@@ -2160,11 +2163,6 @@ export async function resumeAgentLoopV2(
       ? `${effectiveFinalText}\n\nQuality check — ${qualityFinale.verdict.reason.charAt(0).toLowerCase()}${qualityFinale.verdict.reason.slice(1)}`
       : effectiveFinalText;
 
-  localProgress.emit({
-    type: cancelled ? "cancelled" : "finished",
-    ...(cancelled ? { reason: cancelReason ?? "Unknown" } : { totalSteps: stepsUsed, totalDurationMs: Date.now() - startTime }),
-  } as ProgressEvent);
-
   // What did this run actually do to the files?
   //
   // Tool success flags cannot answer that: a tool can write bytes and then
@@ -2180,6 +2178,14 @@ export async function resumeAgentLoopV2(
   const workspaceChange = checkpoint || attemptedMutation
     ? await computeWorkspaceChange(transport, checkpoint ?? null)
     : undefined;
+
+  if (workspaceChange) {
+    localProgress.emit({ type: "workspace_change", ...workspaceChange });
+  }
+  localProgress.emit({
+    type: cancelled ? "cancelled" : "finished",
+    ...(cancelled ? { reason: cancelReason ?? "Unknown" } : { totalSteps: stepsUsed, totalDurationMs: Date.now() - startTime }),
+  } as ProgressEvent);
 
   return {
     finalText: gatedFinalText,

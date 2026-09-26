@@ -12,6 +12,7 @@ import "server-only";
 import type { WorkspaceTransport } from "./workspace-transport";
 import type { ProgressEmitter } from "./progress-events";
 import type { ProjectPackageInfo } from "./workspace-transport";
+import { parseDiagnostics, type StructuredDiagnostic } from "./diagnostic-parser";
 
 export interface CheckResult {
   check: string;
@@ -20,6 +21,7 @@ export interface CheckResult {
   stdout: string;
   stderr: string;
   errorCount?: number;
+  diagnostics?: StructuredDiagnostic[];
 }
 
 export interface BuildFixLoopResult {
@@ -60,6 +62,7 @@ export async function runBuildFixLoop(
         check: checkId,
         passed: result.passed,
         errorCount: result.errorCount,
+        diagnostics: result.diagnostics,
       });
     }
   }
@@ -116,6 +119,7 @@ export async function runBuildFixLoop(
           check: checkId,
           passed: result.passed,
           errorCount: result.errorCount,
+          diagnostics: result.diagnostics,
         });
       }
     }
@@ -148,6 +152,8 @@ async function runSingleCheck(
   packageInfo: ProjectPackageInfo,
 ): Promise<CheckResult> {
   const result = await transport.runCheck(checkId, packageInfo);
+  const output = `${result.stderr}\n${result.stdout}`.trim();
+  const diagnostics = parseDiagnostics(output, checkId);
 
   // Count errors from output
   let errorCount: number | undefined;
@@ -163,5 +169,6 @@ async function runSingleCheck(
     stdout: result.stdout.slice(0, 5000),
     stderr: result.stderr.slice(0, 5000),
     errorCount,
+    diagnostics,
   };
 }

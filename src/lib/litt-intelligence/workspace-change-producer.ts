@@ -27,6 +27,18 @@ import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 /** The slice of the transport this needs — keeps it trivially testable. */
 export interface WorkspaceChangeProbe {
   gitStatus(): Promise<GitStatusResult>;
+  gitDiff?(options?: { staged?: boolean; path?: string; untracked?: boolean }): Promise<{ diff: string }>;
+}
+
+function diffLineCounts(diff: string): { additions: number; deletions: number } {
+  let additions = 0;
+  let deletions = 0;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+++") || line.startsWith("---")) continue;
+    if (line.startsWith("+")) additions++;
+    else if (line.startsWith("-")) deletions++;
+  }
+  return { additions, deletions };
 }
 
 /** Collect every path git reports as differing, deduped and sorted. */
@@ -91,6 +103,24 @@ export async function computeWorkspaceChange(
   }
 
   const files = changedPathsFromStatus(status);
+  let diff = "";
+  if (probe.gitDiff) {
+    try {
+      diff = (await probe.gitDiff()).diff;
+      // Git does not include untracked files in `git diff`; append a real
+      // no-index diff for each newly-created path so the Mission never says
+      // a new file changed without showing its contents.
+      for (const path of status.untracked ?? []) {
+        const untrackedDiff = await probe.gitDiff({ path, untracked: true });
+        if (untrackedDiff.diff) diff = `${diff}${diff ? "\n" : ""}${untrackedDiff.diff}`;
+      }
+    } catch {
+      // Status remains valid evidence even when diff retrieval fails. The
+      // caller can show the changed-file list without pretending to have a
+      // complete patch.
+    }
+  }
+  const counts = diffLineCounts(diff);
 
   // `clean` is git's own verdict; the enumerated paths are the detail. They
   // should agree, and when they do not the presence of a path wins — a named
@@ -99,6 +129,8 @@ export async function computeWorkspaceChange(
     return {
       status: "unchanged",
       files: [],
+      diff,
+      ...counts,
       checkpointSha: checkpoint.gitSha,
       rollbackAvailable: true,
     };
@@ -107,6 +139,8 @@ export async function computeWorkspaceChange(
   return {
     status: "changed",
     files,
+    diff,
+    ...counts,
     checkpointSha: checkpoint.gitSha,
     rollbackAvailable: true,
   };
