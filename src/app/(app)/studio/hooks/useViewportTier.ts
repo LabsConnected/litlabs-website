@@ -20,7 +20,13 @@ import { useEffect, useState } from "react";
 
 export type ViewportTier = "mobile" | "laptop" | "desktop";
 
-const MOBILE_QUERY = "(max-width: 1023px)";
+/**
+ * The mobile-tier media query, exported so synchronous initializers
+ * (useState initializers that run before the hook's first measurement)
+ * can apply the same breakpoint without duplicating the literal.
+ */
+export const MOBILE_TIER_QUERY = "(max-width: 1023px)";
+const MOBILE_QUERY = MOBILE_TIER_QUERY;
 const DESKTOP_QUERY = "(min-width: 1440px)";
 
 function computeTier(): ViewportTier {

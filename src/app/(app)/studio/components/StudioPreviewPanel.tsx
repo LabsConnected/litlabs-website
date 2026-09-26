@@ -155,6 +155,7 @@ export default function StudioPreviewPanel({
   versionControl = "none",
   refreshKey = 0,
   onSelectionChange,
+  compact = false,
 }: {
   projectId: string | null;
   projectName: string | null;
@@ -170,6 +171,13 @@ export default function StudioPreviewPanel({
   versionControl?: "git" | "none";
   refreshKey?: number;
   onSelectionChange?: (selection: PreviewSelection | null) => void;
+  /**
+   * Mobile density mode: single-line toolbar, secondary actions
+   * (copy URL, maximize) folded away, and no status footer — maximizes
+   * iframe height on phone-sized viewports. Recovery controls (refresh,
+   * restart, stop) and the secrets editor stay reachable.
+   */
+  compact?: boolean;
 }) {
   const { getToken } = useClerkAuth();
   const [state, setState] = useState<PreviewState>(projectId ? "loading" : "not_started");
@@ -805,7 +813,7 @@ export default function StudioPreviewPanel({
           Horizontally scrollable: on narrow phones the action buttons
           (refresh/restart/stop/copy/maximize) would otherwise be cut off
           with no way to reach them. */}
-      <div className="no-scrollbar flex shrink-0 items-center gap-1.5 overflow-x-auto border-b px-2 py-1.5" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }} data-testid="preview-toolbar">
+      <div className={`no-scrollbar flex shrink-0 items-center gap-1.5 overflow-x-auto border-b px-2 ${compact ? "py-1" : "py-1.5"}`} style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }} data-testid="preview-toolbar">
         {/* Runtime status dot */}
         <div
           className="h-2 w-2 shrink-0 rounded-full"
@@ -835,8 +843,12 @@ export default function StudioPreviewPanel({
             history and a branch without any GitHub repository, so this
             must never render "No repository · —" — that reads as "this
             project is empty" for a perfectly healthy project.
+            Compact mode drops it — the source summary reappears in the
+            Inspector and Files surfaces on mobile.
           */}
-          <div className="truncate text-[9px]" style={{ color: "var(--text-muted)" }} title={sourceSummary} data-testid="preview-source-summary">{sourceSummary}</div>
+          {!compact && (
+            <div className="truncate text-[9px]" style={{ color: "var(--text-muted)" }} title={sourceSummary} data-testid="preview-source-summary">{sourceSummary}</div>
+          )}
         </div>
         {/* Device mode selector — compact */}
         {isLive && (
@@ -929,8 +941,9 @@ export default function StudioPreviewPanel({
             <Square size={12} className="pointer-events-none" />
           </button>
         )}
-        {/* Copy URL */}
-        {isLive && previewUrl && (
+        {/* Copy URL — desktop chrome; compact mode keeps "Open in new
+            tab" (below) instead, the more useful action on a phone. */}
+        {!compact && isLive && previewUrl && (
           <button
             type="button"
             onClick={() => void handleCopyUrl()}
@@ -940,6 +953,20 @@ export default function StudioPreviewPanel({
             data-testid="preview-copy-url"
           >
             {urlCopied ? <Check size={12} className="pointer-events-none" style={{ color: "#48EE38" }} /> : <Copy size={12} className="pointer-events-none" />}
+          </button>
+        )}
+        {/* Open in a real browser tab — in the toolbar on compact (the
+            status footer that normally hosts it is hidden there). */}
+        {compact && isLive && previewUrl && (
+          <button
+            type="button"
+            onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")}
+            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            aria-label="Open preview in new tab"
+            title="Open preview in new tab"
+            data-testid="preview-open-external"
+          >
+            <ExternalLink size={12} className="pointer-events-none" />
           </button>
         )}
         {/* Project secrets — Clerk keys for the preview runtime */}
@@ -959,8 +986,9 @@ export default function StudioPreviewPanel({
         >
           <KeyRound size={12} className="pointer-events-none" />
         </button>
-        {/* Maximize */}
-        {isLive && (
+        {/* Maximize — pointless in compact mode (the panel already owns
+            the full viewport width on mobile). */}
+        {!compact && isLive && (
           <button
             type="button"
             onClick={() => setMaximized((v) => !v)}
@@ -1092,8 +1120,10 @@ export default function StudioPreviewPanel({
         )}
       </div>
 
-      {/* Status footer — compact, shows runtime + device info */}
-      {isLive && (
+      {/* Status footer — compact, shows runtime + device info. Hidden in
+          compact (mobile) mode to give the iframe back ~24px; the "Open"
+          action moves into the toolbar there. */}
+      {!compact && isLive && (
         <div className="flex shrink-0 items-center gap-1.5 border-t px-2 py-1" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
           <span
             className="h-1.5 w-1.5 shrink-0 rounded-full"

@@ -46,7 +46,7 @@ import AssetsPanel from "./context/AssetsPanel";
 import { StudioContextProvider, type StudioSelection } from "../context/StudioContext";
 import { deriveCreator, deriveWorkspaceStage } from "../context/derive-studio-context";
 import { StudioCreatorHost } from "./creators/StudioCreatorHost";
-import { useViewportTier } from "../hooks/useViewportTier";
+import { useViewportTier, MOBILE_TIER_QUERY } from "../hooks/useViewportTier";
 import ResizeHandle from "./shell/ResizeHandle";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { useExecutionStore, type MutationSummary } from "../stores/useExecutionStore";
@@ -297,6 +297,10 @@ function CommandStudioContent() {
   // updates. Initial URL openDrawer maps onto the dock.
   const [dockOpen, setDockOpen] = useState<boolean>(() => {
     if (typeof window === "undefined") return !!initial.openDrawer;
+    // On phone-tier viewports the dock defaults to collapsed even if an
+    // earlier session left it open — an expanded dock consumes most of a
+    // mobile viewport. Explicit URL intent (?drawer=…) still opens it.
+    if (window.matchMedia(MOBILE_TIER_QUERY).matches) return !!initial.openDrawer;
     try {
       const stored = sessionStorage.getItem("studio-dock-open");
       if (stored !== null) return stored === "true";
@@ -2050,6 +2054,7 @@ function CommandStudioContent() {
                       versionControl={capabilities.versionControl}
                       workspaceStatus={capabilities.workspaceStatus ?? null}
                       onSelectionChange={setPreviewSelection}
+                      compact={isMobileLitt}
                     />
                   </div>
                 ) : isMedia ? (
@@ -2095,6 +2100,7 @@ function CommandStudioContent() {
             <StudioDock
               open={dockOpen}
               activeTab={dockTab}
+              hidden={isMobileLitt && !dockOpen}
               onTabChange={setDockTab}
               onClose={() => setDockOpen(false)}
               onToggle={handleToggleDock}

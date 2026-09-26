@@ -60,6 +60,13 @@ export interface StudioDockProps {
   activityPulse?: boolean;
   /** True when a terminal command failed — badges the Terminal tab */
   terminalBadge?: boolean;
+  /**
+   * Renders the dock with display:none (all slot content stays mounted —
+   * the PTY survives). Used on the mobile tier where the collapsed 44px
+   * strip would permanently eat preview height; dock tabs are reached via
+   * the mobile Tools sheet instead.
+   */
+  hidden?: boolean;
 }
 
 const COLLAPSED_HEIGHT = 44;
@@ -101,6 +108,7 @@ export default function StudioDock({
   mediaContent,
   activityPulse = false,
   terminalBadge = false,
+  hidden = false,
 }: StudioDockProps) {
   // Internal view is the source of truth for rendering. The `open` prop
   // drives it only on CHANGES (tracked via prevOpen) so a parent that
@@ -252,6 +260,7 @@ export default function StudioDock({
       style={{
         backgroundColor: "rgba(16,12,26,0.92)",
         borderColor: "rgba(255,255,255,0.07)",
+        display: hidden ? "none" : undefined,
         height: effectiveHeight,
         transition: view === "collapsed" ? "height 0.15s ease" : undefined,
       }}
