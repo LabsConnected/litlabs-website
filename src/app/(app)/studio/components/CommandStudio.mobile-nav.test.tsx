@@ -4,16 +4,10 @@ import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 
 // ── Mocks ────────────────────────────────────────────────────────────
-// Regression coverage for the mobile bottom nav (MobileCommandNav in
-// CommandStudioNav.tsx): every destination button — Home, Studio, Create,
-// Assets, Agents, Missions, More — must actually switch the visible
-// center-workspace content on a single tap, at a real mobile viewport
-// (674x1536). Root cause of the bug this guards: `handleSelectDestination`
-// (the nav's onSelect handler) only called `setDestination(dest)` and never
-// synced `advancedToolsOpen`, so `showAdvancedWorkspace` stayed false and
-// the center workspace kept rendering the default chat/preview surface no
-// matter which destination button was tapped — every button *received*
-// the tap (no z-index/pointer-events issue) but nothing visibly changed.
+// Regression coverage for the mobile work-surface dock. Chat, Preview,
+// Files, Activity, and More must switch the existing shared Studio surfaces
+// at a real mobile viewport (674x1536), without creating a second runtime.
+// Legacy destination routing remains covered by CommandStudio.routing.test.tsx.
 //
 // Same mock harness as CommandStudio.preview-singleton.test.tsx: next/dynamic
 // resolves via React.lazy + Suspense so the real mounted-component graph
@@ -417,7 +411,7 @@ function centerWorkspace() {
   return screen.getByTestId("studio-center-workspace");
 }
 
-describe("MobileCommandNav — every destination responds to a single tap (674x1536)", () => {
+describe("MobileCommandNav — shared work surfaces", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sendMock.mockResolvedValue({ accepted: true });
@@ -441,94 +435,38 @@ describe("MobileCommandNav — every destination responds to a single tap (674x1
     });
   });
 
-  it("renders all seven destinations (Home, Studio, Create, Assets, Agents, Missions, More)", async () => {
+  it("renders work surfaces instead of desktop destinations", async () => {
     await renderMobileCommandStudio();
     const nav = within(mobileNav());
-    // Home's accessible name is "Go to dashboard" (aria-label); the rest use
-    // their visible destination label directly.
-    expect(nav.getByLabelText("Go to dashboard"), "Home button should be present").toBeTruthy();
-    for (const label of ["Studio", "Create", "Assets", "Agents", "Missions", "More"]) {
-      expect(nav.getByLabelText(label), `${label} button should be present`).toBeTruthy();
+    for (const label of ["Chat", "Preview", "Files", "Activity", "More"]) {
+      expect(nav.getByLabelText(label), `${label} surface should be present`).toBeTruthy();
     }
+    expect(nav.queryByLabelText("Agents")).toBeNull();
+    expect(nav.queryByLabelText("Missions")).toBeNull();
   });
 
-  it("Home is a real link to /dashboard, not a placeholder handler", async () => {
-    await renderMobileCommandStudio();
-    const home = within(mobileNav()).getByLabelText("Go to dashboard");
-    expect(home.tagName).toBe("A");
-    expect(home).toHaveAttribute("href", "/dashboard");
-  });
-
-  it("defaults to the Studio destination showing the live preview", async () => {
+  it("keeps the real preview as the primary workspace surface", async () => {
     await renderMobileCommandStudio();
     await waitFor(() => {
       expect(centerWorkspace().querySelector("[data-testid='studio-preview-panel']")).toBeTruthy();
     });
   });
 
-  it("tapping Create swaps the center workspace to the Create surface", async () => {
+  it("marks the active work surface with aria-current", async () => {
     const { user } = await renderMobileCommandStudio();
-    await user.click(within(mobileNav()).getByLabelText("Create"));
+    const preview = within(mobileNav()).getByLabelText("Preview");
+    expect(preview.getAttribute("aria-current")).toBe("page");
+    await user.click(within(mobileNav()).getByLabelText("Activity"));
     await waitFor(() => {
-      expect(centerWorkspace().querySelector("[data-testid='image-tool']")).toBeTruthy();
+      expect(within(mobileNav()).getByLabelText("Activity").getAttribute("aria-current")).toBe("page");
     });
-    expect(centerWorkspace().querySelector("[data-testid='studio-preview-panel']")).toBeNull();
   });
 
-  it("tapping Assets swaps the center workspace to the Assets surface", async () => {
+  it("opens Chat and Activity through the same LiTT sheet", async () => {
     const { user } = await renderMobileCommandStudio();
-    await user.click(within(mobileNav()).getByLabelText("Assets"));
-    await waitFor(() => {
-      expect(centerWorkspace().querySelector("[data-testid='gallery-tool']")).toBeTruthy();
-    });
-    expect(centerWorkspace().querySelector("[data-testid='studio-preview-panel']")).toBeNull();
-  });
-
-  it("tapping Agents swaps the center workspace to the Agents surface", async () => {
-    const { user } = await renderMobileCommandStudio();
-    await user.click(within(mobileNav()).getByLabelText("Agents"));
-    await waitFor(() => {
-      expect(centerWorkspace().querySelector("[data-testid='agent-tool']")).toBeTruthy();
-    });
-    expect(centerWorkspace().querySelector("[data-testid='studio-preview-panel']")).toBeNull();
-  });
-
-  it("tapping Missions swaps the center workspace to the Missions surface", async () => {
-    const { user } = await renderMobileCommandStudio();
-    await user.click(within(mobileNav()).getByLabelText("Missions"));
-    await waitFor(() => {
-      expect(centerWorkspace().querySelector("[data-testid='mission-forge']")).toBeTruthy();
-    });
-    expect(centerWorkspace().querySelector("[data-testid='studio-preview-panel']")).toBeNull();
-  });
-
-  it("tapping More swaps the center workspace to the More (Plugins) surface", async () => {
-    const { user } = await renderMobileCommandStudio();
-    await user.click(within(mobileNav()).getByLabelText("More"));
-    await waitFor(() => {
-      expect(centerWorkspace().querySelector("[data-testid='plugins-tool']")).toBeTruthy();
-    });
-    expect(centerWorkspace().querySelector("[data-testid='studio-preview-panel']")).toBeNull();
-  });
-
-  it("tapping Studio after another destination returns to the live preview", async () => {
-    const { user } = await renderMobileCommandStudio();
-    await user.click(within(mobileNav()).getByLabelText("Assets"));
-    await waitFor(() => {
-      expect(centerWorkspace().querySelector("[data-testid='gallery-tool']")).toBeTruthy();
-    });
-    await user.click(within(mobileNav()).getByLabelText("Studio"));
-    await waitFor(() => {
-      expect(centerWorkspace().querySelector("[data-testid='studio-preview-panel']")).toBeTruthy();
-    });
-    expect(centerWorkspace().querySelector("[data-testid='gallery-tool']")).toBeNull();
-  });
-
-  it("marks the active destination with aria-current for accessibility", async () => {
-    const { user } = await renderMobileCommandStudio();
-    const agents = within(mobileNav()).getByLabelText("Agents");
-    expect(agents).not.toHaveAttribute("aria-current");
-    await user.click(agents);
-    await waitFor(() => expect(agents).toHaveAttribute("aria-current", "page"));
+    await user.click(within(mobileNav()).getByLabelText("Chat"));
+    await waitFor(() => expect(screen.getByTestId("litt-mobile-sheet")).toBeTruthy());
+    await user.click(within(mobileNav()).getByLabelText("Activity"));
+    await waitFor(() => expect(screen.getByTestId("litt-mobile-tab-live")).toHaveAttribute("aria-pressed", "true"));
   });
 });
