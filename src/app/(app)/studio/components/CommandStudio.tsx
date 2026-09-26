@@ -986,6 +986,13 @@ function CommandStudioContent() {
           setCompletion({ changes, previewUpdated: previewReady, repaired });
           setContextDrawerOpen(false);
           setLittActiveTab("chat");
+          // The golden path ends with the user looking at the result, not
+          // just a "Done" card — when the run finished with a live preview,
+          // switch the workspace surface to it automatically.
+          if (previewReady) {
+            setDestination("studio");
+            setStudioMode("preview");
+          }
         }
         if (!capabilities.projectId) {
           await refreshCapabilities();
@@ -2329,8 +2336,8 @@ function CommandStudioContent() {
               color: "var(--litt-primary)",
               backdropFilter: "blur(12px)",
             }}
-            aria-label="Ask LiTT to build"
-            title="Ask LiTT to build"
+            aria-label={conversation.busy ? "LiTT is working — open chat" : "Ask LiTT to build"}
+            title={conversation.busy ? "LiTT is working" : "Ask LiTT to build"}
             data-testid="litt-mobile-trigger"
           >
             <span
@@ -2342,6 +2349,20 @@ function CommandStudioContent() {
             >
               L
             </span>
+            {/* Running indicator — when the chat sheet is closed mid-run,
+                this dot is the only signal that LiTT is still working.
+                Real state only: bound to conversation.busy, not a timer. */}
+            {conversation.busy && (
+              <span
+                className="absolute -right-0.5 -top-0.5 h-3 w-3 animate-pulse rounded-full border-2"
+                style={{
+                  backgroundColor: "var(--litt-primary)",
+                  borderColor: "var(--studio-surface)",
+                }}
+                data-testid="litt-mobile-busy-dot"
+                aria-hidden
+              />
+            )}
           </button>
         )}
         {/* Mobile Chat surface — stays MOUNTED on the mobile tier and

@@ -208,6 +208,11 @@ function mapPhase(phase: string, step: number): ExecutionPhase {
       return "editing";
     case "build_fix":
       return "testing";
+    // Preview start/health-check and deploy are verification work — showing
+    // "Editing" while the preview boots or a deploy runs misreports the run.
+    case "preview":
+    case "deploy":
+      return "verifying";
     case "finished":
       return "done";
     case "cancelled":
