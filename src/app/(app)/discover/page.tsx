@@ -128,7 +128,7 @@ export default function DiscoverPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-2xl min-w-0 px-3 pb-28">
+    <div className="mx-auto w-full max-w-4xl min-w-0 px-3 pb-28">
       {/* Compact feed header — the app shell already owns navigation. */}
       <header className="flex min-h-[44px] items-center gap-2 py-2">
         <span className="relative flex h-2 w-2 shrink-0" aria-hidden="true">
