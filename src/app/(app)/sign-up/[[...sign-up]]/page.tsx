@@ -28,6 +28,14 @@ export default function SignUpPage() {
             Verify your email, land in Studio, and give LiTT your first
             mission — you&apos;ll be building in under two minutes.
           </p>
+          <p
+            className="text-[11px] mt-2 leading-relaxed opacity-60"
+            style={{ color: "#94a3b8" }}
+          >
+            LiTT is for people 13 and older. Anyone under 18 should use it
+            with a parent or legal guardian. Paid features and business
+            services may require an adult account holder.
+          </p>
         </div>
 
         <div

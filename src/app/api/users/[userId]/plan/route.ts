@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { isAdmin } from "@/lib/roles";
+import { PLANS, type PlanId } from "@/config/plans";
 import {
   getAdminSupabase,
   isAdminSupabaseConfigured,
@@ -78,12 +79,18 @@ export async function POST(
   const ADMIN_CLERK_IDS = (process.env.ADMIN_CLERK_IDS || "")
     .split(",")
     .filter(Boolean);
-  if (clerkId !== userId && !ADMIN_CLERK_IDS.includes(clerkId)) {
+  // Plan mutations are administrative billing operations. A normal user may
+  // read their own plan, but must never be able to grant themselves access.
+  if (!ADMIN_CLERK_IDS.includes(clerkId) && !(await isAdmin())) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const body = await req.json();
-  const plan = body.plan || "free";
+  const plan = typeof body.plan === "string" ? body.plan : "";
+  if (!Object.prototype.hasOwnProperty.call(PLANS, plan)) {
+    return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
+  }
+  const planId = plan as PlanId;
 
   if (isAdminSupabaseConfigured()) {
     const sb = getAdminSupabase();
@@ -97,7 +104,7 @@ export async function POST(
       await sb.from("subscriptions").upsert(
         {
           user_id: user.id,
-          plan,
+          plan: planId,
           status: "active",
           updated_at: new Date().toISOString(),
         },
@@ -106,5 +113,5 @@ export async function POST(
     }
   }
 
-  return NextResponse.json({ ok: true, plan });
+  return NextResponse.json({ ok: true, plan: planId });
 }
