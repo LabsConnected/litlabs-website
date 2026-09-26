@@ -285,13 +285,16 @@ export async function listPosts(args: ListPostsArgs): Promise<ListPostsResult> {
     // Last 7 days, ordered by engagement score desc. Cursor {t,i} identifies
     // the last item of the previous page within this ordering.
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const { data } = await sb
+    const { data, error } = await sb
       .from("posts")
       .select(POST_SELECT)
       .eq("visibility", "public")
       .gte("created_at", since)
       .order("created_at", { ascending: false })
       .limit(500);
+    if (error) {
+      throw new Error(`Failed to load trending posts: ${error.message}`);
+    }
     const candidates = (data ?? []) as typeof rows;
     const score = (p: { likes_count?: number; comments_count?: number; reposts_count?: number }) =>
       (p.likes_count ?? 0) + (p.comments_count ?? 0) * 2 + (p.reposts_count ?? 0) * 3;
@@ -314,19 +317,25 @@ export async function listPosts(args: ListPostsArgs): Promise<ListPostsResult> {
       // Public posts…
       let q = sb.from("posts").select(POST_SELECT).eq("visibility", "public");
       q = applyKeysetPagination(q, args.cursor);
-      const { data } = await q
+      const { data, error } = await q
         .order("created_at", { ascending: false })
         .order("id", { ascending: false })
         .limit(limit + 1);
+      if (error) {
+        throw new Error(`Failed to load feed posts: ${error.message}`);
+      }
       pages.push((data ?? []) as typeof rows);
 
       if (viewerDbId) {
         // …plus the viewer's own posts and posts by authors they follow
         // with followers/crew visibility (private handled by viewer==author).
-        const { data: follows } = await sb
+        const { data: follows, error: followsError } = await sb
           .from("follows")
           .select("followee_id")
           .eq("follower_id", viewerDbId);
+        if (followsError) {
+          throw new Error(`Failed to load follows: ${followsError.message}`);
+        }
         const followeeIds = (follows ?? []).map((f: { followee_id: string }) => f.followee_id);
         const visibleAuthorIds = [viewerDbId, ...followeeIds];
         let q2 = sb
@@ -335,36 +344,48 @@ export async function listPosts(args: ListPostsArgs): Promise<ListPostsResult> {
           .in("user_id", visibleAuthorIds)
           .in("visibility", ["followers", "crew", "private"]);
         q2 = applyKeysetPagination(q2, args.cursor);
-        const { data: d2 } = await q2
+        const { data: d2, error: d2Error } = await q2
           .order("created_at", { ascending: false })
           .order("id", { ascending: false })
           .limit(limit + 1);
+        if (d2Error) {
+          throw new Error(`Failed to load feed posts: ${d2Error.message}`);
+        }
         pages.push((d2 ?? []) as typeof rows);
       }
     } else {
       // following: posts by followed authors (+ own), any visibility.
       if (viewerDbId) {
-        const { data: follows } = await sb
+        const { data: follows, error: followsError } = await sb
           .from("follows")
           .select("followee_id")
           .eq("follower_id", viewerDbId);
+        if (followsError) {
+          throw new Error(`Failed to load follows: ${followsError.message}`);
+        }
         const authorIds = [viewerDbId, ...(follows ?? []).map((f: { followee_id: string }) => f.followee_id)];
         let q = sb.from("posts").select(POST_SELECT).in("user_id", authorIds);
         if (args.authorId) q = q.eq("user_id", args.authorId);
         q = applyKeysetPagination(q, args.cursor);
-        const { data } = await q
+        const { data, error } = await q
           .order("created_at", { ascending: false })
           .order("id", { ascending: false })
           .limit(limit + 1);
+        if (error) {
+          throw new Error(`Failed to load feed posts: ${error.message}`);
+        }
         pages.push((data ?? []) as typeof rows);
       } else {
         // Signed out: Following tab behaves like For You (public only).
         let q = sb.from("posts").select(POST_SELECT).eq("visibility", "public");
         q = applyKeysetPagination(q, args.cursor);
-        const { data } = await q
+        const { data, error } = await q
           .order("created_at", { ascending: false })
           .order("id", { ascending: false })
           .limit(limit + 1);
+        if (error) {
+          throw new Error(`Failed to load feed posts: ${error.message}`);
+        }
         pages.push((data ?? []) as typeof rows);
       }
     }

@@ -50,8 +50,16 @@ async function getHandler(req: NextRequest) {
     viewerDbId = dbUser?.id ?? null;
   }
 
-  const result = await listPosts({ viewerDbId, tab, authorId, cursor, limit });
-  return NextResponse.json(result);
+  try {
+    const result = await listPosts({ viewerDbId, tab, authorId, cursor, limit });
+    return NextResponse.json(result);
+  } catch {
+    // DB failure is a real error — never report it as an empty feed.
+    return NextResponse.json(
+      { error: "Couldn't load the feed right now. Please try again." },
+      { status: 500 },
+    );
+  }
 }
 
 async function postHandler(req: NextRequest) {

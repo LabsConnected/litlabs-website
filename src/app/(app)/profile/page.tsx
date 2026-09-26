@@ -350,20 +350,20 @@ function ProfilePageInner() {
 
         {(activeTab === "overview" || activeTab === "about") && (
           <div className="profile-content-grid" style={{ marginTop: "24px" }}>
-            <ProfileOverview hasProjects hasAgents />
+            <ProfileOverview />
             <ProfileRightRail profile={profile} />
           </div>
         )}
 
         {activeTab === "projects" && (
           <div style={{ marginTop: "24px" }}>
-            <ProfileOverview hasProjects />
+            <ProfileOverview />
           </div>
         )}
 
         {activeTab === "agents" && (
           <div style={{ marginTop: "24px" }}>
-            <ProfileOverview hasAgents />
+            <ProfileOverview />
           </div>
         )}
 

@@ -6,14 +6,15 @@ import {
   MapPin,
   Globe,
   CalendarDays,
-  BadgeCheck,
   Share2,
   MoreHorizontal,
   UserPlus,
   MessageSquare,
   Pencil,
+  Check,
 } from "lucide-react";
-import { useRef } from "react";
+import { useRef, useState } from "react";
+import { useUser } from "@clerk/nextjs";
 import type { UserProfile } from "@/context/ProfileContext";
 import type { ProfileStats } from "@/lib/profile-stats";
 import { formatStatCount } from "@/lib/profile-stats";
@@ -58,6 +59,36 @@ export function ProfileIdentity({
   const avatarRef = useRef<HTMLInputElement>(null);
   const avatarSrc = avatarPreview || profile.avatarUrl;
   const initial = (profile.displayName?.[0] || "C").toUpperCase();
+  const { user } = useUser();
+  const joinedLabel = user?.createdAt
+    ? user.createdAt.toLocaleDateString("en-US", {
+        month: "short",
+        year: "numeric",
+      })
+    : null;
+  const [shareState, setShareState] = useState<"idle" | "copied" | "failed">(
+    "idle",
+  );
+
+  const handleShare = async () => {
+    const url = window.location.href;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: profile.displayName, url });
+      } catch {
+        // Share sheet dismissed or failed — nothing to report.
+      }
+      return;
+    }
+    // No native share: copy the link (or fail honestly if that's unavailable).
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareState("copied");
+    } catch {
+      setShareState("failed");
+    }
+    window.setTimeout(() => setShareState("idle"), 2000);
+  };
 
   return (
     <div className="profile-identity">
@@ -80,9 +111,6 @@ export function ProfileIdentity({
             )}
           </div>
         </div>
-
-        {/* Online indicator */}
-        <span className="avatar-online" />
 
         {/* Owner: change avatar overlay */}
         {isOwner && !avatarPreview && (
@@ -129,23 +157,13 @@ export function ProfileIdentity({
       {/* Identity text + actions */}
       <div className="identity-body">
         <div className="identity-top">
-          {/* Name + badge + level */}
+          {/* Name */}
           <div className="identity-name-row">
             <h1 className="identity-name">{profile.displayName}</h1>
-            <BadgeCheck
-              size={20}
-              className="identity-verified"
-              aria-label="Verified creator"
-            />
-            <span className="identity-level">Lv 18</span>
           </div>
 
-          {/* Username + role */}
-          <p className="identity-username">
-            @{profile.username}
-            <span className="identity-role-sep">·</span>
-            <span className="identity-role">AI Creator · Founder</span>
-          </p>
+          {/* Username */}
+          <p className="identity-username">@{profile.username}</p>
 
           {/* Bio */}
           {profile.bio && <p className="identity-bio">{profile.bio}</p>}
@@ -169,10 +187,12 @@ export function ProfileIdentity({
                 {profile.website.replace(/^https?:\/\//, "")}
               </a>
             )}
-            <span className="meta-chip">
-              <CalendarDays size={12} />
-              Joined 2024
-            </span>
+            {joinedLabel && (
+              <span className="meta-chip">
+                <CalendarDays size={12} />
+                Joined {joinedLabel}
+              </span>
+            )}
           </div>
         </div>
 
@@ -184,11 +204,23 @@ export function ProfileIdentity({
                 <Pencil size={14} />
                 Edit profile
               </button>
-              <button className="btn-secondary" aria-label="Share profile">
-                <Share2 size={14} />
-              </button>
-              <button className="btn-secondary" aria-label="More options">
-                <MoreHorizontal size={14} />
+              <button
+                className="btn-secondary"
+                aria-label="Share profile"
+                onClick={handleShare}
+                title={
+                  shareState === "copied"
+                    ? "Link copied"
+                    : shareState === "failed"
+                      ? "Couldn't copy the link"
+                      : "Share profile"
+                }
+              >
+                {shareState === "copied" ? (
+                  <Check size={14} />
+                ) : (
+                  <Share2 size={14} />
+                )}
               </button>
             </>
           ) : (
@@ -270,16 +302,6 @@ export function ProfileIdentity({
           background: linear-gradient(135deg, rgba(168,85,247,0.3), rgba(48,231,255,0.15));
           color: #a855f7;
         }
-        .avatar-online {
-          position: absolute;
-          bottom: 6px;
-          right: 6px;
-          width: 16px;
-          height: 16px;
-          border-radius: 999px;
-          background: #34d399;
-          border: 3px solid #07070b;
-        }
         .avatar-edit-btn {
           position: absolute;
           inset: 0;
@@ -349,17 +371,6 @@ export function ProfileIdentity({
           line-height: 1.1;
           letter-spacing: -0.02em;
         }
-        .identity-verified { color: #a855f7; flex-shrink: 0; }
-        .identity-level {
-          font-size: 11px;
-          font-weight: 700;
-          padding: 2px 8px;
-          border-radius: 999px;
-          background: linear-gradient(135deg, rgba(168,85,247,0.2), rgba(48,231,255,0.1));
-          border: 1px solid rgba(168,85,247,0.3);
-          color: #c084fc;
-          letter-spacing: 0.04em;
-        }
         .identity-username {
           font-size: 14px;
           color: #71717a;
@@ -369,8 +380,6 @@ export function ProfileIdentity({
           gap: 6px;
           flex-wrap: wrap;
         }
-        .identity-role-sep { color: #3f3f46; }
-        .identity-role { color: #a1a1aa; }
         .identity-bio {
           font-size: 14px;
           line-height: 1.6;
