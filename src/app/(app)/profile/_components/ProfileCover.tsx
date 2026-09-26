@@ -106,11 +106,14 @@ export function ProfileCover({
           position: relative;
           height: 280px;
           overflow: hidden;
-          border-radius: 22px;
-          border: 1px solid rgba(255,255,255,0.08);
+          /* Full-bleed banner: no card radius or side borders — the wallpaper
+             fills edge-to-edge like the homepage hero treatment. */
+          border-radius: 0;
+          border: none;
+          border-bottom: 1px solid rgba(255,255,255,0.08);
         }
         @media (max-width: 1099px) { .profile-cover { height: 230px; } }
-        @media (max-width: 767px)  { .profile-cover { height: 170px; border-radius: 14px; } }
+        @media (max-width: 767px)  { .profile-cover { height: 170px; } }
 
         .branded-cover {
           background:

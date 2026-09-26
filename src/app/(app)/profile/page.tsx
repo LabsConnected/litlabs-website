@@ -291,6 +291,22 @@ function ProfilePageInner() {
 
   return (
     <div className="profile-page">
+      {/* Full-bleed cover: sits outside the padded content container so the
+          banner wallpaper fills edge-to-edge like the homepage hero. */}
+      <ProfileCover
+        coverUrl={profile.coverUrl}
+        coverPreview={coverPreview}
+        isOwner={true}
+        saving={saving}
+        uploadError={uploadError}
+        onFileSelect={handleCoverSelect}
+        onConfirm={confirmCoverUpload}
+        onCancel={() => {
+          setCoverFile(null);
+          setCoverPreview(null);
+          setUploadError(null);
+        }}
+      />
       <div className="profile-container">
         {syncError && (
           <p
@@ -309,21 +325,6 @@ function ProfilePageInner() {
             {syncError}
           </p>
         )}
-        <ProfileCover
-          coverUrl={profile.coverUrl}
-          coverPreview={coverPreview}
-          isOwner={true}
-          saving={saving}
-          uploadError={uploadError}
-          onFileSelect={handleCoverSelect}
-          onConfirm={confirmCoverUpload}
-          onCancel={() => {
-            setCoverFile(null);
-            setCoverPreview(null);
-            setUploadError(null);
-          }}
-        />
-
         <ProfileIdentity
           profile={profile}
           stats={stats}
