@@ -103,6 +103,31 @@ const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
   },
 };
 
+/**
+ * Parse a /api/llm/health payload into per-provider availability.
+ *
+ * Returns null when the payload carries no provider fields — e.g. the
+ * minimal {status} payload served to unauthenticated callers, or an error
+ * payload. Null means "unknown": callers must leave previously known state
+ * alone rather than marking providers "unavailable".
+ */
+export function parseLlmProviderHealth(
+  data: unknown,
+): { gemini: boolean; groq: boolean; openrouter: boolean } | null {
+  if (!data || typeof data !== "object") return null;
+  const d = data as {
+    gemini?: { available?: unknown };
+    groq?: { available?: unknown };
+    openrouter?: { available?: unknown };
+  };
+  if (d.gemini === undefined && d.groq === undefined && d.openrouter === undefined) return null;
+  return {
+    gemini: !!d.gemini?.available,
+    groq: !!d.groq?.available,
+    openrouter: !!d.openrouter?.available,
+  };
+}
+
 export function useConnectionSummary(options?: { disabled?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [capabilities, setCapabilities] = useState<ConnectionCapabilities>(
@@ -199,25 +224,27 @@ export function useConnectionSummary(options?: { disabled?: boolean }) {
 
       // LLM provider health — sync to model store so the empty-state
       // briefing and model picker show accurate "AI ready" status.
+      // Only assert what the check actually verified: a failed or
+      // unparseable health check is "unknown", never "unavailable".
+      // (The route returns a minimal {status} payload to unauthenticated
+      // callers — that must not read as "all providers down".)
       const setProviderHealth = useStudioModelStore.getState().setProviderHealth;
       if (llmRes.status === "fulfilled" && llmRes.value.ok) {
-        const llmData = await llmRes.value.json();
-        const geminiOk = !!llmData.gemini?.available;
-        const groqOk = !!llmData.groq?.available;
-        const openrouterOk = !!llmData.openrouter?.available;
-        setProviderHealth("gemini", geminiOk ? "available" : "unavailable");
-        setProviderHealth("groq", groqOk ? "available" : "unavailable");
-        setProviderHealth("openrouter", openrouterOk ? "available" : "unavailable");
-        // "Auto" models route to whichever provider is available (prefer Gemini).
-        setProviderHealth("Auto", geminiOk || groqOk || openrouterOk ? "available" : "unavailable");
-      } else {
-        // Health endpoint failed — mark all as unavailable so the UI
-        // shows a truthful "setup required" rather than a stale unknown.
-        setProviderHealth("gemini", "unavailable");
-        setProviderHealth("groq", "unavailable");
-        setProviderHealth("openrouter", "unavailable");
-        setProviderHealth("Auto", "unavailable");
+        const providers = parseLlmProviderHealth(await llmRes.value.json());
+        if (providers) {
+          setProviderHealth("gemini", providers.gemini ? "available" : "unavailable");
+          setProviderHealth("groq", providers.groq ? "available" : "unavailable");
+          setProviderHealth("openrouter", providers.openrouter ? "available" : "unavailable");
+          // "Auto" models route to whichever provider is available (prefer Gemini).
+          setProviderHealth("Auto", providers.gemini || providers.groq || providers.openrouter ? "available" : "unavailable");
+        }
+        // else: no provider fields in the payload — leave previous state.
+        // Unknown stays unknown (the UI shows an honest "checking"), and the
+        // next poll retries.
       }
+      // else: the health check itself failed — leave previous state. A failed
+      // check is not evidence the providers are down, and must never surface
+      // as a stale "AI provider unavailable" badge while the router works.
 
       // Use client-side terminal store as primary source of truth for PTY status
       // Only fall back to server-side if client hasn't connected yet

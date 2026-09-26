@@ -54,6 +54,12 @@ export interface ExecutionEvent {
   summary: string;
   /** Tool ID for tool events */
   toolId?: string;
+  /**
+   * Approval-gate id (pausedRunId) for approval_required entries. Lets the
+   * activity feed dedupe repeated signals for the same gate instead of
+   * stacking duplicate "Approval needed" entries.
+   */
+  gateId?: string;
   /** Success/failure for result events */
   success?: boolean;
   /** Duration in ms for completed operations */
@@ -226,6 +232,41 @@ function mapPhase(phase: string, step: number): ExecutionPhase {
   }
 }
 
+/**
+ * Approval-entry dedupe helpers. The agent loop can emit several signals for
+ * one approval gate (an `approval_required` progress signal, then a
+ * `pending_approval` with the gate's pausedRunId, plus re-fires on SSE
+ * reconnect). Without dedupe the activity feed stacks 2-3 identical
+ * "Approval needed" entries per gate.
+ *
+ * Gates are sequential — at most one gate is pending at a time — so an
+ * `approval_resolved` event closes every approval_required entry before it.
+ */
+
+/**
+ * Index of the most recent approval_required entry that is still open (no
+ * approval_resolved after it), matches toolId, and has no gateId claimed
+ * yet. -1 when there is none.
+ */
+function findUnclaimedApprovalIndex(events: ExecutionEvent[], toolId: string): number {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.type === "approval_resolved") return -1;
+    if (e.type === "approval_required" && e.toolId === toolId && !e.gateId) return i;
+  }
+  return -1;
+}
+
+/** Whether an approval_required entry for this gate id is still open. */
+function hasOpenApprovalEntry(events: ExecutionEvent[], gateId: string): boolean {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.type === "approval_resolved") return false;
+    if (e.type === "approval_required" && e.gateId === gateId) return true;
+  }
+  return false;
+}
+
 /** Classify a successful file mutation for truthful completion feedback. */
 function mutationKindForTool(toolId: string): MutationKind | null {
   switch (toolId) {
@@ -381,6 +422,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   setPhase: (phase) => set({ phase }),
 
   setPendingApproval: (approval) => {
+    const prevPending = get().pendingApproval;
     set({
       pendingApproval: approval,
       phase: approval ? "awaiting_approval" : get().phase,
@@ -394,14 +436,31 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     // reattach to the next gate that mounts.
     if (!approval) {
       set({ approvalPhase: "idle", approvalError: null, approvalRetryable: true, approvalExpired: false });
+      return;
     }
-    if (approval) {
-      get().addEvent({
-        type: "approval_required",
-        summary: `Approval needed: ${approval.toolId.replace(/_/g, " ")}`,
-        toolId: approval.toolId,
-      });
+    const gateId = approval.pausedRunId;
+    // Same gate already pending — its entry is already logged. A repeated
+    // pending_approval signal for one gate must not duplicate the entry.
+    if (gateId && prevPending?.pausedRunId === gateId) return;
+    const events = get().events;
+    // The approval_required SSE signal may have logged this gate already
+    // under its toolId (no gate id yet). Claim that entry in place instead
+    // of appending a duplicate.
+    const unclaimedIdx = findUnclaimedApprovalIndex(events, approval.toolId);
+    if (unclaimedIdx >= 0) {
+      set((state) => ({
+        events: state.events.map((e, i) => (i === unclaimedIdx ? { ...e, gateId } : e)),
+      }));
+      return;
     }
+    // Already logged under this gate id and still open — don't duplicate.
+    if (gateId && hasOpenApprovalEntry(events, gateId)) return;
+    get().addEvent({
+      type: "approval_required",
+      summary: `Approval needed: ${approval.toolId.replace(/_/g, " ")}`,
+      toolId: approval.toolId,
+      gateId,
+    });
   },
 
   resolveApproval: (decision) => {
@@ -647,6 +706,10 @@ export function feedSSEEventToExecutionStore(
       // false "could not be resumed". Log the event only — only
       // `pending_approval` (emitted after the paused run is persisted
       // server-side and carrying its pausedRunId) mounts the card.
+      //
+      // Dedupe: the loop can re-fire this signal for the same gate, so
+      // skip it while an unclaimed entry for the tool is still open.
+      if (findUnclaimedApprovalIndex(s.events, evt.toolId ?? "") >= 0) break;
       s.addEvent({
         type: "approval_required",
         summary: `Approval needed: ${(evt.toolId ?? "").replace(/_/g, " ")}`,

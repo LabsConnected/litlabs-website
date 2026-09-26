@@ -80,6 +80,27 @@ const TEXT_EXTENSIONS = new Set([
   "yml",
 ]);
 
+/**
+ * fetch() with a hard timeout. A hung request must never leave the Files tab
+ * spinning on "Loading files…" forever — the workspace-prepare retry path
+ * previously had no timeout at all, so a stalled prepare POST wedged the
+ * spinner with no error and no retry.
+ */
+export async function fetchWithTimeout(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs = 30_000,
+): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal: init.signal ?? AbortSignal.timeout(timeoutMs) });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Request timed out — the workspace may be slow. Try refreshing.");
+    }
+    throw error;
+  }
+}
+
 function normalizePath(value: string): string {
   const path = value.replace(/\\/g, "/").trim();
   if (!path || path === ".") return ".";
@@ -175,7 +196,10 @@ export default function StudioProjectFiles({
   }, [getToken]);
 
   const requestJson = useCallback(async (url: string, init?: RequestInit) => {
-    const response = await fetch(url, {
+    // Bounded: every files-tab request goes through the timeout so a hung
+    // workspace-prepare (or any other request) surfaces an error with retry
+    // instead of an infinite "Loading files…" spinner.
+    const response = await fetchWithTimeout(url, {
       credentials: "include",
       ...init,
       headers: {
