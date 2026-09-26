@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { CAPABILITY_REGISTRY } from "@/lib/capability-registry";
 
 export const runtime = "nodejs";
 
@@ -33,9 +34,21 @@ async function getHandler(req: NextRequest) {
       return NextResponse.json({ error: "Failed to fetch marketplace items" }, { status: 500 });
     }
 
+    // installable is derived server-side from the capability registry: an
+    // item is only installable when its capability has a real executor.
+    // Today no capability has one, so every item reports installable: false
+    // and the page is truthful by construction. Items flip to installable
+    // automatically the moment executors land — no page changes needed.
+    const itemsWithInstallable = (items || []).map((item) => ({
+      ...item,
+      installable: Boolean(
+        item.capability_key && CAPABILITY_REGISTRY[item.capability_key]?.execute,
+      ),
+    }));
+
     return NextResponse.json({
-      items: items || [],
-      total: items?.length || 0,
+      items: itemsWithInstallable,
+      total: itemsWithInstallable.length,
     });
   } catch {
     return NextResponse.json({ error: "Failed to fetch marketplace items" }, { status: 500 });
