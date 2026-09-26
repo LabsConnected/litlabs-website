@@ -38,7 +38,11 @@ import {
 export interface DescribeBusinessBoxProps {
   /** Project to persist to. Omit on project-less surfaces (dashboard). */
   projectId?: string | null;
-  variant: "dashboard" | "greeter";
+  /**
+   * Visual variant. "studio" matches the greeter panel styling but uses the
+   * canonical LIME accent (Studio surfaces must not drift to purple).
+   */
+  variant: "dashboard" | "greeter" | "studio";
   className?: string;
   /** Called after the profile is persisted/stashed. */
   onConfirmed?: (result: {
@@ -61,7 +65,7 @@ const TYPE_OPTIONS = (Object.keys(BUSINESS_TYPES) as BusinessTypeId[]).map(
   (id) => BUSINESS_TYPES[id],
 );
 
-function panelStyle(variant: "dashboard" | "greeter"): React.CSSProperties {
+function panelStyle(variant: "dashboard" | "greeter" | "studio"): React.CSSProperties {
   if (variant === "dashboard") {
     return {
       background: "rgba(18,18,21,0.7)",
@@ -184,10 +188,11 @@ export function DescribeBusinessBox({
     setPhase({ kind: "idle" });
   };
 
-  const isGreeter = variant === "greeter";
+  const isGreeter = variant === "greeter" || variant === "studio";
   const textPrimary = isGreeter ? "var(--text-primary)" : "#fafafa";
   const textMuted = isGreeter ? "var(--text-muted)" : "#a1a1aa";
-  const accent = isGreeter ? "var(--glass-purple)" : "#a78bfa";
+  const accent =
+    variant === "studio" ? "var(--litt-primary)" : isGreeter ? "var(--glass-purple)" : "#a78bfa";
 
   return (
     <div className={className} style={{ ...panelStyle(variant), borderRadius: 16, padding: 20 }}>
