@@ -368,3 +368,111 @@ describe("send() transport-loss reconciliation — awaitingInput", () => {
     expect(sendResult?.awaitingInput).toBe(false);
   });
 });
+
+// ── 409 refusal classification — real hook render ────────────────────
+// Regression: every 409 used to be treated as a stale-revision race —
+// reloaded, retried once, then misreported as "Conversation was updated
+// by another session". A coded refusal (TOOL_EXECUTION_UNAVAILABLE when
+// workspace provisioning failed) must surface its real error and must
+// NOT trigger the revision retry.
+describe("send() 409 coded refusal — no revision retry", () => {
+  const CONVERSATION: Conversation = {
+    id: "conv-1",
+    ownerId: "user-1",
+    projectId: "proj-1",
+    title: "Test",
+    activeAgentSlug: "litt",
+    activeAgentMode: "standard",
+    agentInstanceId: null,
+    revision: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    archivedAt: null,
+  };
+
+  const makeMsg = (overrides: Partial<ConversationMessage>): ConversationMessage => ({
+    id: "msg-x",
+    conversationId: "conv-1",
+    ownerId: "user-1",
+    projectId: "proj-1",
+    role: "assistant",
+    agentSlug: "litt",
+    agentMode: "standard",
+    agentInstanceId: null,
+    content: "",
+    status: "completed",
+    parentMessageId: null,
+    regenerationOfMessageId: null,
+    clientRequestId: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  });
+
+  const jsonResponse = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  let postCount = 0;
+
+  beforeEach(() => {
+    postCount = 0;
+    useConversationStore.getState().resetForProject();
+
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+
+      if (method === "POST" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        postCount += 1;
+        return jsonResponse({
+          error: "Tool execution unavailable for this task",
+          code: "TOOL_EXECUTION_UNAVAILABLE",
+          detail: "No verified workspace execution path is available. The request was not sent to a text-only model.",
+        }, 409);
+      }
+      // The refusal reloads canonical messages — the user message WAS
+      // persisted before the gate rejected the turn.
+      if (method === "GET" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        return jsonResponse({
+          messages: [makeMsg({ id: "user-1", role: "user", content: "Build me a site" })],
+          revision: 2,
+        });
+      }
+      if (url.startsWith("/api/studio/conversations")) {
+        return jsonResponse({ conversations: [] });
+      }
+      return jsonResponse({});
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useConversationStore.getState().resetForProject();
+  });
+
+  it("surfaces the real refusal without a revision-conflict retry", async () => {
+    const { result } = renderHook(() => useCanonicalConversation({ serverProjectId: "proj-1" }));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    act(() => {
+      const st = useConversationStore.getState();
+      st.setConversations([CONVERSATION]);
+      st.selectConversation("conv-1");
+    });
+
+    let sendResult: SendResult | undefined;
+    await act(async () => {
+      sendResult = await result.current.send("Build me a website");
+    });
+
+    // No retry — the refusal is final, not a revision race.
+    expect(postCount).toBe(1);
+    expect(sendResult?.accepted).toBe(false);
+    expect(sendResult?.errorKind).toBe("conflict");
+    // The real refusal message, not "Conversation was updated by another session".
+    expect(result.current.sendError).toContain("Tool execution unavailable");
+    expect(result.current.sendError).not.toContain("updated by another session");
+  });
+});

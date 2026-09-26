@@ -1262,6 +1262,36 @@ export function useCanonicalConversation({
 
         // Error / conflict paths still return JSON.
         if (response.status === 409) {
+          // 409 is overloaded: "Stale revision" is a revision race worth one
+          // retry, but TOOL_EXECUTION_UNAVAILABLE (and any other coded
+          // refusal) is a real rejection — retrying it as a revision
+          // conflict would return the same 409 and then misreport it as
+          // "Conversation was updated by another session".
+          const conflictData = await response.json().catch(() => null) as {
+            error?: string;
+            detail?: string;
+            code?: string;
+          } | null;
+          const isStaleRevision =
+            !conflictData?.code && (conflictData?.error ?? "").toLowerCase().includes("revision");
+          if (!isStaleRevision) {
+            // The user message WAS persisted server-side before the gate —
+            // reload so the transcript shows canonical truth, then surface
+            // the real refusal instead of a revision-conflict message.
+            await loadMessages(activeConversationId);
+            const sRefused = getStore();
+            sRefused.setMessages(
+              activeConversationId,
+              sRefused.getMessages().filter((m) => !m.id.startsWith("optimistic_")),
+            );
+            const refusalText = conflictData?.detail
+              ? `${conflictData.error}: ${conflictData.detail}`
+              : conflictData?.error || "The request was refused (409).";
+            setSendError(refusalText);
+            mobileDiag("chat_api", "message_send_refused", { code: conflictData?.code ?? "unknown" });
+            return { accepted: false, persisted: true, errorKind: "conflict" };
+          }
+
           // Revision conflict — reload messages from server and retry once with
           // the refreshed revision so the user's message still sends.
           await loadMessages(activeConversationId);
@@ -1279,7 +1309,15 @@ export function useCanonicalConversation({
               activeConversationId,
               sFinal409.getMessages().filter((m) => !m.id.startsWith("optimistic_")),
             );
-            setSendError("Conversation was updated by another session. Your message was not sent — please try again.");
+            const second = await response.json().catch(() => null) as { error?: string; detail?: string; code?: string } | null;
+            const stillRevision = !second?.code && (second?.error ?? "").toLowerCase().includes("revision");
+            setSendError(
+              stillRevision || !second
+                ? "Conversation was updated by another session. Your message was not sent — please try again."
+                : second.detail
+                  ? `${second.error}: ${second.detail}`
+                  : second.error || "The request was refused (409).",
+            );
             mobileDiag("chat_api", "revision_conflict_unresolved");
             return { accepted: false, persisted: false, errorKind: "conflict" };
           }

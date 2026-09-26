@@ -43,6 +43,8 @@ import {
   buildRuntimeContextBlock,
   type ClientRuntimeHint,
 } from "@/lib/litt-intelligence/canonical-runtime-context";
+import { classifyIntent } from "@/lib/litt-kernel";
+import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
 import { detectAndExecuteTool } from "@/lib/litt-intelligence/tool-executor";
 import { deploymentEvidenceFrom } from "@/lib/studio/completion-evidence";
 import {
@@ -284,13 +286,13 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     voiceTransportConnected: runtimeContext.voiceTransportConnected,
     cameraActive: runtimeContext.cameraActive,
   };
-  const canonicalCtx = await buildCanonicalRuntimeContext(
+  let canonicalCtx = await buildCanonicalRuntimeContext(
     userId,
     effectiveProjectId,
     clientHint,
     { executionMode },
   );
-  const runtimeContextBlock = buildRuntimeContextBlock(canonicalCtx);
+  let runtimeContextBlock = buildRuntimeContextBlock(canonicalCtx);
 
   // 6. Load prior completed messages from DB (excluding the just-inserted user message)
   const allMessages = await listMessages(conversation.id, userId);
@@ -424,6 +426,41 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         Connection: "keep-alive",
       },
     });
+  }
+
+  // 7.9. Auto-provision the workspace when this turn needs execution.
+  // The conversation auto-create path ("LiTT Chat" project) never
+  // provisions a workspace, so a brand-new user's first "build me a
+  // website" hit TOOL_EXECUTION_UNAVAILABLE 409 — the send could never
+  // succeed. classifyIntent is a cheap sync classifier; provisioning only
+  // runs for turns that actually need a workspace. If provisioning fails
+  // we fall through to the honest 409 gate below.
+  if (
+    conversation.projectId &&
+    !canonicalCtx.workspaceExecutionAvailable &&
+    classifyIntent(resolvedMessage, { hasProject: true }).requiresExecution
+  ) {
+    try {
+      await provisionWorkspaceForProject(conversation.projectId, userId);
+      canonicalCtx = await buildCanonicalRuntimeContext(
+        userId,
+        effectiveProjectId,
+        clientHint,
+        { executionMode },
+      );
+      runtimeContextBlock = buildRuntimeContextBlock(canonicalCtx);
+      studioLog("message:workspace_auto_provisioned", {
+        conversationId: conversation.id,
+        projectId: conversation.projectId,
+        status: canonicalCtx.workspaceExecutionAvailable ? "ready" : "unavailable",
+      });
+    } catch (provisionErr) {
+      studioLog("message:workspace_auto_provision_failed", {
+        conversationId: conversation.id,
+        projectId: conversation.projectId,
+        errorClass: provisionErr instanceof Error ? provisionErr.message : "unknown",
+      });
+    }
   }
 
   // 8. Recall project-scoped memories
