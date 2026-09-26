@@ -303,7 +303,9 @@ function MessageHoverActions({
   isPinned: boolean;
 }) {
   if (isUser) return null;
-  if (!message.content?.trim()) return null;
+  // Failed turns can legitimately have no provider response text. Keep the
+  // recovery action visible so Retry can re-send the parent user turn.
+  if (!message.content?.trim() && !isFailed) return null;
   const actions: { icon: React.ReactNode; label: string; onClick: () => void; active?: boolean; testId?: string }[] = [
     {
       icon: isCopied && copiedKind === "text" ? <IconCheck /> : <IconCopy />,
@@ -563,10 +565,10 @@ export default function StudioTranscript({
           const isUser = message.role === "user";
           const isStreaming = message.status === "streaming";
           const hasContent = Boolean(message.content?.trim());
-          if (!isUser && !hasContent && !isStreaming) {
+          const isFailed = !isUser && message.status === "failed";
+          if (!isUser && !hasContent && !isStreaming && !isFailed) {
             return null;
           }
-          const isFailed = !isUser && message.status === "failed";
           const isLastAssistant = !isUser && index === messages.length - 1 && !busy;
           const showThinkingPlaceholder = !isUser && isStreaming && !hasContent;
           const command = !isUser ? parseJarvisActions(message.content).find((a) => a.command)?.command : undefined;

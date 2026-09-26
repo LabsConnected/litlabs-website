@@ -41,6 +41,30 @@ export default function SafetyDocsClient() {
         ships.
       </DocP>
 
+      <DocH2 id="age-and-personal-safety">Age and personal safety</DocH2>
+      <DocP>
+        LiTT is a general-audience service for people 13 and older and is not
+        directed to children under 13. Never share passwords, payment-card
+        numbers, government IDs, private keys, or another person&apos;s personal
+        information in a prompt, upload, project, or public post. If you are
+        under 18, involve a parent or legal guardian before using paid,
+        business, publishing, or connected-account features.
+      </DocP>
+      <DocList
+        items={[
+          <>Use Stripe&apos;s hosted checkout for payments. LiTT does not ask you to paste a card number into chat or settings.</>,
+          <>Review generated code, images, and copy before publishing; AI output can be wrong or unsafe.</>,
+          <>Stop and report impersonation, harassment, sexual content involving minors, fraud, malware, or exposed credentials to support@litlabs.net.</>,
+          <>If a prompt asks for a secret or identity document, do not provide it unless the flow explicitly explains why it is required.</>,
+        ]}
+      />
+      <Callout kind="warning" title="Report urgent harm">
+        If someone is in immediate danger, contact local emergency services
+        first. For Platform abuse or child-safety concerns, contact
+        support@litlabs.net and include the relevant URL or account handle —
+        never send passwords, full card numbers, or government ID scans.
+      </Callout>
+
       <DocH2 id="studio-approvals">Approvals in Studio</DocH2>
       <DocList
         items={[

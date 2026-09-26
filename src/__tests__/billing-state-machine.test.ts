@@ -264,12 +264,19 @@ describe("POST /api/billing/checkout — checkout session creation", () => {
       return new Response("not found", { status: 404 });
     }) as any;
 
-    const req = makeNextRequest(JSON.stringify({ planId: "creator_beta" }));
+    const req = makeNextRequest(
+      JSON.stringify({ planId: "creator_beta" }),
+      { origin: "https://evil.example" },
+    );
     const res = await checkoutPOST(req);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.url).toBe("https://checkout.stripe.com/test");
     expect(body.sessionId).toBe("cs_test_123");
+    const stripeBody = (global.fetch as any).mock.calls[0][1].body as string;
+    const params = new URLSearchParams(stripeBody);
+    expect(params.get("success_url")).not.toContain("evil.example");
+    expect(params.get("cancel_url")).not.toContain("evil.example");
     global.fetch = originalFetch;
   });
 

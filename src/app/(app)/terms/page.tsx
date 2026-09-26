@@ -58,6 +58,29 @@ const sections = [
     ),
   },
   {
+    id: "eligibility-and-age",
+    title: "Eligibility and Age Safety",
+    body: (
+      <>
+        <p>
+          LiTTree is a general-audience service and is not directed to
+          children under 13. You may use the Platform only if you meet the
+          minimum age required where you live. If you are under 18, use of
+          paid features, business services, publishing, or connected services
+          may require a parent or legal guardian to participate and accept the
+          applicable terms.
+        </p>
+        <p className="mt-4">
+          Do not submit a child&apos;s personal information, voice, image, or
+          other identifying material. If we learn that we collected personal
+          information from a child under 13 without the required consent, we
+          will take steps to delete it. Parents and guardians can report a
+          concern to <SafeEmailText email="support@litlabs.net" />.
+        </p>
+      </>
+    ),
+  },
+  {
     id: "ai-output",
     title: "AI Output",
     body: (

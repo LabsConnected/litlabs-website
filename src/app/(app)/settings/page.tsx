@@ -298,7 +298,7 @@ function SettingsTabStrip({
       <div className="flex items-center gap-2 px-3 py-2.5 md:gap-3 md:px-4">
         <Link
           href={returnTo}
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border transition-colors hover:bg-white/5"
+          className="grid h-[40px] w-[40px] shrink-0 place-items-center rounded-lg border transition-colors hover:bg-white/5"
           style={{ borderColor: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.6)" }}
           aria-label="Back to Studio"
         >
@@ -326,7 +326,7 @@ function SettingsTabStrip({
         <button
           type="button"
           onClick={onToggleMobileSearch}
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-white/10 text-white/70 transition hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 md:hidden"
+          className="grid h-[40px] w-[40px] shrink-0 place-items-center rounded-lg border border-white/10 text-white/70 transition hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 md:hidden"
           aria-label={mobileSearchOpen ? "Close settings search" : "Search settings"}
           aria-expanded={mobileSearchOpen}
         >

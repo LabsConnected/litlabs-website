@@ -267,7 +267,7 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
     const onRegenerate = vi.fn();
     const messages: ChatMessage[] = [
       { role: "user", content: "Q", createdAt: Date.now() },
-      { role: "assistant", content: "Provider unavailable", status: "failed", createdAt: Date.now() },
+      { id: "assistant-failed", role: "assistant", content: "Provider unavailable", status: "failed", createdAt: Date.now() },
     ];
     render(
       <StudioTranscript
@@ -278,7 +278,34 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
         onRegenerateAction={onRegenerate}
       />,
     );
-    expect(screen.getByRole("button", { name: /retry/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+    expect(onRegenerate).toHaveBeenCalledWith("assistant-failed");
+  });
+
+  it("keeps Retry visible when the failed assistant has no response text", () => {
+    const onRegenerate = vi.fn();
+    const messages: ChatMessage[] = [
+      { id: "user-1", role: "user", content: "Build my site", createdAt: Date.now() },
+      {
+        id: "assistant-1",
+        role: "assistant",
+        content: "",
+        status: "failed",
+        createdAt: Date.now(),
+      },
+    ];
+    render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteToolAction={vi.fn()}
+        onRegenerateAction={onRegenerate}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+    expect(onRegenerate).toHaveBeenCalledWith("assistant-1");
   });
 
   it("does not show Read button on failed assistant messages", () => {

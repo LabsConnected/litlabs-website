@@ -6,6 +6,31 @@ import { withRateLimit } from "@/lib/rate-limiter";
 
 export const runtime = "nodejs";
 
+function getAppUrl(): string {
+  const raw =
+    process.env.NEXT_PUBLIC_APP_URL ??
+    process.env.APP_URL ??
+    (process.env.NODE_ENV === "development"
+      ? "http://localhost:3000"
+      : "https://www.litlabs.net");
+
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    throw new Error("Invalid app URL");
+  }
+
+  if (process.env.NODE_ENV === "production" && url.protocol !== "https:") {
+    throw new Error("Production app URL must use HTTPS");
+  }
+
+  url.pathname = "";
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
 async function handler(req: NextRequest) {
   try {
     const { userId: clerkId } = await auth(req);
@@ -59,15 +84,25 @@ async function handler(req: NextRequest) {
       );
     }
 
-    const origin = req.headers.get("origin") || "https://litlabs.net";
+    // Never trust the browser Origin for payment return URLs. Origin is a
+    // request header and can be forged outside a normal browser flow.
+    let appUrl: string;
+    try {
+      appUrl = getAppUrl();
+    } catch {
+      return NextResponse.json(
+        { error: "Server URL misconfiguration" },
+        { status: 500 },
+      );
+    }
     const mode = plan.billingType === "one_time" ? "payment" : "subscription";
 
     const params = new URLSearchParams();
     params.append("mode", mode);
     params.append("line_items[0][price]", priceId);
     params.append("line_items[0][quantity]", "1");
-    params.append("success_url", `${origin}/settings?section=billing&upgraded=${plan.id}`);
-    params.append("cancel_url", `${origin}/pricing?canceled=true`);
+    params.append("success_url", `${appUrl}/settings?section=billing&upgraded=${plan.id}`);
+    params.append("cancel_url", `${appUrl}/pricing?canceled=true`);
     params.append("allow_promotion_codes", "true");
     params.append("billing_address_collection", "auto");
     // Automatic tax is disabled by default. Enable only after Stripe Tax
