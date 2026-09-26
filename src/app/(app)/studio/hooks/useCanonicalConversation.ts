@@ -2010,6 +2010,7 @@ export function useCanonicalConversation({
     switchAgent,
     selectedConversationId,
     conversations,
+    selectConversation: (id: string | null) => getStore().selectConversation(id),
     loading: loadingState,
     sendError,
     reportSendError: setSendError,
