@@ -901,7 +901,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             } else if (evt.type === "phase") {
               safeEvent({ type: "phase", phase: evt.phase, step: evt.step });
             } else if (evt.type === "finished") {
-              safeEvent({ type: "finished", totalSteps: evt.totalSteps, totalDurationMs: evt.totalDurationMs });
+              safeEvent({ type: "finished", totalSteps: evt.totalSteps, totalDurationMs: evt.totalDurationMs, success: evt.success });
             } else if (evt.type === "cancelled") {
               safeEvent({ type: "cancelled", reason: evt.reason });
             } else if (evt.type === "model_routing") {

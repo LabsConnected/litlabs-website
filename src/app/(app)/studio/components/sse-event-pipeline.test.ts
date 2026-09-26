@@ -577,6 +577,19 @@ describe("approval gate staleness — resolved gates never re-arm", () => {
     expect(after.phase).toBe("done");
   });
 
+  it("does not render a verification-failed run as completed", () => {
+    feedSSEEventToExecutionStore({
+      type: "finished",
+      totalSteps: 8,
+      success: false,
+    });
+
+    const after = useExecutionStore.getState();
+    expect(after.phase).toBe("failed");
+    expect(after.events.at(-1)?.summary).toContain("Verification incomplete");
+    expect(after.events.at(-1)?.type).toBe("tool_error");
+  });
+
   it("reset clears the resolved gate record", () => {
     const s = useExecutionStore.getState();
     s.setPendingApproval({ toolId: "files.write", reason: "gate", pausedRunId: "paused-1" });

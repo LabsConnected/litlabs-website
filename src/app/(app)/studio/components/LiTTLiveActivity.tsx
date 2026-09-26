@@ -65,6 +65,7 @@ const PHASE_CONFIG: Record<ExecutionPhase, { label: string; icon: typeof Activit
   testing: { label: "Testing", icon: CheckCircle2, color: "#e3b341" },
   verifying: { label: "Verifying", icon: Shield, color: "var(--litt-primary)" },
   done: { label: "Complete", icon: CheckCircle2, color: "var(--litt-primary)" },
+  failed: { label: "Needs verification", icon: XCircle, color: "var(--error)" },
   cancelled: { label: "Cancelled", icon: XCircle, color: "var(--error)" },
   awaiting_approval: { label: "Approval needed", icon: AlertTriangle, color: "#e3b341" },
   awaiting_input: { label: "Awaiting input", icon: AlertTriangle, color: "#e3b341" },

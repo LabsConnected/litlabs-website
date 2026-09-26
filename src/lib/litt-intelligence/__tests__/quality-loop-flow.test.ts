@@ -229,6 +229,9 @@ describe("noteBuildFix / noteDeployment", () => {
     );
     mockRunJudge.mockResolvedValue({
       status: "scored",
+      browserInspected: true,
+      styleHealthy: true,
+      consoleClean: true,
       scorecard: makeScorecard(8.5),
       verdict: { passed: true, scorecard: makeScorecard(8.5), reason: "Pass" },
     });
@@ -298,6 +301,9 @@ describe("finalizeQualityLoop", () => {
     if (runInspection) {
       mockRunJudge.mockResolvedValue({
         status: "scored",
+        browserInspected: true,
+        styleHealthy: true,
+        consoleClean: true,
         scorecard: makeScorecard(8.5),
         verdict: { passed: true, scorecard: makeScorecard(8.5), reason: "Pass" },
       });
@@ -322,17 +328,27 @@ describe("finalizeQualityLoop", () => {
     expect(finale.verdict.missing).toContain("deploy");
   });
 
-  it("skips inspect/critique with the recorded inspection note", async () => {
-    // No inspection ran (no screenshot available): the finalize sweep must
-    // skip inspect/critique with the recorded reason and still let TEST
-    // evidence through so the verdict can succeed.
+  it("blocks completion when browser verification is unavailable", async () => {
     const s = await fullPassSession(false);
-    s.inspectionNote = "No screenshot could be captured (browser unavailable).";
+    s.inspectionNote = "Verification unavailable: browser capture failed.";
     const finale = finalizeQualityLoop(s, { deployRequested: false });
-    expect(finale.verdict.ok).toBe(true);
-    expect(s.state.stages.inspect.status).toBe("skipped");
-    expect(s.state.stages.inspect.skipReason).toMatch(/browser unavailable/);
-    expect(s.state.stages.test.status).toBe("passed");
+    expect(finale.verdict.ok).toBe(false);
+    expect(finale.verdict.missing).toContain("inspect");
+    expect(finale.verdict.missing).toContain("critique");
+    expect(s.state.stages.inspect.status).toBe("pending");
+    expect(s.state.stages.test.status).toBe("pending");
+  });
+
+  it("does not let agent inspection prose satisfy the visual gate", async () => {
+    const s = await fullPassSession(false);
+    harvestStageMarkers(s, [{
+      role: "assistant",
+      content: "QUALITY: inspect — I inspected the preview and it looks good.\nQUALITY: critique — No issues found.",
+    }]);
+    const finale = finalizeQualityLoop(s, { deployRequested: false });
+    expect(finale.verdict.ok).toBe(false);
+    expect(finale.verdict.missing).toContain("inspect");
+    expect(finale.verdict.missing).toContain("critique");
   });
 
   it("persists successful build, preview, deploy, and verification evidence across approval resume", async () => {
@@ -356,6 +372,15 @@ describe("finalizeQualityLoop", () => {
     );
     recordVerifiedBuild(beforeApproval);
     notePreviewReady(beforeApproval, "https://preview.test/ws-1");
+    mockRunJudge.mockResolvedValue({
+      status: "scored",
+      browserInspected: true,
+      styleHealthy: true,
+      consoleClean: true,
+      scorecard: makeScorecard(8.5),
+      verdict: { passed: true, scorecard: makeScorecard(8.5), reason: "Pass" },
+    });
+    await runQualityInspection(beforeApproval);
     noteBuildFix(beforeApproval, {
       allPassed: true,
       results: [{ check: "website smoke", passed: true }],
@@ -387,6 +412,47 @@ describe("finalizeQualityLoop", () => {
 });
 
 describe("runQualityInspection", () => {
+  it("blocks on a machine-detected style failure even when the page was reached", async () => {
+    const s = await sessionAtInspection();
+    mockRunJudge.mockResolvedValue({
+      status: "unavailable",
+      browserInspected: true,
+      styleHealthy: false,
+      styleProbe: { tailwindDetected: true, styled: false },
+      reason: "Preview styling failed to apply.",
+    });
+
+    const result = await runQualityInspection(s);
+    expect(result.ran).toBe(true);
+    expect(result.needsRedesign).toBe(true);
+    expect(result.reason).toContain("styling failed");
+    expect(s.state.stages.inspect.evidence.at(-1)?.detail).toMatchObject({
+      browserInspected: true,
+      styleHealthy: false,
+      passed: false,
+    });
+
+    // After a real repair and reload, a new machine capture can clear the
+    // failed latest evidence and allow the visual gate to pass.
+    s.inspectionRan = false;
+    mockRunJudge.mockResolvedValue({
+      status: "scored",
+      browserInspected: true,
+      styleHealthy: true,
+      consoleClean: true,
+      scorecard: makeScorecard(8.5),
+      verdict: { passed: true, scorecard: makeScorecard(8.5), reason: "Pass" },
+    });
+    const repaired = await runQualityInspection(s);
+    expect(repaired.ran).toBe(true);
+    expect(repaired.needsRedesign).toBe(false);
+    expect(s.state.stages.inspect.evidence.at(-1)?.detail).toMatchObject({
+      browserInspected: true,
+      styleHealthy: true,
+      passed: true,
+    });
+  });
+
   it("reports unavailable when there is no preview URL — no fabricated score", async () => {
     const s = makeSession();
     const result = await runQualityInspection(s);
@@ -421,6 +487,9 @@ describe("runQualityInspection", () => {
     const s = await sessionAtInspection();
     mockRunJudge.mockResolvedValue({
       status: "scored",
+      browserInspected: true,
+      styleHealthy: true,
+      consoleClean: true,
       scorecard: makeScorecard(5.5),
       verdict: { passed: false, scorecard: makeScorecard(5.5), reason: "Below threshold: overall 5.5 < 7." },
     });
@@ -439,6 +508,9 @@ describe("runQualityInspection", () => {
     s.previewUrl = "https://preview.test/ws-1";
     mockRunJudge.mockResolvedValue({
       status: "scored",
+      browserInspected: true,
+      styleHealthy: true,
+      consoleClean: true,
       scorecard: makeScorecard(8.5),
       verdict: { passed: true, scorecard: makeScorecard(8.5), reason: "Pass" },
     });
@@ -454,6 +526,9 @@ describe("runQualityInspection", () => {
     s.previewUrl = "https://preview.test/ws-1";
     mockRunJudge.mockResolvedValue({
       status: "scored",
+      browserInspected: true,
+      styleHealthy: true,
+      consoleClean: true,
       scorecard: makeScorecard(8.5),
       verdict: { passed: true, scorecard: makeScorecard(8.5), reason: "Pass" },
     });
@@ -468,6 +543,9 @@ describe("runQualityInspection", () => {
     s.state.designPasses = 2; // already at MAX_DESIGN_PASSES
     mockRunJudge.mockResolvedValue({
       status: "scored",
+      browserInspected: true,
+      styleHealthy: true,
+      consoleClean: true,
       scorecard: makeScorecard(4),
       verdict: { passed: false, scorecard: makeScorecard(4), reason: "Below threshold." },
     });
@@ -521,6 +599,9 @@ describe("failed evidence blocks the gate — never a false pass", () => {
     );
     mockRunJudge.mockResolvedValue({
       status: "scored",
+      browserInspected: true,
+      styleHealthy: true,
+      consoleClean: true,
       scorecard: makeScorecard(8.5),
       verdict: { passed: true, scorecard: makeScorecard(8.5), reason: "Pass" },
     });
@@ -670,6 +751,9 @@ describe("AUTO-mode quality gating", () => {
     }
     mockRunJudge.mockResolvedValue({
       status: "scored",
+      browserInspected: true,
+      styleHealthy: true,
+      consoleClean: true,
       scorecard: makeScorecard(opts.judgeScore ?? 8.5),
       verdict:
         (opts.judgeScore ?? 8.5) >= 7
@@ -757,6 +841,9 @@ describe("AUTO-mode quality gating", () => {
     );
     mockRunJudge.mockResolvedValue({
       status: "scored",
+      browserInspected: true,
+      styleHealthy: true,
+      consoleClean: true,
       scorecard: makeScorecard(5.2),
       verdict: { passed: false, scorecard: makeScorecard(5.2), reason: "Cramped hero, weak hierarchy" },
     });

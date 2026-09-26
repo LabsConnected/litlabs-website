@@ -157,6 +157,8 @@ export function shouldEnableQualityLoop(
 const MACHINE_EVIDENCE_STAGES: ReadonlySet<QualityStage> = new Set([
   "build",
   "run",
+  "inspect",
+  "critique",
   "test",
   "deploy",
   "verify",
@@ -186,6 +188,8 @@ function stagePassable(state: QualityLoopState, stage: QualityStage): boolean {
     const predicates: Partial<Record<QualityStage, (detail: Record<string, unknown> | undefined) => boolean>> = {
       build: (detail) => detail?.artifactVerified === true,
       run: (detail) => detail?.reachable === true,
+      inspect: (detail) => detail?.browserInspected === true && detail?.styleHealthy === true && detail?.consoleClean === true,
+      critique: (detail) => detail?.visualVerified === true && detail?.passed === true && detail?.consoleClean === true,
       test: (detail) => detail?.executedChecks === true && detail?.passed === true,
       deploy: (detail) => detail?.deploymentVerified === true,
       verify: (detail) => detail?.passed === true && detail?.httpStatus === 200,
@@ -608,8 +612,33 @@ export async function runQualityInspection(
     };
   }
 
+  if (outcome.browserInspected && outcome.styleHealthy === false) {
+    const reason = outcome.reason ?? "Preview styling failed to apply.";
+    session.inspectionNote = reason;
+    fileObservation(session, "inspect", {
+      summary: reason,
+      artifacts: [url],
+      by: "system",
+      detail: {
+        browserInspected: true,
+        styleHealthy: false,
+        consoleClean: outcome.consoleClean === true,
+        passed: false,
+        styleProbe: outcome.styleProbe,
+        reason,
+      },
+    });
+    session.critiqueFailed = true;
+    return {
+      ran: true,
+      needsRedesign: true,
+      fixes: ["Inspect the preview CSS/Tailwind setup and repair the styling root cause before reloading the preview."],
+      reason,
+    };
+  }
+
   if (outcome.status === "unavailable" || !outcome.scorecard || !outcome.verdict) {
-    session.inspectionNote = outcome.reason ?? "Visual inspection unavailable.";
+    session.inspectionNote = outcome.reason ?? "Verification unavailable: visual inspection could not run.";
     return { ran: false, needsRedesign: false, fixes: [], reason: session.inspectionNote };
   }
 
@@ -620,6 +649,13 @@ export async function runQualityInspection(
     summary: `Screenshot of the running preview captured for review: ${url}`,
     artifacts: [url],
     by: "system",
+    detail: {
+      browserInspected: outcome.browserInspected === true,
+      styleHealthy: outcome.styleHealthy === true,
+      consoleClean: outcome.consoleClean === true,
+      passed: outcome.browserInspected === true && outcome.styleHealthy === true && outcome.consoleClean === true,
+      styleProbe: outcome.styleProbe,
+    },
   });
   fileObservation(session, "critique", {
     summary:
@@ -627,7 +663,12 @@ export async function runQualityInspection(
       (verdict.passed ? `passed threshold. ${card.summary}` : `below threshold. ${verdict.reason}`),
     artifacts: [url],
     by: "judge",
-    detail: { overall: card.overall, passed: verdict.passed },
+    detail: {
+      overall: card.overall,
+      passed: verdict.passed,
+      visualVerified: outcome.browserInspected === true && outcome.styleHealthy === true && outcome.consoleClean === true && verdict.passed,
+      consoleClean: outcome.consoleClean === true,
+    },
   });
 
   if (!verdict.passed) {
