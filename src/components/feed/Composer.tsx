@@ -172,7 +172,10 @@ export function Composer({
     switch (kind) {
       case "image":
       case "video":
-        return files.some((f) => f.uploadedUrl);
+        // A selected file counts even before it uploads: submit() runs
+        // uploadPending() first. Requiring uploadedUrl here deadlocks the
+        // Post button, because uploads only happen inside submit().
+        return files.some((f) => f.uploadedUrl || !f.error);
       case "link":
         return linkPreview !== null;
       case "project":
@@ -213,10 +216,16 @@ export function Composer({
     ]);
   };
 
-  const uploadPending = async (): Promise<boolean> => {
+  // Uploads every pending file and returns their URLs in selection order.
+  // Returns null if any upload failed. The URLs are returned directly
+  // (instead of re-reading `files` state) because the state update may not
+  // have flushed yet when submit() continues after the await.
+  const uploadPending = async (): Promise<string[] | null> => {
     const pending = files.filter((f) => !f.uploadedUrl && !f.error);
-    if (pending.length === 0) return true;
+    const already = files.filter((f) => f.uploadedUrl).map((f) => f.uploadedUrl as string);
+    if (pending.length === 0) return already;
     setUploading(true);
+    const urls: string[] = [...already];
     let allOk = true;
     for (const pf of pending) {
       try {
@@ -230,7 +239,9 @@ export function Composer({
         }
         const data = await res.json();
         if (!data?.url) throw new Error("Upload returned no URL");
-        setFiles((prev) => prev.map((f) => (f.id === pf.id ? { ...f, uploadedUrl: data.url as string } : f)));
+        const url = data.url as string;
+        urls.push(url);
+        setFiles((prev) => prev.map((f) => (f.id === pf.id ? { ...f, uploadedUrl: url } : f)));
       } catch (e) {
         allOk = false;
         const msg = e instanceof Error ? e.message : "Upload failed";
@@ -238,7 +249,7 @@ export function Composer({
       }
     }
     setUploading(false);
-    return allOk;
+    return allOk ? urls : null;
   };
 
   const retryUpload = (id: string) => {
@@ -271,7 +282,7 @@ export function Composer({
     }
   };
 
-  const buildPayload = (): Record<string, unknown> | null => {
+  const buildPayload = (mediaUrls: string[] = []): Record<string, unknown> | null => {
     const postType: PostType = kind === "image" || kind === "video" ? kind : kind === "text" ? "text" : kind;
     const payload: Record<string, unknown> = {
       content: content.trim(),
@@ -279,7 +290,7 @@ export function Composer({
       visibility,
     };
     if (kind === "image" || kind === "video") {
-      payload.mediaUrls = files.filter((f) => f.uploadedUrl).map((f) => f.uploadedUrl);
+      payload.mediaUrls = mediaUrls;
     }
     if (kind === "link" && linkPreview) {
       payload.link = {
@@ -339,14 +350,16 @@ export function Composer({
     setPosting(true);
     try {
       // Upload media first; the draft stays until the post is confirmed.
+      let mediaUrls: string[] = [];
       if (kind === "image" || kind === "video") {
-        const ok = await uploadPending();
-        if (!ok) {
+        const urls = await uploadPending();
+        if (!urls) {
           setError("Some files failed to upload. Retry them or remove them, then post again.");
           return;
         }
+        mediaUrls = urls;
       }
-      const payload = buildPayload();
+      const payload = buildPayload(mediaUrls);
       if (!payload) {
         setError("This post is missing its attachment.");
         return;

@@ -137,4 +137,62 @@ describe("Composer", () => {
     expect(screen.getByText("Join the conversation")).toBeInTheDocument();
     expect(screen.queryByLabelText("Post text")).not.toBeInTheDocument();
   });
+
+  it("post button enables with text + a not-yet-uploaded image (upload runs at submit)", async () => {
+    // Regression: hasAttachment() required f.uploadedUrl, but files only
+    // upload inside submit() — so the Post button stayed disabled forever
+    // once an image was attached. Posting with media was 100% broken.
+    const onPosted = vi.fn();
+    URL.createObjectURL = vi.fn(() => "blob:preview");
+    URL.revokeObjectURL = vi.fn();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ url: "https://cdn/x.png" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ post: makePost("with pic") })));
+
+    render(<Composer onPosted={onPosted} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Image" }));
+    fireEvent.change(screen.getByLabelText("Post text"), { target: { value: "with pic" } });
+    fireEvent.change(screen.getByLabelText("Choose image files"), {
+      target: { files: [new File(["img"], "pic.png", { type: "image/png" })] },
+    });
+
+    const postBtn = screen.getByRole("button", { name: "Publish post" });
+    expect(postBtn).toBeEnabled();
+
+    fireEvent.click(postBtn);
+    await waitFor(() => {
+      expect(onPosted).toHaveBeenCalledTimes(1);
+    });
+    // Upload ran first, then the post went out with the uploaded URL.
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/upload");
+    const body = JSON.parse(fetchMock.mock.calls[1][1]!.body as string);
+    expect(body.mediaUrls).toEqual(["https://cdn/x.png"]);
+  });
+
+  it("post button disables after the attached image fails to upload", async () => {
+    const onPosted = vi.fn();
+    URL.createObjectURL = vi.fn(() => "blob:preview");
+    URL.revokeObjectURL = vi.fn();
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("network down"));
+
+    render(<Composer onPosted={onPosted} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Image" }));
+    fireEvent.change(screen.getByLabelText("Post text"), { target: { value: "with pic" } });
+    fireEvent.change(screen.getByLabelText("Choose image files"), {
+      target: { files: [new File(["img"], "pic.png", { type: "image/png" })] },
+    });
+
+    const postBtn = screen.getByRole("button", { name: "Publish post" });
+    expect(postBtn).toBeEnabled();
+    fireEvent.click(postBtn);
+
+    // Upload failed: the file is now in error state, so the button must
+    // disable until the user retries or removes the file.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Publish post" })).toBeDisabled();
+    });
+    expect(onPosted).not.toHaveBeenCalled();
+    expect(screen.getByText(/failed to upload/i)).toBeInTheDocument();
+  });
 });
