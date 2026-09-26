@@ -5,7 +5,7 @@
  *
  * `getBusinessProfile()` / `saveBusinessProfile()` talk to the API routes.
  * The pending-intake helpers carry a confirmed description from a
- * project-less surface (dashboard QuickStart) into Studio, where the
+ * project-less surface (the dashboard composer) into Studio, where the
  * greeter adopts it into the active project on first render.
  */
 

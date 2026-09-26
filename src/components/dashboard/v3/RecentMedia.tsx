@@ -100,8 +100,8 @@ export function RecentMedia({ items, loading, error, mediaActions }: RecentMedia
               onClick={() => setActiveTab(tab.id)}
               className="px-1 py-2 transition-colors"
               style={{
-                color: activeTab === tab.id ? "#a78bfa" : "#71717a",
-                borderBottom: activeTab === tab.id ? "1px solid #a78bfa" : "1px solid transparent",
+                color: activeTab === tab.id ? "#a8ff2f" : "#71717a",
+                borderBottom: activeTab === tab.id ? "1px solid #a8ff2f" : "1px solid transparent",
               }}
               onMouseEnter={(e) => {
                 if (activeTab !== tab.id) e.currentTarget.style.color = "#fafafa";
@@ -198,11 +198,11 @@ function MediaTile({
           }}
         >
           {item.type === "music" ? (
-            <MusicIcon size={24} style={{ color: hover ? "#a78bfa" : "#71717a" }} />
+            <MusicIcon size={24} style={{ color: hover ? "#a8ff2f" : "#71717a" }} />
           ) : item.type === "video" ? (
-            <Film size={24} style={{ color: hover ? "#a78bfa" : "#71717a" }} />
+            <Film size={24} style={{ color: hover ? "#a8ff2f" : "#71717a" }} />
           ) : (
-            <ImageIcon size={24} style={{ color: hover ? "#a78bfa" : "#71717a" }} />
+            <ImageIcon size={24} style={{ color: hover ? "#a8ff2f" : "#71717a" }} />
           )}
         </div>
       )}

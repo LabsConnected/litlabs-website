@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * AnimatedBackground — subtle dark/violet WebGL shader background.
+ * AnimatedBackground — subtle dark/lime WebGL shader background.
  *
  * Based on the mock's shader but rebuilt for production:
  *   - Pauses on tab hidden (visibilitychange)
@@ -32,7 +32,7 @@ void main() {
     vec3 color = vec3(0.02, 0.01, 0.04);
     float flow = sin(uv.x * 2.0 + u_time * 0.5) * 0.5 + 0.5;
     float glow = smoothstep(0.4, 0.6, flow) * 0.05;
-    vec3 accent = vec3(0.65, 0.55, 0.98);
+    vec3 accent = vec3(0.66, 1.0, 0.18);
     color += accent * glow * uv.y;
     color += (noise(uv + u_time * 0.01) - 0.5) * 0.01;
     gl_FragColor = vec4(color, 1.0);
@@ -178,7 +178,7 @@ export function AnimatedBackground() {
         className="absolute inset-0"
         style={{
           background:
-            "radial-gradient(ellipse at 70% 20%, rgba(139,92,246,0.12) 0%, transparent 50%), radial-gradient(ellipse at 20% 80%, rgba(34,211,238,0.06) 0%, transparent 50%), #05050a",
+            "radial-gradient(ellipse at 70% 20%, rgba(168,255,47,0.10) 0%, transparent 50%), radial-gradient(ellipse at 20% 80%, rgba(168,255,47,0.05) 0%, transparent 50%), #05050a",
         }}
       />
     </div>

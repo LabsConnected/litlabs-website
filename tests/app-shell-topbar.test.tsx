@@ -106,7 +106,7 @@ describe("AppShell top bar", () => {
     const header = getHeader();
     const scope = within(header);
     // Canonical main pills + the More overflow button.
-    // Create moved into the Dashboard's CreateExperience — it no longer lives in the AppShell nav.
+    // Create moved into the dashboard composer — it no longer lives in the AppShell nav.
     for (const label of ["Home", "Studio", "Assets", "Agents", "Missions"]) {
       expect(scope.getAllByText(label).length).toBeGreaterThanOrEqual(1);
     }

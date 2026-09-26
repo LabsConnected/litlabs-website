@@ -1,15 +1,16 @@
 /**
  * Dashboard v3 — composition and integration tests.
  *
- * Verifies that the new dashboard:
- *   - Renders the v3 Dashboard (not v2 MissionControlDashboard)
- *   - Includes Quick Create, Recent Work, Recent Media
- *   - Uses the real MediaHubProvider (via useMediaDock) — no new provider
- *   - MediaDock consumes MediaHub + MusicPlayerContext (no duplicate state)
- *   - Command palette has real destinations/actions (no dead commands)
- *   - Focus Mode is an overlay (not a separate dashboard tree)
- *   - Developer drawer surfaces real project/runtime info
- *   - No FloatingMusicWidget (replaced by MediaDock)
+ * The dashboard is a minimal launchpad, not an operations console:
+ *   1. One universal "What do you want to make?" composer
+ *   2. Creation type shortcuts
+ *   3. Recent projects
+ *   4. Only actionable warnings/status
+ *
+ * Runtime telemetry (Live Project Status, Agent Activity, Recent Media,
+ * terminal/build/deploy state, branch/repository info) lives in Studio at
+ * /studio/mission-control. The Developer drawer stays collapsed by default
+ * and opens only through the explicit Developer entry button.
  */
 
 import { describe, it, expect } from "vitest";
@@ -22,41 +23,52 @@ function readSrc(filename: string): string {
   return fs.readFileSync(path.join(V3_DIR, filename), "utf-8");
 }
 
-describe("Dashboard v3 — composition", () => {
+describe("Dashboard v3 — launchpad composition", () => {
   const dashboardSrc = readSrc("Dashboard.tsx");
 
   it("does not render the retired ContinueWorking section", () => {
     expect(dashboardSrc).not.toContain("ContinueWorking");
   });
 
-  it("renders QuickStart section", () => {
-    expect(dashboardSrc).toContain("QuickStart");
+  it("renders the one universal composer (BuildConsole)", () => {
+    expect(dashboardSrc).toContain("BuildConsole");
   });
 
-  it("renders RecentWork section", () => {
+  it("removed the duplicate QuickStart composer entirely", () => {
+    expect(dashboardSrc).not.toContain("QuickStart");
+    expect(fs.existsSync(path.join(V3_DIR, "QuickStart.tsx"))).toBe(false);
+    expect(
+      fs.existsSync(
+        path.resolve(__dirname, "../src/components/create/CreateExperience.tsx"),
+      ),
+    ).toBe(false);
+  });
+
+  it("renders RecentWork (recent projects)", () => {
     expect(dashboardSrc).toContain("RecentWork");
   });
 
-  it("renders RecentMedia section", () => {
-    expect(dashboardSrc).toContain("RecentMedia");
+  it("renders ActionNeededStrip (actionable warnings only)", () => {
+    expect(dashboardSrc).toContain("ActionNeededStrip");
+  });
+
+  it("does NOT render runtime telemetry on the dashboard", () => {
+    for (const name of [
+      "LiveProjectStatus",
+      "AgentActivity",
+      "RecentMedia",
+      "ProjectPulseBar",
+    ]) {
+      expect(dashboardSrc).not.toContain(name);
+    }
   });
 
   it("renders MediaDock (persistent footer)", () => {
     expect(dashboardSrc).toContain("MediaDock");
   });
 
-  it("renders ProjectPulseBar", () => {
-    expect(dashboardSrc).toContain("ProjectPulseBar");
-  });
-
   it("does NOT render a duplicate nav header (global nav lives in AppShell)", () => {
     expect(dashboardSrc).not.toContain("DashboardHeader");
-  });
-
-  it("ProjectPulseBar carries the command-palette search trigger", () => {
-    const pulseSrc = readSrc("ProjectPulseBar.tsx");
-    expect(pulseSrc).toContain("onOpenCommandPalette");
-    expect(dashboardSrc).toContain("onOpenCommandPalette={");
   });
 
   it("renders AnimatedBackground", () => {
@@ -75,6 +87,12 @@ describe("Dashboard v3 — composition", () => {
   it("has Developer Drawer", () => {
     expect(dashboardSrc).toContain("DeveloperDrawer");
     expect(dashboardSrc).toContain("devDrawerOpen");
+  });
+
+  it("has an explicit Developer entry button (collapsed by default)", () => {
+    expect(dashboardSrc).toContain('data-testid="developer-entry"');
+    // The drawer is closed until explicitly opened.
+    expect(dashboardSrc).toContain("useState(false)");
   });
 
   it("has Queue Panel (slide-over)", () => {
@@ -99,10 +117,62 @@ describe("Dashboard v3 — composition", () => {
     expect(dashboardSrc).toContain('"k"');
   });
 
-  it("has responsive grid layout (lg:grid-cols-12)", () => {
-    expect(dashboardSrc).toContain("lg:grid-cols-12");
-    expect(dashboardSrc).toContain("lg:col-span-7");
-    expect(dashboardSrc).toContain("lg:col-span-5");
+  it("uses a single calm centered column (no ops-console grid)", () => {
+    expect(dashboardSrc).toContain("max-w-4xl");
+    expect(dashboardSrc).not.toContain("lg:grid-cols-12");
+    expect(dashboardSrc).not.toContain("lg:col-span-7");
+  });
+
+  it("passes deep-link prompts into the composer", () => {
+    expect(dashboardSrc).toContain('searchParams.get("prompt")');
+  });
+});
+
+describe("Dashboard v3 — ActionNeededStrip (actionable status only)", () => {
+  const src = readSrc("ActionNeededStrip.tsx");
+
+  it("renders nothing while loading", () => {
+    expect(src).toContain("if (loading) return null");
+  });
+
+  it("renders nothing when nothing failed", () => {
+    expect(src).toContain('state === "failed"');
+    expect(src).toContain("if (failed.length === 0) return null");
+  });
+
+  it("never shows idle/unknown telemetry", () => {
+    expect(src).not.toContain('"unknown"');
+    expect(src).not.toContain('"idle"');
+  });
+
+  it("links failures to Studio with plain-English copy", () => {
+    expect(src).toContain('href="/studio"');
+    expect(src).toContain("Something needs attention");
+  });
+});
+
+describe("Dashboard v3 — mission control lives in Studio", () => {
+  const pageSrc = fs.readFileSync(
+    path.resolve(
+      __dirname,
+      "../src/app/(app)/studio/mission-control/page.tsx",
+    ),
+    "utf-8",
+  );
+
+  it("renders the moved telemetry components", () => {
+    for (const name of ["LiveProjectStatus", "AgentActivity", "RecentMedia"]) {
+      expect(pageSrc).toContain(name);
+    }
+  });
+
+  it("feeds them from the real dashboard data hooks", () => {
+    expect(pageSrc).toContain("useMissionControl");
+    expect(pageSrc).toContain("useDashboardMedia");
+  });
+
+  it("links back to Studio", () => {
+    expect(pageSrc).toContain('href="/studio"');
   });
 });
 
@@ -166,35 +236,41 @@ describe("Dashboard v3 — DashboardView wiring", () => {
   });
 });
 
-describe("Dashboard v3 — Quick Start", () => {
-  const src = readSrc("QuickStart.tsx");
-  const createSrc = fs.readFileSync(
-    path.resolve(__dirname, "../src/components/create/CreateExperience.tsx"),
-    "utf-8",
-  );
+describe("Dashboard v3 — universal composer", () => {
+  const src = readSrc("BuildConsole.tsx");
 
-  it("has the canonical seven creation types", () => {
-    for (const label of ["Website", "Image", "Video", "Music & Audio", "Code", "Design", "Game"]) {
-      expect(createSrc).toContain(label);
+  it("asks 'What do you want to make?'", () => {
+    expect(src).toContain("What do you want to make?");
+    expect(src).not.toContain("What do you want to build?");
+  });
+
+  it("has the canonical creation-type shortcuts", () => {
+    for (const label of ["Website", "Image", "Video", "Music", "Code", "Design", "Game"]) {
+      expect(src).toContain(`label: "${label}"`);
     }
-    expect(src).not.toContain("Smartphone");
   });
 
-  it("uses the shared CreateExperience flow", () => {
-    expect(src).toContain("CreateExperience");
-    expect(createSrc).toContain("quick-create");
+  it("routes prompts through the intent router (never a dead end)", () => {
+    expect(src).toContain('fetch("/api/litt/intent"');
+    expect(src).toContain('params.set("intent"');
+    expect(src).toContain("/studio?tool=chat&prompt=");
   });
 
-  it("uses suggestion seeds instead of bypassing the intent router", () => {
-    expect(createSrc).toContain("seed:");
-    expect(createSrc).toContain('fetch(\"/api/litt/intent\"');
-    expect(createSrc).not.toContain('href: \"/studio?');
+  it("accepts deep-link prompts (legacy /create redirect)", () => {
+    expect(src).toContain("initialPrompt");
+    expect(src).toContain('id="dashboard-guided-start"');
+  });
+
+  it("uses the LIME canonical accent", () => {
+    expect(src).toContain("#a8ff2f");
+    expect(src).not.toContain("#a78bfa");
   });
 
   it("is responsive and touch-friendly", () => {
-    expect(createSrc).toContain("grid-cols-2");
-    expect(createSrc).toContain("sm:grid-cols-3");
-    expect(createSrc).toContain("min-h-24");
+    expect(src).toContain("flex-col");
+    expect(src).toContain("sm:flex-row");
+    expect(src).toContain("min-h-14");
+    expect(src).toContain("min-h-11");
   });
 });
 
@@ -377,7 +453,7 @@ describe("Dashboard v3 — Focus Mode", () => {
   });
 });
 
-describe("Dashboard v3 — Developer Drawer (real info)", () => {
+describe("Dashboard v3 — Developer Drawer (real info, collapsed by default)", () => {
   const src = readSrc("Dashboard.tsx");
 
   it("shows real project info (name, branch, repository, commit)", () => {
@@ -395,11 +471,6 @@ describe("Dashboard v3 — Developer Drawer (real info)", () => {
     expect(src).toContain("project.terminalState");
   });
 
-  it("shows pulse status items (no fake green checks)", () => {
-    expect(src).toContain("pulseItems");
-    expect(src).toContain("getPulseColor");
-  });
-
   it("has empty state when no project connected", () => {
     expect(src).toContain("No project connected");
   });
@@ -408,15 +479,21 @@ describe("Dashboard v3 — Developer Drawer (real info)", () => {
     expect(src).toContain("Open Terminal");
     expect(src).toContain("onOpenTerminal");
   });
+
+  it("links to mission control in Studio", () => {
+    expect(src).toContain("/studio/mission-control");
+  });
+
+  it("opens only through the explicit Developer entry", () => {
+    expect(src).toContain('data-testid="developer-entry"');
+    expect(src).toContain("setDevDrawerOpen(true)");
+  });
 });
 
 describe("Dashboard v3 — Responsive", () => {
   const dashboardSrc = readSrc("Dashboard.tsx");
   const mediaDockSrc = readSrc("MediaDock.tsx");
-  const quickStartSrc = fs.readFileSync(
-    path.resolve(__dirname, "../src/components/create/CreateExperience.tsx"),
-    "utf-8",
-  );
+  const composerSrc = readSrc("BuildConsole.tsx");
 
   it("Dashboard has mobile padding (px-4 md:px-6)", () => {
     expect(dashboardSrc).toContain("px-4");
@@ -433,9 +510,10 @@ describe("Dashboard v3 — Responsive", () => {
     expect(mediaDockSrc).toContain("md:hidden");
   });
 
-  it("Quick Create reflows on mobile and preserves touch targets", () => {
-    expect(quickStartSrc).toContain("grid-cols-2");
-    expect(quickStartSrc).toContain("sm:grid-cols-3");
-    expect(quickStartSrc).toContain("min-h-24");
+  it("Composer reflows on mobile and preserves touch targets", () => {
+    expect(composerSrc).toContain("flex-col");
+    expect(composerSrc).toContain("sm:flex-row");
+    expect(composerSrc).toContain("min-h-14");
+    expect(composerSrc).toContain("min-h-11");
   });
 });
