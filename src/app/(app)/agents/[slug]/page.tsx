@@ -1,11 +1,11 @@
-export const dynamic = "force-dynamic";
-
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { isKnownAgentSlug, KNOWN_AGENT_SLUGS } from "@/lib/agent-public-slug";
 
-// Unknown slugs never match a generated param, so Next answers with the
-// app not-found page (HTTP 404) before this module renders.
+export const dynamic = "force-dynamic";
+
+// Unknown slugs are rewritten to a missing path in next.config before this
+// page renders. These guards cover direct renders and metadata.
 export const dynamicParams = false;
 
 export function generateStaticParams() {

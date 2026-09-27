@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 import { CANONICAL_REDIRECTS } from "./src/lib/canonical-redirects";
+import { devHarnessProductionRewrites } from "./src/lib/dev-harness-env";
+import { unknownAgentSlugRewrites } from "./src/lib/known-agent-slug-list";
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
@@ -363,6 +365,15 @@ const nextConfig: NextConfig = {
   // ============================================
   // ISR & REVALIDATION
   // ============================================
+
+  async rewrites() {
+    return {
+      beforeFiles: [
+        ...devHarnessProductionRewrites(),
+        ...unknownAgentSlugRewrites(),
+      ],
+    };
+  },
 
   async redirects() {
     return [

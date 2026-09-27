@@ -6,6 +6,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import sitemap from "@/app/sitemap";
 import robots from "@/app/robots";
+import { devHarnessProductionRewrites } from "@/lib/dev-harness-env";
 import RetroEmulatorTestLayout, {
   metadata as retroTestMetadata,
 } from "@/app/(app)/games/retro/test/layout";
@@ -83,6 +84,39 @@ describe("dev harness discovery", () => {
     for (const path of harnessPaths) {
       expect(urls.some((url) => url.includes(path))).toBe(false);
     }
+  });
+
+  it("rewrites harness routes to a missing path in production builds", () => {
+    const rewrites = devHarnessProductionRewrites({
+      NODE_ENV: "production",
+      LITT_ENABLE_DEV_HARNESS: "",
+    } as NodeJS.ProcessEnv);
+    const sources = rewrites.map((entry) => entry.source);
+    expect(sources).toEqual(
+      expect.arrayContaining([
+        "/games/retro/test",
+        "/studio/visual-test",
+        "/runtime-test",
+      ]),
+    );
+    expect(rewrites.every((entry) => entry.destination === "/__dev-harness-unavailable")).toBe(
+      true,
+    );
+  });
+
+  it("does not rewrite harness routes in development or when the flag is set", () => {
+    expect(
+      devHarnessProductionRewrites({ NODE_ENV: "development" } as NodeJS.ProcessEnv),
+    ).toEqual([]);
+    expect(
+      devHarnessProductionRewrites({ NODE_ENV: "test" } as NodeJS.ProcessEnv),
+    ).toEqual([]);
+    expect(
+      devHarnessProductionRewrites({
+        NODE_ENV: "production",
+        LITT_ENABLE_DEV_HARNESS: "1",
+      } as NodeJS.ProcessEnv),
+    ).toEqual([]);
   });
 
   it("disallows harness routes instead of leaving them on the robots allowlist", () => {
