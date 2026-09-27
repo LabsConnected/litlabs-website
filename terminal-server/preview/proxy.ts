@@ -213,8 +213,12 @@ export function registerPreviewProxyRoute(
           return;
         }
 
-        // Rewritten bodies have a new length and are no longer encoded.
-        if (injectInspector && INSPECTOR_DROPPED_HEADERS.has(header)) {
+        // Node's fetch transparently decodes compressed upstream responses.
+        // These headers would describe the upstream representation rather than
+        // the bytes Express is sending, so forwarding them makes CSS/JS fail
+        // to decode in the browser. HTML also needs both headers removed after
+        // inspector injection.
+        if (INSPECTOR_DROPPED_HEADERS.has(header)) {
           return;
         }
 
