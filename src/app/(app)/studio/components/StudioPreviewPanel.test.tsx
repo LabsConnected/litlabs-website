@@ -217,7 +217,10 @@ describe("StudioPreviewPanel", () => {
 
     await waitFor(() => {
       expect(onSelectionChange).toHaveBeenCalledWith(expect.objectContaining({ label: "Navigation", tagName: "nav" }));
-      expect(screen.getByTestId("preview-selection")).toHaveTextContent("Selected: Navigation");
+      // The old "Selected:" strip is gone — the on-canvas overlay owns the
+      // selection affordance (jsdom reports a zero-size rect, so the
+      // overlay honestly renders nothing here).
+      expect(screen.queryByTestId("preview-selection")).toBeNull();
     });
   });
 

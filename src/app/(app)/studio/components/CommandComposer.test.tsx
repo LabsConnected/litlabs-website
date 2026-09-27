@@ -208,57 +208,55 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
     expect(input.parentElement?.className).toContain("flex-wrap");
   });
 
-  it("renders the active workspace context above the composer", () => {
+  it("renders the thin task-aware context strip above the composer", () => {
     render(
       <CommandComposer
         value=""
         onChange={vi.fn()}
         onSend={vi.fn()}
-        contextLine={{ workspace: "Michigan Music Venue" }}
+        contextStrip={<div data-testid="composer-context-strip">Design · HeroSection · h2 · Desktop</div>}
         busy={false}
       />,
     );
 
-    expect(screen.getByTestId("studio-workspace-context").textContent).toContain(
-      "Michigan Music Venue",
+    expect(screen.getByTestId("composer-context-strip").textContent).toContain(
+      "Design · HeroSection · h2 · Desktop",
     );
   });
 
-  it("keeps workspace context, input, and send control reachable on narrow sheets", () => {
+  it("keeps context strip, input, and send control reachable on narrow sheets", () => {
     render(
       <CommandComposer
         value=""
         onChange={vi.fn()}
         onSend={vi.fn()}
-        contextLine={{ workspace: "Private LiTT workspace — created when you send", repo: "owner/a-very-long-project-name", branch: "main" }}
+        contextStrip={<div data-testid="composer-context-strip">Design · HeroSection · h2 · Desktop</div>}
         busy={false}
       />,
     );
 
-    const context = screen.getByTestId("studio-workspace-context");
+    const context = screen.getByTestId("composer-context-strip");
     const input = screen.getByRole("textbox", { name: /message input/i });
     input.focus();
 
-    expect(context.textContent).toContain("Private LiTT workspace");
-    expect(context.className).toContain("flex-wrap");
-    expect(context.className).toContain("max-w-full");
+    expect(context.textContent).toContain("Design · HeroSection");
     expect(document.activeElement).toBe(input);
     expect(screen.getByRole("button", { name: /send message/i })).toBeVisible();
   });
 
-  it("hides the workspace context line when hideContextLine is set (mobile)", () => {
+  it("hides the context strip when hideContextLine is set (mobile)", () => {
     render(
       <CommandComposer
         value=""
         onChange={vi.fn()}
         onSend={vi.fn()}
-        contextLine={{ workspace: "Michigan Music Venue" }}
+        contextStrip={<div data-testid="composer-context-strip">Design · HeroSection · h2 · Desktop</div>}
         hideContextLine
         busy={false}
       />,
     );
 
-    expect(screen.queryByTestId("studio-workspace-context")).toBeNull();
+    expect(screen.queryByTestId("composer-context-strip")).toBeNull();
     // Input and send control stay reachable.
     expect(screen.getByRole("textbox", { name: /message input/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /send message/i })).toBeVisible();
@@ -378,18 +376,7 @@ describe("CommandComposer — mode pills removed (auto is permanent)", () => {
   });
 });
 
-describe("CommandComposer — F1 selection context chips (slice B)", () => {
-  const makeSelection = (
-    over: Partial<import("./studioSelectionPayload").StudioSelectionPayload> = {},
-  ): import("./studioSelectionPayload").StudioSelectionPayload => ({
-    kind: "preview-element",
-    label: "Hero heading",
-    sourceFile: "components/Hero.tsx",
-    projectId: "proj-1",
-    timestamp: 1727280000000,
-    ...over,
-  });
-
+describe("CommandComposer — thin context strip (shell hierarchy)", () => {
   const renderComposer = (props: Partial<Parameters<typeof CommandComposer>[0]> = {}) =>
     render(
       <CommandComposer
@@ -401,97 +388,41 @@ describe("CommandComposer — F1 selection context chips (slice B)", () => {
       />,
     );
 
-  it("renders one chip per selection with label + source file", () => {
+  const strip = <div data-testid="composer-context-strip">Design · HeroSection · h2 · Desktop</div>;
+
+  it("renders the context strip when provided", () => {
+    renderComposer({ contextStrip: strip });
+    expect(screen.getByTestId("composer-context-strip")).toHaveTextContent(
+      "Design · HeroSection · h2 · Desktop",
+    );
+  });
+
+  it("hides the context strip when hideContextLine is set", () => {
+    renderComposer({ contextStrip: strip, hideContextLine: true });
+    expect(screen.queryByTestId("composer-context-strip")).toBeNull();
+  });
+
+  it("renders no context chrome when no strip is provided", () => {
+    renderComposer({});
+    expect(screen.queryByTestId("composer-context-strip")).toBeNull();
+    // The legacy chrome is gone: no selection chips, no "Editing X" strip,
+    // no workspace context line.
+    expect(screen.queryByTestId("selection-context-chips")).toBeNull();
+    expect(screen.queryByTestId("selected-preview-context")).toBeNull();
+    expect(screen.queryByTestId("studio-workspace-context")).toBeNull();
+  });
+
+  it("legacy selection prop no longer renders composer chrome (display moved to the strip)", () => {
     renderComposer({
-      selection: [
-        makeSelection({ label: "Hero heading", sourceFile: "components/Hero.tsx" }),
-        makeSelection({ label: "CTA button", sourceFile: "components/CTA.tsx", kind: "canvas-node" }),
-      ],
-    });
-    const chips = screen.getAllByTestId("selection-context-chip");
-    expect(chips).toHaveLength(2);
-    expect(screen.getByTestId("selection-context-chips")).toBeInTheDocument();
-    const labels = screen.getAllByTestId("selection-chip-label").map((el) => el.textContent);
-    expect(labels).toEqual(["Hero heading", "CTA button"]);
-    const sources = screen.getAllByTestId("selection-chip-source").map((el) => el.textContent);
-    expect(sources).toEqual(["components/Hero.tsx", "components/CTA.tsx"]);
-  });
-
-  it("accepts a single (non-array) selection object", () => {
-    renderComposer({ selection: makeSelection({ label: "Logo" }) });
-    expect(screen.getAllByTestId("selection-context-chip")).toHaveLength(1);
-    expect(screen.getByTestId("selection-chip-label").textContent).toBe("Logo");
-  });
-
-  it("renders route as the source when no sourceFile is present", () => {
-    const sel = makeSelection({ label: "Pricing page" });
-    delete (sel as Partial<typeof sel>).sourceFile;
-    sel.route = "/pricing";
-    renderComposer({ selection: sel });
-    expect(screen.getByTestId("selection-chip-source").textContent).toBe("/pricing");
-  });
-
-  it("renders no source element when neither sourceFile nor route is present", () => {
-    const sel = makeSelection({ label: "Logo" });
-    delete (sel as Partial<typeof sel>).sourceFile;
-    renderComposer({ selection: sel });
-    expect(screen.queryByTestId("selection-chip-source")).toBeNull();
-    expect(screen.getByTestId("selection-chip-label").textContent).toBe("Logo");
-  });
-
-  it("chip clear calls onClearSelectionItem with (index, item)", () => {
-    const onClearSelectionItem = vi.fn();
-    const items = [
-      makeSelection({ label: "Hero heading" }),
-      makeSelection({ label: "CTA button" }),
-    ];
-    renderComposer({ selection: items, onClearSelectionItem });
-    const clearButtons = screen.getAllByTestId("selection-chip-clear");
-    fireEvent.click(clearButtons[1]);
-    expect(onClearSelectionItem).toHaveBeenCalledTimes(1);
-    expect(onClearSelectionItem).toHaveBeenCalledWith(1, items[1]);
-  });
-
-  it("chip clear falls back to onClearSelectedElement when onClearSelectionItem is absent", () => {
-    const onClearSelectedElement = vi.fn();
-    renderComposer({ selection: makeSelection(), onClearSelectedElement });
-    fireEvent.click(screen.getByTestId("selection-chip-clear"));
-    expect(onClearSelectedElement).toHaveBeenCalledTimes(1);
-  });
-
-  it("structured selection takes precedence over the legacy selectedElement strip", () => {
-    renderComposer({
-      selection: makeSelection({ label: "Hero heading" }),
+      selection: {
+        kind: "preview-element",
+        label: "Hero heading",
+        projectId: "proj-1",
+        timestamp: 1727280000000,
+      },
       contextLine: { selectedElement: "legacy label" },
     });
-    expect(screen.getByTestId("selection-context-chips")).toBeInTheDocument();
-    expect(screen.queryByTestId("selected-preview-context")).toBeNull();
-  });
-
-  it("legacy selectedElement strip still renders when no structured selection is given", () => {
-    const onClearSelectedElement = vi.fn();
-    renderComposer({
-      contextLine: { selectedElement: "Hero heading" },
-      onClearSelectedElement,
-    });
-    expect(screen.queryByTestId("selection-context-chips")).toBeNull();
-    const strip = screen.getByTestId("selected-preview-context");
-    expect(strip.textContent).toContain("Hero heading");
-    fireEvent.click(screen.getByRole("button", { name: /clear selected preview element/i }));
-    expect(onClearSelectedElement).toHaveBeenCalledTimes(1);
-  });
-
-  it("renders neither chips nor legacy strip when selection is null", () => {
-    renderComposer({ selection: null });
     expect(screen.queryByTestId("selection-context-chips")).toBeNull();
     expect(screen.queryByTestId("selected-preview-context")).toBeNull();
-  });
-
-  it("chips row is viewport-safe (wraps, never forces page overflow)", () => {
-    renderComposer({ selection: [makeSelection(), makeSelection({ label: "B" })] });
-    const row = screen.getByTestId("selection-context-chips");
-    expect(row.className).toContain("flex-wrap");
-    expect(row.className).toContain("max-w-full");
-    expect(row.className).toContain("overflow-x-auto");
   });
 });

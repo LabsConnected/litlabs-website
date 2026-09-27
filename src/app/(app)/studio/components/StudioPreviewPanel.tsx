@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Copy, ExternalLink, Eye, KeyRound, Loader2, Monitor, MousePointer2, RefreshCw, RotateCcw, Smartphone, Square, Tablet, X } from "lucide-react";
+import { Check, Copy, ExternalLink, Eye, KeyRound, Loader2, Monitor, MousePointer2, RefreshCw, RotateCcw, Smartphone, Square, Tablet } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { formatSourceSummary } from "@/lib/projects/project-source";
 import { useExecutionStore } from "../stores/useExecutionStore";
 import { StudioSecretsPanel } from "./StudioSecretsPanel";
+import SelectionOverlay from "./shell/SelectionOverlay";
 
 /**
  * Preview states — the five canonical states the UI explicitly supports.
@@ -21,6 +22,7 @@ import { StudioSecretsPanel } from "./StudioSecretsPanel";
  */
 type PreviewState = "loading" | "not_started" | "starting" | "ready" | "stale" | "unreachable" | "failed" | "restarting";
 type DeviceMode = "desktop" | "tablet" | "mobile";
+export type PreviewDeviceMode = DeviceMode;
 
 export interface PreviewSelection {
   label: string;
@@ -214,6 +216,8 @@ export default function StudioPreviewPanel({
   versionControl = "none",
   refreshKey = 0,
   onSelectionChange,
+  onDeviceModeChange,
+  onAskAboutSelection,
 }: {
   projectId: string | null;
   projectName: string | null;
@@ -229,6 +233,10 @@ export default function StudioPreviewPanel({
   versionControl?: "git" | "none";
   refreshKey?: number;
   onSelectionChange?: (selection: PreviewSelection | null) => void;
+  /** Shell mirror of the preview viewport (feeds the composer context strip). */
+  onDeviceModeChange?: (mode: PreviewDeviceMode) => void;
+  /** Ask-LiTT action for the on-canvas selection overlay. */
+  onAskAboutSelection?: () => void;
 }) {
   const { getToken } = useClerkAuth();
   const [state, setState] = useState<PreviewState>(projectId ? "loading" : "not_started");
@@ -238,6 +246,11 @@ export default function StudioPreviewPanel({
   const [frameKey, setFrameKey] = useState(0);
   const [deviceMode, setDeviceMode] = useState<DeviceMode>("desktop");
   const [maximized, setMaximized] = useState(false);
+  // Mirror the viewport to the shell (composer context strip) without
+  // lifting the state — the panel stays the source of truth.
+  useEffect(() => {
+    onDeviceModeChange?.(deviceMode);
+  }, [deviceMode, onDeviceModeChange]);
   const [framework, setFramework] = useState<string | null>(null);
   const [devCommand, setDevCommand] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
@@ -259,6 +272,8 @@ export default function StudioPreviewPanel({
   const [secretsOpen, setSecretsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  // Positioned wrapper for the on-canvas SelectionOverlay.
+  const overlayWrapRef = useRef<HTMLDivElement | null>(null);
   const selectionCleanupRef = useRef<(() => void) | null>(null);
   const selectedElementRef = useRef<PreviewSelection | null>(null);
   const selectedNodeRef = useRef<HTMLElement | null>(null);
@@ -870,7 +885,7 @@ export default function StudioPreviewPanel({
           Horizontally scrollable: on narrow phones the action buttons
           (refresh/restart/stop/copy/maximize) would otherwise be cut off
           with no way to reach them. */}
-      <div className="no-scrollbar flex shrink-0 items-center gap-1.5 overflow-x-auto border-b px-2 py-1.5" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }} data-testid="preview-toolbar">
+      <div className="no-scrollbar flex shrink-0 items-center gap-1 overflow-x-auto border-b px-2 py-1" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }} data-testid="preview-toolbar">
         {/* Runtime status dot */}
         <div
           className="h-2 w-2 shrink-0 rounded-full"
@@ -903,6 +918,7 @@ export default function StudioPreviewPanel({
           */}
           <div className="truncate text-[9px]" style={{ color: "var(--text-muted)" }} title={sourceSummary} data-testid="preview-source-summary">{sourceSummary}</div>
         </div>
+        <div className="h-5 w-px shrink-0" style={{ backgroundColor: "var(--studio-border)" }} aria-hidden="true" />
         {/* Device mode selector — compact */}
         {isLive && (
           <div className="flex items-center gap-0.5 rounded-lg border p-0.5" style={{ borderColor: "var(--studio-border)" }}>
@@ -915,7 +931,7 @@ export default function StudioPreviewPanel({
                 key={mode}
                 type="button"
                 onClick={() => setDeviceMode(mode)}
-                className="grid min-h-9 min-w-9 place-items-center rounded-md transition"
+                className="grid min-h-8 min-w-8 place-items-center rounded-md transition"
                 style={{
                   backgroundColor: deviceMode === mode ? "rgba(114,242,56,0.12)" : "transparent",
                   color: deviceMode === mode ? "var(--litt-primary)" : "var(--text-muted)",
@@ -931,19 +947,21 @@ export default function StudioPreviewPanel({
         )}
         {/* Lightweight visual selection — the preview remains the source of truth. */}
         {isLive && (
-          <button
-            type="button"
-            onClick={() => {
-              const next = !selectionMode;
-              setSelectionMode(next);
-              if (!next) {
-                clearSelection();
-                postInspectorCommand("disable");
-              } else {
-                attachSelection();
-              }
-            }}
-            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+          <>
+            <div className="h-5 w-px shrink-0" style={{ backgroundColor: "var(--studio-border)" }} aria-hidden="true" />
+            <button
+              type="button"
+              onClick={() => {
+                const next = !selectionMode;
+                setSelectionMode(next);
+                if (!next) {
+                  clearSelection();
+                  postInspectorCommand("disable");
+                } else {
+                  attachSelection();
+                }
+              }}
+            className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
             style={{
               backgroundColor: selectionMode ? "rgba(155,77,255,0.14)" : "transparent",
               color: selectionMode ? "#c4b5fd" : "var(--text-muted)",
@@ -955,13 +973,18 @@ export default function StudioPreviewPanel({
           >
             <MousePointer2 size={13} className="pointer-events-none" />
           </button>
+          </>
+        )}
+        {/* Runtime controls: refresh / restart / stop / copy / secrets / maximize */}
+        {isLive && (
+          <div className="h-5 w-px shrink-0" style={{ backgroundColor: "var(--studio-border)" }} aria-hidden="true" />
         )}
         {/* Refresh — hard reload iframe + re-check status */}
         <button
           type="button"
           onClick={handleHardRefresh}
           disabled={state === "loading" || state === "starting" || state === "restarting"}
-          className="grid h-7 w-7 shrink-0 place-items-center rounded-lg transition hover:bg-white/8 disabled:opacity-40"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg transition hover:bg-white/8 disabled:opacity-40"
           aria-label="Refresh preview"
           title="Refresh preview (Ctrl+R)"
           data-testid="preview-refresh"
@@ -973,7 +996,7 @@ export default function StudioPreviewPanel({
           <button
             type="button"
             onClick={() => void preparePreview()}
-            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
             aria-label="Restart preview"
             title="Restart preview runtime"
             data-testid="preview-restart"
@@ -986,7 +1009,7 @@ export default function StudioPreviewPanel({
           <button
             type="button"
             onClick={() => void stopPreview()}
-            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
             aria-label="Stop preview"
             title="Stop preview runtime"
             data-testid="preview-stop"
@@ -999,7 +1022,7 @@ export default function StudioPreviewPanel({
           <button
             type="button"
             onClick={() => void handleCopyUrl()}
-            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
             aria-label="Copy preview URL"
             title="Copy preview URL"
             data-testid="preview-copy-url"
@@ -1012,7 +1035,7 @@ export default function StudioPreviewPanel({
           type="button"
           onClick={() => setSecretsOpen((v) => !v)}
           disabled={!projectId}
-          className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8 disabled:opacity-40"
+          className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-white/8 disabled:opacity-40"
           style={{
             backgroundColor: secretsOpen ? "rgba(114,242,56,0.12)" : "transparent",
             color: secretsOpen ? "var(--litt-primary)" : "var(--text-muted)",
@@ -1029,7 +1052,7 @@ export default function StudioPreviewPanel({
           <button
             type="button"
             onClick={() => setMaximized((v) => !v)}
-            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
             aria-label={maximized ? "Exit fullscreen" : "Maximize preview"}
             title={maximized ? "Exit fullscreen" : "Maximize"}
             data-testid="preview-maximize"
@@ -1052,29 +1075,6 @@ export default function StudioPreviewPanel({
           />
         </div>
       )}
-      {selectedElement && (
-        <div
-          className="flex shrink-0 items-center gap-2 border-b px-2.5 py-1.5 text-[10px]"
-          style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(155,77,255,0.06)" }}
-          role="status"
-          aria-live="polite"
-          data-testid="preview-selection"
-        >
-          <MousePointer2 size={11} className="shrink-0" style={{ color: "#c4b5fd" }} aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate" style={{ color: "var(--text-secondary)" }}>
-            Selected: <strong style={{ color: "#c4b5fd" }}>{selectedElement.label}</strong>
-          </span>
-          <button
-            type="button"
-            onClick={() => clearSelection()}
-            className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md hover:bg-white/8"
-            aria-label="Clear selected preview element"
-            title="Clear selection"
-          >
-            <X size={12} className="pointer-events-none" />
-          </button>
-        </div>
-      )}
       {selectionError && selectionMode && (
         <div className="shrink-0 border-b px-2.5 py-1 text-[9px]" style={{ borderColor: "rgba(227,179,65,0.2)", color: "#e3b341" }} role="status">
           {selectionError}
@@ -1084,7 +1084,7 @@ export default function StudioPreviewPanel({
       {/* Preview surface */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ backgroundColor: "rgba(0,0,0,0.2)" }}>
         {isLive && displayUrl ? (
-          <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-2">
+          <div ref={overlayWrapRef} className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto p-2">
             <iframe
               key={frameKey}
               ref={iframeRef}
@@ -1103,6 +1103,20 @@ export default function StudioPreviewPanel({
               onError={() => setIframeFailed(true)}
               data-testid="preview-iframe"
             />
+            {/* On-canvas selection overlay: bounding box, label/dimension
+                chips, resize handles, move grip, Ask LiTT. Positioned from
+                the same-origin measured node (or bridge x/y). */}
+            {selectionMode && (
+              <SelectionOverlay
+                selection={selectedElement}
+                projectId={projectId}
+                anchorNode={selectedNodeRef.current}
+                iframeRef={iframeRef}
+                containerRef={overlayWrapRef}
+                contentKey={frameKey}
+                onAskAboutSelection={onAskAboutSelection}
+              />
+            )}
           </div>
         ) : (
           <div className="flex min-h-[200px] flex-1 flex-col items-center justify-center gap-3 px-4 text-center">

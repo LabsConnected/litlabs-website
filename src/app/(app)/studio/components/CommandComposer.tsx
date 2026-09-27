@@ -7,7 +7,6 @@ import {
   Camera,
   Mic,
   MicOff,
-  MousePointer2,
   Send,
   Square,
   Loader2,
@@ -80,12 +79,9 @@ interface CommandComposerProps {
   contextLine?: ComposerContextLine;
   onClearSelectedElement?: () => void;
   /**
-   * F1 structured selection (SLICE B). When provided (single item or array),
-   * the legacy `contextLine.selectedElement` "Editing X" strip is replaced by
-   * one context chip per selection item. Agent A wires the active tab's
-   * selection into this prop; Agent C attaches the same object to the LLM
-   * send context — the chips render the object that actually ships, never a
-   * copy. When absent, the legacy string strip still renders as fallback.
+   * F1 structured selection (SLICE B). Still attached to the LLM send
+   * context by Agent C — its composer *display* now lives in the thin
+   * `contextStrip` above the input. Kept as a prop for API stability.
    */
   selection?: StudioSelectionPayload | StudioSelectionPayload[] | null;
   /**
@@ -98,6 +94,10 @@ interface CommandComposerProps {
   onExecutionModeChange?: (mode: "plan" | "act" | "auto") => void;
   /** Hide the workspace/repo/branch context line (mobile: it moves into the sheet header) */
   hideContextLine?: boolean;
+  /** Thin task-aware context strip (surface · component · tag · viewport).
+      When provided it replaces the legacy context-line / selection-chip /
+      "Editing X" chrome above the input — one line, no extra chrome. */
+  contextStrip?: React.ReactNode;
   /** Slimmer composer chrome for mobile: tighter padding, smaller min-height */
   compact?: boolean;
   /** Pre-send expectation hint (e.g. status feed down). Send stays enabled —
@@ -125,6 +125,7 @@ export default function CommandComposer({
   hideContextLine = false,
   compact = false,
   executionHint = null,
+  contextStrip = null,
 }: CommandComposerProps) {
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
   const setActiveAgent = useStudioAgentStore((s) => s.setActiveAgent);
@@ -146,18 +147,10 @@ export default function CommandComposer({
   const attachTriggerRef = useRef<HTMLButtonElement>(null);
   const [unifiedRect, setUnifiedRect] = useState<DOMRect | null>(null);
 
-  // F1 selection context chips (SLICE B). The structured payload prop wins
-  // over the legacy string; when absent we fall back to the legacy
-  // contextLine.selectedElement strip so older wiring keeps working.
-  const selections: StudioSelectionPayload[] | null =
-    selection == null ? null : Array.isArray(selection) ? selection : [selection];
-  const clearSelectionChip = useCallback(
-    (index: number, item: StudioSelectionPayload) => {
-      if (onClearSelectionItem) onClearSelectionItem(index, item);
-      else onClearSelectedElement?.();
-    },
-    [onClearSelectionItem, onClearSelectedElement],
-  );
+  // NOTE: the structured `selection` prop still feeds the LLM send context
+  // (Agent C) — only its composer *display* moved into the thin
+  // ComposerContextStrip (see `contextStrip` prop). Clearing a selection
+  // now lives in the inspector.
 
   // Universal attachment system
   const {
@@ -206,6 +199,14 @@ export default function CommandComposer({
       }).catch(() => {});
     });
   }, [onSend, setOnTurn, speakText]);
+
+  // External focus requests ("studio:focus-composer") — e.g. the new-task
+  // anti-spam guard reuses the pristine active task and focuses here.
+  useEffect(() => {
+    const onFocus = () => textareaRef.current?.focus();
+    window.addEventListener("studio:focus-composer", onFocus);
+    return () => window.removeEventListener("studio:focus-composer", onFocus);
+  }, []);
 
   // Unified dictation: finalized transcripts write directly into the composer.
   // No separate transcript review panel — the composer IS the review surface.
@@ -370,108 +371,12 @@ export default function CommandComposer({
         boxShadow: "0 -8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(155,77,255,0.06)",
       }}
     >
-      {/* Context line: workspace · repository · branch.
-          Hidden on mobile (hideContextLine) — it moves into the sheet header. */}
-      {!hideContextLine && (
-      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[10px] font-medium" style={{ color: "var(--text-muted)" }} data-testid="studio-workspace-context">
-        {contextLine?.workspace && <span className="min-w-0 max-w-full truncate">{contextLine.workspace}</span>}
-        {(contextLine?.repo || contextLine?.branch) && (
-          <span className="flex min-w-0 max-w-full items-center gap-1.5">
-            {contextLine.repo && <span className="max-w-[min(200px,60vw)] truncate">{contextLine.repo}</span>}
-            {contextLine.repo && contextLine.branch && (
-              <span style={{ color: "var(--studio-border-strong)" }}>·</span>
-            )}
-            {contextLine.branch && <span className="shrink-0">{contextLine.branch}</span>}
-          </span>
-        )}
-      </div>
-      )}
-
-      {/* F1 selection context chips (SLICE B) — derived from the structured
-          StudioSelectionPayload that Agent C attaches to the LLM send
-          context. One chip per item (label + source file/route), each with
-          its own clear affordance. The row wraps and scrolls horizontally on
-          narrow viewports so it can never push the page past 390px. */}
-      {selections && selections.length > 0 ? (
-        <div
-          className="flex max-h-20 min-w-0 max-w-full flex-wrap items-center gap-1.5 overflow-x-auto overflow-y-auto px-1"
-          data-testid="selection-context-chips"
-          role="list"
-          aria-label="Selected context"
-        >
-          {selections.map((sel, index) => {
-            const source = sel.sourceFile ?? sel.route ?? null;
-            const key = sel.elementId ?? sel.selector ?? `${sel.kind}-${index}`;
-            return (
-              <span
-                key={key}
-                role="listitem"
-                data-testid="selection-context-chip"
-                data-kind={sel.kind}
-                title={source ? `${sel.label} — ${source}` : sel.label}
-                className="flex min-w-0 max-w-full shrink-0 items-center gap-1.5 rounded-lg border py-1 pl-2 pr-1 text-[10px]"
-                style={{
-                  borderColor: "color-mix(in srgb, var(--color-accent) 30%, transparent)",
-                  backgroundColor: "color-mix(in srgb, var(--color-accent) 8%, transparent)",
-                }}
-              >
-                <MousePointer2 size={11} className="shrink-0" style={{ color: "var(--color-accent)" }} aria-hidden="true" />
-                <span
-                  className="min-w-0 max-w-[min(160px,40vw)] truncate font-semibold"
-                  style={{ color: "var(--text-secondary)" }}
-                  data-testid="selection-chip-label"
-                >
-                  {sel.label}
-                </span>
-                {source && (
-                  <span
-                    className="min-w-0 max-w-[min(140px,32vw)] truncate"
-                    style={{ color: "var(--text-muted)" }}
-                    data-testid="selection-chip-source"
-                  >
-                    {source}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => clearSelectionChip(index, sel)}
-                  className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md transition hover:bg-white/10"
-                  style={{ color: "var(--text-muted)" }}
-                  aria-label={`Clear selection: ${sel.label}`}
-                  title="Clear selection"
-                  data-testid="selection-chip-clear"
-                >
-                  <X size={11} className="pointer-events-none" />
-                </button>
-              </span>
-            );
-          })}
-        </div>
-      ) : (
-        contextLine?.selectedElement && (
-          <div
-            className="flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[10px]"
-            style={{ borderColor: "rgba(155,77,255,0.24)", backgroundColor: "rgba(155,77,255,0.07)" }}
-            data-testid="selected-preview-context"
-          >
-            <MousePointer2 size={11} className="shrink-0" style={{ color: "#c4b5fd" }} aria-hidden="true" />
-            <span className="min-w-0 flex-1 truncate" style={{ color: "var(--text-secondary)" }}>
-              Editing <strong style={{ color: "#c4b5fd" }}>{contextLine.selectedElement}</strong>
-            </span>
-            {onClearSelectedElement && (
-              <button
-                type="button"
-                onClick={onClearSelectedElement}
-                className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md hover:bg-white/8"
-                aria-label="Clear selected preview element"
-                title="Clear selection"
-              >
-                <X size={11} className="pointer-events-none" />
-              </button>
-            )}
-          </div>
-        )
-      )}
+      {/* Thin task-aware context strip (surface · component · tag ·
+          viewport). Replaces the old multi-row context chrome (workspace /
+          repo / branch line, selection chips, "Editing X" strip) with one
+          line. Hidden on mobile (hideContextLine) — it moves into the
+          sheet header. */}
+      {!hideContextLine && contextStrip}
 
       {/* Attachment previews — universal system */}
       <AttachmentPreviewStrip

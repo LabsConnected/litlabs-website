@@ -319,17 +319,17 @@ export default function CommandStudioHeader({
         </button>
       )}
 
-      {/* New chat */}
+      {/* New task */}
       <button
         type="button"
         onClick={onNewChatAction}
         disabled={busy}
         className="flex shrink-0 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/10 px-2 py-1.5 text-[11px] font-bold text-accent transition-all hover:bg-accent/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
-        aria-label="New chat"
-        title="Start a new chat"
+        aria-label="New task"
+        title="Start a new task"
       >
         <Plus size={13} aria-hidden />
-        <span className="hidden lg:inline">New Chat</span>
+        <span className="hidden lg:inline">New Task</span>
       </button>
 
       {/* Notifications — wired to /api/notifications/count */}
@@ -675,7 +675,7 @@ function OverflowMenu({
         style={{ color: "var(--text-primary)" }}
       >
         <Plus size={13} className="pointer-events-none text-accent" />
-        New Chat
+        New Task
       </button>
       <button
         type="button"

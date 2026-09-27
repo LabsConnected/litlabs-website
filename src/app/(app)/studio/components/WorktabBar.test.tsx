@@ -46,7 +46,7 @@ describe("WorktabBar", () => {
     expect(screen.getByTestId("worktab-switch-tab-a")).toHaveTextContent("Homepage");
     expect(screen.getByTestId("worktab-switch-tab-b")).toHaveTextContent("Untitled 1");
     expect(screen.getByTestId("worktab-close-tab-a")).toHaveAttribute("aria-label", "Close Homepage");
-    expect(screen.getByTestId("worktab-new")).toHaveAttribute("aria-label", "New worktab");
+    expect(screen.getByTestId("worktab-new")).toHaveAttribute("aria-label", "New task");
   });
 
   it("marks only the active tab selected", () => {

@@ -67,33 +67,50 @@ export default function ContextInspector({
   }
 
   const hasSelection = Boolean(propertiesContent) || Boolean(selection);
+  // When the full editor is present it owns the panel — no redundant
+  // "Inspector · Selection" header from the shell.
+  const hideShellHeader = Boolean(editor);
 
   return (
     <aside
       aria-label="Inspector"
       data-testid="studio-context-inspector"
-      className="glass-shell flex w-[300px] shrink-0 flex-col border-l xl:w-[340px]"
+      className="glass-shell relative flex w-[300px] shrink-0 flex-col border-l xl:w-[340px]"
       style={{ borderColor: "rgba(155,77,255,0.1)", backgroundColor: "rgba(13,9,22,0.85)" }}
     >
-      <div
-        className="flex h-9 shrink-0 items-center gap-2 border-b px-3"
-        style={{ borderColor: "rgba(155,77,255,0.1)" }}
-      >
-        <span className="text-[10px] font-extrabold uppercase tracking-[0.14em]" style={{ color: "var(--text-secondary)" }}>
-          {hasSelection ? "Inspector · Selection" : "Inspector"}
-        </span>
-        <span className="flex-1" />
+      {hideShellHeader && (
         <button
           type="button"
           onClick={onToggle}
           aria-label="Close inspector"
           title="Close inspector"
-          className="flex h-5 w-5 items-center justify-center rounded transition-colors hover:bg-white/5"
+          className="absolute right-1.5 top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded transition-colors hover:bg-white/5"
           style={{ color: "var(--text-muted)" }}
         >
           <ChevronRight size={13} className="pointer-events-none" />
         </button>
-      </div>
+      )}
+      {!hideShellHeader && (
+        <div
+          className="flex h-9 shrink-0 items-center gap-2 border-b px-3"
+          style={{ borderColor: "rgba(155,77,255,0.1)" }}
+        >
+          <span className="text-[10px] font-extrabold uppercase tracking-[0.14em]" style={{ color: "var(--text-secondary)" }}>
+            {hasSelection ? "Inspector · Selection" : "Inspector"}
+          </span>
+          <span className="flex-1" />
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-label="Close inspector"
+            title="Close inspector"
+            className="flex h-5 w-5 items-center justify-center rounded transition-colors hover:bg-white/5"
+            style={{ color: "var(--text-muted)" }}
+          >
+            <ChevronRight size={13} className="pointer-events-none" />
+          </button>
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {editor ?? propertiesContent ?? (selection ? (

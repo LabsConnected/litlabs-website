@@ -160,8 +160,8 @@ export default function WorktabBar({
         onClick={onNew}
         className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[15px] font-bold transition-colors hover:bg-white/5"
         style={{ color: "var(--text-dim)" }}
-        aria-label="New worktab"
-        title="New worktab"
+        aria-label="New task"
+        title="New task"
         data-testid="worktab-new"
       >
         +

@@ -103,17 +103,27 @@ describe("StudioPreviewPanel inspector bridge", () => {
     inspectorMessage(iframe, {
       source: "litt-inspector",
       type: "select",
-      payload: { label: "Checkout button", selector: "main > button:nth-of-type(2)", tagName: "button" },
-    });
-
-    await waitFor(() => {
-      expect(onSelectionChange).toHaveBeenCalledWith({
+      payload: {
         label: "Checkout button",
         selector: "main > button:nth-of-type(2)",
         tagName: "button",
-      });
+        rect: { width: 120, height: 40, x: 10, y: 20 },
+      },
     });
-    expect(screen.getByTestId("preview-selection")).toHaveTextContent("Selected: Checkout button");
+
+    await waitFor(() => {
+      expect(onSelectionChange).toHaveBeenCalledWith(
+        expect.objectContaining({
+          label: "Checkout button",
+          selector: "main > button:nth-of-type(2)",
+          tagName: "button",
+        }),
+      );
+    });
+    // The old "Selected:" strip is gone — the on-canvas overlay owns the
+    // selection affordance (label chip positions from bridge x/y).
+    expect(screen.getByTestId("selection-overlay-label")).toHaveTextContent("Checkout button");
+    expect(screen.getByTestId("selection-overlay-dims")).toHaveTextContent("120×40");
   });
 
   it("ignores events from other origins", async () => {
@@ -127,7 +137,7 @@ describe("StudioPreviewPanel inspector bridge", () => {
     );
 
     expect(onSelectionChange).not.toHaveBeenCalled();
-    expect(screen.queryByTestId("preview-selection")).toBeNull();
+    expect(screen.queryByTestId("selection-overlay")).toBeNull();
   });
 
   it("ignores events whose source is not the preview iframe", async () => {
@@ -153,7 +163,7 @@ describe("StudioPreviewPanel inspector bridge", () => {
     inspectorMessage(iframe, "litt-inspector");
 
     expect(onSelectionChange).not.toHaveBeenCalled();
-    expect(screen.queryByTestId("preview-selection")).toBeNull();
+    expect(screen.queryByTestId("selection-overlay")).toBeNull();
   });
 
   it("reports selection as unavailable when no bridge answers the handshake", async () => {
@@ -182,11 +192,13 @@ describe("StudioPreviewPanel inspector bridge", () => {
     inspectorMessage(iframe, {
       source: "litt-inspector",
       type: "select",
-      payload: { label: "Nav", selector: "nav", tagName: "nav" },
+      payload: { label: "Nav", selector: "nav", tagName: "nav", rect: { width: 200, height: 48, x: 0, y: 0 } },
     });
-    await screen.findByTestId("preview-selection");
+    await screen.findByTestId("selection-overlay");
 
-    fireEvent.click(screen.getByLabelText("Clear selected preview element"));
+    // The selection-mode toggle is the panel-level clear affordance (the
+    // old "Selected:" strip is gone; the inspector owns its own clear).
+    fireEvent.click(screen.getByTestId("preview-select"));
 
     await waitFor(() => {
       expect(postMessageSpy).toHaveBeenCalledWith(

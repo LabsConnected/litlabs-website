@@ -232,6 +232,28 @@ export default function StudioPlanSurface({
     >
       <div className="mx-auto flex max-w-4xl flex-col gap-3">
 
+        {/* ── Compact project-context row: name · branch · write permission ── */}
+        <div
+          className="flex min-w-0 items-center gap-2 px-1 text-[11px] font-medium"
+          style={{ color: "var(--text-muted)" }}
+          data-testid="plan-project-context-row"
+        >
+          <FolderOpen size={11} className="shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate font-bold" style={{ color: "var(--text-main)" }}>
+            {capabilities.projectName}
+          </span>
+          {sourceRow.branch && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="shrink-0 font-mono">{sourceRow.branch}</span>
+            </>
+          )}
+          <span aria-hidden="true">·</span>
+          <span className="shrink-0" style={{ color: capabilities.writeAccess ? "#7dd87d" : "#e3b341" }}>
+            {capabilities.writeAccess ? "Write allowed" : "Write requires approval"}
+          </span>
+        </div>
+
         {/* ── Project header ──────────────────────────────────── */}
         <PlanCard title="Project" icon={FolderOpen}>
           <div className="grid grid-cols-2 gap-x-6">

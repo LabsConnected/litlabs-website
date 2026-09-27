@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { Image as ImageIcon } from "lucide-react";
+import { Image as ImageIcon, MousePointer2 } from "lucide-react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
@@ -22,6 +22,7 @@ import {
   type Worktab,
 } from "../hooks/useServerWorktabs";
 import { useWorktabBadges } from "../hooks/useWorktabBadges";
+import { deriveTaskName, UNTITLED_TASK_PATTERN } from "../lib/derive-task-name";
 import { useLiTTRealtimeSession } from "../hooks/useLiTTRealtimeSession";
 import type { LiTTLiveSessionContext } from "@/lib/litt/live/types";
 import type { ArtifactAction } from "@/lib/canvas/types";
@@ -44,6 +45,8 @@ import { ChatBrowserLiveView } from "./ChatBrowserLiveView";
 import LiTTLiveActivity from "./LiTTLiveActivity";
 import LiTTPanel from "./LiTTPanel";
 import WorktabBar from "./WorktabBar";
+import ComposerContextStrip from "./shell/ComposerContextStrip";
+import { STAGE_SURFACE_META } from "./shell/stage-surfaces";
 import LiTTMobileSheet from "./litt/LiTTMobileSheet";
 import MobileBuildStatusBar from "./litt/MobileBuildStatus";
 import MobileToolsSheet from "./litt/MobileToolsSheet";
@@ -72,7 +75,7 @@ import ElementInspectorPanel from "./shell/ElementInspectorPanel";
 import ImageStudio from "./shell/ImageStudio";
 import { modeToStageSurface, resolveStageSurface, type StudioStageSurface } from "./shell/stage-surfaces";
 import { useCanvasBuilderStore } from "./canvas/builder/store";
-import type { PreviewSelection } from "./StudioPreviewPanel";
+import type { PreviewSelection, PreviewDeviceMode } from "./StudioPreviewPanel";
 import StudioProjectFiles from "./StudioProjectFiles";
 import ProjectNameDialog from "./ProjectNameDialog";
 import { MediaUtilityDock } from "@/components/media/MediaUtilityDock";
@@ -289,6 +292,9 @@ function CommandStudioContent() {
   // F1: holds the full StudioSelectionPayload when present, so the structured
   // selection reaches the real LLM send context — not just composer chrome.
   const [previewSelection, setPreviewSelection] = useState<PreviewSelection | StudioSelectionPayload | null>(null);
+  // Shell mirror of the preview viewport (feeds the thin composer context
+  // strip). The preview panel stays the source of truth.
+  const [previewDeviceMode, setPreviewDeviceMode] = useState<PreviewDeviceMode>("desktop");
   // F1: session-scoped ask-litt selection pinned per server task id.
   // Ephemeral by design (never persisted) — declared up here because the
   // studio:ask-litt listener below stamps into it.
@@ -383,6 +389,14 @@ function CommandStudioContent() {
     destination === "studio" && viewportTier !== null && !isMobileLitt && !classicOverride;
   const [stageSurface, setStageSurface] = useState<StudioStageSurface>("preview");
   const [inspectorOpen, setInspectorOpen] = useState(true);
+  // Manual toggles latch until the selection changes — the selection drive
+  // below never undoes a deliberate open/close, it only acts on fresh
+  // selection transitions.
+  const inspectorManualRef = useRef(false);
+  const setInspectorOpenManual = useCallback((open: boolean) => {
+    inspectorManualRef.current = true;
+    setInspectorOpen(open);
+  }, []);
   const [littExpanded, setLittExpanded] = useState(false);
   // Surfaces stay mounted once visited — hidden, not unmounted — so
   // preview iframes, PTY sessions, and canvas state survive switching.
@@ -408,7 +422,7 @@ function CommandStudioContent() {
   const handleOpenDockTab = useCallback((tab: StudioDockTab) => {
     if (studioShellActive) {
       if (tab === "inspector") {
-        setInspectorOpen(true);
+        setInspectorOpenManual(true);
       } else {
         const surface = DOCK_TAB_TO_SURFACE[tab];
         if (surface) openStageSurface(surface);
@@ -485,7 +499,7 @@ function CommandStudioContent() {
           setStageSurface(surface);
           setMountedSurfaces((prev) => (prev.has(surface) ? prev : new Set(prev).add(surface)));
         }
-        if (mapped.openInspector) setInspectorOpen(true);
+        if (mapped.openInspector) setInspectorOpenManual(true);
       }
     }
     if (mapped.destination === "create") {
@@ -1179,14 +1193,19 @@ function CommandStudioContent() {
       if (result?.accepted) {
         // Meaningful task names: the first accepted prompt names the
         // task — kills the "Untitled N" tab explosion. Only renames
-        // auto-titled tasks; user-named tasks are untouched.
+        // auto-titled tasks; user-named tasks are untouched. (A backstop
+        // effect near handleNewWorktab covers prompts sent from any
+        // other entry point, e.g. after a reload.)
         const execTaskId = useExecutionStore.getState().activeTaskId;
         const activeTask = studioTasks.tasks.find((t) => t.id === execTaskId);
         if (activeTask) {
           const current = activeTask.title?.trim() ?? "";
-          if (!current || /^untitled/i.test(current) || current === "New task") {
-            const derived = value.trim().replace(/\s+/g, " ").slice(0, 60);
-            if (derived) void studioTasks.updateTask(activeTask.id, { title: derived });
+          if (!current || UNTITLED_TASK_PATTERN.test(current) || current === "New task") {
+            const derived = deriveTaskName(value);
+            if (derived) {
+              autoNamedTaskIdsRef.current.add(activeTask.id);
+              void studioTasks.renameTask(activeTask.id, derived);
+            }
           }
         }
         const execution = useExecutionStore.getState();
@@ -1757,6 +1776,82 @@ function CommandStudioContent() {
   const activeWorktabId = serverActiveTaskId;
   const activeWorktab = worktabTabs.find((t) => t.id === activeWorktabId) ?? null;
 
+  // Selection-key drive: null→non-null opens the inspector, non-null→null
+  // closes it. A manual toggle latches until the key changes again, so the
+  // drive never fights a deliberate open/close.
+  const inspectorSelectionKey = builderSelectedNodeId
+    ? `builder:${builderSelectedNodeId}`
+    : activeWorktab?.selection
+      ? `worktab:${activeWorktab.selection.elementId ?? activeWorktab.selection.selector}`
+      : previewSelection
+        ? `preview:${previewSelection.selector}|${previewSelection.tagName}`
+        : null;
+  const prevInspectorSelectionKeyRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const prev = prevInspectorSelectionKeyRef.current;
+    prevInspectorSelectionKeyRef.current = inspectorSelectionKey;
+    if (prev === undefined) return; // mount — keep initial state
+    if (prev === inspectorSelectionKey) return;
+    if (inspectorManualRef.current) {
+      inspectorManualRef.current = false;
+      return;
+    }
+    if (inspectorSelectionKey != null) setInspectorOpen(true);
+    else setInspectorOpen(false);
+  }, [inspectorSelectionKey]);
+
+  // Ask-LiTT for the current preview/element selection — shared by the
+  // inspector editor and the on-canvas selection overlay.
+  const handleAskAboutPreviewSelection = useCallback(() => {
+    const sel: StudioSelectionPayload | null = activeWorktab?.selection
+      ?? (previewSelection && capabilities.projectId
+        ? {
+            kind: "preview-element",
+            label: previewSelection.label,
+            selector: previewSelection.selector,
+            tagName: previewSelection.tagName,
+            sourceFile: "attrs" in previewSelection ? previewSelection.attrs?.["data-source"] : undefined,
+            projectId: capabilities.projectId,
+            timestamp: Date.now(),
+          }
+        : null);
+    if (sel) {
+      window.dispatchEvent(new CustomEvent("studio:ask-litt", { detail: { selection: sel } }));
+    } else {
+      setLittExpanded(true);
+    }
+  }, [activeWorktab, previewSelection, capabilities.projectId]);
+
+  // Thin task-aware context strip for the LiTT command bar:
+  //   Design · HeroSection · h2 · Desktop
+  // Surface label + selected component/element + viewport. Replaces the
+  // old multi-row context chrome (workspace/repo/branch line, selection
+  // chips, "Editing X" strip) — one line, no extra chrome.
+  const composerContextStrip = useMemo(() => {
+    const selection = activeWorktab?.selection ?? previewSelection;
+    const surfaceLabel = studioShellActive
+      ? STAGE_SURFACE_META[stageSurface].label
+      : destination === "studio"
+        ? `Studio · ${studioMode}`
+        : destination;
+    const componentName = selection
+      ? ("componentName" in selection && selection.componentName) || selection.label || null
+      : null;
+    const tagName = selection?.tagName ?? null;
+    const viewport = studioShellActive && (stageSurface === "design" || stageSurface === "preview") && selection
+      ? previewDeviceMode.charAt(0).toUpperCase() + previewDeviceMode.slice(1)
+      : null;
+    return (
+      <ComposerContextStrip
+        surfaceLabel={surfaceLabel}
+        componentName={componentName}
+        tagName={tagName}
+        viewport={viewport}
+        projectName={capabilities.projectName}
+      />
+    );
+  }, [activeWorktab, previewSelection, studioShellActive, stageSurface, destination, studioMode, previewDeviceMode, capabilities.projectName]);
+
   // Keep the execution store's conversation→task index fed from server
   // truth, so SSE events attribute to the OWNING tab even while another
   // tab is active (background runs keep their own badge).
@@ -1824,23 +1919,72 @@ function CommandStudioContent() {
     // Shell: the task-change effect restores this task's stage surface.
   }, [serverTasks, serverActiveTaskId, worktabTabs, bindWorktab, currentSurface, studioTasks]);
 
-  const handleNewWorktab = useCallback(async () => {
-    const task = await studioTasks.createTask({
-      title: nextUntitledTitle(serverTasks.map((t) => t.title)),
-      taskType: "general",
+  // Auto-naming: a task keeps "Untitled N" only until its first user
+  // prompt. The first meaningful prompt names the tab (once per task);
+  // user-titled tasks are never touched.
+  const autoNamedTaskIdsRef = useRef<Set<string>>(new Set());
+  // "Has prompt" signal shared by auto-naming (item 2) and the new-task
+  // anti-spam guard (item 3): task ids known to have a user message.
+  const tasksWithPromptRef = useRef<Set<string>>(new Set());
+  // In-flight guard against double-clicking the "+" worktab button.
+  const creatingTaskRef = useRef(false);
+
+  useEffect(() => {
+    const conversationId = conversation.selectedConversationId;
+    if (!conversationId) return;
+    const task = serverTasks.find((t) => t.id === serverActiveTaskId && t.conversationId === conversationId)
+      ?? serverTasks.find((t) => t.conversationId === conversationId);
+    const firstUserMessage = conversation.messages.find((m) => m.role === "user");
+    if (!task || !firstUserMessage) return;
+    tasksWithPromptRef.current.add(task.id);
+    if (!UNTITLED_TASK_PATTERN.test(task.title ?? "")) return;
+    if (autoNamedTaskIdsRef.current.has(task.id)) return;
+    const name = deriveTaskName(firstUserMessage.content);
+    if (!name || name.toLowerCase() === (task.title ?? "").toLowerCase()) return;
+    autoNamedTaskIdsRef.current.add(task.id);
+    void studioTasks.renameTask(task.id, name).then((renamed) => {
+      if (!renamed) autoNamedTaskIdsRef.current.delete(task.id);
     });
-    if (!task) return;
-    useExecutionStore.getState().setActiveTaskId(task.id);
-    // Fresh task: no conversation yet (the canonical controller lazily
-    // provisions one on first send); bind clears the selection and
-    // restores the current surface.
-    bindWorktab(
-      mapStudioTaskToWorktab(task, { surface: currentSurface, selection: null }),
-    );
-    // Shell: a fresh task opens the LiTT command layer — it's where the
-    // task gets its first prompt (which also names the task).
-    if (studioShellActive) setLittExpanded(true);
-  }, [studioTasks, serverTasks, bindWorktab, currentSurface, studioShellActive]);
+  }, [conversation.messages, conversation.selectedConversationId, serverTasks, serverActiveTaskId, studioTasks]);
+
+  const handleNewWorktab = useCallback(async () => {
+    if (creatingTaskRef.current) return;
+    // Anti empty-task spam: if the active task is still pristine
+    // (auto-titled and no user prompt yet), reuse it — focus the
+    // composer instead of piling up another empty "Untitled N" tab.
+    const activeTask = serverTasks.find((t) => t.id === serverActiveTaskId);
+    if (
+      activeTask &&
+      UNTITLED_TASK_PATTERN.test(activeTask.title ?? "") &&
+      !tasksWithPromptRef.current.has(activeTask.id)
+    ) {
+      window.dispatchEvent(new CustomEvent("studio:focus-composer"));
+      return;
+    }
+    creatingTaskRef.current = true;
+    try {
+      const task = await studioTasks.createTask({
+        title: nextUntitledTitle(serverTasks.map((t) => t.title)),
+        taskType: "general",
+      });
+      if (!task) return;
+      useExecutionStore.getState().setActiveTaskId(task.id);
+      // Fresh task: no conversation yet (the canonical controller lazily
+      // provisions one on first send); bind clears the selection and
+      // restores the current surface.
+      bindWorktab(
+        mapStudioTaskToWorktab(task, { surface: currentSurface, selection: null }),
+      );
+      // Shell: a fresh task presents the thin command bar (collapsed
+      // transcript) with the composer focused — the first prompt typed
+      // there also names the task (auto-naming effect above).
+      if (studioShellActive) {
+        window.dispatchEvent(new CustomEvent("studio:focus-composer"));
+      }
+    } finally {
+      creatingTaskRef.current = false;
+    }
+  }, [studioTasks, serverTasks, serverActiveTaskId, bindWorktab, currentSurface, studioShellActive]);
 
   const handleCloseWorktab = useCallback(async (id: string) => {
     const idx = serverTasks.findIndex((t) => t.id === id);
@@ -2330,6 +2474,9 @@ function CommandStudioContent() {
         contextLine={contextLine}
         hideContextLine={isMobileLitt}
         compact={isMobileLitt}
+        // Thin task-aware context strip (surface · component · tag ·
+        // viewport) — replaces the old multi-row context chrome.
+        contextStrip={composerContextStrip}
         // F1: the ACTIVE worktab's ask-litt selection drives the structured
         // context chips (Slice B). Legacy preview-click selections still
         // flow through contextLine.selectedElement as fallback.
@@ -2408,6 +2555,8 @@ function CommandStudioContent() {
             versionControl={capabilities.versionControl}
             workspaceStatus={capabilities.workspaceStatus ?? null}
             onSelectionChange={setPreviewSelection}
+            onDeviceModeChange={setPreviewDeviceMode}
+            onAskAboutSelection={handleAskAboutPreviewSelection}
           />
         );
       case "browser":
@@ -2663,7 +2812,7 @@ function CommandStudioContent() {
             inspector={
               <ContextInspector
                 open={inspectorOpen}
-                onToggle={() => setInspectorOpen((v) => !v)}
+                onToggle={() => setInspectorOpenManual(!inspectorOpen)}
                 selection={
                   activeWorktab?.selection
                     ? {
@@ -2676,24 +2825,7 @@ function CommandStudioContent() {
                       ? { label: previewSelection.label, tagName: previewSelection.tagName }
                       : null
                 }
-                onAskAboutSelection={() => {
-                  const sel: StudioSelectionPayload | null = activeWorktab?.selection
-                    ?? (previewSelection && capabilities.projectId
-                      ? {
-                          kind: "preview-element",
-                          label: previewSelection.label,
-                          selector: previewSelection.selector,
-                          tagName: previewSelection.tagName,
-                          projectId: capabilities.projectId,
-                          timestamp: Date.now(),
-                        }
-                      : null);
-                  if (sel) {
-                    window.dispatchEvent(new CustomEvent("studio:ask-litt", { detail: { selection: sel } }));
-                  } else {
-                    setLittExpanded(true);
-                  }
-                }}
+                onAskAboutSelection={handleAskAboutPreviewSelection}
                 onClearSelection={handleClearWorktabSelection}
                 editor={
                   // The real element-edit path — only when a live preview
@@ -2704,52 +2836,28 @@ function CommandStudioContent() {
                       selection={previewSelection}
                       projectId={capabilities.projectId}
                       route={null}
-                      onAskAboutSelection={() => {
-                        const sel: StudioSelectionPayload | null = activeWorktab?.selection
-                          ?? (capabilities.projectId
-                            ? {
-                                kind: "preview-element",
-                                label: previewSelection.label,
-                                selector: previewSelection.selector,
-                                tagName: previewSelection.tagName,
-                                sourceFile: previewSelection.attrs?.["data-source"],
-                                projectId: capabilities.projectId,
-                                timestamp: Date.now(),
-                              }
-                            : null);
-                        if (sel) {
-                          window.dispatchEvent(new CustomEvent("studio:ask-litt", { detail: { selection: sel } }));
-                        } else {
-                          setLittExpanded(true);
-                        }
-                      }}
+                      onAskAboutSelection={handleAskAboutPreviewSelection}
                       onClearSelection={handleClearWorktabSelection}
                     />
                   ) : undefined
                 }
                 propertiesContent={builderSelectedNodeId ? <BuilderPropertiesPanel /> : null}
                 defaultContent={
-                  <StudioInspector
-                    embedded
-                    open
-                    onToggle={() => setInspectorOpen(false)}
-                    activeTab={inspectorTab}
-                    onTabChange={setInspectorTab}
-                    data={{
-                      capabilities,
-                      modelLabel,
-                      modelHealth,
-                      activeAgentName: AGENT_META[activeAgentId]?.displayName ?? "LiTT",
-                      destination,
-                      surface: studioMode,
-                      messages: conversation.messages,
-                      busy: conversation.busy,
-                      workspaceRevision,
-                      healthRunTrigger,
-                      onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
-                      onWorkspacePrepared: () => { void refreshCapabilities(); },
-                    }}
-                  />
+                  // Honest minimal empty state — the tabbed StudioInspector
+                  // plan/checks dashboard lives on the classic
+                  // (non-shell) path, not in the shell inspector.
+                  <div
+                    className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center"
+                    data-testid="inspector-empty-state"
+                  >
+                    <MousePointer2 size={16} style={{ color: "var(--text-muted)" }} />
+                    <p className="text-[11px] font-bold" style={{ color: "var(--text-secondary)" }}>
+                      Nothing selected
+                    </p>
+                    <p className="max-w-[220px] text-[10px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
+                      Select an element in Design or Preview to inspect and edit its real properties.
+                    </p>
+                  </div>
                 }
               />
             }

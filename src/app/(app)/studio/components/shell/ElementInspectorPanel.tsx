@@ -1,9 +1,15 @@
 "use client";
 
 /**
- * ElementInspectorPanel — the inspector editor for a selected preview
- * element. Every control writes a real inline-style/attribute/text patch
- * to the workspace file the element was resolved into (useElementEdits).
+ * ElementInspectorPanel — the inspector editor for a selected preview /
+ * design element. Every control writes a real inline-style/attribute/text
+ * patch to the workspace file the element was resolved into
+ * (useElementEdits).
+ *
+ * Section order is the Studio hierarchy contract:
+ *   identity → SOURCE → CONTENT → TYPOGRAPHY → LAYOUT → SPACING →
+ *   FLEX/GRID → COLORS → BORDER/RADIUS/SHADOW → VISIBILITY/LINK/IMAGE →
+ *   ACTIONS.
  *
  * Honesty contract:
  *   - "resolving" → spinner.
@@ -11,6 +17,10 @@
  *   - A save only claims success after the file write returns ok.
  *   - Fields prefill from the element's computed styles at selection
  *     time (capture in the preview bridge) — blank means "unchanged".
+ *
+ * The `edits` prop is dependency injection for visual verification
+ * (harness): when omitted the panel uses the real useElementEdits
+ * pipeline. The real path is untouched.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -20,12 +30,22 @@ import type { StudioSelectionPayload } from "../../context/StudioContext";
 import type { ElementPatch } from "../../lib/element-edits";
 import { useElementEdits } from "../../hooks/useElementEdits";
 
+export type ElementEdits = ReturnType<typeof useElementEdits>;
+
 /** Accepts the PreviewPanel shape OR the pinned canonical payload — the
     ask-litt pin stamps StudioSelectionPayload into the same slot. */
 export type ElementSelectionLike = PreviewSelection | StudioSelectionPayload;
 
-function normalizeSelection(selection: ElementSelectionLike): PreviewSelection {
+export interface NormalizedElementSelection extends PreviewSelection {
+  /** Builder/preview component name when known (e.g. "HeroSection"). */
+  componentName?: string;
+  /** Route the element was selected on, when known. */
+  route?: string | null;
+}
+
+function normalizeSelection(selection: ElementSelectionLike): NormalizedElementSelection {
   if ("kind" in selection) {
+    const payload = selection as StudioSelectionPayload;
     return {
       label: selection.label,
       selector: selection.selector ?? selection.elementId ?? "",
@@ -35,9 +55,11 @@ function normalizeSelection(selection: ElementSelectionLike): PreviewSelection {
       text: selection.text ?? selection.content,
       path: selection.path,
       rect: selection.rect,
+      componentName: payload.componentName,
+      route: payload.route ?? null,
     };
   }
-  return selection;
+  return selection as NormalizedElementSelection;
 }
 
 const TEXT_TAGS = new Set([
@@ -123,21 +145,28 @@ export default function ElementInspectorPanel({
   route,
   onAskAboutSelection,
   onClearSelection,
+  edits: injectedEdits,
 }: {
   selection: ElementSelectionLike;
   projectId: string | null;
   route: string | null;
   onAskAboutSelection?: () => void;
   onClearSelection?: () => void;
+  /** Injected edit pipeline (harness/visual verification). Defaults to
+      the real useElementEdits(projectId). */
+  edits?: ElementEdits;
 }) {
   const selection = useMemo(() => normalizeSelection(rawSelection), [rawSelection]);
-  const edits = useElementEdits(projectId);
+  const realEdits = useElementEdits(projectId);
+  const edits = injectedEdits ?? realEdits;
   const [savedFlash, setSavedFlash] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
 
   const selKey = `${selection.selector}|${selection.tagName}`;
   useEffect(() => {
+    // An injected harness pipeline is pre-resolved — don't re-resolve.
+    if (injectedEdits) return;
     setLastError(null);
     void edits.resolve({
       selector: selection.selector,
@@ -148,7 +177,7 @@ export default function ElementInspectorPanel({
       path: selection.path,
     }, route);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selKey, route, projectId]);
+  }, [selKey, route, projectId, injectedEdits]);
 
   const apply = async (patch: ElementPatch) => {
     const ok = await edits.applyPatch(patch);
@@ -171,6 +200,7 @@ export default function ElementInspectorPanel({
   const tag = selection.tagName.toLowerCase();
   const editable = edits.status === "ready" || edits.status === "applying";
   const showText = TEXT_TAGS.has(tag) || (!VOID_TAGS.has(tag) && !!selection.text);
+  const routeLabel = selection.route ?? route;
 
   const statusLine = useMemo(() => {
     if (edits.status === "resolving") return "Resolving element in project files…";
@@ -183,12 +213,23 @@ export default function ElementInspectorPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-testid="element-inspector-panel">
-      {/* identity header */}
+      {/* (a) identity header — element/component name + tag chip + Ask LiTT + clear */}
       <div className="shrink-0 px-3 pb-2 pt-3">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <div className="truncate text-[12px] font-bold" style={{ color: "var(--text-main)" }} title={selection.label}>
-              {selection.label}
+            <div className="flex min-w-0 items-center gap-1.5">
+              <div className="truncate text-[12px] font-bold" style={{ color: "var(--text-main)" }} title={selection.label}>
+                {selection.componentName ?? selection.label}
+              </div>
+              {tag && (
+                <span
+                  className="shrink-0 rounded px-1 py-px font-mono text-[9px] font-bold"
+                  style={{ backgroundColor: "rgba(155,77,255,0.14)", color: "#c4b5fd" }}
+                  data-testid="element-inspector-tag"
+                >
+                  &lt;{tag}&gt;
+                </span>
+              )}
             </div>
             <div className="mt-0.5 truncate font-mono text-[10px]" style={{ color: "var(--text-muted)" }} title={selection.selector}>
               {selection.selector}
@@ -242,6 +283,31 @@ export default function ElementInspectorPanel({
 
       {editable && (
         <>
+          {/* (b) SOURCE — real file mapping, never guessed */}
+          <Section title="Source">
+            <div className="col-span-2 grid grid-cols-2 gap-1.5">
+              <div>
+                <span className={LABEL} style={{ color: "var(--text-muted)" }}>File</span>
+                <div className="mt-0.5 truncate font-mono text-[11px]" style={{ color: "var(--text-main)" }} title={edits.filePath ?? ""} data-testid="element-source-file">
+                  {edits.filePath ?? "—"}
+                </div>
+              </div>
+              <div>
+                <span className={LABEL} style={{ color: "var(--text-muted)" }}>Route</span>
+                <div className="mt-0.5 truncate font-mono text-[11px]" style={{ color: "var(--text-main)" }} title={routeLabel ?? ""}>
+                  {routeLabel ?? "—"}
+                </div>
+              </div>
+            </div>
+            <div className="col-span-2">
+              <span className={LABEL} style={{ color: "var(--text-muted)" }}>Selector</span>
+              <div className="mt-0.5 truncate font-mono text-[11px]" style={{ color: "var(--text-secondary)" }} title={selection.selector}>
+                {selection.selector}
+              </div>
+            </div>
+          </Section>
+
+          {/* (c) CONTENT */}
           {showText && (
             <div className="border-t px-3 py-2.5" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
               <div className="mb-2" style={{ color: "var(--text-muted)", fontSize: 9, fontWeight: 800, letterSpacing: "0.1em" }}>CONTENT</div>
@@ -255,25 +321,7 @@ export default function ElementInspectorPanel({
             </div>
           )}
 
-          {tag === "img" && (
-            <Section title="Image">
-              <div className="col-span-2">
-                <TextField label="Source" value={selection.attrs?.["src"] ?? ""} placeholder="https://… or /path.png" testId="element-edit-src" onCommit={setAttr("src")} />
-              </div>
-              <div className="col-span-2">
-                <TextField label="Alt" value={selection.attrs?.["alt"] ?? ""} testId="element-edit-alt" onCommit={setAttr("alt")} />
-              </div>
-            </Section>
-          )}
-
-          {tag === "a" && (
-            <Section title="Link">
-              <div className="col-span-2">
-                <TextField label="Href" value={selection.attrs?.["href"] ?? ""} placeholder="/route or https://…" testId="element-edit-href" onCommit={setAttr("href")} />
-              </div>
-            </Section>
-          )}
-
+          {/* (d) TYPOGRAPHY */}
           <Section title="Typography">
             <TextField label="Font size" value={styles["font-size"] ?? ""} placeholder="16px" onCommit={setStyle("font-size")} />
             <SelectField
@@ -298,7 +346,58 @@ export default function ElementInspectorPanel({
             <TextField label="Spacing" value={styles["letter-spacing"] ?? ""} placeholder="0.02em" onCommit={setStyle("letter-spacing")} />
           </Section>
 
-          <Section title="Fill">
+          {/* (e) LAYOUT */}
+          <Section title="Layout">
+            <SelectField
+              label="Display"
+              value=""
+              options={["block", "inline-block", "inline", "flex", "grid", "none"].map((v) => ({ value: v, label: v }))}
+              onCommit={setStyle("display")}
+              testId="element-edit-display"
+            />
+            <TextField label="Width" value={styles["width"] ?? ""} placeholder="auto" onCommit={setStyle("width")} />
+            <TextField label="Height" value={styles["height"] ?? ""} placeholder="auto" onCommit={setStyle("height")} />
+          </Section>
+
+          {/* (f) SPACING */}
+          <Section title="Spacing">
+            <TextField label="Padding" value={styles["padding"] ?? ""} placeholder="16px" onCommit={setStyle("padding")} />
+            <TextField label="Margin" value={styles["margin"] ?? ""} placeholder="8px" onCommit={setStyle("margin")} />
+          </Section>
+
+          {/* (g) FLEX/GRID */}
+          <Section title="Flex / Grid">
+            <SelectField
+              label="Direction"
+              value=""
+              options={["row", "row-reverse", "column", "column-reverse"].map((v) => ({ value: v, label: v }))}
+              onCommit={setStyle("flex-direction")}
+            />
+            <SelectField
+              label="Wrap"
+              value=""
+              options={["nowrap", "wrap", "wrap-reverse"].map((v) => ({ value: v, label: v }))}
+              onCommit={setStyle("flex-wrap")}
+            />
+            <SelectField
+              label="Justify"
+              value=""
+              options={["flex-start", "center", "flex-end", "space-between", "space-around"].map((v) => ({ value: v, label: v }))}
+              onCommit={setStyle("justify-content")}
+            />
+            <SelectField
+              label="Align"
+              value=""
+              options={["flex-start", "center", "flex-end", "stretch", "baseline"].map((v) => ({ value: v, label: v }))}
+              onCommit={setStyle("align-items")}
+            />
+            <TextField label="Gap" value={styles["gap"] ?? ""} placeholder="12px" onCommit={setStyle("gap")} />
+            <TextField label="Grid columns" value={styles["grid-template-columns"] ?? ""} placeholder="1fr 1fr" onCommit={setStyle("grid-template-columns")} />
+            <TextField label="Grid rows" value={styles["grid-template-rows"] ?? ""} placeholder="auto" onCommit={setStyle("grid-template-rows")} />
+          </Section>
+
+          {/* (h) COLORS */}
+          <Section title="Colors">
             <label className="block">
               <span className={LABEL} style={{ color: "var(--text-muted)" }}>Text color</span>
               <div className="mt-0.5 flex gap-1">
@@ -315,45 +414,41 @@ export default function ElementInspectorPanel({
             </label>
           </Section>
 
-          <Section title="Spacing">
-            <TextField label="Padding" value={styles["padding"] ?? ""} placeholder="16px" onCommit={setStyle("padding")} />
-            <TextField label="Margin" value={styles["margin"] ?? ""} placeholder="8px" onCommit={setStyle("margin")} />
-          </Section>
-
-          <Section title="Size">
-            <TextField label="Width" value={styles["width"] ?? ""} placeholder="auto" onCommit={setStyle("width")} />
-            <TextField label="Height" value={styles["height"] ?? ""} placeholder="auto" onCommit={setStyle("height")} />
-          </Section>
-
-          <Section title="Border">
-            <TextField label="Radius" value={styles["border-radius"] ?? ""} placeholder="8px" onCommit={setStyle("border-radius")} />
+          {/* (i) BORDER / RADIUS / SHADOW */}
+          <Section title="Border / Radius / Shadow">
             <TextField label="Border" value={styles["border"] ?? ""} placeholder="1px solid #333" onCommit={setStyle("border")} />
+            <TextField label="Radius" value={styles["border-radius"] ?? ""} placeholder="8px" onCommit={setStyle("border-radius")} />
+            <div className="col-span-2">
+              <TextField label="Shadow" value={styles["box-shadow"] ?? ""} placeholder="0 4px 16px rgba(0,0,0,0.3)" onCommit={setStyle("box-shadow")} />
+            </div>
           </Section>
 
-          <Section title="Layout">
+          {/* (j) VISIBILITY / LINK / IMAGE */}
+          <Section title="Visibility / Link / Image">
             <SelectField
-              label="Display"
+              label="Visibility"
               value=""
-              options={["block", "inline-block", "inline", "flex", "grid", "none"].map((v) => ({ value: v, label: v }))}
-              onCommit={setStyle("display")}
-              testId="element-edit-display"
+              options={[{ value: "visible", label: "Visible" }, { value: "hidden", label: "Hidden" }, { value: "collapse", label: "Collapse" }]}
+              onCommit={setStyle("visibility")}
             />
-            <TextField label="Gap" value={styles["gap"] ?? ""} placeholder="12px" onCommit={setStyle("gap")} />
-            <SelectField
-              label="Justify"
-              value=""
-              options={["flex-start", "center", "flex-end", "space-between", "space-around"].map((v) => ({ value: v, label: v }))}
-              onCommit={setStyle("justify-content")}
-            />
-            <SelectField
-              label="Align"
-              value=""
-              options={["flex-start", "center", "flex-end", "stretch", "baseline"].map((v) => ({ value: v, label: v }))}
-              onCommit={setStyle("align-items")}
-            />
+            {tag === "a" && (
+              <div className="col-span-2">
+                <TextField label="Href" value={selection.attrs?.["href"] ?? ""} placeholder="/route or https://…" testId="element-edit-href" onCommit={setAttr("href")} />
+              </div>
+            )}
+            {tag === "img" && (
+              <>
+                <div className="col-span-2">
+                  <TextField label="Source" value={selection.attrs?.["src"] ?? ""} placeholder="https://… or /path.png" testId="element-edit-src" onCommit={setAttr("src")} />
+                </div>
+                <div className="col-span-2">
+                  <TextField label="Alt" value={selection.attrs?.["alt"] ?? ""} testId="element-edit-alt" onCommit={setAttr("alt")} />
+                </div>
+              </>
+            )}
           </Section>
 
-          {/* actions */}
+          {/* (k) ACTIONS */}
           <div className="border-t px-3 py-2.5" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
             <div className="mb-2" style={{ color: "var(--text-muted)", fontSize: 9, fontWeight: 800, letterSpacing: "0.1em" }}>ACTIONS</div>
             <div className="flex flex-wrap items-center gap-1.5">
