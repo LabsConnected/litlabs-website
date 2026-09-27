@@ -141,6 +141,7 @@ export function registerPreviewProxyRoute(
           `method=${req.method} path=${pathOnly} status=${proxyResp.status} ` +
           `contentType=${proxyResp.headers.get("content-type") ?? "-"} ` +
           `contentEncoding=${proxyResp.headers.get("content-encoding") ?? "-"} ` +
+          `contentLength=${proxyResp.headers.get("content-length") ?? "-"} ` +
           `durationMs=${Date.now() - upstreamStartMs}`,
       );
 
