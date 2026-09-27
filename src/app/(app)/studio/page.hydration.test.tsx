@@ -27,8 +27,8 @@ vi.mock("@/context/ThemeContext", () => ({
   }),
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
-vi.mock("./components/CommandStudio", () => ({
-  default: () => <div data-testid="command-studio-mock" />,
+vi.mock("./shell/StudioShell", () => ({
+  StudioShell: () => <div data-testid="studio-shell-mock" />,
 }));
 
 const { default: StudioPage } = await import("./page");
@@ -63,12 +63,12 @@ describe("StudioPage hydration", () => {
     });
 
     // Without the mounted gate, the first client render produces the full
-    // CommandStudio tree against the loading-state HTML → hydration
+    // StudioShell tree against the loading-state HTML → hydration
     // mismatch → recoverable error → forced client re-render.
     expect(recoverableErrors).toHaveLength(0);
 
     // After mount, the real Studio renders.
-    expect(container.querySelector("[data-testid='command-studio-mock']")).toBeTruthy();
+    expect(container.querySelector("[data-testid='studio-shell-mock']")).toBeTruthy();
 
     await act(async () => root?.unmount());
     container.remove();
