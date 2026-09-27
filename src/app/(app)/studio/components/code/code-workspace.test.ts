@@ -165,3 +165,15 @@ describe("Studio Code workspace lifecycle (regression)", () => {
     expect(true).toBe(true);
   });
 });
+
+describe("Code workspace view-mode toggle", () => {
+  it("has no duplicate Code button — the Code tab itself is the code view", async () => {
+    const { CODE_VIEW_MODES } = await import("./CodeWorkspace");
+    const labels = CODE_VIEW_MODES.map((m) => m.label);
+    // The toggle must not repeat the "Code" workspace tab label.
+    expect(labels).not.toContain("Code");
+    expect(new Set(labels).size).toBe(labels.length);
+    const ids = CODE_VIEW_MODES.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});

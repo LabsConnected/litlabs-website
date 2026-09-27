@@ -15,7 +15,6 @@ import {
   Save,
   Trash2,
   X,
-  Code2,
   Eye,
   Columns2,
   Monitor,
@@ -37,6 +36,17 @@ interface FileEntry {
 }
 
 type ViewMode = "code" | "split" | "file-preview" | "app-preview";
+
+/**
+ * View-mode toggle for the Code workspace tab toolbar. There is
+ * intentionally no "Code" option: the Code workspace tab itself is the code
+ * view, and a second Code button here duplicated it in the same toolbar.
+ */
+export const CODE_VIEW_MODES: { id: ViewMode; icon: typeof Columns2; label: string }[] = [
+  { id: "split", icon: Columns2, label: "Split" },
+  { id: "file-preview", icon: Eye, label: "File" },
+  { id: "app-preview", icon: Monitor, label: "App" },
+];
 
 type DialogState =
   | { kind: "file" | "folder"; directory: string; value: string }
@@ -544,12 +554,7 @@ export function CodeWorkspace({
         <div className="flex-1" />
         {/* View mode toggle */}
         <div className="flex items-center gap-0.5 rounded-md p-0.5" style={{ backgroundColor: "rgba(255,255,255,0.04)" }}>
-          {([
-            { id: "code" as ViewMode, icon: Code2, label: "Code" },
-            { id: "split" as ViewMode, icon: Columns2, label: "Split" },
-            { id: "file-preview" as ViewMode, icon: Eye, label: "File" },
-            { id: "app-preview" as ViewMode, icon: Monitor, label: "App" },
-          ]).map((mode) => {
+          {CODE_VIEW_MODES.map((mode) => {
             const Icon = mode.icon;
             const isActive = viewMode === mode.id;
             return (
