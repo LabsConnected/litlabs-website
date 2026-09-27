@@ -74,7 +74,7 @@ import { resolveStageSurface, shellStageForTool, type StudioStageSurface } from 
 import { SpatialWorkspace } from "./workspace/SpatialWorkspace";
 import { WorkspaceInspector } from "./workspace/WorkspaceInspector";
 import { useWorkspaceStore } from "./workspace/workspace-store";
-import { extractWorkspaceActionBlock, parseHttpWorkspaceAction } from "@/lib/studio/workspace-document";
+import { readAssistantWorkspaceAction } from "@/lib/studio/workspace-document";
 import { useCanvasBuilderStore } from "./canvas/builder/store";
 import type { PreviewSelection } from "./StudioPreviewPanel";
 import StudioProjectFiles from "./StudioProjectFiles";
@@ -1160,10 +1160,10 @@ function CommandStudioContent() {
     }
     for (const message of newMessages) {
       if (message.role !== "assistant" || typeof message.content !== "string") continue;
-      const action = parseHttpWorkspaceAction(extractWorkspaceActionBlock(message.content));
-      if (!action) continue;
+      const parsed = readAssistantWorkspaceAction(message.content);
+      if (!parsed.ok) continue;
       openStageSurface("workspace");
-      useWorkspaceStore.getState().enqueueAction(action);
+      useWorkspaceStore.getState().enqueueAction(parsed.action);
     }
   }, [conversation.messages, openStageSurface]);
 
@@ -2647,6 +2647,10 @@ function CommandStudioContent() {
               <WorkspaceRail
                 active={stageSurface}
                 onSelect={openStageSurface}
+                onCreateWorkspace={(kind) => {
+                  openStageSurface("workspace");
+                  useWorkspaceStore.getState().enqueueAction({ type: "workspace.create", objectType: kind });
+                }}
               />
             }
             stage={
@@ -2782,6 +2786,7 @@ function CommandStudioContent() {
                       <button
                         key={kind}
                         type="button"
+                        data-testid={`litt-workspace-new-${kind}`}
                         className="rounded px-2 py-1 text-[10px] uppercase tracking-wide text-white/70 hover:bg-white/5"
                         onClick={() => {
                           openStageSurface("workspace");

@@ -34,6 +34,7 @@ export function SpatialWorkspace({ projectId }: { projectId: string | null }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const status = useWorkspaceStore((state) => state.status);
   const error = useWorkspaceStore((state) => state.error);
+  const unavailable = useWorkspaceStore((state) => state.unavailable);
   const workspaceDoc = useWorkspaceStore((state) => state.document);
   const selectedIds = useWorkspaceStore((state) => state.selectedIds);
   const load = useWorkspaceStore((state) => state.load);
@@ -47,6 +48,7 @@ export function SpatialWorkspace({ projectId }: { projectId: string | null }) {
   const [frames, setFrames] = useState<Record<string, Frame>>({});
   const [guides, setGuides] = useState<{ orientation: "v" | "h"; pos: number }[]>([]);
   const [marquee, setMarquee] = useState<Frame | null>(null);
+  const marqueeRef = useRef<Frame | null>(null);
   const [space, setSpace] = useState(false);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const wheelTimer = useRef<number | null>(null);
@@ -170,26 +172,36 @@ export function SpatialWorkspace({ projectId }: { projectId: string | null }) {
     }
     beginGesture(event, (point) => {
       const current = screenToCanvas(point, viewport);
-      setMarquee({
+      const rect = {
         x: Math.min(marqueeStart.x, current.x),
         y: Math.min(marqueeStart.y, current.y),
         width: Math.abs(current.x - marqueeStart.x),
         height: Math.abs(current.y - marqueeStart.y),
-      });
+      };
+      marqueeRef.current = rect;
+      setMarquee(rect);
     }, () => {
-      setMarquee((rect) => {
-        if (rect) {
-          const hits = workspaceDoc.objects.filter((object) => marqueeHits(object.frame, rect)).map((object) => object.id);
-          select(hits);
-        }
-        return null;
-      });
+      const rect = marqueeRef.current;
+      marqueeRef.current = null;
+      setMarquee(null);
+      if (!rect) return;
+      const hits = workspaceDoc.objects.filter((object) => marqueeHits(object.frame, rect)).map((object) => object.id);
+      select(hits);
     });
+  }
+
+  function toggleSelection(id: string) {
+    const current = useWorkspaceStore.getState().selectedIds;
+    select(current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   }
 
   function onTitlePointerDown(object: WorkspaceObject, event: React.PointerEvent) {
     event.stopPropagation();
     if (!isPrimaryPointerButton(event)) return;
+    if (event.shiftKey) {
+      toggleSelection(object.id);
+      return;
+    }
     const origin = screenToCanvas(eventPoint(event), viewport);
     const selected = selectedIds.includes(object.id) ? selectedIds : [object.id];
     if (!selectedIds.includes(object.id)) select(selected);
@@ -260,6 +272,17 @@ export function SpatialWorkspace({ projectId }: { projectId: string | null }) {
     );
   }
 
+  if (unavailable) {
+    return (
+      <div ref={rootRef} data-testid="spatial-workspace" className="flex h-full items-center justify-center bg-[#07080b] p-8 text-center text-sm text-white/80">
+        <div data-testid="workspace-persistence-unavailable" className="max-w-md space-y-2">
+          <p className="text-base text-white">Workspace storage is not ready</p>
+          <p>{error}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={rootRef}
@@ -271,6 +294,11 @@ export function SpatialWorkspace({ projectId }: { projectId: string | null }) {
         <button type="button" data-testid="workspace-new-chat" onClick={() => void run({ type: "workspace.create", objectType: "chat" })}>New chat</button>
         <button type="button" data-testid="workspace-new-task" onClick={() => void run({ type: "workspace.create", objectType: "task" })}>New task</button>
         <button type="button" data-testid="workspace-new-note" onClick={() => void run({ type: "workspace.create", objectType: "note" })}>New note</button>
+        <button type="button" data-testid="workspace-duplicate" onClick={() => { const id = selectedIds[0]; if (id) void run({ type: "workspace.duplicate", id }); }}>Duplicate</button>
+        <button type="button" data-testid="workspace-delete" onClick={() => { for (const id of selectedIds) void run({ type: "workspace.delete", id }); }}>Delete</button>
+        <button type="button" data-testid="workspace-bring-forward" onClick={() => { const id = selectedIds[0]; if (id) void run({ type: "workspace.reorder", id, direction: "forward" }); }}>Bring forward</button>
+        <button type="button" data-testid="workspace-send-backward" onClick={() => { const id = selectedIds[0]; if (id) void run({ type: "workspace.reorder", id, direction: "backward" }); }}>Send backward</button>
+        <button type="button" data-testid="workspace-focus" onClick={() => { const id = selectedIds[0]; if (id) void run({ type: "workspace.focus", id }); }}>Focus</button>
         <button type="button" onClick={() => void undoAction()}>Undo</button>
         <button type="button" onClick={() => void redoAction()}>Redo</button>
         <button
@@ -285,8 +313,8 @@ export function SpatialWorkspace({ projectId }: { projectId: string | null }) {
         </button>
       </div>
       <WorkspaceChecklist />
-      {status === "loading" ? <p className="absolute left-3 top-40 z-30 text-xs text-white/50">Loading workspace…</p> : null}
-      {error ? <p className="absolute left-3 top-48 z-30 max-w-sm text-xs text-red-300">{error}</p> : null}
+      {status === "loading" ? <p data-testid="workspace-loading" className="absolute left-3 top-40 z-30 text-xs text-white/50">Loading workspace…</p> : null}
+      {error ? <p data-testid="workspace-error" className="absolute left-3 top-48 z-30 max-w-sm text-xs text-red-300">{error}</p> : null}
       <div
         data-testid="workspace-canvas"
         className="absolute inset-0"
@@ -315,7 +343,10 @@ export function SpatialWorkspace({ projectId }: { projectId: string | null }) {
               object={object}
               frame={frameOf(object)}
               selected={selectedIds.includes(object.id)}
-              onFocus={() => select(selectedIds.includes(object.id) ? selectedIds : [object.id])}
+              onFocus={(event) => {
+                if (event.shiftKey) toggleSelection(object.id);
+                else select([object.id]);
+              }}
               onTitlePointerDown={(event) => onTitlePointerDown(object, event)}
               onResizePointerDown={(handle, event) => onResizePointerDown(object, handle, event)}
               onMinimize={() => void run({ type: "workspace.update", id: object.id, collapsed: !object.collapsed })}
@@ -327,7 +358,7 @@ export function SpatialWorkspace({ projectId }: { projectId: string | null }) {
         </div>
       </div>
       {status === "ready" && workspaceDoc.objects.length === 0 ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-white/45">
+        <div data-testid="workspace-empty" className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-white/45">
           This workspace is empty. Create a chat, a task, or a note.
         </div>
       ) : null}
@@ -367,6 +398,8 @@ function httpToWorkspaceAction(action: HttpWorkspaceAction): WorkspaceAction | n
       return { type: "workspace.focus", id: action.id };
     case "workspace.viewport":
       return { type: "workspace.viewport", viewport: action.viewport };
+    case "workspace.reorder":
+      return { type: "workspace.reorder", id: action.id, direction: action.direction };
     case "workspace.unlink":
       return { type: "workspace.unlink", id: action.id };
     case "workspace.restore":

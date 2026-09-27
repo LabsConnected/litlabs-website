@@ -16,9 +16,11 @@ import {
 export default function WorkspaceRail({
   active,
   onSelect,
+  onCreateWorkspace,
 }: {
   active: StudioStageSurface;
   onSelect: (surface: StudioStageSurface) => void;
+  onCreateWorkspace?: (kind: "chat" | "task" | "note") => void;
 }) {
   const item = (id: StudioStageSurface) => {
     const meta = STAGE_SURFACE_META[id];
@@ -61,6 +63,23 @@ export default function WorkspaceRail({
       data-testid="studio-workspace-rail"
     >
       {PRIMARY_SURFACES.map(item)}
+      {onCreateWorkspace ? (
+        <div className="mt-2 flex flex-col gap-1" data-testid="workspace-rail-create">
+          {(["chat", "task", "note"] as const).map((kind) => (
+            <button
+              key={kind}
+              type="button"
+              data-testid={`workspace-rail-new-${kind}`}
+              aria-label={`New workspace ${kind}`}
+              title={`New ${kind}`}
+              className="flex h-7 w-9 items-center justify-center rounded text-[9px] uppercase text-white/70 hover:bg-white/5"
+              onClick={() => onCreateWorkspace(kind)}
+            >
+              {kind.slice(0, 1)}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="min-h-0 flex-1" />
       {UTILITY_SURFACES.map(item)}
     </nav>

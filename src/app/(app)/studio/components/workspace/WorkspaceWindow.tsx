@@ -19,7 +19,7 @@ export function WorkspaceWindow({
   object: WorkspaceObject;
   frame: Frame;
   selected: boolean;
-  onFocus: () => void;
+  onFocus: (event: PointerEvent<HTMLElement>) => void;
   onTitlePointerDown: (event: PointerEvent<HTMLDivElement>) => void;
   onResizePointerDown: (handle: ResizeHandle, event: PointerEvent<HTMLButtonElement>) => void;
   onMinimize: () => void;
@@ -29,6 +29,7 @@ export function WorkspaceWindow({
     <article
       data-testid={`workspace-window-${object.id}`}
       data-object-type={object.type}
+      data-selected={selected ? "true" : "false"}
       className="absolute flex flex-col overflow-hidden border bg-[#0c0d10] text-white shadow-lg"
       style={{
         left: frame.x,

@@ -14,8 +14,9 @@ export interface Guide {
 
 export function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
+  if (target.closest("input, textarea, select, [contenteditable='true'], .xterm")) return true;
   const tag = target.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable === true;
 }
 
 export function isPrimaryPointerButton(event: { button: number; pointerType?: string }): boolean {
