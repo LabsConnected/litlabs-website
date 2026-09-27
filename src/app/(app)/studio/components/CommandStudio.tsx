@@ -2556,7 +2556,7 @@ function CommandStudioContent() {
 
       <div
         className="studio-shell flex h-full w-full flex-col overflow-hidden"
-        data-layout={theme.layoutStyle}
+        data-layout={layoutMode === "freeform" ? "freeform" : theme.layoutStyle}
         data-studio-chrome
         style={{
           backgroundColor: "var(--bg-main)",
@@ -2796,6 +2796,27 @@ function CommandStudioContent() {
               accessed via the mobile trigger + overlay sheet below
               (Phase C2.1). */}
           {viewportTier !== null && !isMobileLitt && (
+            layoutMode === "freeform" ? (
+              <StudioWindowFrame
+                id="litt-chat"
+                title="LiTT Chat"
+                defaultRect={{ x: 18, y: 18, width: 380, height: 570 }}
+                className="studio-freeform-chat-window"
+              >
+                <LiTTPanel
+                  collapsed={littCollapsed}
+                  onCollapse={() => setLittCollapsed(true)}
+                  onExpand={() => setLittCollapsed(false)}
+                  activeTab={littActiveTab}
+                  onTabChange={setLittActiveTab}
+                  voiceConnected={liveSession.isLive}
+                  microphoneStatus={liveSession.indicators.microphone}
+                  chatContent={littChatContent}
+                  liveContent={littLiveContent}
+                  expandedWidth={littResize.width}
+                />
+              </StudioWindowFrame>
+            ) : (
             <LiTTPanel
               overlay={!littCollapsed}
               collapsed={littCollapsed}
@@ -2809,6 +2830,7 @@ function CommandStudioContent() {
               liveContent={littLiveContent}
               expandedWidth={littResize.width}
             />
+            )
           )}
 
           <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden overflow-x-hidden">
@@ -3067,6 +3089,32 @@ function CommandStudioContent() {
               mediaContent={<MediaUtilityDock />}
             />
           </main>
+
+          {layoutMode === "freeform" && previewWindowOpen && viewportTier !== null && !isMobileLitt && (
+            <StudioWindowFrame
+              id="preview"
+              type="preview"
+              taskId={conversation.selectedConversationId ?? `project:${capabilities.projectId ?? "unknown"}`}
+              projectId={capabilities.projectId ?? "project:unknown"}
+              title="Preview"
+              defaultRect={{ x: 420, y: 52, width: 760, height: 620 }}
+              minWidth={420}
+              minHeight={320}
+              onClose={() => setPreviewWindowOpen(false)}
+            >
+              <StudioPreviewPanel
+                projectId={capabilities.projectId}
+                projectName={capabilities.projectName}
+                repositoryName={capabilities.repositoryName}
+                branch={capabilities.activeBranch}
+                sourceKind={capabilities.sourceKind}
+                sourceStatus={capabilities.sourceStatus}
+                versionControl={capabilities.versionControl}
+                workspaceStatus={capabilities.workspaceStatus ?? null}
+                onSelectionChange={setPreviewSelection}
+              />
+            </StudioWindowFrame>
+          )}
 
           {/* Mobile Context Drawer — right-side fixed overlay (unchanged).
               On mobile, the ContextDrawer is NOT repositioned to the left;

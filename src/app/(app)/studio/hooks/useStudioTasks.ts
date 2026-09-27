@@ -140,6 +140,23 @@ export function useStudioTasks(projectId: string | null) {
     return data.task ?? null;
   }, [headers]);
 
+  const renameTask = useCallback(async (taskId: string, title: string) => {
+    const trimmed = title.trim().slice(0, 160);
+    if (!trimmed) return null;
+    const res = await fetch(`/api/studio/tasks/${encodeURIComponent(taskId)}`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: await headers(true),
+      body: JSON.stringify({ title: trimmed }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as { task?: StudioTask };
+    if (data.task) {
+      setTasks((current) => current.map((item) => item.id === taskId ? data.task! : item));
+    }
+    return data.task ?? null;
+  }, [headers]);
+
   return {
     tasks,
     closedTasks,
@@ -148,6 +165,7 @@ export function useStudioTasks(projectId: string | null) {
     loading,
     refresh,
     createTask,
+    renameTask,
     activateTask,
     closeTask,
     reopenTask,
