@@ -179,6 +179,47 @@ export default function GitHubPATDrawer({
             >
               {status === "saving" ? "Disconnecting…" : "Disconnect"}
             </button>
+            {/* Update token without disconnecting */}
+            <div className="rounded-xl border p-3" style={{ borderColor: `${T.borderColor}40` }}>
+              <label className="mb-1.5 block text-[10px] font-bold opacity-60">
+                Update Token
+              </label>
+              <input
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="Paste new token to replace the current one"
+                className="w-full rounded-xl border px-3 py-2.5 text-xs outline-none transition"
+                style={{
+                  borderColor: T.borderColor,
+                  backgroundColor: T.bgColor,
+                  color: T.textColor,
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && token.trim() && status !== "saving") {
+                    void handleSave();
+                  }
+                }}
+              />
+              <button
+                onClick={() => void handleSave()}
+                disabled={!token.trim() || status === "saving"}
+                className="mt-2 w-full rounded-xl py-2.5 text-xs font-bold transition disabled:opacity-50"
+                style={{ backgroundColor: T.accentColor, color: "#000" }}
+              >
+                {status === "saving" ? "Saving…" : "Save New Token"}
+              </button>
+              {status === "error" && errorMsg && (
+                <div className="mt-2 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">
+                  <AlertCircle size={14} className="mt-0.5 shrink-0" /> {errorMsg}
+                </div>
+              )}
+              {status === "success" && (
+                <div className="mt-2 flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-400">
+                  <Check size={14} /> Token updated!
+                </div>
+              )}
+            </div>
           </div>
         )}
 
