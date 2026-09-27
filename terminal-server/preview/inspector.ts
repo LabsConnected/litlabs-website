@@ -138,10 +138,12 @@ const INSPECTOR_SCRIPT = `(function () {
         if (sv) styles[STYLE_PROPS[j]] = String(sv).slice(0, 120);
       }
     } catch (e) {}
-    var rect = { width: 0, height: 0 };
+    var rect = { x: 0, y: 0, width: 0, height: 0 };
+    var box = { x: 0, y: 0, width: 0, height: 0 };
     try {
       var r = el.getBoundingClientRect();
-      rect = { width: Math.round(r.width), height: Math.round(r.height) };
+      rect = { x: Math.round(r.left), y: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) };
+      box = styleBox(el, r);
     } catch (e) {}
     return {
       label: describe(el),
@@ -152,7 +154,19 @@ const INSPECTOR_SCRIPT = `(function () {
       text: textOf(el),
       path: pathFor(el),
       rect: rect,
+      box: box,
     };
+  }
+  function styleBox(el, r) {
+    var cs = window.getComputedStyle(el);
+    var positioned = cs.position === "absolute" || cs.position === "fixed";
+    var parent = el.offsetParent || document.documentElement;
+    var pr = parent.getBoundingClientRect();
+    var left = parseFloat(cs.left);
+    var top = parseFloat(cs.top);
+    var x = positioned && isFinite(left) ? left : (r.left - pr.left);
+    var y = positioned && isFinite(top) ? top : (r.top - pr.top);
+    return { x: x, y: y, width: r.width, height: r.height };
   }
   function post(type, data) {
     try {
@@ -187,16 +201,45 @@ const INSPECTOR_SCRIPT = `(function () {
     el.style.boxShadow = "0 0 0 4px rgba(155,77,255,0.16)";
     post("select", payload(el));
   }
+  var panOrigin = null;
+  function onWheel(event) {
+    if (!enabled) return;
+    var zoomed = window.__littCanvasZoom && window.__littCanvasZoom !== 1;
+    if (event.ctrlKey || event.metaKey || zoomed) event.preventDefault();
+    post("viewport", { deltaX: event.deltaX, deltaY: event.deltaY, ctrlKey: !!(event.ctrlKey || event.metaKey) });
+  }
+  function onMidDown(event) {
+    if (!enabled || event.button !== 1) return;
+    event.preventDefault();
+    panOrigin = { x: event.screenX, y: event.screenY };
+  }
+  function onMidMove(event) {
+    if (!panOrigin) return;
+    var dx = event.screenX - panOrigin.x;
+    var dy = event.screenY - panOrigin.y;
+    panOrigin = { x: event.screenX, y: event.screenY };
+    post("pan", { dx: dx, dy: dy });
+  }
+  function onMidUp() { panOrigin = null; }
   function enable() {
     if (enabled) return;
     enabled = true;
     document.addEventListener("mouseover", onOver, true);
     document.addEventListener("click", onClick, true);
+    document.addEventListener("wheel", onWheel, { passive: false });
+    document.addEventListener("pointerdown", onMidDown, true);
+    document.addEventListener("pointermove", onMidMove, true);
+    document.addEventListener("pointerup", onMidUp, true);
   }
   function disable() {
     enabled = false;
     document.removeEventListener("mouseover", onOver, true);
     document.removeEventListener("click", onClick, true);
+    document.removeEventListener("wheel", onWheel);
+    document.removeEventListener("pointerdown", onMidDown, true);
+    document.removeEventListener("pointermove", onMidMove, true);
+    document.removeEventListener("pointerup", onMidUp, true);
+    panOrigin = null;
     if (hoverEl) { restore(hoverEl, hoverPrev); hoverEl = null; hoverPrev = null; }
   }
   function clear() {
@@ -259,6 +302,34 @@ const INSPECTOR_SCRIPT = `(function () {
     if (data.type === "enable") { enable(); post("ready"); }
     else if (data.type === "disable") disable();
     else if (data.type === "clear") clear();
+    else if (data.type === "set-zoom") {
+      window.__littCanvasZoom = typeof data.zoom === "number" ? data.zoom : 1;
+    }
+    else if (data.type === "apply-box" && selectedEl && data.box) {
+      var b = data.box;
+      selectedEl.style.position = "absolute";
+      selectedEl.style.left = Math.round(b.x) + "px";
+      selectedEl.style.top = Math.round(b.y) + "px";
+      selectedEl.style.width = Math.round(b.width) + "px";
+      selectedEl.style.height = Math.round(b.height) + "px";
+      post("geometry", payload(selectedEl));
+    }
+    else if (data.type === "reselect") {
+      var found = null;
+      try { if (typeof data.path === "string" && data.path) found = document.querySelector(data.path); } catch (e) {}
+      if (!found) {
+        try { if (typeof data.selector === "string" && data.selector) found = document.querySelector(data.selector); } catch (e2) {}
+      }
+      if (found && found.tagName) {
+        if (selectedEl) restore(selectedEl, selectedPrev);
+        selectedEl = found;
+        selectedPrev = snapshot(found);
+        found.style.outline = "2px solid #9b4dff";
+        found.style.outlineOffset = "2px";
+        found.style.boxShadow = "0 0 0 4px rgba(155,77,255,0.16)";
+        post("select", payload(found));
+      }
+    }
   });
 })();`;
 

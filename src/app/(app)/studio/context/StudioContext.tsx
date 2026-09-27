@@ -92,6 +92,14 @@ export interface StudioSelection {
   tagName?: string;
   /** Bounding box in the producing surface's coordinates. */
   bounds?: { x: number; y: number; width: number; height: number };
+  /** Preview-element attributes captured by the inspector bridge. */
+  attrs?: Record<string, string>;
+  /** Visible text captured with the preview element. */
+  text?: string;
+  /** Ancestor-chain selector, stronger than `selector`. */
+  path?: string;
+  /** Rendered box. x/y are viewport coordinates when the bridge reports them. */
+  rect?: { x?: number; y?: number; width: number; height: number };
   /** Owning project id (required on the full payload). */
   projectId?: string;
   /** Owning worktab id, when the selection came from a worktab. */

@@ -74,6 +74,12 @@ function stylesToCSS(styles: NodeStyles): React.CSSProperties {
   if (styles.maxWidth) css.maxWidth = styles.maxWidth;
   if (styles.overflow) css.overflow = styles.overflow;
   if (styles.borderBottom) css.borderBottom = styles.borderBottom;
+  if (styles.position) css.position = styles.position as React.CSSProperties["position"];
+  if (styles.top) css.top = styles.top;
+  if (styles.left) css.left = styles.left;
+  if (styles.right) css.right = styles.right;
+  if (styles.bottom) css.bottom = styles.bottom;
+  if (styles.zIndex != null) css.zIndex = styles.zIndex;
   return css;
 }
 
@@ -112,12 +118,12 @@ function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, 
 
   const baseStyle: React.CSSProperties = {
     ...css,
-    position: "relative",
+    position: css.position ?? "relative",
     cursor: "pointer",
     outline: isSelected ? "2px solid #9b4dff" : "none",
     outlineOffset: isSelected ? "2px" : "0",
     transition: "outline 0.1s ease",
-    minHeight: node.type === "spacer" ? undefined : "min-content",
+    minHeight: node.styles?.height || node.type === "spacer" ? undefined : "min-content",
   };
 
   const handleSelect = (e: React.MouseEvent) => {
@@ -156,19 +162,9 @@ function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, 
   };
 
   const selectionHandles = isSelected && !isEditing ? (
-    <>
-      {[
-        { top: -4, left: -4, cursor: "nwse-resize" },
-        { top: -4, right: -4, cursor: "nesw-resize" },
-        { bottom: -4, left: -4, cursor: "nesw-resize" },
-        { bottom: -4, right: -4, cursor: "nwse-resize" },
-      ].map((pos, i) => (
-        <div key={i} style={{ position: "absolute", width: 8, height: 8, borderRadius: 2, backgroundColor: "#9b4dff", border: "1.5px solid #fff", ...pos, cursor: pos.cursor }} />
-      ))}
-      <div style={{ position: "absolute", top: -20, left: -2, fontSize: 8, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff", backgroundColor: "#9b4dff", padding: "1px 6px", borderRadius: 3, pointerEvents: "none", whiteSpace: "nowrap" }}>
-        {node.type}
-      </div>
-    </>
+    <div style={{ position: "absolute", top: -20, left: -2, fontSize: 8, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff", backgroundColor: "#9b4dff", padding: "1px 6px", borderRadius: 3, pointerEvents: "none", whiteSpace: "nowrap" }}>
+      {node.type}
+    </div>
   ) : null;
 
   // Render based on type

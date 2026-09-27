@@ -1,10 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import { AlertTriangle, Loader2, RotateCw } from "lucide-react";
 import StudioPreviewPanel, { type PreviewSelection } from "./StudioPreviewPanel";
+import { DirectManipulationCanvas, type DirectCommit } from "./canvas/DirectManipulationCanvas";
 import { useStudioContext } from "../context/StudioContext";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
 import { useProjectRuntime } from "../hooks/useProjectRuntime";
+import { useElementEditSessionOptional } from "../hooks/element-edit-session";
 
 /**
  * ProjectDesignSurface is deliberately project-first. It renders the active
@@ -16,6 +19,55 @@ export function ProjectDesignSurface() {
   const { projectId, selection, setSelection } = useStudioContext();
   const { capabilities } = useConnectionSummary();
   const runtime = useProjectRuntime();
+  const edits = useElementEditSessionOptional();
+  // The live preview stays one click away. The canvas is the default on
+  // Design because that rail is the editable surface; Preview is its own rail.
+  const [view, setView] = useState<"canvas" | "preview">("canvas");
+
+  const publishSelection = (next: PreviewSelection | null) => {
+    setSelection(next ? {
+      elementId: next.selector,
+      label: next.label,
+      selector: next.selector,
+      tagName: next.tagName,
+      componentName: next.tagName,
+      content: next.label,
+      attrs: next.attrs,
+      styles: next.styles,
+      text: next.text,
+      path: next.path,
+      rect: next.rect,
+    } : null);
+  };
+
+  const commitCanvas = async (commit: DirectCommit) => {
+    const next: PreviewSelection = {
+      label: commit.element.label,
+      selector: commit.element.selector,
+      tagName: commit.element.tagName,
+      text: commit.element.text,
+      styles: { ...commit.patch.styles },
+      rect: {
+        x: Math.round(commit.element.x),
+        y: Math.round(commit.element.y),
+        width: Math.round(commit.element.width),
+        height: Math.round(commit.element.height),
+      },
+    };
+    publishSelection(next);
+    if (!edits) return;
+    const identity = {
+      selector: next.selector,
+      tagName: next.tagName,
+      label: next.label,
+      text: next.text,
+    };
+    let ok = await edits.applyPatch(commit.patch);
+    if (!ok) {
+      await edits.resolve(identity, null);
+      ok = await edits.applyPatch(commit.patch);
+    }
+  };
 
   if (!projectId) {
     return (
@@ -55,27 +107,80 @@ export function ProjectDesignSurface() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="project-design-surface">
-      <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-4 py-2">
-        <div>
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-2">
+        <div className="min-w-0">
           <p className="text-[10px] font-black uppercase tracking-[0.16em] text-violet-300">Design</p>
-          <h2 className="text-sm font-semibold text-white">{capabilities.projectName ?? "Active project"}</h2>
+          <h2 className="truncate text-sm font-semibold text-white">{capabilities.projectName ?? "Active project"}</h2>
         </div>
-        {selection && <span className="text-xs text-white/50">Selected: {selection.content ?? selection.componentName ?? selection.elementId}</span>}
+        <div className="flex items-center gap-2">
+          {selection && <span className="hidden text-xs text-white/50 sm:inline">Selected: {selection.content ?? selection.componentName ?? selection.elementId}</span>}
+          <div className="flex rounded-lg border border-white/10 p-0.5" role="group" aria-label="Design surface">
+            <button
+              type="button"
+              data-testid="design-view-canvas"
+              aria-pressed={view === "canvas"}
+              className="rounded-md px-2.5 py-1 text-[10px] font-bold"
+              style={{ background: view === "canvas" ? "rgba(155,77,255,0.2)" : "transparent", color: view === "canvas" ? "#e9d5ff" : "rgba(255,255,255,0.55)" }}
+              onClick={() => setView("canvas")}
+            >
+              Canvas
+            </button>
+            <button
+              type="button"
+              data-testid="design-view-preview"
+              aria-pressed={view === "preview"}
+              className="rounded-md px-2.5 py-1 text-[10px] font-bold"
+              style={{ background: view === "preview" ? "rgba(155,77,255,0.2)" : "transparent", color: view === "preview" ? "#e9d5ff" : "rgba(255,255,255,0.55)" }}
+              onClick={() => setView("preview")}
+            >
+              Preview
+            </button>
+          </div>
+        </div>
       </div>
       <div className="min-h-0 flex-1">
-        <StudioPreviewPanel
-          projectId={projectId}
-          projectName={capabilities.projectName}
-          repositoryName={capabilities.repositoryName}
-          branch={capabilities.activeBranch}
-          workspaceStatus={runtime.state.workspaceStatus}
-          sourceKind={capabilities.sourceKind}
-          sourceStatus={capabilities.sourceStatus}
-          versionControl={capabilities.versionControl}
-          onSelectionChange={(next: PreviewSelection | null) => {
-            setSelection(next ? { elementId: next.selector, componentName: next.tagName, content: next.label } : null);
-          }}
-        />
+        {view === "canvas" ? (
+          <DirectManipulationCanvas
+            onSelect={(element) => {
+              if (!element) {
+                publishSelection(null);
+                return;
+              }
+              publishSelection({
+                label: element.label,
+                selector: element.selector,
+                tagName: element.tagName,
+                text: element.text,
+                styles: {
+                  position: "absolute",
+                  left: `${Math.round(element.x)}px`,
+                  top: `${Math.round(element.y)}px`,
+                  width: `${Math.round(element.width)}px`,
+                  height: `${Math.round(element.height)}px`,
+                },
+                rect: {
+                  x: Math.round(element.x),
+                  y: Math.round(element.y),
+                  width: Math.round(element.width),
+                  height: Math.round(element.height),
+                },
+              });
+            }}
+            onCommit={(commit) => { void commitCanvas(commit); }}
+          />
+        ) : (
+          <StudioPreviewPanel
+            projectId={projectId}
+            projectName={capabilities.projectName}
+            repositoryName={capabilities.repositoryName}
+            branch={capabilities.activeBranch}
+            workspaceStatus={runtime.state.workspaceStatus}
+            sourceKind={capabilities.sourceKind}
+            sourceStatus={capabilities.sourceStatus}
+            versionControl={capabilities.versionControl}
+            onSelectionChange={publishSelection}
+          />
+        )}
       </div>
     </div>
   );

@@ -71,6 +71,7 @@ import StudioOperatorBar from "./shell/StudioOperatorBar";
 import ElementInspectorPanel from "./shell/ElementInspectorPanel";
 import ImageStudio from "./shell/ImageStudio";
 import { modeToStageSurface, resolveStageSurface, type StudioStageSurface } from "./shell/stage-surfaces";
+import { ElementEditSessionProvider } from "../hooks/element-edit-session";
 import { useCanvasBuilderStore } from "./canvas/builder/store";
 import type { PreviewSelection } from "./StudioPreviewPanel";
 import StudioProjectFiles from "./StudioProjectFiles";
@@ -2505,7 +2506,27 @@ function CommandStudioContent() {
   const studioSessionId = conversation.selectedConversationId
     ?? (capabilities.projectId ? `project:${capabilities.projectId}` : "studio:default");
 
+  const elementEditSelection = previewSelection
+    ? {
+        selector: previewSelection.selector ?? ("elementId" in previewSelection ? previewSelection.elementId : "") ?? "",
+        tagName: previewSelection.tagName ?? ("componentName" in previewSelection ? previewSelection.componentName : "") ?? "element",
+        label: previewSelection.label,
+        attrs: "attrs" in previewSelection ? previewSelection.attrs : undefined,
+        text: "text" in previewSelection && typeof previewSelection.text === "string"
+          ? previewSelection.text
+          : "content" in previewSelection && typeof previewSelection.content === "string"
+            ? previewSelection.content
+            : undefined,
+        path: "path" in previewSelection ? previewSelection.path : undefined,
+      }
+    : null;
+
   return (
+    <ElementEditSessionProvider
+      projectId={capabilities.projectId ?? null}
+      selection={elementEditSelection && elementEditSelection.selector ? elementEditSelection : null}
+      route={null}
+    >
     <StudioContextProvider
       projectId={capabilities.projectId ?? null}
       sessionId={studioSessionId}
@@ -2514,16 +2535,29 @@ function CommandStudioContent() {
       selection={studioSelection}
       onSelectionChange={(next) => {
         // Map the F1 selection value (legacy shape or full payload) onto
-        // the preview-selection mirror that drives the composer chips.
+        // the preview-selection mirror that drives the composer chips and
+        // the element inspector. Keep style/rect identity so a canvas
+        // move updates the inspector's width and height fields.
         if (!next) {
           setPreviewSelection(null);
           return;
         }
         const label = next.label ?? next.content ?? next.elementId ?? "selection";
+        const styles: Record<string, string> = {};
+        if (next.styles && typeof next.styles === "object") {
+          for (const [key, value] of Object.entries(next.styles)) {
+            if (typeof value === "string" && value) styles[key] = value;
+          }
+        }
         setPreviewSelection({
           label,
           selector: next.selector ?? next.elementId ?? label,
           tagName: next.tagName ?? next.componentName ?? "element",
+          ...(next.attrs ? { attrs: next.attrs } : {}),
+          ...(Object.keys(styles).length > 0 ? { styles } : {}),
+          ...(typeof next.text === "string" ? { text: next.text } : {}),
+          ...(next.path ? { path: next.path } : {}),
+          ...(next.rect ? { rect: next.rect } : {}),
         });
       }}
       onWorkspaceModeChange={(mode) => {
@@ -3385,6 +3419,7 @@ function CommandStudioContent() {
 
     </>
     </StudioContextProvider>
+    </ElementEditSessionProvider>
   );
 }
 

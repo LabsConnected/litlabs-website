@@ -9,6 +9,7 @@ import { PropertiesPanel } from "./PropertiesPanel";
 import { ProjectTypeSelector } from "./ProjectTypeSelector";
 import { HtmlProjectEditor } from "./HtmlProjectEditor";
 import { useCanvasBuilderStore } from "./store";
+import { isArrowKey, isCanvasShown, measureElementBox, nudgeBox } from "../direct-manipulation";
 import { getProjectTypeMeta, type ProjectType } from "./projectTypes";
 import { useConnectionSummary } from "@/app/(app)/studio/hooks/useConnectionSummary";
 import { useResizableWidth } from "@/app/(app)/studio/hooks/useResizableWidth";
@@ -72,6 +73,7 @@ export function VisualCanvasBuilder() {
   const selectNode = useCanvasBuilderStore((s) => s.selectNode);
   const document = useCanvasBuilderStore((s) => s.document);
   const nudgeNode = useCanvasBuilderStore((s) => s.nudgeNode);
+  const commitNodeBox = useCanvasBuilderStore((s) => s.commitNodeBox);
   const tool = useCanvasBuilderStore((s) => s.tool);
   const setTool = useCanvasBuilderStore((s) => s.setTool);
   const projectType = useCanvasBuilderStore((s) => s.projectType);
@@ -115,6 +117,10 @@ export function VisualCanvasBuilder() {
     if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable) {
       return;
     }
+    // `document` here is the canvas-builder store document, not the DOM.
+    const directCanvasActive = Array.from(window.document.querySelectorAll("[data-direct-canvas]")).some(
+      (node) => node instanceof HTMLElement && isCanvasShown(node),
+    );
 
     const cmd = e.metaKey || e.ctrlKey;
 
@@ -142,26 +148,32 @@ export function VisualCanvasBuilder() {
       e.preventDefault();
       removeNode(selectedNodeId);
     } else if (e.key === "Escape") {
+      if (directCanvasActive) return;
       e.preventDefault();
       selectNode(null);
     } else if (e.key === "v" && !cmd) {
       setTool("select");
     } else if (e.key === "h" && !cmd) {
       setTool("pan");
-    } else if (e.key === "ArrowUp" && selectedNodeId) {
+    } else if (isArrowKey(e.key) && selectedNodeId) {
+      if (directCanvasActive) return;
+      const el = window.document.querySelector(`[data-node-id="${CSS.escape(selectedNodeId)}"]`);
+      if (el instanceof HTMLElement) {
+        const zoom = useCanvasBuilderStore.getState().zoom / 100;
+        const box = measureElementBox(el, zoom);
+        if (box.width >= 1 && box.height >= 1) {
+          e.preventDefault();
+          commitNodeBox(selectedNodeId, nudgeBox(box, e.key, e.shiftKey), "push");
+          return;
+        }
+      }
       e.preventDefault();
-      nudgeNode(selectedNodeId, 0, e.shiftKey ? -10 : -1);
-    } else if (e.key === "ArrowDown" && selectedNodeId) {
-      e.preventDefault();
-      nudgeNode(selectedNodeId, 0, e.shiftKey ? 10 : 1);
-    } else if (e.key === "ArrowLeft" && selectedNodeId) {
-      e.preventDefault();
-      nudgeNode(selectedNodeId, e.shiftKey ? -10 : -1, 0);
-    } else if (e.key === "ArrowRight" && selectedNodeId) {
-      e.preventDefault();
-      nudgeNode(selectedNodeId, e.shiftKey ? 10 : 1, 0);
+      if (e.key === "ArrowUp") nudgeNode(selectedNodeId, 0, e.shiftKey ? -10 : -1);
+      else if (e.key === "ArrowDown") nudgeNode(selectedNodeId, 0, e.shiftKey ? 10 : 1);
+      else if (e.key === "ArrowLeft") nudgeNode(selectedNodeId, e.shiftKey ? -10 : -1, 0);
+      else nudgeNode(selectedNodeId, e.shiftKey ? 10 : 1, 0);
     }
-  }, [selectedNodeId, removeNode, copyNode, pasteNode, duplicateNode, undo, redo, selectNode, document.rootNodeIds, nudgeNode, tool, setTool]);
+  }, [selectedNodeId, removeNode, copyNode, pasteNode, duplicateNode, undo, redo, selectNode, document.rootNodeIds, nudgeNode, commitNodeBox, tool, setTool]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
