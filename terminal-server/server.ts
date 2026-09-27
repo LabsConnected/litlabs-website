@@ -80,6 +80,7 @@ import { dispatchCommand } from "./command-bridge";
 import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manager";
 import { requireInternalServiceAuth, type AuthenticatedRequest } from "./internal-auth";
 import { mintTerminalToken, verifyTerminalToken, bearerToken } from "./auth";
+import { isTerminalOwner, warnIfOwnerAllowlistUnset } from "./terminal-owner-gate";
 import { verifyClerkToken } from "./clerk-verify";
 import { resolveBindHost } from "./network-bind";
 import type { RemoteCommandRequest } from "@litt/agent-core";
@@ -274,6 +275,15 @@ app.post("/api/token-exchange", async (req: AuthenticatedRequest, res: Response)
     // userId comes from the verified token, NOT from the request body.
     const verified = await verifyClerkToken(clerkToken);
     const userId = verified.userId;
+
+    // ─── 1b. Owner gate (P0): terminal shell access is owner-only ──
+    // Runs BEFORE any workspace authorization or token minting — a
+    // non-owner Clerk identity gets 403 here and never receives a
+    // terminal JWT.
+    if (!isTerminalOwner(userId)) {
+      res.status(403).json({ error: "Terminal access is restricted to the workspace owner" });
+      return;
+    }
 
     // ─── 2. Workspace/project authorization (server-side) ────────
     // If the client requests a specific workspaceId, verify the
@@ -1564,6 +1574,13 @@ app.post("/ws-files/rename", (req: AuthenticatedRequest, res) => {
 io.use((socket, next) => {
   try {
     const tokenPayload = verifyTerminalToken(socket.handshake.auth?.token);
+    // ─── Owner gate (P0, defense in depth) ────────────────────────
+    // Rejects terminal JWTs minted for non-owners in the window
+    // before this gate deployed.
+    if (!isTerminalOwner(tokenPayload.sub)) {
+      next(new Error("Forbidden"));
+      return;
+    }
     socket.data.userId = tokenPayload.sub;
     socket.data.cwd = tokenPayload.cwd;  // Authenticated Desktop cwd from JWT
     const workspaceId = tokenPayload.wid;
@@ -1852,6 +1869,7 @@ server.listen(PORT, BIND.host, () => {
   console.log(`   Allowed origins: ${ALLOWED_ORIGINS.join(", ")}`);
   console.log(`   Workspace root: ${WORKSPACE_ROOT}`);
   console.log(`   Docker mode: ${USE_DOCKER}`);
+  warnIfOwnerAllowlistUnset();
 });
 
 // Graceful shutdown
