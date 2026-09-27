@@ -3314,6 +3314,45 @@ main {
   border-radius: 14px 5px 14px 5px !important;
 }
 
+/* Freeform Studio surface: the chat is a movable window instead of a
+   permanently reserved rail. The workspace remains the canvas underneath. */
+.studio-shell[data-layout="freeform"] [data-studio-body] {
+  isolation: isolate;
+  background: radial-gradient(circle at 72% 18%, rgba(139, 92, 246, 0.08), transparent 34%), var(--bg-main);
+}
+.studio-shell[data-layout="freeform"] [data-studio-body] .studio-canvas-surface > main { width: 100%; min-width: 0; }
+.studio-shell[data-layout="freeform"] [data-studio-body] [data-resize-handle] { display: none; }
+.studio-shell[data-layout="freeform"] [data-studio-body] .studio-canvas-surface > main > [data-testid="studio-dock"] { position: absolute; right: 0; bottom: 0; left: 0; z-index: 20; }
+.studio-freeform-window { position: absolute; z-index: 40; display: flex; min-width: 280px; min-height: 240px; flex-direction: column; overflow: hidden; border: 1px solid rgba(190, 145, 255, 0.28); border-radius: 14px; background: rgba(12, 8, 20, 0.96); box-shadow: 0 24px 70px rgba(0, 0, 0, 0.48), 0 0 0 1px rgba(139, 92, 246, 0.08); backdrop-filter: blur(18px); }
+.studio-freeform-window--focused { border-color: rgba(190, 145, 255, 0.58); box-shadow: 0 28px 80px rgba(0, 0, 0, 0.56), 0 0 0 1px rgba(139, 92, 246, 0.2); }
+.studio-freeform-window__grab { display: flex; height: 28px; flex: 0 0 28px; cursor: grab; align-items: center; gap: 8px; padding: 0 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); background: rgba(255, 255, 255, 0.035); touch-action: none; }
+.studio-freeform-window__grab:active { cursor: grabbing; }
+.studio-freeform-window__title { color: var(--text-main); font-size: 11px; font-weight: 800; }
+.studio-freeform-window__hint { margin-left: auto; color: var(--text-muted); font-size: 9px; opacity: 0.72; }
+.studio-freeform-window__body { min-height: 0; flex: 1; overflow: hidden; }
+.studio-freeform-window__body > [data-testid="litt-panel"] { width: 100% !important; max-width: none !important; min-width: 0 !important; border-right: 0; }
+.studio-freeform-window__resize { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; touch-action: none; }
+.studio-freeform-window__resize::after { content: ""; position: absolute; right: 4px; bottom: 4px; width: 7px; height: 7px; border-right: 2px solid rgba(255,255,255,0.42); border-bottom: 2px solid rgba(255,255,255,0.42); }
+.studio-freeform-toggle { position: absolute; top: 8px; right: 12px; z-index: 50; border: 1px solid rgba(190,145,255,0.28); border-radius: 999px; background: rgba(12,8,20,0.82); padding: 5px 10px; color: var(--text-secondary); font-size: 10px; font-weight: 800; backdrop-filter: blur(12px); }
+.studio-freeform-toggle:hover { border-color: rgba(190,145,255,0.6); color: var(--text-main); }
+.studio-freeform-preview-toggle { position: absolute; top: 8px; right: 92px; z-index: 50; border: 1px solid rgba(72,238,56,0.3); border-radius: 999px; background: rgba(12,8,20,0.82); padding: 5px 10px; color: var(--text-secondary); font-size: 10px; font-weight: 800; backdrop-filter: blur(12px); }
+.studio-freeform-preview-toggle:hover { border-color: rgba(72,238,56,0.7); color: var(--text-main); }
+.studio-canvas-viewport { position: relative; min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
+.studio-canvas-viewport--enabled { cursor: grab; background: radial-gradient(circle at 50% 40%, rgba(139,92,246,0.06), transparent 48%), #07070d; }
+.studio-canvas-viewport--enabled:active { cursor: grabbing; }
+.studio-canvas-surface { position: relative; width: 100%; height: 100%; transform-origin: 0 0; }
+.studio-canvas-controls { position: absolute; top: 10px; left: 12px; z-index: 100; display: flex; align-items: center; gap: 2px; border: 1px solid rgba(190,145,255,0.28); border-radius: 999px; background: rgba(12,8,20,0.88); padding: 3px; color: var(--text-secondary); box-shadow: 0 12px 30px rgba(0,0,0,0.26); backdrop-filter: blur(12px); }
+.studio-canvas-controls button { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 999px; color: var(--text-secondary); }
+.studio-canvas-controls button:hover { background: rgba(190,145,255,0.16); color: var(--text-main); }
+.studio-canvas-controls span { min-width: 42px; text-align: center; font-size: 10px; font-weight: 800; }
+.studio-canvas-viewport--enabled [data-studio-window] { transform-origin: 0 0; }
+.studio-freeform-window__grab button { display: grid; width: 20px; height: 20px; place-items: center; border-radius: 5px; color: var(--text-muted); }
+.studio-freeform-window__grab button:hover { background: rgba(255,255,255,0.08); color: var(--text-main); }
+@media (max-width: 1023px) {
+  .studio-freeform-toggle { display: none; }
+  .studio-freeform-window { position: relative; inset: auto !important; width: 100% !important; height: 100% !important; border: 0; border-radius: 0; }
+}
+
 @media (min-width: 769px) {
   .studio-grid-responsive {
     grid-template-columns: 64px minmax(0, 1fr);
@@ -4005,4 +4044,3 @@ main {
     animation: none !important;
   }
 }
-

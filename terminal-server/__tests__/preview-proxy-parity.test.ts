@@ -34,6 +34,7 @@ import express from "express";
 import request from "supertest";
 import { createServer, type Server } from "http";
 import type { AddressInfo } from "net";
+import { gzipSync } from "zlib";
 
 import { registerPreviewProxyRoute, type PreviewProxyDeps } from "../preview/proxy";
 import {
@@ -66,6 +67,7 @@ const HTML_BODY = [
 ].join("");
 
 const JS_BODY = "console.log('workspace chunk');\n";
+const CSS_BODY = "body { background: rgb(1, 2, 3); }\n";
 
 /** Simulated dev server — serves the app on / and redirect fixtures. */
 function upstreamDevServer(): Server {
@@ -79,6 +81,10 @@ function upstreamDevServer(): Server {
       case "/_next/static/chunks/app.js":
         res.writeHead(200, { "content-type": "application/javascript" });
         res.end(JS_BODY);
+        return;
+      case "/_next/static/css/app.css":
+        res.writeHead(200, { "content-type": "text/css; charset=utf-8", "content-encoding": "gzip" });
+        res.end(gzipSync(CSS_BODY));
         return;
       case "/redirect-root":
         res.writeHead(302, { location: "/" });
@@ -224,6 +230,17 @@ describe("preview gateway — routing parity with the workspace dev server", () 
 
     expect(proxied.status).toBe(direct.status);
     expect(proxied.text).toBe(await direct.text());
+  });
+
+  it("does not forward stale compression headers for compressed CSS", async () => {
+    const proxied = await request(app).get(
+      `/preview/${WORKSPACE_ID}/_next/static/css/app.css?token=${TOKEN}`,
+    );
+
+    expect(proxied.status).toBe(200);
+    expect(proxied.headers["content-type"]).toContain("text/css");
+    expect(proxied.headers["content-encoding"]).toBeUndefined();
+    expect(proxied.text).toContain("background: rgb(1, 2, 3)");
   });
 
   it("a 404 on the entry route becomes an honest 502 — never raw 'Cannot GET /'", async () => {
