@@ -12,6 +12,7 @@ import type { HttpWorkspaceAction } from "@/lib/studio/workspace-document";
 interface WorkspaceState {
   projectId: string | null;
   status: "idle" | "loading" | "ready" | "error";
+  unavailable: boolean;
   error: string | null;
   document: WorkspaceDocument;
   revision: number;
@@ -23,7 +24,7 @@ interface WorkspaceState {
   select: (ids: string[]) => void;
   enqueueAction: (action: HttpWorkspaceAction) => void;
   shiftAction: () => HttpWorkspaceAction | null;
-  commit: (action: HttpWorkspaceAction, inverse: WorkspaceAction | null) => Promise<boolean>;
+  commit: (action: HttpWorkspaceAction, inverse: WorkspaceAction | null, options?: { preserveRedo?: boolean }) => Promise<boolean>;
   undoAction: () => Promise<void>;
   redoAction: () => Promise<void>;
 }
@@ -42,6 +43,7 @@ async function postAction(projectId: string, revision: number, action: HttpWorks
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   projectId: null,
   status: "idle",
+  unavailable: false,
   error: null,
   document: emptyWorkspaceDocument(),
   revision: 0,
@@ -51,16 +53,23 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   pendingActions: [],
 
   async load(projectId) {
-    set({ projectId, status: "loading", error: null, selectedIds: [], undo: [], redo: [] });
+    set({ projectId, status: "loading", unavailable: false, error: null, selectedIds: [], undo: [], redo: [] });
     try {
       const res = await fetch(`/api/studio/workspaces?projectId=${encodeURIComponent(projectId)}`, { credentials: "include" });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        set({ status: "error", error: body.error || "The workspace could not be loaded." });
+        set({
+          status: "error",
+          unavailable: res.status === 503,
+          error: body.error || (res.status === 503
+            ? "The workspace table is not available yet. Apply the studio_workspaces migration, then reload."
+            : "The workspace could not be loaded."),
+        });
         return;
       }
       set({
         status: "ready",
+        unavailable: false,
         document: body.document ?? emptyWorkspaceDocument(),
         revision: body.revision ?? 1,
         error: null,
@@ -85,7 +94,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     return next;
   },
 
-  async commit(action, inverse) {
+  async commit(action, inverse, options) {
     const { projectId, revision } = get();
     if (!projectId || !revision) return false;
     const result = await postAction(projectId, revision, action);
@@ -108,7 +117,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       revision: result.body.revision,
       error: null,
       undo: inverse ? [...state.undo, inverse].slice(-50) : state.undo,
-      redo: [],
+      redo: options?.preserveRedo ? state.redo : [],
     }));
     return true;
   },
@@ -117,7 +126,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const inverse = get().undo.at(-1);
     if (!inverse) return;
     const redo = inverseWorkspaceAction(get().document, inverse as WorkspaceAction);
-    const ok = await get().commit(inverse as HttpWorkspaceAction, null);
+    const ok = await get().commit(inverse as HttpWorkspaceAction, null, { preserveRedo: true });
     if (!ok) return;
     set((state) => ({ undo: state.undo.slice(0, -1), redo: redo ? [...state.redo, redo] : state.redo }));
   },
@@ -126,7 +135,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const action = get().redo.at(-1);
     if (!action) return;
     const inverse = inverseWorkspaceAction(get().document, action);
-    const ok = await get().commit(action as HttpWorkspaceAction, null);
+    const ok = await get().commit(action as HttpWorkspaceAction, null, { preserveRedo: true });
     if (!ok) return;
     set((state) => ({ redo: state.redo.slice(0, -1), undo: inverse ? [...state.undo, inverse] : state.undo }));
   },

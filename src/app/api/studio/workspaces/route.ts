@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { applyHttpWorkspaceAction, getWorkspace, type HttpWorkspaceAction } from "@/lib/studio/workspace-service";
+import { applyHttpWorkspaceAction, getWorkspace, WorkspacePersistenceError, type HttpWorkspaceAction } from "@/lib/studio/workspace-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,8 +14,11 @@ export async function GET(req: NextRequest) {
     const record = await getWorkspace(userId, projectId);
     if (!record) return NextResponse.json({ error: "Project not found" }, { status: 403 });
     return NextResponse.json(record);
-  } catch {
-    return NextResponse.json({ error: "Workspace persistence is not configured" }, { status: 503 });
+  } catch (error) {
+    const message = error instanceof WorkspacePersistenceError
+      ? error.message
+      : "The workspace table is not available yet. Apply the studio_workspaces migration, then reload.";
+    return NextResponse.json({ error: message }, { status: 503 });
   }
 }
 
@@ -32,7 +35,10 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: result.error, workspace: result.record ?? null }, { status: result.status });
     }
     return NextResponse.json({ ...result.record, result: result.result });
-  } catch {
-    return NextResponse.json({ error: "Workspace persistence is not configured" }, { status: 503 });
+  } catch (error) {
+    const message = error instanceof WorkspacePersistenceError
+      ? error.message
+      : "The workspace table is not available yet. Apply the studio_workspaces migration, then reload.";
+    return NextResponse.json({ error: message }, { status: 503 });
   }
 }

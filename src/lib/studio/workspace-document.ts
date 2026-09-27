@@ -59,8 +59,10 @@ export type HttpWorkspaceAction =
   | { type: "workspace.list"; query?: string }
   | { type: "workspace.read"; id: string }
   | { type: "workspace.create"; objectType: "chat" | "task" | "note"; title?: string; linkToId?: string }
-  | { type: "workspace.link"; fromId: string; toId: string }
-  | { type: "workspace.update"; id: string; title?: string; frame?: Frame; z?: number; collapsed?: boolean; accent?: string | null; tags?: string[]; noteBody?: string; noteLinks?: string[] }
+  | { type: "workspace.link"; fromId: string; toId: string; relationship?: Relationship }
+  | { type: "workspace.link"; relationship: Relationship }
+  | { type: "workspace.update"; id: string; title?: string; frame?: Frame; z?: number; collapsed?: boolean; accent?: string | null; tags?: string[]; noteBody?: string; noteLinks?: string[]; patch?: ObjectPatch }
+  | { type: "workspace.reorder"; id: string; direction: "forward" | "backward" }
   | { type: "workspace.delete"; id: string }
   | { type: "workspace.unlink"; id: string }
   | { type: "workspace.duplicate"; id: string }
@@ -76,7 +78,8 @@ export type WorkspaceAction =
   | { type: "workspace.link"; relationship: Relationship }
   | { type: "workspace.unlink"; id: string }
   | { type: "workspace.viewport"; viewport: Viewport }
-  | { type: "workspace.focus"; id: string };
+  | { type: "workspace.focus"; id: string }
+  | { type: "workspace.reorder"; id: string; direction: "forward" | "backward" };
 
 export function emptyWorkspaceDocument(): WorkspaceDocument {
   return {
@@ -259,6 +262,19 @@ export function applyWorkspaceAction(doc: WorkspaceDocument, action: WorkspaceAc
       object.collapsed = false;
       return { doc: next };
     }
+    case "workspace.reorder": {
+      const object = next.objects.find((item) => item.id === action.id);
+      if (!object) return { doc, error: "Object not found" };
+      const neighbor = next.objects
+        .filter((item) => item.id !== object.id && (action.direction === "forward" ? item.z > object.z : item.z < object.z))
+        .sort((a, b) => action.direction === "forward" ? a.z - b.z : b.z - a.z)[0];
+      if (!neighbor) return { doc, error: "Nothing to reorder" };
+      const z = object.z;
+      object.z = neighbor.z;
+      const swapped = next.objects.find((item) => item.id === neighbor.id);
+      if (swapped) swapped.z = z;
+      return { doc: next };
+    }
     default:
       return { doc, error: "Unknown action" };
   }
@@ -309,6 +325,8 @@ export function inverseWorkspaceAction(doc: WorkspaceDocument, action: Workspace
       if (!object) return null;
       return { type: "workspace.update", id: action.id, patch: { z: object.z, collapsed: object.collapsed } };
     }
+    case "workspace.reorder":
+      return { type: "workspace.reorder", id: action.id, direction: action.direction === "forward" ? "backward" : "forward" };
     default:
       return null;
   }
@@ -341,6 +359,25 @@ export function parseHttpWorkspaceAction(value: unknown): HttpWorkspaceAction | 
     };
   }
   return null;
+}
+
+export type AssistantWorkspaceRead =
+  | { ok: true; action: HttpWorkspaceAction }
+  | { ok: false; reason: "missing" | "malformed" | "unknown" };
+
+/** Validate one fenced workspace-action block from a LiTT reply. */
+export function readAssistantWorkspaceAction(text: string): AssistantWorkspaceRead {
+  const match = text.match(FENCE);
+  if (!match) return { ok: false, reason: "missing" };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(match[1]);
+  } catch {
+    return { ok: false, reason: "malformed" };
+  }
+  const action = parseHttpWorkspaceAction(parsed);
+  if (!action) return { ok: false, reason: "unknown" };
+  return { ok: true, action };
 }
 
 export function extractWorkspaceActionBlock(text: string): unknown | null {

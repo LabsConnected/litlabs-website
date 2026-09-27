@@ -22,6 +22,13 @@ import {
 
 export type { HttpWorkspaceAction };
 
+export class WorkspacePersistenceError extends Error {
+  constructor(message = "The workspace table is not available yet. Apply the studio_workspaces migration, then reload.") {
+    super(message);
+    this.name = "WorkspacePersistenceError";
+  }
+}
+
 export interface WorkspaceRecord {
   id: string;
   projectId: string;
@@ -31,7 +38,7 @@ export interface WorkspaceRecord {
 
 function admin() {
   const client = getSupabaseAdmin();
-  if (!client) throw new Error("Workspace persistence is not configured");
+  if (!client) throw new WorkspacePersistenceError();
   return client;
 }
 
@@ -47,14 +54,14 @@ export async function getWorkspace(userId: string, projectId: string): Promise<W
     .eq("user_id", userId)
     .eq("project_id", projectId)
     .maybeSingle();
-  if (error) return null;
+  if (error) throw new WorkspacePersistenceError();
   if (!data) {
     const created = await admin()
       .from("studio_workspaces")
       .insert({ user_id: userId, project_id: projectId, document: emptyWorkspaceDocument(), revision: 1 })
       .select("id,project_id,document,revision")
       .maybeSingle();
-    if (!created.data) return null;
+    if (created.error || !created.data) throw new WorkspacePersistenceError();
     return mapRow(created.data as Row);
   }
   return mapRow(data as Row);
@@ -85,7 +92,7 @@ async function save(userId: string, projectId: string, revision: number, documen
     .eq("revision", revision)
     .select("id,project_id,document,revision")
     .maybeSingle();
-  if (error) return null;
+  if (error) throw new WorkspacePersistenceError();
   if (!data) return "conflict";
   return mapRow(data as Row);
 }
@@ -137,22 +144,28 @@ async function resolveAction(
     case "workspace.create":
       return createObject(userId, projectId, doc, action);
     case "workspace.link": {
-      const relationship = { id: newId("rel"), kind: "chat-task" as const, fromId: action.fromId, toId: action.toId };
-      const linked = await syncTaskLink(userId, doc, relationship);
+      const relationship = "fromId" in action
+        ? { id: action.relationship?.id ?? newId("rel"), kind: "chat-task" as const, fromId: action.fromId, toId: action.toId }
+        : { ...action.relationship, kind: "chat-task" as const };
+      const linked = await syncTaskLink(userId, projectId, doc, relationship);
       if (linked.error) return { error: linked.error, status: linked.status ?? 400 };
       return { action: { type: "workspace.link", relationship }, result: { relationship } };
     }
     case "workspace.update": {
       const object = doc.objects.find((item) => item.id === action.id);
       if (!object) return { error: "Object not found", status: 404 };
-      if (action.title && object.type === "task" && typeof object.payload.taskId === "string") {
-        await updateStudioTask(userId, object.payload.taskId, { title: action.title });
+      const title = action.title ?? action.patch?.title;
+      if (title && object.type === "task" && typeof object.payload.taskId === "string") {
+        const task = await getStudioTask(userId, object.payload.taskId);
+        if (!task || task.projectId !== projectId) return { error: "Task not found", status: 403 };
+        await updateStudioTask(userId, object.payload.taskId, { title });
       }
-      if (action.title && object.type === "chat" && typeof object.payload.conversationId === "string") {
+      if (title && object.type === "chat" && typeof object.payload.conversationId === "string") {
         const conversation = await getConversation(object.payload.conversationId, userId);
-        if (conversation) await updateConversation(conversation.id, userId, conversation.revision, { title: action.title });
+        if (!conversation || conversation.projectId !== projectId) return { error: "Conversation not found", status: 403 };
+        await updateConversation(conversation.id, userId, conversation.revision, { title });
       }
-      const patch: ObjectPatch = {};
+      const patch: ObjectPatch = { ...(action.patch ?? {}) };
       if (action.title !== undefined) patch.title = action.title;
       if (action.frame) {
         const frame = parseFrame(action.frame);
@@ -165,12 +178,17 @@ async function resolveAction(
       if (action.tags) patch.tags = action.tags;
       if (object.type === "note" && (action.noteBody !== undefined || action.noteLinks)) {
         patch.payload = {
+          ...(patch.payload ?? {}),
           ...(action.noteBody !== undefined ? { body: action.noteBody.slice(0, 8000) } : {}),
           ...(action.noteLinks ? { links: action.noteLinks.slice(0, 20) } : {}),
         };
       }
+      const owned = await assertOwnedPayload(userId, projectId, patch.payload);
+      if (owned) return owned;
       return { action: { type: "workspace.update", id: action.id, patch }, result: { id: action.id } };
     }
+    case "workspace.reorder":
+      return { action: { type: "workspace.reorder", id: action.id, direction: action.direction }, result: { id: action.id } };
     case "workspace.delete":
       return { action: { type: "workspace.delete", id: action.id }, result: { id: action.id, unlinked: true } };
     case "workspace.unlink":
@@ -181,8 +199,11 @@ async function resolveAction(
       return { action: { type: "workspace.focus", id: action.id }, result: { id: action.id } };
     case "workspace.viewport":
       return { action: { type: "workspace.viewport", viewport: action.viewport }, result: { viewport: action.viewport } };
-    case "workspace.restore":
+    case "workspace.restore": {
+      const owned = await assertOwnedPayload(userId, projectId, action.object.payload);
+      if (owned) return owned;
       return { action: { type: "workspace.restore", object: action.object, relationships: action.relationships ?? [] }, result: { id: action.object.id } };
+    }
     default:
       return { error: "Unsupported action", status: 400 };
   }
@@ -258,6 +279,7 @@ const SNAP_OFFSET = 32;
 
 async function syncTaskLink(
   userId: string,
+  projectId: string,
   doc: WorkspaceDocument,
   relationship: Relationship,
 ): Promise<{ error?: string; status?: number }> {
@@ -269,11 +291,32 @@ async function syncTaskLink(
   const conversationId = chat.payload.conversationId;
   const taskId = task.payload.taskId;
   if (typeof conversationId !== "string" || typeof taskId !== "string") return { error: "Link is missing a conversation or task id", status: 400 };
+  const conversation = await getConversation(conversationId, userId);
+  if (!conversation || conversation.projectId !== projectId) return { error: "Conversation not found", status: 403 };
+  const taskRow = await getStudioTask(userId, taskId);
+  if (!taskRow || taskRow.projectId !== projectId) return { error: "Task not found", status: 403 };
   const updated = await updateStudioTask(userId, taskId, { conversationId });
   if (!updated) return { error: "Task link was rejected", status: 403 };
   relationship.fromId = chat.id;
   relationship.toId = task.id;
   return {};
+}
+
+async function assertOwnedPayload(
+  userId: string,
+  projectId: string,
+  payload: Record<string, unknown> | undefined,
+): Promise<{ error: string; status: number } | null> {
+  if (!payload) return null;
+  if (typeof payload.conversationId === "string") {
+    const conversation = await getConversation(payload.conversationId, userId);
+    if (!conversation || conversation.projectId !== projectId) return { error: "Conversation not found", status: 403 };
+  }
+  if (typeof payload.taskId === "string") {
+    const task = await getStudioTask(userId, payload.taskId);
+    if (!task || task.projectId !== projectId) return { error: "Task not found", status: 403 };
+  }
+  return null;
 }
 
 export async function readLinkedTask(userId: string, taskId: string) {
