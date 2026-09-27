@@ -419,8 +419,8 @@ export function resolvePlatformServices(isOwner: boolean): PlatformService[] {
     lastChecked: now,
   });
 
-  // Deployment platform (Railway or Vercel)
-  const deployed = process.env.RAILWAY_ENVIRONMENT || process.env.VERCEL || process.env.VERCEL_URL;
+  // Deployment platform (Railway)
+  const deployed = process.env.RAILWAY_ENVIRONMENT;
   services.push({
     id: "deployment",
     label: "Deployment",

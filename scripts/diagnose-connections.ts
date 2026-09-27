@@ -6,7 +6,7 @@
  * provider health. Never prints secret values.
  *
  * Also serves as a "crash report" — gathering all the context a user
- * would need to send to support: env var presence (local + Vercel),
+ * would need to send to support: env var presence (local),
  * provider health, terminal server status, Supabase table check,
  * git state, and build info.
  */
@@ -54,7 +54,6 @@ const INTEGRATION_ENV_REQUIREMENTS: Record<string, string[]> = {
   clerk: ["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY"],
   supabase: ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY"],
   github: ["GITHUB_APP_ID", "GITHUB_PRIVATE_KEY"],
-  vercel: ["VERCEL_TOKEN", "VERCEL_PROJECT_ID"],
   r2: ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET_NAME"],
   stripe: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
   gemini: ["GEMINI_API_KEY"],
@@ -67,40 +66,14 @@ const INTEGRATION_ENV_REQUIREMENTS: Record<string, string[]> = {
 interface EnvStatus {
   key: string;
   local: boolean;
-  preview: boolean;
-  production: boolean;
 }
 
-async function fetchVercelEnvs(token: string, projectId: string): Promise<Record<string, string[]>> {
-  try {
-    const res = await fetch(`https://api.vercel.com/v9/projects/${projectId}/env`, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) return {};
-    const data = await res.json();
-    
-    const envMap: Record<string, string[]> = {};
-    for (const env of data.envs || []) {
-       if (!envMap[env.key]) envMap[env.key] = [];
-       envMap[env.key].push(...(env.target || []));
-    }
-    return envMap;
-  } catch (err) {
-    return {};
-  }
-}
-
-function checkEnv(keys: string[], vercelEnvs: Record<string, string[]>): EnvStatus[] {
+function checkEnv(keys: string[]): EnvStatus[] {
   return keys.map((k) => {
     const v = process.env[k];
     const local = Boolean(v && v.length >= 5 && !v.includes("your-") && !v.includes("placeholder"));
     
-    const targets = vercelEnvs[k] || [];
-    const preview = targets.includes("preview");
-    const production = targets.includes("production");
-    
-    return { key: k, local, preview, production };
+    return { key: k, local };
   });
 }
 
@@ -190,30 +163,10 @@ async function main() {
   let failCount = 0;
   let warnCount = 0;
 
-  const vercelToken = process.env.VERCEL_TOKEN;
-  const vercelProject = process.env.VERCEL_PROJECT_ID;
-  let vercelEnvs: Record<string, string[]> = {};
-  let vercelConnected = false;
-
-  if (vercelToken && vercelProject) {
-    vercelEnvs = await fetchVercelEnvs(vercelToken, vercelProject);
-    vercelConnected = Object.keys(vercelEnvs).length > 0;
-    if (vercelConnected) {
-      printResult("Vercel API Connected", "PASS", "Fetched remote environments");
-      passCount++;
-    } else {
-      printResult("Vercel API Connected", "WARN", "Failed to fetch remote environments or none configured");
-      warnCount++;
-    }
-  } else {
-    printResult("Vercel API", "WARN", "Skipping remote check (VERCEL_TOKEN or VERCEL_PROJECT_ID missing locally)");
-    warnCount++;
-  }
-
   for (const [id, envKeys] of Object.entries(INTEGRATION_ENV_REQUIREMENTS)) {
-    const statuses = checkEnv(envKeys, vercelEnvs);
+    const statuses = checkEnv(envKeys);
     const label = id.charAt(0).toUpperCase() + id.slice(1);
-    const isOptional = ["groq", "openai", "anthropic", "vercel", "r2", "stripe"].includes(id);
+    const isOptional = ["groq", "openai", "anthropic", "r2", "stripe"].includes(id);
 
     const missingLocally = statuses.filter((s) => !s.local).map((s) => s.key);
     
@@ -243,28 +196,6 @@ async function main() {
       } else {
         printResult(`${label} platform key present locally`, "FAIL", `Missing locally (.env.local): ${missingLocally.join(", ")}`);
         failCount++;
-      }
-    }
-
-    // Remote checks
-    if (vercelConnected) {
-      const missingPreview = statuses.filter((s) => !s.preview).map((s) => s.key);
-      const missingProd = statuses.filter((s) => !s.production).map((s) => s.key);
-
-      if (missingPreview.length > 0) {
-        printResult(`${label} keys in Vercel Preview`, isOptional ? "WARN" : "FAIL", `Missing in Vercel Preview: ${missingPreview.join(", ")}`);
-        if (isOptional) warnCount++; else failCount++;
-      } else {
-        printResult(`${label} keys in Vercel Preview`, "PASS");
-        passCount++;
-      }
-
-      if (missingProd.length > 0) {
-        printResult(`${label} keys in Vercel Production`, isOptional ? "WARN" : "FAIL", `Missing in Vercel Production: ${missingProd.join(", ")}`);
-        if (isOptional) warnCount++; else failCount++;
-      } else {
-        printResult(`${label} keys in Vercel Production`, "PASS");
-        passCount++;
       }
     }
 

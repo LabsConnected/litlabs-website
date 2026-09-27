@@ -1926,7 +1926,7 @@ export function registerInternalTools(): void {
       tool: {
         id: "deploy.execute",
         name: "Execute Deployment",
-        description: "Trigger a Railway or Vercel deployment. Requires RAILWAY_API_TOKEN + RAILWAY_SERVICE_ID or VERCEL_TOKEN + VERCEL_PROJECT_ID. Returns the deployment ID, status, and verified production URL on success, or a truthful error on failure.",
+        description: "Trigger a Railway deployment. Requires RAILWAY_API_TOKEN + RAILWAY_SERVICE_ID. Returns the deployment ID, status, and verified production URL on success, or a truthful error on failure.",
         source: "internal",
         version: "1.0.0",
         inputSchema: {
@@ -1945,7 +1945,7 @@ export function registerInternalTools(): void {
         permissionLevel: 'production',
         // Only offer when an infra deploy provider is actually configured
         // AND infra deploys are explicitly opted in. This tool redeploys
-        // the configured Railway/Vercel service — the LiTT app itself, not
+        // the configured Railway service — the LiTT app itself, not
         // the user's project (that's project.deploy). The app service's own
         // deploy creds are present in production, so without the opt-in the
         // model can pick this over project.deploy: pausing the run for an
@@ -1954,8 +1954,7 @@ export function registerInternalTools(): void {
         enabled:
           process.env.LITT_ENABLE_INFRA_DEPLOY === "1"
           && Boolean(
-            (process.env.RAILWAY_API_TOKEN && process.env.RAILWAY_SERVICE_ID && process.env.RAILWAY_ENVIRONMENT_ID)
-            || (process.env.VERCEL_TOKEN && process.env.VERCEL_PROJECT_ID),
+            (process.env.RAILWAY_API_TOKEN && process.env.RAILWAY_SERVICE_ID && process.env.RAILWAY_ENVIRONMENT_ID),
           ),
       },
       handler: lazyHandlers["deploy.execute"],
