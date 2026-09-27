@@ -34,6 +34,7 @@ export default function LiTTCommandLayer({
   transcript,
   composer,
   statusBar,
+  actions,
 }: {
   /** Scope for persisted expand/height state (project id or "default"). */
   storageKey: string;
@@ -47,6 +48,8 @@ export default function LiTTCommandLayer({
   /** Always-visible run-state strip (StudioOperatorBar) between the
       transcript and the composer. */
   statusBar?: ReactNode;
+  /** Compact workspace actions beside the composer. */
+  actions?: ReactNode;
 }) {
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
   const dragRef = useRef<{ startY: number; startH: number; pointerId: number } | null>(null);
@@ -186,6 +189,7 @@ export default function LiTTCommandLayer({
             ? <ChevronDown size={14} className="pointer-events-none" />
             : <ChevronUp size={14} className="pointer-events-none" />}
         </button>
+        {actions ? <div className="flex shrink-0 items-center gap-1 px-1">{actions}</div> : null}
         <div className="min-w-0 flex-1">{composer}</div>
       </div>
     </section>

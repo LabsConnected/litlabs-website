@@ -461,26 +461,30 @@ describe("StudioShell — desktop operating shell", () => {
     expect(screen.queryByTestId("studio-canvas-open-tool")).toBeNull();
   });
 
-  it("renders the Preview surface on the stage by default", async () => {
+  it("renders the Workspace surface on the stage by default", async () => {
     await renderStudioShell();
     await waitFor(() => {
-      expect(screen.getByTestId("stage-surface-preview")).toHaveAttribute("data-active", "true");
-      expect(screen.getByTestId("studio-preview-panel")).toBeTruthy();
+      expect(screen.getByTestId("stage-surface-workspace")).toHaveAttribute("data-active", "true");
+      expect(screen.getByTestId("spatial-workspace")).toBeTruthy();
     });
   });
 
   it("rail switches the stage surface and keeps visited surfaces mounted", async () => {
     const { user } = await renderStudioShell();
-    await waitFor(() => screen.getByTestId("studio-preview-panel"));
+    await waitFor(() => screen.getByTestId("spatial-workspace"));
     await user.click(screen.getByTestId("workspace-rail-design"));
     await waitFor(() => {
       expect(screen.getByTestId("stage-surface-design")).toHaveAttribute("data-active", "true");
       expect(screen.getByTestId("visual-canvas-builder")).toBeTruthy();
     });
-    // Preview stays mounted (hidden) — iframe/scroll state survives.
-    const previewSurface = screen.getByTestId("stage-surface-preview");
-    expect(previewSurface).toHaveAttribute("data-active", "false");
-    expect(previewSurface.querySelector("[data-testid='studio-preview-panel']")).toBeTruthy();
+    const workspaceSurface = screen.getByTestId("stage-surface-workspace");
+    expect(workspaceSurface).toHaveAttribute("data-active", "false");
+    expect(workspaceSurface.querySelector("[data-testid='spatial-workspace']")).toBeTruthy();
+    await user.click(screen.getByTestId("workspace-rail-preview"));
+    await waitFor(() => {
+      expect(screen.getByTestId("stage-surface-preview")).toHaveAttribute("data-active", "true");
+      expect(screen.getByTestId("studio-preview-panel")).toBeTruthy();
+    });
   });
 
   it("LiTT command layer expands to the transcript and collapses back to the bar", async () => {

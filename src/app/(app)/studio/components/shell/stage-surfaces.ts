@@ -18,6 +18,7 @@ import {
   Globe,
   Image as ImageIcon,
   Package,
+  PanelsTopLeft,
   PenTool,
   Rocket,
   SquareTerminal,
@@ -25,6 +26,7 @@ import {
 } from "lucide-react";
 
 export type StudioStageSurface =
+  | "workspace"
   | "plan"
   | "design"
   | "preview"
@@ -41,8 +43,9 @@ export const STAGE_SURFACE_META: Record<
   StudioStageSurface,
   { label: string; icon: LucideIcon; hint: string }
 > = {
+  workspace:{ label: "Workspace", icon: PanelsTopLeft, hint: "Chats, tasks, and notes on one canvas" },
   plan:     { label: "Plan",     icon: ClipboardList,  hint: "Mission plan & overview" },
-  design:   { label: "Design",   icon: PenTool,        hint: "Editable structured canvas" },
+  design:   { label: "Design",   icon: PenTool,        hint: "Structured page canvas" },
   preview:  { label: "Preview",  icon: Eye,            hint: "Live dev-server preview" },
   browser:  { label: "Browser",  icon: Globe,          hint: "Remote browser session" },
   code:     { label: "Code",     icon: Code2,          hint: "Code workspace" },
@@ -56,6 +59,7 @@ export const STAGE_SURFACE_META: Record<
 
 /** Primary workspace rail order (top → bottom). */
 export const PRIMARY_SURFACES: StudioStageSurface[] = [
+  "workspace",
   "plan",
   "design",
   "preview",
@@ -73,7 +77,7 @@ export const UTILITY_SURFACES: StudioStageSurface[] = ["terminal"];
 
 /** Persisted `lastOpenedSurface` may hold a legacy studio value
     ("studio"/"chat"/"work"/"canvas"/"media") or a rail id written by the
-    shell. Unknown → preview (the default stage). */
+    shell. Unknown → workspace (the default stage). */
 const PERSISTED_SURFACE_MAP: Record<string, StudioStageSurface> = {
   design: "design",
   preview: "preview",
@@ -89,13 +93,14 @@ const PERSISTED_SURFACE_MAP: Record<string, StudioStageSurface> = {
   deploy: "deploy",
   activity: "activity",
   terminal: "terminal",
-  studio: "preview",
-  chat: "preview",
+  studio: "workspace",
+  chat: "workspace",
+  workspace: "workspace",
 };
 
 export function resolveStageSurface(stored: string | null | undefined): StudioStageSurface {
-  if (!stored) return "preview";
-  return PERSISTED_SURFACE_MAP[stored] ?? "preview";
+  if (!stored) return "workspace";
+  return PERSISTED_SURFACE_MAP[stored] ?? "workspace";
 }
 
 /** Legacy studioMode → rail surface. NOTE: mode "files" is the visual
@@ -105,9 +110,17 @@ export function modeToStageSurface(mode: string | null | undefined): StudioStage
     case "work": return "plan";
     case "files": return "design";
     case "code": return "code";
+    case "workspace": return "workspace";
     case "preview": return "preview";
     case "media": return "images";
     case "design": return "design";
     default: return null;
   }
+}
+
+/** Opening Studio, or the canonical chat URL, lands on the workspace.
+    An explicit tool such as preview, design, or code still selects that surface. */
+export function shellStageForTool(tool: string | null, mode: string | null | undefined): StudioStageSurface | null {
+  if (tool === null || tool === "chat" || tool === "home") return "workspace";
+  return modeToStageSurface(mode);
 }

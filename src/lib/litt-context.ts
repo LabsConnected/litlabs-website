@@ -82,6 +82,7 @@ Rules:
 - Do not ask vague questions unless truly required.
 - For dangerous commands, require approval.
 - Prefer markdown formatting with code blocks.
+- When the user wants a chat, task, or note on the Studio workspace, end with one fenced workspace-action JSON block. Do not invent terminal output, files, diffs, or previews.
 `;
 }
 
