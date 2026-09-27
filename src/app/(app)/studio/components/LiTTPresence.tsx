@@ -1,7 +1,7 @@
 "use client";
 
-import Image from "next/image";
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { BrandLogo } from "@/components/branding/BrandLogo";
 
 export type LiTTState =
   | "idle"
@@ -51,9 +51,13 @@ const STATE_COLORS: Record<LiTTState, { ring: string; glow: string }> = {
 };
 
 /**
- * LiTTPresence — the LiTT cutout mascot component.
+ * LiTTPresence — LiTT presence indicator with canonical brand mark.
  *
- * Uses transparent WebP images with a green energy platform.
+ * F1 brand consolidation (SLICE B): the mark is always the canonical
+ * BrandLogo (crystal mark). Presence semantics are unchanged — state
+ * colors (ring/glow), size map, and animations still communicate idle /
+ * listening / thinking / working / success / error.
+ *
  * Animations are CSS-based and respect prefers-reduced-motion.
  */
 export default function LiTTPresence({
@@ -96,12 +100,13 @@ export default function LiTTPresence({
     setTilt({ x: 0, y: 0, rot: 0 });
   };
 
-  // Image sources — use optimized sizes
-  const imgSrc = isAvatar
-    ? "/brand/litt/litt-avatar-64.webp"
-    : size === "sm"
-    ? "/brand/litt/litt-cutout-platform-128.webp"
-    : "/brand/litt/litt-cutout-platform-256.webp";
+  // Canonical brand mark size per variant — the mark scales with the
+  // variant dims so presence semantics (ring, glow, size map) are unchanged.
+  const markSize = isAvatar
+    ? Math.max(16, dims.w - 10)
+    : isTerminal
+    ? Math.max(20, dims.w - 12)
+    : Math.max(48, Math.round(dims.w * 0.68));
 
   const animationClass = reducedMotion
     ? ""
@@ -119,7 +124,7 @@ export default function LiTTPresence({
     // Chat avatar — small circle beside assistant messages
     return (
       <div
-        className={`relative shrink-0 rounded-full ${animationClass}`}
+        className={`relative grid shrink-0 place-items-center rounded-full ${animationClass}`}
         style={{
           width: dims.w,
           height: dims.h,
@@ -130,13 +135,7 @@ export default function LiTTPresence({
         }}
         aria-label={`LiTT ${state}`}
       >
-        <Image
-          src={imgSrc}
-          alt="LiTT"
-          width={dims.w}
-          height={dims.h}
-          className="h-full w-full object-contain p-0.5"
-        />
+        <BrandLogo showText={false} size={markSize} variant="mark" />
       </div>
     );
   }
@@ -156,18 +155,12 @@ export default function LiTTPresence({
         }}
         aria-label={`LiTT ${state}`}
       >
-        <Image
-          src="/brand/litt/litt-avatar-64.webp"
-          alt="LiTT"
-          width={dims.w - 8}
-          height={dims.h - 8}
-          className="object-contain"
-        />
+        <BrandLogo showText={false} size={markSize} variant="mark" />
       </div>
     );
   }
 
-  // Empty state — full cutout with green platform
+  // Empty state — canonical brand mark on the energy platform
   return (
     <div
       ref={shellRef}
@@ -224,18 +217,16 @@ export default function LiTTPresence({
         className="litt-presence-figure relative grid place-items-center litt-float"
         style={{ width: dims.w, height: dims.h }}
       >
-        <Image
-          src={imgSrc}
-          alt="LiTT mascot"
-          width={dims.w}
-          height={dims.h}
-          className="object-contain p-2.5"
-          style={{ filter: `drop-shadow(0 20px 30px rgba(0,0,0,0.45)) drop-shadow(0 0 25px ${colors.glow})` }}
-        />
-        <span
-          className="litt-eye-blink pointer-events-none absolute left-1/2 top-[36%] h-[7%] w-[30%] -translate-x-1/2 rounded-full bg-[#0b0f14]/70 blur-[0.5px]"
-          aria-hidden
-        />
+        <div
+          className="grid place-items-center"
+          style={{
+            width: markSize + 16,
+            height: markSize + 16,
+            filter: `drop-shadow(0 20px 30px rgba(0,0,0,0.45)) drop-shadow(0 0 25px ${colors.glow})`,
+          }}
+        >
+          <BrandLogo showText={false} size={markSize} variant="mark" />
+        </div>
         <span
           className="pointer-events-none absolute bottom-[12%] left-1/2 h-[8%] w-[46%] -translate-x-1/2 rounded-full"
           style={{

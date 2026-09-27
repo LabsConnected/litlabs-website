@@ -4,6 +4,7 @@ import { shouldDeferConversationUrlSync, useConversationStore } from "../stores/
 import type { Conversation, ConversationMessage } from "@/lib/studio/types";
 import type { SendResult } from "./useCanonicalConversation";
 import { useCanonicalConversation } from "./useCanonicalConversation";
+import type { StudioSelectionPayload } from "../context/StudioContext";
 
 // Minimal browser-environment mocks for rendering the real hook.
 // Every mocked hook must return a STABLE object — this hook's useCallback
@@ -474,5 +475,153 @@ describe("send() 409 coded refusal — no revision retry", () => {
     // The real refusal message, not "Conversation was updated by another session".
     expect(result.current.sendError).toContain("Tool execution unavailable");
     expect(result.current.sendError).not.toContain("updated by another session");
+  });
+});
+
+// ── F1 slice C: active selection reaches the LLM request ──────────────
+// The `previewSelection` prop accepts the legacy {label, selector,
+// tagName} shape OR a full StudioSelectionPayload. Only a full payload
+// (which carries kind/sourceFile/route — fields the server's own
+// "[Preview selection context]" block doesn't forward) prepends a
+// compact, clearly-marked [Selected: …] block to the outgoing message.
+// Legacy shapes keep working byte-identically.
+describe("send() selection context — StudioSelectionPayload", () => {
+  const CONVERSATION: Conversation = {
+    id: "conv-1",
+    ownerId: "user-1",
+    projectId: "proj-1",
+    title: "Test",
+    activeAgentSlug: "litt",
+    activeAgentMode: "standard",
+    agentInstanceId: null,
+    revision: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    archivedAt: null,
+  };
+
+  const makeMsg = (overrides: Partial<ConversationMessage>): ConversationMessage => ({
+    id: "msg-x",
+    conversationId: "conv-1",
+    ownerId: "user-1",
+    projectId: "proj-1",
+    role: "assistant",
+    agentSlug: "litt",
+    agentMode: "standard",
+    agentInstanceId: null,
+    content: "",
+    status: "completed",
+    parentMessageId: null,
+    regenerationOfMessageId: null,
+    clientRequestId: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  });
+
+  const jsonResponse = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let capturedBody: any;
+
+  beforeEach(() => {
+    capturedBody = null;
+    useConversationStore.getState().resetForProject();
+
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+
+      if (method === "POST" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        capturedBody = JSON.parse(String(init?.body));
+        return jsonResponse({
+          userMessage: makeMsg({ id: "user-1", role: "user", content: capturedBody.message }),
+          assistantMessage: makeMsg({ id: "asst-1", content: "Making it bigger." }),
+          revision: 2,
+        });
+      }
+      if (url.startsWith("/api/studio/conversations")) {
+        return jsonResponse({ conversations: [] });
+      }
+      return jsonResponse({});
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useConversationStore.getState().resetForProject();
+  });
+
+  async function renderAndSend(
+    text: string,
+    previewSelection: {
+      label: string;
+      selector: string;
+      tagName: string;
+    } | StudioSelectionPayload | null,
+  ): Promise<SendResult | undefined> {
+    const { result } = renderHook(() =>
+      useCanonicalConversation({ serverProjectId: "proj-1", previewSelection }),
+    );
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    act(() => {
+      const st = useConversationStore.getState();
+      st.setConversations([CONVERSATION]);
+      st.selectConversation("conv-1");
+    });
+
+    let sendResult: SendResult | undefined;
+    await act(async () => {
+      sendResult = await result.current.send(text);
+    });
+    return sendResult;
+  }
+
+  const PAYLOAD: StudioSelectionPayload = {
+    kind: "preview-element",
+    label: "Hero heading",
+    selector: "main > h1",
+    tagName: "h1",
+    sourceFile: "src/components/Hero.tsx",
+    route: "/",
+    projectId: "proj-1",
+    timestamp: 1727,
+  };
+
+  it("prepends a [Selected: …] block with label+source for a full payload", async () => {
+    const sendResult = await renderAndSend("make it bigger", PAYLOAD);
+
+    expect(sendResult?.accepted).toBe(true);
+    expect(capturedBody.message).toBe(
+      "[Selected: Hero heading — src/components/Hero.tsx @ / (preview-element)]\nmake it bigger",
+    );
+    // The legacy previewSelection field still goes along for the
+    // server's own context block — the contract is additive.
+    expect(capturedBody.previewSelection.label).toBe("Hero heading");
+    expect(capturedBody.previewSelection.selector).toBe("main > h1");
+  });
+
+  it("keeps the legacy shape byte-identical (server adds its own block)", async () => {
+    const sendResult = await renderAndSend("make it bigger", {
+      label: "Hero heading",
+      selector: "main > h1",
+      tagName: "h1",
+    });
+
+    expect(sendResult?.accepted).toBe(true);
+    expect(capturedBody.message).toBe("make it bigger");
+    expect(capturedBody.previewSelection.label).toBe("Hero heading");
+  });
+
+  it("sends the message unchanged with no selection", async () => {
+    const sendResult = await renderAndSend("make it bigger", null);
+
+    expect(sendResult?.accepted).toBe(true);
+    expect(capturedBody.message).toBe("make it bigger");
+    expect(capturedBody.previewSelection).toBeUndefined();
   });
 });

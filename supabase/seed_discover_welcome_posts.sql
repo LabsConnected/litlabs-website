@@ -43,25 +43,28 @@ BEGIN
 
   -- 2. Welcome posts — oldest first; only when the team has none yet.
   IF NOT EXISTS (SELECT 1 FROM public.posts WHERE user_id = team_id) THEN
-    INSERT INTO public.posts (user_id, content, post_type, visibility, created_at)
+    -- created_at is backdated for a natural feed; updated_at must match it,
+    -- otherwise every seeded post shows a misleading "edited" badge
+    -- (the UI badges a post edited whenever updated_at != created_at).
+    INSERT INTO public.posts (user_id, content, post_type, visibility, created_at, updated_at)
     VALUES
       (team_id, $seed1$Welcome to Discover — the community home for people building with LiTT. 🚀
 
 This is where builders share what they are shipping, ask questions, and show what is possible when you describe an idea once and let LiTT do the rest.
 
-Introduce yourself in the replies: what are you building?$seed1$, 'text', 'public', now() - interval '30 hours'),
+Introduce yourself in the replies: what are you building?$seed1$, 'text', 'public', now() - interval '30 hours', now() - interval '30 hours'),
       (team_id, $seed2$LiTT turns an idea into an operating business — not just a published website.
 
 Describe what you want once. LiTT plans it, builds it, and wires up the real stuff: lead capture, booking, payments, email, your domain. Then you publish without ever touching hosting or DNS.
 
-That is the bar. Discover is where you will watch it happen first.$seed2$, 'text', 'public', now() - interval '24 hours'),
+That is the bar. Discover is where you will watch it happen first.$seed2$, 'text', 'public', now() - interval '24 hours', now() - interval '24 hours'),
       (team_id, $seed3$How Discover works:
 
 📣 Share — post your builds, wins, and works-in-progress.
 ❓ Ask — stuck on something? The community and the team are here.
 💡 Learn — patterns and tips from people shipping real businesses on LiTT.
 
-Sign in to post. Real builds only — if you share it, it should actually exist.$seed3$, 'text', 'public', now() - interval '18 hours'),
+Sign in to post. Real builds only — if you share it, it should actually exist.$seed3$, 'text', 'public', now() - interval '18 hours', now() - interval '18 hours'),
       (team_id, $seed4$Discover house rules, short version:
 
 1. Be kind — builders at every level are welcome here.
@@ -69,14 +72,14 @@ Sign in to post. Real builds only — if you share it, it should actually exist.
 3. Share real work.
 4. Help before you promote.
 
-We keep this place useful. Rule-breaking posts come down. — the LiTT team$seed4$, 'text', 'public', now() - interval '12 hours'),
+We keep this place useful. Rule-breaking posts come down. — the LiTT team$seed4$, 'text', 'public', now() - interval '12 hours', now() - interval '12 hours'),
       (team_id, $seed5$LiTT tip: the more concrete your first description, the better the build.
 
 "A booking site for my cleaning business in Austin with online payments" beats "a website for my business" every time.
 
-Describe once. LiTT handles the rest.$seed5$, 'text', 'public', now() - interval '6 hours'),
+Describe once. LiTT handles the rest.$seed5$, 'text', 'public', now() - interval '6 hours', now() - interval '6 hours'),
       (team_id, $seed6$It is launch-week energy every week around here. 🔥
 
-Drop a reply: what are you building with LiTT right now? Even if it is just an idea — describe it in one paragraph. The best answers get featured.$seed6$, 'text', 'public', now() - interval '1 hour');
+Drop a reply: what are you building with LiTT right now? Even if it is just an idea — describe it in one paragraph. The best answers get featured.$seed6$, 'text', 'public', now() - interval '1 hour', now() - interval '1 hour');
   END IF;
 END $$;

@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import type { StructuredDiagnostic } from "@/lib/litt-intelligence/diagnostic-parser";
+import type { ActionRunDisplayState } from "../components/ActionRunStatusPanel";
 
 /**
  * Execution Store — single source of truth for LiTT's live execution state.
@@ -54,6 +55,12 @@ export interface ExecutionEvent {
   summary: string;
   /** Tool ID for tool events */
   toolId?: string;
+  /**
+   * Approval-gate id (pausedRunId) for approval_required entries. Lets the
+   * activity feed dedupe repeated signals for the same gate instead of
+   * stacking duplicate "Approval needed" entries.
+   */
+  gateId?: string;
   /** Success/failure for result events */
   success?: boolean;
   /** Duration in ms for completed operations */
@@ -73,6 +80,12 @@ export interface ExecutionEvent {
   step?: number;
   /** Timestamp */
   ts: number;
+  /**
+   * F1 slice C — worktab id this event belongs to. Tagged at ingestion
+   * from the store's activeTaskId (set by the shell on worktab switch).
+   * Absent on events recorded before tagging or with no active worktab.
+   */
+  taskId?: string;
   /** Whether this event is collapsed in the UI */
   collapsed?: boolean;
   /** Whether this event is a low-level operation that can be auto-collapsed */
@@ -168,12 +181,32 @@ interface ExecutionStore {
    * agent run is in progress (agent runs take precedence).
    */
   previewPreparing: boolean;
+  /**
+   * F1 slice C — currently-active worktab id. SSE events ingested while
+   * this is set are tagged with it (see addEvent). Set by the shell via
+   * setActiveTaskId() when the active worktab changes — wired to the
+   * durable server task id.
+   */
+  activeTaskId: string | null;
+  /**
+   * F1 — server-fed conversation→task index. The shell keeps this in sync
+   * with the durable task list (GET /api/studio/tasks) so SSE events
+   * attribute to the tab OWNING the conversation even while another tab
+   * is active. Replaces the old client-local worktab store binding.
+   */
+  taskConversationIndex: Record<string, string>;
+  /**
+   * F1 slice C — per-worktab execution phase, keyed by worktab id.
+   * Mirrored from every global phase transition while that worktab is
+   * active. Read via phaseForTask(taskId); unknown ids read as "idle".
+   */
+  taskPhases: Record<string, ExecutionPhase>;
 
   // ── Actions ──
   startRun: () => void;
   endRun: (reason?: string) => void;
   addEvent: (event: Omit<ExecutionEvent, "id" | "seq" | "ts">) => void;
-  setPhase: (phase: ExecutionPhase) => void;
+  setPhase: (phase: ExecutionPhase, taskId?: string) => void;
   setPendingApproval: (approval: PendingApproval | null) => void;
   resolveApproval: (decision: "approved" | "rejected") => void;
   /** Approval POST submitted — card stays mounted, shows submitting state. */
@@ -191,14 +224,91 @@ interface ExecutionStore {
   collapseLowLevel: () => void;
   clearEvents: () => void;
   setPreviewPreparing: (preparing: boolean) => void;
+  /**
+   * F1 slice C — set the active worktab id for event tagging.
+   * Called by the shell when the active worktab changes.
+   */
+  setActiveTaskId: (taskId: string | null) => void;
+  /**
+   * F1 — refresh the conversation→task index from the durable task list.
+   * Called by the shell whenever the server task list changes. No-ops
+   * when the mapping is unchanged so subscribers never re-render spuriously.
+   */
+  setTaskConversationIndex: (
+    tasks: Array<{ id: string; conversationId: string | null }>,
+  ) => void;
+  /**
+   * F1 — record a phase for a specific worktab, attributed from the SSE
+   * stream's own conversation (not the active tab). Used by the SSE
+   * ingestor so a background tab's run reaches "done" on real completion.
+   */
+  setTaskPhase: (taskId: string, phase: ExecutionPhase) => void;
+  /**
+   * F1 slice C — events for one worktab. With no taskId this returns
+   * the full event list (today's global behavior — backwards compatible).
+   */
+  eventsForTask: (taskId?: string) => ExecutionEvent[];
+  /**
+   * F1 slice C — phase for one worktab. With no taskId this returns the
+   * global phase (today's behavior). Unknown worktabs read as "idle".
+   */
+  phaseForTask: (taskId?: string) => ExecutionPhase;
   reset: () => void;
 }
 
 let seqCounter = 0;
 let idCounter = 0;
 
+/**
+ * F1 slice C — mirror the current global phase into `taskPhases` under
+ * the active worktab id. Called at the end of every action that mutates
+ * `phase`. Strictly additive: existing transitions keep their exact
+ * behavior; this only records the per-worktab view. The simplified
+ * parameter types keep this helper decoupled from zustand's overloads.
+ */
+function mirrorTaskPhase(
+  get: () => {
+    activeTaskId: string | null;
+    phase: ExecutionPhase;
+    taskPhases: Record<string, ExecutionPhase>;
+  },
+  set: (
+    updater: (s: {
+      taskPhases: Record<string, ExecutionPhase>;
+    }) => { taskPhases: Record<string, ExecutionPhase> },
+  ) => void,
+  // F1: explicit attribution target. SSE-ingested phases attribute to the
+  // run's OWNING worktab (resolved from the stream's conversation); every
+  // other caller attributes to the active tab (today's behavior).
+  targetTaskId?: string,
+): void {
+  const { activeTaskId, phase, taskPhases } = get();
+  const target = targetTaskId ?? activeTaskId;
+  if (!target || taskPhases[target] === phase) return;
+  set((s) => ({ taskPhases: { ...s.taskPhases, [target]: phase } }));
+}
+
 function nextId(): string {
   return `exec_${Date.now()}_${idCounter++}`;
+}
+
+/**
+ * F1: resolve the worktab id for an SSE stream's conversation. Events must
+ * attribute to the tab that OWNS the run (via its bound conversation), not
+ * to whichever tab is active when the event lands — otherwise a run started
+ * in tab A would paint tab B's badge after a switch, and tab A could never
+ * reach "ready". Falls back to the active tab (today's behavior) when the
+ * conversation isn't bound to any tab (e.g. pre-F1 flows).
+ */
+function resolveTaskIdForConversation(
+  conversationId: string | undefined,
+  store: typeof useExecutionStore,
+): string | undefined {
+  if (conversationId) {
+    const taskId = store.getState().taskConversationIndex[conversationId];
+    if (taskId) return taskId;
+  }
+  return store.getState().activeTaskId ?? undefined;
 }
 
 /** Map agent-loop phase names to user-facing execution phases */
@@ -224,6 +334,41 @@ function mapPhase(phase: string, step: number): ExecutionPhase {
     default:
       return "editing";
   }
+}
+
+/**
+ * Approval-entry dedupe helpers. The agent loop can emit several signals for
+ * one approval gate (an `approval_required` progress signal, then a
+ * `pending_approval` with the gate's pausedRunId, plus re-fires on SSE
+ * reconnect). Without dedupe the activity feed stacks 2-3 identical
+ * "Approval needed" entries per gate.
+ *
+ * Gates are sequential — at most one gate is pending at a time — so an
+ * `approval_resolved` event closes every approval_required entry before it.
+ */
+
+/**
+ * Index of the most recent approval_required entry that is still open (no
+ * approval_resolved after it), matches toolId, and has no gateId claimed
+ * yet. -1 when there is none.
+ */
+function findUnclaimedApprovalIndex(events: ExecutionEvent[], toolId: string): number {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.type === "approval_resolved") return -1;
+    if (e.type === "approval_required" && e.toolId === toolId && !e.gateId) return i;
+  }
+  return -1;
+}
+
+/** Whether an approval_required entry for this gate id is still open. */
+function hasOpenApprovalEntry(events: ExecutionEvent[], gateId: string): boolean {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.type === "approval_resolved") return false;
+    if (e.type === "approval_required" && e.gateId === gateId) return true;
+  }
+  return false;
 }
 
 /** Classify a successful file mutation for truthful completion feedback. */
@@ -294,6 +439,9 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   toolCalls: [],
   changesSummary: null,
   previewPreparing: false,
+  activeTaskId: null,
+  taskConversationIndex: {},
+  taskPhases: {},
 
   startRun: () => {
     seqCounter = 0;
@@ -311,6 +459,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       toolCalls: [],
       changesSummary: null,
     });
+    mirrorTaskPhase(get, set);
   },
 
   endRun: (reason?: string) => {
@@ -334,12 +483,15 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       approvalRetryable: paused ? state.approvalRetryable : true,
       approvalExpired: paused ? state.approvalExpired : false,
     });
+    mirrorTaskPhase(get, set);
   },
 
   addEvent: (event) => {
     const seq = seqCounter++;
     const fullEvent: ExecutionEvent = {
       ...event,
+      // F1 slice C: tag with the active worktab id (explicit wins).
+      taskId: event.taskId ?? get().activeTaskId ?? undefined,
       id: nextId(),
       seq,
       ts: Date.now(),
@@ -378,9 +530,13 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     });
   },
 
-  setPhase: (phase) => set({ phase }),
+  setPhase: (phase, taskId) => {
+    set({ phase });
+    mirrorTaskPhase(get, set, taskId);
+  },
 
   setPendingApproval: (approval) => {
+    const prevPending = get().pendingApproval;
     set({
       pendingApproval: approval,
       phase: approval ? "awaiting_approval" : get().phase,
@@ -394,14 +550,32 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     // reattach to the next gate that mounts.
     if (!approval) {
       set({ approvalPhase: "idle", approvalError: null, approvalRetryable: true, approvalExpired: false });
+      return;
     }
-    if (approval) {
-      get().addEvent({
-        type: "approval_required",
-        summary: `Approval needed: ${approval.toolId.replace(/_/g, " ")}`,
-        toolId: approval.toolId,
-      });
+    const gateId = approval.pausedRunId;
+    // Same gate already pending — its entry is already logged. A repeated
+    // pending_approval signal for one gate must not duplicate the entry.
+    if (gateId && prevPending?.pausedRunId === gateId) return;
+    const events = get().events;
+    // The approval_required SSE signal may have logged this gate already
+    // under its toolId (no gate id yet). Claim that entry in place instead
+    // of appending a duplicate.
+    const unclaimedIdx = findUnclaimedApprovalIndex(events, approval.toolId);
+    if (unclaimedIdx >= 0) {
+      set((state) => ({
+        events: state.events.map((e, i) => (i === unclaimedIdx ? { ...e, gateId } : e)),
+      }));
+      return;
     }
+    // Already logged under this gate id and still open — don't duplicate.
+    if (gateId && hasOpenApprovalEntry(events, gateId)) return;
+    get().addEvent({
+      type: "approval_required",
+      summary: `Approval needed: ${approval.toolId.replace(/_/g, " ")}`,
+      toolId: approval.toolId,
+      gateId,
+    });
+    mirrorTaskPhase(get, set);
   },
 
   resolveApproval: (decision) => {
@@ -431,6 +605,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       approvalRetryable: true,
       approvalExpired: false,
     });
+    mirrorTaskPhase(get, set);
   },
 
   beginApprovalSubmit: () => {
@@ -459,6 +634,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       toolId: get().pendingApproval?.toolId,
       success: false,
     });
+    mirrorTaskPhase(get, set);
   },
 
   setCheckpoint: (checkpoint) => {
@@ -499,6 +675,43 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     set({ previewPreparing: preparing });
   },
 
+  // ── F1 slice C: per-worktab scoping ──────────────────────────
+  setActiveTaskId: (taskId) => {
+    if (get().activeTaskId === taskId) return;
+    set({ activeTaskId: taskId });
+  },
+  setTaskPhase: (taskId, phase) => {
+    set((s) => ({ taskPhases: { ...s.taskPhases, [taskId]: phase } }));
+  },
+
+  eventsForTask: (taskId) => {
+    const events = get().events;
+    // No taskId → today's global behavior (all events).
+    if (taskId === undefined) return events;
+    return events.filter((e) => e.taskId === taskId);
+  },
+
+  phaseForTask: (taskId) => {
+    // No taskId → today's global behavior (global phase).
+    if (taskId === undefined) return get().phase;
+    // Unknown worktab → "idle" (honest: no known work).
+    return get().taskPhases[taskId] ?? "idle";
+  },
+
+  setTaskConversationIndex: (tasks) => {
+    const next: Record<string, string> = {};
+    for (const t of tasks) {
+      if (t.conversationId) next[t.conversationId] = t.id;
+    }
+    const prev = get().taskConversationIndex;
+    const prevKeys = Object.keys(prev);
+    const nextKeys = Object.keys(next);
+    const unchanged =
+      prevKeys.length === nextKeys.length &&
+      nextKeys.every((k) => prev[k] === next[k]);
+    if (!unchanged) set({ taskConversationIndex: next });
+  },
+
   reset: () => {
     seqCounter = 0;
     set({
@@ -516,6 +729,9 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       toolCalls: [],
       changesSummary: null,
       previewPreparing: false,
+      activeTaskId: null,
+      taskConversationIndex: {},
+      taskPhases: {},
     });
   },
 }));
@@ -580,11 +796,20 @@ export function feedSSEEventToExecutionStore(
 ) {
   const s = store.getState();
 
+  // F1: attribute this stream's events to the worktab bound to the event's
+  // conversation — NOT the currently active tab. A run started in tab A
+  // keeps attributing to A after the user switches to tab B, so tab A's
+  // badge can flip to ready on real completion. Explicit event.taskId
+  // still wins inside addEvent.
+  const streamTaskId = resolveTaskIdForConversation(conversationId, store);
+  const addEvent: typeof s.addEvent = (event) =>
+    s.addEvent({ taskId: streamTaskId, ...event });
+
   switch (evt.type) {
     case "tool_execution":
       if (evt.success === undefined) {
         // tool_start
-        s.addEvent({
+        addEvent({
           type: "tool_start",
           summary: toolSummary(evt.toolId ?? "", evt.summary),
           toolId: evt.toolId,
@@ -592,7 +817,7 @@ export function feedSSEEventToExecutionStore(
         });
       } else {
         // tool_result
-        s.addEvent({
+        addEvent({
           type: evt.success ? "tool_result" : "tool_error",
           summary: evt.summary ?? toolSummary(evt.toolId ?? ""),
           toolId: evt.toolId,
@@ -604,7 +829,7 @@ export function feedSSEEventToExecutionStore(
       break;
 
     case "workspace_change":
-      s.addEvent({
+      addEvent({
         type: "status",
         summary: evt.status === "changed"
           ? `${evt.files?.length ?? 0} file${evt.files?.length === 1 ? "" : "s"} changed (+${evt.additions ?? 0}/-${evt.deletions ?? 0})`
@@ -619,16 +844,16 @@ export function feedSSEEventToExecutionStore(
       break;
 
     case "build_start":
-      s.addEvent({
+      addEvent({
         type: "build_start",
         summary: `Running ${evt.check}...`,
         check: evt.check,
       });
-      s.setPhase("testing");
+      s.setPhase("testing", streamTaskId);
       break;
 
     case "build_result":
-      s.addEvent({
+      addEvent({
         type: "build_result",
         summary: `${evt.check}: ${evt.passed ? "passed" : "failed"}`,
         check: evt.check,
@@ -647,7 +872,10 @@ export function feedSSEEventToExecutionStore(
       // false "could not be resumed". Log the event only — only
       // `pending_approval` (emitted after the paused run is persisted
       // server-side and carrying its pausedRunId) mounts the card.
-      s.addEvent({
+      // Dedupe: the loop can re-fire this signal for the same gate, so
+      // skip it while an unclaimed entry for the tool is still open.
+      if (findUnclaimedApprovalIndex(s.events, evt.toolId ?? "") >= 0) break;
+      addEvent({
         type: "approval_required",
         summary: `Approval needed: ${(evt.toolId ?? "").replace(/_/g, " ")}`,
         toolId: evt.toolId,
@@ -677,13 +905,16 @@ export function feedSSEEventToExecutionStore(
 
     case "phase":
       if (evt.phase && evt.step !== undefined) {
-        s.setPhase(mapPhase(evt.phase, evt.step));
+        const mapped = mapPhase(evt.phase, evt.step);
+        // Attribute to the run's OWNING worktab (streamTaskId), not the
+        // active tab — a background tab's badge must track its own run.
+        s.setPhase(mapped, streamTaskId);
         useExecutionStore.setState({ currentStep: evt.step });
       }
       break;
 
     case "finished":
-      s.addEvent({
+      addEvent({
         type: evt.success === false ? "tool_error" : "finished",
         summary: evt.success === false
           ? "Verification incomplete — completion was not declared"
@@ -696,20 +927,20 @@ export function feedSSEEventToExecutionStore(
       // pendingApproval still set here is stale and would strand the
       // "Approval waiting" badge. Clear it without fabricating a decision.
       s.setPendingApproval(null);
-      s.setPhase(evt.success === false ? "failed" : "done");
+      s.setPhase(evt.success === false ? "failed" : "done", streamTaskId);
       s.collapseLowLevel();
       break;
 
     case "cancelled":
-      s.addEvent({
+      addEvent({
         type: "cancelled",
         summary: evt.reason ?? "Cancelled",
       });
-      s.setPhase("cancelled");
+      s.setPhase("cancelled", streamTaskId);
       break;
 
     case "model_routing":
-      s.addEvent({
+      addEvent({
         type: "model_routing",
         summary: evt.fallbackFrom
           ? `Switched to ${evt.model} (fallback from ${evt.fallbackFrom})`
@@ -723,7 +954,7 @@ export function feedSSEEventToExecutionStore(
       break;
 
     case "model_failed":
-      s.addEvent({
+      addEvent({
         type: "model_failed",
         summary: `Model ${evt.model} failed: ${evt.category}`,
         model: evt.model,
@@ -733,35 +964,35 @@ export function feedSSEEventToExecutionStore(
       break;
 
     case "reasoning":
-      s.addEvent({
+      addEvent({
         type: "reasoning",
         summary: evt.summary ?? "",
       });
       break;
 
     case "status":
-      s.addEvent({
+      addEvent({
         type: "status",
         summary: evt.summary ?? "",
       });
       break;
 
     case "repair_attempt":
-      s.addEvent({
+      addEvent({
         type: "repair_attempt",
         summary: `Repair attempt ${evt.attempt}/${evt.maxAttempts}`,
       });
       break;
 
     case "preview_start":
-      s.addEvent({
+      addEvent({
         type: "preview",
         summary: "Starting live preview...",
       });
       break;
 
     case "preview_result":
-      s.addEvent({
+      addEvent({
         type: "preview",
         summary: evt.success
           ? "Live preview ready"
@@ -771,14 +1002,14 @@ export function feedSSEEventToExecutionStore(
       break;
 
     case "deploy_start":
-      s.addEvent({
+      addEvent({
         type: "deploy",
         summary: `Deploying to ${evt.environment ?? "production"}...`,
       });
       break;
 
     case "deploy_result":
-      s.addEvent({
+      addEvent({
         type: "deploy",
         summary: evt.success
           ? `Deployment succeeded${evt.productionUrl ? `: ${evt.productionUrl}` : ""}`
@@ -788,7 +1019,7 @@ export function feedSSEEventToExecutionStore(
       break;
 
     case "deploy_verify":
-      s.addEvent({
+      addEvent({
         type: "deploy",
         summary: evt.success
           ? `Production URL verified: ${evt.url ?? "unknown"}`
@@ -797,4 +1028,87 @@ export function feedSSEEventToExecutionStore(
       });
       break;
   }
+}
+
+/* ── F1 slice C: worktab badge derivation ──────────────────────────
+ * Pure function — Agent A renders the badges; this module owns the
+ * derivation so every surface agrees on what a badge means.
+ *
+ * Inputs are exactly the two sanctioned sources:
+ *   1. the execution store's per-task phase (phaseForTask), and
+ *   2. the action-run projection's displayState (ActionRunStatusPanel's
+ *      union — imported, not redeclared).
+ *
+ * Honesty rules:
+ * - "needs-approval" wins over everything: a live approval gate means
+ *   the user must act; the worktab is never "ready" or "working" then.
+ * - "ready" ONLY on completed-with-evidence: execution phase "done"
+ *   AND the action-run projection confirms "completed". Phase "done"
+ *   alone is not evidence — a client-side endRun() with no reason also
+ *   lands on "done" without any finished event.
+ * - Anything else (failed, cancelled, stopped, unknown task) is "idle" —
+ *   never an optimistic state.
+ */
+
+export type WorktabBadge = "working" | "ready" | "needs-approval" | "idle";
+
+export interface WorktabBadgeSnapshot {
+  /** Per-task execution phase — useExecutionStore.getState().phaseForTask(taskId). */
+  executionPhase: ExecutionPhase;
+  /**
+   * Action-run projection displayState for the task's conversation, when
+   * known. Absent/null means the projection is unavailable — the badge
+   * then derives from the execution phase alone, conservatively.
+   */
+  actionRunDisplayState?: ActionRunDisplayState | null;
+}
+
+/** Execution phases that mean live work is in flight for the task. */
+const WORKING_PHASES: ReadonlySet<ExecutionPhase> = new Set([
+  "planning",
+  "inspecting",
+  "editing",
+  "testing",
+  "verifying",
+  "awaiting_input",
+]);
+
+/** Action-run display states that mean live work is in flight. */
+const WORKING_DISPLAY_STATES: ReadonlySet<ActionRunDisplayState> = new Set([
+  "queued",
+  "starting",
+  "running",
+  "waiting_for_user",
+  "paused",
+  "stopping",
+]);
+
+export function deriveWorktabBadge(
+  taskId: string,
+  snapshots: Record<string, WorktabBadgeSnapshot | undefined>,
+): WorktabBadge {
+  const snapshot = snapshots[taskId];
+  if (!snapshot) return "idle";
+  const { executionPhase, actionRunDisplayState } = snapshot;
+
+  // An approval gate up in either source means the user must act.
+  if (
+    executionPhase === "awaiting_approval" ||
+    actionRunDisplayState === "awaiting_approval"
+  ) {
+    return "needs-approval";
+  }
+
+  // Live work in either source.
+  if (WORKING_PHASES.has(executionPhase)) return "working";
+  if (actionRunDisplayState && WORKING_DISPLAY_STATES.has(actionRunDisplayState)) {
+    return "working";
+  }
+
+  // Ready only on completed-with-evidence.
+  if (executionPhase === "done" && actionRunDisplayState === "completed") {
+    return "ready";
+  }
+
+  return "idle";
 }

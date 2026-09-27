@@ -28,6 +28,11 @@ import {
   shouldDeferConversationUrlSync,
 } from "../stores/useConversationStore";
 import { useExecutionStore, feedSSEEventToExecutionStore, type PendingApproval } from "../stores/useExecutionStore";
+import {
+  formatSelectionContextBlock,
+  isStudioSelectionPayload,
+  type StudioSelectionPayload,
+} from "../context/StudioContext";
 import { mobileDiag } from "../lib/mobileDiagnostics";
 import {
   reconcileRunState,
@@ -180,8 +185,14 @@ export function useCanonicalConversation({
   serverProjectId?: string | null;
   /** Camera dock state — passed to the LLM so it knows camera is available */
   cameraState?: { active: boolean; status: string };
-  /** Element selected in the live preview, used as context for the next request. */
-  previewSelection?: { label: string; selector: string; tagName: string } | null;
+  /**
+   * Element selected in the live preview, used as context for the next
+   * request. Accepts the legacy {label, selector, tagName} shape or a
+   * full F1 StudioSelectionPayload — when the payload carries kind /
+   * source fields, the send path prepends a compact [Selected: …] block
+   * so the model sees the element's label AND source.
+   */
+  previewSelection?: { label: string; selector: string; tagName: string } | StudioSelectionPayload | null;
   /**
    * Shared capabilities from the caller's own useConnectionSummary. When
    * provided, the hook does NOT start a second polling instance — one
@@ -1061,6 +1072,21 @@ export function useCanonicalConversation({
         };
       }
 
+      // F1 slice C — the active selection reaches the ACTUAL LLM request,
+      // not just composer chrome. The server already forwards the legacy
+      // previewSelection {label, selector, tagName} as its own
+      // "[Preview selection context]" block; when the selection is a full
+      // StudioSelectionPayload (kind/sourceFile/route — fields the server
+      // block doesn't carry) prepend a compact, clearly-marked block to
+      // the outgoing message so "make it bigger" gives the model the
+      // element's label AND source. Slash-command and intent detection
+      // above intentionally run on the raw text.
+      const activeSelection = previewSelectionRef.current ?? null;
+      const selectionContextBlock = isStudioSelectionPayload(activeSelection)
+        ? formatSelectionContextBlock(activeSelection)
+        : null;
+      const outgoingText = selectionContextBlock ? `${selectionContextBlock}\n${text}` : text;
+
       // 3. Ensure we have a conversation
       const s = getStore();
       let conversationId = s.selectedConversationId;
@@ -1075,7 +1101,7 @@ export function useCanonicalConversation({
       const optimisticUserMessage = {
         id: optimisticUserId,
         role: "user",
-        content: text,
+        content: outgoingText,
         agentSlug: null,
         agentMode: null,
         status: "completed",
@@ -1228,7 +1254,7 @@ export function useCanonicalConversation({
             credentials: "include",
             headers: await authHeaders(true),
             body: JSON.stringify({
-              message: text,
+              message: outgoingText,
               clientRequestId,
               expectedRevision: revision,
               requestedAgentSlug: activeAgentId,
@@ -1425,7 +1451,7 @@ export function useCanonicalConversation({
             const userMsg = data.userMessage;
             s2.updateMessage(activeConversationId, optimisticUserId, {
               id: userMsg?.id ?? optimisticUserId,
-              content: userMsg?.content ?? text,
+              content: userMsg?.content ?? outgoingText,
               createdAt: userMsg?.createdAt ?? optimisticTimestamp,
             });
             if (data.assistantMessage) {
@@ -2010,6 +2036,7 @@ export function useCanonicalConversation({
     switchAgent,
     selectedConversationId,
     conversations,
+    selectConversation: (id: string | null) => getStore().selectConversation(id),
     loading: loadingState,
     sendError,
     reportSendError: setSendError,

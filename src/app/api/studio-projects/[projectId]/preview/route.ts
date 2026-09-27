@@ -123,9 +123,12 @@ export async function POST(
   // for the "Prepare preview" → 409 "Workspace not provisioned" loop: the
   // preview start endpoint now provisions the workspace itself so the user
   // never has to know what a "workspace" or "repository binding" is.
+  // GitHub-backed projects always go through provisionWorkspaceForProject so
+  // the workspace is re-synced to the latest repo state on every preview
+  // start (otherwise the preview serves the stale clone from provisioning).
   let workspaceId = project.workspaceId;
   try {
-    if (!workspaceId || !project.workspaceRoot) {
+    if (!workspaceId || !project.workspaceRoot || project.sourceType === "github") {
       workspaceId = await provisionWorkspaceForProject(projectId, userId);
     } else {
       const recovered = await ensureWorkspaceAlive(projectId, userId, workspaceId);
