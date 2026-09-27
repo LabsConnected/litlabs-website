@@ -52,7 +52,7 @@ import MobileDiagOverlay from "./MobileDiagOverlay";
 import { mobileDiag, isMobileDiagEnabled } from "../lib/mobileDiagnostics";
 import ContextDrawer, { type ContextDrawerTab } from "./context/ContextDrawer";
 import AssetsPanel from "./context/AssetsPanel";
-import { StudioContextProvider, isStudioSelectionPayload, type StudioSelection, type StudioSelectionPayload, type StudioSelectionValue } from "../context/StudioContext";
+import { StudioContextProvider, isStudioSelectionPayload, type StudioSelectionPayload, type StudioSelectionValue } from "../context/StudioContext";
 import { deriveCreator, deriveWorkspaceStage } from "../context/derive-studio-context";
 import { StudioCreatorHost } from "./creators/StudioCreatorHost";
 import { useViewportTier } from "../hooks/useViewportTier";
@@ -62,8 +62,16 @@ import { useResizableWidth } from "../hooks/useResizableWidth";
 import { useExecutionStore, type MutationSummary } from "../stores/useExecutionStore";
 import { submitApprovalAndPoll, watchApprovalResolution, type ApprovalRunResult } from "../lib/approval-polling";
 import { StudioActivityPanel, StudioInspector } from "./StudioWorkspaceFrame";
-import StudioWindowFrame from "./StudioWindowFrame";
-import StudioCanvasViewport from "./StudioCanvasViewport";
+import StudioShell from "./shell/StudioShell";
+import WorkspaceRail from "./shell/WorkspaceRail";
+import ContextInspector from "./shell/ContextInspector";
+import LiTTCommandLayer from "./shell/LiTTCommandLayer";
+import StudioDeploySurface from "./shell/StudioDeploySurface";
+import StudioOperatorBar from "./shell/StudioOperatorBar";
+import ElementInspectorPanel from "./shell/ElementInspectorPanel";
+import ImageStudio from "./shell/ImageStudio";
+import { modeToStageSurface, resolveStageSurface, type StudioStageSurface } from "./shell/stage-surfaces";
+import { useCanvasBuilderStore } from "./canvas/builder/store";
 import type { PreviewSelection } from "./StudioPreviewPanel";
 import StudioProjectFiles from "./StudioProjectFiles";
 import ProjectNameDialog from "./ProjectNameDialog";
@@ -109,6 +117,8 @@ const DesignCanvas = dynamic(() => import("../tools/DesignCanvas"), { ssr: false
 const AgentTool = dynamic(() => import("../tools/AgentTool"), { ssr: false });
 const GalleryTool = dynamic(() => import("../tools/GalleryTool"), { ssr: false });
 const StudioTerminalDrawer = dynamic(() => import("./StudioTerminalDrawer"), { ssr: false });
+const StudioBrowserJobsPanel = dynamic(() => import("./StudioBrowserJobsPanel"), { ssr: false });
+const BuilderPropertiesPanel = dynamic(() => import("./canvas/builder/PropertiesPanel").then((m) => m.PropertiesPanel), { ssr: false });
 const MissionForge = dynamic(() => import("../tools/MissionForge"), { ssr: false });
 const CLIBridgeTool = dynamic(() => import("../tools/CLIBridgeTool"), { ssr: false });
 const SpaceTool = dynamic(() => import("../tools/SpaceTool"), { ssr: false });
@@ -118,6 +128,15 @@ const ScreenTool = dynamic(() => import("../tools/ScreenTool"), { ssr: false });
 const LiveVoiceOverlay = dynamic(() => import("./LiveVoiceOverlay"), { ssr: false });
 
 type DockPosition = "bottom-right" | "bottom-left" | "top-right" | "top-left" | "full";
+
+/** Desktop shell: dock-tab actions map onto stage surfaces (or the
+    inspector). In mobile/classic they still drive the real bottom dock. */
+const DOCK_TAB_TO_SURFACE: Partial<Record<StudioDockTab, StudioStageSurface>> = {
+  activity: "activity",
+  files: "files",
+  terminal: "terminal",
+  media: "images",
+};
 
 // Which surface renders inside Studio/Work. Canonical identity lives in
 // studio-destinations.ts: (studio, work, builder) ⟷ ?tool=build.
@@ -251,7 +270,7 @@ function CommandStudioContent() {
   const [moreMode, setMoreMode] = useState<MoreMode>(
     initial.destination === "more" ? (initial.mode as MoreMode) ?? "plugins" : "plugins",
   );
-  const [missionMode, setMissionMode] = useState<MissionMode>(
+  const [, setMissionMode] = useState<MissionMode>(
     initial.destination === "missions" ? (initial.mode as MissionMode) ?? "overview" : "overview",
   );
   const [, setPendingCommand] = useState<string>(initial.command ?? "");
@@ -342,11 +361,63 @@ function CommandStudioContent() {
   const approvalRetryable = useExecutionStore((s) => s.approvalRetryable);
   const approvalExpired = useExecutionStore((s) => s.approvalExpired);
 
-  const handleToggleDock = useCallback(() => setDockOpen((v) => !v), []);
+  // ── StudioShell — the desktop Studio destination IS the operating
+  // shell: workspace rail + central stage + contextual inspector + the
+  // LiTT command layer at the bottom. Mobile keeps its sheet/nav model;
+  // non-studio destinations keep the classic body below.
+  const viewportTier = useViewportTier();
+  const isMobileLitt = viewportTier === "mobile";
+
+  // Hidden escape hatch while the shell migration lands: the classic
+  // panel layout is also the mobile/non-studio body — honoring this pref
+  // keeps it reachable on desktop. There is intentionally NO toggle UI.
+  const [classicOverride] = useState(() => {
+    try {
+      return window.localStorage.getItem("litt:studio:layout-mode") === "classic";
+    } catch {
+      return false;
+    }
+  });
+
+  const studioShellActive =
+    destination === "studio" && viewportTier !== null && !isMobileLitt && !classicOverride;
+  const [stageSurface, setStageSurface] = useState<StudioStageSurface>("preview");
+  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [littExpanded, setLittExpanded] = useState(false);
+  // Surfaces stay mounted once visited — hidden, not unmounted — so
+  // preview iframes, PTY sessions, and canvas state survive switching.
+  const [mountedSurfaces, setMountedSurfaces] = useState<Set<StudioStageSurface>>(() => new Set(["preview"]));
+
+  const openStageSurface = useCallback((surface: StudioStageSurface) => {
+    setDestination("studio");
+    setStageSurface(surface);
+    setMountedSurfaces((prev) => (prev.has(surface) ? prev : new Set(prev).add(surface)));
+  }, []);
+
+  // Design-surface node selection → the inspector shows the real
+  // property editor (builder store is module-scoped; reads stay cheap).
+  const builderSelectedNodeId = useCanvasBuilderStore((s) => s.selectedNodeId);
+
+  const handleToggleDock = useCallback(() => {
+    if (studioShellActive) {
+      openStageSurface("activity");
+      return;
+    }
+    setDockOpen((v) => !v);
+  }, [studioShellActive, openStageSurface]);
   const handleOpenDockTab = useCallback((tab: StudioDockTab) => {
+    if (studioShellActive) {
+      if (tab === "inspector") {
+        setInspectorOpen(true);
+      } else {
+        const surface = DOCK_TAB_TO_SURFACE[tab];
+        if (surface) openStageSurface(surface);
+      }
+      return;
+    }
     setDockTab(tab);
     setDockOpen(true);
-  }, []);
+  }, [studioShellActive, openStageSurface]);
 
   // The query string written by the state→URL effect on its last pass —
   // used by URL→state to recognize (and skip) our own echoes.
@@ -404,6 +475,18 @@ function CommandStudioContent() {
       // any other explicit Studio tool exits it.
       if (mapped.legacyTool === "build") setWorkSurface("builder");
       else if (!mapped.openDrawer) setWorkSurface("conversation");
+      // Shell: a Studio deep-link selects the corresponding stage surface
+      // (drawer overlays map to their surfaces too — terminal, files…).
+      if (studioShellActive) {
+        const surface = mapped.openDrawer
+          ? (DOCK_TAB_TO_SURFACE[mapped.openDrawer as StudioDockTab] ?? null)
+          : modeToStageSurface(newMode);
+        if (surface) {
+          setStageSurface(surface);
+          setMountedSurfaces((prev) => (prev.has(surface) ? prev : new Set(prev).add(surface)));
+        }
+        if (mapped.openInspector) setInspectorOpen(true);
+      }
     }
     if (mapped.destination === "create") {
       const newMode = (mapped.mode as CreateMode) ?? "image";
@@ -417,7 +500,9 @@ function CommandStudioContent() {
       const newMode = (mapped.mode as MissionMode) ?? "overview";
       setMissionMode((cur) => (cur === newMode ? cur : newMode));
     }
-  }, [searchParams]);
+    // studioShellActive in deps: entering Studio via URL from another
+    // destination must re-apply the surface mapping on the next render.
+  }, [searchParams, studioShellActive]);
 
   // ── Phase D.1: track the last workspace stage when in Studio ──────
   // When the user is in the Studio destination (Plan/Canvas/Code/Preview),
@@ -468,10 +553,9 @@ function CommandStudioContent() {
   // desktop rail, the mobile sheet, and header/activity actions.
   const [littActiveTab, setLittActiveTab] = useState<"chat" | "live">("chat");
 
-  // Viewport tier drives desktop-rail vs mobile-sheet LiTT presentation.
-  // null until the first client measurement (SSR-safe — see hook docs).
-  const viewportTier = useViewportTier();
-  const isMobileLitt = viewportTier === "mobile";
+  // Viewport tier (declared above with the canvas state) drives
+  // desktop-rail vs mobile-sheet LiTT presentation — null until first
+  // client measurement (SSR-safe — see hook docs).
   const [mobileLittOpen, setMobileLittOpen] = useState(false);
   // Mobile density redesign: progressive-disclosure sheet state. Both sheets
   // render only while the mobile chat sheet is open (see mounts below).
@@ -621,6 +705,9 @@ function CommandStudioContent() {
         | undefined;
       if (isMobileLitt) {
         setMobileLittOpen(true);
+      } else if (studioShellActive) {
+        // Shell: Ask LiTT expands the bottom command layer.
+        setLittExpanded(true);
       } else {
         setLittCollapsed(false);
       }
@@ -646,7 +733,7 @@ function CommandStudioContent() {
     };
     window.addEventListener("studio:ask-litt", handler);
     return () => window.removeEventListener("studio:ask-litt", handler);
-  }, [isMobileLitt, setWorktabSelection]);
+  }, [isMobileLitt, setWorktabSelection, studioShellActive]);
 
   // Canvas ActionPanel events — the studio.* ArtifactActions execute
   // client-side: executeAction dispatches these DOM events and the owning
@@ -731,25 +818,7 @@ function CommandStudioContent() {
   const [pendingCanvasAction, setPendingCanvasAction] = useState<ArtifactAction | null>(null);
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const [healthRunTrigger, setHealthRunTrigger] = useState(0);
-  const [layoutMode, setLayoutMode] = useState<"classic" | "freeform">("freeform");
-  const [previewWindowOpen, setPreviewWindowOpen] = useState(false);
-
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem("litt:studio:layout-mode");
-      if (stored === "classic" || stored === "freeform") setLayoutMode(stored);
-    } catch {
-      // Use the freeform default when browser storage is unavailable.
-    }
-  }, []);
-
-  const toggleLayoutMode = useCallback(() => {
-    setLayoutMode((current) => {
-      const next = current === "freeform" ? "classic" : "freeform";
-      try { window.localStorage.setItem("litt:studio:layout-mode", next); } catch { /* optional preference */ }
-      return next;
-    });
-  }, []);
+  // viewportTier/layout state declared with the shell block above.
 
   // Files panel state is now managed by the Context Drawer (Phase C2).
   // The old filesPanelOpen state has been replaced by contextDrawerOpen + contextDrawerTab.
@@ -812,16 +881,22 @@ function CommandStudioContent() {
       const terminalNeedsExplicitConnect =
         mapped.openDrawer === "terminal" && capabilities.terminalStatus !== "connected" && !command;
       if (!terminalNeedsExplicitConnect) {
-        setDockTab(mapped.openDrawer as StudioDockTab);
-        setDockOpen(true);
+        // handleOpenDockTab routes to a stage surface while the shell
+        // owns the workspace; classic mode still opens the bottom dock.
+        handleOpenDockTab(mapped.openDrawer as StudioDockTab);
       }
     }
     if (mapped.openInspector) {
       handleOpenContextInspector();
       setInspectorTab(mapped.openInspector);
     }
+    // Shell: studio workspace modes select the corresponding stage surface.
+    if (studioShellActive && mapped.destination === "studio" && !mapped.openDrawer && !mapped.openInspector) {
+      const surface = modeToStageSurface(mapped.mode);
+      if (surface) openStageSurface(surface);
+    }
     setPendingCommand(command);
-  }, [capabilities.terminalStatus, handleOpenContextInspector]);
+  }, [capabilities.terminalStatus, handleOpenContextInspector, handleOpenDockTab, studioShellActive, openStageSurface]);
 
   // P1-1: the chat image intent ("generate an image of X") opens the REAL
   // Image Studio — the create destination's ImageTool — with the user's
@@ -886,6 +961,7 @@ function CommandStudioContent() {
   const refreshTasks = studioTasks.refresh;
   const taskSeededRef = useRef<string | null>(null);
 
+
   useEffect(() => {
     const conversationId = conversation.selectedConversationId;
     if (!conversationId) return;
@@ -934,7 +1010,7 @@ function CommandStudioContent() {
   }, [studioTasks]);
 
   useEffect(() => {
-    if (!conversation.busy) void studioTasks.refresh();
+    if (!conversation.busy) void refreshTasks();
   }, [conversation.busy, refreshTasks]);
 
   const launchpadState = useMemo(
@@ -1101,6 +1177,18 @@ function CommandStudioContent() {
         );
       }
       if (result?.accepted) {
+        // Meaningful task names: the first accepted prompt names the
+        // task — kills the "Untitled N" tab explosion. Only renames
+        // auto-titled tasks; user-named tasks are untouched.
+        const execTaskId = useExecutionStore.getState().activeTaskId;
+        const activeTask = studioTasks.tasks.find((t) => t.id === execTaskId);
+        if (activeTask) {
+          const current = activeTask.title?.trim() ?? "";
+          if (!current || /^untitled/i.test(current) || current === "New task") {
+            const derived = value.trim().replace(/\s+/g, " ").slice(0, 60);
+            if (derived) void studioTasks.updateTask(activeTask.id, { title: derived });
+          }
+        }
         const execution = useExecutionStore.getState();
         const changes = execution.changesSummary ?? { added: 0, modified: 0, deleted: 0, renamed: 0 };
         const filesChanged = changes.added + changes.modified + changes.deleted + changes.renamed;
@@ -1126,6 +1214,9 @@ function CommandStudioContent() {
           setLittActiveTab("live");
           if (isMobileLitt) {
             setMobileLittOpen(true);
+          } else if (studioShellActive) {
+            // Shell: expand the LiTT layer so the approval card is visible.
+            setLittExpanded(true);
           } else {
             setLittCollapsed(false);
           }
@@ -1149,6 +1240,8 @@ function CommandStudioContent() {
           if (previewReady) {
             setDestination("studio");
             setStudioMode("preview");
+            // Shell: the live preview takes the stage.
+            if (studioShellActive) openStageSurface("preview");
           }
         }
         if (!capabilities.projectId) {
@@ -1168,7 +1261,7 @@ function CommandStudioContent() {
       }
       return { accepted: false, persisted: false, errorKind: "network" as const };
     }
-  }, [conversation, capabilities.projectId, refreshCapabilities, isMobileLitt]);
+  }, [conversation, capabilities.projectId, refreshCapabilities, isMobileLitt, studioShellActive, openStageSurface, studioTasks]);
 
   // Approval decisions resume the SAME paused server-side execution — never
   // a new run. The approval lifecycle only settles when the resumed run
@@ -1312,7 +1405,7 @@ function CommandStudioContent() {
       }
       setLittActiveTab("chat");
     }
-  }, [conversation, capabilities.projectId, applyApprovalOutcome]);
+  }, [conversation, applyApprovalOutcome]);
 
   // Re-request an EXPIRED approval gate: one tap issues a fresh pending run
   // carrying the same frozen inputs/reason, with a new TTL — no new agent
@@ -1527,9 +1620,13 @@ function CommandStudioContent() {
 
   // Header actions — truthful.
   const handlePreview = useCallback(() => {
+    if (studioShellActive) {
+      openStageSurface("preview");
+      return;
+    }
     setDestination("studio");
     setStudioMode("preview");
-  }, []);
+  }, [studioShellActive, openStageSurface]);
   // Real deploy runs through LiTT in chat (project.deploy tool with
   // approval). This prefills the composer with a deploy request and opens
   // the chat surface — one tap, no developer tooling.
@@ -1724,6 +1821,7 @@ function CommandStudioContent() {
     // then bind the tab's conversation/surface/selection.
     void studioTasks.activateTask(id, view?.surface ?? currentSurface);
     if (view) bindWorktab(view);
+    // Shell: the task-change effect restores this task's stage surface.
   }, [serverTasks, serverActiveTaskId, worktabTabs, bindWorktab, currentSurface, studioTasks]);
 
   const handleNewWorktab = useCallback(async () => {
@@ -1739,7 +1837,10 @@ function CommandStudioContent() {
     bindWorktab(
       mapStudioTaskToWorktab(task, { surface: currentSurface, selection: null }),
     );
-  }, [studioTasks, serverTasks, bindWorktab, currentSurface]);
+    // Shell: a fresh task opens the LiTT command layer — it's where the
+    // task gets its first prompt (which also names the task).
+    if (studioShellActive) setLittExpanded(true);
+  }, [studioTasks, serverTasks, bindWorktab, currentSurface, studioShellActive]);
 
   const handleCloseWorktab = useCallback(async (id: string) => {
     const idx = serverTasks.findIndex((t) => t.id === id);
@@ -1853,6 +1954,44 @@ function CommandStudioContent() {
   // projection. Never optimistic: "ready" requires real completion
   // evidence; unknown tabs read "idle".
   const worktabBadges = useWorktabBadges(worktabTabs);
+
+  // ── StudioShell ↔ durable task binding ─────────────────────────────
+  // Task → surface: switching the active worktab restores that task's
+  // remembered stage surface (server `lastOpenedSurface` is the truth).
+  // Runs BEFORE the persist effect below so a task switch never
+  // overwrites the new task's stored surface.
+  const lastSyncedTaskRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!studioShellActive) return;
+    if (serverActiveTaskId === lastSyncedTaskRef.current) return;
+    lastSyncedTaskRef.current = serverActiveTaskId;
+    const task = serverTasks.find((t) => t.id === serverActiveTaskId);
+    setStageSurface((current) => {
+      const mapped = resolveStageSurface(task?.lastOpenedSurface);
+      return current === mapped ? current : mapped;
+    });
+    if (task && task.lastOpenedSurface) {
+      const mapped = resolveStageSurface(task.lastOpenedSurface);
+      setMountedSurfaces((prev) => (prev.has(mapped) ? prev : new Set(prev).add(mapped)));
+    }
+  }, [studioShellActive, serverActiveTaskId, serverTasks]);
+
+  // Surface → task: a user-initiated surface switch persists onto the
+  // active server task. Skips when already in sync (task switch path).
+  useEffect(() => {
+    if (!studioShellActive || !serverActiveTaskId) return;
+    const task = serverTasks.find((t) => t.id === serverActiveTaskId);
+    if (!task || task.lastOpenedSurface === stageSurface) return;
+    if (resolveStageSurface(task.lastOpenedSurface) === stageSurface) return;
+    void studioTasks.updateTask(serverActiveTaskId, { lastOpenedSurface: stageSurface });
+  }, [studioShellActive, stageSurface, serverActiveTaskId, serverTasks, studioTasks]);
+
+  // An approval gate must never strand hidden: a paused run expands the
+  // LiTT command layer so the approve/reject decision stays reachable.
+  useEffect(() => {
+    if (!studioShellActive || !pendingApproval) return;
+    setLittExpanded(true);
+  }, [studioShellActive, pendingApproval]);
 
   // ── LiTT Live session context (must be after contextLine) ──
   const liveContext = useMemo<LiTTLiveSessionContext>(() => ({
@@ -2043,7 +2182,84 @@ function CommandStudioContent() {
     onRollback: handleRollback,
   };
 
-  const littChatContent = (
+  // Error + approval chrome rendered inside the LiTT command layer's
+  // transcript (and the mobile sheet / classic panel via littChatContent).
+  const chatErrorBanner = (conversation.requiresReauth || conversation.sendError || projectCreateError) ? (
+    <div
+      className="flex min-w-0 shrink-0 flex-wrap items-center gap-3 border-b px-3 py-2.5 text-[12px]"
+      style={{
+        borderColor: "rgba(239,68,68,0.3)",
+        backgroundColor: "rgba(239,68,68,0.08)",
+        color: "#fca5a5",
+      }}
+    >
+      <span className="min-w-0 flex-1 font-medium">
+        {conversation.requiresReauth
+          ? "Your session expired. Sign in again to continue."
+          : conversation.sendError ?? projectCreateError}
+      </span>
+      <div className="flex shrink-0 items-center gap-2">
+        {!conversation.requiresReauth && (conversation.sendError || projectCreateError) && (
+          <button
+            type="button"
+            onClick={() => { conversation.clearSendError(); setProjectCreateError(null); }}
+            className="whitespace-nowrap rounded px-2 py-1 text-[10px] font-bold hover:bg-white/10"
+            aria-label="Dismiss error"
+          >
+            ✕
+          </button>
+        )}
+        {conversation.requiresReauth ? (
+          <button
+            type="button"
+            onClick={() => {
+              conversation.clearRequiresReauth();
+              window.location.href = "/sign-in?redirect_url=" + encodeURIComponent(window.location.pathname + window.location.search);
+            }}
+            className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
+          >
+            Sign in again
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
+          >
+            Refresh session
+          </button>
+        )}
+      </div>
+    </div>
+  ) : null;
+
+  const chatApprovalCard = pendingApproval ? (
+    <div className="shrink-0 px-3 pt-2">
+      <ApprovalCard
+        approval={pendingApproval}
+        onResolve={handleResolveApproval}
+        isDeploy={pendingApproval.toolId === "project.deploy"}
+        phase={approvalPhase}
+        error={approvalError}
+        retryable={approvalRetryable}
+        expired={approvalExpired}
+        // Mode pill: the client's currently selected execution mode.
+        // This is display-only — the mode is not yet bound into the
+        // server-side approval request (mode-pill honesty track), so
+        // the card shows the user's selection, never a guessed lane.
+        mode={executionMode}
+        // An expired gate's "Retry" re-requests a fresh gate — re-POSTing
+        // the dead pausedRunId would 409. Other failures retry the
+        // approval POST as before.
+        onRetry={approvalExpired ? handleReRequestApproval : () => handleResolveApproval("approved")}
+      />
+    </div>
+  ) : null;
+
+  // The LiTT command layer: transcript region (expanded) + composer bar
+  // (always visible). Shared with the mobile sheet / classic panel paths
+  // via littChatContent = transcript + composer.
+  const littTranscript = (
     <>
       {/* Mission cards — compact pinned intelligence above the chat.
           The Plan workspace tab's live summary, folded into collapsible
@@ -2079,83 +2295,19 @@ function CommandStudioContent() {
           setCompletion(null);
         }}
       />
-      {(conversation.requiresReauth || conversation.sendError || projectCreateError) && (
-        <div
-          className="flex min-w-0 shrink-0 flex-wrap items-center gap-3 border-b px-3 py-2.5 text-[12px]"
-          style={{
-            borderColor: "rgba(239,68,68,0.3)",
-            backgroundColor: "rgba(239,68,68,0.08)",
-            color: "#fca5a5",
-          }}
-        >
-          <span className="min-w-0 flex-1 font-medium">
-            {conversation.requiresReauth
-              ? "Your session expired. Sign in again to continue."
-              : conversation.sendError ?? projectCreateError}
-          </span>
-          <div className="flex shrink-0 items-center gap-2">
-            {!conversation.requiresReauth && (conversation.sendError || projectCreateError) && (
-              <button
-                type="button"
-                onClick={() => { conversation.clearSendError(); setProjectCreateError(null); }}
-                className="whitespace-nowrap rounded px-2 py-1 text-[10px] font-bold hover:bg-white/10"
-                aria-label="Dismiss error"
-              >
-                ✕
-              </button>
-            )}
-            {conversation.requiresReauth ? (
-              <button
-                type="button"
-                onClick={() => {
-                  conversation.clearRequiresReauth();
-                  window.location.href = "/sign-in?redirect_url=" + encodeURIComponent(window.location.pathname + window.location.search);
-                }}
-                className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
-              >
-                Sign in again
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => window.location.reload()}
-                className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
-              >
-                Refresh session
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+      {chatErrorBanner}
       {/* Approval gate — pinned directly above the composer so the
           approve/deny decision is always one glance away. Deploy
           approvals are visually distinct: project.deploy always
           requires a human, even in AUTO. */}
-      {pendingApproval && (
-        <div className="shrink-0 px-3 pt-2">
-          <ApprovalCard
-            approval={pendingApproval}
-            onResolve={handleResolveApproval}
-            isDeploy={pendingApproval.toolId === "project.deploy"}
-            phase={approvalPhase}
-            error={approvalError}
-            retryable={approvalRetryable}
-            expired={approvalExpired}
-            // Mode pill: the client's currently selected execution mode.
-            // This is display-only — the mode is not yet bound into the
-            // server-side approval request (mode-pill honesty track), so
-            // the card shows the user's selection, never a guessed lane.
-            mode={executionMode}
-            // An expired gate's "Retry" re-requests a fresh gate — re-POSTing
-            // the dead pausedRunId would 409. Other failures retry the
-            // approval POST as before.
-            onRetry={approvalExpired ? handleReRequestApproval : () => handleResolveApproval("approved")}
-          />
-        </div>
-      )}
-      {/* Browser session chip — mounted above the composer per its design.
-          Renders only while a real browser session exists; polls only during
-          an active run or live session (beta-gated, owner-only backend). */}
+      {chatApprovalCard}
+    </>
+  );
+
+  const littComposer = (
+    <>
+      {/* Browser session chip — above the composer so takeover state is
+          visible whether the LiTT layer is collapsed or expanded. */}
       <StudioBrowserStatusChip
         conversationId={conversation.selectedConversationId ?? undefined}
         active={conversation.busy}
@@ -2191,6 +2343,14 @@ function CommandStudioContent() {
     </>
   );
 
+  // Classic + mobile surfaces render transcript and composer together.
+  const littChatContent = (
+    <>
+      {littTranscript}
+      {littComposer}
+    </>
+  );
+
   const littLiveContent = (
     <LiTTLiveActivity
       onOpenFile={(_filePath) => {
@@ -2212,6 +2372,123 @@ function CommandStudioContent() {
       onResolveApproval={handleResolveApproval}
     />
   );
+
+  // ── Stage surface content — the shell's central Stage renders the
+  // active workspace surface for the active task. Visited surfaces stay
+  // mounted (hidden) so preview iframes, PTY sessions, files, and canvas
+  // state survive switching. Render-scoped, not memoized.
+  const renderStageSurface = (surface: StudioStageSurface, active: boolean) => {
+    const projectId = capabilities.projectId;
+    switch (surface) {
+      case "plan":
+        return (
+          <StudioPlanSurface
+            capabilities={capabilities}
+            modelLabel={modelLabel}
+            onOpenCode={() => openStageSurface("code")}
+            onOpenCanvas={() => openStageSurface("design")}
+            onOpenPreview={() => openStageSurface("preview")}
+            onOpenTerminal={() => openStageSurface("terminal")}
+            onOpenActivity={() => openStageSurface("activity")}
+            onOpenFiles={handleOpenContextFiles}
+            onRollback={handleRollback}
+          />
+        );
+      case "design":
+        return <VisualCanvasBuilder />;
+      case "preview":
+        return (
+          <StudioPreviewPanel
+            projectId={projectId}
+            projectName={capabilities.projectName}
+            repositoryName={capabilities.repositoryName}
+            branch={capabilities.activeBranch}
+            sourceKind={capabilities.sourceKind}
+            sourceStatus={capabilities.sourceStatus}
+            versionControl={capabilities.versionControl}
+            workspaceStatus={capabilities.workspaceStatus ?? null}
+            onSelectionChange={setPreviewSelection}
+          />
+        );
+      case "browser":
+        return <StudioBrowserJobsPanel />;
+      case "code":
+        return (
+          <CodeWorkspace
+            projectId={capabilities.projectId}
+            repositoryName={capabilities.repositoryName}
+            branch={capabilities.activeBranch}
+            workspaceStatus={capabilities.workspaceStatus ?? null}
+            writeAccess={capabilities.writeAccess ?? true}
+          />
+        );
+      case "files":
+        return (
+          <StudioProjectFiles
+            projectId={projectId}
+            repositoryName={capabilities.repositoryName}
+            branch={capabilities.activeBranch ?? capabilities.defaultBranch}
+            workspaceStatus={capabilities.workspaceStatus}
+            writeAccess={capabilities.writeAccess}
+            onSaved={() => setWorkspaceRevision((value) => value + 1)}
+            onMutation={() => setWorkspaceRevision((value) => value + 1)}
+            onWorkspacePrepared={() => { void refreshCapabilities(); }}
+          />
+        );
+      case "images":
+        return (
+          <ImageStudio
+            projectId={projectId}
+            onOpenCreate={() => { setCreateMode("image"); setDestination("create"); }}
+          />
+        );
+      case "assets":
+        return <AssetsPanel projectId={projectId} />;
+      case "deploy":
+        return (
+          <StudioDeploySurface
+            projectId={projectId}
+            onDeployRequest={() => {
+              window.dispatchEvent(new CustomEvent(STUDIO_EVENT_REQUEST_DEPLOY));
+            }}
+          />
+        );
+      case "activity":
+        return (
+          <StudioActivityPanel
+            messages={conversation.messages}
+            busy={conversation.busy}
+            modelLabel={modelLabel}
+            projectName={capabilities.projectName}
+            terminalStatus={capabilities.terminalStatus}
+            missionContent={
+              <MissionCards
+                capabilities={capabilities}
+                modelLabel={modelLabel}
+                onOpenCode={() => openStageSurface("code")}
+                onOpenCanvas={() => openStageSurface("design")}
+                onOpenPreview={() => openStageSurface("preview")}
+                onOpenTerminal={() => openStageSurface("terminal")}
+                onOpenActivity={() => openStageSurface("activity")}
+                onOpenFiles={() => openStageSurface("files")}
+                onRollback={handleRollback}
+              />
+            }
+          />
+        );
+      case "terminal":
+        return (
+          <StudioTerminalDrawer
+            projectId={projectId}
+            repositoryName={capabilities.repositoryName}
+            branch={capabilities.activeBranch ?? capabilities.defaultBranch}
+            visible={active}
+          />
+        );
+      default:
+        return null;
+    }
+  };
 
   // ── Phase D.1: canonical StudioContext (controlled props) ─────────
   // The four authoritative values are controlled props — the provider
@@ -2279,7 +2556,7 @@ function CommandStudioContent() {
 
       <div
         className="studio-shell flex h-full w-full flex-col overflow-hidden"
-        data-layout={layoutMode === "freeform" ? "freeform" : theme.layoutStyle}
+        data-layout={theme.layoutStyle}
         data-studio-chrome
         style={{
           backgroundColor: "var(--bg-main)",
@@ -2334,29 +2611,176 @@ function CommandStudioContent() {
             Mobile behavior is unchanged: ContextDrawer is a right-side fixed
             overlay, LiTTPanel is a mobile sheet, Preview is a workspace tab. */}
         <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden" data-studio-body>
-        <StudioCanvasViewport enabled={layoutMode === "freeform"} storageKey={capabilities.projectId ?? "project:unknown"}>
-          <button
-            type="button"
-            className="studio-freeform-toggle"
-            data-testid="studio-layout-toggle"
-            onClick={toggleLayoutMode}
-            aria-pressed={layoutMode === "freeform"}
-            title="Switch between freeform windows and classic panels"
-          >
-            {layoutMode === "freeform" ? "Freeform" : "Classic"}
-          </button>
-          {layoutMode === "freeform" && viewportTier !== null && !isMobileLitt && (
-            <button
-              type="button"
-              className="studio-freeform-preview-toggle"
-              data-testid="studio-preview-window-toggle"
-              onClick={() => setPreviewWindowOpen((open) => !open)}
-              aria-pressed={previewWindowOpen}
-            >
-              {previewWindowOpen ? "Hide Preview window" : "Open Preview window"}
-            </button>
-          )}
-          {/* Desktop ContextDrawer removed (P2): Files, Inspector, Activity,
+        {studioShellActive ? (
+          <StudioShell
+            taskbar={
+              /* Durable worktabs — task identity, never layout. */
+              <WorktabBar
+                tabs={worktabTabs}
+                activeId={activeWorktabId}
+                badges={worktabBadges}
+                onSwitch={handleSwitchWorktab}
+                onClose={(id) => { void handleCloseWorktab(id); }}
+                onNew={() => { void handleNewWorktab(); }}
+                closedTabs={studioTasks.closedTasks.map((t) => ({
+                  id: t.id,
+                  title: t.title?.trim() || "Untitled",
+                }))}
+                onReopen={(id) => { void handleReopenWorktab(id); }}
+              />
+            }
+            rail={
+              <WorkspaceRail
+                active={stageSurface}
+                onSelect={openStageSurface}
+              />
+            }
+            stage={
+              <>
+                {Array.from(
+                  mountedSurfaces.has(stageSurface)
+                    ? mountedSurfaces
+                    : new Set([...mountedSurfaces, stageSurface]),
+                ).map((surface) => {
+                  const active = surface === stageSurface;
+                  return (
+                    <div
+                      key={surface}
+                      // `hidden` attribute would lose to Tailwind's `flex`
+                      // display utility — toggle the class instead.
+                      className={active
+                        ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+                        : "hidden"}
+                      data-testid={`stage-surface-${surface}`}
+                      data-active={active ? "true" : "false"}
+                    >
+                      {renderStageSurface(surface, active)}
+                    </div>
+                  );
+                })}
+              </>
+            }
+            inspector={
+              <ContextInspector
+                open={inspectorOpen}
+                onToggle={() => setInspectorOpen((v) => !v)}
+                selection={
+                  activeWorktab?.selection
+                    ? {
+                        label: activeWorktab.selection.label,
+                        tagName: activeWorktab.selection.tagName,
+                        sourceFile: activeWorktab.selection.sourceFile,
+                        route: activeWorktab.selection.route,
+                      }
+                    : previewSelection
+                      ? { label: previewSelection.label, tagName: previewSelection.tagName }
+                      : null
+                }
+                onAskAboutSelection={() => {
+                  const sel: StudioSelectionPayload | null = activeWorktab?.selection
+                    ?? (previewSelection && capabilities.projectId
+                      ? {
+                          kind: "preview-element",
+                          label: previewSelection.label,
+                          selector: previewSelection.selector,
+                          tagName: previewSelection.tagName,
+                          projectId: capabilities.projectId,
+                          timestamp: Date.now(),
+                        }
+                      : null);
+                  if (sel) {
+                    window.dispatchEvent(new CustomEvent("studio:ask-litt", { detail: { selection: sel } }));
+                  } else {
+                    setLittExpanded(true);
+                  }
+                }}
+                onClearSelection={handleClearWorktabSelection}
+                editor={
+                  // The real element-edit path — only when a live preview
+                  // element is selected (builder nodes use
+                  // propertiesContent below).
+                  previewSelection && !builderSelectedNodeId ? (
+                    <ElementInspectorPanel
+                      selection={previewSelection}
+                      projectId={capabilities.projectId}
+                      route={null}
+                      onAskAboutSelection={() => {
+                        const sel: StudioSelectionPayload | null = activeWorktab?.selection
+                          ?? (capabilities.projectId
+                            ? {
+                                kind: "preview-element",
+                                label: previewSelection.label,
+                                selector: previewSelection.selector,
+                                tagName: previewSelection.tagName,
+                                sourceFile: previewSelection.attrs?.["data-source"],
+                                projectId: capabilities.projectId,
+                                timestamp: Date.now(),
+                              }
+                            : null);
+                        if (sel) {
+                          window.dispatchEvent(new CustomEvent("studio:ask-litt", { detail: { selection: sel } }));
+                        } else {
+                          setLittExpanded(true);
+                        }
+                      }}
+                      onClearSelection={handleClearWorktabSelection}
+                    />
+                  ) : undefined
+                }
+                propertiesContent={builderSelectedNodeId ? <BuilderPropertiesPanel /> : null}
+                defaultContent={
+                  <StudioInspector
+                    embedded
+                    open
+                    onToggle={() => setInspectorOpen(false)}
+                    activeTab={inspectorTab}
+                    onTabChange={setInspectorTab}
+                    data={{
+                      capabilities,
+                      modelLabel,
+                      modelHealth,
+                      activeAgentName: AGENT_META[activeAgentId]?.displayName ?? "LiTT",
+                      destination,
+                      surface: studioMode,
+                      messages: conversation.messages,
+                      busy: conversation.busy,
+                      workspaceRevision,
+                      healthRunTrigger,
+                      onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
+                      onWorkspacePrepared: () => { void refreshCapabilities(); },
+                    }}
+                  />
+                }
+              />
+            }
+            littLayer={
+              <LiTTCommandLayer
+                storageKey={capabilities.projectId ?? "default"}
+                busy={conversation.busy}
+                expanded={littExpanded}
+                onExpandedChange={setLittExpanded}
+                transcript={littTranscript}
+                composer={littComposer}
+                statusBar={
+                  <StudioOperatorBar
+                    onOpenTerminal={() => openStageSurface("terminal")}
+                    onOpenActivity={() => openStageSurface("activity")}
+                    onRollback={handleRollback}
+                    onStop={() => {
+                      conversation.cancel();
+                      useExecutionStore.getState().endRun("cancelled");
+                    }}
+                    onResolveApproval={handleResolveApproval}
+                    terminalStatus={capabilities.terminalStatus}
+                    modelLabel={modelLabel}
+                  />
+                }
+              />
+            }
+          />
+        ) : (
+          <>
+            {/* Desktop ContextDrawer removed (P2): Files, Inspector, Activity,
               and the terminal now live in the bottom StudioDock, toggled
               from the top command bar. The mobile ContextDrawer overlay
               below is unchanged. */}
@@ -2372,27 +2796,6 @@ function CommandStudioContent() {
               accessed via the mobile trigger + overlay sheet below
               (Phase C2.1). */}
           {viewportTier !== null && !isMobileLitt && (
-            layoutMode === "freeform" ? (
-              <StudioWindowFrame
-                id="litt-chat"
-                title="LiTT Chat"
-                defaultRect={{ x: 18, y: 18, width: 380, height: 570 }}
-                className="studio-freeform-chat-window"
-              >
-                <LiTTPanel
-                  collapsed={littCollapsed}
-                  onCollapse={() => setLittCollapsed(true)}
-                  onExpand={() => setLittCollapsed(false)}
-                  activeTab={littActiveTab}
-                  onTabChange={setLittActiveTab}
-                  voiceConnected={liveSession.isLive}
-                  microphoneStatus={liveSession.indicators.microphone}
-                  chatContent={littChatContent}
-                  liveContent={littLiveContent}
-                  expandedWidth={littResize.width}
-                />
-              </StudioWindowFrame>
-            ) : (
             <LiTTPanel
               overlay={!littCollapsed}
               collapsed={littCollapsed}
@@ -2406,7 +2809,6 @@ function CommandStudioContent() {
               liveContent={littLiveContent}
               expandedWidth={littResize.width}
             />
-            )
           )}
 
           <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden overflow-x-hidden">
@@ -2666,32 +3068,6 @@ function CommandStudioContent() {
             />
           </main>
 
-          {layoutMode === "freeform" && previewWindowOpen && viewportTier !== null && !isMobileLitt && (
-            <StudioWindowFrame
-              id="preview"
-              type="preview"
-              taskId={conversation.selectedConversationId ?? `project:${capabilities.projectId ?? "unknown"}`}
-              projectId={capabilities.projectId ?? "project:unknown"}
-              title="Preview"
-              defaultRect={{ x: 420, y: 52, width: 760, height: 620 }}
-              minWidth={420}
-              minHeight={320}
-              onClose={() => setPreviewWindowOpen(false)}
-            >
-              <StudioPreviewPanel
-                projectId={capabilities.projectId}
-                projectName={capabilities.projectName}
-                repositoryName={capabilities.repositoryName}
-                branch={capabilities.activeBranch}
-                sourceKind={capabilities.sourceKind}
-                sourceStatus={capabilities.sourceStatus}
-                versionControl={capabilities.versionControl}
-                workspaceStatus={capabilities.workspaceStatus ?? null}
-                onSelectionChange={setPreviewSelection}
-              />
-            </StudioWindowFrame>
-          )}
-
           {/* Mobile Context Drawer — right-side fixed overlay (unchanged).
               On mobile, the ContextDrawer is NOT repositioned to the left;
               it stays as a right-side overlay (position defaults to "right").
@@ -2759,7 +3135,8 @@ function CommandStudioContent() {
               }
             />
           )}
-        </StudioCanvasViewport>
+        </>
+        )}
         </div>
 
         {/* Persistent music player — survives tool switches while audio plays */}
@@ -3077,7 +3454,7 @@ export { describeSourceRows };
 
 /* ── Media workspace panel — generated images, video, music, audio ── */
 function MediaWorkspacePanel({
-  projectId,
+  projectId: _projectId,
   onOpenCreate,
 }: {
   projectId: string | null;
