@@ -20,6 +20,26 @@ describe("final-acceptance-golden workflow secret wiring", () => {
     return workflow.slice(stepStart, nextStep === -1 ? workflow.length : nextStep);
   }
 
+  it("masks the throwaway Clerk user id before it can appear in the log", () => {
+    const block = stepBlock("Create disposable fresh acceptance account");
+    expect(block).toContain('echo "::add-mask::${USER_ID}"');
+    expect(block).toContain('echo "user_id=${USER_ID}" >> "$GITHUB_OUTPUT"');
+    expect(block).not.toContain("echo \"user_id=$(node");
+  });
+
+  it("redacts artifact text and keeps uploaded evidence for a short window", () => {
+    expect(workflow).toContain("node scripts/final-acceptance/redact-artifacts.mjs artifacts/final-acceptance");
+    expect(workflow).toContain("retention-days: 3");
+    expect(workflow).not.toContain("retention-days: 14");
+    const script = readFileSync(
+      path.resolve(__dirname, "../scripts/final-acceptance/prod-mobile-golden.mjs"),
+      "utf-8",
+    );
+    expect(script).toContain("maskUrl(signInUrl)");
+    expect(script).toContain("writeRedactedJson");
+    expect(script).toContain('userId: "[redacted]"');
+  });
+
   it("passes the freshly created user id and enables fresh-account mode", () => {
     const block = stepBlock("Run production golden acceptance");
     expect(block).toMatch(/CLERK_SECRET_KEY:\s*\$\{\{\s*secrets\.CLERK_SECRET_KEY\s*\}\}/);
