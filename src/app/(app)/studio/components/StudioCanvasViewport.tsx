@@ -1,7 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type PointerEvent, type ReactNode, type WheelEvent } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type PointerEvent, type ReactNode, type WheelEvent } from "react";
 import { Minus, Plus, RotateCcw } from "lucide-react";
+
+/** Current canvas zoom — window drag/resize deltas are divided by this so
+    pointer movement maps correctly onto the scaled surface. */
+const StudioCanvasZoomContext = createContext(1);
+export const useStudioCanvasZoom = () => useContext(StudioCanvasZoomContext);
 
 type Props = { children: ReactNode; enabled: boolean; storageKey: string };
 
@@ -54,7 +59,9 @@ export default function StudioCanvasViewport({ children, enabled, storageKey }: 
         </div>
       )}
       <div className="studio-canvas-surface" style={enabled ? { transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` } : undefined}>
-        {children}
+        <StudioCanvasZoomContext.Provider value={enabled ? zoom : 1}>
+          {children}
+        </StudioCanvasZoomContext.Provider>
       </div>
     </div>
   );

@@ -6,10 +6,23 @@ const localServerURL = process.env.PLAYWRIGHT_DEV_SERVER === "true"
   ? "http://localhost:3001"
   : "http://127.0.0.1:3001";
 
-const baseURL =
+function canonicalizeTestBaseURL(value: string): string {
+  try {
+    const url = new URL(value);
+    // The apex is permanently redirected to www by Cloudflare. Normalize it
+    // here so POST-based API tests keep their method across the redirect.
+    if (url.hostname === "litlabs.net") url.hostname = "www.litlabs.net";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return value;
+  }
+}
+
+const baseURL = canonicalizeTestBaseURL(
   process.env.PLAYWRIGHT_BASE_URL ??
-  process.env.SMOKE_TEST_URL ??
-  localServerURL;
+    process.env.SMOKE_TEST_URL ??
+    localServerURL,
+);
 
 const authDir = path.join(__dirname, "tests/playwright/.clerk");
 const userAAuthFile = path.join(authDir, "user-a.json");

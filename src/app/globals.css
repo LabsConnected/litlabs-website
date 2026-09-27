@@ -3348,6 +3348,52 @@ main {
 .studio-canvas-viewport--enabled [data-studio-window] { transform-origin: 0 0; }
 .studio-freeform-window__grab button { display: grid; width: 20px; height: 20px; place-items: center; border-radius: 5px; color: var(--text-muted); }
 .studio-freeform-window__grab button:hover { background: rgba(255,255,255,0.08); color: var(--text-main); }
+.studio-canvas { position: relative; width: 100%; height: 100%; overflow: hidden; background: radial-gradient(circle at 50% 40%, rgba(139,92,246,0.08), transparent 42%), repeating-linear-gradient(0deg, transparent 0 39px, rgba(255,255,255,0.025) 40px), repeating-linear-gradient(90deg, transparent 0 39px, rgba(255,255,255,0.025) 40px), #07070d; }
+.studio-canvas__launcher { position: absolute; top: 14px; left: 16px; z-index: 110; }
+.studio-canvas__launcher-btn, .studio-canvas__empty-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid rgba(190,145,255,0.35); border-radius: 9px; background: rgba(12,8,20,0.9); padding: 8px 11px; color: var(--text-main); font-size: 11px; font-weight: 800; box-shadow: 0 12px 30px rgba(0,0,0,0.25); backdrop-filter: blur(12px); }
+.studio-canvas__launcher-btn:hover, .studio-canvas__empty-btn:hover { border-color: rgba(190,145,255,0.75); background: rgba(35,20,55,0.95); }
+.studio-canvas__menu { position: absolute; top: 38px; left: 0; display: grid; width: 220px; gap: 3px; border: 1px solid rgba(190,145,255,0.28); border-radius: 12px; background: rgba(12,8,20,0.97); padding: 6px; box-shadow: 0 20px 55px rgba(0,0,0,0.5); backdrop-filter: blur(18px); }
+.studio-canvas__menu-item { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; border-radius: 7px; padding: 8px; text-align: left; color: var(--text-main); }
+.studio-canvas__menu-item:hover { background: rgba(190,145,255,0.13); }
+.studio-canvas__menu-label { font-size: 11px; font-weight: 800; }
+.studio-canvas__menu-hint { color: var(--text-muted); font-size: 9px; }
+.studio-canvas__empty { position: absolute; top: 50%; left: 50%; z-index: 1; transform: translate(-50%, -50%); text-align: center; color: var(--text-muted); pointer-events: none; }
+.studio-canvas__empty-title { color: var(--text-main); font-size: 22px; font-weight: 900; letter-spacing: -0.02em; }
+.studio-canvas__empty-sub { max-width: 330px; margin: 6px auto 14px; font-size: 12px; line-height: 1.5; }
+.studio-canvas__empty-btn { pointer-events: auto; }
+.studio-taskbar { position: absolute; right: 14px; bottom: 14px; left: 14px; z-index: 110; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid rgba(190,145,255,0.18); border-radius: 10px; background: rgba(12,8,20,0.84); padding: 5px 7px; backdrop-filter: blur(16px); }
+.studio-taskbar__windows { display: flex; min-width: 0; align-items: center; gap: 5px; overflow-x: auto; }
+.studio-taskbar__hint { padding: 3px 6px; color: var(--text-muted); font-size: 10px; }
+.studio-taskbar__chip, .studio-taskbar__reset { border: 1px solid rgba(190,145,255,0.18); border-radius: 6px; padding: 5px 8px; color: var(--text-secondary); font-size: 10px; font-weight: 800; white-space: nowrap; }
+.studio-taskbar__chip:hover, .studio-taskbar__reset:hover { border-color: rgba(190,145,255,0.5); color: var(--text-main); }
+.studio-freeform-window__controls { display: inline-flex; align-items: center; gap: 2px; margin-left: 4px; }
+.studio-freeform-window__controls button { display: grid; width: 20px; height: 20px; place-items: center; border-radius: 5px; color: var(--text-muted); }
+.studio-freeform-window__controls button:hover { background: rgba(255,255,255,0.08); color: var(--text-main); }
+.studio-freeform-window__task { max-width: 140px; overflow: hidden; color: var(--text-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.studio-freeform-window--minimized { display: none; }
+.studio-freeform-window--maximized { inset: 8px !important; width: auto !important; height: auto !important; }
+.studio-freeform-window--docked-left, .studio-freeform-window--docked-right { top: 8px; bottom: 8px; width: 34% !important; height: auto !important; }
+.studio-freeform-window--docked-left { left: 8px; }
+.studio-freeform-window--docked-right { right: 8px; left: auto; }
+.studio-freeform-window--docked-top, .studio-freeform-window--docked-bottom { right: 8px; left: 8px; width: auto !important; height: 42% !important; }
+.studio-freeform-window--docked-top { top: 8px; }
+.studio-freeform-window--docked-bottom { bottom: 8px; top: auto; }
+.studio-canvas-root { position: relative; min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
+/* Freeform/classic toggle sits above the taskbar in canvas mode. */
+.studio-shell[data-layout="freeform"] .studio-freeform-toggle { top: auto; bottom: 56px; right: 14px; }
+.studio-freeform-window__rh { position: absolute; z-index: 2; }
+.studio-freeform-window__rh--n, .studio-freeform-window__rh--s { right: 10px; left: 10px; height: 7px; cursor: ns-resize; }
+.studio-freeform-window__rh--n { top: -3px; }
+.studio-freeform-window__rh--s { bottom: -3px; }
+.studio-freeform-window__rh--e, .studio-freeform-window__rh--w { top: 10px; bottom: 10px; width: 7px; cursor: ew-resize; }
+.studio-freeform-window__rh--e { right: -3px; }
+.studio-freeform-window__rh--w { left: -3px; }
+.studio-freeform-window__rh--ne, .studio-freeform-window__rh--sw { width: 12px; height: 12px; cursor: nesw-resize; }
+.studio-freeform-window__rh--ne { top: -3px; right: -3px; }
+.studio-freeform-window__rh--sw { bottom: -3px; left: -3px; }
+.studio-freeform-window__rh--nw, .studio-freeform-window__rh--se { width: 12px; height: 12px; cursor: nwse-resize; }
+.studio-freeform-window__rh--nw { top: -3px; left: -3px; }
+.studio-freeform-window__rh--se { right: -3px; bottom: -3px; }
 @media (max-width: 1023px) {
   .studio-freeform-toggle { display: none; }
   .studio-freeform-window { position: relative; inset: auto !important; width: 100% !important; height: 100% !important; border: 0; border-radius: 0; }
