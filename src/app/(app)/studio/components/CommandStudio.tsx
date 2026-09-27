@@ -1855,8 +1855,11 @@ function CommandStudioContent() {
     if (remaining.length === 0) {
       // Never leave zero tabs — seed a fresh server task. The closed
       // task's conversation stays on the server (close, never delete).
+      // Use the shared collision-free numbering against the full server
+      // list (not a hardcoded "Untitled 1") — the just-closed task and
+      // any other untitled tasks still exist server-side.
       const task = await studioTasks.createTask({
-        title: "Untitled 1",
+        title: nextUntitledTitle(serverTasks.map((t) => t.title)),
         taskType: "general",
       });
       if (task) {

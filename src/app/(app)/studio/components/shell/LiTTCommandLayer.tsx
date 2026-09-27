@@ -114,7 +114,7 @@ export default function LiTTCommandLayer({
       aria-label="LiTT command layer"
       data-testid="litt-command-layer"
       className="glass-shell flex w-full shrink-0 flex-col border-t"
-      style={{ borderColor: "rgba(155,77,255,0.1)", backgroundColor: "rgba(13,9,22,0.92)" }}
+      style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", backgroundColor: "rgba(13,9,22,0.92)" }}
     >
       {/* Drag edge — always a resize affordance when expanded, an expand
           affordance when collapsed. */}
@@ -136,7 +136,7 @@ export default function LiTTCommandLayer({
         <div className="flex min-h-0 flex-col" style={{ height }}>
           <div
             className="flex h-7 shrink-0 items-center gap-2 border-b px-3"
-            style={{ borderColor: "rgba(155,77,255,0.1)" }}
+            style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)" }}
           >
             <Sparkles size={11} style={{ color: "var(--litt-primary)" }} aria-hidden />
             <span className="text-[10px] font-extrabold uppercase tracking-[0.14em]" style={{ color: "var(--text-secondary)" }}>

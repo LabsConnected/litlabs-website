@@ -55,7 +55,7 @@ export default function ContextInspector({
         title="Open inspector"
         data-testid="studio-inspector-open"
         className="glass-shell flex w-5 shrink-0 items-center justify-center border-l"
-        style={{ borderColor: "rgba(155,77,255,0.1)", backgroundColor: "rgba(13,9,22,0.6)" }}
+        style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", backgroundColor: "rgba(13,9,22,0.6)" }}
       >
         <ChevronRight
           size={12}
@@ -73,11 +73,11 @@ export default function ContextInspector({
       aria-label="Inspector"
       data-testid="studio-context-inspector"
       className="glass-shell flex w-[300px] shrink-0 flex-col border-l xl:w-[340px]"
-      style={{ borderColor: "rgba(155,77,255,0.1)", backgroundColor: "rgba(13,9,22,0.85)" }}
+      style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", backgroundColor: "rgba(13,9,22,0.85)" }}
     >
       <div
         className="flex h-9 shrink-0 items-center gap-2 border-b px-3"
-        style={{ borderColor: "rgba(155,77,255,0.1)" }}
+        style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)" }}
       >
         <span className="text-[10px] font-extrabold uppercase tracking-[0.14em]" style={{ color: "var(--text-secondary)" }}>
           {hasSelection ? "Inspector · Selection" : "Inspector"}
@@ -128,9 +128,9 @@ export default function ContextInspector({
               data-testid="inspector-ask-litt"
               className="flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-[12px] font-bold transition-colors"
               style={{
-                borderColor: "rgba(190,145,255,0.35)",
+                borderColor: "color-mix(in srgb, var(--color-accent) 35%, transparent)",
                 color: "var(--text-main)",
-                backgroundColor: "rgba(139,92,246,0.1)",
+                backgroundColor: "color-mix(in srgb, var(--color-accent) 10%, transparent)",
               }}
             >
               <Sparkles size={12} className="pointer-events-none" style={{ color: "var(--litt-primary)" }} />

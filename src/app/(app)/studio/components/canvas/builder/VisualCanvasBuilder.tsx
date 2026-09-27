@@ -42,10 +42,10 @@ function HtmlFileList() {
             onClick={() => setActiveHtmlFile(file.name)}
             className="flex items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-white/5"
             style={{
-              background: isActive ? "rgba(155,77,255,0.08)" : "transparent",
+              background: isActive ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
             }}
           >
-            <Icon size={12} style={{ color: isActive ? "var(--glass-purple)" : "var(--glass-text-3)" }} />
+            <Icon size={12} style={{ color: isActive ? "var(--litt-primary)" : "var(--glass-text-3)" }} />
             <span
               className="text-[11px] font-medium"
               style={{ color: isActive ? "var(--text-primary)" : "var(--glass-text-3)" }}
