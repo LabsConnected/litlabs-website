@@ -224,6 +224,23 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
     );
   });
 
+  it("renders the repo chip only once when repo matches the workspace name", () => {
+    render(
+      <CommandComposer
+        value=""
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        contextLine={{ workspace: "LabsConnected/litlabs-website", repo: "LabsConnected/litlabs-website", branch: "main" }}
+        busy={false}
+      />,
+    );
+
+    const context = screen.getByTestId("studio-workspace-context");
+    const occurrences = context.textContent?.split("LabsConnected/litlabs-website").length ?? 0;
+    expect(occurrences - 1).toBe(1);
+    expect(context.textContent).toContain("main");
+  });
+
   it("keeps workspace context, input, and send control reachable on narrow sheets", () => {
     render(
       <CommandComposer

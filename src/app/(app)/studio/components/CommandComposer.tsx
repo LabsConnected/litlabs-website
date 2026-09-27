@@ -360,6 +360,12 @@ export default function CommandComposer({
 
   const agentAccent = agentMeta.color;
 
+  // The workspace chip shows the project name and the repo chip shows the
+  // repository — for GitHub-connected projects these are often the identical
+  // "owner/repo" string, which rendered the repo name twice. Hide the repo
+  // chip in that case; the branch chip still shows.
+  const showRepoChip = Boolean(contextLine?.repo && contextLine.repo !== contextLine?.workspace);
+
   return (
     <div
       data-testid="studio-command-composer"
@@ -375,13 +381,13 @@ export default function CommandComposer({
       {!hideContextLine && (
       <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[10px] font-medium" style={{ color: "var(--text-muted)" }} data-testid="studio-workspace-context">
         {contextLine?.workspace && <span className="min-w-0 max-w-full truncate">{contextLine.workspace}</span>}
-        {(contextLine?.repo || contextLine?.branch) && (
+        {(showRepoChip || contextLine?.branch) && (
           <span className="flex min-w-0 max-w-full items-center gap-1.5">
-            {contextLine.repo && <span className="max-w-[min(200px,60vw)] truncate">{contextLine.repo}</span>}
-            {contextLine.repo && contextLine.branch && (
+            {showRepoChip && <span className="max-w-[min(200px,60vw)] truncate">{contextLine?.repo}</span>}
+            {showRepoChip && contextLine?.branch && (
               <span style={{ color: "var(--studio-border-strong)" }}>·</span>
             )}
-            {contextLine.branch && <span className="shrink-0">{contextLine.branch}</span>}
+            {contextLine?.branch && <span className="shrink-0">{contextLine.branch}</span>}
           </span>
         )}
       </div>
