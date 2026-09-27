@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
-import { gatePublicTestPage, isPublicTestPageBlocked } from "@/lib/public-test-pages";
+import { isPublicTestPageBlocked } from "@/lib/public-test-pages";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +13,6 @@ export function generateMetadata(): Metadata {
 }
 
 export default function VisualTestLayout({ children }: { children: ReactNode }) {
-  gatePublicTestPage();
+  if (isPublicTestPageBlocked()) notFound();
   return children;
 }

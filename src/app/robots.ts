@@ -31,6 +31,7 @@ export default function robots(): MetadataRoute.Robots {
           "/runtime-test/",
           "/games/retro/test",
           "/studio/visual-test",
+          "/agent-slug/",
           "/settings/",
           "/sign-in/",
           "/sign-up/",

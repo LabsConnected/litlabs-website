@@ -1,10 +1,14 @@
+import type { Metadata } from "next";
 import { createElement, type ReactNode } from "react";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import robots from "@/app/robots";
 import sitemap from "@/app/sitemap";
 import { absoluteUrl } from "@/lib/seo";
-import { isPublicTestPageBlocked } from "@/lib/public-test-pages";
+import {
+  hiddenPublicTestRewrites,
+  isPublicTestPageBlocked,
+} from "@/lib/public-test-pages";
 
 vi.mock("next/navigation", () => ({
   notFound: () => {
@@ -32,7 +36,7 @@ import VisualHarnessPage from "@/app/(app)/studio/visual-test/page";
 const HIDDEN_PATHS = ["/games/retro/test", "/studio/visual-test", "/runtime-test"];
 
 type LayoutFn = (props: { children: ReactNode }) => ReactNode;
-type MetadataFn = () => { robots?: { index?: boolean; follow?: boolean } };
+type MetadataFn = () => Metadata;
 
 const gatedLayouts: Array<[string, LayoutFn, MetadataFn]> = [
   ["retro test", RetroTestLayout, retroMetadata],
@@ -109,13 +113,33 @@ describe("public test page gate", () => {
     expect(html).toContain("visual-harness");
   });
 
+  it("rewrites harness routes to a missing path only in production", () => {
+    expect(hiddenPublicTestRewrites({ NODE_ENV: "development" } as NodeJS.ProcessEnv)).toEqual([]);
+    expect(hiddenPublicTestRewrites({ NODE_ENV: "test" } as NodeJS.ProcessEnv)).toEqual([]);
+    expect(
+      hiddenPublicTestRewrites({
+        NODE_ENV: "production",
+        ENABLE_PUBLIC_TEST_PAGES: "1",
+      } as NodeJS.ProcessEnv),
+    ).toEqual([]);
+
+    const rewrites = hiddenPublicTestRewrites({ NODE_ENV: "production" } as NodeJS.ProcessEnv);
+    expect(rewrites.map((entry) => entry.source)).toEqual(
+      expect.arrayContaining(["/games/retro/test", "/studio/visual-test", "/runtime-test"]),
+    );
+    expect(new Set(rewrites.map((entry) => entry.destination))).toEqual(
+      new Set(["/__hidden-public-test-page"]),
+    );
+  });
+
   it("keeps harness routes out of the sitemap and the robots allowlist", () => {
     const urls = sitemap().map((entry) => entry.url);
     for (const path of HIDDEN_PATHS) {
       expect(urls).not.toContain(absoluteUrl(path));
     }
 
-    const rules = Array.isArray(robots().rules) ? robots().rules : [robots().rules];
+    const rulesValue = robots().rules;
+    const rules = Array.isArray(rulesValue) ? rulesValue : [rulesValue];
     const root = rules.find((rule) => rule.allow === "/");
     const disallow = Array.isArray(root?.disallow)
       ? root.disallow
@@ -123,7 +147,12 @@ describe("public test page gate", () => {
         ? [root.disallow]
         : [];
     expect(disallow).toEqual(
-      expect.arrayContaining(["/games/retro/test", "/studio/visual-test", "/runtime-test/"]),
+      expect.arrayContaining([
+        "/games/retro/test",
+        "/studio/visual-test",
+        "/runtime-test/",
+        "/agent-slug/",
+      ]),
     );
     expect(root?.allow).toBe("/");
   });

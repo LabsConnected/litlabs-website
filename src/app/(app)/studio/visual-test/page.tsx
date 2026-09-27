@@ -1,9 +1,10 @@
-import { gatePublicTestPage } from "@/lib/public-test-pages";
+import { notFound } from "next/navigation";
+import { isPublicTestPageBlocked } from "@/lib/public-test-pages";
 import VisualHarnessClient from "./VisualHarnessClient";
 
 export const dynamic = "force-dynamic";
 
 export default function VisualHarnessPage() {
-  gatePublicTestPage();
+  if (isPublicTestPageBlocked()) notFound();
   return <VisualHarnessClient />;
 }

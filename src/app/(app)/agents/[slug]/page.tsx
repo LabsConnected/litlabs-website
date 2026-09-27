@@ -1,5 +1,8 @@
-export const dynamic = "force-dynamic";
 export const dynamicParams = false;
+
+// Requests are rewritten to /agent-slug/[slug] before this page renders, so
+// the HTTP status is decided outside the root loading boundary. This module
+// still calls notFound()/redirect() for direct renders and tests.
 
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";

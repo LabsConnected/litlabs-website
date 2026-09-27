@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 import { CANONICAL_REDIRECTS } from "./src/lib/canonical-redirects";
+import { agentSlugGateRewrites, hiddenPublicTestRewrites } from "./src/lib/public-test-pages";
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
@@ -363,6 +364,16 @@ const nextConfig: NextConfig = {
   // ============================================
   // ISR & REVALIDATION
   // ============================================
+
+  async rewrites() {
+    // beforeFiles runs after middleware. Public harnesses (for example
+    // /games/retro/test) never reach the page, so the response is the
+    // unmatched-route 404. Protected harnesses still pass through auth
+    // first; this file does not change that.
+    return {
+      beforeFiles: [...hiddenPublicTestRewrites(), ...agentSlugGateRewrites()],
+    };
+  },
 
   async redirects() {
     return [
