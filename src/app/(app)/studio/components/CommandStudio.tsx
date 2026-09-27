@@ -48,6 +48,9 @@ import { StudioContextProvider, type StudioSelection } from "../context/StudioCo
 import { deriveCreator, deriveWorkspaceStage } from "../context/derive-studio-context";
 import { StudioCreatorHost } from "./creators/StudioCreatorHost";
 import { useViewportTier } from "../hooks/useViewportTier";
+import { useStudioTasks } from "../hooks/useStudioTasks";
+import StudioTaskRail from "./StudioTaskRail";
+import type { StudioTask } from "@/lib/studio/task-types";
 import ResizeHandle from "./shell/ResizeHandle";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { useExecutionStore, type MutationSummary } from "../stores/useExecutionStore";
@@ -817,6 +820,56 @@ function CommandStudioContent() {
     // Shared capabilities — the hook must not start a second poll stack.
     capabilities,
   });
+
+  const studioTasks = useStudioTasks(capabilities.projectId);
+  const refreshTasks = studioTasks.refresh;
+  const taskSeededRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const conversationId = conversation.selectedConversationId;
+    if (!conversationId) return;
+    const matching = studioTasks.tasks.find((task) => task.conversationId === conversationId);
+    if (matching && matching.id !== studioTasks.activeTaskId) studioTasks.setActiveTaskId(matching.id);
+  }, [conversation.selectedConversationId, studioTasks]);
+
+  // Existing conversations are adopted into the durable task model once per
+  // project. This avoids creating a new conversation/task on every message,
+  // while giving pre-Worktab projects a real task immediately.
+  useEffect(() => {
+    const conversationId = conversation.selectedConversationId;
+    if (!capabilities.projectId || !conversationId || studioTasks.loading) return;
+    if (studioTasks.tasks.some((task) => task.conversationId === conversationId)) return;
+    if (taskSeededRef.current === conversationId) return;
+    taskSeededRef.current = conversationId;
+    const selected = conversation.conversations.find((item) => item.id === conversationId);
+    void studioTasks.createTask({
+      title: selected?.title ?? "Current work",
+      taskType: "general",
+      conversationId,
+    });
+  }, [capabilities.projectId, conversation.selectedConversationId, conversation, studioTasks]);
+
+  const activateStudioTask = useCallback(async (task: StudioTask) => {
+    const activated = await studioTasks.activateTask(task.id, "studio");
+    if (!activated?.conversationId || activated.conversationId === conversation.selectedConversationId) return;
+    conversation.selectConversation(activated.conversationId);
+    await conversation.loadMessages(activated.conversationId);
+  }, [conversation, studioTasks]);
+
+  const createStudioTask = useCallback(async () => {
+    const task = await studioTasks.createTask({ title: "New task", taskType: "general" });
+    if (!task?.conversationId) return;
+    conversation.selectConversation(task.conversationId);
+    await conversation.loadMessages(task.conversationId);
+  }, [conversation, studioTasks]);
+
+  const closeStudioTask = useCallback(async (task: StudioTask) => {
+    await studioTasks.closeTask(task.id);
+  }, [studioTasks]);
+
+  useEffect(() => {
+    if (!conversation.busy) void studioTasks.refresh();
+  }, [conversation.busy, refreshTasks]);
 
   const launchpadState = useMemo(
     () => deriveFirstMissionLaunchpadState({
@@ -2001,6 +2054,17 @@ function CommandStudioContent() {
           )}
 
           <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden overflow-x-hidden">
+            {!isMobileLitt && (
+              <StudioTaskRail
+                tasks={studioTasks.tasks}
+                activeTaskId={studioTasks.activeTaskId}
+                onSelect={(task) => { void activateStudioTask(task); }}
+                onCreate={() => { void createStudioTask(); }}
+                onClose={(task) => { void closeStudioTask(task); }}
+                closedTasks={studioTasks.closedTasks}
+                onReopen={(task) => { void studioTasks.reopenTask(task.id); }}
+              />
+            )}
             {/* Persistent primary workspace switcher. The main workspace has
                 one mode at a time; the Preview tab is the live preview —
                 it always consumes the full workspace width. */}
@@ -2476,6 +2540,13 @@ function CommandStudioContent() {
               onOpenVideo={openMobileTool(() => { setCreateMode("video"); setDestination("create"); })}
               onOpenAudio={openMobileTool(() => { setCreateMode("audio"); setDestination("create"); })}
               onOpenMusic={openMobileTool(() => { setCreateMode("music"); setDestination("create"); })}
+              tasks={studioTasks.tasks}
+              activeTaskId={studioTasks.activeTaskId}
+              onSelectTask={(task) => { void activateStudioTask(task); setMobileToolsOpen(false); }}
+              onCreateTask={() => { void createStudioTask(); setMobileToolsOpen(false); }}
+              onCloseTask={(task) => { void closeStudioTask(task); }}
+              closedTasks={studioTasks.closedTasks}
+              onReopenTask={(task) => { void studioTasks.reopenTask(task.id); setMobileToolsOpen(false); }}
             />
           </MobileBottomSheet>
         )}

@@ -35,6 +35,7 @@ import {
 import { getProject } from "@/lib/projects/project-repository";
 import { getConversation } from "@/lib/studio/conversation-service";
 import { isTerminalActionRunStatus } from "@/lib/action-runtime/state-machine";
+import { attachBrowserSessionToConversationTask } from "@/lib/studio/task-service";
 
 export const runtime = "nodejs";
 
@@ -370,6 +371,9 @@ async function handler(req: NextRequest) {
 
         try {
           const linkedRun = await attachBrowserSession(actionRun, session);
+          if (linkedRun.conversationId) {
+            await attachBrowserSessionToConversationTask(userId, linkedRun.conversationId, session.id).catch(() => undefined);
+          }
           return NextResponse.json({ session, actionRunId: linkedRun.id });
         } catch (attachError) {
           let cleanupFailed = false;

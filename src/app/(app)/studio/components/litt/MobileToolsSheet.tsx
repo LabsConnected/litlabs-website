@@ -14,7 +14,8 @@
  */
 
 import type { ComponentType, CSSProperties } from "react";
-import { Activity, Film, FolderOpen, Hammer, Image as ImageIcon, Layout, Mic, Music, Play, Terminal } from "lucide-react";
+import { Activity, Film, FolderOpen, Hammer, Image as ImageIcon, Layout, Mic, Music, Play, Terminal, Plus, X } from "lucide-react";
+import type { StudioTask } from "@/lib/studio/task-types";
 
 const ACCENT = "var(--color-accent)";
 const CARD_BORDER = "rgba(255,255,255,0.07)";
@@ -31,6 +32,13 @@ export interface MobileToolsSheetProps {
   onOpenVideo: () => void;
   onOpenAudio: () => void;
   onOpenMusic: () => void;
+  tasks?: StudioTask[];
+  activeTaskId?: string | null;
+  onSelectTask?: (task: StudioTask) => void;
+  onCreateTask?: () => void;
+  onCloseTask?: (task: StudioTask) => void;
+  closedTasks?: StudioTask[];
+  onReopenTask?: (task: StudioTask) => void;
 }
 
 type IconType = ComponentType<{ size?: number | string; strokeWidth?: number | string; className?: string; style?: CSSProperties }>;
@@ -235,6 +243,60 @@ function CreateTileButton({
 export default function MobileToolsSheet(props: MobileToolsSheetProps) {
   return (
     <div data-testid="mobile-tools-sheet" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {props.tasks && props.tasks.length > 0 && (
+        <>
+          <SectionHeader>Tasks</SectionHeader>
+          {props.tasks.map((task) => (
+            <div
+              key={task.id}
+              className="flex min-h-12 w-full items-center gap-1 rounded-xl border px-1"
+              style={{
+                borderColor: props.activeTaskId === task.id ? "color-mix(in srgb, var(--color-accent) 45%, transparent)" : CARD_BORDER,
+                backgroundColor: props.activeTaskId === task.id ? TOOLS_BG : "transparent",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => props.onSelectTask?.(task)}
+                className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-left"
+                style={{ color: "var(--text-main)" }}
+                aria-current={props.activeTaskId === task.id ? "page" : undefined}
+              >
+                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: task.status === "failed" ? "#ef4444" : task.status === "needs_verification" ? "#e3b341" : task.status === "working" ? ACCENT : "var(--text-muted)" }} aria-hidden />
+                <span className="min-w-0 flex-1 truncate text-[12px] font-bold">{task.title}</span>
+              </button>
+              {props.onCloseTask && (
+                <button
+                  type="button"
+                  className="grid min-h-9 min-w-9 place-items-center rounded-lg"
+                  aria-label={`Close task ${task.title}`}
+                  onClick={() => props.onCloseTask?.(task)}
+                >
+                  <X size={13} className="pointer-events-none" />
+                </button>
+              )}
+            </div>
+          ))}
+          <button type="button" onClick={props.onCreateTask} className="flex min-h-10 items-center gap-2 rounded-xl border px-3 text-left text-[11px] font-bold" style={{ borderColor: CARD_BORDER, color: "var(--text-muted)" }}>
+            <Plus size={14} className="pointer-events-none" /> New task
+          </button>
+          {props.closedTasks && props.closedTasks.length > 0 && props.onReopenTask && (
+            <select
+              className="min-h-10 rounded-xl border bg-transparent px-3 text-[11px] font-bold"
+              style={{ borderColor: CARD_BORDER, color: "var(--text-muted)" }}
+              aria-label="Reopen closed task"
+              value=""
+              onChange={(event) => {
+                const task = props.closedTasks?.find((item) => item.id === event.target.value);
+                if (task) props.onReopenTask?.(task);
+              }}
+            >
+              <option value="">Reopen closed task…</option>
+              {props.closedTasks.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}
+            </select>
+          )}
+        </>
+      )}
       <SectionHeader>Create</SectionHeader>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         {CREATE_TILES.map((tile) => (

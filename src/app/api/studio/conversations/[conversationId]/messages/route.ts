@@ -56,6 +56,7 @@ import {
   type ActionRun,
 } from "@/lib/action-runtime";
 import type { ConversationTurn } from "@/lib/litt-intelligence/turn-resolver";
+import { attachActionRunToConversationTask, settleConversationTask } from "@/lib/studio/task-service";
 
 export const runtime = "nodejs";
 
@@ -693,12 +694,23 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         currentActivity: "Preparing LiTT task",
         idempotencyKey: `studio-message:${conversation.id}:${clientRequestId}`,
       });
+      const createdActionRunId = actionRun.id;
       actionContext = {
-        actionRunId: actionRun.id,
+        actionRunId: createdActionRunId,
         userId,
         conversationId: conversation.id,
         projectId: v2Transport.projectId,
       };
+      await attachActionRunToConversationTask(userId, conversation.id, createdActionRunId).catch((taskErr) => {
+        // Task persistence is an association layer; a migration/runtime issue
+        // must not prevent the canonical ActionRun from executing.
+        studioLog("message:task_attach_failed", {
+          conversationId: conversation.id,
+          userId,
+          actionRunId: createdActionRunId,
+          errorClass: taskErr instanceof Error ? taskErr.message : "unknown",
+        });
+      });
       v2Config.actionContext = actionContext;
     } catch (runErr) {
       const safeMessage = "LiTT couldn't start durable task tracking for this request.";
@@ -1122,6 +1134,25 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 errorClass: settleErr instanceof Error ? settleErr.message : "unknown",
               });
             }
+          }
+          if (actionContext) {
+            const taskStatus = finalMessageStatus === "awaiting_approval"
+              ? "waiting_approval"
+              : finalMessageStatus === "cancelled"
+                ? "cancelled"
+                : finalMessageStatus === "completed"
+                  ? "completed"
+                  : "failed";
+            const verified = finalMessageStatus === "completed"
+              && (!v2Result?.qualityLoop || v2Result.qualityLoop.verdict.ok);
+            await settleConversationTask(userId, conversation.id, taskStatus, verified).catch((taskErr) => {
+              studioLog("message:task_settle_failed", {
+                conversationId: conversation.id,
+                userId,
+                actionRunId: actionContext.actionRunId,
+                errorClass: taskErr instanceof Error ? taskErr.message : "unknown",
+              });
+            });
           }
           if (statusPersisted === false) {
             // The run reached a terminal state but the transcript row did
