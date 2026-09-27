@@ -397,6 +397,9 @@ const nextConfig: NextConfig = {
       { source: "/creator", destination: "/dashboard", permanent: true },
       { source: "/landing", destination: "/", permanent: true },
       { source: "/login", destination: "/sign-in", permanent: true },
+      // Live verification (2026-09-26): /signup returned a branded 404.
+      // Canonical route is /sign-up — alias it permanently.
+      { source: "/signup", destination: "/sign-up", permanent: true },
       // Canonical route unification (polish program, issue #467): /discover
       // is the one true route for the community surface. The aliases 308 so
       // external links and future forks can never silently duplicate it.

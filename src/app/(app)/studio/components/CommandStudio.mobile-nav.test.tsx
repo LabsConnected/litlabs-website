@@ -266,6 +266,10 @@ const execState = vi.hoisted(() => {
     collapseLowLevel: vi.fn(),
     clearEvents: vi.fn(),
     setPreviewPreparing: vi.fn(),
+    setActiveTaskId: vi.fn(),
+    setTaskConversationIndex: vi.fn(),
+    taskConversationIndex: {},
+    taskPhases: {},
     reset: vi.fn(),
   };
   return { state };
@@ -326,12 +330,23 @@ vi.mock("../stores/useExecutionStore", () => {
 });
 
 vi.mock("../stores/useConversationStore", () => ({
-  useConversationStore: (selector: (s: Record<string, unknown>) => unknown) =>
-    selector({
-      conversations: [],
-      selectedConversationId: null,
-      selectConversation: vi.fn(),
-    }),
+  // The real store is a zustand store: getState() is always available and
+  // component code (e.g. worktab binding) calls it outside render.
+  useConversationStore: Object.assign(
+    (selector: (s: Record<string, unknown>) => unknown) =>
+      selector({
+        conversations: [],
+        selectedConversationId: null,
+        selectConversation: vi.fn(),
+      }),
+    {
+      getState: () => ({
+        conversations: [],
+        selectedConversationId: null,
+        selectConversation: vi.fn(),
+      }),
+    },
+  ),
 }));
 
 vi.mock("../lib/builder-command-router", () => ({

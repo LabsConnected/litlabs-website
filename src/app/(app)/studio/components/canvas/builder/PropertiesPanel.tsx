@@ -3,6 +3,11 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Settings, Sparkles, MessageSquare } from "lucide-react";
 import { useCanvasBuilderStore } from "./store";
+import {
+  isStudioSelectionPayload,
+  toSelectionPayload,
+  useStudioContextOptional,
+} from "../../../context/StudioContext";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -46,19 +51,42 @@ const inputStyle: React.CSSProperties = {
 export function PropertiesPanel() {
   const selectedNodeId = useCanvasBuilderStore((s) => s.selectedNodeId);
   const node = useCanvasBuilderStore((s) => (s.selectedNodeId ? s.document.nodes[s.selectedNodeId] : null));
+  // F1 slice C — the real StudioContext selection, when mounted inside
+  // the Studio tree. Optional: safe outside a provider (tests).
+  const studioCtx = useStudioContextOptional();
 
   const handleAskLiTT = () => {
     // Dispatch a custom event that CommandStudio listens for to expand
     // the canonical left LiTT panel and switch it to Chat tab.
-    // The Canvas context (selected node, document) is included so the
-    // canonical LiTT conversation can reference it.
+    // F1 slice C — the detail now carries the structured selection
+    // payload. The selected canvas node describes itself (kind
+    // canvas-node); with no node selected, the active StudioContext
+    // payload is reused when it is a full payload; otherwise the legacy
+    // { context, nodeId } detail goes out. The shell's studio:ask-litt
+    // handler accepts { selection } alongside the legacy shapes.
     const nodeName = node?.props?.text || node?.type || "canvas";
+    const ctxSelection = studioCtx?.selection ?? null;
+    const payload = selectedNodeId
+      ? toSelectionPayload(null, {
+          kind: "canvas-node",
+          label: String(nodeName),
+          projectId: studioCtx?.projectId ?? "",
+          elementId: selectedNodeId,
+          componentName: node?.type,
+          content:
+            typeof node?.props?.text === "string" ? node.props.text : undefined,
+        })
+      : isStudioSelectionPayload(ctxSelection)
+        ? ctxSelection
+        : null;
     window.dispatchEvent(
       new CustomEvent("studio:ask-litt", {
-        detail: {
-          context: `Canvas component selected: ${nodeName}`,
-          nodeId: selectedNodeId,
-        },
+        detail: payload
+          ? { selection: payload }
+          : {
+              context: `Canvas component selected: ${nodeName}`,
+              nodeId: selectedNodeId,
+            },
       }),
     );
   };

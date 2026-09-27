@@ -36,6 +36,12 @@ interface ActionRunProjectionResponse {
   failure: { code: string | null; message: string | null } | null;
 }
 
+/**
+ * F1 slice C — the action-run projection's display state. Single source
+ * of truth for this union; do not redeclare it elsewhere (import this).
+ */
+export type ActionRunDisplayState = ActionRunProjectionResponse["displayState"];
+
 const ACTIVE_STATES = new Set([
   "queued",
   "starting",

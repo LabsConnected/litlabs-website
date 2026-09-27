@@ -48,6 +48,26 @@ import type { WorkspaceStage, CreatorKind } from "@/app/(app)/studio/lib/studio-
 
 // ─── Contract types ──────────────────────────────────────────────
 
+/**
+ * F1 canonical selection kind. The `kind` tells every consumer which
+ * surface produced the selection and what the payload's fields mean.
+ */
+export type StudioSelectionKind = 'preview-element' | 'canvas-node' | 'code-range' | 'file' | 'asset' | 'canvas-block';
+
+/**
+ * F1 canonical selection payload — the contract sibling slices code
+ * against. Carried across Preview / Canvas / Code / Chat and attached
+ * to the real LLM request (see useCanonicalConversation's send path).
+ */
+export interface StudioSelectionPayload {
+  kind: StudioSelectionKind; label: string;
+  elementId?: string; selector?: string; tagName?: string;
+  componentName?: string; sourceFile?: string; route?: string;
+  bounds?: { x: number; y: number; width: number; height: number };
+  styles?: Record<string,string>; content?: string;
+  projectId: string; worktabId?: string; conversationId?: string | null; timestamp: number;
+}
+
 export interface StudioSelection {
   elementId: string;
   componentName?: string;
@@ -55,7 +75,32 @@ export interface StudioSelection {
   route?: string;
   content?: string;
   styles?: Record<string, unknown>;
+  // ── F1 payload fields (all optional — additive) ──
+  /** Which surface produced the selection. */
+  kind?: StudioSelectionKind;
+  /** Human-readable label, e.g. "Hero heading". */
+  label?: string;
+  /** CSS selector for preview-element selections. */
+  selector?: string;
+  /** Lowercase tag name for preview-element selections. */
+  tagName?: string;
+  /** Bounding box in the producing surface's coordinates. */
+  bounds?: { x: number; y: number; width: number; height: number };
+  /** Owning project id (required on the full payload). */
+  projectId?: string;
+  /** Owning worktab id, when the selection came from a worktab. */
+  worktabId?: string;
+  /** Conversation the selection is attached to, if any. */
+  conversationId?: string | null;
+  /** Epoch ms when the selection was made. */
+  timestamp?: number;
 }
+
+/**
+ * Any selection value the Studio context can carry — the legacy shape
+ * (still produced by the preview bridge) or the full F1 payload.
+ */
+export type StudioSelectionValue = StudioSelection | StudioSelectionPayload;
 
 export interface StudioContextValue {
   /** Stable session identity (controlled — from conversationId or deterministic fallback). */
@@ -77,7 +122,7 @@ export interface StudioContextValue {
   activeAssetId: string | null;
 
   /** Shared selection carried across Preview, Design, Code, and Chat. */
-  selection: StudioSelection | null;
+  selection: StudioSelectionValue | null;
 }
 
 export interface StudioContextActions {
@@ -98,7 +143,7 @@ export interface StudioContextActions {
   setActiveAssetId: (id: string | null) => void;
 
   /** Preserve the same selected element across Studio surfaces. */
-  setSelection: (selection: StudioSelection | null) => void;
+  setSelection: (selection: StudioSelectionValue | null) => void;
 }
 
 export type StudioContextApi = StudioContextValue & StudioContextActions;
@@ -125,7 +170,7 @@ export interface StudioContextProviderProps {
   creator: CreatorKind | null;
 
   /** Shared selection (controlled by CommandStudio). */
-  selection?: StudioSelection | null;
+  selection?: StudioSelectionValue | null;
 
   /**
    * Callback to delegate workspace mode changes into the existing
@@ -135,7 +180,7 @@ export interface StudioContextProviderProps {
   onWorkspaceModeChange?: (mode: WorkspaceStage) => void;
 
   /** Selection changes from Preview/Design are shared by all surfaces. */
-  onSelectionChange?: (selection: StudioSelection | null) => void;
+  onSelectionChange?: (selection: StudioSelectionValue | null) => void;
 
   /**
    * Callback to delegate creator changes into the existing routing
@@ -196,7 +241,7 @@ export function StudioContextProvider({
   );
 
   const setSelection = useCallback(
-    (next: StudioSelection | null) => {
+    (next: StudioSelectionValue | null) => {
       onSelectionChange?.(next);
     },
     [onSelectionChange],
@@ -234,6 +279,104 @@ export function StudioContextProvider({
   return <StudioContext.Provider value={value}>{children}</StudioContext.Provider>;
 }
 
+// ─── Selection payload helpers (F1 slice C) ──────────────────────
+// Pure functions — safe to import anywhere, including non-React modules.
+
+/**
+ * Type guard: true when the value is a full F1 StudioSelectionPayload
+ * (all required fields present), not the legacy StudioSelection shape.
+ */
+export function isStudioSelectionPayload(
+  value: unknown,
+): value is StudioSelectionPayload {
+  if (!value || typeof value !== "object") return false;
+  const v = value as unknown as Record<string, unknown>;
+  return (
+    typeof v.kind === "string" &&
+    typeof v.label === "string" &&
+    typeof v.projectId === "string" &&
+    typeof v.timestamp === "number"
+  );
+}
+
+/** Fallback fields for building a payload from a legacy selection. */
+export interface SelectionPayloadFallback {
+  kind: StudioSelectionKind;
+  projectId: string;
+  /** Used when the legacy selection has no label/content/elementId. */
+  label?: string;
+  elementId?: string;
+  componentName?: string;
+  content?: string;
+  worktabId?: string;
+  conversationId?: string | null;
+}
+
+/**
+ * Normalize any context selection into a full StudioSelectionPayload.
+ * A value that is already a payload passes through unchanged. A legacy
+ * selection is upgraded with the caller's fallback kind/project. Returns
+ * null when there is nothing to build from.
+ */
+export function toSelectionPayload(
+  selection: StudioSelectionValue | null | undefined,
+  fallback?: SelectionPayloadFallback,
+): StudioSelectionPayload | null {
+  if (isStudioSelectionPayload(selection)) return selection;
+  const label =
+    selection?.label ??
+    selection?.content ??
+    selection?.elementId ??
+    fallback?.label ??
+    null;
+  if (!label || !fallback) return null;
+  const styles = selection?.styles;
+  const stringStyles: Record<string, string> | undefined = styles
+    ? Object.fromEntries(
+        Object.entries(styles).map(([k, v]) => [k, typeof v === "string" ? v : String(v ?? "")]),
+      )
+    : undefined;
+  return {
+    kind: fallback.kind,
+    label,
+    elementId: selection?.elementId ?? fallback.elementId,
+    selector: selection?.selector,
+    tagName: selection?.tagName,
+    componentName: selection?.componentName ?? fallback.componentName,
+    sourceFile: selection?.sourceFile,
+    route: selection?.route,
+    bounds: selection?.bounds,
+    styles: stringStyles,
+    content: selection?.content ?? fallback.content,
+    projectId: fallback.projectId,
+    worktabId: selection?.worktabId ?? fallback.worktabId,
+    conversationId: selection?.conversationId ?? fallback.conversationId ?? null,
+    timestamp: selection?.timestamp ?? Date.now(),
+  };
+}
+
+/**
+ * Format the compact, clearly-marked context block that travels with the
+ * outgoing chat message so the model sees the selected element's label
+ * AND source. Example:
+ *   [Selected: Hero heading — src/components/Hero.tsx @ / (preview-element)]
+ * Only present parts are rendered; returns null when there is no selection.
+ */
+export function formatSelectionContextBlock(
+  selection: StudioSelectionValue | null | undefined,
+): string | null {
+  if (!selection) return null;
+  const label =
+    selection.label ?? selection.content ?? selection.elementId ?? "selected element";
+  const sourceParts: string[] = [];
+  if (selection.sourceFile) sourceParts.push(selection.sourceFile);
+  if (selection.route) sourceParts.push(`@ ${selection.route}`);
+  if (selection.selector && !selection.sourceFile) sourceParts.push(selection.selector);
+  const where = sourceParts.length > 0 ? ` — ${sourceParts.join(" ")}` : "";
+  const kind = selection.kind ? ` (${selection.kind})` : "";
+  return `[Selected: ${label}${where}${kind}]`;
+}
+
 // ─── Hook ────────────────────────────────────────────────────────
 
 /**
@@ -250,4 +393,14 @@ export function useStudioContext(): StudioContextApi {
     );
   }
   return ctx;
+}
+
+/**
+ * useStudioContextOptional — like useStudioContext but returns null
+ * outside a provider instead of throwing. For components (e.g. the
+ * StudioDock, canvas surfaces) that can render without a provider —
+ * in tests or in surfaces mounted outside the Studio tree.
+ */
+export function useStudioContextOptional(): StudioContextApi | null {
+  return useContext(StudioContext);
 }
