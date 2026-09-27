@@ -197,9 +197,20 @@ export async function provisionWorkspaceForProject(
   if (!project) throw new Error("Project not found");
   if (project.userId !== userId) throw new Error("Forbidden");
 
+  // GitHub-backed projects are mirrors: the repo is the source of truth, so a
+  // "ready" workspace must be re-synced on provision — otherwise the preview
+  // serves stale files forever (the fetch/pull only happens inside
+  // prepareWorkspace). Managed workspaces ARE the source of truth, so the
+  // early return below is safe for them.
+  const isGithubMirror =
+    project.sourceType === "github" &&
+    project.githubInstallationId &&
+    project.githubOwner &&
+    project.githubRepo;
+
   // If the workspace is already ready in DB, verify it still exists on the
   // terminal server. Railway restarts/crashes can lose in-memory workspaces.
-  if (project.workspaceId && project.workspaceStatus === "ready") {
+  if (project.workspaceId && project.workspaceStatus === "ready" && !isGithubMirror) {
     const ws = await getWorkspaceInternal(project.workspaceId, userId).catch(() => null);
     if (ws && ws.ready) {
       return project.workspaceId;
@@ -207,6 +218,57 @@ export async function provisionWorkspaceForProject(
     // Workspace lost on terminal-server — reset the status only.
     // workspaceId/workspaceRoot stay as adoption hints so the
     // durable source on the volume is reattached, not replaced.
+    await updateProjectWorkspace(projectId, userId, {
+      workspaceStatus: "not_prepared",
+      workspaceError: null,
+    });
+  }
+
+  // GitHub mirror refresh: an existing, alive workspace is re-synced to the
+  // latest repo state via prepareWorkspace (fetch/pull). Best-effort — if the
+  // pull fails (e.g. uncommitted agent work blocks it), keep serving the
+  // existing workspace instead of breaking the preview.
+  if (isGithubMirror && project.workspaceId && project.workspaceStatus === "ready") {
+    const ws = await getWorkspaceInternal(project.workspaceId, userId).catch(() => null);
+    if (ws && ws.ready) {
+      try {
+        const githubToken = await getInstallationTokenForClone({
+          installationId: project.githubInstallationId!,
+          owner: project.githubOwner!,
+          repo: project.githubRepo!,
+        });
+        const result = await prepareWorkspaceInternal({
+          sourceType: "github",
+          userId,
+          projectId,
+          installationId: project.githubInstallationId!,
+          owner: project.githubOwner!,
+          repo: project.githubRepo!,
+          branch: project.githubBranch ?? "main",
+          commitSha: project.latestCommitSha,
+          githubToken,
+          existingRoot: project.workspaceRoot,
+          existingWorkspaceId: project.workspaceId,
+        });
+        await updateProjectWorkspace(projectId, userId, {
+          workspaceId: result.workspaceId,
+          workspaceStatus: "ready",
+          workspaceRoot: result.root,
+          workspaceBranch: result.branch ?? null,
+          workspacePreparedAt: new Date().toISOString(),
+          workspaceError: null,
+        });
+        return result.workspaceId;
+      } catch (err) {
+        console.warn(
+          `[provisionWorkspaceForProject] GitHub refresh failed for project ${projectId}; serving existing workspace:`,
+          err instanceof Error ? err.message : err,
+        );
+        return project.workspaceId;
+      }
+    }
+    // Workspace lost on terminal-server — reset the status only and fall
+    // through to the full re-provision below.
     await updateProjectWorkspace(projectId, userId, {
       workspaceStatus: "not_prepared",
       workspaceError: null,

@@ -19,11 +19,13 @@ vi.mock("@/lib/terminal-internal-client", () => ({
 
 vi.mock("@/lib/github-app", () => ({
   getInstallationToken: vi.fn(),
+  getInstallationTokenForClone: vi.fn(),
 }));
 
 import { ensureWorkspaceAlive, normalizeFileError, provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
 import { getProject, updateProjectWorkspace, claimProvisioningLock, ensureCanonicalStudioProject } from "@/lib/projects/project-repository";
 import { getWorkspaceInternal, prepareWorkspaceInternal } from "@/lib/terminal-internal-client";
+import { getInstallationTokenForClone } from "@/lib/github-app";
 import type { CanonicalProject } from "@/lib/projects/types";
 import type { WorkspaceGetResponse, WorkspacePrepareResponse } from "@/lib/terminal-internal-client";
 
@@ -142,6 +144,79 @@ describe("workspace-recovery", () => {
       // Should NOT have claimed a lock or prepared a new workspace
       expect(claimProvisioningLock).not.toHaveBeenCalled();
       expect(prepareWorkspaceInternal).not.toHaveBeenCalled();
+    });
+
+    it("re-syncs a GitHub mirror workspace instead of returning it stale", async () => {
+      // Regression: a "ready" GitHub workspace was returned as-is forever, so
+      // the preview served the clone from initial provisioning (stale files).
+      // The repo is the source of truth — it must be re-synced via prepare.
+      vi.mocked(getProject).mockResolvedValue(
+        fakeProject({
+          sourceType: "github",
+          githubInstallationId: 123,
+          githubOwner: "LabsConnected",
+          githubRepo: "litlabs-website",
+          githubBranch: "main",
+          workspaceId: "ws-gh",
+          workspaceRoot: "/data/ws-gh",
+          workspaceStatus: "ready",
+        }),
+      );
+      vi.mocked(getWorkspaceInternal).mockResolvedValue(
+        fakeWorkspace({ workspaceId: "ws-gh", root: "/data/ws-gh", ready: true } as unknown as WorkspaceGetResponse),
+      );
+      vi.mocked(getInstallationTokenForClone).mockResolvedValue("tok-123");
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-gh", root: "/data/ws-gh", branch: "main" }) as unknown as WorkspacePrepareResponse,
+      );
+
+      const result = await provisionWorkspaceForProject("proj-gh", "user-1");
+
+      expect(result).toBe("ws-gh");
+      // Must re-sync via prepare (which fetches/pulls on the terminal server)
+      expect(prepareWorkspaceInternal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceType: "github",
+          owner: "LabsConnected",
+          repo: "litlabs-website",
+          branch: "main",
+          existingWorkspaceId: "ws-gh",
+        }),
+      );
+      // Must NOT have taken the full provisioning lock path
+      expect(claimProvisioningLock).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the existing workspace when GitHub refresh fails", async () => {
+      // If the pull fails (e.g. uncommitted agent work), the preview must keep
+      // working on the existing workspace — stale beats broken.
+      vi.mocked(getProject).mockResolvedValue(
+        fakeProject({
+          sourceType: "github",
+          githubInstallationId: 123,
+          githubOwner: "LabsConnected",
+          githubRepo: "litlabs-website",
+          workspaceId: "ws-gh",
+          workspaceRoot: "/data/ws-gh",
+          workspaceStatus: "ready",
+        }),
+      );
+      vi.mocked(getWorkspaceInternal).mockResolvedValue(
+        fakeWorkspace({ workspaceId: "ws-gh", root: "/data/ws-gh", ready: true } as unknown as WorkspaceGetResponse),
+      );
+      vi.mocked(getInstallationTokenForClone).mockResolvedValue("tok-123");
+      vi.mocked(prepareWorkspaceInternal).mockRejectedValue(new Error("Your local changes would be overwritten by merge"));
+
+      const result = await provisionWorkspaceForProject("proj-gh", "user-1");
+
+      expect(result).toBe("ws-gh");
+      // Must not have marked the project failed
+      expect(updateProjectWorkspace).not.toHaveBeenCalledWith(
+        "proj-gh",
+        "user-1",
+        expect.objectContaining({ workspaceStatus: "failed" }),
+      );
     });
 
     it("re-provisions when DB says ready but terminal server lost the workspace", async () => {
