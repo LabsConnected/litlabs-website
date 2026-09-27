@@ -43,6 +43,19 @@ export interface PreviewProxyDeps {
   markPreviewBackendUnreachable?: (workspaceId: string) => boolean;
 }
 
+/**
+ * Upper bound for any single upstream fetch to the workspace dev server.
+ * A hung upstream (observed 2026-09-27: the dev server accepted the
+ * globals CSS chunk request and never finished the response body) must
+ * not wedge the browser tab forever — fail fast with an honest 504 and a
+ * log line instead. Tunable via PREVIEW_UPSTREAM_TIMEOUT_MS
+ * (milliseconds); defaults to 60s. Read per request so tests can stub it.
+ */
+function upstreamTimeoutMs(): number {
+  const raw = Number(process.env.PREVIEW_UPSTREAM_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 60_000;
+}
+
 export function registerPreviewProxyRoute(
   app: Application,
   deps: PreviewProxyDeps = {},
@@ -101,6 +114,10 @@ export function registerPreviewProxyRoute(
     // Proxy the request to localhost:<port>
     const strippedPath = req.url.replace(/^\/preview\/[^/]+/, "");
     const targetUrl = `http://127.0.0.1:${upstreamPort}${strippedPath}`;
+    // pathOnly is logged only — never includes the query string, so the
+    // preview token stays out of the logs.
+    const pathOnly = strippedPath.split("?")[0] || "/";
+    const upstreamStartMs = Date.now();
     try {
       const proxyResp = await fetch(targetUrl, {
         method: req.method,
@@ -110,7 +127,23 @@ export function registerPreviewProxyRoute(
         ),
         body: ["GET", "HEAD"].includes(req.method) ? undefined : (req as any),
         redirect: "manual",
+        // Bound a hung upstream: AbortSignal.timeout rejects with a
+        // TimeoutError DOMException, handled in the catch below.
+        signal: AbortSignal.timeout(upstreamTimeoutMs()),
       });
+
+      // Diagnostic fingerprint of every upstream response (2026-09-27):
+      // status, content type/encoding, and duration are the only way to
+      // tell from the Railway logs whether the dev server is slow, stuck,
+      // or mislabeling an asset. Purely additive — no behavior change.
+      console.log(
+        `[Preview] upstream workspace=${workspaceId} port=${upstreamPort} ` +
+          `method=${req.method} path=${pathOnly} status=${proxyResp.status} ` +
+          `contentType=${proxyResp.headers.get("content-type") ?? "-"} ` +
+          `contentEncoding=${proxyResp.headers.get("content-encoding") ?? "-"} ` +
+          `contentLength=${proxyResp.headers.get("content-length") ?? "-"} ` +
+          `durationMs=${Date.now() - upstreamStartMs}`,
+      );
 
       // TEMPORARY diagnostic logging (2026-09-21): fingerprint upstream
       // redirects. A transient 302 from the workspace dev server (~02:30 EDT)
@@ -121,7 +154,6 @@ export function registerPreviewProxyRoute(
       // the emitter is found. (Never logs the preview token or cookies.)
       if (proxyResp.status >= 300 && proxyResp.status < 400) {
         const rawLocation = proxyResp.headers.get("location") ?? "(none)";
-        const pathOnly = strippedPath.split("?")[0] || "/";
         console.warn(
           `[Preview] upstream redirect workspace=${workspaceId} ` +
             `port=${upstreamPort} path=${pathOnly} status=${proxyResp.status} ` +
@@ -253,6 +285,29 @@ export function registerPreviewProxyRoute(
       }
       res.send(Buffer.from(body));
     } catch (err) {
+      // Upstream timeout: the dev server accepted the request but never
+      // finished the response (observed 2026-09-27 on the globals CSS
+      // chunk — the page rendered unstyled while the tab hung). The
+      // server is otherwise alive (it answered the status check and
+      // serves other assets), so don't flip the whole preview to failed —
+      // fail this asset fast with an honest 504 instead of an infinite hang.
+      if (err instanceof DOMException && err.name === "TimeoutError") {
+        const timeoutMs = upstreamTimeoutMs();
+        console.warn(
+          `[Preview] upstream timeout workspace=${workspaceId} port=${upstreamPort} ` +
+            `method=${req.method} path=${pathOnly} afterMs=${timeoutMs}`,
+        );
+        res.status(504).setHeader("content-type", "text/html; charset=utf-8");
+        res.send(buildPreviewErrorPage({
+          heading: "Preview asset timed out",
+          message: `The dev server took longer than ${timeoutMs / 1000}s to answer ${pathOnly} — it may be stuck compiling that file. Restarting the preview usually clears it.`,
+          command: status.command,
+          framework: status.framework,
+          errorCode: "preview_upstream_timeout",
+          workspaceId,
+        }));
+        return;
+      }
       // The backend died between the status check and the proxy (or was
       // never reachable). An iframe showing raw JSON next to a green
       // "Preview ready" badge is the same lie as the white 404 — flip the
