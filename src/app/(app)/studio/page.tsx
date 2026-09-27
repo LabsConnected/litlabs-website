@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useTheme } from "@/context/ThemeContext";
 import { track } from "@/lib/analytics";
-import CommandStudio from "./components/CommandStudio";
+import { StudioShell } from "./shell/StudioShell";
 import { Terminal, Loader2 } from "lucide-react";
 
 /**
@@ -13,7 +13,7 @@ import { Terminal, Loader2 } from "lucide-react";
  *
  * These labels map to real signals:
  *  1. "Authenticating" — Clerk isLoaded becomes true
- *  2. "Loading workspace" — CommandStudio mounts and loads project context
+ *  2. "Loading workspace" — StudioShell mounts and loads project context
  *  3. "Connecting runtime" — terminal-server connection established
  *  4. "Ready" — all signals green, Studio is interactive
  *
@@ -161,7 +161,10 @@ function StudioHub() {
     return <StudioLoadingState key={retryKey} onRetry={handleRetry} />;
   }
 
-  return <CommandStudio />;
+  // Phase 1 (2026-09-27): the Figma-like shell DIRECTLY replaces the old
+  // CommandStudio layout — Larry rejected the old layout outright, so there
+  // is no feature flag and no parallel old path.
+  return <StudioShell />;
 }
 
 export default function StudioPage() {
