@@ -86,6 +86,11 @@ function upstreamDevServer(): Server {
         res.writeHead(200, { "content-type": "text/css; charset=utf-8", "content-encoding": "gzip" });
         res.end(gzipSync(CSS_BODY));
         return;
+      case "/_next/static/css/hang-forever.css":
+        // Never responds — simulates the stuck upstream observed in
+        // production 2026-09-27 (dev server accepted the globals CSS
+        // chunk request and never finished the body, hanging the tab).
+        return;
       case "/redirect-root":
         res.writeHead(302, { location: "/" });
         res.end();
@@ -241,6 +246,28 @@ describe("preview gateway — routing parity with the workspace dev server", () 
     expect(proxied.headers["content-type"]).toContain("text/css");
     expect(proxied.headers["content-encoding"]).toBeUndefined();
     expect(proxied.text).toContain("background: rgb(1, 2, 3)");
+  });
+
+  it("a hung upstream fails fast with an honest 504 — never an infinite hang", async () => {
+    // The production incident: the dev server accepted the globals CSS
+    // chunk and never finished the body, so the preview tab hung
+    // forever. The proxy must bound the upstream fetch and answer 504.
+    vi.stubEnv("PREVIEW_UPSTREAM_TIMEOUT_MS", "150");
+    try {
+      markBackendUnreachable.mockClear();
+      const proxied = await request(app).get(
+        `/preview/${WORKSPACE_ID}/_next/static/css/hang-forever.css?token=${TOKEN}`,
+      );
+
+      expect(proxied.status).toBe(504);
+      expect(proxied.text).toContain("preview_upstream_timeout");
+      expect(proxied.text).not.toContain(TOKEN);
+      // The dev server is otherwise alive — a slow asset must not flip
+      // the whole preview runtime to failed.
+      expect(markBackendUnreachable).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("a 404 on the entry route becomes an honest 502 — never raw 'Cannot GET /'", async () => {
