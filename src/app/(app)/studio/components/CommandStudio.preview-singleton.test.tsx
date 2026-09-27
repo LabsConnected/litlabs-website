@@ -454,6 +454,9 @@ describe("CommandStudio — canvas-first 2-zone layout", () => {
     sendMock.mockResolvedValue({ accepted: true });
     window.innerHeight = 844;
     try { localStorage.clear(); } catch { /* jsdom without storage */ }
+    // Classic shell — the default freeform canvas is a compositor without
+    // mounted panels; these assertions target the classic topology.
+    localStorage.setItem("litt:studio:layout-mode", "classic");
     Object.defineProperty(window, "visualViewport", {
       value: {
         width: 390,
@@ -627,6 +630,8 @@ describe("CommandStudio — approval gate convergence", () => {
     execState.state.isRunning = false;
     execState.state.events = [];
     approvalWatch.onSettled = null;
+    // Classic shell — approval behavior lives in the panel chat there.
+    localStorage.setItem("litt:studio:layout-mode", "classic");
   });
 
   it("returns the LiTT panel to Chat when an approval gate settles without a local click", async () => {
@@ -908,6 +913,7 @@ describe("CommandStudio — mission panels live in the Activity dock", () => {
     capState.projectId = "project-1";
     capState.projectName = "Roast Site";
     sessionStorage.clear();
+    localStorage.setItem("litt:studio:layout-mode", "classic");
     window.innerHeight = 844;
     Object.defineProperty(window, "visualViewport", {
       value: {

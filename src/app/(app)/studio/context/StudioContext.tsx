@@ -65,6 +65,12 @@ export interface StudioSelectionPayload {
   componentName?: string; sourceFile?: string; route?: string;
   bounds?: { x: number; y: number; width: number; height: number };
   styles?: Record<string,string>; content?: string;
+  /** Element identity details captured by the preview inspector bridge —
+      carried through the pin so edits and Ask-LiTT keep full context. */
+  attrs?: Record<string, string>;
+  text?: string;
+  path?: string;
+  rect?: { width: number; height: number };
   projectId: string; worktabId?: string; conversationId?: string | null; timestamp: number;
 }
 

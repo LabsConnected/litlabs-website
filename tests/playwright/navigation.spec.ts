@@ -11,6 +11,14 @@ test.describe("Navigation @public", () => {
     await page.goto("/");
     await page.waitForLoadState("domcontentloaded");
 
+    // Nav renders with client hydration (Clerk) — poll rather than snapshot
+    // the pre-hydration DOM.
+    await page.waitForFunction(
+      () => document.querySelectorAll("nav a[href]").length >= 3,
+      undefined,
+      { timeout: 20_000 },
+    );
+
     // Find all anchor tags in nav elements
     const navLinks = page.locator("nav a[href]");
     const count = await navLinks.count();
@@ -26,7 +34,7 @@ test.describe("Navigation @public", () => {
     await page.waitForLoadState("domcontentloaded");
 
     // Wait for nav to render — Clerk hydration may delay nav rendering
-    await page.locator("nav").waitFor({ state: "visible", timeout: 15_000 }).catch(() => {});
+    await page.locator("nav").waitFor({ state: "visible", timeout: 20_000 });
 
     // Collect all nav link hrefs in a single DOM evaluation — this avoids
     // stale locator references when Clerk hydration re-renders the nav
@@ -50,17 +58,34 @@ test.describe("Navigation @public", () => {
     // Now navigate to each href directly — this avoids stale locator
     // issues from Clerk re-rendering the nav after goBack().
     for (const href of hrefs) {
+      const [, hash] = href.split("#", 2);
       await page.goto(href);
       await page.waitForLoadState("domcontentloaded");
 
       const bodyText = await page.locator("body").innerText();
-      expect(bodyText.length, `Nav link to ${href} should have content`).toBeGreaterThan(50);
+      if (hash) {
+        // Hash navigation stays on the homepage; validate the actual target
+        // instead of treating the fragment URL as a separate page.
+        expect(page.url(), `Nav link to ${href} should preserve the hash`).toContain(`#${hash}`);
+        await expect(page.locator(`#${hash}`), `Nav target #${hash} should exist`).toBeVisible();
+      } else {
+        expect(bodyText.length, `Nav link to ${href} should have content`).toBeGreaterThan(50);
+      }
     }
   });
 
   test("All visible internal links on homepage resolve to 200 or 307", async ({ page }) => {
     await page.goto("/");
     await page.waitForLoadState("domcontentloaded");
+
+    // The landing page hydrates client-side (mounted gate on the hero CTA),
+    // so most anchors appear only after hydration — poll for them instead of
+    // asserting against the pre-hydration SSR snapshot.
+    await page.waitForFunction(
+      () => document.querySelectorAll("a[href]").length > 5,
+      undefined,
+      { timeout: 20_000 },
+    );
 
     // Get all <a> tags with href
     const links = page.locator("a[href]");

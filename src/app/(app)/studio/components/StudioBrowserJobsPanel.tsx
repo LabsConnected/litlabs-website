@@ -40,8 +40,10 @@ import {
   Search,
   RotateCw,
   Circle,
+  MousePointer2,
 } from "lucide-react";
 import { useBrowserJobs, type BrowserJob, type BrowserJobStep } from "../hooks/useBrowserJobs";
+import { useBrowserSessionControl } from "../hooks/useBrowserSessionControl";
 import { useBrowserJobEvents, type AgentJobEvent } from "../hooks/useBrowserJobEvents";
 import { describeJobState, type JobDisplayState } from "@/lib/browser-job-states";
 import type { JobStatus } from "@/lib/browser-jobs";
@@ -314,6 +316,91 @@ function ActivityLog({
   );
 }
 
+// ─── Session control — real takeover on the same live session ──
+
+/**
+ * BrowserSessionControlBar — Take control / Return to LiTT / Stop on the
+ * session that backs this job. The controller is server-persisted
+ * (browser_sessions.controller), so ownership survives rerenders,
+ * navigation, and reloads; the buttons flip only after the server
+ * confirms. The live view below IS the interactive drive surface
+ * (Browserbase debugger embed) — no second browser implementation.
+ */
+function BrowserSessionControlBar({ sessionId }: { sessionId: string }) {
+  const control = useBrowserSessionControl(sessionId);
+  if (!control.isLive) return null;
+
+  const human = control.controller === "human";
+  const agent = control.controller === "agent";
+
+  return (
+    <div
+      className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-1.5"
+      style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(155,77,255,0.05)" }}
+      data-testid="browser-session-control"
+    >
+      <span
+        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-black"
+        style={{
+          color: human ? "#48EE38" : "var(--litt-primary)",
+          backgroundColor: human ? "rgba(72,238,56,0.12)" : "rgba(155,77,255,0.12)",
+          border: `1px solid ${human ? "rgba(72,238,56,0.35)" : "rgba(155,77,255,0.3)"}`,
+        }}
+        data-testid="browser-controller-badge"
+      >
+        {human ? <MousePointer2 size={9} /> : <Bot size={9} />}
+        {human ? "You're driving" : agent ? "LiTT driving" : "Session live"}
+      </span>
+      <span className="flex-1" />
+      {agent && (
+        <button
+          type="button"
+          disabled={control.busy}
+          onClick={() => { void control.takeControl(); }}
+          className="flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-bold transition hover:bg-white/5 disabled:opacity-50"
+          style={{ borderColor: "rgba(72,238,56,0.35)", color: "#48EE38" }}
+          data-testid="browser-take-control"
+        >
+          {control.busy ? <Loader2 size={10} className="animate-spin" /> : <MousePointer2 size={10} />}
+          Take control
+        </button>
+      )}
+      {human && (
+        <button
+          type="button"
+          disabled={control.busy}
+          onClick={() => { void control.returnControl(); }}
+          className="flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-bold transition hover:bg-white/5 disabled:opacity-50"
+          style={{ borderColor: "rgba(155,77,255,0.4)", color: "var(--litt-primary)" }}
+          data-testid="browser-return-control"
+        >
+          {control.busy ? <Loader2 size={10} className="animate-spin" /> : <Bot size={10} />}
+          Return to LiTT
+        </button>
+      )}
+      <button
+        type="button"
+        disabled={control.busy}
+        onClick={() => { void control.stop(); }}
+        className="flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-bold transition hover:bg-white/5 disabled:opacity-50"
+        style={{ borderColor: "var(--studio-border-strong)", color: "var(--text-secondary)" }}
+        data-testid="browser-session-stop"
+      >
+        <Square size={9} />
+        Stop
+      </button>
+      {control.error && (
+        <span className="w-full text-[9px]" style={{ color: "#fca5a5" }}>{control.error}</span>
+      )}
+      {human && (
+        <span className="w-full text-[9px]" style={{ color: "var(--text-muted)" }}>
+          You&apos;re driving — click inside the live view below. When done, return control so LiTT can continue.
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ─── Job Card (the ONE persistent surface) ─────────────────────
 
 function JobCard({
@@ -391,6 +478,13 @@ function JobCard({
             />
           </div>
         </div>
+      )}
+
+      {/* Cooperative session control — Take control / Return to LiTT /
+          Stop on the job's real browser session. The live view below is
+          the interactive drive surface. */}
+      {job.browserSessionId && (
+        <BrowserSessionControlBar sessionId={job.browserSessionId} />
       )}
 
       {/* Browser view — live when available, otherwise the snapshot

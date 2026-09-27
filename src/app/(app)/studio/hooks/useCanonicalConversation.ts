@@ -130,8 +130,10 @@ function generateClientRequestId(): string {
 /**
  * Convert canonical ChatMessage (from useConversationStore) to the
  * ChatMessage type expected by StudioTranscript and CommandComposer.
+ * Exported for task-scoped chat windows that render a non-selected
+ * conversation's transcript.
  */
-function toUIMessage(
+export function toUIMessage(
   msg: ReturnType<typeof useConversationStore.getState>["messagesByConversationId"][string][number],
 ): ChatMessage {
   return {
@@ -1773,7 +1775,7 @@ export function useCanonicalConversation({
         // keeps offering Stop and the UI keeps claiming "working".
       }
     },
-    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, onOpenProjectNameDialog, onOpenImageStudio, onOpenVideoStudio, selectedModel, activeAgentId, activeAgentMode, activeAgentInstanceId, executionMode, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError, reconcileAndApply],
+    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, onOpenProjectNameDialog, onOpenImageStudio, onOpenVideoStudio, selectedModel, activeAgentId, activeAgentMode, activeAgentInstanceId, executionMode, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError, reconcileAndApply, serverProjectId, userId],
   );
 
   // Regenerate — calls canonical regenerate API

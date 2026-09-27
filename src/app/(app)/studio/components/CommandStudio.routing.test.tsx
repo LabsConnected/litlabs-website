@@ -470,6 +470,10 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     // The dock persists open/tab/height in sessionStorage (intentional
     // product behavior); clear it so each test starts from a closed dock.
     sessionStorage.clear();
+    // These suites assert the classic shell topology (panel + dock +
+    // workspace tabs). The default layout is now the freeform canvas
+    // compositor — pin classic so the assertions stay meaningful.
+    localStorage.setItem("litt:studio:layout-mode", "classic");
     window.innerHeight = 844;
     Object.defineProperty(window, "visualViewport", {
       value: {

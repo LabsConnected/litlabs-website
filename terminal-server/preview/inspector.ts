@@ -18,7 +18,8 @@
  * the preview access token (the same token already required to load the
  * preview), so arbitrary cross-origin embedders cannot drive the
  * inspector. The child posts to "*" because it cannot know the parent
- * origin; payloads are non-sensitive DOM metadata (label/selector/tag).
+ * origin; payloads are non-sensitive DOM metadata (label/selector/tag/
+ * attributes/computed styles) used to identify and edit the element.
  *
  * If a previewed app sets a CSP that blocks inline scripts, the script
  * never runs and Studio reports selection as unavailable — we do not
@@ -98,8 +99,60 @@ const INSPECTOR_SCRIPT = `(function () {
     }
     return (parts.join(" > ") || el.tagName.toLowerCase()).slice(0, 400);
   }
+  var ATTR_PROPS = ["id", "class", "data-testid", "src", "href", "alt", "role", "aria-label", "type", "name", "value", "placeholder"];
+  var STYLE_PROPS = ["color", "background-color", "font-size", "font-weight", "font-style", "line-height", "letter-spacing", "text-align", "padding", "margin", "display", "gap", "justify-content", "align-items", "border", "border-radius", "width", "height", "opacity"];
+  function pathFor(el) {
+    var parts = [];
+    var current = el;
+    while (current && current.tagName && parts.length < 8) {
+      var tagName = current.tagName.toLowerCase();
+      var parent = current.parentElement;
+      var siblings = parent ? Array.prototype.filter.call(parent.children, function (c) { return c.tagName === current.tagName; }) : [];
+      var index = siblings.indexOf(current) + 1;
+      parts.unshift(tagName + (siblings.length > 1 ? ":nth-of-type(" + index + ")" : ""));
+      current = parent;
+    }
+    return parts.join(" > ").slice(0, 600);
+  }
+  function textOf(el) {
+    if (!el) return "";
+    var t = "";
+    try {
+      t = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+    } catch (e) {}
+    return t.slice(0, 240);
+  }
   function payload(el) {
-    return { label: describe(el), selector: selectorFor(el), tagName: el.tagName.toLowerCase() };
+    var attrs = {};
+    for (var i = 0; i < ATTR_PROPS.length; i++) {
+      try {
+        var v = el.getAttribute(ATTR_PROPS[i]);
+        if (v != null && v !== "") attrs[ATTR_PROPS[i]] = String(v).slice(0, 200);
+      } catch (e) {}
+    }
+    var styles = {};
+    try {
+      var cs = window.getComputedStyle(el);
+      for (var j = 0; j < STYLE_PROPS.length; j++) {
+        var sv = cs.getPropertyValue(STYLE_PROPS[j]);
+        if (sv) styles[STYLE_PROPS[j]] = String(sv).slice(0, 120);
+      }
+    } catch (e) {}
+    var rect = { width: 0, height: 0 };
+    try {
+      var r = el.getBoundingClientRect();
+      rect = { width: Math.round(r.width), height: Math.round(r.height) };
+    } catch (e) {}
+    return {
+      label: describe(el),
+      selector: selectorFor(el),
+      tagName: el.tagName.toLowerCase(),
+      attrs: attrs,
+      styles: styles,
+      text: textOf(el),
+      path: pathFor(el),
+      rect: rect,
+    };
   }
   function post(type, data) {
     try {
