@@ -52,16 +52,15 @@ vi.mock("@/context/ThemeContext", () => ({
 }));
 vi.mock("next/navigation", () => ({
   useSearchParams: vi.fn(() => new URLSearchParams()),
-  useRouter: vi.fn(() => ({ push: vi.fn() })),
+  useRouter: vi.fn(() => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() })),
   usePathname: vi.fn(() => "/studio"),
 }));
 
-// CommandStudio is dynamically imported with many sub-dependencies.
+// StudioShell is dynamically imported with many sub-dependencies.
 // We stub it to avoid mounting the full Studio surface — we only
 // need to verify that the loading state is replaced when auth loads.
-vi.mock("@/app/(app)/studio/components/CommandStudio", () => ({
-  __esModule: true,
-  default: () =>
+vi.mock("@/app/(app)/studio/shell/StudioShell", () => ({
+  StudioShell: () =>
     React.createElement(
       "div",
       { "data-testid": "command-studio-mounted" },
