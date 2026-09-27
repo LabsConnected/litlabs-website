@@ -54,8 +54,11 @@ export function SpatialWorkspace({ projectId }: { projectId: string | null }) {
   const wheelTimer = useRef<number | null>(null);
   const viewportRef = useRef(viewport);
   const framesRef = useRef(frames);
-  viewportRef.current = viewport;
-  framesRef.current = frames;
+
+  useEffect(() => {
+    viewportRef.current = viewport;
+    framesRef.current = frames;
+  }, [viewport, frames]);
 
   useEffect(() => {
     if (projectId) void load(projectId);

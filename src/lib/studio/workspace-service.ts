@@ -11,11 +11,9 @@ import {
   nextZ,
   parseFrame,
   parseWorkspaceDocument,
-  type Frame,
   type Relationship,
   type HttpWorkspaceAction,
   type ObjectPatch,
-  type Viewport,
   type WorkspaceDocument,
   type WorkspaceObject,
 } from "./workspace-document";
