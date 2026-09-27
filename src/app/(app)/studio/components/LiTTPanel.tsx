@@ -17,13 +17,23 @@
  * ambient HUD chrome is shown instead. This preserves scroll position,
  * in-flight requests, and any composer-local UI state across toggles.
  *
+ * F1 (SLICE B) — overlay mode: `overlay` turns the panel into a floating
+ * surface (fixed position, right side, elevated shadow, close button)
+ * instead of a layout column. When closed (collapsed) in overlay mode the
+ * whole panel hides with display:none — content stays mounted so SSE,
+ * scroll, and drafts survive (the proven pattern). The overlay renders NO
+ * composer: the persistent bottom CommandComposer is the single command
+ * surface, and chatContent/liveContent are parent-provided transcript slots,
+ * so there is never a duplicate composer.
+ *
  * Active tab is fully controlled by the parent (CommandStudio) — this
  * component owns no tab state of its own, so header actions, collapse/
  * expand, and the panel's own tab buttons always agree on what's active.
  */
 
 import type { ReactNode } from "react";
-import { MessageSquare, Activity, PanelLeftClose } from "lucide-react";
+import { MessageSquare, Activity, PanelLeftClose, X } from "lucide-react";
+import { BrandLogo } from "@/components/branding/BrandLogo";
 import LiTTAmbientHUD from "./litt/LiTTAmbientHUD";
 import type { DeviceStatus } from "@/lib/litt/live/types";
 
@@ -41,6 +51,13 @@ interface LiTTPanelProps {
   collapsed: boolean;
   onCollapse: () => void;
   onExpand: () => void;
+  /**
+   * F1 overlay mode (SLICE B): render as a floating panel (fixed, right
+   * side, elevated shadow, close button) instead of a layout column.
+   * Closed overlay panels hide with display:none (content stays mounted).
+   * No composer is rendered in overlay mode — the bottom command bar owns it.
+   */
+  overlay?: boolean;
   /** Truthful voice/mic state for the collapsed HUD */
   voiceConnected?: boolean;
   microphoneStatus?: DeviceStatus;
@@ -56,23 +73,46 @@ export default function LiTTPanel({
   collapsed,
   onCollapse,
   onExpand,
+  overlay = false,
   voiceConnected,
   microphoneStatus,
   expandedWidth = 320,
 }: LiTTPanelProps) {
   return (
     <aside
-      className="hidden h-full shrink-0 flex-col overflow-hidden border-r transition-[width] duration-150 ease-out lg:flex"
-      style={{
-        width: collapsed ? 64 : `clamp(300px, ${expandedWidth}px, min(640px, 26vw))`,
-        minWidth: collapsed ? 64 : 280,
-        maxWidth: collapsed ? 64 : "36vw",
-        backgroundColor: "#0d0916",
-        borderRight: "1px solid rgba(255,255,255,0.07)",
-        backdropFilter: "blur(12px)",
-      }}
+      className={
+        overlay
+          ? "fixed z-[70] flex flex-col overflow-hidden rounded-2xl border"
+          : "hidden h-full shrink-0 flex-col overflow-hidden border-r transition-[width] duration-150 ease-out lg:flex"
+      }
+      style={
+        overlay
+          ? {
+              // Floating panel: pinned right, clears the header above and
+              // the persistent bottom command bar below. Clamped so it
+              // always fits a 390px viewport.
+              display: collapsed ? "none" : "flex",
+              top: 64,
+              right: 12,
+              bottom: 104,
+              width: `min(${expandedWidth}px, calc(100vw - 24px))`,
+              backgroundColor: "#0d0916",
+              border: "1px solid rgba(255,255,255,0.1)",
+              boxShadow:
+                "0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(168,255,47,0.08), 0 8px 32px rgba(0,0,0,0.5)",
+            }
+          : {
+              width: collapsed ? 64 : `clamp(300px, ${expandedWidth}px, min(640px, 26vw))`,
+              minWidth: collapsed ? 64 : 280,
+              maxWidth: collapsed ? 64 : "36vw",
+              backgroundColor: "#0d0916",
+              borderRight: "1px solid rgba(255,255,255,0.07)",
+              backdropFilter: "blur(12px)",
+            }
+      }
       data-testid="litt-panel"
       data-collapsed={collapsed}
+      data-overlay={overlay}
       aria-label="LiTT assistant panel"
     >
       {/* Collapsed chrome — always mounted, shown only while collapsed.
@@ -99,21 +139,11 @@ export default function LiTTPanel({
             backgroundColor: "rgba(24,18,38,0.96)",
           }}
         >
-          {/* LiTT identity mark */}
-          <div
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg"
-            style={{
-              background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 20%, transparent), color-mix(in srgb, var(--color-accent) 8%, transparent))",
-              border: "1px solid rgba(255,255,255,0.13)",
-            }}
-            aria-hidden
-          >
-            <span
-              className="text-[9px] font-black text-accent"
-            >
-              L
-            </span>
-          </div>
+          {/* LiTT identity mark — canonical brand logo (F1 brand consolidation).
+              No invented "L" tiles. */}
+          <span className="mr-0.5 shrink-0" aria-hidden data-testid="litt-panel-brand">
+            <BrandLogo showText={false} size={22} variant="mark" />
+          </span>
           <button
             type="button"
             onClick={() => onTabChange("chat")}
@@ -143,17 +173,31 @@ export default function LiTTPanel({
             Activity
           </button>
           <div className="flex-1" />
-          <button
-            type="button"
-            onClick={onCollapse}
-            className="grid h-6 w-6 place-items-center rounded-md transition hover:bg-white/10"
-            style={{ color: "var(--text-muted)" }}
-            aria-label="Collapse LiTT panel"
-            data-testid="litt-panel-collapse"
-            title="Collapse"
-          >
-            <PanelLeftClose size={14} className="pointer-events-none" />
-          </button>
+          {overlay ? (
+            <button
+              type="button"
+              onClick={onCollapse}
+              className="grid h-6 w-6 place-items-center rounded-md transition hover:bg-white/10"
+              style={{ color: "var(--text-muted)" }}
+              aria-label="Close LiTT panel"
+              data-testid="litt-panel-close"
+              title="Close"
+            >
+              <X size={14} className="pointer-events-none" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onCollapse}
+              className="grid h-6 w-6 place-items-center rounded-md transition hover:bg-white/10"
+              style={{ color: "var(--text-muted)" }}
+              aria-label="Collapse LiTT panel"
+              data-testid="litt-panel-collapse"
+              title="Collapse"
+            >
+              <PanelLeftClose size={14} className="pointer-events-none" />
+            </button>
+          )}
         </div>
 
         {/* Tab panels — grid-stacked for zero layout shift.

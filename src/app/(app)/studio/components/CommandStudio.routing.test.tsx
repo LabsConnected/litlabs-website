@@ -284,30 +284,38 @@ vi.mock("../stores/useStudioModelStore", () => ({
     }),
 }));
 
-vi.mock("../stores/useExecutionStore", () => ({
-  useExecutionStore: (selector: (s: Record<string, unknown>) => unknown) =>
-    selector({
-      events: [],
-      phase: "idle",
-      isRunning: false,
-      currentStep: 0,
-      pendingApproval: null,
-      checkpoint: null,
-      toolCalls: [],
-      changesSummary: null,
-      startRun: vi.fn(),
-      endRun: vi.fn(),
-      addEvent: vi.fn(),
-      setPhase: vi.fn(),
-      setPendingApproval: vi.fn(),
-      resolveApproval: vi.fn(),
-      setCheckpoint: vi.fn(),
-      collapseEvent: vi.fn(),
-      collapseLowLevel: vi.fn(),
-      clearEvents: vi.fn(),
-      reset: vi.fn(),
-    }),
-}));
+vi.mock("../stores/useExecutionStore", () => {
+  const state: Record<string, unknown> = {
+    events: [],
+    phase: "idle",
+    isRunning: false,
+    currentStep: 0,
+    pendingApproval: null,
+    checkpoint: null,
+    toolCalls: [],
+    changesSummary: null,
+    startRun: vi.fn(),
+    endRun: vi.fn(),
+    addEvent: vi.fn(),
+    setPhase: vi.fn(),
+    setPendingApproval: vi.fn(),
+    resolveApproval: vi.fn(),
+    setCheckpoint: vi.fn(),
+    collapseEvent: vi.fn(),
+    collapseLowLevel: vi.fn(),
+    clearEvents: vi.fn(),
+    setActiveTaskId: vi.fn(),
+    setTaskConversationIndex: vi.fn(),
+    taskConversationIndex: {},
+    taskPhases: {},
+    reset: vi.fn(),
+  };
+  const useExecutionStore = Object.assign(
+    (selector: (s: Record<string, unknown>) => unknown) => selector(state),
+    { getState: () => state },
+  );
+  return { useExecutionStore };
+});
 
 vi.mock("../stores/useConversationStore", () => ({
   useConversationStore: (selector: (s: Record<string, unknown>) => unknown) =>
@@ -1349,15 +1357,14 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.queryByTestId("mobile-build-status")).toBeNull();
     });
 
-    it("laptop tier defaults to expanded LiTT when no preference is stored", async () => {
-      // LiTT now defaults expanded on ALL desktop/laptop tiers (>=1024px)
-      // unless the user has an explicit persisted collapse preference.
-      // The old laptop-only auto-collapse was removed because it hid the
-      // chat behind a 64px strip for first-time users.
+    it("laptop tier defaults to the collapsed LiTT rail when no preference is stored", async () => {
+      // F1 workspace-first: LiTT opens on the 64px ambient HUD rail (no
+      // permanent desktop column) unless the user has an explicit persisted
+      // preference. Expanding opens the floating overlay panel.
       globalThis.__TEST_VIEWPORT_WIDTH__ = 1200;
       await renderCommandStudio();
       await waitFor(() => {
-        expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
+        expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
       });
     });
 
@@ -1370,11 +1377,12 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       });
     });
 
-    it("desktop tier (>=1440px) defaults to expanded LiTT when no preference is stored", async () => {
+    it("desktop tier (>=1440px) defaults to the collapsed LiTT rail when no preference is stored", async () => {
+      // F1 workspace-first: same collapsed-rail default on desktop.
       globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
       await renderCommandStudio();
       await waitFor(() => {
-        expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
+        expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
       });
     });
 

@@ -33,6 +33,8 @@ import {
   SquareTerminal,
   X,
 } from "lucide-react";
+import { useStudioContextOptional } from "../context/StudioContext";
+import { SelectionInspectorPanel } from "./StudioInspector";
 
 export type StudioDockTab =
   | "activity"
@@ -102,6 +104,10 @@ export default function StudioDock({
   activityPulse = false,
   terminalBadge = false,
 }: StudioDockProps) {
+  // F1 slice C — the inspector tab is contextual on the active Studio
+  // selection. Optional hook: the dock also renders in tests without a
+  // provider, where the selection is simply absent.
+  const studioSelection = useStudioContextOptional();
   // Internal view is the source of truth for rendering. The `open` prop
   // drives it only on CHANGES (tracked via prevOpen) so a parent that
   // updates its own state asynchronously can't clobber a tab-click that
@@ -240,7 +246,25 @@ export default function StudioDock({
     activity: activityContent,
     files: filesContent,
     terminal: terminalContent,
-    inspector: inspectorContent,
+    // F1 slice C — the Inspector tab is contextual: the active Studio
+    // selection (from StudioContext, any surface) renders above the
+    // parent-provided inspector content, with provenance, Ask LiTT /
+    // Reveal in Code actions, and a clear affordance. With no selection
+    // the panel shows an honest empty state — never fake content.
+    // useStudioContextOptional keeps the dock renderable outside a
+    // provider (tests, standalone mounts).
+    inspector: (
+      <div className="flex h-full min-h-0 flex-col">
+        <SelectionInspectorPanel
+          selection={studioSelection?.selection ?? null}
+          projectId={studioSelection?.projectId ?? null}
+          onClear={
+            studioSelection ? () => studioSelection.setSelection(null) : undefined
+          }
+        />
+        <div className="min-h-0 flex-1 overflow-y-auto">{inspectorContent}</div>
+      </div>
+    ),
     media: mediaContent,
   };
 

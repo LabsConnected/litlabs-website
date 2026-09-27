@@ -37,6 +37,9 @@ import AttachmentPreviewStrip from "./AttachmentPreviewStrip";
 import MediaRecorderPanel from "./MediaRecorderPanel";
 import CameraPreview from "./CameraPreview";
 import ShareMenu from "./ShareMenu";
+/** F1 (SLICE B): structural mirror of the shared contract type from
+    StudioContext (Agent C). Switched to the canonical import once landed. */
+import type { StudioSelectionPayload } from "./studioSelectionPayload";
 
 /** Composer execution modes. */
 const STATUS_LABELS: Record<VoiceState, string> = {
@@ -76,6 +79,20 @@ interface CommandComposerProps {
   liveActive?: boolean;
   contextLine?: ComposerContextLine;
   onClearSelectedElement?: () => void;
+  /**
+   * F1 structured selection (SLICE B). When provided (single item or array),
+   * the legacy `contextLine.selectedElement` "Editing X" strip is replaced by
+   * one context chip per selection item. Agent A wires the active tab's
+   * selection into this prop; Agent C attaches the same object to the LLM
+   * send context — the chips render the object that actually ships, never a
+   * copy. When absent, the legacy string strip still renders as fallback.
+   */
+  selection?: StudioSelectionPayload | StudioSelectionPayload[] | null;
+  /**
+   * Clear a single selection chip (index into the normalized selection array).
+   * Falls back to onClearSelectedElement when not provided.
+   */
+  onClearSelectionItem?: (index: number, item: StudioSelectionPayload) => void;
   /** Execution mode selector: plan (read-only), act (approval for mutations), auto (autonomous) */
   executionMode?: "plan" | "act" | "auto";
   onExecutionModeChange?: (mode: "plan" | "act" | "auto") => void;
@@ -101,6 +118,8 @@ export default function CommandComposer({
   liveActive = false,
   contextLine,
   onClearSelectedElement,
+  selection = null,
+  onClearSelectionItem,
   executionMode = "act",
   onExecutionModeChange,
   hideContextLine = false,
@@ -126,6 +145,19 @@ export default function CommandComposer({
   const unifiedTriggerRef = useRef<HTMLButtonElement>(null);
   const attachTriggerRef = useRef<HTMLButtonElement>(null);
   const [unifiedRect, setUnifiedRect] = useState<DOMRect | null>(null);
+
+  // F1 selection context chips (SLICE B). The structured payload prop wins
+  // over the legacy string; when absent we fall back to the legacy
+  // contextLine.selectedElement strip so older wiring keeps working.
+  const selections: StudioSelectionPayload[] | null =
+    selection == null ? null : Array.isArray(selection) ? selection : [selection];
+  const clearSelectionChip = useCallback(
+    (index: number, item: StudioSelectionPayload) => {
+      if (onClearSelectionItem) onClearSelectionItem(index, item);
+      else onClearSelectedElement?.();
+    },
+    [onClearSelectionItem, onClearSelectedElement],
+  );
 
   // Universal attachment system
   const {
@@ -355,28 +387,90 @@ export default function CommandComposer({
       </div>
       )}
 
-      {contextLine?.selectedElement && (
+      {/* F1 selection context chips (SLICE B) — derived from the structured
+          StudioSelectionPayload that Agent C attaches to the LLM send
+          context. One chip per item (label + source file/route), each with
+          its own clear affordance. The row wraps and scrolls horizontally on
+          narrow viewports so it can never push the page past 390px. */}
+      {selections && selections.length > 0 ? (
         <div
-          className="flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[10px]"
-          style={{ borderColor: "rgba(155,77,255,0.24)", backgroundColor: "rgba(155,77,255,0.07)" }}
-          data-testid="selected-preview-context"
+          className="flex max-h-20 min-w-0 max-w-full flex-wrap items-center gap-1.5 overflow-x-auto overflow-y-auto px-1"
+          data-testid="selection-context-chips"
+          role="list"
+          aria-label="Selected context"
         >
-          <MousePointer2 size={11} className="shrink-0" style={{ color: "#c4b5fd" }} aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate" style={{ color: "var(--text-secondary)" }}>
-            Editing <strong style={{ color: "#c4b5fd" }}>{contextLine.selectedElement}</strong>
-          </span>
-          {onClearSelectedElement && (
-            <button
-              type="button"
-              onClick={onClearSelectedElement}
-              className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md hover:bg-white/8"
-              aria-label="Clear selected preview element"
-              title="Clear selection"
-            >
-              <X size={11} className="pointer-events-none" />
-            </button>
-          )}
+          {selections.map((sel, index) => {
+            const source = sel.sourceFile ?? sel.route ?? null;
+            const key = sel.elementId ?? sel.selector ?? `${sel.kind}-${index}`;
+            return (
+              <span
+                key={key}
+                role="listitem"
+                data-testid="selection-context-chip"
+                data-kind={sel.kind}
+                title={source ? `${sel.label} — ${source}` : sel.label}
+                className="flex min-w-0 max-w-full shrink-0 items-center gap-1.5 rounded-lg border py-1 pl-2 pr-1 text-[10px]"
+                style={{
+                  borderColor: "color-mix(in srgb, var(--color-accent) 30%, transparent)",
+                  backgroundColor: "color-mix(in srgb, var(--color-accent) 8%, transparent)",
+                }}
+              >
+                <MousePointer2 size={11} className="shrink-0" style={{ color: "var(--color-accent)" }} aria-hidden="true" />
+                <span
+                  className="min-w-0 max-w-[min(160px,40vw)] truncate font-semibold"
+                  style={{ color: "var(--text-secondary)" }}
+                  data-testid="selection-chip-label"
+                >
+                  {sel.label}
+                </span>
+                {source && (
+                  <span
+                    className="min-w-0 max-w-[min(140px,32vw)] truncate"
+                    style={{ color: "var(--text-muted)" }}
+                    data-testid="selection-chip-source"
+                  >
+                    {source}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => clearSelectionChip(index, sel)}
+                  className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md transition hover:bg-white/10"
+                  style={{ color: "var(--text-muted)" }}
+                  aria-label={`Clear selection: ${sel.label}`}
+                  title="Clear selection"
+                  data-testid="selection-chip-clear"
+                >
+                  <X size={11} className="pointer-events-none" />
+                </button>
+              </span>
+            );
+          })}
         </div>
+      ) : (
+        contextLine?.selectedElement && (
+          <div
+            className="flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[10px]"
+            style={{ borderColor: "rgba(155,77,255,0.24)", backgroundColor: "rgba(155,77,255,0.07)" }}
+            data-testid="selected-preview-context"
+          >
+            <MousePointer2 size={11} className="shrink-0" style={{ color: "#c4b5fd" }} aria-hidden="true" />
+            <span className="min-w-0 flex-1 truncate" style={{ color: "var(--text-secondary)" }}>
+              Editing <strong style={{ color: "#c4b5fd" }}>{contextLine.selectedElement}</strong>
+            </span>
+            {onClearSelectedElement && (
+              <button
+                type="button"
+                onClick={onClearSelectedElement}
+                className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md hover:bg-white/8"
+                aria-label="Clear selected preview element"
+                title="Clear selection"
+              >
+                <X size={11} className="pointer-events-none" />
+              </button>
+            )}
+          </div>
+        )
       )}
 
       {/* Attachment previews — universal system */}

@@ -19,8 +19,17 @@ import {
 } from "lucide-react";
 import { useCanvasBuilderStore } from "./store";
 import type { Breakpoint } from "./types";
+import {
+  isStudioSelectionPayload,
+  toSelectionPayload,
+  useStudioContextOptional,
+} from "../../../context/StudioContext";
 
 export function CanvasToolbar() {
+  // F1 slice C — the real StudioContext selection, when this toolbar is
+  // mounted inside the Studio tree. Optional: the canvas can render
+  // standalone (tests), where there is simply no shared selection.
+  const studioCtx = useStudioContextOptional();
   const undo = useCanvasBuilderStore((s) => s.undo);
   const redo = useCanvasBuilderStore((s) => s.redo);
   const canUndo = useCanvasBuilderStore((s) => s.historyIndex > 0);
@@ -159,15 +168,38 @@ export function CanvasToolbar() {
       {/* Ask LiTT — routes to the canonical left LiTT, not a duplicate chat */}
       <button
         onClick={() => {
-          const selectedNode = useCanvasBuilderStore.getState().selectedNodeId;
-          const nodeName = selectedNode
-            ? useCanvasBuilderStore.getState().document.nodes[selectedNode]?.props?.text ||
-              useCanvasBuilderStore.getState().document.nodes[selectedNode]?.type ||
-              "selected component"
-            : "the canvas";
+          const builderState = useCanvasBuilderStore.getState();
+          const selectedNode = builderState.selectedNodeId;
+          const node = selectedNode ? builderState.document.nodes[selectedNode] : undefined;
+          const nodeName =
+            node?.props?.text || node?.type || "selected component";
+          // F1 slice C — dispatch the structured selection payload. A
+          // selected canvas node describes itself (kind canvas-node);
+          // with no node selected, reuse the active StudioContext
+          // payload when it is a full payload; otherwise fall back to
+          // the legacy { context } detail. The shell's studio:ask-litt
+          // handler accepts { selection } alongside the legacy shapes.
+          const ctxSelection = studioCtx?.selection ?? null;
+          const payload = selectedNode
+            ? toSelectionPayload(null, {
+                kind: "canvas-node",
+                label: String(nodeName),
+                projectId: studioCtx?.projectId ?? "",
+                elementId: selectedNode,
+                componentName: node?.type,
+                content:
+                  typeof node?.props?.text === "string"
+                    ? node.props.text
+                    : undefined,
+              })
+            : isStudioSelectionPayload(ctxSelection)
+              ? ctxSelection
+              : null;
           window.dispatchEvent(
             new CustomEvent("studio:ask-litt", {
-              detail: { context: `Canvas — ${nodeName}` },
+              detail: payload
+                ? { selection: payload }
+                : { context: `Canvas — ${nodeName}` },
             }),
           );
         }}
