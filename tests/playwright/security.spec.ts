@@ -23,7 +23,10 @@ test.describe("Security @public @security", () => {
         expect(url, `${route} should redirect to sign-in`).toContain("/sign-in");
       } else if (status === 200) {
         // Page rendered — should show sign-in prompt or unauthenticated state
-        await page.waitForLoadState("networkidle");
+        // Auth/analytics may keep connections open indefinitely in production;
+        // DOM content plus a rendered body is the meaningful readiness signal.
+        await page.waitForLoadState("domcontentloaded");
+        await expect(page.locator("body")).toBeVisible();
         const bodyText = await page.locator("body").textContent() ?? "";
         // Should contain sign-in related text
         const hasSignInPrompt = /sign|Sign|login|Login|unauthorized|member/i.test(bodyText);

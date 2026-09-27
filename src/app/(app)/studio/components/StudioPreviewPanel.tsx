@@ -26,6 +26,17 @@ export interface PreviewSelection {
   label: string;
   selector: string;
   tagName: string;
+  /** Element attributes (id, class, src, href, alt, role, …) — used to
+      verify source-file matches and to prefill the inspector. */
+  attrs?: Record<string, string>;
+  /** Computed-style subset captured at selection time. */
+  styles?: Record<string, string>;
+  /** Visible text content (trimmed, ≤240 chars). */
+  text?: string;
+  /** Full ancestor chain selector (stronger than `selector`). */
+  path?: string;
+  /** Rendered size at selection time. */
+  rect?: { width: number; height: number };
 }
 
 const DEVICE_DIMENSIONS: Record<DeviceMode, { w: number; h: number; label: string }> = {
@@ -102,6 +113,54 @@ function describePreviewElement(element: HTMLElement): string {
   if (semanticLabels[element.tagName.toLowerCase()]) return semanticLabels[element.tagName.toLowerCase()];
   const text = element.textContent?.replace(/\s+/g, " ").trim();
   return text ? text.slice(0, 42) : element.tagName.toLowerCase();
+}
+
+const PREVIEW_ATTR_PROPS = ["id", "class", "data-testid", "src", "href", "alt", "role", "aria-label", "type", "name", "value", "placeholder"];
+const PREVIEW_STYLE_PROPS = ["color", "background-color", "font-size", "font-weight", "font-style", "line-height", "letter-spacing", "text-align", "padding", "margin", "display", "gap", "justify-content", "align-items", "border", "border-radius", "width", "height", "opacity"];
+
+function isRecordMap(value: unknown): value is Record<string, string> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isRect(value: unknown): value is { width: number; height: number } {
+  return typeof value === "object" && value !== null
+    && typeof (value as { width?: unknown }).width === "number"
+    && typeof (value as { height?: unknown }).height === "number";
+}
+
+/** Element identity + current styles for the same-origin selection path
+    (the cross-origin inspector.ts payload mirrors this shape). */
+function previewElementDetails(element: HTMLElement): Pick<PreviewSelection, "attrs" | "styles" | "text" | "path" | "rect"> {
+  const attrs: Record<string, string> = {};
+  for (const name of PREVIEW_ATTR_PROPS) {
+    const value = element.getAttribute(name);
+    if (value != null && value !== "") attrs[name] = value.slice(0, 200);
+  }
+  const styles: Record<string, string> = {};
+  try {
+    const computed = window.getComputedStyle(element);
+    for (const prop of PREVIEW_STYLE_PROPS) {
+      const value = computed.getPropertyValue(prop);
+      if (value) styles[prop] = value.slice(0, 120);
+    }
+  } catch { /* detached element */ }
+  const text = (element.innerText || element.textContent || "").replace(/\s+/g, " ").trim().slice(0, 240);
+  const pathParts: string[] = [];
+  let current: HTMLElement | null = element;
+  while (current && current.tagName && pathParts.length < 8) {
+    const tag = current.tagName.toLowerCase();
+    const parent: HTMLElement | null = current.parentElement;
+    const siblings = parent ? Array.from(parent.children).filter((c: Element) => c.tagName === current!.tagName) : [];
+    const index = siblings.indexOf(current) + 1;
+    pathParts.unshift(`${tag}${siblings.length > 1 ? `:nth-of-type(${index})` : ""}`);
+    current = parent;
+  }
+  let rect = { width: 0, height: 0 };
+  try {
+    const r = element.getBoundingClientRect();
+    rect = { width: Math.round(r.width), height: Math.round(r.height) };
+  } catch { /* detached */ }
+  return { attrs, styles, text, path: pathParts.join(" > ").slice(0, 600), rect };
 }
 
 function selectorForPreviewElement(element: HTMLElement): string {
@@ -308,6 +367,11 @@ export default function StudioPreviewPanel({
               label: p.label.slice(0, 120),
               selector: p.selector.slice(0, 400),
               tagName: p.tagName.slice(0, 40),
+              ...(isRecordMap(p.attrs) ? { attrs: p.attrs } : {}),
+              ...(isRecordMap(p.styles) ? { styles: p.styles } : {}),
+              ...(typeof p.text === "string" ? { text: p.text.slice(0, 240) } : {}),
+              ...(typeof p.path === "string" ? { path: p.path.slice(0, 600) } : {}),
+              ...(isRect(p.rect) ? { rect: p.rect } : {}),
             };
             selectedElementRef.current = nextSelection;
             setSelectedElement(nextSelection);
@@ -364,6 +428,7 @@ export default function StudioPreviewPanel({
         label: describePreviewElement(element),
         selector: selectorForPreviewElement(element),
         tagName: element.tagName.toLowerCase(),
+        ...previewElementDetails(element),
       };
       selectedElementRef.current = nextSelection;
       setSelectedElement(nextSelection);

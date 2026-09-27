@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { StudioTask } from "@/lib/studio/task-types";
+import type { StudioTask, UpdateStudioTaskInput } from "@/lib/studio/task-types";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 
 export function useStudioTasks(projectId: string | null) {
@@ -109,6 +109,20 @@ export function useStudioTasks(projectId: string | null) {
     return true;
   }, [headers, tasks]);
 
+  /** Generic PATCH — e.g. bind a provisioned conversationId to the task. */
+  const updateTask = useCallback(async (taskId: string, patch: UpdateStudioTaskInput) => {
+    const res = await fetch(`/api/studio/tasks/${encodeURIComponent(taskId)}`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: await headers(true),
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as { task?: StudioTask };
+    if (data.task) setTasks((current) => current.map((item) => item.id === taskId ? data.task! : item));
+    return data.task ?? null;
+  }, [headers]);
+
   const reopenTask = useCallback(async (taskId: string) => {
     const res = await fetch(`/api/studio/tasks/${encodeURIComponent(taskId)}`, {
       method: "PATCH",
@@ -155,6 +169,7 @@ export function useStudioTasks(projectId: string | null) {
     activateTask,
     closeTask,
     reopenTask,
+    updateTask,
     setActiveTaskId,
   };
 }
