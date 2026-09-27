@@ -67,6 +67,8 @@ interface CanvasBuilderStore {
   moveNode: (nodeId: string, newParentId: string, index?: number) => void;
   updateNodeProps: (nodeId: string, props: Partial<NodeProps>) => void;
   updateNodeStyles: (nodeId: string, styles: Partial<NodeStyles>) => void;
+  /** Write a direct-manipulation box. `replace` updates the current undo entry so a drag is one step. */
+  commitNodeBox: (nodeId: string, box: { x: number; y: number; width: number; height: number }, mode?: "push" | "replace") => void;
   updateNodeMetadata: (nodeId: string, metadata: Partial<CanvasNode["metadata"]>) => void;
   duplicateNode: (nodeId: string) => void;
   copyNode: (nodeId: string) => void;
@@ -580,6 +582,41 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
     };
     pushHistory(set, get, newDoc, `Add ${template.label} section`);
     set({ document: newDoc, selectedNodeId: section.id });
+    saveAndMarkDirty(newDoc);
+  },
+
+  commitNodeBox: (nodeId, box, mode = "push") => {
+    const doc = get().document;
+    const node = doc.nodes[nodeId];
+    if (!node || node.metadata?.locked) return;
+    const updatedNode: CanvasNode = {
+      ...node,
+      styles: {
+        ...node.styles,
+        position: "absolute",
+        left: `${Math.round(box.x)}px`,
+        top: `${Math.round(box.y)}px`,
+        width: `${Math.round(box.width)}px`,
+        height: `${Math.round(box.height)}px`,
+      },
+      metadata: { ...node.metadata, updatedAt: Date.now() },
+    };
+    const newDoc: CanvasDocument = {
+      ...doc,
+      nodes: { ...doc.nodes, [nodeId]: updatedNode },
+      version: doc.version + 1,
+      updatedAt: Date.now(),
+    };
+    if (mode === "replace" && get().historyIndex >= 0) {
+      const history = get().history.slice();
+      history[get().historyIndex] = { document: newDoc, description: `Edit ${node.type}`, timestamp: Date.now() };
+      set({ document: newDoc, history });
+      saveAndMarkDirty(newDoc);
+      return;
+    }
+    if (get().historyIndex < 0) pushHistory(set, get, doc, "Before direct edit");
+    pushHistory(set, get, newDoc, `Edit ${node.type}`);
+    set({ document: newDoc });
     saveAndMarkDirty(newDoc);
   },
 

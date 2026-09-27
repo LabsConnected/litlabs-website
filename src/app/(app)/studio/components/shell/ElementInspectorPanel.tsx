@@ -19,6 +19,7 @@ import type { PreviewSelection } from "../StudioPreviewPanel";
 import type { StudioSelectionPayload } from "../../context/StudioContext";
 import type { ElementPatch } from "../../lib/element-edits";
 import { useElementEdits } from "../../hooks/useElementEdits";
+import { useElementEditSessionOptional } from "../../hooks/element-edit-session";
 
 /** Accepts the PreviewPanel shape OR the pinned canonical payload — the
     ask-litt pin stamps StudioSelectionPayload into the same slot. */
@@ -131,7 +132,9 @@ export default function ElementInspectorPanel({
   onClearSelection?: () => void;
 }) {
   const selection = useMemo(() => normalizeSelection(rawSelection), [rawSelection]);
-  const edits = useElementEdits(projectId);
+  const session = useElementEditSessionOptional();
+  const localEdits = useElementEdits(session ? null : projectId);
+  const edits = session ?? localEdits;
   const [savedFlash, setSavedFlash] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -139,7 +142,10 @@ export default function ElementInspectorPanel({
   const selKey = `${selection.selector}|${selection.tagName}`;
   useEffect(() => {
     setLastError(null);
-    void edits.resolve({
+    // The session provider resolves for the whole shell. Standalone
+    // renders (and tests) still resolve through the local hook.
+    if (session) return;
+    void localEdits.resolve({
       selector: selection.selector,
       tagName: selection.tagName,
       label: selection.label,
@@ -148,7 +154,7 @@ export default function ElementInspectorPanel({
       path: selection.path,
     }, route);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selKey, route, projectId]);
+  }, [selKey, route, projectId, session]);
 
   const apply = async (patch: ElementPatch) => {
     const ok = await edits.applyPatch(patch);

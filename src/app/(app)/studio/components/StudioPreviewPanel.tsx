@@ -3,6 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Copy, ExternalLink, Eye, KeyRound, Loader2, Monitor, MousePointer2, RefreshCw, RotateCcw, Smartphone, Square, Tablet, X } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { SelectionChrome, type SelectionGesture } from "./canvas/SelectionChrome";
+import {
+  applyGesture,
+  canvasKeyAction,
+  geometryToStylePatch,
+  isCanvasShown,
+  measureElementBox,
+  panBy,
+  zoomByWheel,
+  type Box,
+} from "./canvas/direct-manipulation";
+import { useElementEditSessionOptional } from "../hooks/element-edit-session";
 import { formatSourceSummary } from "@/lib/projects/project-source";
 import { useExecutionStore } from "../stores/useExecutionStore";
 import { StudioSecretsPanel } from "./StudioSecretsPanel";
@@ -35,8 +47,10 @@ export interface PreviewSelection {
   text?: string;
   /** Full ancestor chain selector (stronger than `selector`). */
   path?: string;
-  /** Rendered size at selection time. */
-  rect?: { width: number; height: number };
+  /** Rendered size at selection time. x/y are iframe-viewport coordinates. */
+  rect?: { x?: number; y?: number; width: number; height: number };
+  /** Positioning box (left/top/width/height) used by direct manipulation. */
+  box?: { x: number; y: number; width: number; height: number };
 }
 
 const DEVICE_DIMENSIONS: Record<DeviceMode, { w: number; h: number; label: string }> = {
@@ -122,10 +136,25 @@ function isRecordMap(value: unknown): value is Record<string, string> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isRect(value: unknown): value is { width: number; height: number } {
+function isRect(value: unknown): value is { x?: number; y?: number; width: number; height: number } {
   return typeof value === "object" && value !== null
     && typeof (value as { width?: unknown }).width === "number"
     && typeof (value as { height?: unknown }).height === "number";
+}
+
+function isBox(value: unknown): value is { x: number; y: number; width: number; height: number } {
+  return isRect(value)
+    && typeof (value as { x?: unknown }).x === "number"
+    && typeof (value as { y?: unknown }).y === "number";
+}
+
+function copyRect(value: { x?: number; y?: number; width: number; height: number }): { x?: number; y?: number; width: number; height: number } {
+  return {
+    width: value.width,
+    height: value.height,
+    ...(typeof value.x === "number" ? { x: value.x } : {}),
+    ...(typeof value.y === "number" ? { y: value.y } : {}),
+  };
 }
 
 /** Element identity + current styles for the same-origin selection path
@@ -155,10 +184,10 @@ function previewElementDetails(element: HTMLElement): Pick<PreviewSelection, "at
     pathParts.unshift(`${tag}${siblings.length > 1 ? `:nth-of-type(${index})` : ""}`);
     current = parent;
   }
-  let rect = { width: 0, height: 0 };
+  let rect: { x: number; y: number; width: number; height: number } = { x: 0, y: 0, width: 0, height: 0 };
   try {
     const r = element.getBoundingClientRect();
-    rect = { width: Math.round(r.width), height: Math.round(r.height) };
+    rect = { x: Math.round(r.left), y: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) };
   } catch { /* detached */ }
   return { attrs, styles, text, path: pathParts.join(" > ").slice(0, 600), rect };
 }
@@ -231,6 +260,7 @@ export default function StudioPreviewPanel({
   onSelectionChange?: (selection: PreviewSelection | null) => void;
 }) {
   const { getToken } = useClerkAuth();
+  const elementEdits = useElementEditSessionOptional();
   const [state, setState] = useState<PreviewState>(projectId ? "loading" : "not_started");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -251,6 +281,10 @@ export default function StudioPreviewPanel({
   const [styleProbe, setStyleProbe] = useState<{ tailwindDetected: boolean; styled: boolean } | null>(null);
   const [selectionMode, setSelectionMode] = useState(true);
   const [selectedElement, setSelectedElement] = useState<PreviewSelection | null>(null);
+  const [canvasPan, setCanvasPan] = useState({ x: 0, y: 0 });
+  const [canvasZoom, setCanvasZoom] = useState(1);
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const [liveRect, setLiveRect] = useState<Box | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [startPhase, setStartPhase] = useState<StartPhase>(null);
@@ -259,6 +293,17 @@ export default function StudioPreviewPanel({
   const [secretsOpen, setSecretsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const styleBoxRef = useRef<Box | null>(null);
+  const gestureOriginRef = useRef<{ style: Box; view: Box } | null>(null);
+  const canvasZoomRef = useRef(1);
+  const spaceHeldRef = useRef(false);
+  const reselectRef = useRef<PreviewSelection | null>(null);
+  const panDragRef = useRef<{ pointerId: number; x: number; y: number; panX: number; panY: number } | null>(null);
+  const elementEditsRef = useRef(elementEdits);
+  useEffect(() => {
+    elementEditsRef.current = elementEdits;
+  }, [elementEdits]);
   const selectionCleanupRef = useRef<(() => void) | null>(null);
   const selectedElementRef = useRef<PreviewSelection | null>(null);
   const selectedNodeRef = useRef<HTMLElement | null>(null);
@@ -288,11 +333,11 @@ export default function StudioPreviewPanel({
   // ready also reloads the iframe (a "stale" preview must actually refresh).
   const reloadFrameOnNextReadyRef = useRef(false);
 
-  const postInspectorCommand = useCallback((type: "enable" | "disable" | "clear") => {
+  const postInspectorCommand = useCallback((type: "enable" | "disable" | "clear" | "apply-box" | "set-zoom" | "reselect", extra?: Record<string, unknown>) => {
     const bridge = bridgeRef.current;
     if (!bridge?.target) return;
     try {
-      bridge.target.postMessage({ source: "litt-inspector", type, token: bridge.token }, bridge.origin);
+      bridge.target.postMessage({ source: "litt-inspector", type, token: bridge.token, ...extra }, bridge.origin);
     } catch {
       // Frame navigated away mid-flight — the next load re-attaches.
     }
@@ -371,12 +416,42 @@ export default function StudioPreviewPanel({
               ...(isRecordMap(p.styles) ? { styles: p.styles } : {}),
               ...(typeof p.text === "string" ? { text: p.text.slice(0, 240) } : {}),
               ...(typeof p.path === "string" ? { path: p.path.slice(0, 600) } : {}),
-              ...(isRect(p.rect) ? { rect: p.rect } : {}),
+              ...(isRect(p.rect) ? { rect: copyRect(p.rect) } : {}),
+              ...(isBox(p.box) ? { box: { x: p.box.x, y: p.box.y, width: p.box.width, height: p.box.height } } : {}),
             };
             selectedElementRef.current = nextSelection;
             setSelectedElement(nextSelection);
+            if (nextSelection.box) styleBoxRef.current = nextSelection.box;
+            else if (typeof nextSelection.rect?.x === "number" && typeof nextSelection.rect?.y === "number") {
+              styleBoxRef.current = {
+                x: nextSelection.rect.x,
+                y: nextSelection.rect.y,
+                width: nextSelection.rect.width,
+                height: nextSelection.rect.height,
+              };
+            }
             onSelectionChange?.(nextSelection);
           }
+          return;
+        }
+        if (data.type === "geometry") {
+          const p = data.payload as Record<string, unknown> | null;
+          if (p && isBox(p.box)) styleBoxRef.current = { x: p.box.x, y: p.box.y, width: p.box.width, height: p.box.height };
+          return;
+        }
+        if (data.type === "viewport") {
+          const p = data.payload as { deltaX?: unknown; deltaY?: unknown; ctrlKey?: unknown } | null;
+          const deltaX = typeof p?.deltaX === "number" ? p.deltaX : 0;
+          const deltaY = typeof p?.deltaY === "number" ? p.deltaY : 0;
+          if (p?.ctrlKey) setCanvasZoom((current) => zoomByWheel(current, deltaY));
+          else if (canvasZoomRef.current !== 1) setCanvasPan((current) => panBy(current, -deltaX, -deltaY));
+          return;
+        }
+        if (data.type === "pan") {
+          const p = data.payload as { dx?: unknown; dy?: unknown } | null;
+          const dx = typeof p?.dx === "number" ? p.dx : 0;
+          const dy = typeof p?.dy === "number" ? p.dy : 0;
+          setCanvasPan((current) => panBy(current, dx, dy));
         }
       };
       window.addEventListener("message", onMessage);
@@ -424,11 +499,15 @@ export default function StudioPreviewPanel({
       element.style.outline = "2px solid #9b4dff";
       element.style.outlineOffset = "2px";
       element.style.boxShadow = "0 0 0 4px rgba(155,77,255,0.16)";
+      const details = previewElementDetails(element);
+      const styleBox = measureElementBox(element, 1);
+      styleBoxRef.current = styleBox;
       const nextSelection: PreviewSelection = {
         label: describePreviewElement(element),
         selector: selectorForPreviewElement(element),
         tagName: element.tagName.toLowerCase(),
-        ...previewElementDetails(element),
+        ...details,
+        box: styleBox,
       };
       selectedElementRef.current = nextSelection;
       setSelectedElement(nextSelection);
@@ -440,9 +519,164 @@ export default function StudioPreviewPanel({
 
   const handleIframeLoad = useCallback(() => {
     setIframeFailed(false);
+    const pending = reselectRef.current;
     clearSelection(false);
-    window.setTimeout(attachSelection, 0);
-  }, [attachSelection, clearSelection]);
+    window.setTimeout(() => {
+      attachSelection();
+      if (!pending) return;
+      let documentInFrame: Document | null = null;
+      try { documentInFrame = iframeRef.current?.contentDocument ?? null; } catch { documentInFrame = null; }
+      if (documentInFrame) {
+        const found = (pending.path && documentInFrame.querySelector(pending.path))
+          || documentInFrame.querySelector(pending.selector);
+        if (found instanceof HTMLElement) found.click();
+        return;
+      }
+      postInspectorCommand("reselect", { selector: pending.selector, path: pending.path });
+    }, 0);
+  }, [attachSelection, clearSelection, postInspectorCommand]);
+
+  const persistGeometry = useCallback(async (selection: PreviewSelection, box: Box) => {
+    const patch = geometryToStylePatch(box);
+    const next: PreviewSelection = {
+      ...selection,
+      styles: { ...selection.styles, ...patch.styles },
+      rect: {
+        x: box.x,
+        y: box.y,
+        width: Math.round(box.width),
+        height: Math.round(box.height),
+      },
+      box,
+    };
+    selectedElementRef.current = next;
+    setSelectedElement(next);
+    onSelectionChange?.(next);
+    reselectRef.current = next;
+    const session = elementEditsRef.current;
+    if (!session) return;
+    let ok = await session.applyPatch(patch);
+    if (!ok) {
+      await session.resolve({
+        selector: selection.selector,
+        tagName: selection.tagName,
+        label: selection.label,
+        attrs: selection.attrs,
+        text: selection.text,
+        path: selection.path,
+      }, null);
+      ok = await session.applyPatch(patch);
+    }
+  }, [onSelectionChange]);
+
+  const onChromeGesture = useCallback((gesture: SelectionGesture) => {
+    const selection = selectedElementRef.current;
+    if (!selection) return;
+    const view: Box = {
+      x: selection.rect?.x ?? 0,
+      y: selection.rect?.y ?? 0,
+      width: selection.rect?.width ?? selection.box?.width ?? 0,
+      height: selection.rect?.height ?? selection.box?.height ?? 0,
+    };
+    if (gesture.phase === "start") {
+      gestureOriginRef.current = {
+        style: styleBoxRef.current ?? { ...view },
+        view,
+      };
+      return;
+    }
+    const origin = gestureOriginRef.current;
+    if (!origin) return;
+    const nextStyle = applyGesture(origin.style, gesture.kind, gesture.dx, gesture.dy, gesture.shiftKey);
+    const nextView = applyGesture(origin.view, gesture.kind, gesture.dx, gesture.dy, gesture.shiftKey);
+    styleBoxRef.current = nextStyle;
+    setLiveRect(nextView);
+    const node = selectedNodeRef.current;
+    if (node) {
+      node.style.position = "absolute";
+      node.style.left = `${Math.round(nextStyle.x)}px`;
+      node.style.top = `${Math.round(nextStyle.y)}px`;
+      node.style.width = `${Math.round(nextStyle.width)}px`;
+      node.style.height = `${Math.round(nextStyle.height)}px`;
+    } else {
+      postInspectorCommand("apply-box", { box: nextStyle });
+    }
+    if (gesture.phase === "end") {
+      gestureOriginRef.current = null;
+      setLiveRect(null);
+      const unchanged = Math.round(nextStyle.x) === Math.round(origin.style.x)
+        && Math.round(nextStyle.y) === Math.round(origin.style.y)
+        && Math.round(nextStyle.width) === Math.round(origin.style.width)
+        && Math.round(nextStyle.height) === Math.round(origin.style.height);
+      if (!unchanged) void persistGeometry(selection, nextStyle);
+    }
+  }, [persistGeometry, postInspectorCommand]);
+
+  useEffect(() => {
+    canvasZoomRef.current = canvasZoom;
+    postInspectorCommand("set-zoom", { zoom: canvasZoom });
+  }, [canvasZoom, postInspectorCommand]);
+
+  useEffect(() => {
+    const node = viewportRef.current;
+    if (!node) return;
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        setCanvasZoom((current) => zoomByWheel(current, event.deltaY));
+        return;
+      }
+      if (canvasZoomRef.current !== 1) {
+        event.preventDefault();
+        setCanvasPan((current) => panBy(current, -event.deltaX, -event.deltaY));
+      }
+    };
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return () => node.removeEventListener("wheel", onWheel);
+  }, [previewUrl, state]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const viewport = viewportRef.current;
+      if (!viewport || !isCanvasShown(viewport)) return;
+      const action = canvasKeyAction(event, event.target);
+      if (!action) return;
+      if (action.type === "space") {
+        if (event.repeat) return;
+        event.preventDefault();
+        spaceHeldRef.current = true;
+        setSpaceHeld(true);
+        return;
+      }
+      if (action.type === "deselect") {
+        event.preventDefault();
+        clearSelection();
+        return;
+      }
+      const selection = selectedElementRef.current;
+      const style = styleBoxRef.current;
+      if (!selection || !style) return;
+      event.preventDefault();
+      void persistGeometry(selection, {
+        x: style.x + action.dx,
+        y: style.y + action.dy,
+        width: style.width,
+        height: style.height,
+      });
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key === " " || event.key === "Spacebar" || event.code === "Space") {
+        spaceHeldRef.current = false;
+        setSpaceHeld(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [clearSelection, persistGeometry]);
 
   useEffect(() => () => {
     selectionCleanupRef.current?.();
@@ -1084,25 +1318,85 @@ export default function StudioPreviewPanel({
       {/* Preview surface */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ backgroundColor: "rgba(0,0,0,0.2)" }}>
         {isLive && displayUrl ? (
-          <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-2">
-            <iframe
-              key={frameKey}
-              ref={iframeRef}
-              title={`${projectName ?? "Project"} preview`}
-              src={displayUrl}
-              className="border-0 bg-white transition-all duration-200"
+          <div
+            ref={viewportRef}
+            data-testid="preview-canvas-viewport"
+            data-direct-canvas=""
+            className="relative min-h-0 flex-1 overflow-hidden"
+            style={{ cursor: spaceHeld ? "grab" : undefined, touchAction: "none" }}
+            onPointerDown={(event) => {
+              if (event.button !== 1 && !spaceHeldRef.current) return;
+              event.preventDefault();
+              const el = event.currentTarget;
+              try { el.setPointerCapture(event.pointerId); } catch { /* jsdom */ }
+              panDragRef.current = {
+                pointerId: event.pointerId,
+                x: event.clientX,
+                y: event.clientY,
+                panX: canvasPan.x,
+                panY: canvasPan.y,
+              };
+            }}
+            onPointerMove={(event) => {
+              const drag = panDragRef.current;
+              if (!drag || drag.pointerId !== event.pointerId) return;
+              setCanvasPan({
+                x: drag.panX + (event.clientX - drag.x),
+                y: drag.panY + (event.clientY - drag.y),
+              });
+            }}
+            onPointerUp={(event) => {
+              if (panDragRef.current?.pointerId === event.pointerId) panDragRef.current = null;
+            }}
+          >
+            <div
+              className="flex h-full w-full items-center justify-center"
               style={{
-                width: deviceMode === "desktop" ? "100%" : `${DEVICE_DIMENSIONS[deviceMode].w}px`,
-                height: deviceMode === "desktop" ? "100%" : `${DEVICE_DIMENSIONS[deviceMode].h}px`,
-                maxWidth: "100%",
-                borderRadius: deviceMode === "desktop" ? "0" : "8px",
-                boxShadow: deviceMode === "desktop" ? "none" : "0 4px 24px rgba(0,0,0,0.4)",
+                transform: `translate(${canvasPan.x}px, ${canvasPan.y}px) scale(${canvasZoom})`,
+                transformOrigin: "center center",
               }}
-              sandbox="allow-scripts allow-forms allow-modals allow-same-origin allow-popups"
-              onLoad={handleIframeLoad}
-              onError={() => setIframeFailed(true)}
-              data-testid="preview-iframe"
-            />
+            >
+              <div
+                className="relative"
+                style={{
+                  width: deviceMode === "desktop" ? "100%" : `${DEVICE_DIMENSIONS[deviceMode].w}px`,
+                  height: deviceMode === "desktop" ? "100%" : `${DEVICE_DIMENSIONS[deviceMode].h}px`,
+                  maxWidth: "100%",
+                }}
+              >
+                <iframe
+                  key={frameKey}
+                  ref={iframeRef}
+                  title={`${projectName ?? "Project"} preview`}
+                  src={displayUrl}
+                  className="border-0 bg-white transition-all duration-200"
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    borderRadius: deviceMode === "desktop" ? "0" : "8px",
+                    boxShadow: deviceMode === "desktop" ? "none" : "0 4px 24px rgba(0,0,0,0.4)",
+                  }}
+                  sandbox="allow-scripts allow-forms allow-modals allow-same-origin allow-popups"
+                  onLoad={handleIframeLoad}
+                  onError={() => setIframeFailed(true)}
+                  data-testid="preview-iframe"
+                />
+                {selectionMode && (() => {
+                  const rect = liveRect ?? (selectedElement?.rect && typeof selectedElement.rect.x === "number" && typeof selectedElement.rect.y === "number"
+                    ? { x: selectedElement.rect.x, y: selectedElement.rect.y, width: selectedElement.rect.width, height: selectedElement.rect.height }
+                    : null);
+                  if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+                  return (
+                    <SelectionChrome
+                      box={rect}
+                      zoom={canvasZoom}
+                      label={selectedElement?.tagName}
+                      onGesture={onChromeGesture}
+                    />
+                  );
+                })()}
+              </div>
+            </div>
           </div>
         ) : (
           <div className="flex min-h-[200px] flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
