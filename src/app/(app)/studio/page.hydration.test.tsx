@@ -8,6 +8,7 @@ const authState = vi.hoisted(() => ({ isLoaded: true, isSignedIn: true }));
 
 vi.mock("@/hooks/useClerkAuth", () => ({
   useClerkAuth: () => authState,
+  useAppUser: () => ({ user: null }),
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
@@ -27,8 +28,8 @@ vi.mock("@/context/ThemeContext", () => ({
   }),
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
-vi.mock("./shell/StudioShell", () => ({
-  StudioShell: () => <div data-testid="studio-shell-mock" />,
+vi.mock("./components/CommandStudio", () => ({
+  default: () => <div data-testid="command-studio-mock" />,
 }));
 
 const { default: StudioPage } = await import("./page");
@@ -68,7 +69,7 @@ describe("StudioPage hydration", () => {
     expect(recoverableErrors).toHaveLength(0);
 
     // After mount, the real Studio renders.
-    expect(container.querySelector("[data-testid='studio-shell-mock']")).toBeTruthy();
+    expect(container.querySelector("[data-testid='command-studio-mock']")).toBeTruthy();
 
     await act(async () => root?.unmount());
     container.remove();
