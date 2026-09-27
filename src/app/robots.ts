@@ -29,6 +29,8 @@ export default function robots(): MetadataRoute.Robots {
           "/projects/",
           "/resources/",
           "/runtime-test/",
+          "/games/retro/test",
+          "/studio/visual-test",
           "/settings/",
           "/sign-in/",
           "/sign-up/",

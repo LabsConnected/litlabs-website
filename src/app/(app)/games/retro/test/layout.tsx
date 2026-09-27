@@ -12,7 +12,7 @@ export function generateMetadata(): Metadata {
   };
 }
 
-export default function RuntimeTestLayout({ children }: { children: ReactNode }) {
+export default function RetroTestLayout({ children }: { children: ReactNode }) {
   gatePublicTestPage();
   return children;
 }
