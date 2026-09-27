@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useWorkspaceStore } from "./workspace/workspace-store";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
@@ -536,6 +537,23 @@ describe("StudioShell — desktop operating shell", () => {
       expect(screen.getByTestId("inspector-ask-litt")).toBeTruthy();
       // Ask LiTT expanded the command layer for the pinned context.
       expect(screen.getByTestId("litt-layer-transcript")).toBeTruthy();
+    });
+  });
+
+  it("creates a chat, task, and note from the left rail and the composer", async () => {
+    const { user } = await renderStudioShell();
+    await waitFor(() => screen.getByTestId("spatial-workspace"));
+    await user.click(screen.getByTestId("workspace-rail-new-chat"));
+    await user.click(screen.getByTestId("workspace-rail-new-task"));
+    await user.click(screen.getByTestId("workspace-rail-new-note"));
+    await user.click(screen.getByTestId("litt-workspace-new-chat"));
+    await user.click(screen.getByTestId("litt-workspace-new-task"));
+    await user.click(screen.getByTestId("litt-workspace-new-note"));
+    await waitFor(() => {
+      const requested = useWorkspaceStore.getState().pendingActions
+        .filter((action) => action.type === "workspace.create")
+        .map((action) => action.objectType);
+      expect(requested).toEqual(["chat", "task", "note", "chat", "task", "note"]);
     });
   });
 });
