@@ -91,6 +91,16 @@ export const ACTION_EVENT_TYPES = [
   "deployment.status",
   "deployment.completed",
   "deployment.failed",
+  // Verification lifecycle events ride the canonical action_events spine
+  // (PASS 2). There is no separate verification_events table.
+  "verification.plan_created",
+  "verification.check_started",
+  "verification.policy_snapshot",
+  "verification.attempt_started",
+  "verification.evidence_recorded",
+  "verification.evidence_quarantined",
+  "verification.verdict_changed",
+  "verification.failed",
 ] as const;
 export type ActionEventType = (typeof ACTION_EVENT_TYPES)[number];
 

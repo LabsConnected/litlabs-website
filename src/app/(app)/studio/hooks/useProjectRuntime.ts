@@ -16,11 +16,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useTerminalStore } from "@/stores/useTerminalStore";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { HEARTBEAT_STALE_MS } from "@/lib/capabilities/types";
 import {
   INITIAL_RUNTIME_STATE,
+  terminalModelFromRuntime,
   type ProjectRuntimeState,
   type RuntimePhase,
 } from "@/lib/projects/runtime-state";
+import type { TerminalFreshness } from "@/lib/verification/terminal-state";
 
 const POLL_INTERVAL_MS = 15_000;
 const STALE_MS = 30_000;
@@ -45,6 +48,19 @@ export function useProjectRuntime(options?: { disabled?: boolean }): UseProjectR
   const terminalStatus = useTerminalStore((s) => s.status);
   const terminalSessionId = useTerminalStore((s) => s.sessionId);
   const terminalCwd = useTerminalStore((s) => s.cwd);
+  const lastHeartbeatAt = useTerminalStore((s) => s.lastHeartbeatAt);
+
+  /**
+   * Freshness of the terminal status feed, derived from the PTY heartbeat.
+   * A missing heartbeat is "unreachable", never "fresh" — freshness is
+   * verified, not assumed (INV-004).
+   */
+  const terminalFreshness: TerminalFreshness =
+    terminalStatus !== "connected" || !lastHeartbeatAt
+      ? "unreachable"
+      : Date.now() - new Date(lastHeartbeatAt).getTime() <= HEARTBEAT_STALE_MS
+        ? "fresh"
+        : "stale";
 
   const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
@@ -107,6 +123,18 @@ export function useProjectRuntime(options?: { disabled?: boolean }): UseProjectR
           phase,
           terminalConnected,
           terminalSessionId: terminalSessionId ?? serverState.terminalSessionId,
+          // Canonical terminal model — the ONE derivation. UI consumes
+          // state.terminalModel instead of re-deriving this logic.
+          // hasActiveCommand: the PTY store does not track command
+          // execution; "idle" here means channel open + live + fresh with
+          // no locally-known active command.
+          terminalModel: terminalModelFromRuntime({
+            phase,
+            terminalConnected,
+            terminalServerReachable: serverState.terminalServerReachable,
+            freshness: terminalFreshness,
+            hasActiveCommand: false,
+          }),
           executionAvailable: workspaceReady && terminalConnected,
           readAccess: workspaceReady, // reads work even if terminal is down (via API)
           writeSurfaceAvailable,
@@ -122,7 +150,7 @@ export function useProjectRuntime(options?: { disabled?: boolean }): UseProjectR
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  }, [authLoaded, isSignedIn, getToken, explicitProjectId, terminalStatus, terminalSessionId, terminalCwd]);
+  }, [authLoaded, isSignedIn, getToken, explicitProjectId, terminalStatus, terminalSessionId, terminalCwd, terminalFreshness]);
 
   // Initial resolve + polling — skipped entirely when disabled so a
   // second hook instance can't double the runtime poll stack.
@@ -166,13 +194,21 @@ export function useProjectRuntime(options?: { disabled?: boolean }): UseProjectR
         phase,
         terminalConnected,
         terminalSessionId: terminalSessionId ?? prev.terminalSessionId,
+        // Canonical terminal model — the ONE derivation (see above).
+        terminalModel: terminalModelFromRuntime({
+          phase,
+          terminalConnected,
+          terminalServerReachable: prev.terminalServerReachable,
+          freshness: terminalFreshness,
+          hasActiveCommand: false,
+        }),
         executionAvailable: workspaceReady && terminalConnected,
         writeSurfaceAvailable,
         writeAccess: writeSurfaceAvailable, // legacy alias
         writeApprovalRequired: true, // policy — not derived from connection
       };
     });
-  }, [terminalStatus, terminalSessionId, terminalCwd]);
+  }, [terminalStatus, terminalSessionId, terminalCwd, terminalFreshness]);
 
   return { state, loading, error, refresh };
 }

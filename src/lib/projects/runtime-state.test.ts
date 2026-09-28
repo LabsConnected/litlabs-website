@@ -6,10 +6,11 @@ import {
 } from "./runtime-state";
 
 describe("runtimePhaseLabel", () => {
-  it("labels terminal_disconnected as Terminal idle — workspace ready, PTY unattached", () => {
-    // Honesty fix: the workspace is ready and builds run server-side; only
-    // the visible terminal PTY isn't attached. Must never read as an outage.
-    expect(runtimePhaseLabel("terminal_disconnected")).toBe("Terminal idle");
+  it("labels terminal_disconnected truthfully — never 'Terminal idle' without a live session", () => {
+    // INV-004: "idle" is an activity claim valid only with a live verified
+    // session + fresh heartbeat. A detached PTY must not claim idle.
+    // Execution availability is reported separately via the terminal model.
+    expect(runtimePhaseLabel("terminal_disconnected")).toBe("Terminal not attached");
   });
 
   it("keeps the other phase labels intact", () => {

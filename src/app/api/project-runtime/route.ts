@@ -128,6 +128,7 @@ export async function GET(request: NextRequest) {
     workspacePath,
     workspaceStatus,
     terminalSessionId: null, // client-side hook sets this
+    terminalModel: null, // client-side hook derives this
     previewState: "idle",
     logsState: "idle",
     deploymentState: project.previewUrl ? "preview" : "none",
@@ -172,6 +173,7 @@ function makeState(phase: RuntimePhase, error?: ProjectRuntimeError): Omit<Proje
     workspacePath: null,
     workspaceStatus: null,
     terminalSessionId: null,
+    terminalModel: null,
     previewState: "idle",
     logsState: "idle",
     deploymentState: "none",

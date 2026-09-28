@@ -11,6 +11,12 @@
  */
 
 import type { RuntimeFreshness } from "@/hooks/useLiTTRuntime";
+import type {
+  TerminalConnection,
+  TerminalFreshness,
+  TerminalModel,
+} from "@/lib/verification/terminal-state";
+import { deriveTerminalModel } from "@/lib/verification/terminal-state";
 
 export type RuntimePhase =
   | "idle" // no project selected
@@ -72,6 +78,14 @@ export interface ProjectRuntimeState {
   /** Terminal identity */
   terminalSessionId: string | null;
 
+  /**
+   * Canonical terminal model (connectivity / freshness / activity /
+   * execution availability), derived via terminalModelFromRuntime — the ONE
+   * call site. UI components must consume this, never re-derive it.
+   * Null when the runtime has not resolved yet.
+   */
+  terminalModel: TerminalModel | null;
+
   /** Preview state — client-side hook refines this */
   previewState: "idle" | "preparing" | "ready" | "running" | "failed";
   /** Logs state — client-side hook refines this */
@@ -125,6 +139,7 @@ export const INITIAL_RUNTIME_STATE: ProjectRuntimeState = {
   workspacePath: null,
   workspaceStatus: null,
   terminalSessionId: null,
+  terminalModel: null,
   previewState: "idle",
   logsState: "idle",
   deploymentState: "none",
@@ -154,10 +169,12 @@ export function runtimePhaseLabel(phase: RuntimePhase): string {
     case "workspace_not_ready":
       return "Workspace not ready";
     case "terminal_disconnected":
-      // "Terminal idle" — the workspace is ready; only the visible terminal
-      // PTY isn't attached. Builds and commands run server-side regardless,
-      // so this must never read as an outage.
-      return "Terminal idle";
+      // Truthful label: the visible terminal PTY is not attached. This is
+      // NOT an "idle" claim — idle is an activity state valid only with a
+      // live verified session + fresh heartbeat (INV-004). Execution
+      // availability is reported separately via the terminal model, because
+      // builds/commands run server-side regardless of PTY attachment.
+      return "Terminal not attached";
     case "terminal_reconnecting":
       return "Reconnecting terminal…";
     case "error":
@@ -245,4 +262,38 @@ export function runtimeRecoveryActions(
     default:
       return [];
   }
+}
+
+/**
+ * Canonical terminal-model derivation — the ONE call site.
+ *
+ * Maps the runtime's existing signals onto the verification terminal model:
+ * - connection: from the PTY attach state (reconnecting when the runtime
+ *   phase says so)
+ * - freshness: from the status-feed freshness when known; callers that do
+ *   not have heartbeat data must pass "unreachable" rather than invent it
+ * - serverExecutionProven: from terminalServerReachable (independent
+ *   server-side proof — never derived from the visible PTY)
+ *
+ * UI components must consume `state.terminalModel`, never re-derive this.
+ */
+export function terminalModelFromRuntime(input: {
+  phase: RuntimePhase;
+  terminalConnected: boolean;
+  terminalServerReachable: boolean;
+  freshness: TerminalFreshness;
+  hasActiveCommand: boolean;
+}): TerminalModel {
+  const connection: TerminalConnection =
+    input.phase === "terminal_reconnecting"
+      ? "reconnecting"
+      : input.terminalConnected
+        ? "connected"
+        : "disconnected";
+  return deriveTerminalModel({
+    connection,
+    freshness: input.freshness,
+    hasActiveCommand: input.hasActiveCommand,
+    serverExecutionProven: input.terminalServerReachable,
+  });
 }
