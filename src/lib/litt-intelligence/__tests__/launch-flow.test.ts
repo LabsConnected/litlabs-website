@@ -941,3 +941,35 @@ describe("Launch Flow: artifact gate honors workspace-change evidence (#551)", (
     expect(check.error).toContain("No runnable website entry file");
   });
 });
+
+// ─── Tests: honest loop failure propagation ─────────────────────────
+
+describe("Launch Flow: honest loop failure", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    toolRegistry.clear();
+    registerInternalTools();
+  });
+
+  it("reports the run as failed — never completed — when the loop fails honestly", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(
+      successAgentResult({
+        failedHonestly:
+          "I couldn't apply the requested file change: I asked for approval in words " +
+          "instead of emitting the file tool call, so no approval card was created " +
+          "and no files were changed. Nothing was modified — please try again.",
+        toolCalls: [],
+      }),
+    );
+    const options = makeOptions({ requiresExecution: true, runAgentLoop });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(false);
+    expect(result.status).toBe("failed");
+    expect(result.finalText).toContain("no approval card was created");
+    expect(result.error).toBe("HONEST_LOOP_FAILURE");
+    expect(result.agentLoopResult?.failedHonestly).toBeDefined();
+  });
+});

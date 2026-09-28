@@ -164,6 +164,15 @@ export interface AgentLoopResult {
    *  Only set when the loop produced a purpose-written failure message
    *  (all routes exhausted / budget exhausted). */
   modelFailureText?: string;
+  /**
+   * Set when the loop ended in an honest failure that must be reported as
+   * FAILED, never completed — e.g. the model kept asking for approval in
+   * prose instead of emitting the gated tool call, so no approval card was
+   * ever created and no mutations happened. Carries the user-facing
+   * truthful message. Distinct from `cancelled` (user/system stop) and
+   * `modelFailed` (provider outage).
+   */
+  failedHonestly?: string;
   /** Set when the loop paused because ACT mode requires approval for a mutation */
   pendingApproval?: PendingApproval;
   /**
@@ -251,18 +260,80 @@ export function announcesMoreWork(text: string): boolean {
   return CONTINUATION_MARKERS.some((re) => re.test(text));
 }
 
+/**
+ * A zero-tool-call reply that asks for approval in PROSE ("please confirm
+ * and give approval to apply the change") instead of emitting the
+ * approval-gated tool call never pauses the loop — the pause only happens
+ * on a real tool call whose permission check yields `requiresApproval`.
+ * Accepting the prose as final settles the run "Complete" with zero
+ * mutations and no approval card ever created: a silent fake-complete.
+ * These markers route the prose approval-ask to the bounded-nudge path
+ * instead, so the model is told to emit the real tool call.
+ */
+const APPROVAL_ASK_MARKERS: RegExp[] = [
+  /please confirm/i,
+  /give approval/i,
+  /need your approval/i,
+  /confirm.*proceed/i,
+];
+
+/**
+ * Present-continuous work claims ("I'm adding…", "I'm updating…") with
+ * zero tool calls: the work is announced as happening right now, but
+ * nothing was executed. Same fake-complete hole as the prose
+ * approval-ask — none of the CONTINUATION_MARKERS match present
+ * continuous tense.
+ */
+const PROSE_WORK_CLAIM_MARKERS: RegExp[] = [
+  /i['’]m\s+(adding|updating|writing|creating|applying|editing|modifying)\b/i,
+];
+
+export function asksForApprovalInProse(text: string): boolean {
+  return APPROVAL_ASK_MARKERS.some((re) => re.test(text));
+}
+
+export function claimsOngoingWork(text: string): boolean {
+  return PROSE_WORK_CLAIM_MARKERS.some((re) => re.test(text));
+}
+
 type ZeroCallResolution =
   | { action: "final" }
   | { action: "nudge"; nudgeMessage: string }
-  | { action: "stall" };
+  | { action: "stall" }
+  /** The model kept up a behavior that can never succeed (e.g. asking for
+      approval in prose instead of emitting the gated tool call). The run
+      must end FAILED with a truthful message — never "Complete". */
+  | { action: "fail"; failureMessage: string };
 
 /**
  * Decide what a zero-tool-call model reply means. Plain prose is the
  * final answer. Prose that announces more work gets bounded nudges to
  * emit the promised tool calls; when the nudges are exhausted the run
- * must fail honestly rather than claim completion.
+ * must fail honestly rather than claim completion. Prose that asks for
+ * approval (or claims work is happening) without emitting the tool call
+ * gets a targeted nudge to emit the call; on exhaustion the run fails
+ * honestly — no approval card was ever created, so completing would lie.
  */
 export function resolveZeroToolCalls(text: string, nudgesUsed: number): ZeroCallResolution {
+  // The prose approval-ask is the most specific signal and is checked
+  // first: the model wants to perform a gated mutation but never emitted
+  // the tool call, so no approval card exists.
+  if (asksForApprovalInProse(text) || claimsOngoingWork(text)) {
+    if (nudgesUsed < MAX_CONTINUATION_NUDGES) {
+      return {
+        action: "nudge",
+        nudgeMessage:
+          "Prose approval requests don't create approval cards — no approval was recorded and no files were changed. " +
+          "Emit the file tool call (e.g. `files.write`) now; the approval gate will pause the run and surface the approval card for the user.",
+      };
+    }
+    return {
+      action: "fail",
+      failureMessage:
+        "I couldn't apply the requested file change: I asked for approval in words instead of emitting the file tool call, " +
+        "so no approval card was created and no files were changed. Nothing was modified — please try again.",
+    };
+  }
   if (!announcesMoreWork(text)) return { action: "final" };
   if (nudgesUsed < MAX_CONTINUATION_NUDGES) {
     return {
@@ -534,6 +605,7 @@ export async function runAgentLoopV2(
   let cancelReason: string | undefined;
   let modelFailed: string | undefined;
   let modelFailureText: string | undefined;
+  let failedHonestly: string | undefined;
   let checkpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
   const toolCallLog: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }> = [];
   let completedDeployment: CompletedDeployment | null = null;
@@ -659,6 +731,19 @@ export async function runAgentLoopV2(
         localProgress.emit({
           type: "status",
           summary: "Stopping: the model announced more work but produced no tool calls.",
+        });
+        break;
+      }
+      if (resolution.action === "fail") {
+        // Honest failure, not a cancellation: the model kept asking for
+        // approval in prose (or claiming work was happening) instead of
+        // emitting the gated tool call, so no approval card was ever
+        // created and nothing was mutated. Report FAILED, never Complete.
+        failedHonestly = resolution.failureMessage;
+        finalText = resolution.failureMessage;
+        localProgress.emit({
+          type: "status",
+          summary: "Stopping: the model asked for approval in prose instead of emitting the tool call — no approval card was created.",
         });
         break;
       }
@@ -1117,6 +1202,7 @@ export async function runAgentLoopV2(
     events,
     modelFailed,
     modelFailureText,
+    failedHonestly,
     qualityLoop: qualityFinale
       ? {
           verdict: qualityFinale.verdict,
@@ -1635,6 +1721,7 @@ export async function resumeAgentLoopV2(
   let cancelReason: string | undefined;
   let modelFailed: string | undefined;
   let modelFailureText: string | undefined;
+  let failedHonestly: string | undefined;
   let checkpoint = resume.existingCheckpoint;
   const toolCallLog: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }> = [];
   let completedDeployment: CompletedDeployment | null = null;
@@ -1929,6 +2016,19 @@ export async function resumeAgentLoopV2(
         });
         break;
       }
+      if (resolution.action === "fail") {
+        // Honest failure, not a cancellation: the model kept asking for
+        // approval in prose (or claiming work was happening) instead of
+        // emitting the gated tool call, so no approval card was ever
+        // created and nothing was mutated. Report FAILED, never Complete.
+        failedHonestly = resolution.failureMessage;
+        finalText = resolution.failureMessage;
+        localProgress.emit({
+          type: "status",
+          summary: "Stopping: the model asked for approval in prose instead of emitting the tool call — no approval card was created.",
+        });
+        break;
+      }
       finalText = llmResponse.text;
       break;
     }
@@ -2212,6 +2312,7 @@ export async function resumeAgentLoopV2(
     events,
     modelFailed,
     modelFailureText,
+    failedHonestly,
     qualityLoop: qualityFinale
       ? {
           verdict: qualityFinale.verdict,

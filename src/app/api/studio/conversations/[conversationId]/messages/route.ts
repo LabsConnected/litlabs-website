@@ -532,6 +532,18 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   if (conversation.projectId && canonicalCtx.workspaceExecutionAvailable) {
     try {
       v2Transport = await createWorkspaceTransport(conversation.projectId, userId);
+      if (v2Transport.fileOpsReachable === false) {
+        // Honest reachability: the DB row said the workspace is ready, but
+        // the /ws-files probe failed — file operations will time out. Tell
+        // the model the truth instead of "Write permission: allowed".
+        canonicalCtx.writePermission = false;
+        canonicalCtx.workspaceFileOpsFailing = true;
+        runtimeContextBlock = buildRuntimeContextBlock(canonicalCtx);
+        studioLog("message:workspace_file_ops_unreachable", {
+          conversationId: conversation.id,
+          projectId: conversation.projectId,
+        });
+      }
     } catch (transportErr) {
       // Transport creation failed — fall back to V1 with visible logging
       // so operators can detect workspace issues (not silently swallowed).
@@ -1102,13 +1114,35 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             && !actionableApproval
             && !assistantText.trim();
 
+          // Honest completion: a mutation-required run that ended with
+          // zero tool calls and zero mutations must never be persisted or
+          // reported as "completed" — that is the silent fake-complete
+          // (e.g. a prose approval-ask settling Complete with nothing
+          // done and no approval card ever created). Fail it honestly.
+          const mutationRequired = built.kernelResult.decision.routing.requiresExecution === true;
+          const v2ToolCalls = v2Result?.toolCalls ?? [];
+          const v2Mutations = v2ToolCalls.filter((c) => c.success && c.mutating).length;
+          const zeroMutationCompletion =
+            mutationRequired &&
+            !actionableApproval &&
+            !v2Result?.pendingApproval &&
+            !launchFlowResult?.cancelled &&
+            v2ToolCalls.length === 0 &&
+            v2Mutations === 0;
+          if (zeroMutationCompletion) {
+            assistantText =
+              "I couldn't complete the requested change: no file operations were performed, so nothing was modified. Please try again.";
+          }
+
           const finalMessageStatus: MessageStatus = launchFlowResult?.cancelled
             ? "cancelled"
             : actionableApproval
               ? "awaiting_approval"
-              : launchFlowResult?.success && !v2Empty && !pausedRunPersistFailed
-                ? "completed"
-                : "failed";
+              : v2Result?.failedHonestly || zeroMutationCompletion
+                ? "failed"
+                : launchFlowResult?.success && !v2Empty && !pausedRunPersistFailed
+                  ? "completed"
+                  : "failed";
 
           const statusPersisted = await updateMessageStatus(assistantMessage.id, userId, finalMessageStatus, assistantText);
           let actionRunPersistenceFailed = false;

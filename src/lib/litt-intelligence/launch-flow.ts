@@ -655,6 +655,20 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
     // cancellation is reported as "cancelled", not a model failure.
     checkSignal(signal);
 
+    // An honest loop failure (e.g. the model kept asking for approval in
+    // prose instead of emitting the gated tool call, so no approval card
+    // was ever created) is terminal: the run must be reported as failed,
+    // never completed. Short-circuit before the pause/preview logic below.
+    if (agentResult.failedHonestly) {
+      return baseResult({
+        status: "failed",
+        finalText: agentResult.failedHonestly,
+        error: "HONEST_LOOP_FAILURE",
+        repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
+        runtimeRepairAttempts,
+      });
+    }
+
     // A pause for a sensitive action (e.g. project.deploy) is not a failure:
     // the build output already exists in the workspace, so still bring the
     // preview up while the approval is pending — the user can review the

@@ -704,7 +704,8 @@ export async function POST(
 
       // Reflect the final outcome on the transcript BEFORE marking the run
       // completed — a poller that sees "completed" can then loadMessages
-      // and get the real persisted result.
+      // and get the real persisted result. An honest loop failure is
+      // reported as failed, never completed.
       await writeResumedResultToTranscript({
         conversationId,
         userId,
@@ -714,8 +715,10 @@ export async function POST(
           ? "cancelled"
           : result.pendingApproval
             ? "awaiting_approval"
-            : "completed",
-        content: finalText || undefined,
+            : result.failedHonestly
+              ? "failed"
+              : "completed",
+        content: (result.failedHonestly || finalText) || undefined,
       });
 
       const runResult: RunResult = {
@@ -744,14 +747,19 @@ export async function POST(
       };
       const completion = await markRunCompleted(pausedRunId, userId, runResult, executionToken);
       if (!result.pendingApproval) {
+        const honestFailure = result.failedHonestly;
         await settleParentActionRun(
           resolved,
-          result.cancelled ? "cancelled" : "completed",
+          result.cancelled ? "cancelled" : honestFailure ? "failed" : "completed",
           {
-            currentActivity: result.cancelled ? "Task cancelled by user" : "Task completed",
+            currentActivity: result.cancelled
+              ? "Task cancelled by user"
+              : honestFailure
+                ? "Task failed"
+                : "Task completed",
             approvalReference: null,
-            failureCode: null,
-            failureMessage: null,
+            failureCode: honestFailure ? "TASK_FAILED" : null,
+            failureMessage: honestFailure ? honestFailure.slice(0, 500) : null,
           },
           result.cancelled
             ? "approval:action_run_cancel_settle_failed"
