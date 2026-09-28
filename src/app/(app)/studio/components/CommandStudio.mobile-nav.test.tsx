@@ -266,10 +266,6 @@ const execState = vi.hoisted(() => {
     collapseLowLevel: vi.fn(),
     clearEvents: vi.fn(),
     setPreviewPreparing: vi.fn(),
-    setActiveTaskId: vi.fn(),
-    setTaskConversationIndex: vi.fn(),
-    taskConversationIndex: {},
-    taskPhases: {},
     reset: vi.fn(),
   };
   return { state };
@@ -330,23 +326,12 @@ vi.mock("../stores/useExecutionStore", () => {
 });
 
 vi.mock("../stores/useConversationStore", () => ({
-  // The real store is a zustand store: getState() is always available and
-  // component code (e.g. worktab binding) calls it outside render.
-  useConversationStore: Object.assign(
-    (selector: (s: Record<string, unknown>) => unknown) =>
-      selector({
-        conversations: [],
-        selectedConversationId: null,
-        selectConversation: vi.fn(),
-      }),
-    {
-      getState: () => ({
-        conversations: [],
-        selectedConversationId: null,
-        selectConversation: vi.fn(),
-      }),
-    },
-  ),
+  useConversationStore: (selector: (s: Record<string, unknown>) => unknown) =>
+    selector({
+      conversations: [],
+      selectedConversationId: null,
+      selectConversation: vi.fn(),
+    }),
 }));
 
 vi.mock("../lib/builder-command-router", () => ({
@@ -385,10 +370,6 @@ vi.mock("@/lib/canvas/types", () => ({ ArtifactAction: {} }));
 vi.mock("@/lib/litt-context", () => ({ parseJarvisActions: () => [] }));
 vi.mock("./canvas/ActionChips", () => ({ ActionChips: () => null }));
 vi.mock("@/components/chat/MessageAvatar", () => ({ UserMessageAvatar: () => <div /> }));
-
-vi.mock("./shell/StudioOperatorBar", () => ({
-  default: () => <div data-testid="studio-operator-bar" />,
-}));
 
 vi.mock("@/components/media/MediaUtilityDock", () => ({
   MediaUtilityDock: () => <div data-testid="media-utility-dock-mock" />,

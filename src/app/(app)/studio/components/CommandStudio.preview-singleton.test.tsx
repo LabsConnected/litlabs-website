@@ -280,10 +280,6 @@ const execState = vi.hoisted(() => {
     collapseLowLevel: vi.fn(),
     clearEvents: vi.fn(),
     setPreviewPreparing: vi.fn(),
-    setActiveTaskId: vi.fn(),
-    setTaskConversationIndex: vi.fn(),
-    taskConversationIndex: {},
-    taskPhases: {},
     reset: vi.fn(),
   };
   return { state };
@@ -350,23 +346,12 @@ vi.mock("../stores/useExecutionStore", () => {
 });
 
 vi.mock("../stores/useConversationStore", () => ({
-  // The real store is a zustand store: getState() is always available and
-  // component code (e.g. worktab binding) calls it outside render.
-  useConversationStore: Object.assign(
-    (selector: (s: Record<string, unknown>) => unknown) =>
-      selector({
-        conversations: [],
-        selectedConversationId: null,
-        selectConversation: vi.fn(),
-      }),
-    {
-      getState: () => ({
-        conversations: [],
-        selectedConversationId: null,
-        selectConversation: vi.fn(),
-      }),
-    },
-  ),
+  useConversationStore: (selector: (s: Record<string, unknown>) => unknown) =>
+    selector({
+      conversations: [],
+      selectedConversationId: null,
+      selectConversation: vi.fn(),
+    }),
 }));
 
 vi.mock("../lib/builder-command-router", () => ({
@@ -405,10 +390,6 @@ vi.mock("@/lib/canvas/types", () => ({ ArtifactAction: {} }));
 vi.mock("@/lib/litt-context", () => ({ parseJarvisActions: () => [] }));
 vi.mock("./canvas/ActionChips", () => ({ ActionChips: () => null }));
 vi.mock("@/components/chat/MessageAvatar", () => ({ UserMessageAvatar: () => <div /> }));
-
-vi.mock("./shell/StudioOperatorBar", () => ({
-  default: () => <div data-testid="studio-operator-bar" />,
-}));
 
 // The dock's Media tab renders MediaUtilityDock, which requires the
 // MediaHubProvider from the app layout (not present in this test mount).
@@ -454,9 +435,6 @@ describe("CommandStudio — canvas-first 2-zone layout", () => {
     sendMock.mockResolvedValue({ accepted: true });
     window.innerHeight = 844;
     try { localStorage.clear(); } catch { /* jsdom without storage */ }
-    // Classic shell — the default freeform canvas is a compositor without
-    // mounted panels; these assertions target the classic topology.
-    localStorage.setItem("litt:studio:layout-mode", "classic");
     Object.defineProperty(window, "visualViewport", {
       value: {
         width: 390,
@@ -516,30 +494,24 @@ describe("CommandStudio — canvas-first 2-zone layout", () => {
     const { user } = await renderCommandStudio();
     await settle();
 
-    // Drive to a known state: expanded. F1 workspace-first: expanding LiTT
-    // opens Slice B's floating overlay (no permanent column), not a column.
+    // Drive to a known state: expanded.
     if (screen.getByTestId("litt-panel").getAttribute("data-collapsed") === "true") {
       await user.click(screen.getByTestId("litt-hud-expand"));
       await settle();
     }
     expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
-    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-overlay", "true");
 
-    // Close the overlay — the canvas must stay mounted and take all
-    // remaining width. The overlay hides with display:none; the 64px rail
-    // returns in flow.
-    await user.click(screen.getByTestId("litt-panel-close"));
+    // Collapse — the canvas must stay mounted and take all remaining width.
+    await user.click(screen.getByTestId("litt-panel-collapse"));
     await settle();
     expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
-    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-overlay", "false");
     expect(screen.getByTestId("studio-center-workspace")).toBeTruthy();
     expect(screen.queryByTestId("permanent-preview-column")).toBeNull();
 
-    // Expand again — overlay returns, canvas still mounted.
+    // Expand again — chat returns, canvas still mounted.
     await user.click(screen.getByTestId("litt-hud-expand"));
     await settle();
     expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
-    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-overlay", "true");
     expect(screen.getByTestId("studio-center-workspace")).toBeTruthy();
   });
 
@@ -630,8 +602,6 @@ describe("CommandStudio — approval gate convergence", () => {
     execState.state.isRunning = false;
     execState.state.events = [];
     approvalWatch.onSettled = null;
-    // Classic shell — approval behavior lives in the panel chat there.
-    localStorage.setItem("litt:studio:layout-mode", "classic");
   });
 
   it("returns the LiTT panel to Chat when an approval gate settles without a local click", async () => {
@@ -735,13 +705,6 @@ describe("CommandStudio — approval gate convergence", () => {
     const { user } = await renderCommandStudio();
     await settle();
 
-    // F1 workspace-first: the panel opens on the 64px rail — expand it to
-    // the floating overlay so the Live tab's approval controls are visible.
-    if (screen.getByTestId("litt-panel").getAttribute("data-collapsed") === "true") {
-      await user.click(screen.getByTestId("litt-hud-expand"));
-      await settle();
-    }
-
     await user.click(screen.getByTestId("litt-tab-live"));
     await settle();
 
@@ -777,13 +740,6 @@ describe("CommandStudio — approval gate convergence", () => {
     const { user } = await renderCommandStudio();
     await settle();
 
-    // F1 workspace-first: the panel opens on the 64px rail — expand it to
-    // the floating overlay so the Live tab's approval controls are visible.
-    if (screen.getByTestId("litt-panel").getAttribute("data-collapsed") === "true") {
-      await user.click(screen.getByTestId("litt-hud-expand"));
-      await settle();
-    }
-
     await user.click(screen.getByTestId("litt-tab-live"));
     await settle();
     await user.click(screen.getByRole("button", { name: /^approve$/i }));
@@ -810,13 +766,6 @@ describe("CommandStudio — approval gate convergence", () => {
     ];
     const { user } = await renderCommandStudio();
     await settle();
-
-    // F1 workspace-first: the panel opens on the 64px rail — expand it to
-    // the floating overlay so the Live tab's approval controls are visible.
-    if (screen.getByTestId("litt-panel").getAttribute("data-collapsed") === "true") {
-      await user.click(screen.getByTestId("litt-hud-expand"));
-      await settle();
-    }
 
     await user.click(screen.getByTestId("litt-tab-live"));
     await settle();
@@ -865,13 +814,6 @@ describe("CommandStudio — approval gate convergence", () => {
     const { user } = await renderCommandStudio();
     await settle();
 
-    // F1 workspace-first: the panel opens on the 64px rail — expand it to
-    // the floating overlay so the Live tab's approval controls are visible.
-    if (screen.getByTestId("litt-panel").getAttribute("data-collapsed") === "true") {
-      await user.click(screen.getByTestId("litt-hud-expand"));
-      await settle();
-    }
-
     await user.click(screen.getByTestId("litt-tab-live"));
     await settle();
     await user.click(screen.getByRole("button", { name: /^approve$/i }));
@@ -913,7 +855,6 @@ describe("CommandStudio — mission panels live in the Activity dock", () => {
     capState.projectId = "project-1";
     capState.projectName = "Roast Site";
     sessionStorage.clear();
-    localStorage.setItem("litt:studio:layout-mode", "classic");
     window.innerHeight = 844;
     Object.defineProperty(window, "visualViewport", {
       value: {

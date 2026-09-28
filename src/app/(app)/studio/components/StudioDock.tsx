@@ -10,9 +10,10 @@
  *
  * Controlled by the parent: tab state, height, and open state all come in
  * as props; the dock owns only its view (collapsed/normal/maximized) and
- * syncs it with the `open` prop. All five tab content slots stay mounted
+ * syncs it with the `open` prop. All four tab content slots stay mounted
  * always; inactive ones render with display:none so the terminal PTY and
- * other tab state survive tab switches.
+ * other tab state survive tab switches. (The Inspector lives in the right
+ * column on desktop — see CommandStudio.)
  */
 
 import {
@@ -29,18 +30,14 @@ import {
   Maximize2,
   Minimize2,
   PanelBottom,
-  ScanSearch,
   SquareTerminal,
   X,
 } from "lucide-react";
-import { useStudioContextOptional } from "../context/StudioContext";
-import { SelectionInspectorPanel } from "./StudioInspector";
 
 export type StudioDockTab =
   | "activity"
   | "files"
   | "terminal"
-  | "inspector"
   | "media";
 
 export interface StudioDockProps {
@@ -56,7 +53,6 @@ export interface StudioDockProps {
   filesContent: ReactNode;
   /** Keep mounted always (PTY stays alive) — rendered with display:none when inactive */
   terminalContent: ReactNode;
-  inspectorContent: ReactNode;
   mediaContent: ReactNode;
   /** True while an agent run is in flight — pulses the Activity tab */
   activityPulse?: boolean;
@@ -84,7 +80,6 @@ const DOCK_TABS: {
   { id: "activity", label: "Activity", icon: Activity },
   { id: "files", label: "Files", icon: FolderOpen },
   { id: "terminal", label: "Terminal", icon: SquareTerminal },
-  { id: "inspector", label: "Inspector", icon: ScanSearch },
   { id: "media", label: "Media", icon: Clapperboard },
 ];
 
@@ -99,15 +94,10 @@ export default function StudioDock({
   activityContent,
   filesContent,
   terminalContent,
-  inspectorContent,
   mediaContent,
   activityPulse = false,
   terminalBadge = false,
 }: StudioDockProps) {
-  // F1 slice C — the inspector tab is contextual on the active Studio
-  // selection. Optional hook: the dock also renders in tests without a
-  // provider, where the selection is simply absent.
-  const studioSelection = useStudioContextOptional();
   // Internal view is the source of truth for rendering. The `open` prop
   // drives it only on CHANGES (tracked via prevOpen) so a parent that
   // updates its own state asynchronously can't clobber a tab-click that
@@ -246,25 +236,6 @@ export default function StudioDock({
     activity: activityContent,
     files: filesContent,
     terminal: terminalContent,
-    // F1 slice C — the Inspector tab is contextual: the active Studio
-    // selection (from StudioContext, any surface) renders above the
-    // parent-provided inspector content, with provenance, Ask LiTT /
-    // Reveal in Code actions, and a clear affordance. With no selection
-    // the panel shows an honest empty state — never fake content.
-    // useStudioContextOptional keeps the dock renderable outside a
-    // provider (tests, standalone mounts).
-    inspector: (
-      <div className="flex h-full min-h-0 flex-col">
-        <SelectionInspectorPanel
-          selection={studioSelection?.selection ?? null}
-          projectId={studioSelection?.projectId ?? null}
-          onClear={
-            studioSelection ? () => studioSelection.setSelection(null) : undefined
-          }
-        />
-        <div className="min-h-0 flex-1 overflow-y-auto">{inspectorContent}</div>
-      </div>
-    ),
     media: mediaContent,
   };
 

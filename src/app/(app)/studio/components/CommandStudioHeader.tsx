@@ -40,7 +40,7 @@ const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {
 };
 
 export type StudioTopBarMode = "plan" | "act" | "auto";
-export type StudioTopBarDockTab = "activity" | "files" | "terminal" | "inspector" | "media";
+export type StudioTopBarDockTab = "activity" | "files" | "terminal" | "media";
 
 const MODE_META: { id: StudioTopBarMode; label: string; desc: string; color: string; tint: string; border: string }[] = [
   { id: "plan", label: "PLAN", desc: "Inspect and explain; do not change files", color: "#3b82f6", tint: "rgba(59,130,246,0.12)", border: "rgba(59,130,246,0.35)" },
@@ -55,8 +55,8 @@ const MODE_META: { id: StudioTopBarMode; label: string; desc: string; color: str
  * truthful agent-status pill (idle / working / approval needed) · preview
  * quick action · dock toggle · overflow. The old 15-control header, the
  * permanent mode-description strip, and the separate Activity/Tools/
- * Terminal/Inspector buttons are gone — secondary surfaces live in the
- * dock. Visual redesign only: every behavior is preserved.
+ * Terminal buttons are gone — secondary surfaces live in the
+ * dock, and the Inspector lives in the right column. Visual redesign only: every behavior is preserved.
  *
  * No fake readiness or health is ever displayed.
  */
@@ -86,7 +86,7 @@ export default function CommandStudioHeader({
   onExecutionModeChange,
 }: {
   onPreviewAction?: () => void;
-  /** Toggles the bottom dock (Activity/Files/Terminal/Inspector/Media). */
+  /** Toggles the bottom dock (Activity/Files/Terminal/Media). */
   onToggleDockAction?: () => void;
   /** Opens the dock on a specific tab (used by the status popover + overflow menu). */
   onOpenDockTabAction?: (tab: StudioTopBarDockTab) => void;
@@ -351,7 +351,7 @@ export default function CommandStudioHeader({
         ) : null}
       </Link>
 
-      {/* Dock toggle — the single entry point to Activity/Files/Terminal/Inspector/Media */}
+      {/* Dock toggle — the single entry point to Activity/Files/Terminal/Media */}
       <button
         type="button"
         onClick={onToggleDockAction}
@@ -361,7 +361,7 @@ export default function CommandStudioHeader({
           color: dockOpen ? "var(--color-accent)" : "var(--text-secondary)",
           backgroundColor: dockOpen ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent",
         }}
-        title="Toggle the dock — activity, files, terminal, inspector, media"
+        title="Toggle the dock — activity, files, terminal, media"
         aria-label={dockOpen ? "Close dock" : "Open dock"}
         aria-pressed={dockOpen}
         data-testid="studio-dock-toggle"

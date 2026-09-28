@@ -16,7 +16,6 @@ function renderDock(overrides: Partial<React.ComponentProps<typeof StudioDock>> 
     activityContent: <div data-testid="activity-slot">activity</div>,
     filesContent: <div data-testid="files-slot">files</div>,
     terminalContent: <div data-testid="terminal-slot">terminal</div>,
-    inspectorContent: <div data-testid="inspector-slot">inspector</div>,
     mediaContent: <div data-testid="media-slot">media</div>,
     ...overrides,
   };
@@ -29,16 +28,19 @@ describe("StudioDock", () => {
     vi.clearAllMocks();
   });
 
-  it("renders all five tabs", () => {
+  it("renders all four tabs", () => {
     renderDock();
     expect(screen.getByTestId("studio-dock")).toBeDefined();
-    for (const id of ["activity", "files", "terminal", "inspector", "media"]) {
+    for (const id of ["activity", "files", "terminal", "media"]) {
       const tab = screen.getByTestId(`dock-tab-${id}`);
       expect(tab).toBeDefined();
       expect(tab.getAttribute("aria-selected")).toBe(
         id === "activity" ? "true" : "false",
       );
     }
+    // The inspector moved to the right column (chat-dock layout) — it is
+    // no longer a dock tab.
+    expect(screen.queryByTestId("dock-tab-inspector")).toBeNull();
   });
 
   it("clicking a tab calls onTabChange", () => {
@@ -140,7 +142,6 @@ describe("StudioDock", () => {
       "activity",
       "files",
       "terminal",
-      "inspector",
       "media",
     ];
     for (const tab of tabs) {
@@ -155,7 +156,7 @@ describe("StudioDock", () => {
 
   it("tab strip scrolls horizontally on narrow screens so all tabs stay reachable", () => {
     renderDock();
-    // The tablist wraps the tab buttons; at 390px the five labeled tabs
+    // The tablist wraps the tab buttons; at 390px the four labeled tabs
     // overflow, so the strip must scroll instead of clipping them.
     const tablist = screen.getByRole("tablist", { name: "Studio dock tabs" });
     expect(tablist.className).toMatch(/overflow-x-auto/);

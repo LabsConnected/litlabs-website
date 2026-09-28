@@ -284,38 +284,30 @@ vi.mock("../stores/useStudioModelStore", () => ({
     }),
 }));
 
-vi.mock("../stores/useExecutionStore", () => {
-  const state: Record<string, unknown> = {
-    events: [],
-    phase: "idle",
-    isRunning: false,
-    currentStep: 0,
-    pendingApproval: null,
-    checkpoint: null,
-    toolCalls: [],
-    changesSummary: null,
-    startRun: vi.fn(),
-    endRun: vi.fn(),
-    addEvent: vi.fn(),
-    setPhase: vi.fn(),
-    setPendingApproval: vi.fn(),
-    resolveApproval: vi.fn(),
-    setCheckpoint: vi.fn(),
-    collapseEvent: vi.fn(),
-    collapseLowLevel: vi.fn(),
-    clearEvents: vi.fn(),
-    setActiveTaskId: vi.fn(),
-    setTaskConversationIndex: vi.fn(),
-    taskConversationIndex: {},
-    taskPhases: {},
-    reset: vi.fn(),
-  };
-  const useExecutionStore = Object.assign(
-    (selector: (s: Record<string, unknown>) => unknown) => selector(state),
-    { getState: () => state },
-  );
-  return { useExecutionStore };
-});
+vi.mock("../stores/useExecutionStore", () => ({
+  useExecutionStore: (selector: (s: Record<string, unknown>) => unknown) =>
+    selector({
+      events: [],
+      phase: "idle",
+      isRunning: false,
+      currentStep: 0,
+      pendingApproval: null,
+      checkpoint: null,
+      toolCalls: [],
+      changesSummary: null,
+      startRun: vi.fn(),
+      endRun: vi.fn(),
+      addEvent: vi.fn(),
+      setPhase: vi.fn(),
+      setPendingApproval: vi.fn(),
+      resolveApproval: vi.fn(),
+      setCheckpoint: vi.fn(),
+      collapseEvent: vi.fn(),
+      collapseLowLevel: vi.fn(),
+      clearEvents: vi.fn(),
+      reset: vi.fn(),
+    }),
+}));
 
 vi.mock("../stores/useConversationStore", () => ({
   useConversationStore: (selector: (s: Record<string, unknown>) => unknown) =>
@@ -434,9 +426,6 @@ vi.mock("next/dynamic", async () => {
 // ownership bugs inside those exact components (uncontrolled tab state,
 // unmount-on-collapse, mic truthfulness) — mocking them away would hide
 // regressions instead of catching them.
-vi.mock("./shell/StudioOperatorBar", () => ({
-  default: () => <div data-testid="studio-operator-bar" />,
-}));
 
 // jsdom polyfill
 if (!Element.prototype.scrollTo) {
@@ -470,10 +459,6 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     // The dock persists open/tab/height in sessionStorage (intentional
     // product behavior); clear it so each test starts from a closed dock.
     sessionStorage.clear();
-    // These suites assert the classic shell topology (panel + dock +
-    // workspace tabs). The default layout is now the freeform canvas
-    // compositor — pin classic so the assertions stay meaningful.
-    localStorage.setItem("litt:studio:layout-mode", "classic");
     window.innerHeight = 844;
     Object.defineProperty(window, "visualViewport", {
       value: {
@@ -778,23 +763,22 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       await waitFor(() => expectBuilderSurfaceActive());
     });
 
-    it("opening and closing the Inspector dock tab does not leave Builder", async () => {
+    it("opening and closing the Inspector column does not leave Builder", async () => {
       setUrl("tool=build");
+      localStorage.setItem("littree:studio:inspector-open", "true");
       const view = await renderCommandStudio();
       expectBuilderSurfaceActive();
       const user = userEvent.setup();
-      // The dock is an overlay — Inspector opens inside it without
+      // The inspector opens as a right column — not a dock tab — without
       // touching the active Builder surface or the canonical URL.
-      await user.click(screen.getByTestId("dock-collapsed-toggle"));
-      await user.click(screen.getByTestId("dock-tab-inspector"));
-      expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "true");
-      expect(screen.getByTestId("dock-tab-inspector")).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByTestId("studio-inspector-column")).toBeTruthy();
       expectBuilderSurfaceActive();
-      await user.click(screen.getByTestId("dock-close"));
-      expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "false");
+      await user.click(screen.getByTestId("inspector-column-close"));
+      expect(screen.queryByTestId("studio-inspector-column")).toBeNull();
       act(() => view.rerender(<CommandStudio />));
       expectBuilderSurfaceActive();
       expect(currentTool()).toBe("build");
+      localStorage.removeItem("littree:studio:inspector-open");
     });
 
     it("closing the dock chrome does not eject the Builder surface", async () => {
@@ -1252,11 +1236,12 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       // Open on Files
       await user.click(screen.getByTestId("dock-tab-files"));
       expect(screen.getByTestId("dock-tab-files")).toHaveAttribute("aria-selected", "true");
-      // Switch to Inspector inside the dock
-      await user.click(screen.getByTestId("dock-tab-inspector"));
-      expect(screen.getByTestId("dock-tab-inspector")).toHaveAttribute("aria-selected", "true");
+      // Switch to Terminal inside the dock (the inspector is no longer a
+      // dock tab — it lives in the right column)
+      await user.click(screen.getByTestId("dock-tab-terminal"));
+      expect(screen.getByTestId("dock-tab-terminal")).toHaveAttribute("aria-selected", "true");
       expect(screen.getByTestId("dock-tab-files")).toHaveAttribute("aria-selected", "false");
-      expect(screen.getByTestId("dock-content-inspector")).toBeTruthy();
+      expect(screen.getByTestId("dock-content-terminal")).toBeTruthy();
     });
 
     it("clicking a dock tab on the collapsed strip opens the dock on that tab", async () => {
@@ -1361,14 +1346,15 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.queryByTestId("mobile-build-status")).toBeNull();
     });
 
-    it("laptop tier defaults to the collapsed LiTT rail when no preference is stored", async () => {
-      // F1 workspace-first: LiTT opens on the 64px ambient HUD rail (no
-      // permanent desktop column) unless the user has an explicit persisted
-      // preference. Expanding opens the floating overlay panel.
+    it("laptop tier defaults to expanded LiTT when no preference is stored", async () => {
+      // LiTT now defaults expanded on ALL desktop/laptop tiers (>=1024px)
+      // unless the user has an explicit persisted collapse preference.
+      // The old laptop-only auto-collapse was removed because it hid the
+      // chat behind a 64px strip for first-time users.
       globalThis.__TEST_VIEWPORT_WIDTH__ = 1200;
       await renderCommandStudio();
       await waitFor(() => {
-        expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
+        expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
       });
     });
 
@@ -1381,12 +1367,11 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       });
     });
 
-    it("desktop tier (>=1440px) defaults to the collapsed LiTT rail when no preference is stored", async () => {
-      // F1 workspace-first: same collapsed-rail default on desktop.
+    it("desktop tier (>=1440px) defaults to expanded LiTT when no preference is stored", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
       await renderCommandStudio();
       await waitFor(() => {
-        expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
+        expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
       });
     });
 
@@ -1460,6 +1445,88 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       await renderCommandStudio();
       expect(localStorage.getItem("littree:studio:side-panel")).toBeNull();
       expect(localStorage.getItem("littree:studio:activity-rail-open")).toBeNull();
+    });
+  });
+
+  describe("chat-dock layout (left/bottom dock + right inspector column)", () => {
+    beforeEach(() => {
+      // Desktop tier (>=1024px): the left panel / bottom strip / inspector
+      // column render here. (An earlier test in this file sets 500.)
+      globalThis.__TEST_VIEWPORT_WIDTH__ = 1440;
+      localStorage.removeItem("littree:studio:chat-dock");
+      localStorage.removeItem("littree:studio:inspector-open");
+    });
+
+    it("defaults the chat to the left panel with the inspector column hidden", async () => {
+      await renderCommandStudio();
+      // Left panel rendered with the dock switcher in its tab header
+      expect(screen.getByTestId("litt-panel")).toBeTruthy();
+      expect(screen.getByTestId("chat-dock-switcher")).toBeTruthy();
+      expect(screen.getByTestId("chat-dock-left").getAttribute("aria-pressed")).toBe("true");
+      // No bottom strip in left-dock mode
+      expect(screen.queryByTestId("litt-bottom-dock")).toBeNull();
+      // Inspector column hidden by default
+      expect(screen.queryByTestId("studio-inspector-column")).toBeNull();
+      // Exactly one composer — the single-composer-instance invariant
+      expect(screen.getAllByTestId("studio-command-composer")).toHaveLength(1);
+    });
+
+    it("switching to the bottom dock MOVES the chat (single composer, preference persisted)", async () => {
+      const { user } = await renderCommandStudio();
+      await user.click(screen.getByTestId("chat-dock-bottom"));
+      // Bottom strip appears, left panel unmounts
+      expect(screen.getByTestId("litt-bottom-dock")).toBeTruthy();
+      expect(screen.queryByTestId("litt-panel")).toBeNull();
+      // The composer moved — not duplicated
+      expect(screen.getAllByTestId("studio-command-composer")).toHaveLength(1);
+      // The strip also carries the switcher so the user can switch back
+      expect(screen.getByTestId("litt-bottom-dock").querySelector('[data-testid="chat-dock-switcher"]')).toBeTruthy();
+      expect(localStorage.getItem("littree:studio:chat-dock")).toBe("bottom");
+
+      // Switch back to left
+      await user.click(screen.getByTestId("chat-dock-left"));
+      expect(screen.getByTestId("litt-panel")).toBeTruthy();
+      expect(screen.queryByTestId("litt-bottom-dock")).toBeNull();
+      expect(screen.getAllByTestId("studio-command-composer")).toHaveLength(1);
+      expect(localStorage.getItem("littree:studio:chat-dock")).toBe("left");
+    });
+
+    it("restores the bottom dock from a persisted preference", async () => {
+      localStorage.setItem("littree:studio:chat-dock", "bottom");
+      await renderCommandStudio();
+      expect(screen.getByTestId("litt-bottom-dock")).toBeTruthy();
+      expect(screen.queryByTestId("litt-panel")).toBeNull();
+      expect(screen.getAllByTestId("studio-command-composer")).toHaveLength(1);
+    });
+
+    it("falls back to the left panel for an invalid persisted dock value", async () => {
+      localStorage.setItem("littree:studio:chat-dock", "sideways");
+      await renderCommandStudio();
+      expect(screen.getByTestId("litt-panel")).toBeTruthy();
+      expect(screen.queryByTestId("litt-bottom-dock")).toBeNull();
+    });
+
+    it("opens the right inspector column from a persisted preference and closes it", async () => {
+      localStorage.setItem("littree:studio:inspector-open", "true");
+      const { user } = await renderCommandStudio();
+      expect(screen.getByTestId("studio-inspector-column")).toBeTruthy();
+      // The left chat panel stays visible alongside the inspector
+      expect(screen.getByTestId("litt-panel")).toBeTruthy();
+
+      await user.click(screen.getByTestId("inspector-column-close"));
+      expect(screen.queryByTestId("studio-inspector-column")).toBeNull();
+      expect(localStorage.getItem("littree:studio:inspector-open")).toBe("false");
+    });
+
+    it("no longer offers an inspector tab in the bottom dock", async () => {
+      const { user } = await renderCommandStudio();
+      await user.click(screen.getByTestId("studio-dock-toggle"));
+      expect(screen.getByTestId("studio-dock")).toBeTruthy();
+      expect(screen.queryByTestId("dock-tab-inspector")).toBeNull();
+      // The remaining tabs are still there
+      for (const id of ["activity", "files", "terminal", "media"]) {
+        expect(screen.getByTestId(`dock-tab-${id}`), `dock tab ${id}`).toBeTruthy();
+      }
     });
   });
 });
