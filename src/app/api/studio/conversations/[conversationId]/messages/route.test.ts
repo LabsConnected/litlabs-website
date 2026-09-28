@@ -429,7 +429,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         previewUrl: "https://preview.example.com",
         productionUrl: null,
         finalText: "I built your landing page.",
-        agentLoopResult: { stepsUsed: 1, toolCalls: [], cancelled: false, pendingApproval: null } as any,
+        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }], cancelled: false, pendingApproval: null } as any,
         cancelled: false,
         totalDurationMs: 100,
       } as any;
@@ -508,7 +508,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         previewUrl: "https://preview.example.com",
         productionUrl: null,
         finalText: "Built after disconnect.",
-        agentLoopResult: { stepsUsed: 1, toolCalls: [], cancelled: false, pendingApproval: null } as any,
+        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }], cancelled: false, pendingApproval: null } as any,
         cancelled: false,
         totalDurationMs: 60,
       } as any;
@@ -715,7 +715,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         previewUrl: "https://preview.example.com",
         productionUrl: null,
         finalText: "Done after downstream cancel.",
-        agentLoopResult: { stepsUsed: 1, toolCalls: [], cancelled: false, pendingApproval: null } as any,
+        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.read", success: true, summary: "read index.html", mutating: false }], cancelled: false, pendingApproval: null } as any,
         cancelled: false,
         totalDurationMs: 100,
       } as any;
@@ -1085,7 +1085,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
       expect.any(String),
       "user_123",
       "failed",
-      "",
+      "I couldn't complete the requested change: no file operations were performed, so nothing was modified. Please try again.",
     );
     expect(getActiveExecution("conv-123")).toBeNull();
   });
@@ -1107,7 +1107,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
       previewUrl: null,
       productionUrl: null,
       finalText: "Recovered answer.",
-      agentLoopResult: { stepsUsed: 1, toolCalls: [], cancelled: false, pendingApproval: null } as any,
+      agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.read", success: true, summary: "read index.html", mutating: false }], cancelled: false, pendingApproval: null } as any,
       cancelled: false,
       totalDurationMs: 50,
     } as any);
