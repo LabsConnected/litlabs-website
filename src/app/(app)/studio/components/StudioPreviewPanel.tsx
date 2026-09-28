@@ -71,7 +71,7 @@ const STATUS_DOT_COLOR: Record<PreviewState, string> = {
  * single honest "Preparing preview…" state instead of inventing stages.
  */
 type StartPhase = "provision" | "devserver" | null;
-const START_STAGES = ["Provision", "Dev server", "Health check"] as const;
+const START_STAGES = ["Provision", "Dev server"] as const;
 
 function deriveStartPhase(state: PreviewState, workspaceStatus: string | null, runtimeStatusRaw: string | null): StartPhase {
   if (state !== "starting" && state !== "restarting") return null;
@@ -1105,22 +1105,63 @@ export default function StudioPreviewPanel({
             />
           </div>
         ) : (
-          <div className="flex min-h-[200px] flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
+          <div
+            className="flex min-h-[280px] flex-1 flex-col items-center justify-center gap-4 px-6 text-center"
+            style={{
+              backgroundImage: "radial-gradient(ellipse 60% 50% at 50% 40%, rgba(168,255,47,0.04), transparent)",
+            }}
+          >
             <div
-              className="grid h-10 w-10 place-items-center rounded-xl"
+              className="grid h-12 w-12 place-items-center rounded-2xl"
               style={{
-                backgroundColor: state === "failed" ? "rgba(239,68,68,0.08)" : "rgba(114,242,56,0.08)",
+                backgroundColor: state === "failed" ? "rgba(239,68,68,0.1)" : "color-mix(in srgb, var(--color-accent) 10%, transparent)",
                 color: state === "failed" ? "#EF4444" : "var(--litt-primary)",
+                border: `1px solid ${state === "failed" ? "rgba(239,68,68,0.2)" : "color-mix(in srgb, var(--color-accent) 20%, transparent)"}`,
+                boxShadow: state === "failed" ? "0 0 24px rgba(239,68,68,0.1)" : "0 0 24px rgba(168,255,47,0.08)",
               }}
             >
               {state === "loading" || state === "starting" || state === "restarting" ? (
-                <Loader2 size={18} className="animate-spin" />
+                <Loader2 size={20} className="animate-spin" />
               ) : (
-                <Eye size={18} />
+                <Eye size={20} />
               )}
             </div>
-            <div className="text-[11px] font-bold" style={{ color: "var(--text-primary)" }}>{label}</div>
-            <div className="max-w-[220px] text-[10px] leading-4" style={{ color: "var(--text-muted)" }}>{detail}</div>
+            <div>
+              <div className="text-sm font-extrabold tracking-tight" style={{ color: "var(--text-primary)" }}>{label}</div>
+              <div className="mx-auto mt-1.5 max-w-[280px] text-xs leading-5" style={{ color: "var(--text-muted)" }}>{detail}</div>
+            </div>
+            {/* Staged loading — show honest progress while the preview starts. */}
+            {(state === "starting" || state === "restarting") && startPhase && (
+              <div className="flex items-center gap-2" data-testid="preview-start-stages" aria-label="Preview startup progress">
+                {START_STAGES.map((stageName) => {
+                  const stageKey = stageName === "Provision" ? "provision" : "devserver";
+                  const isCurrent = startPhase === stageKey || (startPhase === "devserver" && stageKey === "provision");
+                  const isDone = startPhase === "devserver" && stageKey === "provision";
+                  return (
+                    <div key={stageName} className="flex items-center gap-1.5">
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${isCurrent && !isDone ? "animate-pulse" : ""}`}
+                        style={{
+                          backgroundColor: isDone
+                            ? "var(--litt-primary)"
+                            : isCurrent
+                              ? "#e3b341"
+                              : "var(--text-muted)",
+                          opacity: isDone || isCurrent ? 1 : 0.4,
+                        }}
+                        aria-hidden
+                      />
+                      <span
+                        className="text-[10px] font-bold"
+                        style={{ color: isDone || isCurrent ? "var(--text-primary)" : "var(--text-muted)" }}
+                      >
+                        {stageName}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             {/* Retry button for unreachable/failed states. not_started is
                 handled by auto-start — no manual button needed. */}
             {["unreachable", "failed"].includes(state) && (
@@ -1129,11 +1170,15 @@ export default function StudioPreviewPanel({
                   type="button"
                   onClick={() => void preparePreview()}
                   disabled={!projectId || state === "starting" || state === "restarting"}
-                  className="flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-[10px] font-bold disabled:opacity-40"
-                  style={{ backgroundColor: "var(--litt-primary)", color: "#000" }}
+                  className="flex min-h-10 items-center gap-2 rounded-xl px-4 text-xs font-extrabold transition-all hover:-translate-y-0.5 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
+                  style={{
+                    backgroundColor: "var(--litt-primary)",
+                    color: "#000",
+                    boxShadow: "0 8px 24px rgba(168,255,47,0.2)",
+                  }}
                   data-testid="preview-prepare"
                 >
-                  <RotateCcw size={11} className="pointer-events-none" />
+                  <RotateCcw size={12} className="pointer-events-none" />
                   {state === "failed" ? "Restart preview" : "Retry"}
                 </button>
                 {/* Auth-config failure → the fix is the project's Clerk keys.

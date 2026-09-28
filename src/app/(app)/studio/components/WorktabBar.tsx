@@ -108,7 +108,7 @@ export default function WorktabBar({
       className="glass-shell flex h-9 shrink-0 items-center gap-1 overflow-x-auto overflow-y-hidden border-b px-2"
       style={{
         backgroundColor: "rgba(13,9,22,0.85)",
-        borderColor: "rgba(155,77,255,0.1)",
+        borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)",
         scrollbarWidth: "thin",
       }}
       role="tablist"
@@ -124,12 +124,12 @@ export default function WorktabBar({
             aria-selected={isActive}
             data-testid={`worktab-${tab.id}`}
             className="flex max-w-[180px] shrink-0 items-center gap-0.5 rounded-md"
-            style={isActive ? { backgroundColor: "var(--purple-soft)" } : undefined}
+            style={isActive ? { backgroundColor: "color-mix(in srgb, var(--color-accent) 14%, transparent)" } : undefined}
           >
             <button
               type="button"
               onClick={() => onSwitch(tab.id)}
-              className="flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] font-semibold transition-colors"
+              className="flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)]"
               style={{ color: isActive ? "var(--text-main)" : "var(--text-dim)" }}
               aria-label={`Switch to ${tab.title}`}
               title={tab.title}
