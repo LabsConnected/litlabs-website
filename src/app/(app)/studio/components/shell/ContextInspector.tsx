@@ -72,7 +72,7 @@ export default function ContextInspector({
     <aside
       aria-label="Inspector"
       data-testid="studio-context-inspector"
-      className="glass-shell flex w-[300px] shrink-0 flex-col border-l xl:w-[340px]"
+      className="glass-shell flex w-[300px] shrink-0 flex-col border-l xl:w-[320px]"
       style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", backgroundColor: "rgba(13,9,22,0.85)" }}
     >
       <div
