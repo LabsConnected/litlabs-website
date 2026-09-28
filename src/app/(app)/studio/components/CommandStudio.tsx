@@ -66,7 +66,6 @@ import StudioShell from "./shell/StudioShell";
 import WorkspaceRail from "./shell/WorkspaceRail";
 import ContextInspector from "./shell/ContextInspector";
 import LiTTCommandLayer from "./shell/LiTTCommandLayer";
-import ResizeHandle from "./shell/ResizeHandle";
 import StudioDeploySurface from "./shell/StudioDeploySurface";
 import StudioOperatorBar from "./shell/StudioOperatorBar";
 import ElementInspectorPanel from "./shell/ElementInspectorPanel";
@@ -531,18 +530,6 @@ function CommandStudioContent() {
   // overrides an explicit stored user preference.
   const LITT_COLLAPSED_KEY = "littree:studio:litt-collapsed";
 
-  // Whether the user has an explicit stored collapse preference — captured
-  // once at init (constant state) so the mount-time persistence write below
-  // can't race the shell first-run default.
-  const [littCollapsedHadStoredPref] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    try {
-      return localStorage.getItem(LITT_COLLAPSED_KEY) !== null;
-    } catch {
-      return false;
-    }
-  });
-
   const [littCollapsed, setLittCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return true;
     try {
@@ -561,26 +548,6 @@ function CommandStudioContent() {
       // ignore
     }
   }, [littCollapsed]);
-
-  // Chat dock position — "left" (persistent left panel, 360px default) or
-  // "bottom" (today's bottom command layer). Default "left" per the spec;
-  // any stored value other than "bottom" falls back to "left".
-  const CHAT_DOCK_KEY = "littree:studio:chat-dock";
-  const [chatDock, setChatDock] = useState<"left" | "bottom">(() => {
-    if (typeof window === "undefined") return "left";
-    try {
-      return localStorage.getItem(CHAT_DOCK_KEY) === "bottom" ? "bottom" : "left";
-    } catch {
-      return "left";
-    }
-  });
-  useEffect(() => {
-    try {
-      localStorage.setItem(CHAT_DOCK_KEY, chatDock);
-    } catch {
-      // ignore
-    }
-  }, [chatDock]);
 
   // Canonical LiTT active tab — single source of truth shared by the
   // desktop rail, the mobile sheet, and header/activity actions.
@@ -615,40 +582,9 @@ function CommandStudioContent() {
     // No auto-collapse — expanded by default on all desktop tiers.
   }, [viewportTier]);
 
-  // Shell first-run default: the left chat dock is persistent per the
-  // spec, so it opens EXPANDED on first run in the shell path. A stored
-  // explicit preference always wins (captured at init — the persistence
-  // effect below writes on mount, so localStorage can't be re-read here).
-  // The legacy (non-shell) path keeps its own collapsed-first-run default.
-  const shellDockDefaultAppliedRef = useRef(false);
-  useEffect(() => {
-    if (shellDockDefaultAppliedRef.current) return;
-    if (viewportTier === null) return;
-    shellDockDefaultAppliedRef.current = true;
-    if (!studioShellActive) return;
-    if (!littCollapsedHadStoredPref) setLittCollapsed(false);
-  }, [viewportTier, studioShellActive, littCollapsedHadStoredPref]);
-
-  // Esc collapses the left dock — parity with the bottom command layer's
-  // Esc behavior. Skipped while typing in an input/textarea/contenteditable.
-  useEffect(() => {
-    if (!studioShellActive || chatDock !== "left" || littCollapsed) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      const target = e.target as HTMLElement | null;
-      if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable) return;
-      setLittCollapsed(true);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [studioShellActive, chatDock, littCollapsed]);
-
   // Resizable pane widths — persisted to localStorage, clamped to min/max.
   // LiTT chat is the PRIMARY surface — wide default (520px) so the
   // conversation has room to breathe. Range 420–640px.
-  // NOTE: littResize feeds the LEGACY overlay panel only — it is never
-  // touched by the shell dock. The shell dock has its own width state
-  // below (littDockResize) under a separate storage key.
   const littResize = useResizableWidth({
     storageKey: "littree:studio:litt-width",
     defaultWidth: 520,
@@ -656,33 +592,6 @@ function CommandStudioContent() {
     maxWidth: 640,
     direction: "left",
   });
-  // Shell left-dock width — 360px default, clamped 300–500px, persisted
-  // under its own key so the legacy panel sizing is unaffected.
-  const littDockResize = useResizableWidth({
-    storageKey: "littree:studio:litt-dock-width",
-    defaultWidth: 360,
-    minWidth: 300,
-    maxWidth: 500,
-    direction: "left",
-  });
-
-  // Keyboard resize for the left-dock handle: ResizeHandle dispatches
-  // "studio:resize-keyboard" on ArrowLeft/ArrowRight. Scoped to the dock
-  // handle via its testid so other resize handles are unaffected.
-  const dockSetWidth = littDockResize.setWidth;
-  const dockWidth = littDockResize.width;
-  useEffect(() => {
-    if (chatDock !== "left") return;
-    const onResizeKey = (e: Event) => {
-      const active = document.activeElement;
-      if (!(active instanceof HTMLElement) || active.getAttribute("data-testid") !== "litt-dock-resize") return;
-      const delta = (e as CustomEvent).detail?.delta;
-      if (typeof delta !== "number") return;
-      dockSetWidth(dockWidth + delta);
-    };
-    window.addEventListener("studio:resize-keyboard", onResizeKey as EventListener);
-    return () => window.removeEventListener("studio:resize-keyboard", onResizeKey as EventListener);
-  }, [chatDock, dockSetWidth, dockWidth]);
   // Context Drawer: 280–480px open, 0px closed (closed handled by `open` prop).
   // Phase 1: repositioned left-of-center, narrower default (~210px) to act
   // as the contextual secondary panel beside the nav rail.
@@ -797,13 +706,8 @@ function CommandStudioContent() {
       if (isMobileLitt) {
         setMobileLittOpen(true);
       } else if (studioShellActive) {
-        // Shell: Ask LiTT reveals the chat — the left dock panel in
-        // left-dock mode, the bottom command layer in bottom-dock mode.
-        if (chatDock === "left") {
-          setLittCollapsed(false);
-        } else {
-          setLittExpanded(true);
-        }
+        // Shell: Ask LiTT expands the bottom command layer.
+        setLittExpanded(true);
       } else {
         setLittCollapsed(false);
       }
@@ -829,7 +733,7 @@ function CommandStudioContent() {
     };
     window.addEventListener("studio:ask-litt", handler);
     return () => window.removeEventListener("studio:ask-litt", handler);
-  }, [isMobileLitt, setWorktabSelection, studioShellActive, chatDock]);
+  }, [isMobileLitt, setWorktabSelection, studioShellActive]);
 
   // Canvas ActionPanel events — the studio.* ArtifactActions execute
   // client-side: executeAction dispatches these DOM events and the owning
@@ -2480,48 +2384,6 @@ function CommandStudioContent() {
     />
   );
 
-  // The run-state strip (StudioOperatorBar) — shared VERBATIM between the
-  // bottom command layer and the left dock panel. Pure relocation: no
-  // logic, handler, or prop changes. Approval behavior is owned by the
-  // separate approval-fix lane.
-  const operatorBar = (
-    <StudioOperatorBar
-      onOpenTerminal={() => openStageSurface("terminal")}
-      onOpenActivity={() => openStageSurface("activity")}
-      onRollback={handleRollback}
-      onStop={() => {
-        conversation.cancel();
-        useExecutionStore.getState().endRun("cancelled");
-      }}
-      onResolveApproval={handleResolveApproval}
-      terminalStatus={capabilities.terminalStatus}
-      modelLabel={modelLabel}
-    />
-  );
-
-  // Left-dock chat column: transcript (scrolls) + operator bar + composer
-  // pinned to the panel bottom. littTranscript (which already contains the
-  // in-conversation ApprovalCard) and littComposer move as whole elements —
-  // nothing inside them is edited here.
-  const littLeftPanelContent = (
-    <>
-      <div
-        className="flex min-h-0 flex-1 flex-col overflow-hidden"
-        data-testid="litt-dock-transcript"
-      >
-        {littTranscript}
-      </div>
-      {operatorBar}
-      <div
-        className="shrink-0 border-t px-1 pb-1 pt-1"
-        style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)" }}
-        data-testid="litt-dock-composer"
-      >
-        {littComposer}
-      </div>
-    </>
-  );
-
   // ── Stage surface content — the shell's central Stage renders the
   // active workspace surface for the active task. Visited surfaces stay
   // mounted (hidden) so preview iframes, PTY sessions, files, and canvas
@@ -2902,52 +2764,29 @@ function CommandStudioContent() {
                 }
               />
             }
-            leftPanel={
-              chatDock === "left" ? (
-                <LiTTPanel
-                  overlay={false}
-                  collapsed={littCollapsed}
-                  onCollapse={() => setLittCollapsed(true)}
-                  onExpand={() => setLittCollapsed(false)}
-                  activeTab={littActiveTab}
-                  onTabChange={setLittActiveTab}
-                  voiceConnected={liveSession.isLive}
-                  microphoneStatus={liveSession.indicators.microphone}
-                  chatContent={littLeftPanelContent}
-                  liveContent={littLiveContent}
-                  expandedWidth={littDockResize.width}
-                  expandedMaxWidth="500px"
-                  dockPosition="left"
-                  onDockPositionChange={setChatDock}
-                />
-              ) : null
-            }
-            dockHandle={
-              chatDock === "left" && !littCollapsed ? (
-                <ResizeHandle
-                  onDragStart={littDockResize.onDragStart}
-                  onReset={littDockResize.reset}
-                  isDragging={littDockResize.isDragging}
-                  direction="left"
-                  ariaLabel="Resize LiTT chat panel"
-                  testId="litt-dock-resize"
-                />
-              ) : null
-            }
             littLayer={
-              chatDock === "left" ? null : (
-                <LiTTCommandLayer
-                  storageKey={capabilities.projectId ?? "default"}
-                  busy={conversation.busy}
-                  expanded={littExpanded}
-                  onExpandedChange={setLittExpanded}
-                  transcript={littTranscript}
-                  composer={littComposer}
-                  statusBar={operatorBar}
-                  dockPosition="bottom"
-                  onDockPositionChange={setChatDock}
-                />
-              )
+              <LiTTCommandLayer
+                storageKey={capabilities.projectId ?? "default"}
+                busy={conversation.busy}
+                expanded={littExpanded}
+                onExpandedChange={setLittExpanded}
+                transcript={littTranscript}
+                composer={littComposer}
+                statusBar={
+                  <StudioOperatorBar
+                    onOpenTerminal={() => openStageSurface("terminal")}
+                    onOpenActivity={() => openStageSurface("activity")}
+                    onRollback={handleRollback}
+                    onStop={() => {
+                      conversation.cancel();
+                      useExecutionStore.getState().endRun("cancelled");
+                    }}
+                    onResolveApproval={handleResolveApproval}
+                    terminalStatus={capabilities.terminalStatus}
+                    modelLabel={modelLabel}
+                  />
+                }
+              />
             }
           />
         ) : (

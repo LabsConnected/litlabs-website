@@ -35,7 +35,6 @@ import type { ReactNode } from "react";
 import { MessageSquare, Activity, PanelLeftClose, X } from "lucide-react";
 import { BrandLogo } from "@/components/branding/BrandLogo";
 import LiTTAmbientHUD from "./litt/LiTTAmbientHUD";
-import ChatDockSwitcher, { type ChatDockPosition } from "./ChatDockSwitcher";
 import type { DeviceStatus } from "@/lib/litt/live/types";
 
 export type LiTTTab = "chat" | "live";
@@ -64,19 +63,6 @@ interface LiTTPanelProps {
   microphoneStatus?: DeviceStatus;
   /** Expanded width in pixels (controlled by parent via useResizableWidth) */
   expandedWidth?: number;
-  /**
-   * Max width clamp for the expanded panel (CSS length). Defaults to the
-   * legacy "min(640px, 26vw)". The left chat dock passes "500px" so the
-   * spec's 300–500px range is reachable at common desktop viewports.
-   */
-  expandedMaxWidth?: string;
-  /**
-   * Chat dock position — when provided (with onDockPositionChange), the
-   * tab header renders the Left/Bottom dock switcher. The legacy path
-   * does not pass these, so its header is unchanged.
-   */
-  dockPosition?: ChatDockPosition;
-  onDockPositionChange?: (position: ChatDockPosition) => void;
 }
 
 export default function LiTTPanel({
@@ -91,9 +77,6 @@ export default function LiTTPanel({
   voiceConnected,
   microphoneStatus,
   expandedWidth = 320,
-  expandedMaxWidth,
-  dockPosition,
-  onDockPositionChange,
 }: LiTTPanelProps) {
   return (
     <aside
@@ -119,7 +102,7 @@ export default function LiTTPanel({
                 "0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(168,255,47,0.08), 0 8px 32px rgba(0,0,0,0.5)",
             }
           : {
-              width: collapsed ? 64 : `clamp(300px, ${expandedWidth}px, ${expandedMaxWidth ?? "min(640px, 26vw)"})`,
+              width: collapsed ? 64 : `clamp(300px, ${expandedWidth}px, min(640px, 26vw))`,
               minWidth: collapsed ? 64 : 280,
               maxWidth: collapsed ? 64 : "36vw",
               backgroundColor: "#0d0916",
@@ -190,9 +173,6 @@ export default function LiTTPanel({
             Activity
           </button>
           <div className="flex-1" />
-          {dockPosition && onDockPositionChange && (
-            <ChatDockSwitcher position={dockPosition} onChange={onDockPositionChange} />
-          )}
           {overlay ? (
             <button
               type="button"
