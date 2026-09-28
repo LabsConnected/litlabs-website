@@ -1,5 +1,6 @@
 "use client";
 
+import RunChangesPanel from "./RunChangesPanel";
 import { useEffect, useRef, useState } from "react";
 import {
   PanelRightClose,
@@ -298,7 +299,6 @@ function InspectorSection({ title, children }: { title: string; children: React.
 
 function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspectorData }) {
   const { capabilities, messages } = data;
-  const lastMessage = messages[messages.length - 1];
 
   if (tab === "files") {
     return (
@@ -333,23 +333,14 @@ function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspec
   }
 
   if (tab === "changes") {
+    // Real workspace state: the latest run's persisted checkpoints, file
+    // list, readable diff, and Accept / Revert.
     return (
-      <div className="space-y-4">
-        <InspectorSection title="Current surface">
-          <InspectorRow label="Destination" value={data.destination} />
-          <InspectorRow label="Surface" value={data.surface} />
-          <InspectorRow label="Messages" value={String(messages.length)} />
-          <InspectorRow label="Latest state" value={lastMessage?.status ?? "No messages yet"} tone={lastMessage?.status === "failed" ? "warn" : lastMessage ? "ok" : "muted"} />
-        </InspectorSection>
-        <InspectorSection title="Repository scope">
-          <InspectorRow label="GitHub" value={describeSourceRows(capabilities).github} tone={capabilities.repositoryName ? "ok" : "muted"} />
-          <InspectorRow label="Branch" value={describeSourceRows(capabilities).branch} />
-          <InspectorRow label="Index" value={capabilities.repositoryIndexed ? "Indexed" : "Not indexed"} tone={capabilities.repositoryIndexed ? "ok" : "muted"} />
-        </InspectorSection>
-        <div className="rounded-xl border px-3 py-2.5 text-[10px] leading-4" style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(114,242,56,0.04)", color: "var(--text-muted)" }}>
-          File-level changes will appear here when a project write or checkpoint is available. The imported prototype showed sample files; this panel only reports real workspace state.
-        </div>
-      </div>
+      <RunChangesPanel
+        projectId={capabilities.projectId}
+        busy={data.busy}
+        refreshKey={data.workspaceRevision}
+      />
     );
   }
 
@@ -579,7 +570,7 @@ export function StudioActivityPanel({
         </div>
       )}
       <div className="flex items-center justify-between px-1 text-[9px]" style={{ color: "var(--text-muted)" }}>
-        <span>Terminal: {terminalStatus}</span>
+        <span>{terminalStatus}</span>
         <span>{messages.length} message{messages.length === 1 ? "" : "s"}</span>
       </div>
       <StudioActivityTimeline />

@@ -3,6 +3,7 @@ import "server-only";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { getProject } from "@/lib/projects/project-repository";
 import { createConversation, getConversation } from "./conversation-service";
+import { dedupeTasksByConversation } from "./task-types";
 import type {
   CreateStudioTaskInput,
   StudioTask,
@@ -114,7 +115,11 @@ export async function listStudioTasks(userId: string, projectId: string, include
   if (error || !data) return [];
   const rows = data as TaskRow[];
   const statuses = await projectRunStatuses(userId, rows);
-  return rows.map((row) => mapTask(row, statuses.get(row.active_action_run_id ?? row.latest_action_run_id ?? "")));
+  // Rows are newest-first, so the most recently opened task per
+  // conversation survives; historic duplicates stop rendering as tabs.
+  return dedupeTasksByConversation(
+    rows.map((row) => mapTask(row, statuses.get(row.active_action_run_id ?? row.latest_action_run_id ?? ""))),
+  );
 }
 
 export async function getStudioTask(userId: string, taskId: string): Promise<StudioTask | null> {
@@ -136,6 +141,19 @@ export async function createStudioTask(userId: string, input: CreateStudioTaskIn
   if (conversationId) {
     const conversation = await getConversation(conversationId, userId);
     if (!conversation || conversation.projectId !== input.projectId) return null;
+    // Idempotent adoption: a conversation already bound to an open task
+    // returns that task instead of creating a duplicate worktab.
+    const { data: existing } = await admin()
+      .from("studio_tasks")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("project_id", input.projectId)
+      .eq("conversation_id", conversationId)
+      .is("archived_at", null)
+      .order("last_opened_at", { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle();
+    if (existing) return mapTask(existing as TaskRow);
   } else {
     const conversation = await createConversation(userId, input.projectId, input.title ?? null, "litt");
     if (!conversation) return null;

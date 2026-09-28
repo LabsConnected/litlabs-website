@@ -23,6 +23,10 @@ async function handler(req: NextRequest) {
     workspaceId: null,
     lastVerifiedAt: new Date().toISOString(),
     error: null,
+    // Explicit on every response: the Studio derives "idle" (server up, no
+    // PTY attached) vs "unavailable" (server down) from this field. It was
+    // previously never set, so a healthy server always read as unavailable.
+    serverReachable: false,
   };
 
   // getTerminalServerUrl() always resolves to SOMETHING — it falls back to a
@@ -87,6 +91,7 @@ async function handler(req: NextRequest) {
       ...baseCapability,
       status: "unavailable",
       terminalStatus: "disconnected",
+      serverReachable: true,
       lastVerifiedAt: new Date().toISOString(),
     });
   } catch {

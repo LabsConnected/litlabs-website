@@ -16,7 +16,7 @@ export type ProgressEvent =
   | { type: "tool_start"; toolId: string; summary: string }
   | { type: "tool_result"; toolId: string; success: boolean; summary: string; durationMs: number }
   | { type: "approval_required"; toolId: string; reason: string }
-  | { type: "checkpoint"; label: string; gitSha: string }
+  | { type: "checkpoint"; label: string; gitSha: string; kind?: "before" | "after" }
   | { type: "build_start"; check: string }
   | { type: "build_result"; check: string; passed: boolean; errorCount?: number; diagnostics?: StructuredDiagnostic[] }
   | { type: "workspace_change"; status: "changed" | "unchanged" | "unknown"; files?: string[]; diff?: string; additions?: number; deletions?: number; checkpointSha?: string; unknownReason?: string }

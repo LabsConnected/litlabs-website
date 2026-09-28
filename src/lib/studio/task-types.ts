@@ -68,3 +68,23 @@ export interface UpdateStudioTaskInput {
   close?: boolean;
   reopen?: boolean;
 }
+
+/**
+ * One worktab per conversation. Acceptance 2026-09-28 showed three
+ * "Current work" tabs for the same conversation: the client adopts an
+ * untasked conversation on mount, and a remount / stale list re-adopted
+ * it. Rows are expected newest-first; the first (most recently opened)
+ * task for each conversation wins. Tasks without a conversation are kept.
+ */
+export function dedupeTasksByConversation<T extends { conversationId: string | null }>(tasks: readonly T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const task of tasks) {
+    if (task.conversationId) {
+      if (seen.has(task.conversationId)) continue;
+      seen.add(task.conversationId);
+    }
+    out.push(task);
+  }
+  return out;
+}

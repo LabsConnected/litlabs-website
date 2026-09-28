@@ -20,7 +20,8 @@
  * it NEVER modifies Stripe or the real subscription.
  */
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { FlaskConical, ChevronDown, Check, X } from "lucide-react";
 
 type SimulatedPlan = "owner" | "starter" | "creator_beta" | "pro_builder_beta" | "zero_bits";
@@ -42,6 +43,13 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // Inline placement: the Studio header clips overflow (fixed 52px height,
+  // overflow-hidden), so an absolutely positioned dropdown rendered inside
+  // it was invisible and unclickable. The menu is portaled to <body> and
+  // positioned from the trigger's rect instead.
+  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
 
   useEffect(() => {
     fetch("/api/owner/test-mode", { credentials: "include" })
@@ -60,12 +68,28 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
   useEffect(() => {
     if (!open) return;
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const target = e.target as Node;
+      if (ref.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     }
+    function place() {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (rect) setAnchor({ top: rect.bottom + 8, right: Math.max(8, window.innerWidth - rect.right) });
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    place();
     document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
   }, [open]);
 
   if (!state?.isOwner) return null;
@@ -103,6 +127,8 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
   const badgeBg = isTestMode ? "rgba(245,158,11,0.15)" : "rgba(16,185,129,0.15)";
 
   const isInline = placement === "inline";
+  const renderMenu = (node: ReactNode) =>
+    isInline && typeof document !== "undefined" ? createPortal(node, document.body) : node;
 
   return (
     <div
@@ -124,6 +150,10 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
     >
       {/* Badge button */}
       <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         style={{
           display: "flex",
@@ -149,13 +179,14 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
       {/* Dropdown — opens downward from the trigger, right-aligned.
           Inline variant stacks above header content; fixed variant clamps
           to the viewport so it never clips offscreen. */}
-      {open && (
+      {open && renderMenu(
         <div
+          ref={menuRef}
+          role="menu"
           style={{
-            position: "absolute",
-            top: "100%",
-            right: 0,
-            marginTop: 8,
+            ...(isInline && anchor
+              ? { position: "fixed" as const, top: anchor.top, right: anchor.right }
+              : { position: "absolute" as const, top: "100%", right: 0, marginTop: 8 }),
             minWidth: 280,
             maxWidth: "min(320px, calc(100vw - 32px))",
             maxHeight: "min(70vh, 560px)",
@@ -166,7 +197,7 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
             boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
             padding: 8,
             backdropFilter: "blur(12px)",
-            zIndex: isInline ? 200 : 10000,
+            zIndex: 10000,
           }}
         >
           <div
@@ -248,7 +279,7 @@ export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeInd
           >
             Simulation never modifies Stripe. Reload to apply.
           </div>
-        </div>
+        </div>,
       )}
     </div>
   );

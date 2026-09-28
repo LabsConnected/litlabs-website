@@ -1,5 +1,6 @@
 "use client";
 
+import { HEALTH_LEVEL_COLOR, terminalHealthOf } from "@/lib/studio/terminal-health";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
@@ -182,6 +183,10 @@ export default function CommandStudioHeader({
     ? "Runtime status checking"
     : runtime.phase === "idle" || !runtime.projectId
       ? "No project selected"
+      : runtime.phase === "terminal_disconnected"
+        // Canonical terminal wording — same label the operator bar and
+        // Mission hints render (lib/studio/terminal-health.ts).
+        ? terminalHealthOf(capabilities).label
       : runtime.phase !== "ready"
         ? runtimePhaseLabel(runtime.phase)
         : modelHealth === undefined
@@ -198,9 +203,7 @@ export default function CommandStudioHeader({
       : runtime.phase === "error" || runtime.phase === "unauthenticated" || modelHealth === "unavailable"
         ? "#ef4444"
         : runtime.phase === "terminal_disconnected"
-          // Neutral, ready-adjacent: the workspace is ready and builds run
-          // server-side — only the visible terminal PTY is unattached.
-          ? "#9ca3af"
+          ? HEALTH_LEVEL_COLOR[terminalHealthOf(capabilities).level]
           : "#e3b341";
 
   // Status pill: approval gates and agent work take precedence over the

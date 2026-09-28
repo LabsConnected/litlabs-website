@@ -175,7 +175,10 @@ interface ExecutionStore {
    * the dead pausedRunId (which would 409). Set by failApproval({expired}).
    */
   approvalExpired: boolean;
+  /** Pre-run baseline — the Revert target. */
   checkpoint: { label: string; gitSha: string } | null;
+  /** Post-run checkpoint — what Accept keeps. */
+  afterCheckpoint: { label: string; gitSha: string } | null;
   /** Tool calls in the current run */
   toolCalls: Array<{ toolId: string; success?: boolean; summary: string }>;
   /** Changes summary, classified by the actual mutation operation. */
@@ -239,6 +242,15 @@ interface ExecutionStore {
     opts?: { expired?: boolean; decisionRecorded?: boolean },
   ) => void;
   setCheckpoint: (checkpoint: { label: string; gitSha: string } | null) => void;
+  setAfterCheckpoint: (checkpoint: { label: string; gitSha: string } | null) => void;
+  /**
+   * Restore persisted run checkpoints (after a refresh) WITHOUT emitting
+   * activity events and without overwriting live-run values.
+   */
+  hydrateCheckpoints: (pair: {
+    before: { label: string; gitSha: string } | null;
+    after: { label: string; gitSha: string } | null;
+  }) => void;
   collapseEvent: (id: string) => void;
   collapseLowLevel: () => void;
   clearEvents: () => void;
@@ -468,6 +480,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   approvalRetryable: true,
   approvalExpired: false,
   checkpoint: null,
+  afterCheckpoint: null,
   toolCalls: [],
   changesSummary: null,
   previewPreparing: false,
@@ -488,6 +501,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       approvalRetryable: true,
       approvalExpired: false,
       checkpoint: null,
+      afterCheckpoint: null,
       toolCalls: [],
       changesSummary: null,
     });
@@ -681,6 +695,27 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     mirrorTaskPhase(get, set);
   },
 
+  setAfterCheckpoint: (afterCheckpoint) => {
+    set({ afterCheckpoint });
+    if (afterCheckpoint) {
+      get().addEvent({
+        type: "checkpoint",
+        summary: `Saved: ${afterCheckpoint.label}`,
+        label: afterCheckpoint.label,
+        gitSha: afterCheckpoint.gitSha,
+      });
+    }
+  },
+
+  hydrateCheckpoints: ({ before, after }) => {
+    const cur = get();
+    if (cur.isRunning) return;
+    set({
+      checkpoint: cur.checkpoint ?? before,
+      afterCheckpoint: cur.afterCheckpoint ?? after,
+    });
+  },
+
   setCheckpoint: (checkpoint) => {
     set({ checkpoint });
     if (checkpoint) {
@@ -770,6 +805,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       approvalRetryable: true,
       approvalExpired: false,
       checkpoint: null,
+      afterCheckpoint: null,
       toolCalls: [],
       changesSummary: null,
       previewPreparing: false,
@@ -797,6 +833,8 @@ export function feedSSEEventToExecutionStore(
     conversationId?: string;
     label?: string;
     gitSha?: string;
+    /** checkpoint events: "after" = post-run checkpoint (not the baseline). */
+    kind?: "before" | "after";
     check?: string;
     passed?: boolean;
     errorCount?: number;
@@ -884,7 +922,13 @@ export function feedSSEEventToExecutionStore(
       break;
 
     case "checkpoint":
-      s.setCheckpoint({ label: evt.label ?? "", gitSha: evt.gitSha ?? "" });
+      if (evt.kind === "after") {
+        // Post-run checkpoint — must NOT replace the pre-run baseline,
+        // or Revert would "restore" the state it is meant to undo.
+        s.setAfterCheckpoint({ label: evt.label ?? "", gitSha: evt.gitSha ?? "" });
+      } else {
+        s.setCheckpoint({ label: evt.label ?? "", gitSha: evt.gitSha ?? "" });
+      }
       break;
 
     case "build_start":

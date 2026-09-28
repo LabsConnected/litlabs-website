@@ -13,6 +13,8 @@
  * No fabricated data — empty states where fields are unavailable.
  */
 
+import { useRunCheckpoints } from "../hooks/useRunCheckpoints";
+import { terminalHealthOf } from "@/lib/studio/terminal-health";
 import { useState } from "react";
 import type { ComponentType, CSSProperties, ReactNode } from "react";
 import {
@@ -241,6 +243,10 @@ export default function MissionCards({
   const isRunning = useExecutionStore((s) => s.isRunning);
   const pendingApproval = useExecutionStore((s) => s.pendingApproval);
   const checkpoint = useExecutionStore((s) => s.checkpoint);
+  const afterCheckpoint = useExecutionStore((s) => s.afterCheckpoint);
+  // Persisted run checkpoints survive a refresh: hydrate the store from
+  // the server (and re-read when a run finishes).
+  useRunCheckpoints(capabilities.projectId, isRunning);
   const changesSummary = useExecutionStore((s) => s.changesSummary);
   const toolCalls = useExecutionStore((s) => s.toolCalls);
 
@@ -277,8 +283,9 @@ export default function MissionCards({
   if (pendingApproval) hints.push("Approval waiting — review the request before work continues.");
   if (isRunning) hints.push(`Run in progress — step ${toolCalls.length + 1}.`);
   if (hasCheckpoint && hasChanges && !isRunning) hints.push("Checkpoint recorded — restore if you need to undo changes.");
-  if (capabilities.terminalExecution === "unavailable")
-    hints.push("Terminal unavailable — code changes still apply to the workspace.");
+  const terminalHealth = terminalHealthOf(capabilities);
+  if (terminalHealth.level === "red")
+    hints.push(`${terminalHealth.label} — ${terminalHealth.detail}`);
 
   return (
     <div data-testid="mission-cards" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -386,10 +393,12 @@ export default function MissionCards({
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-main)" }}>
-                {checkpoint!.label}
+                {afterCheckpoint?.label ?? checkpoint!.label}
               </div>
               <div style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>
-                {checkpoint!.gitSha.slice(0, 12)}
+                {afterCheckpoint
+                  ? `${checkpoint!.gitSha.slice(0, 8)} → ${afterCheckpoint.gitSha.slice(0, 8)}`
+                  : checkpoint!.gitSha.slice(0, 12)}
               </div>
             </div>
             <button
@@ -397,6 +406,7 @@ export default function MissionCards({
               onClick={onRollback}
               disabled={isRunning}
               aria-label="Restore checkpoint"
+              title="Revert to the checkpoint before this run"
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -413,7 +423,7 @@ export default function MissionCards({
               }}
             >
               <RotateCcw size={13} className="pointer-events-none" style={{ color: ACCENT }} />
-              Restore
+              Revert
             </button>
           </div>
         ) : (

@@ -15,6 +15,8 @@
 
 import "server-only";
 
+import { postRunCheckpointLabel } from "@/lib/studio/checkpoint-pairs";
+import { profileOf } from "./quality-loop";
 import type { WorkspaceTransport } from "./workspace-transport";
 import { ProgressEmitter, type ProgressEvent } from "./progress-events";
 import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from "./permission-engine";
@@ -31,7 +33,6 @@ import type { ActionExecutionContext } from "@/lib/action-runtime";
 import { resolveAvailableCapabilities } from "./capabilities";
 import type { LiTTToolDefinition } from "./types";
 import {
-  QUALITY_LOOP_PROMPT_SECTION,
   buildRedesignPrompt,
   finalizeQualityLoop,
   harvestStageMarkers,
@@ -39,6 +40,8 @@ import {
   noteBuildFix,
   noteDeployment,
   noteToolResult,
+  noteMutationReadBack,
+  qualityLoopPromptSection,
   runQualityInspection,
   snapshotQualityLoopSession,
   startQualityLoopSession,
@@ -172,6 +175,13 @@ export interface AgentLoopResult {
   toolCalls: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }>;
   buildFixResult?: BuildFixLoopResult;
   checkpoint?: { checkpointId: string; label: string; gitSha: string };
+  /**
+   * Post-run checkpoint: created once the run's changes landed (workspace
+   * status "changed"). Paired with `checkpoint` (the pre-run baseline) so
+   * the Studio can Accept (keep this) or Revert (restore the baseline),
+   * and both survive a refresh (they are persisted checkpoint rows).
+   */
+  afterCheckpoint?: { checkpointId: string; label: string; gitSha: string };
   /**
    * What the run actually did to the workspace, compared against the
    * pre-mutation checkpoint. Undefined when no mutation was ever reached.
@@ -474,6 +484,67 @@ async function pauseReasonFor(
 // ─── Quality loop hooks ───────────────────────────────────────────
 
 /**
+ * Every run whose changes actually landed gets a durable post-run
+ * checkpoint (a git commit + project_checkpoints row) — the user never has
+ * to remember to create one. Never throws; a failure just means no
+ * after-checkpoint (the pre-run baseline still exists for Revert).
+ */
+async function createAfterRunCheckpoint(
+  transport: WorkspaceTransport,
+  workspaceChange: WorkspaceChangeEvidence | undefined,
+  request: string | null,
+  localProgress: ProgressEmitter,
+): Promise<{ checkpointId: string; label: string; gitSha: string } | undefined> {
+  if (workspaceChange?.status !== "changed") return undefined;
+  try {
+    const after = await transport.createCheckpointBeforeMutation(postRunCheckpointLabel(request));
+    if (!after) return undefined;
+    localProgress.emit({ type: "checkpoint", label: after.label, gitSha: after.gitSha, kind: "after" });
+    return after;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * After a successful file mutation, re-read the file from the workspace and
+ * record INSPECT evidence (targeted-edit verification). For writes, the
+ * read-back must equal the written content; for search/replace patches,
+ * every replacement must be present. Unified-diff patches can only be
+ * confirmed readable. Never throws — verification failures are recorded
+ * honestly, never as passes.
+ */
+async function verifyMutationReadBack(
+  session: QualityLoopSession,
+  transport: WorkspaceTransport,
+  toolId: string,
+  inputs: Record<string, unknown> | undefined,
+  mutated: boolean,
+): Promise<void> {
+  if (!mutated || !inputs) return;
+  if (toolId !== "files.write" && toolId !== "files.patch" && toolId !== "apply_patch") return;
+  const path = typeof inputs.path === "string" ? inputs.path : null;
+  if (!path) return;
+  let content: string;
+  try {
+    content = (await transport.readFile(path)).content;
+  } catch {
+    noteMutationReadBack(session, { path, readable: false, contentMatches: false });
+    return;
+  }
+  let contentMatches: boolean | null = null;
+  if (toolId === "files.write" && typeof inputs.content === "string") {
+    contentMatches = content === inputs.content;
+  } else if (toolId === "apply_patch" && Array.isArray(inputs.patches)) {
+    const replaces = (inputs.patches as Array<{ replace?: unknown }>)
+      .map((p) => (typeof p?.replace === "string" ? p.replace : null))
+      .filter((r): r is string => r !== null && r.length > 0);
+    contentMatches = replaces.length > 0 ? replaces.every((r) => content.includes(r)) : null;
+  }
+  noteMutationReadBack(session, { path, readable: true, contentMatches });
+}
+
+/**
  * Quality-gate hook at the point the agent produces its final answer.
  * Harvests any final QUALITY stage markers, then runs the visual
  * inspection once. Returns true when a below-threshold critique demands
@@ -604,7 +675,7 @@ async function runAgentLoopV2Inner(
       userRequest: cfg.qualityLoop.userRequest ?? userMessage,
       snapshot: cfg.qualityLoop.state,
     });
-    cfg.systemPrompt += QUALITY_LOOP_PROMPT_SECTION;
+    cfg.systemPrompt += qualityLoopPromptSection(profileOf(qualitySession.state));
   }
 
   const events: ProgressEvent[] = [];
@@ -1140,6 +1211,7 @@ async function runAgentLoopV2Inner(
           { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
           transport.workspaceId,
         );
+        await verifyMutationReadBack(qualitySession, transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly);
       }
 
       localProgress.emit({
@@ -1238,6 +1310,13 @@ async function runAgentLoopV2Inner(
   if (workspaceChange) {
     localProgress.emit({ type: "workspace_change", ...workspaceChange });
   }
+  const afterCheckpoint = await createAfterRunCheckpoint(
+    transport,
+    workspaceChange,
+    cfg.qualityLoop?.userRequest ?? null,
+    localProgress,
+  );
+  const afterCheckpoint = await createAfterRunCheckpoint(transport, workspaceChange, userMessage, localProgress);
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
     ...(cancelled
@@ -1256,6 +1335,7 @@ async function runAgentLoopV2Inner(
     toolCalls: toolCallLog,
     buildFixResult,
     checkpoint,
+    afterCheckpoint,
     workspaceChange,
     cancelled,
     cancelReason,
@@ -1685,6 +1765,7 @@ export async function executeDeferredToolCalls(
         { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
         ctx.transport.workspaceId,
       );
+      await verifyMutationReadBack(ctx.qualitySession, ctx.transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly);
     }
 
     ctx.localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: result.success, summary, durationMs: 0 });
@@ -1751,7 +1832,7 @@ async function resumeAgentLoopV2Inner(
       userRequest: cfg.qualityLoop.userRequest ?? "",
       snapshot: cfg.qualityLoop.state,
     });
-    cfg.systemPrompt += QUALITY_LOOP_PROMPT_SECTION;
+    cfg.systemPrompt += qualityLoopPromptSection(profileOf(qualitySession.state));
   }
 
   const events: ProgressEvent[] = [];
@@ -1894,6 +1975,19 @@ async function resumeAgentLoopV2Inner(
     const resumedReadOnly = availableTools.find((t) => t.id === resume.toolId)?.readOnly ?? false;
     toolCallLog.push({ toolId: resume.toolId, success: result.success, summary, mutating: !resumedReadOnly });
     completedDeployment = readDeploymentOutcome(resume.toolId, result.result) ?? completedDeployment;
+    // Acceptance 2026-09-28: the APPROVED tool — the actual edit in an
+    // approval-gated run — was never fed to the quality ledger, so a
+    // successful edit still reported "build (pending)". Record it like
+    // any other executed tool.
+    if (qualitySession) {
+      noteToolResult(
+        qualitySession,
+        resume.toolId,
+        { success: result.success, result: result.result, mutating: !resumedReadOnly, summary },
+        transport.workspaceId,
+      );
+      await verifyMutationReadBack(qualitySession, transport, resume.toolId, resume.inputs, result.success && !resumedReadOnly);
+    }
 
     localProgress.emit({
       type: "tool_result",
@@ -2300,6 +2394,7 @@ async function resumeAgentLoopV2Inner(
           { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
           transport.workspaceId,
         );
+        await verifyMutationReadBack(qualitySession, transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly);
       }
 
       localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: result.success, summary, durationMs: 0 });
@@ -2388,6 +2483,7 @@ async function resumeAgentLoopV2Inner(
     toolCalls: toolCallLog,
     buildFixResult,
     checkpoint,
+    afterCheckpoint,
     workspaceChange,
     cancelled,
     cancelReason,

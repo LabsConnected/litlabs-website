@@ -230,6 +230,15 @@ initRuntime(io);
 const ptyManager = new PtySessionManager();
 ptyManager.startSweeper();
 
+/**
+ * How long a PTY survives with no socket attached. Long enough to cover a
+ * page refresh, an in-app route change or a network blip; short enough that
+ * abandoned shells do not pile up against the per-user session cap.
+ */
+const PTY_RESUME_GRACE_MS = Number(process.env.PTY_RESUME_GRACE_MS) > 0
+  ? Number(process.env.PTY_RESUME_GRACE_MS)
+  : 120_000;
+
 app.get("/health/live", (_req, res) => {
   res.json({
     service: "terminal-server",
@@ -1583,6 +1592,13 @@ io.use((socket, next) => {
     }
     socket.data.userId = tokenPayload.sub;
     socket.data.cwd = tokenPayload.cwd;  // Authenticated Desktop cwd from JWT
+    // Optional resume hint. It is only a hint: the PTY manager re-checks
+    // ownership + workspace scope before re-attaching anything.
+    const resumeSessionId = socket.handshake.auth?.resumeSessionId;
+    socket.data.resumeSessionId =
+      typeof resumeSessionId === "string" && /^[0-9a-f-]{36}$/i.test(resumeSessionId)
+        ? resumeSessionId
+        : undefined;
     const workspaceId = tokenPayload.wid;
     if (workspaceId) {
       const ws = getWorkspace(String(workspaceId));
@@ -1629,8 +1645,42 @@ io.on("connection", (socket) => {
   // max concurrent enforcement, workspace boundary validation, and cleanup.
   // The allowedRoot is the server-side resolved workspace root — the
   // manager validates that cwd is within this root before spawning.
-  let session: PtySessionSnapshot;
-  try {
+  // Transport callbacks for THIS socket. Used both for a fresh session and
+  // when re-attaching a parked one, so a resumed shell streams to the new
+  // socket and never to the closed one.
+  const socketCallbacks = {
+    onData: (data: string) => socket.emit("terminal:output", data),
+    onExit: ({ sessionId, exitCode, signal }: { sessionId: string; exitCode: number | null; signal?: number }) => {
+      console.log("[Terminal] Exit:", { sessionId, exitCode, signal });
+      socket.emit("terminal:output", `\r\n\x1b[31m[Session ended ${exitCode ?? signal}]\x1b[0m\r\n`);
+    },
+    isTransportWritable: () => {
+      if (socket.disconnected) return false;
+      const conn = (socket as any).conn;
+      if (conn?.sendBuffer && Array.isArray(conn.sendBuffer) && conn.sendBuffer.length > 64) {
+        return false;
+      }
+      return true;
+    },
+    onBackpressureWarning: ({ droppedChunks, droppedBytes }: { droppedChunks: number; droppedBytes: number }) => {
+      const kb = Math.max(1, Math.round(droppedBytes / 1024));
+      socket.emit(
+        "terminal:output",
+        `\r\n\x1b[33m\u26A0 Terminal output dropped (${droppedChunks} chunks, ~${kb} KiB) \u2014 connection too slow.\x1b[0m\r\n`,
+      );
+    },
+  };
+
+  let session: PtySessionSnapshot | null = null;
+  let resumed = false;
+  const resumeSessionId = socket.data.resumeSessionId as string | undefined;
+  if (resumeSessionId) {
+    session = ptyManager.reattach(resumeSessionId, userId, { workspaceId: workspaceId ?? null }, socketCallbacks);
+    resumed = session !== null;
+    console.log("[Terminal] Resume", resumed ? "succeeded" : "refused", { resumeSessionId });
+  }
+
+  if (!session) try {
     session = ptyManager.create({
       userId,
       projectId: projectId ?? null,
@@ -1638,38 +1688,15 @@ io.on("connection", (socket) => {
       cwd: workspace,
       allowedRoot: workspace,
       useDocker: USE_DOCKER,
-      onData: (data: string) => socket.emit("terminal:output", data),
-      onExit: ({ sessionId, exitCode, signal }) => {
-        console.log("[Terminal] Exit:", { sessionId, exitCode, signal });
-        socket.emit("terminal:output", `\r\n\x1b[31m[Session ended ${exitCode ?? signal}]\x1b[0m\r\n`);
-      },
+      onData: socketCallbacks.onData,
+      onExit: socketCallbacks.onExit,
       onOutputDropped: ({ sessionId, dropped }) => {
         console.warn("[Terminal] Output dropped:", { sessionId, dropped });
       },
-      // ─── Backpressure protection ───────────────────────────────
-      // Predicate: is the Socket.IO transport ready to accept output?
-      // Checks both disconnection and Engine.IO sendBuffer buildup.
-      // When this returns false, PtySessionManager buffers output up
-      // to MAX_PENDING_OUTPUT_BYTES, then drops to prevent OOM.
-      isTransportWritable: () => {
-        if (socket.disconnected) return false;
-        // Engine.IO sendBuffer: packets queued waiting for the transport.
-        // If it's backing up (slow client), stop feeding it more data.
-        const conn = (socket as any).conn;
-        if (conn?.sendBuffer && Array.isArray(conn.sendBuffer) && conn.sendBuffer.length > 64) {
-          return false;
-        }
-        return true;
-      },
-      // Throttled user-visible warning — emitted once when the transport
-      // recovers and buffered output is flushed, if any output was dropped.
-      onBackpressureWarning: ({ droppedChunks, droppedBytes }) => {
-        const kb = Math.max(1, Math.round(droppedBytes / 1024));
-        socket.emit(
-          "terminal:output",
-          `\r\n\x1b[33m\u26A0 Terminal output dropped (${droppedChunks} chunks, ~${kb} KiB) \u2014 connection too slow.\x1b[0m\r\n`,
-        );
-      },
+      // Backpressure protection: the manager buffers up to
+      // MAX_PENDING_OUTPUT_BYTES while the socket is backed up, then drops.
+      isTransportWritable: socketCallbacks.isTransportWritable,
+      onBackpressureWarning: socketCallbacks.onBackpressureWarning,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to start terminal";
@@ -1678,6 +1705,7 @@ io.on("connection", (socket) => {
     socket.disconnect();
     return;
   }
+  if (!session) return;
 
   const sessionId = session.sessionId;
 
@@ -1687,6 +1715,7 @@ io.on("connection", (socket) => {
     workspaceId: workspaceId ?? null,
     projectId: projectId ?? null,
     shell: session.shell,
+    resumed,
   });
 
   socket.on("terminal:input", (data: string) => {
@@ -1858,9 +1887,12 @@ io.on("connection", (socket) => {
     // — abort them rather than letting them run to completion unheard.
     for (const controller of activeModelStreams.values()) controller.abort();
     activeModelStreams.clear();
-    // Kill the session — the socket owns it, so we pass the authenticated userId.
-    // This is safe because userId came from the JWT, not the client.
-    ptyManager.kill(sessionId, "client_disconnect", userId);
+    // Park the session instead of killing it: a refresh, an in-app
+    // navigation or a network blip closes the socket, and the client
+    // resumes with the same sessionId. The shell is killed only if nobody
+    // resumes it within the grace window. userId came from the JWT, so
+    // ownership is enforced by the manager.
+    ptyManager.detach(sessionId, userId, PTY_RESUME_GRACE_MS);
   });
 });
 
