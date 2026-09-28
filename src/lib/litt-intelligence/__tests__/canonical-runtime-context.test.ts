@@ -223,3 +223,48 @@ describe("buildRuntimeContextBlock", () => {
     expect(block).not.toContain("STYLING CONTRACT");
   });
 });
+
+describe("buildRuntimeContextBlock — failing file operations", () => {
+  const baseCtx: CanonicalRuntimeContext = {
+    projectId: "proj-123",
+    projectName: "litlabs-website",
+    workspaceId: "ws-123",
+    workspaceReady: true,
+    workspaceExecutionAvailable: true,
+    workspaceRoot: "/workspace/proj-123",
+    terminalConnected: true,
+    terminalStatus: "connected",
+    terminalServerAlive: true,
+    githubConnected: true,
+    repository: "LabsConnected/litlabs-website",
+    branch: "main",
+    writePermission: true,
+    previewStatus: "ready",
+    availableTools: ["repository", "terminal"],
+    executionMode: "act",
+    model: null,
+    provider: null,
+    sourceType: "github",
+    deploymentStatus: "not_started",
+    deploymentUrl: null,
+  };
+
+  it("reports failing file operations instead of claiming write permission", () => {
+    const block = buildRuntimeContextBlock({
+      ...baseCtx,
+      writePermission: false,
+      workspaceFileOpsFailing: true,
+    });
+
+    expect(block).toContain("Write permission: not allowed");
+    expect(block).toContain("Workspace file operations: FAILING");
+    expect(block).not.toContain("Write permission: allowed");
+  });
+
+  it("omits the failing line when the transport is healthy", () => {
+    const block = buildRuntimeContextBlock(baseCtx);
+
+    expect(block).toContain("Write permission: allowed");
+    expect(block).not.toContain("FAILING");
+  });
+});

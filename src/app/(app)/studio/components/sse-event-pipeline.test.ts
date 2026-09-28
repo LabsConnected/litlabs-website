@@ -474,7 +474,9 @@ describe("Approval gate lifecycle", () => {
     });
     useExecutionStore.getState().endRun("failed");
     expect(useExecutionStore.getState().pendingApproval).toBeNull();
-    expect(useExecutionStore.getState().phase).toBe("done");
+    // A failed run reports "failed", never "done" (#551: reporting a failed
+    // run as Complete is the same dishonesty class as a fake success).
+    expect(useExecutionStore.getState().phase).toBe("failed");
   });
 
   it("resolveApproval clears the card after the user decides", () => {
