@@ -1,148 +1,169 @@
 # Studio UX simplification plan
 
-Baseline: Larry's Studio UX plan (chat controls the workspace, the workspace shows the result, the inspector handles details). This document records that baseline, then the corrections found by reading `main` at `22aa433b` (2026-09-28). Line numbers below are from that snapshot. They must be re-inventoried before any later phase.
+Larry's plan (2026-09-27) is the baseline. Everything under **Verified against the code** is a correction from reading the tree after Phase 1, at `c3bb99c6` on top of `main` `22aa433b`. Where they disagree, follow the code.
 
-Phases 2 through 6 are blocked. Do not start them until both of these have landed and the tree has been re-read:
+## Status
 
-- Codex PR #537 (`codex/studio-freeform-canvas`). As of this writing it is **closed unmerged** (`mergeCommit` null, closed 2026-09-27). The same StudioShell work is already on `main` as #538 (`cea4d21e`). Treat #537's changed-file list as the overlap set anyway.
-- Mobile-pass PR #545 (`feat/studio-mobile-architecture`, open). It rewrites Studio mobile under 768px and edits `CommandStudio.tsx`.
-
-This PR is Phase 1 only: verified dead-code deletion, plus this plan.
-
-## What Larry's plan claims
-
-- Live Studio is `src/app/(app)/studio/page.tsx` rendering `CommandStudio`.
-- There are no live floating windows. Clutter is about nine duplicate navigation UIs.
-- The Inspector lives in the bottom dock and should move to a contextual right-side panel.
-- Target: left LiTT chat, one center workspace (Design, Preview, Browser, Code, Files, Images, Deploy, Activity), right inspector hidden until something is selected, thin top bar (project, current surface, important status, Preview/Open, Deploy).
-- Dead code to delete: `src/components/studio/shell/`, `StudioModeSwitcher`, the unmounted desktop `CommandStudioNav` rail (keep `MobileCommandNav`), `src/app/(app)/studio/components/windows/StudioWindowChrome.tsx`, `src/app/(app)/studio/stores/useWindowManagerStore.ts`.
-- Later phases, in order, one commit each, with type-check, lint, and the relevant vitest suites between them:
-  1. Dead-code deletion (this PR).
-  2. One surface switcher. Remove duplicate rails, tabs, and menus.
-  3. Move the inspector to a contextual right panel. Keep the old dock Inspector tab until the new panel is verified, then remove it.
-  4. Remove the bottom dock as primary navigation.
-  5. Mobile: full-width workspace, chat easy to reach, inspector as a bottom sheet.
-  6. Visual polish: less chrome, honest disabled states, premium near-black LiTT look.
-- Preserve browser control, the selection bridge, inspector source writes, persistence, approvals, and agent tooling. Move components. Do not rebuild the state layer.
-- Unimplemented surfaces show an honest disabled or pending state.
-- PR #547's spatial canvas (unmerged) should become an optional board inside the center, not primary navigation. Do not branch from it. Do not touch #540, #541, #544, or #550.
-
-## Corrections against the code
-
-### Live entry is correct
-
-`src/app/(app)/studio/page.tsx` imports `CommandStudio` (line 7) and renders it. The canonical operating shell is `src/app/(app)/studio/components/shell/`, not `src/components/studio/shell/`.
-
-Two different `StudioShell` components exist:
-
-| Path | Role | Status |
+| Phase | What Larry asked | State |
 | --- | --- | --- |
-| `src/app/(app)/studio/components/shell/StudioShell.tsx` | Desktop operating shell used by `CommandStudio` (import at `CommandStudio.tsx` line 65, mount around line 2615) | Live. #537/#538 modify it. Not deleted. |
-| `src/components/page-shells/StudioShell.tsx` | Loading placeholder for `/studio` (`studio/loading.tsx`) | Live. Not the same file. Not deleted. |
-| `src/components/studio/shell/StudioShell.tsx` | Old resizable-panel shell (`TopBar`, `LeftRail`, `BottomDock`, `RightPanel`, `WorkspaceCanvas`, `CommandBar`) | Unmounted. Deleted in Phase 1. |
+| 1 | Delete unmounted shell, mode switcher, desktop nav rail, window chrome, window-manager store | Done in `c3bb99c6`. See the deletion table. |
+| 2 | One desktop surface switcher. Remove duplicate Preview/Files/Terminal/Activity entries. | Not started. |
+| 3 | Move the inspector to a contextual right panel. Keep the dock Inspector tab until the new panel is verified, then remove it. | Not started. |
+| 4 | Promote Browser, Files, Images, Deploy, Activity into the center. Terminal becomes a bottom utility panel. Delete `StudioDock`. Keep the PTY mounted. | Not started. |
+| 5 | Mobile: one switcher, full-width workspace, inspector sheet. | Not started. |
+| 6 | Remove nested chrome, empty panels, and duplicate labels. Honest disabled states. | Not started. |
 
-`studioShellActive` (`CommandStudio.tsx` lines 382–383) is desktop-only: `destination === "studio"` and viewport is known and not mobile and `localStorage["litt:studio:layout-mode"] !== "classic"`. Mobile and the classic override still render the older body (workspace tabs, `StudioDock`, `LiTTPanel`, `MobileCommandNav`).
+Phases 2–6 stay blocked until PR #545 (mobile architecture) has landed and this inventory is repeated. PR #537 is closed unmerged; the same StudioShell files are already on `main` as #538 (`cea4d21e`). Larry's line numbers were taken before that shell. Do not edit from them.
 
-### Floating windows are not the primary model, and they are not gone
+Do not combine phases. After each later phase: `pnpm type-check`, `pnpm lint`, and the vitest files that mount `CommandStudio`, the dock, the terminal, and the inspector. Do not rebuild stores. Do not touch #540, #541, or #547. If #547's spatial board lands, it is an optional center view, not the surface switcher.
 
-The operating shell comment says it replaces the floating-window compositor. Surface switches mount one stage child (`data-testid="stage-surface-*"`). There is no window manager.
+## Larry's plan (baseline)
 
-These overlays are still mounted from `CommandStudio` and are not navigation:
+Goal: chat controls the workspace, the workspace shows the result, the inspector handles details.
 
-- Camera dock and screen dock (`CameraDock` / `ScreenDock` near the bottom of `CommandStudio.tsx`).
-- Canvas action aside, opened by `canvas:execute-action` (around lines 1095 and 3332).
+Target:
+
+- Top bar: project name, current surface, status, Preview, Deploy.
+- Left: LiTT chat, always available.
+- Center: one surface at a time — Design, Preview, Browser, Code, Files, Images, Deploy, Activity.
+- Right: inspector, hidden until a selection exists. On mobile it is a bottom sheet.
+
+Larry's inventory, as written:
+
+- Live root is `src/app/(app)/studio/page.tsx` rendering `CommandStudio.tsx` (he counted 2940 lines). He said there is no separate `StudioShell` on the live path.
+- He said there are zero live floating or draggable windows. The clutter is nine switcher UIs.
+- Regions he described: `CommandStudioHeader`; left `LiTTPanel` (Chat | Live, collapses to 64px without unmounting); center task rail plus a 36px Design | Code | Preview bar and one surface; bottom `StudioDock` (Activity, Files, Terminal, Inspector, Media) with the terminal kept alive by `display:none`; inspector inside the dock with seven tabs (Plan, Changes, Files, Preview, Checks, Approvals, Browser); mobile `MobileCommandNav`, `ContextDrawer`, and sheets.
+- Dead code he listed: `src/components/studio/shell/` (he said 7 files: StudioShell, TopBar, LeftRail, BottomDock, WorkspaceCanvas, CommandBar, RightPanel), `StudioModeSwitcher.tsx`, the desktop `CommandStudioNav` rail, `windows/StudioWindowChrome.tsx`, `stores/useWindowManagerStore.ts`.
+- Duplicate routes he counted: Preview 6 ways, Files 5, Terminal 4, Activity 3. The nine switchers: workspace tab bar, `MobileCommandNav`, `StudioDock` tabs, `MobileToolsSheet`, `ContextDrawer` tabs, header overflow, inspector tabs, LiTT panel tabs, and the dead `CommandStudioNav` rail.
+- Stay: `LiTTPanel`, composer, transcript, approvals, studio stores plus `useStudioStore` / `useProjectStore` / `useSelectionStore` / `useTerminalStore`, `StudioTerminalDrawer` keep-alive, `StudioPreviewPanel` selection bridge, `VisualCanvasBuilder`, `CodeWorkspace`, browser jobs and live view, `studio-destinations.ts`, `StudioTaskRail`, and the legacy tools under `tools/`.
+- Phase 2 removes inspector Files and Preview tabs (`StudioWorkspaceFrame.tsx` ~252), header overflow Preview and Terminal (keep Deploy), `MobileToolsSheet` surface shortcuts, and the LiTT "Activity" tab label path (Activity becomes a center surface; keep Live).
+- Phase 3 extracts `StudioInspector` from `StudioWorkspaceFrame.tsx` ~387 into `StudioInspectorPanel.tsx`, mounts it as a right `<aside>`, hidden by default, opened from `useSelectionStore`, mobile sheet via `MobileBottomSheet`. Keep the dock tab until that panel is verified.
+- Phase 4: terminal leaves the dock for a collapsible bottom panel; Browser, Files, Images, Deploy, and Activity become center surfaces; then delete `StudioDock`.
+- Phase 5: `MobileCommandNav` becomes Chat, Workspace, Surfaces, Inspector. Remove `ContextDrawer` tabs and the tools-sheet shortcuts.
+- Acceptance: one desktop way to each surface, chat stays mounted, terminal survives surface switches, browser Take control / Return to LiTT does not change layout, unimplemented surfaces are honestly disabled.
+
+## Verified against the code
+
+### Live entry
+
+Correct. `src/app/(app)/studio/page.tsx` imports `CommandStudio` at line 8. `StudioHub` returns it at line 164, and the page renders `StudioHub` at line 196.
+
+`CommandStudio.tsx` is 3706 lines, not 2940.
+
+### There is a live StudioShell. Larry's "no StudioShell" claim is stale.
+
+#538 added `src/app/(app)/studio/components/shell/StudioShell.tsx` (54 lines). `CommandStudio.tsx` imports it at line 65 and mounts it when `studioShellActive` is true (lines 382–383, mount at line 2615).
+
+`studioShellActive` is desktop only: destination is studio, the viewport tier is known, the tier is not mobile, and `localStorage["litt:studio:layout-mode"]` is not `"classic"`. Mobile and the classic override still render the body Larry described (LiTT panel, 36px tabs, bottom dock).
+
+| Path | What it is | Action |
+| --- | --- | --- |
+| `src/app/(app)/studio/components/shell/StudioShell.tsx` | Live desktop shell: task bar, rail, stage, right inspector, bottom LiTT layer | Keep. #537/#538 own this file. |
+| `src/components/page-shells/StudioShell.tsx` | `/studio` loading placeholder | Keep. Different component. |
+| `src/components/studio/shell/` | Old resizable-panel shell | Deleted in Phase 1. |
+
+Desktop shell layout today, which Larry's inventory does not describe:
+
+- Top: the same `CommandStudioHeader`.
+- Left: `WorkspaceRail` (`stage-surfaces.ts` lines 58–72), not `LiTTPanel`. Surfaces: Plan, Design, Preview, Browser, Code, Files, Images, Assets, Deploy, Activity, plus Terminal.
+- Center: one `stage-surface-*` child (`renderStageSurface` at line 2380). Design, Preview, Browser, Code, Files, Images, Deploy, and Activity already render here. Plan, Assets, and Terminal do too.
+- Right: `ContextInspector` (`StudioShell.tsx` lines 44–49). `inspectorOpen` starts `true` (`CommandStudio.tsx` line 385), so the column is open with no selection and falls through to `StudioInspector`.
+- Bottom: `LiTTCommandLayer`, not `LiTTPanel`. The transcript is collapsed until expanded. `StudioOperatorBar` inside that layer also opens Terminal and Activity.
+
+The classic body Larry inventoried is the fallback, starting around line 2781. Workspace tabs are still only Design, Code, Preview (`workspaceTabs` lines 2158–2162, rendered at line 2843). `StudioDock` is mounted at line 2977 with Activity, Files, Terminal, Inspector, Media (`StudioDock.tsx` lines 83–89). The terminal comment at lines 2972–2976 says the PTY stays mounted with `display:none`.
+
+### Floating windows
+
+No window manager is mounted. `useWindowManagerStore` and `StudioWindowChrome` are absent, and a search of `*.ts` / `*.tsx` finds no `useWindowManager`, `WindowChrome`, or `windowManager` symbols.
+
+These overlays are still real and are not the surface switcher:
+
+- Camera dock and screen dock, defined near the bottom of `CommandStudio.tsx`.
+- Canvas action aside, opened by `canvas:execute-action` (listener around line 1095, aside around line 3332).
 - `LiveVoiceOverlay`.
-- Classic-mode `LiTTPanel` overlay when expanded.
+- Classic `LiTTPanel` uses a fixed overlay when expanded (`CommandStudio.tsx` around line 2791).
 
-`StudioWindowChrome.tsx` and `useWindowManagerStore.ts` are not in the tree. A repo-wide search for `useWindowManager`, `WindowChrome`, and `windowManager` in `*.ts` / `*.tsx` returns nothing. Phase 1 does not recreate them.
+#547 (unmerged) would add a floating-window board. It is not on this branch.
 
-### The inspector is already on the right in the desktop shell
+### Inspector
 
-Larry's "inspector lives in the bottom dock" describes the classic/mobile path, not the current desktop default.
+Larry is right about the classic/mobile dock, and wrong about the desktop default.
 
-- Desktop shell: `ContextInspector` is the right column of `src/app/(app)/studio/components/shell/StudioShell.tsx` (lines 44–49). `inspectorOpen` defaults to `true` (`CommandStudio.tsx` line 385), so the panel is open even with no selection and falls through to `StudioInspector`.
-- Classic/mobile: `StudioDock` still has an inspector tab, and the mobile `ContextDrawer` still hosts inspector content.
+- Classic: the dock has an Inspector tab (`StudioDock.tsx` line 87). Its body is `inspectorContent`, which `CommandStudio` fills with `StudioInspector`. The seven tabs live in `StudioWorkspaceFrame.tsx` lines 252–260: Plan, Changes, Files, Preview, Checks, Approvals, Browser. Files and Preview there duplicate other navigation. The comment at lines 242–243 is stale (it still says Plan, Changes, Checks, Approvals and a bottom Activity | Terminal drawer).
+- Desktop shell: the inspector is already the right column. It is not hidden by default, and it still embeds the same `StudioInspector` when nothing is selected (`CommandStudio.tsx` around line 2731). A preview selection mounts `ElementInspectorPanel` instead. A design-node selection mounts `BuilderPropertiesPanel`.
 
-Phase 3 is not "create a right inspector from nothing." It is "make the existing right inspector selection-only, and stop also hosting inspector UI in the dock." Re-read both paths after #545.
+Phase 3 is not "create the first right inspector." It is "default the existing right inspector closed, show only the selection's controls, and remove the dock tab only after that path is verified." `useSelectionStore` is not what the live preview bridge uses. Preview selection is `previewSelection` / `studio:ask-litt`, and design selection is the canvas builder store. Do not switch that pipeline to `useSelectionStore` just because the plan names it.
 
-### Duplicate navigation is two shells, not a single set of nine
+### Duplicate navigation
 
-Counted on this snapshot. "About nine" matches one shell. Both shells are still in the product, so the real set is larger.
+Larry's nine switchers match the classic/mobile body plus the dead rail. They do not include the desktop shell, which adds more.
 
-Desktop shell (`studioShellActive`):
+Classic and mobile, checked in this tree:
 
-1. `WorkspaceRail` — icon rail for `PRIMARY_SURFACES` plus terminal (`stage-surfaces.ts` lines 58–72, `WorkspaceRail.tsx`).
-2. `CommandStudioHeader` — Preview, Dock toggle, overflow dock tabs. When the shell is active, dock actions are remapped onto stage surfaces (`DOCK_TAB_TO_SURFACE`, `CommandStudio.tsx` lines 134–139 and 408–420).
-3. `StudioOperatorBar` inside the LiTT layer — Terminal and Activity.
-4. `WorktabBar` — task identity, not a surface switcher. Keep it, but it is a second chrome row.
-5. `StudioPlanSurface` and Activity `MissionCards` — buttons that jump to Code, Design, Preview, Files, Terminal, Activity.
+| Switcher | Where | Still present |
+| --- | --- | --- |
+| Workspace tab bar | `CommandStudio.tsx` 2158 and 2843 | Design, Code, Preview only. Not Browser, Files, Images, Deploy, Activity. |
+| `MobileCommandNav` | `CommandStudioNav.tsx`, mounted from `CommandStudio.tsx` line 37 | Chat, Preview, Files, Activity, More |
+| `StudioDock` tabs | `StudioDock.tsx` 83–89, mount 2977 | Activity, Files, Terminal, Inspector, Media |
+| `MobileToolsSheet` | `litt/MobileToolsSheet.tsx`, mounted from `CommandStudio.tsx` line 49 | Code, Canvas, Preview, Files, Terminal, Activity, plus create modes |
+| `ContextDrawer` tabs | mobile overlay in the classic branch | work, files, inspector, assets |
+| Header overflow | `CommandStudioHeader.tsx` 735 (Preview) and 764 (Terminal). Status popover also opens Terminal at line 568. | Yes |
+| Inspector tabs | `StudioWorkspaceFrame.tsx` 252–260 | Seven tabs, including Files and Preview |
+| LiTT panel tabs | `LiTTPanel.tsx` 173, label "Activity" on the `live` tab | Classic path only |
+| Desktop `CommandStudioNav` rail | was the default export | Removed in Phase 1. `MobileCommandNav` kept. |
 
-Classic and mobile (shell inactive):
+Preview on the classic path is reachable from the workspace tab, the header Preview button (`CommandStudioHeader.tsx` 311), the header overflow (735), the inspector Preview tab (256), mobile nav, and the tools sheet. That is six, as Larry said, before counting the desktop rail.
 
-6. Workspace tab strip — Design, Code, Preview only (`workspaceTabs`, around line 2158; rendered around line 2843). Browser, Files, Images, Deploy, Activity are not on this strip.
-7. `StudioDock` — activity, files, terminal, inspector, media.
-8. Header dock toggle (same header, different behavior).
-9. `MobileCommandNav` — Chat, Preview, Files, Activity, More.
-10. Fixed Chat | Canvas switcher plus the LiTT FAB.
-11. Mobile tools sheet — Code, Canvas, Preview, Files, Terminal, Activity, and create modes.
-12. Mobile `ContextDrawer` tabs — work, files, inspector, assets.
+Files: dock, `ContextDrawer`, inspector Files tab, mobile nav, tools sheet. Five, as Larry said, on the classic path. The desktop shell also has `WorkspaceRail` "files".
 
-Center stage surfaces that already exist and are real (`renderStageSurface`, around line 2380): Plan, Design (`VisualCanvasBuilder`), Preview, Browser (`StudioBrowserJobsPanel`, including Take control / Return to LiTT), Code, Files, Images (`ImageStudio`), Assets, Deploy, Activity, Terminal. Larry's target list drops Plan, Assets, and Terminal from the primary switcher. They are functional today. Do not replace them with a fake finished tab, and do not delete them in a later phase without a new home (Terminal stays mounted when visited; that keep-alive must survive).
+Terminal: dock, header overflow, tools sheet, and LiTT live actions. The status popover is a fifth (`CommandStudioHeader.tsx` 568). Desktop shell adds the rail utility and `StudioOperatorBar`.
 
-### Dead code verified before deletion
+Activity: LiTT Activity tab, dock tab, mobile nav. Desktop shell adds the rail, the operator bar, and the Activity stage.
 
-Searched `*.ts`, `*.tsx`, `*.js`, and `*.jsx` for static imports and `import()` of each target. Also searched #537's diff for those paths. #537 does not add, modify, or import any Phase 1 target. No deletion was skipped for overlap.
+Desktop shell switchers that Larry did not list: `WorkspaceRail`, header Dock toggle (remapped to stage surfaces at `CommandStudio.tsx` 134–139 and 408–420), and `StudioOperatorBar`.
 
-| Target | Importers on `main` | #537 | Action |
-| --- | --- | --- | --- |
-| `src/components/studio/shell/` (`StudioShell.tsx`, `TopBar.tsx`, `LeftRail.tsx`, `BottomDock.tsx`) | Only each other. No app, test, or dynamic import. | Not in the diff | Deleted |
-| `src/app/(app)/studio/components/StudioModeSwitcher.tsx` | None. Docs mention a stale path `src/app/studio/components/StudioModeSwitcher.tsx` | Not in the diff | Deleted |
-| Desktop `CommandStudioNav` default export | None. `MobileCommandNav` is imported by `CommandStudio.tsx` line 37 and `CommandStudioNav.mobile.test.tsx` | Not in the diff | Default export removed. `MobileCommandNav` kept |
-| `src/app/(app)/studio/components/windows/StudioWindowChrome.tsx` | File absent. No symbol references | Not in the diff | Nothing to delete |
-| `src/app/(app)/studio/stores/useWindowManagerStore.ts` | File absent. No symbol references | Not in the diff | Nothing to delete |
+### Center surfaces already exist on the desktop shell
 
-Left in place on purpose, even though nothing mounts them after the shell directory goes away:
+`renderStageSurface` (line 2380) already mounts Design (`VisualCanvasBuilder`), Preview, Browser (`StudioBrowserJobsPanel`, with Take control / Return to LiTT), Code, Files, Images (`ImageStudio`), Deploy, and Activity. Larry's phase 4 "promote these out of the dock" is already true for the desktop shell. The classic dock still has its own copies. A later phase has to delete the duplicates, not build a second browser.
 
-- `src/components/studio/canvas/WorkspaceCanvas.tsx`
-- `src/components/studio/command/CommandBar.tsx`
-- `src/components/studio/inspector/RightPanel.tsx`
-- `src/stores/useStudioStore.ts` (still imported by `WorkspaceCanvas` and `CommandBar`)
+Plan, Assets, and Terminal are also real stage surfaces. They are not in Larry's eight-item switcher. Do not show them as finished extra tabs, and do not unmount Terminal to remove them. The classic dock's `display:none` keep-alive and the shell's "visited surfaces stay mounted" behavior both have to survive.
 
-They were not on the Phase 1 list. Deleting them would widen the diff into stores #537 does not touch, without a fresh "nothing imports this" pass after the shell deletion. A later cleanup can remove them once that pass is repeated.
+### Dead code
 
-Stale prose, not code, still names the deleted shell or switcher: `docs/landing/REAL-ASSET-MANIFEST.md`, `docs/chat-api-wiring-map.md`, `docs/legacy/BLUEPRINT-legacy.md`, `SITE_REFERENCE.md`. Those docs were not edited here.
+Searched `*.ts`, `*.tsx`, `*.js`, and `*.jsx` for static imports and `import()`. Also searched PR #537's diff. None of the Phase 1 targets appear there, so nothing was held back for overlap.
 
-## What should stay
+| Larry's item | What the code actually is | Result |
+| --- | --- | --- |
+| `src/components/studio/shell/` | Four files were in that directory: `StudioShell.tsx`, `TopBar.tsx`, `LeftRail.tsx`, `BottomDock.tsx`. They imported only each other. | Deleted. |
+| WorkspaceCanvas, CommandBar, RightPanel | Not inside `shell/`. They are `src/components/studio/canvas/WorkspaceCanvas.tsx`, `src/components/studio/command/CommandBar.tsx`, and `src/components/studio/inspector/RightPanel.tsx`. After the shell deletion, nothing imports them. | Left in place. They were not on the Phase 1 path list. `useStudioStore` is still imported by `WorkspaceCanvas` and `CommandBar`. |
+| `StudioModeSwitcher.tsx` | No importer. Docs still mention a stale path. | Deleted. |
+| Desktop `CommandStudioNav` | Default export had no importer. `MobileCommandNav` is imported by `CommandStudio.tsx` line 37 and `CommandStudioNav.mobile.test.tsx`. | Default export removed. Mobile nav kept. |
+| `windows/StudioWindowChrome.tsx` | File does not exist. | Nothing to delete. |
+| `stores/useWindowManagerStore.ts` | File does not exist. | Nothing to delete. |
 
-- `CommandStudio` data flow, stores, URL routing, approvals, tasks, and the classic layout behind `litt:studio:layout-mode=classic` until a later phase replaces it on purpose.
-- Live shell: `WorkspaceRail`, `ContextInspector`, `ElementInspectorPanel`, `LiTTCommandLayer`, `stage-surfaces.ts`, preview selection bridge, `useElementEdits`, browser session control, image ops.
-- `MobileCommandNav` until #545 replaces mobile navigation.
-- Terminal stay-alive (`StudioTerminalDrawer` `visible={active}` while the surface stays mounted).
-- Chat composer and transcript ownership in `useCanonicalConversation`.
+Stale docs that still name the deleted shell or switcher were not edited: `docs/landing/REAL-ASSET-MANIFEST.md`, `docs/chat-api-wiring-map.md`, `docs/legacy/BLUEPRINT-legacy.md`, `SITE_REFERENCE.md`.
 
-## What later phases should change (not this PR)
+### What later phases must not assume
 
-Re-inventory line numbers first. #545 edits `CommandStudio.tsx`, the routing and shell tests, and adds `components/mobile/*`. #537/#538 already changed the shell, inspector, preview, and browser files. A plan written against pre-#538 `main` will point at the wrong lines.
+- `workspaceTabs` at line 2158 is not the desktop switcher. The desktop switcher is `WorkspaceRail`. Making the 36px bar "the only switcher" would resurrect the classic bar on a path that no longer shows it, and would miss the rail.
+- `StudioWorkspaceFrame.tsx` ~387 is not a separate inspector component waiting to be moved. `StudioInspector` is already exported from that file and passed into both the dock and `ContextInspector`.
+- Images on the shell are `ImageStudio` (`shell/ImageStudio.tsx`), not only the inline `MediaWorkspacePanel` Larry pointed at near `CommandStudio.tsx` 2690. That inline panel is part of the classic tree and has moved.
+- `ContextDrawer` on this branch is `src/app/(app)/studio/components/context/ContextDrawer.tsx`, not `src/components/context/ContextDrawer.tsx`.
+- #545 adds `src/app/(app)/studio/components/mobile/*` and edits `CommandStudio.tsx`, the routing tests, and `CommandStudio.mobile-nav.test.tsx`. Phase 5 has to start from that, not from today's `MobileCommandNav`.
 
-2. **One switcher.** One control for Design, Preview, Browser, Code, Files, Images, Deploy, Activity. Remove the same destination from the rail, header dock, operator bar, workspace tabs, and mobile tools sheet. Keep task tabs as tasks.
-3. **Inspector.** Default closed. Open on element, design-node, file, image, browser-target, or task selection, and show only that selection's controls. Desktop shell already has the right column; classic dock still has the old tab. Keep the dock tab until the right panel is verified.
-4. **Dock.** Stop using `StudioDock` as navigation once every dock tab has a single home. Do not unmount the terminal session to do it.
-5. **Mobile.** Wait for #545. Then design chat, full-width workspace, and an inspector sheet against that shell instead of shrinking the desktop rail.
-6. **Polish.** Thin top bar, quieter status, honest pending states, no second empty panel.
+## Phase 1 regression notes
 
-### #547
+- `MobileCommandNav` and `MobileStudioSurface` still export from `CommandStudioNav.tsx`.
+- The live shell and the page-shell `StudioShell` were not deleted.
+- `WorkspaceCanvas`, `CommandBar`, `RightPanel`, and `useStudioStore` still type-check. The first three are unmounted.
 
-Draft #547 (`cursor/studio-spatial-workspace-m1-4aec`) adds a floating-window board and `studio_workspaces`. Do not merge it into this work and do not edit that branch. If it lands later, the board should be an optional center view, not the way users change surfaces.
+## Checks already recorded for Phase 1
 
-## Regression risks for Phase 1
+| Command | Exit |
+| --- | --- |
+| `pnpm type-check` | 0 |
+| `pnpm lint` | 0 (0 errors, 630 existing warnings) |
+| `pnpm test` | 1. Only `tests/action-runtime-sql.integration.test.ts` failed: `spawn docker ENOENT`. 471 files passed, 6482 tests passed, 76 skipped. |
+| `pnpm build` | 0 |
 
-- Removing the desktop rail must not drop `MobileCommandNav` or `MobileStudioSurface`. The mobile nav test imports the named export only.
-- Deleting `src/components/studio/shell/` must not be confused with `components/shell/StudioShell.tsx` or `page-shells/StudioShell.tsx`.
-- `WorkspaceCanvas`, `CommandBar`, `RightPanel`, and `useStudioStore` still type-check. They are unused at runtime.
-
-## Acceptance for this PR
-
-- Phase 1 deletions match the table above.
-- `pnpm type-check`, `pnpm lint` (0 errors), `pnpm test`, and `pnpm build` are recorded with exit codes.
-- No Phase 2–6 layout edits.
-- No migrations, no edits under `packages/litt-agent-core`, `packages/litt-cli`, `packages/litt-models`, or `.github/workflows`.
+This document change does not alter runtime code. Those results still cover Phase 1.
