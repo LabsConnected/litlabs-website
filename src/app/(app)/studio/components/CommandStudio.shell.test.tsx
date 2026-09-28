@@ -703,14 +703,17 @@ describe("StudioShell — left chat dock", () => {
     await waitFor(() => {
       expect(panel().style.width).toContain("460px");
     });
-    // Drag far left → clamped at 300px, and persisted.
+    // Drag far left → clamped at 300px, and persisted (the hook persists
+    // via rAF debounce, so poll for it).
     fireEvent.mouseDown(handle, { clientX: 460, button: 0 });
     fireEvent.mouseMove(document, { clientX: 0 });
     fireEvent.mouseUp(document);
     await waitFor(() => {
       expect(panel().style.width).toContain("300px");
     });
-    expect(window.localStorage.getItem("littree:studio:litt-dock-width")).toBe("300");
+    await waitFor(() => {
+      expect(window.localStorage.getItem("littree:studio:litt-dock-width")).toBe("300");
+    });
   });
 
   it("Ask LiTT expands a collapsed left dock panel", async () => {
