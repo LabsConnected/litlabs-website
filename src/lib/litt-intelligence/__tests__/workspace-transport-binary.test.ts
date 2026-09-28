@@ -35,6 +35,28 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+/**
+ * createWorkspaceTransport() probes GET /ws-files?path=. at creation
+ * (reachability). Route the stub by URL so the probe gets a listing and
+ * the read tests get their canned response; assertions target the
+ * /ws-files/read call, never mock.calls[0].
+ */
+function stubFetch(readBody: unknown) {
+  globalThis.fetch = vi.fn(async (url: unknown) => {
+    if (String(url).includes("/ws-files/read")) return jsonResponse(readBody);
+    return jsonResponse({ entries: [] });
+  }) as unknown as typeof fetch;
+}
+
+function readCallInit(): RequestInit {
+  const calls = vi.mocked(globalThis.fetch).mock.calls as unknown as Array<
+    [string, RequestInit | undefined]
+  >;
+  const found = calls.find(([url]) => String(url).includes("/ws-files/read"));
+  if (!found || !found[1]) throw new Error("no /ws-files/read call was made");
+  return found[1];
+}
+
 async function makeTransport() {
   return createWorkspaceTransport("proj_test", "user_test");
 }
@@ -49,44 +71,35 @@ afterEach(() => {
 describe("readBinaryFile encoding contract", () => {
   it("returns content when the terminal honors base64", async () => {
     const bytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
-    globalThis.fetch = vi.fn(async () =>
-      jsonResponse({ content: bytes.toString("base64"), size: bytes.length, encoding: "base64" }),
-    ) as unknown as typeof fetch;
+    stubFetch({ content: bytes.toString("base64"), size: bytes.length, encoding: "base64" });
 
     const transport = await makeTransport();
     const result = await transport.readBinaryFile("assets/x.jpeg");
     expect(result.content).toBe(bytes.toString("base64"));
 
     // The request actually asked for base64.
-    const [, init] = vi.mocked(globalThis.fetch).mock.calls[0] as unknown as [string, RequestInit];
-    expect(JSON.parse(String(init.body))).toMatchObject({ path: "assets/x.jpeg", encoding: "base64" });
+    expect(JSON.parse(String(readCallInit().body))).toMatchObject({ path: "assets/x.jpeg", encoding: "base64" });
   });
 
   it("rejects a response that never applied base64 (old terminal build)", async () => {
     // Old terminal ignores `encoding` and returns a utf-8 decode — no
     // `encoding` field, and the content contains NULs/replacement chars.
     const utf8Jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]).toString("utf-8");
-    globalThis.fetch = vi.fn(async () =>
-      jsonResponse({ content: utf8Jpeg, size: 6 }),
-    ) as unknown as typeof fetch;
+    stubFetch({ content: utf8Jpeg, size: 6 });
 
     const transport = await makeTransport();
     await expect(transport.readBinaryFile("assets/x.jpeg")).rejects.toThrow(/base64/i);
   });
 
   it("rejects a claimed-base64 response whose content is not base64", async () => {
-    globalThis.fetch = vi.fn(async () =>
-      jsonResponse({ content: "ÿØÿà corrupted", size: 6, encoding: "base64" }),
-    ) as unknown as typeof fetch;
+    stubFetch({ content: "ÿØÿà corrupted", size: 6, encoding: "base64" });
 
     const transport = await makeTransport();
     await expect(transport.readBinaryFile("assets/x.jpeg")).rejects.toThrow(/base64/i);
   });
 
   it("utf-8 reads are unaffected by the contract check", async () => {
-    globalThis.fetch = vi.fn(async () =>
-      jsonResponse({ content: "<p>émoji 🐶 日本語</p>", size: 20, encoding: "utf-8" }),
-    ) as unknown as typeof fetch;
+    stubFetch({ content: "<p>émoji 🐶 日本語</p>", size: 20, encoding: "utf-8" });
 
     const transport = await makeTransport();
     const result = await transport.readFile("index.html");

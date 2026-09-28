@@ -57,6 +57,10 @@ vi.mock("@/lib/projects/project-repository", () => ({
   verifyProjectWorkspace: vi.fn(),
 }));
 
+vi.mock("@/lib/missions/mission-repository", () => ({
+  getCheckpoint: vi.fn(),
+}));
+
 vi.mock("@/lib/studio/conversation-service", () => ({
   getAwaitingApprovalAssistantMessage: vi.fn(),
   insertMessage: vi.fn(),
@@ -86,6 +90,7 @@ import {
 } from "@/lib/litt-intelligence/paused-run-store";
 import { resumeAgentLoopV2 } from "@/lib/litt-intelligence/agent-loop-v2";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
+import { getCheckpoint } from "@/lib/missions/mission-repository";
 import {
   getActionRun,
   transitionActionRun,
@@ -377,5 +382,91 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
         clientRequestId: `resume:${PAUSED_ID}`,
       }),
     );
+  });
+});
+
+describe("POST /approvals/[pausedRunId] — checkpoint SHA threading (#551b1)", () => {
+  // #551 acceptance re-run #3: createPausedRun persisted only the
+  // checkpointId, and the resume fabricated existingCheckpoint with an
+  // empty gitSha — so computeWorkspaceChange always reported "unknown"
+  // and the artifact gate's workspace-change scoping could never engage.
+  // The route now recovers the real pre-mutation SHA from the checkpoint
+  // row and threads it into the resume input.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" } as any);
+    vi.mocked(getActionRun).mockResolvedValue({ id: "run-parent-1", status: "waiting_for_user" } as any);
+    vi.mocked(verifyProjectWorkspace).mockResolvedValue({ workspaceId: "ws-123" } as any);
+    vi.mocked(markRunProcessing).mockResolvedValue(true);
+    vi.mocked(getAwaitingApprovalAssistantMessage).mockResolvedValue(awaitingMessage as any);
+    vi.mocked(resumeAgentLoopV2).mockResolvedValue({
+      finalText: "done",
+      stepsUsed: 1,
+      toolCalls: [],
+      cancelled: false,
+      pendingApproval: undefined,
+    } as any);
+  });
+
+  it("threads the checkpoint row's real gitSha into existingCheckpoint", async () => {
+    vi.mocked(getPausedRun).mockResolvedValue({ ...pendingRun, checkpointId: "chk-1" } as any);
+    vi.mocked(resolvePausedRun).mockResolvedValue({
+      ...pendingRun,
+      checkpointId: "chk-1",
+      status: "approved",
+    } as any);
+    vi.mocked(getCheckpoint).mockResolvedValue({
+      id: "chk-1",
+      projectId: "proj-123",
+      userId: "user_123",
+      gitSha: "abc123def456",
+      label: "pre-approval",
+      description: null,
+      missionRunId: null,
+      createdAt: new Date().toISOString(),
+    } as any);
+
+    const res = await POST(makeRequest("approved"), routeParams);
+    expect(res.status).toBe(202);
+
+    expect(getCheckpoint).toHaveBeenCalledWith("chk-1", "user_123");
+    const resumeInput = vi.mocked(resumeAgentLoopV2).mock.calls[0][0];
+    expect(resumeInput.existingCheckpoint).toEqual({
+      checkpointId: "chk-1",
+      label: "pre-approval",
+      gitSha: "abc123def456",
+    });
+  });
+
+  it("keeps the empty-SHA behavior when the checkpoint row is missing (legacy rows)", async () => {
+    vi.mocked(getPausedRun).mockResolvedValue({ ...pendingRun, checkpointId: "chk-gone" } as any);
+    vi.mocked(resolvePausedRun).mockResolvedValue({
+      ...pendingRun,
+      checkpointId: "chk-gone",
+      status: "approved",
+    } as any);
+    vi.mocked(getCheckpoint).mockResolvedValue(null);
+
+    const res = await POST(makeRequest("approved"), routeParams);
+    expect(res.status).toBe(202);
+
+    const resumeInput = vi.mocked(resumeAgentLoopV2).mock.calls[0][0];
+    expect(resumeInput.existingCheckpoint).toEqual({
+      checkpointId: "chk-gone",
+      label: "pre-approval",
+      gitSha: "",
+    });
+  });
+
+  it("leaves existingCheckpoint undefined when the pause recorded no checkpoint", async () => {
+    vi.mocked(getPausedRun).mockResolvedValue({ ...pendingRun, checkpointId: null } as any);
+    vi.mocked(resolvePausedRun).mockResolvedValue({ ...pendingRun, status: "approved" } as any);
+
+    const res = await POST(makeRequest("approved"), routeParams);
+    expect(res.status).toBe(202);
+
+    expect(getCheckpoint).not.toHaveBeenCalled();
+    const resumeInput = vi.mocked(resumeAgentLoopV2).mock.calls[0][0];
+    expect(resumeInput.existingCheckpoint).toBeUndefined();
   });
 });

@@ -791,3 +791,82 @@ describe("runAgentLoopV2 — mid-build stall recovery", () => {
     expect(result.cancelled).toBe(false);
   });
 });
+
+describe("runAgentLoopV2 — prose approval-ask stall guard", () => {
+  // The exact #551 failure: the model asked for approval in prose instead
+  // of emitting the approval-gated files.write tool call, and the run
+  // settled "Complete" with zero mutations.
+  const APPROVAL_ASK =
+    "I'm ready to update index.html by adding <!-- marker --> as the very first line of the file. " +
+    "Since this requires modifying workspace files, please confirm and give approval to apply the change.";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("routes a prose approval-ask to the nudge path, not final", () => {
+    const r = resolveZeroToolCalls(APPROVAL_ASK, 0);
+    expect(r.action).toBe("nudge");
+    if (r.action === "nudge") {
+      expect(r.nudgeMessage).toContain("files.write");
+      expect(r.nudgeMessage).toContain("don't create approval cards");
+    }
+  });
+
+  it("routes present-continuous work claims to the nudge path", () => {
+    expect(
+      resolveZeroToolCalls("Thanks for the approval. I'm adding the comment as the first line.", 0).action,
+    ).toBe("nudge");
+    expect(resolveZeroToolCalls("I'm updating the header styles now.", 0).action).toBe("nudge");
+  });
+
+  it("fails honestly — never completes — when nudges are exhausted", () => {
+    const r = resolveZeroToolCalls(APPROVAL_ASK, 2);
+    expect(r.action).toBe("fail");
+    if (r.action === "fail") {
+      expect(r.failureMessage).toContain("no approval card was created");
+      expect(r.failureMessage).toContain("no files were changed");
+    }
+  });
+
+  it("still treats plain prose as final", () => {
+    expect(resolveZeroToolCalls("Done — the site is complete.", 0).action).toBe("final");
+    expect(resolveZeroToolCalls("Which file should I update?", 0).action).toBe("final");
+  });
+
+  it("fails the run honestly when the model keeps asking for approval in prose", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: APPROVAL_ASK,
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test-model",
+    });
+
+    const result = await runAgentLoopV2(
+      "Add an HTML comment as the first line of index.html",
+      fakeTransport,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+        maxSteps: 10,
+      },
+    );
+
+    // 1 initial + 2 nudges, then honest failure — never "completed".
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(3);
+    expect(result.cancelled).toBe(false);
+    expect(result.failedHonestly).toContain("no approval card was created");
+    expect(result.finalText).toBe(result.failedHonestly);
+
+    // The nudge told the model exactly what to do: emit the tool call.
+    const secondCallMessages = vi.mocked(callLLMWithTools).mock.calls[1][1] as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(
+      secondCallMessages.some((m) => m.role === "user" && m.content.includes("files.write")),
+    ).toBe(true);
+  });
+});

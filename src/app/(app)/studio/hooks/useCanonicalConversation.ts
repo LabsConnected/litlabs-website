@@ -1263,6 +1263,11 @@ export function useCanonicalConversation({
               agentMode: activeAgentMode,
               executionMode,
               agentInstanceId: activeAgentInstanceId || undefined,
+              // The project being viewed — the server reconciles it against
+              // the conversation's bound project and refuses the send with
+              // an explicit error on mismatch, instead of silently mutating
+              // the wrong project's workspace.
+              projectId: getActiveProjectId(serverProjectId, userId) || undefined,
               provider: isAutoBest ? undefined : selectedModel.apiProvider || selectedModel.provider,
               category: isAutoBest ? "auto" : selectedModel.category,
               model: selectedModel.model,
