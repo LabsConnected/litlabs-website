@@ -2,6 +2,7 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { clerkFrontendApiProxy } from "@clerk/backend/proxy";
 import { NextResponse, NextRequest } from "next/server";
 import { isAnonymousDevAllowed, isClerkConfigured, isDeployed } from "@/lib/env";
+import { isLittAppEnabled } from "@/lib/litt-client/entry-points";
 
 // ─── Bot detection ────────────────────────────────────────────────
 // Merged from the former src/middleware.ts. Next.js 16 forbids having
@@ -827,6 +828,20 @@ export function redirectNakedToWww(req: NextRequest): NextResponse | null {
  * Only the single-segment form redirects — bare /profile (the Account menu
  * link) and deeper paths are left alone.
  */
+/**
+ * While the LiTT App flag is off, `/app` does not exist. Return 404
+ * before auth and before the route renders, so the placeholder is not
+ * served and signed-out visitors are not sent through sign-in first.
+ * When the flag is on this returns null and the normal `/app(.*)`
+ * protection applies.
+ */
+export function hiddenLittAppResponse(req: NextRequest): NextResponse | null {
+  if (isLittAppEnabled()) return null;
+  const { pathname } = req.nextUrl;
+  if (pathname !== "/app" && !pathname.startsWith("/app/")) return null;
+  return new NextResponse(null, { status: 404, statusText: "Not Found" });
+}
+
 export function redirectLegacyProfileToU(req: NextRequest): NextResponse | null {
   const match = /^\/profile\/([^/]+)\/?$/.exec(req.nextUrl.pathname);
   if (!match) return null;
@@ -851,6 +866,9 @@ const middleware = (req: NextRequest, ...rest: never[]): Promise<NextResponse> =
   // signed-out visitors reach the public profile (see redirectLegacyProfileToU).
   const legacyProfileRedirect = redirectLegacyProfileToU(req);
   if (legacyProfileRedirect) return Promise.resolve(legacyProfileRedirect);
+
+  const hiddenApp = hiddenLittAppResponse(req);
+  if (hiddenApp) return Promise.resolve(hiddenApp);
 
   const fixed = fixDevProxyHeaders(req);
   if (fixed) return Promise.resolve(fixed);

@@ -4,6 +4,7 @@ import "@testing-library/jest-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useLittAppStore } from "@/lib/litt-client/store-context";
 import { LittAppFrame } from "./litt-app-frame";
+import LittAppPage from "./page";
 
 function Probe() {
   const conversationId = useLittAppStore((state) => state.conversationId);
@@ -14,6 +15,17 @@ describe("LittAppFrame", () => {
   afterEach(() => {
     document.documentElement.style.removeProperty("--litt-keyboard-inset");
     vi.unstubAllGlobals();
+  });
+
+  it("renders the placeholder inside its own frame", () => {
+    render(
+      <LittAppFrame>
+        <LittAppPage />
+      </LittAppFrame>,
+    );
+    expect(screen.getByRole("heading", { name: "LiTT" })).toBeInTheDocument();
+    expect(screen.getByText("Your conversation will show up here.")).toBeInTheDocument();
+    expect(document.querySelector("[data-litt-app]")).not.toBeNull();
   });
 
   it("renders its own frame and a private store", () => {
