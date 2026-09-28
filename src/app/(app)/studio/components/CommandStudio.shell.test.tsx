@@ -16,10 +16,11 @@ import "@testing-library/jest-dom";
 // observable.
 
 const stableSearchParams = new URLSearchParams("tool=chat");
+const { replaceMock } = vi.hoisted(() => ({ replaceMock: vi.fn() }));
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => stableSearchParams,
-  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  useRouter: () => ({ replace: replaceMock, push: vi.fn() }),
   usePathname: () => "/studio",
 }));
 
@@ -468,6 +469,8 @@ describe("StudioShell — desktop operating shell", () => {
       expect(screen.getByTestId("stage-surface-workspace")).toHaveAttribute("data-active", "true");
       expect(screen.getByTestId("spatial-workspace")).toBeTruthy();
     });
+    const written = replaceMock.mock.calls.map((call) => String(call[0]));
+    expect(written.some((url) => url.includes("tool=preview"))).toBe(false);
   });
 
   it("rail switches the stage surface and keeps visited surfaces mounted", async () => {

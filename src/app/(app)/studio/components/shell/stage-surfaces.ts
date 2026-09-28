@@ -121,6 +121,40 @@ export function modeToStageSurface(mode: string | null | undefined): StudioStage
 /** Opening Studio, or the canonical chat URL, lands on the workspace.
     An explicit tool such as preview, design, or code still selects that surface. */
 export function shellStageForTool(tool: string | null, mode: string | null | undefined): StudioStageSurface | null {
-  if (tool === null || tool === "chat" || tool === "home") return "workspace";
+  if (tool === null || tool === "chat" || tool === "home" || tool === "workspace") return "workspace";
   return modeToStageSurface(mode);
+}
+
+const EXPLICIT_TOOL_STAGE: Record<string, StudioStageSurface> = {
+  preview: "preview",
+  design: "design",
+  canvas: "design",
+  code: "code",
+  build: "plan",
+  terminal: "terminal",
+  files: "files",
+};
+
+/** Stage to show before the URL→state effect runs. Bare /studio, chat, and home
+    are the workspace. Explicit preview and design stay on those surfaces. */
+export function initialStageFromTool(tool: string | null): StudioStageSurface {
+  if (tool === null || tool === "chat" || tool === "home" || tool === "workspace") return "workspace";
+  return EXPLICIT_TOOL_STAGE[tool] ?? "workspace";
+}
+
+/** Tool param the operating shell should write. The legacy studio mode for
+    chat/home is "preview", and publishing that as ?tool=preview makes the
+    next URL read treat Preview as an explicit deep link. Workspace stays on
+    chat/home. An explicit tool that already names the active stage is kept. */
+export function canonicalShellTool(legacyTool: string, stage: StudioStageSurface, currentTool: string | null): string {
+  if (stage === "workspace") {
+    if (currentTool === "home" || currentTool === "chat" || currentTool === "workspace") return currentTool;
+    return "chat";
+  }
+  if (currentTool && initialStageFromTool(currentTool) === stage) return currentTool;
+  if (stage === "preview") return "preview";
+  if (stage === "design") return "design";
+  if (stage === "code") return "code";
+  if (legacyTool === "preview") return "chat";
+  return legacyTool;
 }

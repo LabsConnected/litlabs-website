@@ -70,7 +70,7 @@ import StudioDeploySurface from "./shell/StudioDeploySurface";
 import StudioOperatorBar from "./shell/StudioOperatorBar";
 import ElementInspectorPanel from "./shell/ElementInspectorPanel";
 import ImageStudio from "./shell/ImageStudio";
-import { resolveStageSurface, shellStageForTool, type StudioStageSurface } from "./shell/stage-surfaces";
+import { canonicalShellTool, initialStageFromTool, resolveStageSurface, shellStageForTool, type StudioStageSurface } from "./shell/stage-surfaces";
 import { SpatialWorkspace } from "./workspace/SpatialWorkspace";
 import { WorkspaceInspector } from "./workspace/WorkspaceInspector";
 import { useWorkspaceStore } from "./workspace/workspace-store";
@@ -385,7 +385,7 @@ function CommandStudioContent() {
 
   const studioShellActive =
     destination === "studio" && viewportTier !== null && !isMobileLitt && !classicOverride;
-  const [stageSurface, setStageSurface] = useState<StudioStageSurface>("workspace");
+  const [stageSurface, setStageSurface] = useState<StudioStageSurface>(() => initialStageFromTool(searchParams.get("tool")));
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [littExpanded, setLittExpanded] = useState(false);
   // Surfaces stay mounted once visited — hidden, not unmounted — so
@@ -1042,12 +1042,19 @@ function CommandStudioContent() {
   // own ?tool= value for deep-linking. Any stray ?mode= is dropped:
   // there is no user-facing mode choice.
   useEffect(() => {
+    // The viewport tier is null on the first paint. Writing the classic
+    // preview default in that gap turns ?tool=chat into ?tool=preview, and
+    // the shell then treats Preview as an explicit request.
+    if (viewportTier === null) return;
     const activeMode =
       destination === "studio" ? studioMode :
       destination === "create" ? createMode :
       destination === "more" ? moreMode :
       undefined;
-    const legacyTool = destinationToLegacyTool(destination, activeMode, workSurface);
+    const mappedTool = destinationToLegacyTool(destination, activeMode, workSurface);
+    const legacyTool = studioShellActive && destination === "studio"
+      ? canonicalShellTool(mappedTool, stageSurface, searchParams.get("tool"))
+      : mappedTool;
     try {
       localStorage.setItem("littree:studio:tool", legacyTool);
     } catch {
@@ -1083,8 +1090,7 @@ function CommandStudioContent() {
       lastWrittenUrlRef.current = params.toString();
       router.replace(target, { scroll: false });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [destination, studioMode, createMode, moreMode, workSurface, pathname, router]);
+  }, [destination, studioMode, createMode, moreMode, workSurface, pathname, router, viewportTier, studioShellActive, stageSurface, searchParams]);
 
   // Handle legacy "studio:switch-tool" events emitted from inside tools.
   useEffect(() => {
@@ -1559,6 +1565,7 @@ function CommandStudioContent() {
       setDestination("studio");
       setStudioMode("work");
       setWorkSurface("conversation");
+      if (studioShellActive) openStageSurface("workspace");
       setProjectNameDialogOpen(false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Network error while creating project.";
@@ -1568,7 +1575,7 @@ function CommandStudioContent() {
     } finally {
       setCreatingProject(false);
     }
-  }, [creatingProject, searchParams, pathname, router, refreshCapabilities, userId, getToken, isMobileLitt]);
+  }, [creatingProject, searchParams, pathname, router, refreshCapabilities, userId, getToken, isMobileLitt, studioShellActive, openStageSurface]);
 
   const handlePrepareWorkspace = useCallback(async () => {
     if (!runtimeState.projectId) return;
