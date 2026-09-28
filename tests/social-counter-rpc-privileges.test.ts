@@ -1,10 +1,36 @@
 // @vitest-environment node
-import { execFile } from "node:child_process";
+// Live privilege checks against a local Postgres server reached the same way
+// this file runs SQL: `sudo -u postgres psql` on the default socket.
+// describe.skipIf skips the suite when that server is not accepting
+// connections (the GitHub "Build and Type Check" job has no local Postgres).
+// The assertions below are unchanged when the server is reachable.
+import { execFile, execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it, afterAll } from "vitest";
+
+const SKIP_REASON =
+  "skipped: no Postgres reachable on socket /var/run/postgresql/.s.PGSQL.5432";
+
+function postgresReachable(): boolean {
+  try {
+    execFileSync(
+      "sudo",
+      ["-n", "-u", "postgres", "psql", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-At", "-c", "SELECT 1"],
+      { stdio: "ignore", timeout: 10_000 },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const hasPostgres = postgresReachable();
+if (!hasPostgres) {
+  console.info(`[social-counter-rpc-privileges] ${SKIP_REASON}`);
+}
 
 const execFileAsync = promisify(execFile);
 const root = path.resolve(__dirname, "..");
@@ -48,8 +74,11 @@ async function psqlFile(database: string, file: string): Promise<void> {
   );
 }
 
-describe("social counter RPC execute privileges", () => {
+describe.skipIf(!hasPostgres)(
+  hasPostgres ? "social counter RPC execute privileges" : `social counter RPC execute privileges (${SKIP_REASON})`,
+  () => {
   afterAll(async () => {
+    if (!hasPostgres) return;
     await psql("postgres", `DROP DATABASE IF EXISTS ${DB}`);
   });
 
