@@ -231,6 +231,86 @@ describe("Launch Flow: no-mutation reprompt", () => {
   });
 });
 
+// ─── Tests: reprompt continues the recovery conversation ─────────────
+// Regression for the 2026-09-28 acceptance failure: a rejected apply_patch
+// builds a recovery (validation error + exact re-read file content) in the
+// loop's messages, but the bounded reprompt used to start a FRESH loop and
+// deterministically discard it — the weakest fallback models started blind,
+// produced no tool calls, and the run died. The reprompt must continue the
+// SAME conversation.
+
+describe("Launch Flow: reprompt continues the recovery conversation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    toolRegistry.clear();
+    registerInternalTools();
+  });
+
+  it("re-seeds the previous loop's messages when the first attempt's patch was rejected", async () => {
+    const recoveryContent = "CURRENT FILE CONTENT (index.html):\n<html>recovered</html>";
+    const runAgentLoop = vi.fn()
+      .mockResolvedValueOnce(successAgentResult({
+        toolCalls: [{ toolId: "apply_patch", success: false, summary: "search text not found in file", mutating: false }],
+        finalMessages: [
+          { role: "user", content: "Build a simple site" },
+          { role: "user", content: `validation failed\n\nSAFE PATCH RECOVERY ATTEMPT 1\n\n${recoveryContent}` },
+        ],
+      }))
+      .mockResolvedValueOnce(successAgentResult({
+        toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
+      }));
+    const options = makeOptions({ requiresExecution: true, runAgentLoop });
+
+    await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    // The second attempt continues the SAME conversation — the recovery
+    // context (re-read file content) survives instead of starting blind.
+    const secondConfig = runAgentLoop.mock.calls[1][2];
+    expect(secondConfig.initialMessages).toBeDefined();
+    expect(JSON.stringify(secondConfig.initialMessages)).toContain("CURRENT FILE CONTENT");
+    // The reprompt text describes the rejected patch — it must not claim
+    // the model merely "announced changes".
+    const repromptMessage = String(runAgentLoop.mock.calls[1][0]);
+    expect(repromptMessage).not.toContain("announced changes");
+    expect(repromptMessage).toContain("rejected");
+  });
+
+  it("keeps the generic reprompt text and no seeded messages when no patch was rejected", async () => {
+    const runAgentLoop = vi.fn()
+      .mockResolvedValueOnce(successAgentResult({
+        toolCalls: [{ toolId: "files.list", success: true, summary: "listed", mutating: false }],
+      }))
+      .mockResolvedValueOnce(successAgentResult({
+        toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
+      }));
+    const options = makeOptions({ requiresExecution: true, runAgentLoop });
+
+    await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    expect(String(runAgentLoop.mock.calls[1][0])).toContain("did not write any project files");
+    // No recovery context existed — nothing to seed, and the first loop's
+    // mock result carried no finalMessages.
+    expect(runAgentLoop.mock.calls[1][2].initialMessages).toBeUndefined();
+  });
+
+  it("reprompts at most once even when the continued attempt also fails", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(successAgentResult({
+      toolCalls: [{ toolId: "apply_patch", success: false, summary: "rejected again", mutating: false }],
+      finalMessages: [{ role: "user", content: "Build a simple site" }],
+    }));
+    const options = makeOptions({ requiresExecution: true, runAgentLoop });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("TOOL_EXECUTION_UNAVAILABLE");
+    expect(result.finalText).toContain("no available model produced a file-writing tool call after two attempts");
+  });
+});
+
 // ─── Tests: approval pause still runs preview ────────────────────────
 
 describe("Launch Flow: approval pause runs preview", () => {

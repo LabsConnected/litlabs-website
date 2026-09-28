@@ -19,6 +19,8 @@ import type { WorkspaceTransport } from "./workspace-transport";
 import { ProgressEmitter, type ProgressEvent } from "./progress-events";
 import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from "./permission-engine";
 import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, AllRoutesFailedError, AgentBudgetExhaustedError, type ToolDefinition, type ToolCallResult, type LLMMessage } from "./llm-tool-calling";
+// Re-exported so launch-flow can seed a continued loop's messages.
+export type { LLMMessage };
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { buildPatchRecoveryMessage, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
@@ -59,6 +61,13 @@ export interface AgentLoopConfig {
   enableBuildFix: boolean;
   /** Require a structured tool call on the first model turn of an execution flow. */
   requireToolCallOnFirstStep?: boolean;
+  /**
+   * Messages to seed the conversation with before the user message.
+   * Used by the launch flow's bounded reprompt to CONTINUE an existing
+   * loop (preserving a patch-recovery message and the re-read file
+   * content) instead of starting a blind fresh loop.
+   */
+  initialMessages?: LLMMessage[];
   evalMetadata?: LLMCallMetadata;
   /** Upstream/client AbortSignal propagated to all provider calls. */
   signal?: AbortSignal;
@@ -187,6 +196,13 @@ export interface AgentLoopResult {
   };
   /** Canonical quality ledger snapshot, including evidence not yet filed. */
   qualityLoopState?: QualityLoopSnapshot;
+  /**
+   * The conversation messages at loop end (copy). Lets a caller continue
+   * the SAME conversation for a bounded reprompt — e.g. the launch flow
+   * re-seeds these so a rejected patch's recovery context (validation
+   * error + re-read file content) survives the second attempt.
+   */
+  finalMessages?: LLMMessage[];
 }
 
 // ─── Loop detection ───────────────────────────────────────────────
@@ -594,8 +610,12 @@ export async function runAgentLoopV2(
 
   const toolDefs = availableTools.map(toToolDefinition);
 
-  // Conversation messages for the LLM
+  // Conversation messages for the LLM. A reprompt continues the SAME
+  // conversation: seeded messages (e.g. a patch-recovery message with the
+  // re-read file content) come first so the model regenerates against
+  // real context instead of starting blind.
   const llmMessages: LLMMessage[] = [
+    ...(cfg.initialMessages ?? []),
     { role: "user", content: userMessage },
   ];
 
@@ -971,6 +991,7 @@ export async function runAgentLoopV2(
               stepsUsedAtPause: stepsUsed,
               hadInterveningMutationAtPause: hasInterveningMutation,
             },
+            finalMessages: [...llmMessages],
           };
         }
 
@@ -1211,6 +1232,7 @@ export async function runAgentLoopV2(
         }
       : undefined,
     qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
+    finalMessages: [...llmMessages],
   };
 }
 
@@ -2321,6 +2343,7 @@ export async function resumeAgentLoopV2(
         }
       : undefined,
     qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
+    finalMessages: [...llmMessages],
   };
 }
 

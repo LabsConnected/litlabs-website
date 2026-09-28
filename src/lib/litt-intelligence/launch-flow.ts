@@ -19,7 +19,7 @@ import "server-only";
 import { randomUUID } from "crypto";
 import type { WorkspaceTransport } from "./workspace-transport";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
-import { runAgentLoopV2, type AgentLoopResult, type AgentLoopConfig, DEFAULT_LOOP_CONFIG } from "./agent-loop-v2";
+import { runAgentLoopV2, type AgentLoopResult, type AgentLoopConfig, type LLMMessage, DEFAULT_LOOP_CONFIG } from "./agent-loop-v2";
 import { toolRegistry } from "./tool-registry";
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import type { BuildFixLoopResult } from "./build-fix-loop";
@@ -543,7 +543,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
     emitStep(progress, steps, "Planning and generating the project...");
     progress.emit({ type: "phase", phase: "call_llm", step: 1 });
 
-    const runPhase1 = (message: string, qualityState = options.qualityLoop?.state) =>
+    const runPhase1 = (message: string, qualityState = options.qualityLoop?.state, initialMessages?: LLMMessage[]) =>
       (options.runAgentLoop ?? runAgentLoopV2)(
         message,
         transport,
@@ -554,6 +554,11 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           enableBuildFix: options.enableBuildFix ?? true,
           requireToolCallOnFirstStep: options.requiresExecution === true,
           evalMetadata: options.evalMetadata,
+          // A bounded reprompt continues the SAME conversation: pass the
+          // previous loop's messages so a patch-recovery (validation error
+          // + re-read file content) survives the second attempt instead of
+          // starting a blind fresh loop.
+          initialMessages,
           // Always bounded by the global launch budget — a reprompt must not
           // restart the clock.
           maxRuntimeMs: Math.max(0, startTime + DEFAULT_LOOP_CONFIG.maxRuntimeMs - Date.now()),
@@ -705,17 +710,28 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
       // always means a weak model closed its turn after announcing writes it
       // never made. Issue exactly one bounded reprompt, then continue — the
       // second result flows through the same guards.
+      //
+      // The reprompt CONTINUES the same conversation (the previous loop's
+      // messages are re-seeded): when the first attempt's apply_patch was
+      // rejected, the loop already holds the validation error and the
+      // exact re-read file content. Starting a fresh loop would discard
+      // that recovery and hand a blind model to the weakest providers —
+      // the recovery would be defeated by construction.
       if (options.requiresExecution && !hasAppliedMutation(agentResult)) {
         emitStep(
           progress,
           steps,
           "No project files were changed — re-prompting the agent to apply the request...",
         );
-        agentResult = await runPhase1(
-          `Your previous reply announced changes but did not write any project files. ` +
-          `Apply the original request now: ${options.userMessage}\n\n` +
-          `Write or modify the project files with the file tools (files.write / apply_patch), then stop.`,
+        const repromptHadRejectedPatch = agentResult.toolCalls.some(
+          (c) => c.toolId === "apply_patch" && !c.success,
         );
+        const repromptText = repromptHadRejectedPatch
+          ? `Your previous file-writing patch was rejected — the validation error and the exact CURRENT FILE CONTENT are in the conversation above. Do not repeat the rejected patch. Regenerate now: copy the search text exactly from CURRENT FILE CONTENT, or use files.write with the complete literal contents of the file. Apply the original request: ${options.userMessage}\n\nWrite or modify the project files with the file tools (files.write / apply_patch), then stop.`
+          : `Your previous reply announced changes but did not write any project files. ` +
+            `Apply the original request now: ${options.userMessage}\n\n` +
+            `Write or modify the project files with the file tools (files.write / apply_patch), then stop.`;
+        agentResult = await runPhase1(repromptText, undefined, agentResult.finalMessages);
         lastAgentLoopResult = agentResult;
         checkSignal(signal);
         pausedApproval = agentResult.pendingApproval;

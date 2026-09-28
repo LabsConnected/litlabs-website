@@ -1252,8 +1252,15 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           v2ToolCalls.length === 0 &&
           v2Mutations === 0;
         if (zeroMutationCompletion) {
-          assistantText =
-            "I couldn't complete the requested change: no file operations were performed, so nothing was modified. Please try again.";
+          // Preserve a specific failure message the launch flow already
+          // produced (e.g. TOOL_EXECUTION_UNAVAILABLE names the real cause
+          // after two attempts) — it is more honest than the generic text.
+          // Only fall back to the generic wording when the flow named no
+          // specific error (the silent fake-complete case).
+          if (!launchFlowResult?.error) {
+            assistantText =
+              "I couldn't complete the requested change: no file operations were performed, so nothing was modified. Please try again.";
+          }
         }
 
         const finalMessageStatus: MessageStatus = launchFlowResult?.cancelled

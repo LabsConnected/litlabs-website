@@ -1090,6 +1090,76 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
     expect(getActiveExecution("conv-123")).toBeNull();
   });
 
+  it("preserves a specific launch-flow failure message instead of the generic zero-mutation text", async () => {
+    // Regression for the 2026-09-28 acceptance failure: the launch flow
+    // named the real cause (TOOL_EXECUTION_UNAVAILABLE) but the route
+    // overwrote it with the generic "no file operations" text, hiding
+    // what actually went wrong.
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: false,
+      status: "failed",
+      error: "TOOL_EXECUTION_UNAVAILABLE",
+      finalText: "Tool execution unavailable: no available model produced a file-writing tool call after two attempts, so no project files were changed. Try a model with stronger tool-calling support (e.g. Gemini).",
+      agentLoopResult: {
+        stepsUsed: 2,
+        toolCalls: [],
+        cancelled: false,
+        pendingApproval: null,
+      } as any,
+      cancelled: false,
+      totalDurationMs: 100,
+    } as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    await readSSE(res);
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      expect.stringContaining("Tool execution unavailable"),
+    );
+    expect(updateMessageStatus).not.toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      "I couldn't complete the requested change: no file operations were performed, so nothing was modified. Please try again.",
+    );
+  });
+
+  it("keeps the generic zero-mutation text when the launch flow names no specific error", async () => {
+    // The silent fake-complete: the flow claimed success with completion-
+    // sounding prose but zero tool calls — the generic honest text still
+    // replaces it.
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      finalText: "Done!",
+      agentLoopResult: {
+        stepsUsed: 1,
+        toolCalls: [],
+        cancelled: false,
+        pendingApproval: null,
+      } as any,
+      cancelled: false,
+      totalDurationMs: 100,
+    } as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    await readSSE(res);
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      "I couldn't complete the requested change: no file operations were performed, so nothing was modified. Please try again.",
+    );
+  });
+
   it("a failed run releases the conversation — an immediate second send is not rejected", async () => {
     vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
     vi.mocked(runLaunchFlow).mockRejectedValue(new Error("Provider connection refused"));
