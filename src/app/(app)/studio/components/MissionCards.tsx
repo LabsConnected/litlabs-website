@@ -76,6 +76,12 @@ export const PHASE_META: Record<ExecutionPhase, { label: string; color: string }
   cancelled: { label: "Cancelled", color: "var(--error)" },
   awaiting_approval: { label: "Approval needed", color: AMBER },
   awaiting_input: { label: "Awaiting input", color: AMBER },
+  // Station Control bridge (§9) — additive entries for the new phases.
+  researching: { label: "Researching", color: ACCENT },
+  creating: { label: "Creating", color: "var(--litt-primary)" },
+  browsing: { label: "Browsing", color: ACCENT },
+  running: { label: "Running", color: AMBER },
+  deploying: { label: "Deploying", color: "var(--litt-primary)" },
 };
 
 /* ── Collapsible card shell ─────────────────────────────────────── */

@@ -56,6 +56,12 @@ const PHASE_CONFIG: Record<ExecutionPhase, { label: string; icon: ComponentType<
   cancelled: { label: "Cancelled", icon: XCircle, color: "var(--error)" },
   awaiting_approval: { label: "Approval needed", icon: AlertTriangle, color: "#e3b341" },
   awaiting_input: { label: "Awaiting input", icon: AlertTriangle, color: "#e3b341" },
+  // Station Control bridge (§9) — additive entries for the new phases.
+  researching: { label: "Researching", icon: Eye, color: "var(--spark-primary)" },
+  creating: { label: "Creating", icon: Edit3, color: "var(--litt-primary)" },
+  browsing: { label: "Browsing", icon: Eye, color: "var(--spark-primary)" },
+  running: { label: "Running", icon: Terminal, color: "#e3b341" },
+  deploying: { label: "Deploying", icon: GitBranch, color: "var(--litt-primary)" },
 };
 
 /* ── Props ─────────────────────────────────────────────────────── */

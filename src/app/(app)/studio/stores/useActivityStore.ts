@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import type { ExecutionPhase } from "./useExecutionStore";
 
 const STORAGE_KEY = "litt:activityEvents";
 const MAX_EVENTS = 50;
@@ -16,6 +17,16 @@ export interface PersistedActivityEvent {
   timestamp: number;
   status: "success" | "pending" | "error" | "info";
   conversationId?: string;
+  /**
+   * Station Control bridge (§9 activity format: { timestamp, station,
+   * summary, phase }). Additive — existing producers are untouched.
+   */
+  /** Which station produced the entry (contract StationId), e.g. "browser". */
+  station?: string;
+  /** Human-readable summary, e.g. "Opened Stripe documentation". */
+  summary?: string;
+  /** Execution phase at the time of the entry. */
+  phase?: ExecutionPhase;
 }
 
 interface ActivityStore {
