@@ -55,8 +55,9 @@ export const STAGE_SURFACE_META: Record<
 };
 
 /** Primary workspace rail order (top → bottom). */
+// "plan" is not a center station: Mission / Checkpoints / Next actions live
+// in the inspector's Plan tab (see station-url.ts).
 export const PRIMARY_SURFACES: StudioStageSurface[] = [
-  "plan",
   "design",
   "preview",
   "browser",
@@ -80,9 +81,9 @@ const PERSISTED_SURFACE_MAP: Record<string, StudioStageSurface> = {
   code: "code",
   files: "files",
   media: "images",
-  work: "plan",
+  work: "preview",
   canvas: "design",
-  plan: "plan",
+  plan: "preview",
   browser: "browser",
   images: "images",
   assets: "assets",
@@ -102,7 +103,7 @@ export function resolveStageSurface(stored: string | null | undefined): StudioSt
     builder canvas (design), not the file tree. */
 export function modeToStageSurface(mode: string | null | undefined): StudioStageSurface | null {
   switch (mode) {
-    case "work": return "plan";
+    case "work": return "preview";
     case "files": return "design";
     case "code": return "code";
     case "preview": return "preview";

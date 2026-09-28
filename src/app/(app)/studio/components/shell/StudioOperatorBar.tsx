@@ -136,7 +136,7 @@ export default function StudioOperatorBar({
       {/* Terminal status */}
       {terminalStatus && (
         <span className="hidden md:inline" style={{ color: "var(--text-muted)" }}>
-          · Terminal: {terminalStatus}
+          · {terminalStatus}
         </span>
       )}
 

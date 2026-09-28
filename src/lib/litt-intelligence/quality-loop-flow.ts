@@ -33,7 +33,10 @@ import {
   MAX_DESIGN_PASSES,
   QUALITY_STAGES,
   STAGE_REQUIREMENTS,
+  classifyQualityProfile,
   createQualityLoop,
+  isStageRequired,
+  profileOf,
   currentStage,
   declareSuccess,
   passStage,
@@ -42,6 +45,7 @@ import {
   summarizeLoop,
   type EvidenceSource,
   type QualityLoopState,
+  type QualityProfile,
   type QualityStage,
   type StageEvidence,
   type SuccessVerdict,
@@ -73,6 +77,8 @@ export interface QualityLoopSession {
   critiqueFailed: boolean;
   /** Machine observations not yet filed into the stage machine. */
   observations: QualityLoopObservation[];
+  /** True once any mutating tool succeeded — gates read-back evidence. */
+  mutationSeen?: boolean;
 }
 
 export interface QualityLoopObservation {
@@ -94,6 +100,7 @@ export interface QualityLoopSnapshot {
   inspectionNote?: string;
   critiqueFailed: boolean;
   observations: QualityLoopObservation[];
+  mutationSeen?: boolean;
 }
 
 export function snapshotQualityLoopSession(session: QualityLoopSession): QualityLoopSnapshot {
@@ -110,26 +117,45 @@ export function startQualityLoopSession(opts: {
   userId: string;
   userRequest: string;
   snapshot?: QualityLoopSnapshot;
+  /** Override the classifier (tests, explicit mission types). */
+  profile?: QualityProfile;
 }): QualityLoopSession {
   if (
     opts.snapshot &&
     opts.snapshot.state.projectId === opts.projectId &&
     opts.snapshot.state.userId === opts.userId
   ) {
+    // Snapshots from before profiles existed keep the full website gate
+    // (profileOf() defaults to "site") — a resume never loosens the gate.
     return restoreQualityLoopSession(opts.snapshot);
   }
 
-  return {
+  const profile = opts.profile ?? classifyQualityProfile(opts.userRequest);
+  const session: QualityLoopSession = {
     state: createQualityLoop({
       runId: opts.runId,
       projectId: opts.projectId,
       userId: opts.userId,
+      profile,
     }),
     userRequest: opts.userRequest,
     inspectionRan: false,
     critiqueFailed: false,
     observations: [],
+    mutationSeen: false,
   };
+
+  // UNDERSTAND for targeted work is established by the request itself:
+  // the system records it instead of demanding a written brief. A site
+  // build still needs the agent's structured brief (audience, goals…).
+  if (profile !== "site" && opts.userRequest.trim()) {
+    fileObservation(session, "understand", {
+      summary: `Request captured (${profile} task): ${opts.userRequest.trim().slice(0, 300)}`,
+      by: "system",
+      detail: { profile },
+    });
+  }
+  return session;
 }
 
 /**
@@ -185,10 +211,16 @@ function stagePassable(state: QualityLoopState, stage: QualityStage): boolean {
   if (s.evidence.length === 0) return false;
   if (blockedReason(state, stage)) return false;
   if (MACHINE_EVIDENCE_STAGES.has(stage)) {
+    // Targeted work (edit/feature) is verified at the scale of the change:
+    // a successful mutation is the build, and reading the changed file
+    // back is an inspection. A site build keeps the strict website proofs.
+    const targeted = profileOf(state) !== "site";
     const predicates: Partial<Record<QualityStage, (detail: Record<string, unknown> | undefined) => boolean>> = {
-      build: (detail) => detail?.artifactVerified === true,
+      build: (detail) => detail?.artifactVerified === true || (targeted && detail?.mutationVerified === true),
       run: (detail) => detail?.reachable === true,
-      inspect: (detail) => detail?.browserInspected === true && detail?.styleHealthy === true && detail?.consoleClean === true,
+      inspect: (detail) =>
+        (detail?.browserInspected === true && detail?.styleHealthy === true && detail?.consoleClean === true) ||
+        (targeted && detail?.readBackVerified === true),
       critique: (detail) => detail?.visualVerified === true && detail?.passed === true && detail?.consoleClean === true,
       test: (detail) => detail?.executedChecks === true && detail?.passed === true,
       deploy: (detail) => detail?.deploymentVerified === true,
@@ -380,14 +412,16 @@ function reconcile(session: QualityLoopSession): void {
       } else if (
         s.evidence.length === 0 &&
         laterHasEvidence &&
-        IMPLICATION_SKIPPABLE.has(c) &&
+        (IMPLICATION_SKIPPABLE.has(c) || !isStageRequired(state, c)) &&
         (s.status === "pending" || s.status === "active")
       ) {
         try {
           skipStage(
             state,
             c,
-            "No evidence recorded; advanced by implication from later-stage work.",
+            isStageRequired(state, c) || IMPLICATION_SKIPPABLE.has(c)
+              ? "No evidence recorded; advanced by implication from later-stage work."
+              : `Not required for a ${profileOf(state)} task.`,
           );
           progressed = true;
         } catch {
@@ -419,10 +453,12 @@ export function noteToolResult(
 ): void {
   try {
     if (tool.success && tool.mutating) {
+      session.mutationSeen = true;
       fileObservation(session, "build", {
         summary: `Mutating tool "${toolId}" succeeded: ${tool.summary.slice(0, 300)}`,
         artifacts: [toolId],
         by: "system",
+        detail: { mutationVerified: true },
       });
       if (session.critiqueFailed) {
         fileObservation(session, "fix", {
@@ -437,6 +473,23 @@ export function noteToolResult(
       tool.result && typeof tool.result === "object"
         ? (tool.result as Record<string, unknown>)
         : null;
+
+    // Check tools executed through the workspace are TEST evidence the
+    // moment they run — no need to wait for the post-run build-fix loop.
+    if (CHECK_TOOL_IDS.has(toolId)) {
+      const exitCode = typeof payload?.exitCode === "number" ? payload.exitCode : null;
+      const passed = tool.success && payload?.success !== false && (exitCode === null || exitCode === 0);
+      fileObservation(session, "test", {
+        summary: passed
+          ? `Check "${toolId}" executed and passed.`
+          : `Check "${toolId}" executed and failed${exitCode !== null ? ` (exit ${exitCode})` : ""}.`,
+        artifacts: [`${toolId}:${passed ? "pass" : "fail"}`],
+        by: "system",
+        detail: passed
+          ? { passed: true, executedChecks: true }
+          : { passed: false, executedChecks: true, reason: `${toolId} failed` },
+      });
+    }
     const previewReady =
       tool.success &&
       ((toolId === "preview.status" && payload?.status === "ready") ||
@@ -447,6 +500,43 @@ export function noteToolResult(
     }
   } catch {
     // Evidence recording must never break the run.
+  }
+}
+
+/** Workspace check tools whose results are TEST evidence. */
+const CHECK_TOOL_IDS: ReadonlySet<string> = new Set([
+  "test.run",
+  "build.run",
+  "typecheck.run",
+  "lint.run",
+]);
+
+/**
+ * Record that a file changed by this run was read back from the workspace
+ * and holds what the run wrote — INSPECT evidence at the scale of a
+ * targeted edit. Only counts after a successful mutation, and only when
+ * the caller actually re-read the file from the workspace.
+ */
+export function noteMutationReadBack(
+  session: QualityLoopSession,
+  check: { path: string; readable: boolean; contentMatches: boolean | null },
+): void {
+  try {
+    if (!session.mutationSeen) return;
+    const ok = check.readable && check.contentMatches !== false;
+    fileObservation(session, "inspect", {
+      summary: ok
+        ? `Changed file read back from the workspace: ${check.path}` +
+          (check.contentMatches === true ? " (content matches the edit)." : ".")
+        : `Read-back of ${check.path} did not confirm the edit.`,
+      artifacts: [check.path],
+      by: "system",
+      detail: ok
+        ? { readBackVerified: true, contentMatches: check.contentMatches }
+        : { readBackVerified: false, passed: false, reason: `Read-back of ${check.path} did not confirm the edit` },
+    });
+  } catch {
+    // Never break the run.
   }
 }
 
@@ -756,12 +846,21 @@ export function finalizeQualityLoop(
     try {
       if (stagePassable(state, c)) {
         passStage(state, c);
-      } else if (s.evidence.length === 0 && STAGE_REQUIREMENTS[c].skippable) {
+      } else if (
+        s.evidence.length === 0 &&
+        (STAGE_REQUIREMENTS[c].skippable || !isStageRequired(state, c))
+      ) {
         const reason =
           (c === "inspect" || c === "critique") && session.inspectionNote
             ? session.inspectionNote
-            : "Stage produced no evidence during the run.";
+            : isStageRequired(state, c) || STAGE_REQUIREMENTS[c].skippable
+              ? "Stage produced no evidence during the run."
+              : `Not required for a ${profileOf(state)} task.`;
         skipStage(state, c, reason);
+      } else if (!isStageRequired(state, c) && !blockedReason(state, c)) {
+        // Optional for this profile and not failing — its partial evidence
+        // stays in the ledger, but it does not hold the gate.
+        skipStage(state, c, `Not required for a ${profileOf(state)} task (evidence kept).`);
       } else {
         // Either no evidence on a required stage (gate holds), or the
         // latest evidence reports failure (gate holds harder).
@@ -826,3 +925,28 @@ export const QUALITY_LOOP_PROMPT_SECTION = [
   "declared. Your closing summary must report what each stage established — never claim",
   "a result (a deletion, a deployment, a passing check) that did not actually happen.",
 ].join("\n");
+
+/** Prompt section for targeted (edit / feature) work. */
+const TARGETED_PROMPT_SECTION = (profile: QualityProfile) => [
+  "",
+  `## Quality check (${profile === "edit" ? "targeted edit" : "feature"})`,
+  "",
+  profile === "edit"
+    ? "This is a targeted edit. Do not run the website workflow (no research, design or critique passes)."
+    : "This is a bounded feature. Plan briefly, then build; no website-level design or critique passes.",
+  "",
+  ...(profile === "feature"
+    ? ["- PLAN: declare it with a line `QUALITY: plan — <one-line plan>` before you change files."]
+    : []),
+  "- Make the change with the file tools.",
+  "- Verify it: read the changed file back, or run the relevant check (test/typecheck/lint/build).",
+  "  The system records this evidence automatically — you do not need to narrate stages.",
+  "- DEPLOY only when the user asked to ship.",
+  "",
+  "Never claim a result (a passing check, a deployment) that did not actually happen.",
+].join("\n");
+
+/** The quality-loop prompt section sized to the run's profile. */
+export function qualityLoopPromptSection(profile: QualityProfile): string {
+  return profile === "site" ? QUALITY_LOOP_PROMPT_SECTION : TARGETED_PROMPT_SECTION(profile);
+}

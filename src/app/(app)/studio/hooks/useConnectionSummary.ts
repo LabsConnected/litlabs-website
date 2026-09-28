@@ -8,6 +8,7 @@ import { useVoiceSession } from "../context/VoiceSessionContext";
 import { useStudioModelStore } from "../stores/useStudioModelStore";
 import { useProjectRuntime } from "./useProjectRuntime";
 import type { TerminalStatus } from "@/lib/capabilities/types";
+import { deriveTerminalHealth, type TerminalHealth } from "@/lib/studio/terminal-health";
 
 export interface VoiceHealthState {
   /** Inworld env vars are set (server-side check) */
@@ -65,6 +66,11 @@ export interface ConnectionCapabilities {
   voiceMicrophoneOn: boolean;
   /** Voice health from /api/voice/health (server-side check). */
   voiceHealth: VoiceHealthState;
+  /**
+   * Canonical terminal health — the ONLY terminal label/level any Studio
+   * surface may render (header, operator bar, mission hints, health light).
+   */
+  terminalHealth?: TerminalHealth;
 }
 
 const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
@@ -101,6 +107,7 @@ const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
     tokenService: "unknown",
     available: false,
   },
+  terminalHealth: deriveTerminalHealth({ storeStatus: "disconnected", cwd: null, serverReachable: null }),
 };
 
 /**
@@ -298,6 +305,17 @@ export function useConnectionSummary(options?: { disabled?: boolean }) {
       // PTY can execute file writes, so it's a valid write surface.
       // NOTE: writeAccess here means "a write surface exists", NOT "writes
       // don't need approval". Approval is a separate policy, always required.
+      next.terminalHealth = deriveTerminalHealth({
+        storeStatus: terminalStatus,
+        cwd: terminalCwd,
+        // Only trust reachability we actually observed this refresh.
+        serverReachable:
+          next.terminalExecution === "unavailable" && termRes.status !== "fulfilled"
+            ? null
+            : next.terminalServerReachable,
+        error: next.terminalError ?? terminalError,
+      });
+
       if (next.terminalExecution === "available" && !next.writeAccess) {
         next.writeAccess = true;
       }

@@ -1,5 +1,6 @@
 "use client";
 
+import { terminalHealthOf } from "@/lib/studio/terminal-health";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { Image as ImageIcon } from "lucide-react";
@@ -72,6 +73,7 @@ import StudioOperatorBar from "./shell/StudioOperatorBar";
 import ElementInspectorPanel from "./shell/ElementInspectorPanel";
 import ImageStudio from "./shell/ImageStudio";
 import { modeToStageSurface, resolveStageSurface, type StudioStageSurface } from "./shell/stage-surfaces";
+import { centerStation, resolveInitialStation, stationToToolParam, toolParamToStation } from "./shell/station-url";
 import { useCanvasBuilderStore } from "./canvas/builder/store";
 import type { PreviewSelection } from "./StudioPreviewPanel";
 import StudioProjectFiles from "./StudioProjectFiles";
@@ -382,14 +384,34 @@ function CommandStudioContent() {
 
   const studioShellActive =
     destination === "studio" && viewportTier !== null && !isMobileLitt && !classicOverride;
-  const [stageSurface, setStageSurface] = useState<StudioStageSurface>("preview");
+  // Initial station honors an explicit ?tool= deep link (URL, state and
+  // the visible station must agree from the first paint).
+  const [stageSurface, setStageSurface] = useState<StudioStageSurface>(() =>
+    resolveInitialStation(searchParams.get("tool"), null),
+  );
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [littExpanded, setLittExpanded] = useState(false);
   // Surfaces stay mounted once visited — hidden, not unmounted — so
   // preview iframes, PTY sessions, and canvas state survive switching.
   const [mountedSurfaces, setMountedSurfaces] = useState<Set<StudioStageSurface>>(() => new Set(["preview"]));
 
-  const openStageSurface = useCallback((surface: StudioStageSurface) => {
+  // Terminal P0: attach the workspace PTY as soon as a project is open,
+  // not only after the user visits the Terminal station. The surface is
+  // mounted hidden (stay-alive), so the shell is live — and LiTT's
+  // terminal health is green — without the user opening anything.
+  // Respects the explicit opt-out ("litt:terminalAutoStart" = "0").
+  useEffect(() => {
+    if (!studioShellActive || !capabilities.projectId) return;
+    try {
+      if (window.localStorage.getItem("litt:terminalAutoStart") === "0") return;
+    } catch {
+      // Storage unavailable — default to auto-attach.
+    }
+    setMountedSurfaces((prev) => (prev.has("terminal") ? prev : new Set(prev).add("terminal")));
+  }, [studioShellActive, capabilities.projectId]);
+
+  const openStageSurface = useCallback((requested: StudioStageSurface) => {
+    const surface = centerStation(requested);
     setDestination("studio");
     setStageSurface(surface);
     setMountedSurfaces((prev) => (prev.has(surface) ? prev : new Set(prev).add(surface)));
@@ -479,9 +501,13 @@ function CommandStudioContent() {
       // Shell: a Studio deep-link selects the corresponding stage surface
       // (drawer overlays map to their surfaces too — terminal, files…).
       if (studioShellActive) {
-        const surface = mapped.openDrawer
+        // The station named in the URL is authoritative; legacy tool
+        // values fall back to the old mode/drawer mapping.
+        const legacySurface = mapped.openDrawer
           ? (DOCK_TAB_TO_SURFACE[mapped.openDrawer as StudioDockTab] ?? null)
           : modeToStageSurface(newMode);
+        const named = toolParamToStation(fromUrl) ?? legacySurface;
+        const surface = named ? centerStation(named) : null;
         if (surface) {
           setStageSurface(surface);
           setMountedSurfaces((prev) => (prev.has(surface) ? prev : new Set(prev).add(surface)));
@@ -1156,6 +1182,10 @@ function CommandStudioContent() {
     if (destination === "create") {
       params.delete("tool");
       params.set("creator", createMode);
+    } else if (destination === "studio" && studioShellActive && workSurface !== "builder") {
+      // Shell: the URL names the station the center actually renders.
+      params.set("tool", stationToToolParam(stageSurface));
+      params.delete("creator");
     } else {
       params.set("tool", legacyTool);
       params.delete("creator");
@@ -1175,7 +1205,7 @@ function CommandStudioContent() {
       router.replace(target, { scroll: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [destination, studioMode, createMode, moreMode, workSurface, pathname, router]);
+  }, [destination, studioMode, createMode, moreMode, workSurface, pathname, router, studioShellActive, stageSurface]);
 
   // Handle legacy "studio:switch-tool" events emitted from inside tools.
   useEffect(() => {
@@ -2068,19 +2098,22 @@ function CommandStudioContent() {
   // Runs BEFORE the persist effect below so a task switch never
   // overwrites the new task's stored surface.
   const lastSyncedTaskRef = useRef<string | null>(null);
+  const didInitialTaskSyncRef = useRef(false);
   useEffect(() => {
     if (!studioShellActive) return;
     if (serverActiveTaskId === lastSyncedTaskRef.current) return;
     lastSyncedTaskRef.current = serverActiveTaskId;
+    const isFirstSync = !didInitialTaskSyncRef.current;
+    didInitialTaskSyncRef.current = true;
     const task = serverTasks.find((t) => t.id === serverActiveTaskId);
-    setStageSurface((current) => {
-      const mapped = resolveStageSurface(task?.lastOpenedSurface);
-      return current === mapped ? current : mapped;
-    });
-    if (task && task.lastOpenedSurface) {
-      const mapped = resolveStageSurface(task.lastOpenedSurface);
-      setMountedSurfaces((prev) => (prev.has(mapped) ? prev : new Set(prev).add(mapped)));
-    }
+    // First load: an explicit ?tool= deep link beats the remembered
+    // surface (acceptance: tool=preview rendered the stale "plan" surface).
+    const urlStation = isFirstSync ? toolParamToStation(searchParams.get("tool")) : null;
+    const mapped = urlStation ?? centerStation(resolveStageSurface(task?.lastOpenedSurface));
+    setStageSurface((current) => (current === mapped ? current : mapped));
+    setMountedSurfaces((prev) => (prev.has(mapped) ? prev : new Set(prev).add(mapped)));
+    // searchParams is read only on the first sync — deliberately not a dep.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studioShellActive, serverActiveTaskId, serverTasks]);
 
   // Surface → task: a user-initiated surface switch persists onto the
@@ -2494,7 +2527,7 @@ function CommandStudioContent() {
         useExecutionStore.getState().endRun("cancelled");
       }}
       onResolveApproval={handleResolveApproval}
-      terminalStatus={capabilities.terminalStatus}
+      terminalStatus={terminalHealthOf(capabilities).label}
       modelLabel={modelLabel}
     />
   );
@@ -2609,7 +2642,7 @@ function CommandStudioContent() {
             busy={conversation.busy}
             modelLabel={modelLabel}
             projectName={capabilities.projectName}
-            terminalStatus={capabilities.terminalStatus}
+            terminalStatus={terminalHealthOf(capabilities).label}
             missionContent={
               <MissionCards
                 capabilities={capabilities}
@@ -3162,7 +3195,7 @@ function CommandStudioContent() {
                   busy={conversation.busy}
                   modelLabel={modelLabel}
                   projectName={capabilities.projectName}
-                  terminalStatus={capabilities.terminalStatus}
+                  terminalStatus={terminalHealthOf(capabilities).label}
                   missionContent={
                     <MissionCards
                       capabilities={capabilities}

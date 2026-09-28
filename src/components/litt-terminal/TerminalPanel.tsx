@@ -18,6 +18,14 @@ import "@xterm/xterm/css/xterm.css";
 import { copyToClipboard } from "@/lib/studio/message-copy";
 import { useVisualViewport } from "../../app/(app)/studio/hooks/useVisualViewport";
 import { TerminalFitController } from "./terminal-fit";
+import {
+  clearResumeSessionId,
+  createSocketAuth,
+  loadResumeSessionId,
+  needsManualReconnect,
+  reconnectDelayMs,
+  saveResumeSessionId,
+} from "./terminal-resume";
 
 const HEARTBEAT_INTERVAL_MS = 10_000;
 
@@ -241,7 +249,7 @@ export const TerminalPanel = forwardRef<
       if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current);
       connectTimeoutRef.current = setTimeout(() => {
         if (disposed) return;
-        if (terminalStore.status !== "connected") {
+        if (useTerminalStore.getState().status !== "connected") {
           terminalStore.setError("PTY connection timed out after 10 seconds");
           terminalStore.setStatus("error");
           terminalStore.setFailureStage("pty_timeout");
@@ -253,6 +261,7 @@ export const TerminalPanel = forwardRef<
       }, CONNECTION_TIMEOUT_MS);
     };
     let attemptedUnauthorizedRetry = false;
+    let serverDisconnects = 0;
     let wsUrl = "";
 
     const connect = async () => {
@@ -274,7 +283,14 @@ export const TerminalPanel = forwardRef<
         // Start PTY timeout only now — workspace is ready, socket is connecting
         startConnectTimeout();
         const connectedSocket = io(wsUrl, {
-          auth: { token },
+          // A function, not a value: socket.io calls it before EVERY connect
+          // and reconnect, so each attempt carries a fresh token and offers
+          // the parked PTY for resume (see terminal-resume.ts).
+          auth: createSocketAuth({
+            initialToken: token,
+            fetchToken: async () => (await connect()).token,
+            resumeSessionId: () => loadResumeSessionId(projectId),
+          }),
           transports: ["websocket", "polling"],
           reconnection: true,
           reconnectionAttempts: Infinity,
@@ -315,7 +331,7 @@ export const TerminalPanel = forwardRef<
           setSessionInfo(null);
           // Preserve error state — don't overwrite an error with "disconnected"
           // If we were already in an error/auth_failed state, keep it.
-          const currentStatus = terminalStore.status;
+          const currentStatus = useTerminalStore.getState().status;
           if (currentStatus !== "error" && currentStatus !== "auth_failed" && currentStatus !== "unavailable" && currentStatus !== "pty_failed") {
             terminalStore.setStatus("disconnected");
           }
@@ -329,9 +345,26 @@ export const TerminalPanel = forwardRef<
             clearInterval(heartbeatRef.current);
             heartbeatRef.current = null;
           }
+          // socket.io retries transport drops itself, but never a
+          // server-initiated disconnect — reconnect those with bounded
+          // backoff so the terminal heals without a manual Retry.
+          if (needsManualReconnect(reason) && !disposed) {
+            serverDisconnects += 1;
+            const delay = reconnectDelayMs(serverDisconnects);
+            terminalStore.setStatus("connecting");
+            term.writeln(`\x1b[33m⟳ Server closed the connection — reconnecting in ${Math.round(delay / 1000)}s...\x1b[0m`);
+            setTimeout(() => {
+              if (!disposed && socketRef.current === connectedSocket && !connectedSocket.connected) {
+                connectedSocket.connect();
+              }
+            }, delay);
+          }
         });
 
-        connectedSocket.on("session:ready", ({ sessionId: sid, cwd = "Unknown workspace", shell = "Unknown shell", workspaceId: wsId = null, projectId: sessProjectId = null }) => {
+        connectedSocket.on("session:ready", ({ sessionId: sid, cwd = "Unknown workspace", shell = "Unknown shell", workspaceId: wsId = null, projectId: sessProjectId = null, resumed = false }) => {
+          serverDisconnects = 0;
+          // Remember the shell so a refresh / station change resumes it.
+          saveResumeSessionId(projectId, sid);
           // Clear connection timeout — PTY session is verified
           if (connectTimeoutRef.current) {
             clearTimeout(connectTimeoutRef.current);
@@ -347,7 +380,9 @@ export const TerminalPanel = forwardRef<
           // what is actually rendered.
           fitController.invalidateEmitted();
           fitController.requestFit();
-          term.writeln(`\x1b[36mℹ Session ready: ${sid.slice(0, 8)}...\x1b[0m`);
+          term.writeln(resumed
+            ? `\x1b[36mℹ Session resumed: ${sid.slice(0, 8)}... (same shell, output replayed)\x1b[0m`
+            : `\x1b[36mℹ Session ready: ${sid.slice(0, 8)}...\x1b[0m`);
           if (wsId) term.writeln(`\x1b[36m   workspace: ${wsId}\x1b[0m`);
           if (sessProjectId) term.writeln(`\x1b[36m   project: ${sessProjectId}\x1b[0m`);
           term.writeln(`\x1b[36m   cwd: ${cwd}\x1b[0m`);
@@ -370,7 +405,11 @@ export const TerminalPanel = forwardRef<
               if (disposed) return;
               const retryWsUrl = freshBaseUrl || wsUrl;
               const retrySocket = io(retryWsUrl, {
-                auth: { token: freshToken },
+                auth: createSocketAuth({
+                  initialToken: freshToken,
+                  fetchToken: async () => (await connect()).token,
+                  resumeSessionId: () => loadResumeSessionId(projectId),
+                }),
                 transports: ["websocket", "polling"],
                 reconnection: true,
                 reconnectionAttempts: Infinity,
@@ -388,6 +427,7 @@ export const TerminalPanel = forwardRef<
                 onLog?.(`[WS] Connect error: ${nextErr.message}`);
               });
               retrySocket.on("session:ready", (readyData: { sessionId: string; cwd: string; shell: string; workspaceId?: string | null; projectId?: string | null }) => {
+                saveResumeSessionId(projectId, readyData.sessionId);
                 if (connectTimeoutRef.current) { clearTimeout(connectTimeoutRef.current); connectTimeoutRef.current = null; }
                 setConnected(true);
                 setSessionInfo(readyData);
@@ -423,6 +463,7 @@ export const TerminalPanel = forwardRef<
         });
 
         connectedSocket.on("terminal:output", (data: string) => {
+          if (data.includes("[Session ended")) clearResumeSessionId(projectId);
           term.write(data);
           outputBufferRef.current += data;
           if (outputBufferRef.current.length > 4000) {
@@ -494,7 +535,11 @@ export const TerminalPanel = forwardRef<
                     // Start PTY timeout for retry socket
                     startConnectTimeout();
                     const retrySocket = io(retryWsUrl, {
-                      auth: { token },
+                      auth: createSocketAuth({
+                        initialToken: token,
+                        fetchToken: async () => (await connect()).token,
+                        resumeSessionId: () => loadResumeSessionId(projectId),
+                      }),
                       transports: ["websocket", "polling"],
                       reconnection: true,
                       reconnectionAttempts: Infinity,
@@ -518,6 +563,7 @@ export const TerminalPanel = forwardRef<
                     });
 
                     retrySocket.on("session:ready", (readyData: { sessionId: string; cwd: string; shell: string; workspaceId?: string | null; projectId?: string | null }) => {
+                      saveResumeSessionId(projectId, readyData.sessionId);
                       if (connectTimeoutRef.current) { clearTimeout(connectTimeoutRef.current); connectTimeoutRef.current = null; }
                       setConnected(true);
                       setSessionInfo(readyData);
@@ -543,7 +589,7 @@ export const TerminalPanel = forwardRef<
                       setConnected(false);
                       setSessionInfo(null);
                       // Preserve error state on disconnect
-                      const currentStatus = terminalStore.status;
+                      const currentStatus = useTerminalStore.getState().status;
                       if (currentStatus !== "error" && currentStatus !== "auth_failed" && currentStatus !== "unavailable" && currentStatus !== "pty_failed") {
                         terminalStore.setStatus("disconnected");
                       }

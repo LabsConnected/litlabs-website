@@ -1028,7 +1028,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               reason: evt.reason,
             });
           } else if (evt.type === "checkpoint") {
-            safeEvent({ type: "checkpoint", label: evt.label, gitSha: evt.gitSha });
+            safeEvent({ type: "checkpoint", label: evt.label, gitSha: evt.gitSha, kind: evt.kind });
           } else if (evt.type === "build_start") {
             safeEvent({ type: "build_start", check: evt.check });
           } else if (evt.type === "build_result") {
