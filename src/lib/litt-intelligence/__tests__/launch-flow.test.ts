@@ -973,3 +973,77 @@ describe("Launch Flow: honest loop failure", () => {
     expect(result.agentLoopResult?.failedHonestly).toBeDefined();
   });
 });
+
+describe("Launch Flow: artifact gate mutation-aware marker skip (#551b2)", () => {
+  // #551 acceptance re-run #3: an approved additive edit to index.html
+  // legitimately keeps the LITT-WELCOME-SCREEN marker. The resumed run's
+  // own tool-call log (a successful file mutation) is passed as defense
+  // in depth for when the workspace diff could not run ("unknown").
+  const MARKER_EDIT =
+    "<!-- PR551-acceptance-edit-marker -->\n<!-- LITT-WELCOME-SCREEN: blank-state of the LiTT builder. Not a project, not project content. -->\n<html><body>Welcome to LiTT</body></html>";
+
+  function markerEditTransport(): WorkspaceTransport {
+    return createMockTransport({
+      listFiles: vi.fn().mockResolvedValue({
+        entries: [{ name: "index.html", type: "file" }],
+      }),
+      readFile: vi.fn().mockResolvedValue({ content: MARKER_EDIT, size: 256 }),
+    });
+  }
+
+  it("passes a marker-bearing entry when the run's tool log shows a successful mutation and the diff is unknown", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      workspaceChange: { status: "unknown", files: [] },
+      hadSuccessfulMutation: true,
+    });
+    expect(check.ok).toBe(true);
+  });
+
+  it("passes a marker-bearing entry when the run's tool log shows a successful mutation and no evidence exists", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      hadSuccessfulMutation: true,
+    });
+    expect(check.ok).toBe(true);
+  });
+
+  it("still fails when the diff affirmatively proves the workspace untouched — a lying tool must not pass", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      workspaceChange: { status: "unchanged", files: [] },
+      hadSuccessfulMutation: true,
+    });
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("blank starter screen");
+  });
+
+  it("still fails without a successful mutation — launch stalls stay caught", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      workspaceChange: { status: "unknown", files: [] },
+      hadSuccessfulMutation: false,
+    });
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("blank starter screen");
+  });
+
+  it("threads hadSuccessfulMutation through ensureProjectPreviewReady", async () => {
+    const { ensureProjectPreviewReady } = await import("@/lib/litt-intelligence/launch-flow");
+    const transport = createMockTransport({
+      listFiles: vi.fn().mockResolvedValue({
+        entries: [{ name: "index.html", type: "file" }],
+      }),
+      readFile: vi.fn().mockResolvedValue({ content: MARKER_EDIT, size: 256 }),
+      startPreview: vi.fn().mockResolvedValue({ status: "ready" }),
+      getPreviewStatus: vi.fn().mockResolvedValue({ status: "ready" }),
+    });
+    const result = await ensureProjectPreviewReady(
+      transport as any,
+      { workspaceChange: { status: "unknown", files: [] }, hadSuccessfulMutation: true },
+      undefined,
+      undefined,
+    );
+    expect(result.ok).toBe(true);
+  });
+});

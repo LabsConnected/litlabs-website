@@ -29,6 +29,7 @@ import {
   snapshotQualityLoopSession,
 } from "@/lib/litt-intelligence/quality-loop-flow";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
+import { getCheckpoint } from "@/lib/missions/mission-repository";
 import {
   getAwaitingApprovalAssistantMessage,
   insertMessage,
@@ -485,6 +486,24 @@ export async function POST(
       : undefined,
   };
 
+  // The paused-run record persists only the checkpointId — recover the real
+  // pre-mutation git SHA from the checkpoint row (the durable source of
+  // truth) and thread it into the resume. Without it, computeWorkspaceChange
+  // short-circuits on the empty SHA and always reports "unknown", which
+  // defeated the workspace-change scoping of the artifact gate on every
+  // approval-resume (#551): the resumed run could never prove it changed
+  // files. A missing checkpoint row (legacy rows) keeps the previous
+  // empty-SHA behavior.
+  let resumeCheckpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
+  if (resolved.checkpointId) {
+    const checkpointRow = await getCheckpoint(resolved.checkpointId, userId).catch(() => null);
+    resumeCheckpoint = {
+      checkpointId: resolved.checkpointId,
+      label: "pre-approval",
+      gitSha: checkpointRow?.gitSha ?? "",
+    };
+  }
+
   // Fire-and-forget with proper error handling — NOT a floating promise.
   // The .then/.catch chain persists the result/error to the DB.
   void resumeAgentLoopV2(
@@ -505,9 +524,7 @@ export async function POST(
       // re-injected after the approved tool runs so approving one tool
       // cannot silently drop the rest of the batch.
       deferredToolCalls: resolved.deferredToolCalls,
-      existingCheckpoint: resolved.checkpointId
-        ? { checkpointId: resolved.checkpointId, label: "pre-approval", gitSha: "" }
-        : undefined,
+      existingCheckpoint: resumeCheckpoint,
       // Capability set for the resume execution gate. Resolved fresh here
       // from the same source of truth the initial loop used
       // (resolveAvailableCapabilities), so the approved tool cannot fail
@@ -555,10 +572,14 @@ export async function POST(
           // evidence: a "changed" diff proves the approved mutation landed,
           // so the welcome-screen marker check (which only detects stalled
           // *launches*) must not fail the run with "no real project files
-          // were created". "unknown"/absent evidence keeps the strict gate.
+          // were created". The run's own successful-mutation record is
+          // passed as defense in depth for when the diff could not run
+          // ("unknown") — it is NOT enough on its own: an affirmative
+          // "unchanged" diff keeps the strict gate so a tool that lied
+          // (or wrote to the wrong workspace) still fails honestly.
           resumePreview = await ensureProjectPreviewReady(
             transport,
-            { workspaceChange: result.workspaceChange ?? null },
+            { workspaceChange: result.workspaceChange ?? null, hadSuccessfulMutation: successfulMutation },
             undefined,
             actionContext,
           );
@@ -570,7 +591,12 @@ export async function POST(
         // A nested approval is allowed to continue, but preview can already
         // be useful once the first file mutation has landed. Do not fail the
         // nested gate merely because a later file has not been written yet.
-        resumePreview = await ensureProjectPreviewReady(transport, {}, undefined, actionContext).catch(() => null);
+        resumePreview = await ensureProjectPreviewReady(
+          transport,
+          { hadSuccessfulMutation: successfulMutation },
+          undefined,
+          actionContext,
+        ).catch(() => null);
       }
 
       if (resumeFailure) {

@@ -325,10 +325,19 @@ const WELCOME_SCREEN_MARKER = "LITT-WELCOME-SCREEN";
  * false failure as dishonest as a fake success. Absent or "unknown"
  * evidence keeps the strict gate: an unverifiable workspace must not loosen
  * the launch check.
+ *
+ * Defense in depth (hadSuccessfulMutation): approval-resume callers pass
+ * whether the resumed run's own tool-call log shows a successful file
+ * mutation. When it does and the workspace diff did not affirmatively
+ * prove the workspace untouched ("unchanged"), the marker rejection is
+ * skipped — an additive edit to the starter legitimately keeps the marker.
+ * Tool success alone is deliberately NOT enough: "unchanged" keeps the
+ * strict gate so a tool that lied (or wrote to the wrong workspace) still
+ * fails honestly instead of passing as a fake success.
  */
 export async function verifyProjectArtifacts(
   transport: Pick<WorkspaceTransport, "listFiles" | "readFile">,
-  options?: { workspaceChange?: WorkspaceChangeEvidence | null },
+  options?: { workspaceChange?: WorkspaceChangeEvidence | null; hadSuccessfulMutation?: boolean },
 ): Promise<ProjectArtifactCheck> {
   const files: string[] = [];
   const queue: Array<{ path: string; depth: number }> = [{ path: ".", depth: 0 }];
@@ -380,9 +389,15 @@ export async function verifyProjectArtifacts(
   // filename-only signal so exotic transports do not newly fail.
   //
   // Scoping: the marker rejection is skipped when workspace-change evidence
-  // proves the run modified files (see the doc comment above). The
+  // proves the run modified files, or when the run's own tool-call log
+  // shows a successful file mutation and the diff did not affirmatively
+  // prove the workspace untouched (see the doc comment above). The
   // entry-file-exists check above still applies in every scope.
   const workspaceChanged = options?.workspaceChange?.status === "changed";
+  const provenUntouched = options?.workspaceChange?.status === "unchanged";
+  const hadSuccessfulMutation = options?.hadSuccessfulMutation === true;
+  const skipMarkerRejection =
+    workspaceChanged || (hadSuccessfulMutation && !provenUntouched);
   let realEntryFound = false;
   let welcomeOnly = false;
   for (const entry of entryFiles) {
@@ -398,7 +413,7 @@ export async function verifyProjectArtifacts(
     }
     welcomeOnly = true;
   }
-  if (!realEntryFound && welcomeOnly && !workspaceChanged) {
+  if (!realEntryFound && welcomeOnly && !skipMarkerRejection) {
     return {
       ok: false,
       files,
@@ -426,6 +441,13 @@ export async function ensureProjectPreviewReady(
     maxWaitMs?: number;
     pollIntervalMs?: number;
     workspaceChange?: WorkspaceChangeEvidence | null;
+    /**
+     * The resumed run's own tool-call log shows a successful file
+     * mutation. Threads into verifyProjectArtifacts so an approved
+     * additive edit to the starter (marker legitimately kept) is not
+     * failed by the welcome-screen gate.
+     */
+    hadSuccessfulMutation?: boolean;
   } = {},
   progress: ProgressEmitter = new ProgressEmitter(),
   actionContext?: ActionExecutionContext,
@@ -434,6 +456,7 @@ export async function ensureProjectPreviewReady(
   for (let attempt = 0; attempt < 3; attempt++) {
     artifacts = await verifyProjectArtifacts(transport, {
       workspaceChange: options.workspaceChange ?? null,
+      hadSuccessfulMutation: options.hadSuccessfulMutation,
     });
     if (artifacts.ok) break;
     if (attempt < 2) await sleep(250);

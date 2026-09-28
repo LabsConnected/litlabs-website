@@ -166,6 +166,15 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const expectedRevision = body.expectedRevision;
   const requestedAgentSlug = body.requestedAgentSlug;
   const agentInstanceId = body.agentInstanceId;
+  // The project the user is viewing when they send this message. Used to
+  // reconcile against the conversation's bound project (see step 5.2) —
+  // a chat viewed inside a different project must never silently mutate
+  // the conversation's project. Older clients omit this; they keep the
+  // previous behavior.
+  const clientProjectId =
+    typeof body.projectId === "string" && body.projectId.trim()
+      ? body.projectId.trim()
+      : undefined;
   const executionMode = typeof body.executionMode === "string" && ["plan", "act", "auto"].includes(body.executionMode)
     ? (body.executionMode as "plan" | "act" | "auto")
     : undefined;
@@ -323,6 +332,26 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
 
   if (!ctx) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  }
+
+  // 5.2. Project reconciliation — the chat must belong to the project the
+  // user is acting in. A conversation viewed inside a different project
+  // (e.g. a stale chat kept open after switching projects) would otherwise
+  // silently mutate the conversation's project while the user watches
+  // another. Refuse with an explicit, user-visible error — never silently
+  // re-bind (stranding conversation context is worse than a clear error).
+  // Older clients that omit projectId keep the previous behavior.
+  if (clientProjectId && clientProjectId !== effectiveProjectId) {
+    return NextResponse.json(
+      {
+        error: "Project mismatch",
+        code: "PROJECT_MISMATCH",
+        detail:
+          `This chat belongs to project "${ctx.projectName}", but you are viewing a different project. ` +
+          `Start a new chat in this project, or switch back to "${ctx.projectName}".`,
+      },
+      { status: 409 },
+    );
   }
 
   // 5.5. Build canonical runtime context — the ONE authoritative source

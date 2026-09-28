@@ -1590,3 +1590,75 @@ describe("GET /api/studio/conversations/[conversationId]/messages — approval r
     expect(body.messages.at(-1).status).toBe("awaiting_approval");
   });
 });
+describe("POST /api/studio/conversations/[conversationId]/messages — project reconciliation (#551a)", () => {
+  // #551 acceptance re-run #3: the browser kept a stale chat (bound to the
+  // previous run's project) open while viewing a new project, and the
+  // approved write silently landed in the old workspace. The client now
+  // sends the viewed projectId; the server refuses the send on mismatch
+  // instead of mutating the wrong project.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetExecutionRegistryForTests();
+
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" } as any);
+    vi.mocked(getConversation).mockResolvedValue({
+      id: "conv-123",
+      projectId: "proj-old",
+      revision: 1,
+      activeAgentSlug: "litt",
+      ownerId: "user_123",
+    } as any);
+    vi.mocked(buildStudioContext).mockResolvedValue({
+      projectId: "proj-old",
+      projectName: "Old Project",
+    } as any);
+    vi.mocked(buildCanonicalRuntimeContext).mockResolvedValue({
+      workspaceExecutionAvailable: true,
+      workspaceId: "ws-123",
+      executionMode: "auto",
+    } as any);
+    vi.mocked(insertMessage).mockImplementation(async (args: any) => ({
+      message: { id: `msg-${args.role}`, ...args },
+      duplicate: false,
+      error: null,
+    }) as any);
+  });
+
+  const routeParams = { params: Promise.resolve({ conversationId: "conv-123" }) };
+
+  it("refuses with PROJECT_MISMATCH when the viewed project differs from the chat's project", async () => {
+    const req = makeRequest({ projectId: "proj-new" });
+    const res = await POST(req, routeParams);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.code).toBe("PROJECT_MISMATCH");
+    expect(body.error).toBe("Project mismatch");
+    expect(body.detail).toContain("Old Project");
+    // The run must never start — no workspace transport is created, so no
+    // mutation can reach the wrong project's workspace.
+    expect(createWorkspaceTransport).not.toHaveBeenCalled();
+  });
+
+  it("proceeds when the viewed project matches the chat's project", async () => {
+    const req = makeRequest({ projectId: "proj-old" });
+    const res = await POST(req, routeParams);
+
+    // Not the mismatch refusal — the request continues into the normal
+    // flow (whatever it resolves to downstream with these mocks).
+    if (res.status === 409) {
+      const body = await res.json().catch(() => null);
+      expect(body?.code).not.toBe("PROJECT_MISMATCH");
+    }
+  });
+
+  it("keeps the previous behavior when the client omits projectId", async () => {
+    const req = makeRequest({});
+    const res = await POST(req, routeParams);
+
+    if (res.status === 409) {
+      const body = await res.json().catch(() => null);
+      expect(body?.code).not.toBe("PROJECT_MISMATCH");
+    }
+  });
+});
