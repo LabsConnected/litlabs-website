@@ -53,6 +53,9 @@ vi.mock("./tool-registry", () => ({
     execute,
     validateInputs: () => null,
     get: (id: string) => ({ id, readOnly: false }),
+    // agent-loop-v2 calls registerAllStationActions() at module scope, which
+    // registers on the real ToolRegistry — the mock must expose register too.
+    register: () => {},
   },
 }));
 
