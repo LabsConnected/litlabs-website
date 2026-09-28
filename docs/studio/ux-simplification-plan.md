@@ -94,6 +94,32 @@ Larry is right about the classic/mobile dock, and wrong about the desktop defaul
 
 Phase 3 is not "create the first right inspector." It is "default the existing right inspector closed, show only the selection's controls, and remove the dock tab only after that path is verified." `useSelectionStore` is not what the live preview bridge uses. Preview selection is `previewSelection` / `studio:ask-litt`, and design selection is the canvas builder store. Do not switch that pipeline to `useSelectionStore` just because the plan names it.
 
+## Phase 3
+
+Not started. Do not build it in this PR.
+
+Acceptance criteria:
+
+- The right inspector is hidden until something is selected, and it shows only that selection's controls.
+- The dock Inspector tab stays until the right panel is verified, then it is removed.
+- On a phone, the same inspector is a bottom sheet.
+- Editing an element's text or style in the inspector saves to the real source file, and the preview updates live. Phase 3 is not done until inspector edits persist. Controls that don't save count as fake UI and are not allowed.
+
+Save-back check (read-only, no Phase 3 code): **(a) save-back exists on main; Phase 3 must preserve this wiring through the move.**
+
+The live path does not use `useSelectionStore`. That store (`src/stores/useSelectionStore.ts`) is only read by the unmounted `RightPanel` (`src/components/studio/inspector/RightPanel.tsx`). Replacing the preview bridge with it would drop the write path.
+
+What is wired today:
+
+1. Selection bridge. `StudioPreviewPanel` (`src/app/(app)/studio/components/StudioPreviewPanel.tsx`) enables selection in an effect around line 319. Same-origin clicks and the cross-origin `postMessage` bridge (`terminal-server/preview/inspector.ts`, client side `bridgeRef` around line 270) call `onSelectionChange`. `CommandStudio` stores that as `previewSelection` and, when set, mounts `ElementInspectorPanel` in the right `ContextInspector` instead of the generic `StudioInspector`.
+2. Text and style controls. `ElementInspectorPanel` (`src/app/(app)/studio/components/shell/ElementInspectorPanel.tsx`) commits text through `apply({ text })` and styles through `setStyle`, which calls local `apply`. `apply` calls `useElementEdits(...).applyPatch`.
+3. File write. `useElementEdits` (`src/app/(app)/studio/hooks/useElementEdits.ts`) `resolve` lists project files and `readFile` POSTs `{ action: "read" }`. `applyPatch` runs `applyElementPatch` (`src/app/(app)/studio/lib/element-edits.ts`) and `writeFile` POSTs `{ action: "write", path, content }` to `/api/studio-projects/{projectId}/files`. `POST` in `src/app/api/studio-projects/[projectId]/files/route.ts` forwards `action: "write"` to the terminal server `ws-files/write`. On success, `applyPatch` dispatches `studio:files-changed` with `source: "element-edit"`. Undo and redo in `step` write the previous or next file body through the same `writeFile`.
+4. Preview refresh. `StudioPreviewPanel`'s `studio:files-changed` listener (around line 615) sets `reloadFrameOnNextReadyRef` and calls `loadStatus(true)`. When the preview status payload is `ready`, `loadStatus` bumps `frameKey` (around line 491), which reloads the iframe. The update is a real reload after the file write, not an unsaved overlay.
+
+`ElementInspectorPanel.test.tsx` covers the text write into `index.html` and the `files-changed` event, and a style change (`display: flex`) writing the file back.
+
+Boundary, not a missing save: `resolve` only accepts a unique match in a `.html` file (`candidateHtmlFiles`, `locateElement`). JSX, TSX, and other framework output set status `unavailable` and render the reason plus Ask LiTT, with no style controls. That is the honest non-edit state. Phase 3 must keep it. Design-node properties (`BuilderPropertiesPanel`) are a different store and are not this write path. Phase 3 must not present those as source-file saves unless they gain the same `writeFile` path.
+
 ### Duplicate navigation
 
 Larry's nine switchers match the classic/mobile body plus the dead rail. They do not include the desktop shell, which adds more.
