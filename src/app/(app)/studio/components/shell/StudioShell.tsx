@@ -12,8 +12,9 @@
  * stay mounted (hidden) so preview iframes, terminal sessions, files,
  * and canvas state survive surface/task switching.
  *
- * LiTT is shell chrome — a bottom command bar that expands upward —
- * never a floating window.
+ * LiTT is shell chrome. It docks either as the bottom command layer
+ * (littLayer) or as a persistent left panel (littDock) — exactly one
+ * of the two renders at a time; the other slot receives null.
  */
 import { type ReactNode } from "react";
 
@@ -23,6 +24,7 @@ export default function StudioShell({
   stage,
   inspector,
   littLayer,
+  littDock,
 }: {
   /** Task strip — the durable task tabs (WorktabBar). */
   taskbar: ReactNode;
@@ -32,8 +34,12 @@ export default function StudioShell({
   stage: ReactNode;
   /** Right contextual inspector. */
   inspector: ReactNode;
-  /** Bottom LiTT command layer. */
+  /** Bottom LiTT command layer (null when the chat is docked left). */
   littLayer: ReactNode;
+  /** Optional persistent left LiTT dock panel + its resize handle.
+      Undefined when the chat is docked bottom — the middle row then
+      renders byte-for-byte as before. */
+  littDock?: ReactNode;
 }) {
   return (
     <div
@@ -42,6 +48,7 @@ export default function StudioShell({
     >
       {taskbar}
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+        {littDock}
         {rail}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" data-testid="studio-stage">
           {stage}

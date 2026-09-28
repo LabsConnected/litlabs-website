@@ -35,6 +35,7 @@ import type { ReactNode } from "react";
 import { MessageSquare, Activity, PanelLeftClose, X } from "lucide-react";
 import { BrandLogo } from "@/components/branding/BrandLogo";
 import LiTTAmbientHUD from "./litt/LiTTAmbientHUD";
+import ChatDockSwitcher, { type ChatDockPosition } from "./ChatDockSwitcher";
 import type { DeviceStatus } from "@/lib/litt/live/types";
 
 export type LiTTTab = "chat" | "live";
@@ -63,6 +64,20 @@ interface LiTTPanelProps {
   microphoneStatus?: DeviceStatus;
   /** Expanded width in pixels (controlled by parent via useResizableWidth) */
   expandedWidth?: number;
+  /**
+   * Chat dock switcher (left-dock mode only): when `dockPosition` and
+   * `onDockPositionChange` are both provided, a Left/Bottom toggle renders
+   * in the tab header. Absent in legacy/overlay usage — no behavior change.
+   */
+  dockPosition?: ChatDockPosition;
+  onDockPositionChange?: (position: ChatDockPosition) => void;
+  /**
+   * Exact-width column mode (left-dock): render exactly `expandedWidth`
+   * px (the parent hook already clamps 300–500) instead of the legacy
+   * `clamp(300px, w, min(640px, 26vw))` / `36vw` constraints. Defaults to
+   * false — legacy/overlay rendering is untouched.
+   */
+  exactWidth?: boolean;
 }
 
 export default function LiTTPanel({
@@ -77,6 +92,9 @@ export default function LiTTPanel({
   voiceConnected,
   microphoneStatus,
   expandedWidth = 320,
+  dockPosition,
+  onDockPositionChange,
+  exactWidth = false,
 }: LiTTPanelProps) {
   return (
     <aside
@@ -102,9 +120,13 @@ export default function LiTTPanel({
                 "0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(168,255,47,0.08), 0 8px 32px rgba(0,0,0,0.5)",
             }
           : {
-              width: collapsed ? 64 : `clamp(300px, ${expandedWidth}px, min(640px, 26vw))`,
-              minWidth: collapsed ? 64 : 280,
-              maxWidth: collapsed ? 64 : "36vw",
+              width: collapsed
+                ? 64
+                : exactWidth
+                  ? expandedWidth
+                  : `clamp(300px, ${expandedWidth}px, min(640px, 26vw))`,
+              minWidth: collapsed ? 64 : exactWidth ? 300 : 280,
+              maxWidth: collapsed ? 64 : exactWidth ? 500 : "36vw",
               backgroundColor: "#0d0916",
               borderRight: "1px solid rgba(255,255,255,0.07)",
               backdropFilter: "blur(12px)",
@@ -173,6 +195,12 @@ export default function LiTTPanel({
             Activity
           </button>
           <div className="flex-1" />
+          {/* Chat dock position switcher — left-dock mode only. Rendered
+              only when the parent passes dockPosition + onDockPositionChange
+              (legacy/overlay usage is unaffected). */}
+          {dockPosition && onDockPositionChange && (
+            <ChatDockSwitcher position={dockPosition} onChange={onDockPositionChange} />
+          )}
           {overlay ? (
             <button
               type="button"

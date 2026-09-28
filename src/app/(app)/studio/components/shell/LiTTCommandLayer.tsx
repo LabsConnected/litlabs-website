@@ -21,6 +21,7 @@ import {
   type ReactNode,
 } from "react";
 import { ChevronDown, ChevronUp, Sparkles } from "lucide-react";
+import ChatDockSwitcher, { type ChatDockPosition } from "../ChatDockSwitcher";
 
 const MIN_HEIGHT = 160;
 const DEFAULT_HEIGHT = 300;
@@ -34,6 +35,8 @@ export default function LiTTCommandLayer({
   transcript,
   composer,
   statusBar,
+  dockPosition,
+  onDockPositionChange,
 }: {
   /** Scope for persisted expand/height state (project id or "default"). */
   storageKey: string;
@@ -47,6 +50,11 @@ export default function LiTTCommandLayer({
   /** Always-visible run-state strip (StudioOperatorBar) between the
       transcript and the composer. */
   statusBar?: ReactNode;
+  /** Optional chat dock switcher (bottom-dock mode): when both are
+      provided, a Left/Bottom toggle renders in the header row so the
+      user can switch back. No logic changes — presentation only. */
+  dockPosition?: ChatDockPosition;
+  onDockPositionChange?: (position: ChatDockPosition) => void;
 }) {
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
   const dragRef = useRef<{ startY: number; startH: number; pointerId: number } | null>(null);
@@ -151,6 +159,12 @@ export default function LiTTCommandLayer({
               />
             )}
             <span className="flex-1" />
+            {/* Chat dock position switcher — rendered only when the parent
+                passes dockPosition + onDockPositionChange (bottom-dock mode).
+                Lets bottom-mode users switch back to the left dock. */}
+            {dockPosition && onDockPositionChange && (
+              <ChatDockSwitcher position={dockPosition} onChange={onDockPositionChange} />
+            )}
             <button
               type="button"
               onClick={() => { onExpandedChange(false); persist(false, height); }}
@@ -186,6 +200,15 @@ export default function LiTTCommandLayer({
             ? <ChevronDown size={14} className="pointer-events-none" />
             : <ChevronUp size={14} className="pointer-events-none" />}
         </button>
+        {/* Chat dock switcher in the collapsed bar — bottom-mode users need
+            a visible way back to the left dock without expanding first.
+            The expanded header renders its own instance; exactly one is
+            ever mounted. */}
+        {!expanded && dockPosition && onDockPositionChange && (
+          <div className="flex shrink-0 items-center self-center">
+            <ChatDockSwitcher position={dockPosition} onChange={onDockPositionChange} />
+          </div>
+        )}
         <div className="min-w-0 flex-1">{composer}</div>
       </div>
     </section>

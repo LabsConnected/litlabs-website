@@ -426,6 +426,8 @@ describe("StudioShell — desktop operating shell", () => {
     sendMock.mockResolvedValue({ accepted: true });
     capState.projectId = "project-1";
     capState.projectName = "Test Project";
+    // Chat-dock prefs are localStorage-backed: isolate every test.
+    localStorage.clear();
 
     globalThis.__TEST_VIEWPORT_WIDTH__ = DESKTOP_WIDTH;
     window.innerWidth = DESKTOP_WIDTH;
@@ -444,7 +446,24 @@ describe("StudioShell — desktop operating shell", () => {
     });
   });
 
-  it("mounts rail + stage + inspector + LiTT command layer", async () => {
+  it("mounts rail + stage + inspector + left chat dock by default", async () => {
+    await renderStudioShell();
+    expect(screen.getByTestId("studio-shell")).toBeTruthy();
+    expect(screen.getByTestId("studio-workspace-rail")).toBeTruthy();
+    expect(screen.getByTestId("studio-stage")).toBeTruthy();
+    expect(screen.getByTestId("studio-context-inspector")).toBeTruthy();
+    // First-run default is the expanded left dock (owner invariant), not the
+    // bottom command layer.
+    const panel = screen.getByTestId("litt-panel");
+    expect(panel).toHaveAttribute("data-overlay", "false");
+    expect(panel).toHaveAttribute("data-collapsed", "false");
+    expect(screen.queryByTestId("litt-command-layer")).toBeNull();
+  });
+
+  it("mounts rail + stage + inspector + LiTT command layer in bottom-dock mode", async () => {
+    // Bottom mode preserves the pre-dock default exactly: set the stored
+    // preference and the legacy assertions below hold verbatim.
+    localStorage.setItem("littree:studio:chat-dock", "bottom");
     await renderStudioShell();
     expect(screen.getByTestId("studio-shell")).toBeTruthy();
     expect(screen.getByTestId("studio-workspace-rail")).toBeTruthy();
@@ -484,6 +503,9 @@ describe("StudioShell — desktop operating shell", () => {
   });
 
   it("LiTT command layer expands to the transcript and collapses back to the bar", async () => {
+    // Bottom-dock mode: the command layer behaves exactly as before the
+    // dock feature (first-run default is now the left dock).
+    localStorage.setItem("littree:studio:chat-dock", "bottom");
     const { user } = await renderStudioShell();
     // Collapsed: composer bar present, transcript hidden.
     expect(screen.getByTestId("litt-command-layer")).toBeTruthy();
@@ -501,6 +523,7 @@ describe("StudioShell — desktop operating shell", () => {
   });
 
   it("Esc collapses the expanded LiTT layer", async () => {
+    localStorage.setItem("littree:studio:chat-dock", "bottom");
     const { user } = await renderStudioShell();
     await user.click(screen.getByTestId("litt-layer-toggle"));
     await waitFor(() => screen.getByTestId("litt-layer-transcript"));
@@ -511,6 +534,7 @@ describe("StudioShell — desktop operating shell", () => {
   });
 
   it("an element selection surfaces the contextual inspector with an Ask-LiTT action", async () => {
+    localStorage.setItem("littree:studio:chat-dock", "bottom");
     await renderStudioShell();
     const sel = {
       kind: "preview-element",
