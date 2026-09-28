@@ -235,7 +235,7 @@ function withBotProtection(inner: (...args: never[]) => unknown) {
 //   /ai-builder    — public AI builder
 //
 // Protected page routes (require authentication):
-//   /dashboard, /studio/*, /create, /projects, /wallet,
+//   /app/*, /dashboard, /studio/*, /create, /projects, /wallet,
 //   /deployments, /settings/*, /profile/*, /admin/*, /owner,
 //   /library/*, /memories, /flow, /code, /agent-chat,
 //   /ai-builder, /builder, /chat, /generate,
@@ -243,6 +243,9 @@ function withBotProtection(inner: (...args: never[]) => unknown) {
 
 const isProtectedRouteInner = createRouteMatcher([
   // Protected page routes
+  // LiTT App — consumer shell. Hidden by feature flag in its layout;
+  // the route is still authenticated so a later enable doesn't open it.
+  "/app(.*)",
   "/studio(.*)",
   "/dashboard(.*)",
   "/create(.*)",
@@ -323,7 +326,7 @@ const isProtectedRouteInner = createRouteMatcher([
  * The chat route enforces its own server-side session + IP rate limits,
  * message ceiling, pinned free-tier provider, and kill switch.
  */
-const isProtectedRoute = (req: NextRequest) => {
+export const isProtectedRoute = (req: NextRequest) => {
   if (
     req.method === "GET" &&
     req.nextUrl.pathname.startsWith("/api/users/by-username/")
