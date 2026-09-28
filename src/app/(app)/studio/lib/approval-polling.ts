@@ -70,12 +70,9 @@ export function submitApprovalAndPoll(opts: {
    * Called with the backend error when the approval POST is rejected
    * (non-2xx) or the resumed run fails. `info.retryable` says whether
    * re-POSTing the same pausedRunId is meaningful — the server re-runs the
-   * same record (no new approval, no double billing). `info.decisionRecorded`
-   * says whether the decision reached the server: false means the POST never
-   * landed, so the gate is still pending and actionable; true means the run
-   * executed and failed, so the gate is dead.
+   * same record (no new approval, no double billing).
    */
-  onFailed?: (error: string, info?: { retryable: boolean; expired?: boolean; decisionRecorded?: boolean }) => void;
+  onFailed?: (error: string, info?: { retryable: boolean; expired?: boolean }) => void;
   onPolling?: () => void;
   /** Test hooks — production callers use the real fetch/timers. */
   fetchImpl?: typeof fetch;
@@ -118,10 +115,8 @@ export function submitApprovalAndPoll(opts: {
         const body = await postResp.json().catch(() => null) as { error?: string } | null;
         // 5xx/429/408 may succeed on retry (the POST is idempotent);
         // other 4xx will not — surface the error without a retry affordance.
-        // The decision never landed server-side, so the gate is still
-        // pending and actionable — the card must stay, not silently clear.
         const retryable = postResp.status >= 500 || postResp.status === 429 || postResp.status === 408;
-        onFailed?.(body?.error ?? `Approval failed (${postResp.status})`, { retryable, decisionRecorded: false });
+        onFailed?.(body?.error ?? `Approval failed (${postResp.status})`, { retryable });
         return;
       }
 
@@ -147,11 +142,9 @@ export function submitApprovalAndPoll(opts: {
 
       // A failure already recorded on the paused run is terminal for this
       // attempt — but retryable: re-POSTing the same pausedRunId re-runs
-      // the same record via the server's controlled-retry path. The decision
-      // was recorded, so the gate itself is dead even when a retry is
-      // offered: the card must not keep Approve/Reject actionable.
+      // the same record via the server's controlled-retry path.
       if (postBody?.runStatus === "failed") {
-        onFailed?.(postBody.runError ?? "Execution failed", { retryable: true, decisionRecorded: true });
+        onFailed?.(postBody.runError ?? "Execution failed", { retryable: true });
         return;
       }
 
@@ -178,11 +171,7 @@ export function submitApprovalAndPoll(opts: {
         }
 
         if (status.runStatus === "failed") {
-          // The resumed run executed and failed — the decision was recorded,
-          // so the gate is dead. Retry replays the identical frozen run and
-          // is only meaningful for transient failures; the store decides
-          // whether the gate stays actionable.
-          onFailed?.(status.runError ?? "Execution failed", { retryable: true, decisionRecorded: true });
+          onFailed?.(status.runError ?? "Execution failed", { retryable: true });
           return;
         }
 
@@ -192,12 +181,11 @@ export function submitApprovalAndPoll(opts: {
         // issue a fresh gate via the re-request endpoint rather than
         // re-POST the dead pausedRunId (which would 409).
         if (status.status === "expired") {
-          onFailed?.("This approval expired before a decision was made.", { retryable: true, expired: true, decisionRecorded: false });
+          onFailed?.("This approval expired before a decision was made.", { retryable: true, expired: true });
           return;
         }
         if (status.status === "rejected") {
-          // Decided elsewhere — the local gate is dead, not pending.
-          onFailed?.("This approval was already declined in another session.", { retryable: false, decisionRecorded: true });
+          onFailed?.("This approval was already declined in another session.", { retryable: false });
           return;
         }
         // Still processing — continue polling
