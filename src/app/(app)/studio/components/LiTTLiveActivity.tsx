@@ -55,6 +55,12 @@ interface LiTTLiveActivityProps {
   onStop?: () => void;
   /** Called when the user clicks Rollback to the last checkpoint. */
   onRollback?: () => void;
+  /**
+   * Task/run scope. When provided, events and phase are read task-scoped
+   * (eventsForTask/phaseForTask) so the feed never shows another task's
+   * run state. The Studio shell always passes the active task id.
+   */
+  taskId?: string | null;
 }
 
 const PHASE_CONFIG: Record<ExecutionPhase, { label: string; icon: typeof Activity; color: string }> = {
@@ -80,10 +86,22 @@ export default function LiTTLiveActivity({
   onResolveApproval,
   onStop,
   onRollback,
+  taskId = null,
 }: LiTTLiveActivityProps) {
-  const events = useExecutionStore((s) => s.events);
-  const phase = useExecutionStore((s) => s.phase);
-  const isRunning = useExecutionStore((s) => s.isRunning);
+  // Task-scoped reads when a taskId is provided: the feed reflects the
+  // ACTIVE task's run only, never a stale global or another task's state.
+  const scoped = taskId != null;
+  const events = useExecutionStore((s) =>
+    scoped ? s.eventsForTask(taskId) : s.events,
+  );
+  const phase = useExecutionStore((s) =>
+    scoped ? s.phaseForTask(taskId) : s.phase,
+  );
+  const isRunning = useExecutionStore((s) => {
+    if (!scoped) return s.isRunning;
+    const taskPhase = s.phaseForTask(taskId);
+    return taskPhase !== "idle" && taskPhase !== "done" && taskPhase !== "failed" && taskPhase !== "cancelled";
+  });
   const pendingApproval = useExecutionStore((s) => s.pendingApproval);
   const checkpoint = useExecutionStore((s) => s.checkpoint);
   const changesSummary = useExecutionStore((s) => s.changesSummary);

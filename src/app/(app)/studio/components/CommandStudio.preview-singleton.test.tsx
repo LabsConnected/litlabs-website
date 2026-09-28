@@ -543,35 +543,42 @@ describe("CommandStudio — canvas-first 2-zone layout", () => {
     expect(screen.getByTestId("studio-center-workspace")).toBeTruthy();
   });
 
-  it("mobile Chat|Canvas switcher toggles surfaces without unmounting chat", async () => {
+  it("phone bottom nav toggles surfaces without unmounting chat", async () => {
+    // This test targets the default shell topology, not the classic
+    // escape hatch this file's beforeEach enables.
+    localStorage.removeItem("litt:studio:layout-mode");
     globalThis.__TEST_VIEWPORT_WIDTH__ = 390;
     window.innerWidth = 390;
     const { user } = await renderCommandStudio();
     await settle();
 
-    // The segmented switcher is the primary fast path on the canvas view.
-    expect(screen.getByTestId("mobile-surface-switcher")).toBeTruthy();
-    expect(screen.getByTestId("mobile-switch-chat")).toBeTruthy();
-    expect(screen.getByTestId("mobile-switch-canvas")).toBeTruthy();
+    // The phone tier uses the shell's bottom nav — no separate Chat|Canvas
+    // switcher and no legacy mobile sheet mount.
+    expect(screen.getByTestId("phone-bottom-nav")).toBeTruthy();
+    expect(screen.queryByTestId("mobile-surface-switcher")).toBeNull();
+    expect(screen.queryByTestId("litt-mobile-sheet-mount")).toBeNull();
 
-    // Chat surface is mounted but hidden — never unmounted while switching.
-    const mount = screen.getByTestId("litt-mobile-sheet-mount");
-    expect(mount.style.display).toBe("none");
+    // The LiTT command layer (with the composer) stays mounted while
+    // switching surfaces — drafts and SSE connections survive.
+    expect(screen.getByTestId("litt-command-layer")).toBeTruthy();
     expect(screen.getByTestId("studio-command-composer")).toBeTruthy();
 
-    // Tap Chat — the sheet becomes visible; the composer instance is the
-    // same one (state, drafts, and SSE connections survive).
-    await user.click(screen.getByTestId("mobile-switch-chat"));
+    // Preview is the default stage surface.
+    expect(screen.getByTestId("stage-surface-preview")).toHaveAttribute("data-active", "true");
+
+    // Switch to Activity via the bottom nav — chat stays mounted.
+    await user.click(screen.getByTestId("mobile-nav-activity"));
     await settle();
-    expect(screen.getByTestId("litt-mobile-sheet-mount").style.display).toBe("");
+    expect(screen.getByTestId("stage-surface-activity")).toHaveAttribute("data-active", "true");
+    expect(screen.getByTestId("stage-surface-preview")).toHaveAttribute("data-active", "false");
     expect(screen.getByTestId("studio-command-composer")).toBeTruthy();
 
-    // Close the sheet — back on canvas, chat still mounted (hidden).
-    await user.click(screen.getByTestId("litt-mobile-sheet-close"));
+    // Back to Preview — the same preview instance, never duplicated.
+    await user.click(screen.getByTestId("mobile-nav-preview"));
     await settle();
-    expect(screen.getByTestId("litt-mobile-sheet-mount").style.display).toBe("none");
+    expect(screen.getByTestId("stage-surface-preview")).toHaveAttribute("data-active", "true");
+    expect(screen.getAllByTestId("studio-preview-panel")).toHaveLength(1);
     expect(screen.getByTestId("studio-command-composer")).toBeTruthy();
-    expect(screen.getByTestId("mobile-surface-switcher")).toBeTruthy();
   });
 
   it("does NOT show a Done completion card when the run pauses for approval", async () => {

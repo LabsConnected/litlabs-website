@@ -10,6 +10,10 @@
  *
  * Collapsible; width is fixed for now (resize is a later slice — the
  * interaction contract is what matters: right = "what is this thing").
+ *
+ * ContextInspectorContent is the same body rendered two ways: inside the
+ * desktop <aside> here, and inside the phone bottom sheet
+ * (MobileDragSheet) on the <768px tier. Presentation move only.
  */
 import { type ReactNode } from "react";
 import { ChevronRight, MousePointer2, Sparkles, X } from "lucide-react";
@@ -21,18 +25,7 @@ export interface InspectorSelection {
   route?: string;
 }
 
-export default function ContextInspector({
-  open,
-  onToggle,
-  selection,
-  onAskAboutSelection,
-  onClearSelection,
-  propertiesContent,
-  editor,
-  defaultContent,
-}: {
-  open: boolean;
-  onToggle: () => void;
+interface InspectorContentProps {
   /** Element selected in Preview/Design, if any. */
   selection: InspectorSelection | null;
   onAskAboutSelection: () => void;
@@ -45,36 +38,26 @@ export default function ContextInspector({
   editor?: ReactNode;
   /** Fallback inspector (plan/checks/telemetry). */
   defaultContent: ReactNode;
-}) {
-  if (!open) {
-    return (
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-label="Open inspector"
-        title="Open inspector"
-        data-testid="studio-inspector-open"
-        className="glass-shell flex w-5 shrink-0 items-center justify-center border-l"
-        style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", backgroundColor: "rgba(13,9,22,0.6)" }}
-      >
-        <ChevronRight
-          size={12}
-          className="pointer-events-none -rotate-180"
-          style={{ color: "var(--text-muted)" }}
-        />
-      </button>
-    );
-  }
+  onToggle: () => void;
+}
 
+/**
+ * ContextInspectorContent — the inspector body shared by the desktop
+ * aside and the phone sheet. Mechanical extraction: no logic changes.
+ */
+export function ContextInspectorContent({
+  selection,
+  onAskAboutSelection,
+  onClearSelection,
+  propertiesContent,
+  editor,
+  defaultContent,
+  onToggle,
+}: InspectorContentProps) {
   const hasSelection = Boolean(propertiesContent) || Boolean(selection);
 
   return (
-    <aside
-      aria-label="Inspector"
-      data-testid="studio-context-inspector"
-      className="glass-shell flex w-[300px] shrink-0 flex-col border-l xl:w-[340px]"
-      style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", backgroundColor: "rgba(13,9,22,0.85)" }}
-    >
+    <>
       <div
         className="flex h-9 shrink-0 items-center gap-2 border-b px-3"
         style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)" }}
@@ -139,6 +122,71 @@ export default function ContextInspector({
           </div>
         ) : defaultContent)}
       </div>
+    </>
+  );
+}
+
+export default function ContextInspector({
+  open,
+  onToggle,
+  selection,
+  onAskAboutSelection,
+  onClearSelection,
+  propertiesContent,
+  editor,
+  defaultContent,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  /** Element selected in Preview/Design, if any. */
+  selection: InspectorSelection | null;
+  onAskAboutSelection: () => void;
+  onClearSelection: () => void;
+  /** Real property editor when a structured builder node is selected. */
+  propertiesContent: ReactNode | null;
+  /** A full editor that owns the selection body (e.g.
+      ElementInspectorPanel for a preview element — it renders its own
+      header, current values, and write controls). */
+  editor?: ReactNode;
+  /** Fallback inspector (plan/checks/telemetry). */
+  defaultContent: ReactNode;
+}) {
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label="Open inspector"
+        title="Open inspector"
+        data-testid="studio-inspector-open"
+        className="glass-shell flex w-5 shrink-0 items-center justify-center border-l"
+        style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", backgroundColor: "rgba(13,9,22,0.6)" }}
+      >
+        <ChevronRight
+          size={12}
+          className="pointer-events-none -rotate-180"
+          style={{ color: "var(--text-muted)" }}
+        />
+      </button>
+    );
+  }
+
+  return (
+    <aside
+      aria-label="Inspector"
+      data-testid="studio-context-inspector"
+      className="glass-shell flex w-[300px] shrink-0 flex-col border-l xl:w-[340px]"
+      style={{ borderColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", backgroundColor: "rgba(13,9,22,0.85)" }}
+    >
+      <ContextInspectorContent
+        selection={selection}
+        onAskAboutSelection={onAskAboutSelection}
+        onClearSelection={onClearSelection}
+        propertiesContent={propertiesContent}
+        editor={editor}
+        defaultContent={defaultContent}
+        onToggle={onToggle}
+      />
     </aside>
   );
 }

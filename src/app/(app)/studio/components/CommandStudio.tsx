@@ -64,7 +64,11 @@ import { submitApprovalAndPoll, watchApprovalResolution, type ApprovalRunResult 
 import { StudioActivityPanel, StudioInspector } from "./StudioWorkspaceFrame";
 import StudioShell from "./shell/StudioShell";
 import WorkspaceRail from "./shell/WorkspaceRail";
-import ContextInspector from "./shell/ContextInspector";
+import ContextInspector, { ContextInspectorContent } from "./shell/ContextInspector";
+import MobileDragSheet from "./mobile/MobileDragSheet";
+import PhoneBottomNav from "./mobile/PhoneBottomNav";
+import PhoneMoreSheet from "./mobile/PhoneMoreSheet";
+import { useIsPhone } from "./mobile/useIsPhone";
 import LiTTCommandLayer from "./shell/LiTTCommandLayer";
 import StudioDeploySurface from "./shell/StudioDeploySurface";
 import StudioOperatorBar from "./shell/StudioOperatorBar";
@@ -363,10 +367,14 @@ function CommandStudioContent() {
 
   // ── StudioShell — the desktop Studio destination IS the operating
   // shell: workspace rail + central stage + contextual inspector + the
-  // LiTT command layer at the bottom. Mobile keeps its sheet/nav model;
-  // non-studio destinations keep the classic body below.
+  // LiTT command layer at the bottom. The <768px phone tier joins the
+  // same shell responsively (bottom nav + sheet inspector); tablet
+  // (768–1023px) keeps its sheet/nav model; non-studio destinations keep
+  // the classic body below.
   const viewportTier = useViewportTier();
   const isMobileLitt = viewportTier === "mobile";
+  const isPhone = useIsPhone(); // <768px; null until first measurement (SSR-safe)
+  const isPhoneTier = isPhone === true;
 
   // Hidden escape hatch while the shell migration lands: the classic
   // panel layout is also the mobile/non-studio body — honoring this pref
@@ -379,11 +387,24 @@ function CommandStudioContent() {
     }
   });
 
+  // Phone tier joins the shell; tablet (768–1023px) keeps the classic
+  // body. isPhone === true (not truthy): while null on first paint the
+  // phone still renders the classic body — no hydration mismatch,
+  // one-frame upgrade max.
   const studioShellActive =
-    destination === "studio" && viewportTier !== null && !isMobileLitt && !classicOverride;
+    destination === "studio" && viewportTier !== null &&
+    (!isMobileLitt || isPhone === true) && !classicOverride;
+  // The legacy <1024px mobile chrome (dock nav, FAB trigger, Chat|Canvas
+  // switcher, mobile sheet) is suppressed only while the phone tier's
+  // responsive shell is actually rendering — otherwise it would duplicate
+  // the shell's bottom nav + command layer. The classic escape hatch keeps
+  // the old mobile body byte-for-byte.
+  const showLegacyMobileChrome = !isPhoneTier || !studioShellActive;
   const [stageSurface, setStageSurface] = useState<StudioStageSurface>("preview");
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [littExpanded, setLittExpanded] = useState(false);
+  // Phone tier (<768px): the More sheet listing secondary stage surfaces.
+  const [moreSheetOpen, setMoreSheetOpen] = useState(false);
   // Surfaces stay mounted once visited — hidden, not unmounted — so
   // preview iframes, PTY sessions, and canvas state survive switching.
   const [mountedSurfaces, setMountedSurfaces] = useState<Set<StudioStageSurface>>(() => new Set(["preview"]));
@@ -703,11 +724,14 @@ function CommandStudioContent() {
       const detail = (e as CustomEvent).detail as
         | { context?: string; prompt?: string; selection?: StudioSelectionPayload }
         | undefined;
-      if (isMobileLitt) {
-        setMobileLittOpen(true);
-      } else if (studioShellActive) {
-        // Shell: Ask LiTT expands the bottom command layer.
+      if (studioShellActive) {
+        // Shell (desktop + phone tier): Ask LiTT expands the bottom
+        // command layer — chat stays central on every tier. On the phone
+        // tier the inspector sheet would cover the layer, so close it.
         setLittExpanded(true);
+        if (isPhoneTier) setInspectorOpen(false);
+      } else if (isMobileLitt) {
+        setMobileLittOpen(true);
       } else {
         setLittCollapsed(false);
       }
@@ -1212,11 +1236,13 @@ function CommandStudioContent() {
           // the Live tab (where the Approve/Reject control lives) instead
           // of showing a false "Done · No files changed" completion card.
           setLittActiveTab("live");
-          if (isMobileLitt) {
-            setMobileLittOpen(true);
-          } else if (studioShellActive) {
-            // Shell: expand the LiTT layer so the approval card is visible.
+          if (studioShellActive) {
+            // Shell (desktop + phone tier): expand the LiTT layer so the
+            // approval card is visible. The legacy mobile sheet is
+            // suppressed on the phone tier — it must not be the target.
             setLittExpanded(true);
+          } else if (isMobileLitt) {
+            setMobileLittOpen(true);
           } else {
             setLittCollapsed(false);
           }
@@ -1764,6 +1790,19 @@ function CommandStudioContent() {
     useExecutionStore.getState().setTaskConversationIndex(serverTasks);
   }, [serverTasks]);
 
+  // Phone tier: the inspector lives in a bottom sheet. It starts closed
+  // so it never covers the stage on load, and opens when something is
+  // selected (the desktop column keeps its own open state). A manual
+  // close sticks until the selection changes.
+  useEffect(() => {
+    if (isPhoneTier) setInspectorOpen(false);
+  }, [isPhoneTier]);
+  useEffect(() => {
+    if (isPhoneTier && (previewSelection || builderSelectedNodeId || activeWorktab?.selection)) {
+      setInspectorOpen(true);
+    }
+  }, [isPhoneTier, previewSelection, builderSelectedNodeId, activeWorktab?.selection]);
+
   const restoreWorktabSurface = useCallback((surface: string) => {
     const sep = surface.indexOf("/");
     const dest = (sep === -1 ? surface : surface.slice(0, sep)) as StudioDestination;
@@ -1910,13 +1949,31 @@ function CommandStudioContent() {
     if (!projectId || studioTasks.loading) return;
     if (initialBindProjectRef.current === projectId) return;
     initialBindProjectRef.current = projectId;
+    // Restore dedupe: a reload must never accumulate "Untitled 2/3/4…".
+    // Close conversation-less Untitled tasks beyond the one being restored
+    // (the active tab, or the oldest when nothing is active yet).
+    const untitledDupes = serverTasks.filter(
+      (t) =>
+        t.id !== serverActiveTaskId &&
+        t.conversationId == null &&
+        /^untitled \d+$/i.test((t.title ?? "").trim()),
+    );
+    if (untitledDupes.length > 0) {
+      // Keep the oldest (it may hold the pre-restore draft); close the rest.
+      const sorted = [...untitledDupes].sort(
+        (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt),
+      );
+      for (const dupe of sorted.slice(1)) {
+        void studioTasks.closeTask(dupe.id);
+      }
+    }
     const tab = worktabTabs.find((t) => t.id === serverActiveTaskId) ?? worktabTabs[0] ?? null;
     // No tasks yet — the bar shows [+] until the user starts real work.
     if (!tab) return;
     if (serverActiveTaskId !== tab.id) studioTasks.setActiveTaskId(tab.id);
     useExecutionStore.getState().setActiveTaskId(tab.id);
     bindWorktab(tab);
-  }, [capabilities.projectId, studioTasks, worktabTabs, serverActiveTaskId, bindWorktab]);
+  }, [capabilities.projectId, studioTasks, worktabTabs, serverActiveTaskId, serverTasks, bindWorktab]);
 
   // Track the active tab's surface as the user navigates the workspace —
   // persisted via PATCH lastOpenedSurface (server truth for restores).
@@ -2411,6 +2468,7 @@ function CommandStudioContent() {
             versionControl={capabilities.versionControl}
             workspaceStatus={capabilities.workspaceStatus ?? null}
             onSelectionChange={setPreviewSelection}
+            toolbarDensity={isPhone ? "compact" : "full"}
           />
         );
       case "browser":
@@ -2507,6 +2565,99 @@ function CommandStudioContent() {
   // otherwise a stable "studio:default" — never random.
   const studioSessionId = conversation.selectedConversationId
     ?? (capabilities.projectId ? `project:${capabilities.projectId}` : "studio:default");
+
+  // Shared inspector content — the same props render in the desktop
+  // <aside> (via ContextInspector) and in the phone bottom sheet
+  // (MobileDragSheet). Defined once so the two presentations can't drift.
+  const inspectorContentProps = {
+    selection: (
+      activeWorktab?.selection
+        ? {
+            label: activeWorktab.selection.label,
+            tagName: activeWorktab.selection.tagName,
+            sourceFile: activeWorktab.selection.sourceFile,
+            route: activeWorktab.selection.route,
+          }
+        : previewSelection
+          ? { label: previewSelection.label, tagName: previewSelection.tagName }
+          : null
+    ),
+    onAskAboutSelection: () => {
+      const sel: StudioSelectionPayload | null = activeWorktab?.selection
+        ?? (previewSelection && capabilities.projectId
+          ? {
+              kind: "preview-element",
+              label: previewSelection.label,
+              selector: previewSelection.selector,
+              tagName: previewSelection.tagName,
+              projectId: capabilities.projectId,
+              timestamp: Date.now(),
+            }
+          : null);
+      if (sel) {
+        window.dispatchEvent(new CustomEvent("studio:ask-litt", { detail: { selection: sel } }));
+      } else {
+        setLittExpanded(true);
+      }
+    },
+    onClearSelection: handleClearWorktabSelection,
+    editor: (
+      // The real element-edit path — only when a live preview
+      // element is selected (builder nodes use
+      // propertiesContent below).
+      previewSelection && !builderSelectedNodeId ? (
+        <ElementInspectorPanel
+          selection={previewSelection}
+          projectId={capabilities.projectId}
+          route={null}
+          onAskAboutSelection={() => {
+            const sel: StudioSelectionPayload | null = activeWorktab?.selection
+              ?? (capabilities.projectId
+                ? {
+                    kind: "preview-element",
+                    label: previewSelection.label,
+                    selector: previewSelection.selector,
+                    tagName: previewSelection.tagName,
+                    sourceFile: previewSelection.attrs?.["data-source"],
+                    projectId: capabilities.projectId,
+                    timestamp: Date.now(),
+                  }
+                : null);
+            if (sel) {
+              window.dispatchEvent(new CustomEvent("studio:ask-litt", { detail: { selection: sel } }));
+            } else {
+              setLittExpanded(true);
+            }
+          }}
+          onClearSelection={handleClearWorktabSelection}
+        />
+      ) : undefined
+    ),
+    propertiesContent: builderSelectedNodeId ? <BuilderPropertiesPanel /> : null,
+    defaultContent: (
+      <StudioInspector
+        embedded
+        open
+        onToggle={() => setInspectorOpen(false)}
+        activeTab={inspectorTab}
+        onTabChange={setInspectorTab}
+        data={{
+          capabilities,
+          modelLabel,
+          modelHealth,
+          activeAgentName: AGENT_META[activeAgentId]?.displayName ?? "LiTT",
+          destination,
+          surface: studioMode,
+          messages: conversation.messages,
+          busy: conversation.busy,
+          workspaceRevision,
+          healthRunTrigger,
+          onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
+          onWorkspacePrepared: () => { void refreshCapabilities(); },
+        }}
+      />
+    ),
+  };
 
   return (
     <StudioContextProvider
@@ -2615,6 +2766,7 @@ function CommandStudioContent() {
             overlay, LiTTPanel is a mobile sheet, Preview is a workspace tab. */}
         <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden" data-studio-body>
         {studioShellActive ? (
+          <>
           <StudioShell
             taskbar={
               /* Durable worktabs — task identity, never layout. */
@@ -2632,12 +2784,12 @@ function CommandStudioContent() {
                 onReopen={(id) => { void handleReopenWorktab(id); }}
               />
             }
-            rail={
+            rail={isPhone ? null : (
               <WorkspaceRail
                 active={stageSurface}
                 onSelect={openStageSurface}
               />
-            }
+            )}
             stage={
               <>
                 {Array.from(
@@ -2663,99 +2815,13 @@ function CommandStudioContent() {
                 })}
               </>
             }
-            inspector={
+            inspector={isPhone ? null : (
               <ContextInspector
                 open={inspectorOpen}
                 onToggle={() => setInspectorOpen((v) => !v)}
-                selection={
-                  activeWorktab?.selection
-                    ? {
-                        label: activeWorktab.selection.label,
-                        tagName: activeWorktab.selection.tagName,
-                        sourceFile: activeWorktab.selection.sourceFile,
-                        route: activeWorktab.selection.route,
-                      }
-                    : previewSelection
-                      ? { label: previewSelection.label, tagName: previewSelection.tagName }
-                      : null
-                }
-                onAskAboutSelection={() => {
-                  const sel: StudioSelectionPayload | null = activeWorktab?.selection
-                    ?? (previewSelection && capabilities.projectId
-                      ? {
-                          kind: "preview-element",
-                          label: previewSelection.label,
-                          selector: previewSelection.selector,
-                          tagName: previewSelection.tagName,
-                          projectId: capabilities.projectId,
-                          timestamp: Date.now(),
-                        }
-                      : null);
-                  if (sel) {
-                    window.dispatchEvent(new CustomEvent("studio:ask-litt", { detail: { selection: sel } }));
-                  } else {
-                    setLittExpanded(true);
-                  }
-                }}
-                onClearSelection={handleClearWorktabSelection}
-                editor={
-                  // The real element-edit path — only when a live preview
-                  // element is selected (builder nodes use
-                  // propertiesContent below).
-                  previewSelection && !builderSelectedNodeId ? (
-                    <ElementInspectorPanel
-                      selection={previewSelection}
-                      projectId={capabilities.projectId}
-                      route={null}
-                      onAskAboutSelection={() => {
-                        const sel: StudioSelectionPayload | null = activeWorktab?.selection
-                          ?? (capabilities.projectId
-                            ? {
-                                kind: "preview-element",
-                                label: previewSelection.label,
-                                selector: previewSelection.selector,
-                                tagName: previewSelection.tagName,
-                                sourceFile: previewSelection.attrs?.["data-source"],
-                                projectId: capabilities.projectId,
-                                timestamp: Date.now(),
-                              }
-                            : null);
-                        if (sel) {
-                          window.dispatchEvent(new CustomEvent("studio:ask-litt", { detail: { selection: sel } }));
-                        } else {
-                          setLittExpanded(true);
-                        }
-                      }}
-                      onClearSelection={handleClearWorktabSelection}
-                    />
-                  ) : undefined
-                }
-                propertiesContent={builderSelectedNodeId ? <BuilderPropertiesPanel /> : null}
-                defaultContent={
-                  <StudioInspector
-                    embedded
-                    open
-                    onToggle={() => setInspectorOpen(false)}
-                    activeTab={inspectorTab}
-                    onTabChange={setInspectorTab}
-                    data={{
-                      capabilities,
-                      modelLabel,
-                      modelHealth,
-                      activeAgentName: AGENT_META[activeAgentId]?.displayName ?? "LiTT",
-                      destination,
-                      surface: studioMode,
-                      messages: conversation.messages,
-                      busy: conversation.busy,
-                      workspaceRevision,
-                      healthRunTrigger,
-                      onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
-                      onWorkspacePrepared: () => { void refreshCapabilities(); },
-                    }}
-                  />
-                }
+                {...inspectorContentProps}
               />
-            }
+            )}
             littLayer={
               <LiTTCommandLayer
                 storageKey={capabilities.projectId ?? "default"}
@@ -2780,7 +2846,47 @@ function CommandStudioContent() {
                 }
               />
             }
+            phoneNav={isPhone ? (
+              <PhoneBottomNav
+                activeSurface={stageSurface}
+                chatActive={littExpanded}
+                onSelectSurface={openStageSurface}
+                onChat={() => setLittExpanded(true)}
+                onMore={() => setMoreSheetOpen(true)}
+              />
+            ) : undefined}
           />
+          {/* Phone tier sheets — same inspector content and stage surfaces
+              as the desktop shell, presented as bottom sheets. */}
+          {isPhone && (
+            <MobileDragSheet
+              open={inspectorOpen}
+              onClose={() => setInspectorOpen(false)}
+              title="Inspector"
+              testId="mobile-inspector-sheet"
+            >
+              <ContextInspectorContent
+                {...inspectorContentProps}
+                onToggle={() => setInspectorOpen(false)}
+              />
+            </MobileDragSheet>
+          )}
+          {isPhone && (
+            <MobileDragSheet
+              open={moreSheetOpen}
+              onClose={() => setMoreSheetOpen(false)}
+              title="More surfaces"
+              testId="mobile-more-sheet"
+            >
+              <PhoneMoreSheet
+                onSelectSurface={(surface) => {
+                  setMoreSheetOpen(false);
+                  openStageSurface(surface);
+                }}
+              />
+            </MobileDragSheet>
+          )}
+          </>
         ) : (
           <>
             {/* Desktop ContextDrawer removed (P2): Files, Inspector, Activity,
@@ -3147,22 +3253,28 @@ function CommandStudioContent() {
 
         {/* Mobile work-surface dock — Chat / Preview / Files / Activity / More.
             All surfaces operate on the same mission, conversation, preview,
-            browser, and execution stores as desktop. */}
-        <MobileCommandNav
-          active={destination}
-          onSelect={handleSelectDestination}
-          surface={mobileSurface}
-          onSelectSurface={handleMobileSurface}
-        />
+            browser, and execution stores as desktop. Suppressed while the
+            phone tier's responsive shell is active: the shell's
+            PhoneBottomNav is the nav there. */}
+        {showLegacyMobileChrome && (
+          <MobileCommandNav
+            active={destination}
+            onSelect={handleSelectDestination}
+            surface={mobileSurface}
+            onSelectSurface={handleMobileSurface}
+          />
+        )}
 
-        {/* Mobile LiTT FAB trigger (<1024px) — Phase C2.1. Secondary
-            affordance now: the Chat|Canvas segmented switcher above is the
-            primary fast path. The sheet reuses the exact same
-            littChatContent / littLiveContent used by the desktop rail —
-            never both at once. Hidden while the dock, context drawer,
-            canvas overlay, or live voice overlay is open: at z-[10015]
-            the FAB would float over their scrims and cover tool action
-            buttons. */}
+        {/* Mobile LiTT FAB trigger (tablet 768–1024px, plus the classic-hatch
+            phone body — suppressed while the phone tier's responsive shell
+            is active, where the shell's bottom nav + command layer own
+            chat). Phase C2.1. Secondary affordance now: the Chat|Canvas
+            segmented switcher above is the primary fast path. The sheet
+            reuses the exact same littChatContent / littLiveContent used by
+            the desktop rail — never both at once. Hidden while the dock,
+            context drawer, canvas overlay, or live voice overlay is open:
+            at z-[10015] the FAB would float over their scrims and cover
+            tool action buttons. */}
         {/* Mobile Chat|Canvas fast switcher — canvas-first 2-zone layout.
             One primary surface dominates at a time on mobile; this compact
             segmented control is the primary fast path between Chat and
@@ -3175,7 +3287,7 @@ function CommandStudioContent() {
             screen (same gate as the FAB trigger below). The segmented
             control is a tablist: the active segment marks the visible
             surface; tapping the other surface switches to it. */}
-        {isMobileLitt && !mobileLittOpen && !dockOpen && !contextDrawerOpen && !canvasOpen && !livePanelOpen && (
+        {isMobileLitt && showLegacyMobileChrome && !mobileLittOpen && !dockOpen && !contextDrawerOpen && !canvasOpen && !livePanelOpen && (
           <div
             className="fixed left-1/2 z-[10015] flex -translate-x-1/2 items-center gap-0.5 rounded-full border p-1 shadow-lg"
             style={{
@@ -3210,7 +3322,7 @@ function CommandStudioContent() {
             </button>
           </div>
         )}
-        {isMobileLitt && !mobileLittOpen && !dockOpen && !contextDrawerOpen && !canvasOpen && !livePanelOpen && (
+        {isMobileLitt && showLegacyMobileChrome && !mobileLittOpen && !dockOpen && !contextDrawerOpen && !canvasOpen && !livePanelOpen && (
           <button
             type="button"
             onClick={() => setMobileLittOpen(true)}
@@ -3258,7 +3370,7 @@ function CommandStudioContent() {
             composer drafts survive Chat <-> Canvas switching. The backdrop
             and sheet are fixed-position, so the display:none wrapper hides
             the whole overlay without affecting layout. */}
-        {isMobileLitt && (
+        {isMobileLitt && showLegacyMobileChrome && (
           <div
             style={{ display: mobileLittOpen ? undefined : "none" }}
             data-testid="litt-mobile-sheet-mount"
@@ -3279,7 +3391,7 @@ function CommandStudioContent() {
         {/* Mobile density redesign: Build status sheet — the existing
             MissionCards with the actions card hidden (actions live in the
             Tools sheet; hints render above the mission card). */}
-        {isMobileLitt && mobileLittOpen && mobileBuildOpen && (
+        {isMobileLitt && showLegacyMobileChrome && mobileLittOpen && mobileBuildOpen && (
           <MobileBottomSheet
             open={mobileBuildOpen}
             onClose={() => setMobileBuildOpen(false)}
@@ -3291,7 +3403,7 @@ function CommandStudioContent() {
         )}
         {/* Mobile density redesign: Tools sheet — Code, Canvas, Preview,
             Files, Terminal, Activity in one place. */}
-        {isMobileLitt && mobileLittOpen && mobileToolsOpen && (
+        {isMobileLitt && showLegacyMobileChrome && mobileLittOpen && mobileToolsOpen && (
           <MobileBottomSheet
             open={mobileToolsOpen}
             onClose={() => setMobileToolsOpen(false)}

@@ -106,6 +106,8 @@ export interface LaunchFlowResult {
   finalText: string;
   buildFixResult?: BuildFixLoopResult;
   error?: string;
+  /** Technical detail for the Details disclosure — never customer-facing copy. */
+  errorDetail?: string;
   repairAttempts: number;
   runtimeRepairAttempts: number;
   steps: string[];
@@ -663,10 +665,16 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
         // prose (including pseudo-tool markup). No structured tool execution
         // means there is no mutation evidence to verify.
         if (!pausedApproval && !hasAppliedMutation(agentResult)) {
+          // Customer-facing copy never names a provider/model — the
+          // provider/model fallback happens internally (see the model
+          // rotation above). Technical detail stays in `errorDetail` for
+          // the Details disclosure only.
           return baseResult({
             status: "failed",
-            finalText: "Tool execution unavailable: no available model produced a file-writing tool call after two attempts, so no project files were changed. Try a model with stronger tool-calling support (e.g. Gemini).",
+            finalText: "LiTT couldn't complete the file change.",
             error: "TOOL_EXECUTION_UNAVAILABLE",
+            errorDetail:
+              "No available model produced a file-writing tool call after two attempts, so no project files were changed.",
             repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
             runtimeRepairAttempts,
           });
