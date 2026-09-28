@@ -1,57 +1,60 @@
-import React from "react";
+"use client";
+
+/**
+ * ChatDockSwitcher — Left / Bottom toggle for the LiTT chat dock position.
+ *
+ * Smallest-footprint control: two icon buttons, rendered both in the
+ * LiTTPanel tab header (left-docked mode) and in the bottom strip header
+ * (bottom-docked mode) so the user can always switch back.
+ */
+
+import { PanelBottom, PanelLeft } from "lucide-react";
 
 export type ChatDockPosition = "left" | "bottom";
 
 interface ChatDockSwitcherProps {
-  /** Current dock position of the chat panel. */
   position: ChatDockPosition;
-  /** Called when the user picks a different dock position. */
   onChange: (position: ChatDockPosition) => void;
-  className?: string;
 }
 
-const OPTIONS: { position: ChatDockPosition; label: string; hint: string }[] = [
-  { position: "left", label: "Left", hint: "Dock chat on the left side" },
-  { position: "bottom", label: "Bottom", hint: "Dock chat on the bottom strip" },
-];
-
-/**
- * ChatDockSwitcher — segmented control that moves the LiTT chat panel
- * between the left dock and the bottom command strip.
- *
- * Purely presentational: the shell decides which surface mounts and keeps
- * chat state (transcript, draft, Chat/Live tab) mounted across switches.
- */
-export default function ChatDockSwitcher({ position, onChange, className = "" }: ChatDockSwitcherProps) {
+export default function ChatDockSwitcher({ position, onChange }: ChatDockSwitcherProps) {
+  const options: {
+    target: ChatDockPosition;
+    label: string;
+    testId: string;
+    Icon: typeof PanelLeft;
+  }[] = [
+    { target: "left", label: "Dock chat left", testId: "chat-dock-left", Icon: PanelLeft },
+    { target: "bottom", label: "Dock chat bottom", testId: "chat-dock-bottom", Icon: PanelBottom },
+  ];
   return (
     <div
-      data-testid="chat-dock-switcher"
+      className="flex items-center gap-0.5"
       role="group"
       aria-label="Chat dock position"
-      className={`flex items-center gap-0.5 rounded-lg border border-white/10 bg-black/30 p-0.5 ${className}`}
+      data-testid="chat-dock-switcher"
     >
-      {OPTIONS.map((opt) => {
-        const active = position === opt.position;
-        return (
-          <button
-            key={opt.position}
-            type="button"
-            data-testid={`chat-dock-${opt.position}`}
-            aria-pressed={active}
-            title={opt.hint}
-            onClick={() => {
-              if (!active) onChange(opt.position);
-            }}
-            className={`rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
-              active
-                ? "bg-lime-400/20 text-lime-300"
-                : "text-white/50 hover:bg-white/10 hover:text-white/80"
-            }`}
-          >
-            {opt.label}
-          </button>
-        );
-      })}
+      {options.map(({ target, label, testId, Icon }) => (
+        <button
+          key={target}
+          type="button"
+          onClick={() => onChange(target)}
+          className="grid h-6 w-6 place-items-center rounded-md transition hover:bg-white/10"
+          style={{
+            color: position === target ? "var(--color-accent)" : "var(--text-muted)",
+            backgroundColor:
+              position === target
+                ? "color-mix(in srgb, var(--color-accent) 10%, transparent)"
+                : "transparent",
+          }}
+          aria-label={label}
+          aria-pressed={position === target}
+          data-testid={testId}
+          title={label}
+        >
+          <Icon size={14} className="pointer-events-none" />
+        </button>
+      ))}
     </div>
   );
 }

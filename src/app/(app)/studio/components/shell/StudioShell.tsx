@@ -5,16 +5,16 @@
  * dashboard and the superseded floating-window compositor).
  *
  *   ┌ taskbar (durable worktabs — task identity, not layout) ┐
- *   ├ rail │        STAGE         │ inspector ┤
+ *   ├ LiTT │ rail │     STAGE      │ inspector ┤   (LiTT left-docked)
+ *   ├ rail │        STAGE         │ inspector ┤   (LiTT bottom-docked)
  *   └──────── LiTT command layer (bottom, resizes stage) ────┘
  *
  * The Stage owns exactly one active workspace surface; visited surfaces
  * stay mounted (hidden) so preview iframes, terminal sessions, files,
  * and canvas state survive surface/task switching.
  *
- * LiTT is shell chrome. It docks either as the bottom command layer
- * (littLayer) or as a persistent left panel (littDock) — exactly one
- * of the two renders at a time; the other slot receives null.
+ * LiTT is shell chrome — a left dock panel or a bottom command bar that
+ * expands upward — never a floating window.
  */
 import { type ReactNode } from "react";
 
@@ -24,7 +24,8 @@ export default function StudioShell({
   stage,
   inspector,
   littLayer,
-  littDock,
+  leftPanel,
+  dockHandle,
 }: {
   /** Task strip — the durable task tabs (WorktabBar). */
   taskbar: ReactNode;
@@ -34,12 +35,12 @@ export default function StudioShell({
   stage: ReactNode;
   /** Right contextual inspector. */
   inspector: ReactNode;
-  /** Bottom LiTT command layer (null when the chat is docked left). */
+  /** Bottom LiTT command layer (null when the chat is left-docked). */
   littLayer: ReactNode;
-  /** Optional persistent left LiTT dock panel + its resize handle.
-      Undefined when the chat is docked bottom — the middle row then
-      renders byte-for-byte as before. */
-  littDock?: ReactNode;
+  /** Left-docked LiTT panel (null when the chat is bottom-docked). */
+  leftPanel?: ReactNode;
+  /** Resize handle between the left panel and the rail. */
+  dockHandle?: ReactNode;
 }) {
   return (
     <div
@@ -48,7 +49,8 @@ export default function StudioShell({
     >
       {taskbar}
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-        {littDock}
+        {leftPanel}
+        {dockHandle}
         {rail}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" data-testid="studio-stage">
           {stage}
