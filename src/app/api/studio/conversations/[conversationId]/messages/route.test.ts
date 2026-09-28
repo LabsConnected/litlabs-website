@@ -429,7 +429,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         previewUrl: "https://preview.example.com",
         productionUrl: null,
         finalText: "I built your landing page.",
-        agentLoopResult: { stepsUsed: 1, toolCalls: [], cancelled: false, pendingApproval: null } as any,
+        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }], cancelled: false, pendingApproval: null } as any,
         cancelled: false,
         totalDurationMs: 100,
       } as any;
@@ -508,7 +508,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         previewUrl: "https://preview.example.com",
         productionUrl: null,
         finalText: "Built after disconnect.",
-        agentLoopResult: { stepsUsed: 1, toolCalls: [], cancelled: false, pendingApproval: null } as any,
+        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }], cancelled: false, pendingApproval: null } as any,
         cancelled: false,
         totalDurationMs: 60,
       } as any;
@@ -715,7 +715,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
         previewUrl: "https://preview.example.com",
         productionUrl: null,
         finalText: "Done after downstream cancel.",
-        agentLoopResult: { stepsUsed: 1, toolCalls: [], cancelled: false, pendingApproval: null } as any,
+        agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.read", success: true, summary: "read index.html", mutating: false }], cancelled: false, pendingApproval: null } as any,
         cancelled: false,
         totalDurationMs: 100,
       } as any;
@@ -1085,9 +1085,79 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
       expect.any(String),
       "user_123",
       "failed",
-      "",
+      "I couldn't complete the requested change: no file operations were performed, so nothing was modified. Please try again.",
     );
     expect(getActiveExecution("conv-123")).toBeNull();
+  });
+
+  it("preserves a specific launch-flow failure message instead of the generic zero-mutation text", async () => {
+    // Regression for the 2026-09-28 acceptance failure: the launch flow
+    // named the real cause (TOOL_EXECUTION_UNAVAILABLE) but the route
+    // overwrote it with the generic "no file operations" text, hiding
+    // what actually went wrong.
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: false,
+      status: "failed",
+      error: "TOOL_EXECUTION_UNAVAILABLE",
+      finalText: "Tool execution unavailable: no available model produced a file-writing tool call after two attempts, so no project files were changed. Try a model with stronger tool-calling support (e.g. Gemini).",
+      agentLoopResult: {
+        stepsUsed: 2,
+        toolCalls: [],
+        cancelled: false,
+        pendingApproval: null,
+      } as any,
+      cancelled: false,
+      totalDurationMs: 100,
+    } as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    await readSSE(res);
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      expect.stringContaining("Tool execution unavailable"),
+    );
+    expect(updateMessageStatus).not.toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      "I couldn't complete the requested change: no file operations were performed, so nothing was modified. Please try again.",
+    );
+  });
+
+  it("keeps the generic zero-mutation text when the launch flow names no specific error", async () => {
+    // The silent fake-complete: the flow claimed success with completion-
+    // sounding prose but zero tool calls — the generic honest text still
+    // replaces it.
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      finalText: "Done!",
+      agentLoopResult: {
+        stepsUsed: 1,
+        toolCalls: [],
+        cancelled: false,
+        pendingApproval: null,
+      } as any,
+      cancelled: false,
+      totalDurationMs: 100,
+    } as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    await readSSE(res);
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      "I couldn't complete the requested change: no file operations were performed, so nothing was modified. Please try again.",
+    );
   });
 
   it("a failed run releases the conversation — an immediate second send is not rejected", async () => {
@@ -1107,7 +1177,7 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
       previewUrl: null,
       productionUrl: null,
       finalText: "Recovered answer.",
-      agentLoopResult: { stepsUsed: 1, toolCalls: [], cancelled: false, pendingApproval: null } as any,
+      agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.read", success: true, summary: "read index.html", mutating: false }], cancelled: false, pendingApproval: null } as any,
       cancelled: false,
       totalDurationMs: 50,
     } as any);
@@ -1588,5 +1658,77 @@ describe("GET /api/studio/conversations/[conversationId]/messages — approval r
     expect(updateMessageStatus).not.toHaveBeenCalled();
 
     expect(body.messages.at(-1).status).toBe("awaiting_approval");
+  });
+});
+describe("POST /api/studio/conversations/[conversationId]/messages — project reconciliation (#551a)", () => {
+  // #551 acceptance re-run #3: the browser kept a stale chat (bound to the
+  // previous run's project) open while viewing a new project, and the
+  // approved write silently landed in the old workspace. The client now
+  // sends the viewed projectId; the server refuses the send on mismatch
+  // instead of mutating the wrong project.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetExecutionRegistryForTests();
+
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" } as any);
+    vi.mocked(getConversation).mockResolvedValue({
+      id: "conv-123",
+      projectId: "proj-old",
+      revision: 1,
+      activeAgentSlug: "litt",
+      ownerId: "user_123",
+    } as any);
+    vi.mocked(buildStudioContext).mockResolvedValue({
+      projectId: "proj-old",
+      projectName: "Old Project",
+    } as any);
+    vi.mocked(buildCanonicalRuntimeContext).mockResolvedValue({
+      workspaceExecutionAvailable: true,
+      workspaceId: "ws-123",
+      executionMode: "auto",
+    } as any);
+    vi.mocked(insertMessage).mockImplementation(async (args: any) => ({
+      message: { id: `msg-${args.role}`, ...args },
+      duplicate: false,
+      error: null,
+    }) as any);
+  });
+
+  const routeParams = { params: Promise.resolve({ conversationId: "conv-123" }) };
+
+  it("refuses with PROJECT_MISMATCH when the viewed project differs from the chat's project", async () => {
+    const req = makeRequest({ projectId: "proj-new" });
+    const res = await POST(req, routeParams);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.code).toBe("PROJECT_MISMATCH");
+    expect(body.error).toBe("Project mismatch");
+    expect(body.detail).toContain("Old Project");
+    // The run must never start — no workspace transport is created, so no
+    // mutation can reach the wrong project's workspace.
+    expect(createWorkspaceTransport).not.toHaveBeenCalled();
+  });
+
+  it("proceeds when the viewed project matches the chat's project", async () => {
+    const req = makeRequest({ projectId: "proj-old" });
+    const res = await POST(req, routeParams);
+
+    // Not the mismatch refusal — the request continues into the normal
+    // flow (whatever it resolves to downstream with these mocks).
+    if (res.status === 409) {
+      const body = await res.json().catch(() => null);
+      expect(body?.code).not.toBe("PROJECT_MISMATCH");
+    }
+  });
+
+  it("keeps the previous behavior when the client omits projectId", async () => {
+    const req = makeRequest({});
+    const res = await POST(req, routeParams);
+
+    if (res.status === 409) {
+      const body = await res.json().catch(() => null);
+      expect(body?.code).not.toBe("PROJECT_MISMATCH");
+    }
   });
 });

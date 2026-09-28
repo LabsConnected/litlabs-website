@@ -162,6 +162,47 @@ describe("MissionCards", () => {
     expect(props.onRollback).toHaveBeenCalledOnce();
   });
 
+  it("does not show the checkpoint-restore hint when the checkpoint has zero changes behind it", () => {
+    // Regression for the 2026-09-28 acceptance failure: the pre-launch
+    // checkpoint is created before any mutation, so "restore if you need
+    // to undo changes" was shown with nothing to undo.
+    const props = makeProps({ showActions: false });
+    act(() => {
+      useExecutionStore.getState().setCheckpoint({
+        label: "pre-launch",
+        gitSha: "abc123def456789",
+      });
+    });
+
+    render(<MissionCards {...props} />);
+
+    expect(
+      screen.queryByText("Checkpoint recorded — restore if you need to undo changes."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the checkpoint-restore hint after a real mutation", () => {
+    const props = makeProps({ showActions: false });
+    act(() => {
+      useExecutionStore.getState().setCheckpoint({
+        label: "pre-launch",
+        gitSha: "abc123def456789",
+      });
+      useExecutionStore.getState().addEvent({
+        type: "tool_result",
+        toolId: "files.write",
+        success: true,
+        summary: "wrote index.html",
+      });
+    });
+
+    render(<MissionCards {...props} />);
+
+    expect(
+      screen.getByText("Checkpoint recorded — restore if you need to undo changes."),
+    ).toBeInTheDocument();
+  });
+
   it("disables rollback while a run is in progress", () => {
     const props = makeProps();
     act(() => {

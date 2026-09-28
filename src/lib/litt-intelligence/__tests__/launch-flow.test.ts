@@ -231,6 +231,86 @@ describe("Launch Flow: no-mutation reprompt", () => {
   });
 });
 
+// ─── Tests: reprompt continues the recovery conversation ─────────────
+// Regression for the 2026-09-28 acceptance failure: a rejected apply_patch
+// builds a recovery (validation error + exact re-read file content) in the
+// loop's messages, but the bounded reprompt used to start a FRESH loop and
+// deterministically discard it — the weakest fallback models started blind,
+// produced no tool calls, and the run died. The reprompt must continue the
+// SAME conversation.
+
+describe("Launch Flow: reprompt continues the recovery conversation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    toolRegistry.clear();
+    registerInternalTools();
+  });
+
+  it("re-seeds the previous loop's messages when the first attempt's patch was rejected", async () => {
+    const recoveryContent = "CURRENT FILE CONTENT (index.html):\n<html>recovered</html>";
+    const runAgentLoop = vi.fn()
+      .mockResolvedValueOnce(successAgentResult({
+        toolCalls: [{ toolId: "apply_patch", success: false, summary: "search text not found in file", mutating: false }],
+        finalMessages: [
+          { role: "user", content: "Build a simple site" },
+          { role: "user", content: `validation failed\n\nSAFE PATCH RECOVERY ATTEMPT 1\n\n${recoveryContent}` },
+        ],
+      }))
+      .mockResolvedValueOnce(successAgentResult({
+        toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
+      }));
+    const options = makeOptions({ requiresExecution: true, runAgentLoop });
+
+    await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    // The second attempt continues the SAME conversation — the recovery
+    // context (re-read file content) survives instead of starting blind.
+    const secondConfig = runAgentLoop.mock.calls[1][2];
+    expect(secondConfig.initialMessages).toBeDefined();
+    expect(JSON.stringify(secondConfig.initialMessages)).toContain("CURRENT FILE CONTENT");
+    // The reprompt text describes the rejected patch — it must not claim
+    // the model merely "announced changes".
+    const repromptMessage = String(runAgentLoop.mock.calls[1][0]);
+    expect(repromptMessage).not.toContain("announced changes");
+    expect(repromptMessage).toContain("rejected");
+  });
+
+  it("keeps the generic reprompt text and no seeded messages when no patch was rejected", async () => {
+    const runAgentLoop = vi.fn()
+      .mockResolvedValueOnce(successAgentResult({
+        toolCalls: [{ toolId: "files.list", success: true, summary: "listed", mutating: false }],
+      }))
+      .mockResolvedValueOnce(successAgentResult({
+        toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
+      }));
+    const options = makeOptions({ requiresExecution: true, runAgentLoop });
+
+    await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    expect(String(runAgentLoop.mock.calls[1][0])).toContain("did not write any project files");
+    // No recovery context existed — nothing to seed, and the first loop's
+    // mock result carried no finalMessages.
+    expect(runAgentLoop.mock.calls[1][2].initialMessages).toBeUndefined();
+  });
+
+  it("reprompts at most once even when the continued attempt also fails", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(successAgentResult({
+      toolCalls: [{ toolId: "apply_patch", success: false, summary: "rejected again", mutating: false }],
+      finalMessages: [{ role: "user", content: "Build a simple site" }],
+    }));
+    const options = makeOptions({ requiresExecution: true, runAgentLoop });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("TOOL_EXECUTION_UNAVAILABLE");
+    expect(result.finalText).toContain("no available model produced a file-writing tool call after two attempts");
+  });
+});
+
 // ─── Tests: approval pause still runs preview ────────────────────────
 
 describe("Launch Flow: approval pause runs preview", () => {
@@ -879,5 +959,171 @@ describe("Launch Flow: artifact gate rejects the blank welcome screen", () => {
     const check = await verifyProjectArtifacts(createMockTransport());
     expect(check.ok).toBe(false);
     expect(check.error).toContain("No runnable website entry file");
+  });
+});
+
+describe("Launch Flow: artifact gate honors workspace-change evidence (#551)", () => {
+  // The #551 acceptance failure: an approved edit to index.html (adding a
+  // comment) legitimately leaves the LITT-WELCOME-SCREEN marker in place.
+  // The resumed run's own workspace diff proves files changed — the marker
+  // gate must not report "no real project files were created" for it.
+  const MARKER_EDIT =
+    "<!-- PR551-acceptance-edit-marker -->\n<!-- LITT-WELCOME-SCREEN: blank-state of the LiTT builder. Not a project, not project content. -->\n<html><body>Welcome to LiTT</body></html>";
+
+  function markerEditTransport(): WorkspaceTransport {
+    return createMockTransport({
+      listFiles: vi.fn().mockResolvedValue({
+        entries: [{ name: "index.html", type: "file" }],
+      }),
+      readFile: vi.fn().mockResolvedValue({ content: MARKER_EDIT, size: 256 }),
+    });
+  }
+
+  it("passes a marker-bearing entry when workspace evidence shows the run changed files", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      workspaceChange: { status: "changed", files: ["index.html"] },
+    });
+    expect(check.ok).toBe(true);
+  });
+
+  it("still fails the same workspace without evidence — launch stalls stay caught", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport());
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("blank starter screen");
+  });
+
+  it("still fails when evidence says the workspace is unchanged", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      workspaceChange: { status: "unchanged", files: [] },
+    });
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("blank starter screen");
+  });
+
+  it("still fails when evidence is unknown — an unverifiable workspace keeps the strict gate", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      workspaceChange: { status: "unknown", files: [] },
+    });
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("blank starter screen");
+  });
+
+  it("still fails when no entry file exists at all, even with changed evidence", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(createMockTransport(), {
+      workspaceChange: { status: "changed", files: ["other.txt"] },
+    });
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("No runnable website entry file");
+  });
+});
+
+// ─── Tests: honest loop failure propagation ─────────────────────────
+
+describe("Launch Flow: honest loop failure", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    toolRegistry.clear();
+    registerInternalTools();
+  });
+
+  it("reports the run as failed — never completed — when the loop fails honestly", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(
+      successAgentResult({
+        failedHonestly:
+          "I couldn't apply the requested file change: I asked for approval in words " +
+          "instead of emitting the file tool call, so no approval card was created " +
+          "and no files were changed. Nothing was modified — please try again.",
+        toolCalls: [],
+      }),
+    );
+    const options = makeOptions({ requiresExecution: true, runAgentLoop });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(false);
+    expect(result.status).toBe("failed");
+    expect(result.finalText).toContain("no approval card was created");
+    expect(result.error).toBe("HONEST_LOOP_FAILURE");
+    expect(result.agentLoopResult?.failedHonestly).toBeDefined();
+  });
+});
+
+describe("Launch Flow: artifact gate mutation-aware marker skip (#551b2)", () => {
+  // #551 acceptance re-run #3: an approved additive edit to index.html
+  // legitimately keeps the LITT-WELCOME-SCREEN marker. The resumed run's
+  // own tool-call log (a successful file mutation) is passed as defense
+  // in depth for when the workspace diff could not run ("unknown").
+  const MARKER_EDIT =
+    "<!-- PR551-acceptance-edit-marker -->\n<!-- LITT-WELCOME-SCREEN: blank-state of the LiTT builder. Not a project, not project content. -->\n<html><body>Welcome to LiTT</body></html>";
+
+  function markerEditTransport(): WorkspaceTransport {
+    return createMockTransport({
+      listFiles: vi.fn().mockResolvedValue({
+        entries: [{ name: "index.html", type: "file" }],
+      }),
+      readFile: vi.fn().mockResolvedValue({ content: MARKER_EDIT, size: 256 }),
+    });
+  }
+
+  it("passes a marker-bearing entry when the run's tool log shows a successful mutation and the diff is unknown", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      workspaceChange: { status: "unknown", files: [] },
+      hadSuccessfulMutation: true,
+    });
+    expect(check.ok).toBe(true);
+  });
+
+  it("passes a marker-bearing entry when the run's tool log shows a successful mutation and no evidence exists", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      hadSuccessfulMutation: true,
+    });
+    expect(check.ok).toBe(true);
+  });
+
+  it("still fails when the diff affirmatively proves the workspace untouched — a lying tool must not pass", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      workspaceChange: { status: "unchanged", files: [] },
+      hadSuccessfulMutation: true,
+    });
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("blank starter screen");
+  });
+
+  it("still fails without a successful mutation — launch stalls stay caught", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      workspaceChange: { status: "unknown", files: [] },
+      hadSuccessfulMutation: false,
+    });
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("blank starter screen");
+  });
+
+  it("threads hadSuccessfulMutation through ensureProjectPreviewReady", async () => {
+    const { ensureProjectPreviewReady } = await import("@/lib/litt-intelligence/launch-flow");
+    const transport = createMockTransport({
+      listFiles: vi.fn().mockResolvedValue({
+        entries: [{ name: "index.html", type: "file" }],
+      }),
+      readFile: vi.fn().mockResolvedValue({ content: MARKER_EDIT, size: 256 }),
+      startPreview: vi.fn().mockResolvedValue({ status: "ready" }),
+      getPreviewStatus: vi.fn().mockResolvedValue({ status: "ready" }),
+    });
+    const result = await ensureProjectPreviewReady(
+      transport as any,
+      { workspaceChange: { status: "unknown", files: [] }, hadSuccessfulMutation: true },
+      undefined,
+      undefined,
+    );
+    expect(result.ok).toBe(true);
   });
 });

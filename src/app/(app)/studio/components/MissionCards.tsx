@@ -270,7 +270,7 @@ export default function MissionCards({
   const hints: string[] = [];
   if (pendingApproval) hints.push("Approval waiting — review the request before work continues.");
   if (isRunning) hints.push(`Run in progress — step ${toolCalls.length + 1}.`);
-  if (hasCheckpoint && !isRunning) hints.push("Checkpoint recorded — restore if you need to undo changes.");
+  if (hasCheckpoint && hasChanges && !isRunning) hints.push("Checkpoint recorded — restore if you need to undo changes.");
   if (capabilities.terminalExecution === "unavailable")
     hints.push("Terminal unavailable — code changes still apply to the workspace.");
 

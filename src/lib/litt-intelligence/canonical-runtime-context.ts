@@ -43,6 +43,13 @@ export interface CanonicalRuntimeContext {
   repository: string | null;
   branch: string | null;
   writePermission: boolean;
+  /**
+   * True when the /ws-files reachability probe failed at transport
+   * creation: the DB row said the workspace is ready, but file operations
+   * will time out. The context block must say so instead of claiming
+   * "Write permission: allowed".
+   */
+  workspaceFileOpsFailing?: boolean;
   previewStatus: "ready" | "unavailable" | "unknown";
   availableTools: string[];
   executionMode: "plan" | "act" | "auto";
@@ -243,6 +250,12 @@ export function buildRuntimeContextBlock(ctx: CanonicalRuntimeContext): string {
     `- Repository: ${ctx.githubConnected ? ctx.repository ?? "connected" : "not connected"}`,
     `- Branch: ${ctx.branch ?? "none"}`,
     `- Write permission: ${ctx.writePermission ? "allowed" : "not allowed"}`,
+    ...(ctx.workspaceFileOpsFailing
+      ? [
+          "- Workspace file operations: FAILING — the file transport is not reachable; reads and writes will time out. " +
+            "Do not claim a write succeeded unless a tool result confirms it.",
+        ]
+      : []),
     `- Preview: ${ctx.previewStatus}`,
     `- Deployment: ${ctx.deploymentStatus}`,
     `- Live URL: ${ctx.deploymentUrl ?? "none"}`,
