@@ -52,6 +52,18 @@ export function snapFrame(frame: Frame): Frame {
   };
 }
 
+/** Title bars sit under the canvas toolbar when y is above this line, and a
+    negative y puts the handle off the canvas entirely. */
+export const TITLE_BAR_MIN_Y = 48;
+
+export function clampReachableFrame(frame: Frame): Frame {
+  return {
+    ...frame,
+    x: Math.max(0, frame.x),
+    y: Math.max(TITLE_BAR_MIN_Y, frame.y),
+  };
+}
+
 export function moveFrame(frame: Frame, dx: number, dy: number): Frame {
   return snapFrame({ ...frame, x: frame.x + dx, y: frame.y + dy });
 }

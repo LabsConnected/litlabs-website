@@ -13,9 +13,9 @@ const ITEMS = [
 
 export function WorkspaceChecklist() {
   return (
-    <details className="absolute left-3 top-14 z-30 w-72 border border-white/10 bg-black/75 p-2 text-[11px] leading-5 text-white/75" style={{ borderRadius: 6 }}>
-      <summary className="cursor-pointer text-white/90">Workspace checklist</summary>
-      <ol className="mt-2 list-decimal space-y-1 pl-4">
+    <details className="pointer-events-none absolute left-3 top-14 z-30 w-72 border border-white/10 bg-black/75 p-2 text-[11px] leading-5 text-white/75" style={{ borderRadius: 6 }}>
+      <summary className="pointer-events-auto cursor-pointer text-white/90">Workspace checklist</summary>
+      <ol className="pointer-events-auto mt-2 list-decimal space-y-1 pl-4">
         {ITEMS.map((item) => <li key={item}>{item}</li>)}
       </ol>
     </details>

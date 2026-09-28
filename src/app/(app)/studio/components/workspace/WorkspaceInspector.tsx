@@ -4,6 +4,7 @@ import { useWorkspaceStore } from "./workspace-store";
 
 export function WorkspaceInspector() {
   const document = useWorkspaceStore((state) => state.document);
+  const liveFrames = useWorkspaceStore((state) => state.liveFrames);
   const selectedIds = useWorkspaceStore((state) => state.selectedIds);
   const commit = useWorkspaceStore((state) => state.commit);
   const object = document.objects.find((item) => item.id === selectedIds[0]);
@@ -11,6 +12,7 @@ export function WorkspaceInspector() {
     return <p className="text-[12px] text-white/45">Select a window to edit its title, frame, accent, and tags.</p>;
   }
   const links = document.relationships.filter((item) => item.fromId === object.id || item.toId === object.id);
+  const frame = liveFrames[object.id] ?? object.frame;
   return (
     <div key={object.id} data-testid="workspace-inspector" className="space-y-3 text-[12px] text-white/80">
       <label className="block">
@@ -33,11 +35,21 @@ export function WorkspaceInspector() {
             <input
               aria-label={`Frame ${key}`}
               type="number"
-              defaultValue={object.frame[key]}
+              value={frame[key]}
               className="mt-1 w-full rounded border border-white/10 bg-black/40 px-2 py-1"
-              onBlur={(event) => {
-                const frame = { ...object.frame, [key]: Number(event.target.value) };
-                void commit({ type: "workspace.update", id: object.id, frame }, { type: "workspace.update", id: object.id, patch: { frame: object.frame } });
+              onChange={(event) => {
+                const next = Number(event.target.value);
+                if (!Number.isFinite(next)) return;
+                const current = useWorkspaceStore.getState().liveFrames;
+                useWorkspaceStore.getState().setLiveFrames({ ...current, [object.id]: { ...frame, [key]: next } });
+              }}
+              onBlur={() => {
+                const next = useWorkspaceStore.getState().liveFrames[object.id];
+                if (!next || (next.x === object.frame.x && next.y === object.frame.y && next.width === object.frame.width && next.height === object.frame.height)) return;
+                void commit(
+                  { type: "workspace.update", id: object.id, frame: next },
+                  { type: "workspace.update", id: object.id, patch: { frame: object.frame } },
+                );
               }}
             />
           </label>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH } from "@/lib/studio/workspace-document";
-import { isTypingTarget, moveFrame, resizeFrame, snapFrame, zoomAtPoint } from "./workspace-geometry";
+import { clampReachableFrame, isTypingTarget, moveFrame, resizeFrame, snapFrame, zoomAtPoint } from "./workspace-geometry";
 
 describe("workspace geometry", () => {
   it("snaps a move to the 8px grid and keeps the minimum window size", () => {
@@ -26,6 +26,11 @@ describe("workspace geometry", () => {
     expect(isTypingTarget(termInner)).toBe(true);
     const plain = globalThis.document.createElement("div");
     expect(isTypingTarget(plain)).toBe(false);
+  });
+
+  it("keeps a dragged title bar below the canvas toolbar", () => {
+    expect(clampReachableFrame({ x: -40, y: -56, width: 360, height: 280 })).toMatchObject({ x: 0, y: 48 });
+    expect(clampReachableFrame({ x: 80, y: 120, width: 360, height: 280 }).y).toBe(120);
   });
 
   it("zooms around the pointer instead of the canvas origin", () => {

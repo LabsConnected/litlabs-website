@@ -208,6 +208,19 @@ describe("SpatialWorkspace", () => {
     await waitFor(() => expect(workspace.objects).toHaveLength(0));
   });
 
+  it("keeps the inspector geometry in sync with a title drag", async () => {
+    render(<><SpatialWorkspace projectId="project-1" /><WorkspaceInspector /></>);
+    await waitFor(() => screen.getByTestId("workspace-window-chat-1"));
+    useWorkspaceStore.getState().select(["chat-1"]);
+    const title = screen.getByTestId("workspace-title-chat-1");
+    fireEvent.pointerDown(title, { clientX: 80, clientY: 60, button: 0, pointerId: 1 });
+    window.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 200, clientY: 140 }));
+    await waitFor(() => {
+      const input = screen.getByLabelText("Frame x") as HTMLInputElement;
+      expect(Number(input.value)).toBeGreaterThan(48);
+    });
+  });
+
   it("saves an inspector title edit onto the window", async () => {
     render(<><SpatialWorkspace projectId="project-1" /><WorkspaceInspector /></>);
     await waitFor(() => screen.getByTestId("workspace-window-chat-1"));

@@ -17,6 +17,7 @@ import { WorkspaceMinimap } from "./WorkspaceMinimap";
 import { WorkspaceWindow } from "./WorkspaceWindow";
 import {
   alignFrame,
+  clampReachableFrame,
   isCanvasShown,
   isPrimaryPointerButton,
   isTypingTarget,
@@ -70,7 +71,11 @@ export function SpatialWorkspace({ projectId }: { projectId: string | null }) {
     setNotes(Object.fromEntries(workspaceDoc.objects.filter((object) => object.type === "note").map((object) => [object.id, String(object.payload.body ?? "")])));
   }, [workspaceDoc]);
 
-  const frameOf = useCallback((object: WorkspaceObject) => frames[object.id] ?? object.frame, [frames]);
+  const frameOf = useCallback((object: WorkspaceObject) => clampReachableFrame(frames[object.id] ?? object.frame), [frames]);
+
+  useEffect(() => {
+    useWorkspaceStore.getState().setLiveFrames(frames);
+  }, [frames]);
 
   const run = useCallback(async (action: HttpWorkspaceAction) => {
     const current = useWorkspaceStore.getState().document;
@@ -219,7 +224,7 @@ export function SpatialWorkspace({ projectId }: { projectId: string | null }) {
         const moved = moveFrame(starts[id], dx, dy);
         const others = workspaceDoc.objects.filter((item) => item.id !== id).map((item) => frames[item.id] ?? item.frame);
         const aligned = alignFrame(moved, others);
-        next[id] = aligned.frame;
+        next[id] = clampReachableFrame(aligned.frame);
         shown = aligned.guides;
       }
       framesRef.current = { ...framesRef.current, ...next };
@@ -241,7 +246,7 @@ export function SpatialWorkspace({ projectId }: { projectId: string | null }) {
     const start = { ...object.frame };
     beginGesture(event, (point) => {
       const current = screenToCanvas(point, viewport);
-      const frame = resizeFrame(start, handle, current.x - origin.x, current.y - origin.y);
+      const frame = clampReachableFrame(resizeFrame(start, handle, current.x - origin.x, current.y - origin.y));
       framesRef.current = { ...framesRef.current, [object.id]: frame };
       setFrames(framesRef.current);
     }, () => {
@@ -293,7 +298,7 @@ export function SpatialWorkspace({ projectId }: { projectId: string | null }) {
       className="relative h-full overflow-hidden bg-[#07080b] text-white"
       onWheel={onWheel}
     >
-      <div className="absolute left-3 top-3 z-30 flex gap-2 text-[11px]">
+      <div className="pointer-events-none absolute left-3 top-3 z-30 flex gap-2 text-[11px] [&>button]:pointer-events-auto">
         <button type="button" data-testid="workspace-new-chat" onClick={() => void run({ type: "workspace.create", objectType: "chat" })}>New chat</button>
         <button type="button" data-testid="workspace-new-task" onClick={() => void run({ type: "workspace.create", objectType: "task" })}>New task</button>
         <button type="button" data-testid="workspace-new-note" onClick={() => void run({ type: "workspace.create", objectType: "note" })}>New note</button>
