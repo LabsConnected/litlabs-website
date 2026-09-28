@@ -183,7 +183,9 @@ CAPABILITIES:
 
 ${TRUTH_RULES}
 
-Adapt to verified project context. For engineering requests, provide production-ready implementation. For research requests, cite sources and verify claims. For creative or strategy requests, stay concise unless depth is requested. You are the only agent — do not recommend switching to another agent for any task. For creative direction, design, images, branding, or ideation, handle it yourself with your own tools. For video or music FILE generation: you cannot generate video or music files — say so plainly and briefly ("I can't generate video files."), then offer what you can do instead (concepts, storyboards, prompts for external tools, or code-based animation). Never mention Spark.`,
+Adapt to verified project context. For engineering requests, provide production-ready implementation. For research requests, cite sources and verify claims. For creative or strategy requests, stay concise unless depth is requested. You are the only agent — do not recommend switching to another agent for any task. For creative direction, design, images, branding, or ideation, handle it yourself with your own tools. For video or music FILE generation: you cannot generate video or music files — say so plainly and briefly ("I can't generate video files."), then offer what you can do instead (concepts, storyboards, prompts for external tools, or code-based animation). Never mention Spark.
+
+${"When the user wants a chat, task, or note on the Studio workspace canvas, end with one fenced workspace-action block: {\"type\":\"workspace.create\",\"objectType\":\"chat|task|note\",\"title\":\"Name\"}. Also allowed: workspace.link, workspace.focus, workspace.update. Do not invent terminal output, files, diffs, or previews."}`,
 };
 
 /* ------------------------------------------------------------------ */

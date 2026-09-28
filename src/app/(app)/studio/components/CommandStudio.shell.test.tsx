@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useWorkspaceStore } from "./workspace/workspace-store";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
@@ -15,10 +16,11 @@ import "@testing-library/jest-dom";
 // observable.
 
 const stableSearchParams = new URLSearchParams("tool=chat");
+const { replaceMock } = vi.hoisted(() => ({ replaceMock: vi.fn() }));
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => stableSearchParams,
-  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  useRouter: () => ({ replace: replaceMock, push: vi.fn() }),
   usePathname: () => "/studio",
 }));
 
@@ -461,26 +463,32 @@ describe("StudioShell — desktop operating shell", () => {
     expect(screen.queryByTestId("studio-canvas-open-tool")).toBeNull();
   });
 
-  it("renders the Preview surface on the stage by default", async () => {
+  it("renders the Workspace surface on the stage by default", async () => {
     await renderStudioShell();
     await waitFor(() => {
-      expect(screen.getByTestId("stage-surface-preview")).toHaveAttribute("data-active", "true");
-      expect(screen.getByTestId("studio-preview-panel")).toBeTruthy();
+      expect(screen.getByTestId("stage-surface-workspace")).toHaveAttribute("data-active", "true");
+      expect(screen.getByTestId("spatial-workspace")).toBeTruthy();
     });
+    const written = replaceMock.mock.calls.map((call) => String(call[0]));
+    expect(written.some((url) => url.includes("tool=preview"))).toBe(false);
   });
 
   it("rail switches the stage surface and keeps visited surfaces mounted", async () => {
     const { user } = await renderStudioShell();
-    await waitFor(() => screen.getByTestId("studio-preview-panel"));
+    await waitFor(() => screen.getByTestId("spatial-workspace"));
     await user.click(screen.getByTestId("workspace-rail-design"));
     await waitFor(() => {
       expect(screen.getByTestId("stage-surface-design")).toHaveAttribute("data-active", "true");
       expect(screen.getByTestId("visual-canvas-builder")).toBeTruthy();
     });
-    // Preview stays mounted (hidden) — iframe/scroll state survives.
-    const previewSurface = screen.getByTestId("stage-surface-preview");
-    expect(previewSurface).toHaveAttribute("data-active", "false");
-    expect(previewSurface.querySelector("[data-testid='studio-preview-panel']")).toBeTruthy();
+    const workspaceSurface = screen.getByTestId("stage-surface-workspace");
+    expect(workspaceSurface).toHaveAttribute("data-active", "false");
+    expect(workspaceSurface.querySelector("[data-testid='spatial-workspace']")).toBeTruthy();
+    await user.click(screen.getByTestId("workspace-rail-preview"));
+    await waitFor(() => {
+      expect(screen.getByTestId("stage-surface-preview")).toHaveAttribute("data-active", "true");
+      expect(screen.getByTestId("studio-preview-panel")).toBeTruthy();
+    });
   });
 
   it("LiTT command layer expands to the transcript and collapses back to the bar", async () => {
@@ -532,6 +540,23 @@ describe("StudioShell — desktop operating shell", () => {
       expect(screen.getByTestId("inspector-ask-litt")).toBeTruthy();
       // Ask LiTT expanded the command layer for the pinned context.
       expect(screen.getByTestId("litt-layer-transcript")).toBeTruthy();
+    });
+  });
+
+  it("creates a chat, task, and note from the left rail and the composer", async () => {
+    const { user } = await renderStudioShell();
+    await waitFor(() => screen.getByTestId("spatial-workspace"));
+    await user.click(screen.getByTestId("workspace-rail-new-chat"));
+    await user.click(screen.getByTestId("workspace-rail-new-task"));
+    await user.click(screen.getByTestId("workspace-rail-new-note"));
+    await user.click(screen.getByTestId("litt-workspace-new-chat"));
+    await user.click(screen.getByTestId("litt-workspace-new-task"));
+    await user.click(screen.getByTestId("litt-workspace-new-note"));
+    await waitFor(() => {
+      const requested = useWorkspaceStore.getState().pendingActions
+        .filter((action) => action.type === "workspace.create")
+        .map((action) => action.objectType);
+      expect(requested).toEqual(["chat", "task", "note", "chat", "task", "note"]);
     });
   });
 });

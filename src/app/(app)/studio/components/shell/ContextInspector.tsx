@@ -29,6 +29,7 @@ export default function ContextInspector({
   onClearSelection,
   propertiesContent,
   editor,
+  workspaceContent,
   defaultContent,
 }: {
   open: boolean;
@@ -43,6 +44,8 @@ export default function ContextInspector({
       ElementInspectorPanel for a preview element — it renders its own
       header, current values, and write controls). */
   editor?: ReactNode;
+  /** Window inspector when the Workspace stage is active. */
+  workspaceContent?: ReactNode;
   /** Fallback inspector (plan/checks/telemetry). */
   defaultContent: ReactNode;
 }) {
@@ -96,7 +99,7 @@ export default function ContextInspector({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {editor ?? propertiesContent ?? (selection ? (
+        {workspaceContent ?? editor ?? propertiesContent ?? (selection ? (
           <div className="flex flex-col gap-3 p-3" data-testid="inspector-selection-card">
             <div className="flex items-start gap-2">
               <MousePointer2 size={14} className="mt-0.5 shrink-0" style={{ color: "var(--litt-primary)" }} />

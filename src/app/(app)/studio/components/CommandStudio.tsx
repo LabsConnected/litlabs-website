@@ -70,7 +70,11 @@ import StudioDeploySurface from "./shell/StudioDeploySurface";
 import StudioOperatorBar from "./shell/StudioOperatorBar";
 import ElementInspectorPanel from "./shell/ElementInspectorPanel";
 import ImageStudio from "./shell/ImageStudio";
-import { modeToStageSurface, resolveStageSurface, type StudioStageSurface } from "./shell/stage-surfaces";
+import { canonicalShellTool, initialStageFromTool, resolveStageSurface, shellStageForTool, type StudioStageSurface } from "./shell/stage-surfaces";
+import { SpatialWorkspace } from "./workspace/SpatialWorkspace";
+import { WorkspaceInspector } from "./workspace/WorkspaceInspector";
+import { useWorkspaceStore } from "./workspace/workspace-store";
+import { readAssistantWorkspaceAction } from "@/lib/studio/workspace-document";
 import { useCanvasBuilderStore } from "./canvas/builder/store";
 import type { PreviewSelection } from "./StudioPreviewPanel";
 import StudioProjectFiles from "./StudioProjectFiles";
@@ -381,12 +385,12 @@ function CommandStudioContent() {
 
   const studioShellActive =
     destination === "studio" && viewportTier !== null && !isMobileLitt && !classicOverride;
-  const [stageSurface, setStageSurface] = useState<StudioStageSurface>("preview");
+  const [stageSurface, setStageSurface] = useState<StudioStageSurface>(() => initialStageFromTool(searchParams.get("tool")));
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [littExpanded, setLittExpanded] = useState(false);
   // Surfaces stay mounted once visited — hidden, not unmounted — so
   // preview iframes, PTY sessions, and canvas state survive switching.
-  const [mountedSurfaces, setMountedSurfaces] = useState<Set<StudioStageSurface>>(() => new Set(["preview"]));
+  const [mountedSurfaces, setMountedSurfaces] = useState<Set<StudioStageSurface>>(() => new Set(["workspace"]));
 
   const openStageSurface = useCallback((surface: StudioStageSurface) => {
     setDestination("studio");
@@ -397,6 +401,7 @@ function CommandStudioContent() {
   // Design-surface node selection → the inspector shows the real
   // property editor (builder store is module-scoped; reads stay cheap).
   const builderSelectedNodeId = useCanvasBuilderStore((s) => s.selectedNodeId);
+  const workspaceWindowSelected = useWorkspaceStore((s) => s.selectedIds.length > 0);
 
   const handleToggleDock = useCallback(() => {
     if (studioShellActive) {
@@ -480,7 +485,7 @@ function CommandStudioContent() {
       if (studioShellActive) {
         const surface = mapped.openDrawer
           ? (DOCK_TAB_TO_SURFACE[mapped.openDrawer as StudioDockTab] ?? null)
-          : modeToStageSurface(newMode);
+          : shellStageForTool(fromUrl, newMode);
         if (surface) {
           setStageSurface(surface);
           setMountedSurfaces((prev) => (prev.has(surface) ? prev : new Set(prev).add(surface)));
@@ -892,7 +897,7 @@ function CommandStudioContent() {
     }
     // Shell: studio workspace modes select the corresponding stage surface.
     if (studioShellActive && mapped.destination === "studio" && !mapped.openDrawer && !mapped.openInspector) {
-      const surface = modeToStageSurface(mapped.mode);
+      const surface = shellStageForTool(tool, mapped.mode);
       if (surface) openStageSurface(surface);
     }
     setPendingCommand(command);
@@ -1037,12 +1042,19 @@ function CommandStudioContent() {
   // own ?tool= value for deep-linking. Any stray ?mode= is dropped:
   // there is no user-facing mode choice.
   useEffect(() => {
+    // The viewport tier is null on the first paint. Writing the classic
+    // preview default in that gap turns ?tool=chat into ?tool=preview, and
+    // the shell then treats Preview as an explicit request.
+    if (viewportTier === null) return;
     const activeMode =
       destination === "studio" ? studioMode :
       destination === "create" ? createMode :
       destination === "more" ? moreMode :
       undefined;
-    const legacyTool = destinationToLegacyTool(destination, activeMode, workSurface);
+    const mappedTool = destinationToLegacyTool(destination, activeMode, workSurface);
+    const legacyTool = studioShellActive && destination === "studio"
+      ? canonicalShellTool(mappedTool, stageSurface, searchParams.get("tool"))
+      : mappedTool;
     try {
       localStorage.setItem("littree:studio:tool", legacyTool);
     } catch {
@@ -1078,8 +1090,7 @@ function CommandStudioContent() {
       lastWrittenUrlRef.current = params.toString();
       router.replace(target, { scroll: false });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [destination, studioMode, createMode, moreMode, workSurface, pathname, router]);
+  }, [destination, studioMode, createMode, moreMode, workSurface, pathname, router, viewportTier, studioShellActive, stageSurface, searchParams]);
 
   // Handle legacy "studio:switch-tool" events emitted from inside tools.
   useEffect(() => {
@@ -1153,7 +1164,14 @@ function CommandStudioContent() {
       setDestination("studio");
       setStudioMode("media" as StudioMode);
     }
-  }, [conversation.messages]);
+    for (const message of newMessages) {
+      if (message.role !== "assistant" || typeof message.content !== "string") continue;
+      const parsed = readAssistantWorkspaceAction(message.content);
+      if (!parsed.ok) continue;
+      openStageSurface("workspace");
+      useWorkspaceStore.getState().enqueueAction(parsed.action);
+    }
+  }, [conversation.messages, openStageSurface]);
 
   const handleComposerSend = useCallback(async (value: string, attachments?: string[]) => {
     // The canonical controller provisions a starter project and conversation
@@ -1547,6 +1565,7 @@ function CommandStudioContent() {
       setDestination("studio");
       setStudioMode("work");
       setWorkSurface("conversation");
+      if (studioShellActive) openStageSurface("workspace");
       setProjectNameDialogOpen(false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Network error while creating project.";
@@ -1556,7 +1575,7 @@ function CommandStudioContent() {
     } finally {
       setCreatingProject(false);
     }
-  }, [creatingProject, searchParams, pathname, router, refreshCapabilities, userId, getToken, isMobileLitt]);
+  }, [creatingProject, searchParams, pathname, router, refreshCapabilities, userId, getToken, isMobileLitt, studioShellActive, openStageSurface]);
 
   const handlePrepareWorkspace = useCallback(async () => {
     if (!runtimeState.projectId) return;
@@ -2394,6 +2413,8 @@ function CommandStudioContent() {
             onRollback={handleRollback}
           />
         );
+      case "workspace":
+        return <SpatialWorkspace projectId={projectId ?? null} />;
       case "design":
         return <VisualCanvasBuilder />;
       case "preview":
@@ -2633,6 +2654,10 @@ function CommandStudioContent() {
               <WorkspaceRail
                 active={stageSurface}
                 onSelect={openStageSurface}
+                onCreateWorkspace={(kind) => {
+                  openStageSurface("workspace");
+                  useWorkspaceStore.getState().enqueueAction({ type: "workspace.create", objectType: kind });
+                }}
               />
             }
             stage={
@@ -2727,6 +2752,7 @@ function CommandStudioContent() {
                     />
                   ) : undefined
                 }
+                workspaceContent={stageSurface === "workspace" && workspaceWindowSelected ? <WorkspaceInspector /> : null}
                 propertiesContent={builderSelectedNodeId ? <BuilderPropertiesPanel /> : null}
                 defaultContent={
                   <StudioInspector
@@ -2761,6 +2787,24 @@ function CommandStudioContent() {
                 onExpandedChange={setLittExpanded}
                 transcript={littTranscript}
                 composer={littComposer}
+                actions={
+                  <>
+                    {(["chat", "task", "note"] as const).map((kind) => (
+                      <button
+                        key={kind}
+                        type="button"
+                        data-testid={`litt-workspace-new-${kind}`}
+                        className="rounded px-2 py-1 text-[10px] uppercase tracking-wide text-white/70 hover:bg-white/5"
+                        onClick={() => {
+                          openStageSurface("workspace");
+                          useWorkspaceStore.getState().enqueueAction({ type: "workspace.create", objectType: kind });
+                        }}
+                      >
+                        {kind}
+                      </button>
+                    ))}
+                  </>
+                }
                 statusBar={
                   <StudioOperatorBar
                     onOpenTerminal={() => openStageSurface("terminal")}
