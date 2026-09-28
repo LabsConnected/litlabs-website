@@ -214,11 +214,24 @@ interface ExecutionStore {
   /** Approval POST accepted (202) — card shows the run executing. */
   approvalAccepted: () => void;
   /**
-   * Approval POST failed (non-2xx) or the resumed run failed — keep the
-   * card mounted with the backend error and a Retry affordance. Never
-   * silently clears, never auto re-requests.
+   * Approval POST failed (non-2xx) or the resumed run failed. Converges the
+   * gate to the failed state:
+   * - When the decision was recorded and the run failed afterwards
+   *   (`decisionRecorded: true`, not expired), the gate is dead — the
+   *   Approve/Reject pair must not stay actionable, so pendingApproval is
+   *   cleared and phase becomes "failed" (never "awaiting_approval"). The
+   *   failure itself is already on the transcript; recovery is a new
+   *   request, not a replay of the identical frozen run.
+   * - When the decision never landed server-side (`decisionRecorded:
+   *   false`) or the gate expired, the gate is still actionable — the card
+   *   stays mounted with the error and its retry/re-request affordance.
+   * Never silently clears, never auto re-requests.
    */
-  failApproval: (error: string, retryable?: boolean, opts?: { expired?: boolean }) => void;
+  failApproval: (
+    error: string,
+    retryable?: boolean,
+    opts?: { expired?: boolean; decisionRecorded?: boolean },
+  ) => void;
   setCheckpoint: (checkpoint: { label: string; gitSha: string } | null) => void;
   collapseEvent: (id: string) => void;
   collapseLowLevel: () => void;
@@ -475,7 +488,9 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     const paused = state.pendingApproval != null && reason !== "cancelled" && reason !== "failed";
     set({
       isRunning: false,
-      phase: reason === "cancelled" ? "cancelled" : paused ? "awaiting_approval" : "done",
+      // A failed run is failed — never "done". (Reporting a failed run as
+      // Complete is the same dishonesty class as a fake success.)
+      phase: reason === "cancelled" ? "cancelled" : reason === "failed" ? "failed" : paused ? "awaiting_approval" : "done",
       events: updatedEvents,
       pendingApproval: paused ? state.pendingApproval : null,
       approvalPhase: paused ? state.approvalPhase : "idle",
@@ -621,12 +636,22 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   },
 
   failApproval: (error, retryable = true, opts) => {
+    const expired = opts?.expired === true;
+    // A gate whose decision never landed server-side (or that expired into
+    // "request again") is still actionable — keep it mounted. A gate whose
+    // decision was recorded and whose run then failed is dead: clearing
+    // pendingApproval drops the operator bar's Approve/Reject buttons and
+    // unmounts the card, and phase "failed" replaces the "Waiting for
+    // approval" label. Replaying the identical frozen run cannot succeed,
+    // so no retry affordance is offered for it.
+    const gateActionable = expired || opts?.decisionRecorded !== true;
     set({
       approvalPhase: "failed",
       approvalError: error,
       approvalRetryable: retryable,
-      approvalExpired: opts?.expired === true,
-      phase: "awaiting_approval",
+      approvalExpired: expired,
+      pendingApproval: gateActionable ? get().pendingApproval : null,
+      phase: gateActionable ? "awaiting_approval" : "failed",
     });
     get().addEvent({
       type: "approval_resolved",

@@ -881,3 +881,63 @@ describe("Launch Flow: artifact gate rejects the blank welcome screen", () => {
     expect(check.error).toContain("No runnable website entry file");
   });
 });
+
+describe("Launch Flow: artifact gate honors workspace-change evidence (#551)", () => {
+  // The #551 acceptance failure: an approved edit to index.html (adding a
+  // comment) legitimately leaves the LITT-WELCOME-SCREEN marker in place.
+  // The resumed run's own workspace diff proves files changed — the marker
+  // gate must not report "no real project files were created" for it.
+  const MARKER_EDIT =
+    "<!-- PR551-acceptance-edit-marker -->\n<!-- LITT-WELCOME-SCREEN: blank-state of the LiTT builder. Not a project, not project content. -->\n<html><body>Welcome to LiTT</body></html>";
+
+  function markerEditTransport(): WorkspaceTransport {
+    return createMockTransport({
+      listFiles: vi.fn().mockResolvedValue({
+        entries: [{ name: "index.html", type: "file" }],
+      }),
+      readFile: vi.fn().mockResolvedValue({ content: MARKER_EDIT, size: 256 }),
+    });
+  }
+
+  it("passes a marker-bearing entry when workspace evidence shows the run changed files", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      workspaceChange: { status: "changed", files: ["index.html"] },
+    });
+    expect(check.ok).toBe(true);
+  });
+
+  it("still fails the same workspace without evidence — launch stalls stay caught", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport());
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("blank starter screen");
+  });
+
+  it("still fails when evidence says the workspace is unchanged", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      workspaceChange: { status: "unchanged", files: [] },
+    });
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("blank starter screen");
+  });
+
+  it("still fails when evidence is unknown — an unverifiable workspace keeps the strict gate", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      workspaceChange: { status: "unknown", files: [] },
+    });
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("blank starter screen");
+  });
+
+  it("still fails when no entry file exists at all, even with changed evidence", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(createMockTransport(), {
+      workspaceChange: { status: "changed", files: ["other.txt"] },
+    });
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("No runnable website entry file");
+  });
+});
