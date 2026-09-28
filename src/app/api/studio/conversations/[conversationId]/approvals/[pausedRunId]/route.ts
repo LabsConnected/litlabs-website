@@ -551,7 +551,17 @@ export async function POST(
         } else if (failedMutation && !successfulMutation) {
           resumeFailure = "The approved workspace operation failed, so the project was not completed.";
         } else if (successfulMutation) {
-          resumePreview = await ensureProjectPreviewReady(transport, {}, undefined, actionContext);
+          // Scope the artifact gate with the resumed run's own workspace
+          // evidence: a "changed" diff proves the approved mutation landed,
+          // so the welcome-screen marker check (which only detects stalled
+          // *launches*) must not fail the run with "no real project files
+          // were created". "unknown"/absent evidence keeps the strict gate.
+          resumePreview = await ensureProjectPreviewReady(
+            transport,
+            { workspaceChange: result.workspaceChange ?? null },
+            undefined,
+            actionContext,
+          );
           if (!resumePreview.ok) {
             resumeFailure = resumePreview.error ?? "The project files were not runnable after approval.";
           }
