@@ -401,32 +401,31 @@ if (!Element.prototype.scrollTo) {
 
 import CommandStudio from "./CommandStudio";
 
-// ── Test viewport: 674x1536, the mobile size specified for this bug ──
-const MOBILE_WIDTH = 674;
-const MOBILE_HEIGHT = 1536;
+// ── Test viewport: 390x844 — the responsive phone tier (<768px). The
+// matchMedia polyfill in tests/setup.ts drives both useViewportTier and
+// useIsPhone from `globalThis.__TEST_VIEWPORT_WIDTH__` (reset to 1440 by
+// the setup's beforeEach), so each test sets 390 explicitly.
+const MOBILE_WIDTH = 390;
+const MOBILE_HEIGHT = 844;
 
-async function renderMobileCommandStudio() {
+async function renderPhoneCommandStudio() {
   const user = userEvent.setup();
   const view = render(<CommandStudio />);
 
   await waitFor(() => {
-    if (!screen.queryByTestId("litt-mobile-trigger") && !screen.queryByRole("navigation", { name: "Studio navigation" })) {
-      throw new Error("Mobile Studio surface has not mounted");
+    if (!screen.queryByTestId("phone-bottom-nav")) {
+      throw new Error("Phone Studio surface has not mounted");
     }
   });
 
   return { user, ...view };
 }
 
-function mobileNav() {
-  return screen.getByRole("navigation", { name: "Studio navigation" });
+function phoneNav() {
+  return screen.getByRole("navigation", { name: "Studio surfaces" });
 }
 
-function centerWorkspace() {
-  return screen.getByTestId("studio-center-workspace");
-}
-
-describe("MobileCommandNav — shared work surfaces", () => {
+describe("Phone tier — responsive StudioShell (<768px)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sendMock.mockResolvedValue({ accepted: true });
@@ -450,38 +449,106 @@ describe("MobileCommandNav — shared work surfaces", () => {
     });
   });
 
-  it("renders work surfaces instead of desktop destinations", async () => {
-    await renderMobileCommandStudio();
-    const nav = within(mobileNav());
+  it("renders the same StudioShell in phone mode with the bottom nav", async () => {
+    await renderPhoneCommandStudio();
+    expect(screen.getByTestId("studio-shell")).toHaveAttribute("data-phone", "true");
+    const nav = within(phoneNav());
     for (const label of ["Chat", "Preview", "Files", "Activity", "More"]) {
-      expect(nav.getByLabelText(label), `${label} surface should be present`).toBeTruthy();
+      expect(nav.getByLabelText(label), `${label} nav item should be present`).toBeTruthy();
     }
     expect(nav.queryByLabelText("Agents")).toBeNull();
     expect(nav.queryByLabelText("Missions")).toBeNull();
   });
 
-  it("keeps the real preview as the primary workspace surface", async () => {
-    await renderMobileCommandStudio();
+  it("keeps the WorktabBar and drops the desktop rail and inspector aside", async () => {
+    await renderPhoneCommandStudio();
+    expect(screen.getByTestId("worktab-bar")).toBeTruthy();
+    expect(screen.queryByTestId("studio-workspace-rail")).toBeNull();
+    expect(screen.queryByTestId("studio-context-inspector")).toBeNull();
+  });
+
+  it("keeps the real preview as the default stage surface", async () => {
+    await renderPhoneCommandStudio();
+    const preview = screen.getByTestId("stage-surface-preview");
+    expect(preview).toHaveAttribute("data-active", "true");
     await waitFor(() => {
-      expect(centerWorkspace().querySelector("[data-testid='studio-preview-panel']")).toBeTruthy();
+      expect(preview.querySelector("[data-testid='studio-preview-panel']")).toBeTruthy();
     });
+    expect(within(phoneNav()).getByLabelText("Preview")).toHaveAttribute("aria-current", "page");
   });
 
   it("marks the active work surface with aria-current", async () => {
-    const { user } = await renderMobileCommandStudio();
-    const preview = within(mobileNav()).getByLabelText("Preview");
-    expect(preview.getAttribute("aria-current")).toBe("page");
-    await user.click(within(mobileNav()).getByLabelText("Activity"));
+    const { user } = await renderPhoneCommandStudio();
+    const nav = () => within(phoneNav());
+    expect(nav().getByLabelText("Preview")).toHaveAttribute("aria-current", "page");
+    await user.click(nav().getByLabelText("Activity"));
     await waitFor(() => {
-      expect(within(mobileNav()).getByLabelText("Activity").getAttribute("aria-current")).toBe("page");
+      expect(nav().getByLabelText("Activity")).toHaveAttribute("aria-current", "page");
     });
+    // The previous surface loses its marker; the stage follows.
+    expect(nav().getByLabelText("Preview")).not.toHaveAttribute("aria-current");
+    expect(screen.getByTestId("stage-surface-activity")).toHaveAttribute("data-active", "true");
+    expect(screen.getByTestId("stage-surface-preview")).toHaveAttribute("data-active", "false");
   });
 
-  it("opens Chat and Activity through the same LiTT sheet", async () => {
-    const { user } = await renderMobileCommandStudio();
-    await user.click(within(mobileNav()).getByLabelText("Chat"));
-    await waitFor(() => expect(screen.getByTestId("litt-mobile-sheet")).toBeTruthy());
-    await user.click(within(mobileNav()).getByLabelText("Activity"));
-    await waitFor(() => expect(screen.getByTestId("litt-mobile-tab-live")).toHaveAttribute("aria-pressed", "true"));
+  it("keeps surfaces mounted when switching — never duplicates the preview", async () => {
+    const { user } = await renderPhoneCommandStudio();
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("stage-surface-preview").querySelector("[data-testid='studio-preview-panel']"),
+      ).toBeTruthy();
+    });
+    await user.click(within(phoneNav()).getByLabelText("Activity"));
+    await waitFor(() => {
+      expect(screen.getByTestId("stage-surface-activity")).toHaveAttribute("data-active", "true");
+    });
+    await user.click(within(phoneNav()).getByLabelText("Preview"));
+    await waitFor(() => {
+      expect(screen.getByTestId("stage-surface-preview")).toHaveAttribute("data-active", "true");
+    });
+    // Exactly one preview panel instance — switching surfaces mounts
+    // lazily and never duplicates or remounts the stage.
+    expect(screen.getAllByTestId("studio-preview-panel")).toHaveLength(1);
+  });
+
+  it("Chat expands the LiTT command layer instead of switching surfaces", async () => {
+    const { user } = await renderPhoneCommandStudio();
+    // The collapsed composer is always visible above the bottom nav.
+    expect(screen.getByTestId("litt-command-layer")).toBeTruthy();
+    await user.click(within(phoneNav()).getByLabelText("Chat"));
+    await waitFor(() => {
+      expect(within(phoneNav()).getByLabelText("Chat")).toHaveAttribute("aria-current", "page");
+    });
+    // Chat is not a stage surface — the stage surface is untouched.
+    expect(screen.getByTestId("stage-surface-preview")).toHaveAttribute("data-active", "true");
+  });
+
+  it("More opens the sheet with the secondary stage surfaces", async () => {
+    const { user } = await renderPhoneCommandStudio();
+    await user.click(within(phoneNav()).getByLabelText("More"));
+    const sheet = await screen.findByTestId("mobile-more-sheet");
+    expect(sheet).toBeTruthy();
+    // plan, design, browser, code, images, assets, deploy, terminal.
+    expect(
+      within(sheet).getAllByTestId(/^phone-more-(plan|design|browser|code|images|assets|deploy|terminal)$/),
+    ).toHaveLength(8);
+    // Selecting a surface drives the real stage and closes the sheet.
+    await user.click(within(sheet).getByTestId("phone-more-terminal"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("mobile-more-sheet")).toBeNull();
+    });
+    expect(screen.getByTestId("stage-surface-terminal")).toHaveAttribute("data-active", "true");
+  });
+
+  it("starts with the inspector sheet closed and no legacy mobile chrome", async () => {
+    await renderPhoneCommandStudio();
+    // The inspector is hidden by default on the phone tier.
+    expect(screen.queryByTestId("mobile-inspector-sheet")).toBeNull();
+    // The pre-simplification mobile chrome is suppressed on the phone
+    // tier — the shell's bottom nav + command layer own those jobs now.
+    expect(screen.queryByTestId("litt-mobile-trigger")).toBeNull();
+    expect(screen.queryByTestId("mobile-surface-switcher")).toBeNull();
+    expect(screen.queryByTestId("litt-mobile-sheet-mount")).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Studio navigation" })).toBeNull();
   });
 });

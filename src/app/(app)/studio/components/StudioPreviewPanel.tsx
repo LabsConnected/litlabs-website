@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Copy, ExternalLink, Eye, KeyRound, Loader2, Monitor, MousePointer2, RefreshCw, RotateCcw, Smartphone, Square, Tablet, X } from "lucide-react";
+import { Check, Copy, ExternalLink, Eye, KeyRound, Loader2, Monitor, MousePointer2, MoreHorizontal, RefreshCw, RotateCcw, Smartphone, Square, Tablet, X } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { formatSourceSummary } from "@/lib/projects/project-source";
 import { useExecutionStore } from "../stores/useExecutionStore";
@@ -214,6 +214,7 @@ export default function StudioPreviewPanel({
   versionControl = "none",
   refreshKey = 0,
   onSelectionChange,
+  toolbarDensity = "full",
 }: {
   projectId: string | null;
   projectName: string | null;
@@ -229,6 +230,8 @@ export default function StudioPreviewPanel({
   versionControl?: "git" | "none";
   refreshKey?: number;
   onSelectionChange?: (selection: PreviewSelection | null) => void;
+  /** Phone tier: collapse the toolbar to status + refresh + select + ••• menu. */
+  toolbarDensity?: "full" | "compact";
 }) {
   const { getToken } = useClerkAuth();
   const [state, setState] = useState<PreviewState>(projectId ? "loading" : "not_started");
@@ -258,6 +261,17 @@ export default function StudioPreviewPanel({
   // from the toolbar; auto-opened from the auth-config error CTA.
   const [secretsOpen, setSecretsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  // Compact toolbar ••• menu: close on outside tap.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [menuOpen]);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const selectionCleanupRef = useRef<(() => void) | null>(null);
   const selectedElementRef = useRef<PreviewSelection | null>(null);
@@ -870,7 +884,164 @@ export default function StudioPreviewPanel({
           Horizontally scrollable: on narrow phones the action buttons
           (refresh/restart/stop/copy/maximize) would otherwise be cut off
           with no way to reach them. */}
-      <div className="no-scrollbar flex shrink-0 items-center gap-1.5 overflow-x-auto border-b px-2 py-1.5" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }} data-testid="preview-toolbar">
+      <div className="no-scrollbar flex shrink-0 items-center gap-1.5 overflow-x-auto border-b px-2 py-1.5" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }} data-testid="preview-toolbar" data-toolbar-density={toolbarDensity}>
+        {toolbarDensity === "compact" ? (
+          <>
+            {/* Compact phone toolbar: status + refresh + select + •••. The
+                remaining actions live in the overflow menu. */}
+            <div
+              className="h-2 w-2 shrink-0 rounded-full"
+              style={{
+                backgroundColor: dotColor,
+                boxShadow: isLive ? `0 0 6px ${dotColor}80` : "none",
+              }}
+              aria-label={`Runtime status: ${label}`}
+              data-testid="preview-status-dot"
+            />
+            <div className="min-w-0 flex-1">
+              <span className="block truncate text-[11px] font-bold" style={{ color: "var(--text-primary)" }}>
+                {projectName ?? "Project preview"}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleHardRefresh}
+              disabled={state === "loading" || state === "starting" || state === "restarting"}
+              className="grid h-[44px] w-[44px] shrink-0 place-items-center rounded-lg transition hover:bg-white/8 disabled:opacity-40"
+              aria-label="Refresh preview"
+              title="Refresh preview"
+              data-testid="preview-refresh"
+            >
+              <RefreshCw size={16} className={`pointer-events-none ${state === "stale" ? "animate-spin" : ""}`} />
+            </button>
+            {isLive && (
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !selectionMode;
+                  setSelectionMode(next);
+                  if (!next) {
+                    clearSelection();
+                    postInspectorCommand("disable");
+                  } else {
+                    attachSelection();
+                  }
+                }}
+                className="grid h-[44px] w-[44px] shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+                style={{
+                  backgroundColor: selectionMode ? "rgba(155,77,255,0.14)" : "transparent",
+                  color: selectionMode ? "#c4b5fd" : "var(--text-muted)",
+                }}
+                aria-label={selectionMode ? "Disable preview element selection" : "Select an element in the preview"}
+                aria-pressed={selectionMode}
+                data-testid="preview-select"
+              >
+                <MousePointer2 size={16} className="pointer-events-none" />
+              </button>
+            )}
+            <div className="relative shrink-0" ref={menuRef}>
+              <button
+                type="button"
+                onClick={() => setMenuOpen((v) => !v)}
+                className="grid h-[44px] w-[44px] place-items-center rounded-lg transition hover:bg-white/8"
+                style={{ color: "var(--text-muted)" }}
+                aria-label="More preview actions"
+                aria-expanded={menuOpen}
+                data-testid="preview-more-menu"
+              >
+                <MoreHorizontal size={18} className="pointer-events-none" />
+              </button>
+              {menuOpen && (
+                <div
+                  className="absolute right-0 top-full z-50 mt-1 w-52 overflow-hidden rounded-xl border shadow-2xl"
+                  style={{ backgroundColor: "var(--studio-elevated)", borderColor: "var(--studio-border-strong)" }}
+                  role="menu"
+                  aria-label="Preview actions"
+                >
+                  {isLive && (
+                    <>
+                      <div className="px-3 pt-2 text-[10px] font-black uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+                        Device
+                      </div>
+                      {([
+                        { mode: "desktop" as const, label: "Desktop (1280×720)" },
+                        { mode: "tablet" as const, label: "Tablet (768×1024)" },
+                        { mode: "mobile" as const, label: "Mobile (390×844)" },
+                      ]).map(({ mode, label: modeLabel }) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={deviceMode === mode}
+                          onClick={() => { setDeviceMode(mode); setMenuOpen(false); }}
+                          className="flex min-h-[44px] w-full items-center px-3 text-left text-[13px] font-bold transition hover:bg-white/5"
+                          style={{ color: deviceMode === mode ? "var(--litt-primary)" : "var(--text-secondary)" }}
+                        >
+                          {modeLabel}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {(isLive || state === "failed") && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => { setMenuOpen(false); void preparePreview(); }}
+                      className="flex min-h-[44px] w-full items-center px-3 text-left text-[13px] font-bold transition hover:bg-white/5"
+                      style={{ color: "var(--text-secondary)" }}
+                    >
+                      Restart preview
+                    </button>
+                  )}
+                  {isLive && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => { setMenuOpen(false); void stopPreview(); }}
+                      className="flex min-h-[44px] w-full items-center px-3 text-left text-[13px] font-bold transition hover:bg-white/5"
+                      style={{ color: "var(--text-secondary)" }}
+                    >
+                      Stop preview
+                    </button>
+                  )}
+                  {isLive && previewUrl && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => { setMenuOpen(false); void handleCopyUrl(); }}
+                      className="flex min-h-[44px] w-full items-center px-3 text-left text-[13px] font-bold transition hover:bg-white/5"
+                      style={{ color: "var(--text-secondary)" }}
+                    >
+                      {urlCopied ? "URL copied!" : "Copy preview URL"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => { setMenuOpen(false); setSecretsOpen((v) => !v); }}
+                    disabled={!projectId}
+                    className="flex min-h-[44px] w-full items-center px-3 text-left text-[13px] font-bold transition hover:bg-white/5 disabled:opacity-40"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
+                    Project secrets
+                  </button>
+                  {isLive && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => { setMenuOpen(false); setMaximized((v) => !v); }}
+                      className="flex min-h-[44px] w-full items-center px-3 text-left text-[13px] font-bold transition hover:bg-white/5"
+                      style={{ color: "var(--text-secondary)" }}
+                    >
+                      {maximized ? "Exit fullscreen" : "Maximize preview"}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
         {/* Runtime status dot */}
         <div
           className="h-2 w-2 shrink-0 rounded-full"
@@ -1036,6 +1207,8 @@ export default function StudioPreviewPanel({
           >
             {maximized ? <span className="text-[12px]">⤓</span> : <span className="text-[12px]">⤢</span>}
           </button>
+        )}
+          </>
         )}
       </div>
       {/* Project secrets section — collapsible, above the preview surface */}

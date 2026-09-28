@@ -23,6 +23,7 @@ export default function StudioShell({
   stage,
   inspector,
   littLayer,
+  phoneNav,
 }: {
   /** Task strip — the durable task tabs (WorktabBar). */
   taskbar: ReactNode;
@@ -34,7 +35,33 @@ export default function StudioShell({
   inspector: ReactNode;
   /** Bottom LiTT command layer. */
   littLayer: ReactNode;
+  /** Phone tier (<768px) bottom chrome. When provided, the shell renders
+      the single responsive phone column instead of the desktop grid:
+      taskbar → stage → LiTT layer → phone nav. The inspector is rendered
+      by the caller as a bottom sheet, not here. */
+  phoneNav?: ReactNode;
 }) {
+  if (phoneNav) {
+    return (
+      <div
+        className="studio-shell flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden"
+        data-testid="studio-shell"
+        data-phone="true"
+      >
+        {taskbar}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" data-testid="studio-stage">
+          {stage}
+        </div>
+        {/* Safe-area gap so the collapsed composer never sits flush
+            against the bottom nav on notched phones. */}
+        <div className="shrink-0" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+          {littLayer}
+        </div>
+        {phoneNav}
+      </div>
+    );
+  }
+
   return (
     <div
       className="studio-shell flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden"
