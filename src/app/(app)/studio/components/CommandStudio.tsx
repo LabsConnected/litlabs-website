@@ -1279,6 +1279,8 @@ function CommandStudioContent() {
     runError?: string | null;
     retryable?: boolean;
     expired?: boolean;
+    /** Whether the approval decision reached the server (see approval-polling). */
+    decisionRecorded?: boolean;
   }) => {
     const exec = useExecutionStore.getState();
     if (opts.resolution === "rejected") {
@@ -1311,12 +1313,14 @@ function CommandStudioContent() {
     }
     // resolution === "approved"
     if (opts.runError) {
-      // The run failed AFTER approval — keep the card mounted with the
-      // backend error and a Retry affordance. The user re-approves the
-      // same record; the resumed execution replays instead of double-running.
-      // (An expiry failure keeps the card too, but retry re-requests a
-      // fresh gate instead of re-POSTing the dead pausedRunId.)
-      exec.failApproval(opts.runError, opts.retryable, { expired: opts.expired });
+      // The approval POST failed or the resumed run failed afterwards.
+      // decisionRecorded tells the store whether the gate is dead (run
+      // executed and failed → clear Approve/Reject, phase "failed") or
+      // still pending (POST never landed → card stays mounted with the
+      // error and a true retry). An expiry failure keeps the card too, but
+      // retry re-requests a fresh gate instead of re-POSTing the dead
+      // pausedRunId.
+      exec.failApproval(opts.runError, opts.retryable, { expired: opts.expired, decisionRecorded: opts.decisionRecorded });
       void conversation.loadMessages(opts.conversationId);
       return;
     }
@@ -1387,6 +1391,7 @@ function CommandStudioContent() {
             runError: error || "The resumed run failed on the server.",
             retryable: info?.retryable,
             expired: info?.expired,
+            decisionRecorded: info?.decisionRecorded,
           });
         },
       });
@@ -1493,6 +1498,9 @@ function CommandStudioContent() {
           runResult: outcome.runResult,
           runError: outcome.runError
             ?? (outcome.runStatus === "failed" ? "The resumed run failed on the server." : null),
+          // The watcher only observes post-decision states: a failed
+          // runStatus means the decision was recorded, so the gate is dead.
+          decisionRecorded: outcome.runStatus === "failed" ? true : undefined,
         });
       },
     });

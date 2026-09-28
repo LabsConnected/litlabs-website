@@ -18,6 +18,7 @@ import "server-only";
 
 import { randomUUID } from "crypto";
 import type { WorkspaceTransport } from "./workspace-transport";
+import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { runAgentLoopV2, type AgentLoopResult, type AgentLoopConfig, DEFAULT_LOOP_CONFIG } from "./agent-loop-v2";
 import { toolRegistry } from "./tool-registry";
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
@@ -314,9 +315,20 @@ const WELCOME_SCREEN_MARKER = "LITT-WELCOME-SCREEN";
  * Verify that a website build produced a real entry artifact in the bound
  * workspace. This deliberately asks the workspace transport rather than
  * trusting tool-call metadata or the model's final prose.
+ *
+ * The welcome-screen marker gate detects builds that stalled before
+ * replacing the starter — it is only meaningful for launch-type runs. When
+ * the caller supplies workspace-change evidence with status "changed", the
+ * run provably modified files, so a remaining marker is a legitimate edit
+ * to the starter (not a replacement of it): failing here would report "no
+ * real project files were created" for a run that provably created them — a
+ * false failure as dishonest as a fake success. Absent or "unknown"
+ * evidence keeps the strict gate: an unverifiable workspace must not loosen
+ * the launch check.
  */
 export async function verifyProjectArtifacts(
   transport: Pick<WorkspaceTransport, "listFiles" | "readFile">,
+  options?: { workspaceChange?: WorkspaceChangeEvidence | null },
 ): Promise<ProjectArtifactCheck> {
   const files: string[] = [];
   const queue: Array<{ path: string; depth: number }> = [{ path: ".", depth: 0 }];
@@ -366,6 +378,11 @@ export async function verifyProjectArtifacts(
   // pass this gate — read each candidate and reject the ones that still
   // carry the welcome-screen marker. An unreadable file keeps the old
   // filename-only signal so exotic transports do not newly fail.
+  //
+  // Scoping: the marker rejection is skipped when workspace-change evidence
+  // proves the run modified files (see the doc comment above). The
+  // entry-file-exists check above still applies in every scope.
+  const workspaceChanged = options?.workspaceChange?.status === "changed";
   let realEntryFound = false;
   let welcomeOnly = false;
   for (const entry of entryFiles) {
@@ -381,7 +398,7 @@ export async function verifyProjectArtifacts(
     }
     welcomeOnly = true;
   }
-  if (!realEntryFound && welcomeOnly) {
+  if (!realEntryFound && welcomeOnly && !workspaceChanged) {
     return {
       ok: false,
       files,
@@ -397,16 +414,27 @@ export async function verifyProjectArtifacts(
  * After an approved mutation, prove the artifact is on disk and bring up a
  * real preview. Used by approval-resume handling so the resumed path has the
  * same physical-artifact gate as the initial launch path.
+ *
+ * `options.workspaceChange` scopes the welcome-screen marker gate (see
+ * verifyProjectArtifacts): approval-resume callers pass the resumed run's
+ * own workspace-change evidence so a legitimate edit to the starter cannot
+ * fail the run with "no real project files were created".
  */
 export async function ensureProjectPreviewReady(
   transport: WorkspaceTransport,
-  options: { maxWaitMs?: number; pollIntervalMs?: number } = {},
+  options: {
+    maxWaitMs?: number;
+    pollIntervalMs?: number;
+    workspaceChange?: WorkspaceChangeEvidence | null;
+  } = {},
   progress: ProgressEmitter = new ProgressEmitter(),
   actionContext?: ActionExecutionContext,
 ): Promise<{ ok: boolean; files: string[]; error?: string }> {
   let artifacts: ProjectArtifactCheck = { ok: false, files: [] };
   for (let attempt = 0; attempt < 3; attempt++) {
-    artifacts = await verifyProjectArtifacts(transport);
+    artifacts = await verifyProjectArtifacts(transport, {
+      workspaceChange: options.workspaceChange ?? null,
+    });
     if (artifacts.ok) break;
     if (attempt < 2) await sleep(250);
   }
