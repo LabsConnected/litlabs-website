@@ -162,9 +162,9 @@ const OPENAI_BASE = "https://api.openai.com/v1";
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
 
 const GEMINI_PRIMARY_MODEL =
-  process.env.GEMINI_PRIMARY_MODEL || "gemini-3.6-flash";
+  process.env.GEMINI_PRIMARY_MODEL || "gemini-flash-latest";
 const GEMINI_FALLBACK_MODEL =
-  process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash-lite";
+  process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash";
 
 export const DEFAULT_MODELS: Record<LLMProvider, string> = {
   gemini: GEMINI_PRIMARY_MODEL,
