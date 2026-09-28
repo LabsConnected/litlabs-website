@@ -1310,12 +1310,6 @@ async function runAgentLoopV2Inner(
   if (workspaceChange) {
     localProgress.emit({ type: "workspace_change", ...workspaceChange });
   }
-  const afterCheckpoint = await createAfterRunCheckpoint(
-    transport,
-    workspaceChange,
-    cfg.qualityLoop?.userRequest ?? null,
-    localProgress,
-  );
   const afterCheckpoint = await createAfterRunCheckpoint(transport, workspaceChange, userMessage, localProgress);
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
@@ -2465,6 +2459,12 @@ async function resumeAgentLoopV2Inner(
   if (workspaceChange) {
     localProgress.emit({ type: "workspace_change", ...workspaceChange });
   }
+  const afterCheckpoint = await createAfterRunCheckpoint(
+    transport,
+    workspaceChange,
+    cfg.qualityLoop?.userRequest ?? null,
+    localProgress,
+  );
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
     ...(cancelled
