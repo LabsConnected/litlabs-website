@@ -131,10 +131,15 @@ function executionDetailsFor(message: ChatMessage): ExecutionDetailRecord[] {
 function phaseHeadline(phase: ExecutionPhase): string {
   switch (phase) {
     case "planning": return "Understanding request";
+    case "researching": return "Researching";
     case "inspecting": return "Looking at the project";
+    case "creating": return "Creating";
     case "editing": return "Building";
+    case "browsing": return "Browsing";
+    case "running": return "Running commands";
     case "testing": return "Checking the build";
     case "verifying": return "Verifying";
+    case "deploying": return "Deploying";
     case "awaiting_approval": return "Waiting for your approval";
     case "awaiting_input": return "Waiting for your answer";
     default: return "Working";

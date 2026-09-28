@@ -359,7 +359,7 @@ const LITT_QUICK_ACTIONS = [
   { label: "Change Background", promptSuffix: ", with a new background: lush tropical garden, soft bokeh, natural lighting" },
   { label: "Fix Hands", promptSuffix: ", correct hand anatomy, detailed fingers, natural pose" },
   { label: "Remove Object", promptSuffix: ", remove distracting objects, clean composition, minimalist background" },
-  { label: "Upscale 4K", promptSuffix: ", 4k upscale, ultra high resolution, enhanced details, crisp edges" },
+  { label: "Enhance details", promptSuffix: ", 4k upscale, ultra high resolution, enhanced details, crisp edges" },
   { label: "Create Variations", promptSuffix: ", alternative composition, different angle, same subject and mood" },
   { label: "Add Text", promptSuffix: ", with elegant typography overlay, bold sans-serif title text" },
 ];
@@ -3690,11 +3690,11 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                                 border: "1px solid rgba(255,255,255,.12)",
                                 color: "rgba(255,255,255,.8)",
                               }}
-                              aria-label={"Upscale"}
-                              title={"Upscale"}
+                              aria-label={"Enhance details"}
+                              title={"Enhance details"}
                             >
                               <Maximize2 size={10} className="pointer-events-none" />
-                              <span className="hidden sm:inline">{"Upscale"}</span>
+                              <span className="hidden sm:inline">{"Enhance details"}</span>
                             </button>
                             <button
                               key={"Remove BG"}

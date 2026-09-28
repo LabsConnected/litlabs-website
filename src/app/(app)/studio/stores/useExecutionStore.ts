@@ -18,11 +18,17 @@ import type { ActionRunDisplayState } from "../components/ActionRunStatusPanel";
 export type ExecutionPhase =
   | "idle"
   | "planning"
+  | "researching" // Station Control bridge (§9): research work
+  | "creating" // Station Control bridge (§9): image/video/music/audio generation
   | "inspecting"
   | "editing"
+  | "browsing" // Station Control bridge (§9): browser station activity
+  | "running" // Station Control bridge (§9): terminal commands
   | "testing"
   | "verifying"
-  | "done"
+  | "deploying" // Station Control bridge (§9): deploy station activity
+  | "done" // Contract §9 calls this "complete" (renamed from done) —
+           // kept as "done" per bridge spec: additive only, no renames.
   | "failed"
   | "cancelled"
   | "awaiting_approval"
@@ -344,6 +350,19 @@ function mapPhase(phase: string, step: number): ExecutionPhase {
       return "done";
     case "cancelled":
       return "cancelled";
+    // Station Control bridge (§9): the new first-class phases pass through
+    // when the agent loop / SSE feed names them directly, instead of
+    // falling into the "editing" default and misreporting the run.
+    case "researching":
+      return "researching";
+    case "creating":
+      return "creating";
+    case "browsing":
+      return "browsing";
+    case "running":
+      return "running";
+    case "deploying":
+      return "deploying";
     default:
       return "editing";
   }

@@ -49,6 +49,9 @@ vi.mock("./tool-registry", () => ({
     get: vi.fn((id: string) => (id === "files.write" ? filesWriteTool : undefined)),
     validateInputs: vi.fn(() => null),
     execute: executeSpy,
+    // agent-loop-v2 calls registerAllStationActions() at module scope, which
+    // registers on the real ToolRegistry — the mock must expose register too.
+    register: vi.fn(),
   },
 }));
 

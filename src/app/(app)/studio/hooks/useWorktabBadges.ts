@@ -23,10 +23,15 @@ import type { Worktab } from "../hooks/useServerWorktabs";
 
 const LIVE_PHASES: ReadonlySet<ExecutionPhase> = new Set([
   "planning",
+  "researching",
+  "creating",
   "inspecting",
   "editing",
+  "browsing",
+  "running",
   "testing",
   "verifying",
+  "deploying",
   "awaiting_input",
   "awaiting_approval",
 ]);

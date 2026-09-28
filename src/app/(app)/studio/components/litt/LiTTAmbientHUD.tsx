@@ -52,13 +52,13 @@ function runtimePhaseToExecutionPhase(
   runtimePhase: string,
 ): ExecutionPhase | null {
   switch (runtimePhase) {
-    case "running": return "editing";       // command is executing
+    case "running": return "running";       // command is executing (Station Control §9)
     case "testing": return "testing";
     case "verifying": return "verifying";
     case "planning": return "planning";
     case "editing": return "editing";
     case "thinking": return "planning";
-    case "browsing": return "inspecting";
+    case "browsing": return "browsing";       // Station Control §9: first-class phase now
     case "waiting_approval": return "awaiting_approval";
     case "complete": return "done";
     case "failed": return "cancelled";
@@ -79,6 +79,12 @@ const PHASE_ICON: Record<ExecutionPhase, ComponentType<{ size?: number; strokeWi
   cancelled: XCircle,
   awaiting_approval: AlertTriangle,
   awaiting_input: AlertTriangle,
+  // Station Control bridge (§9) — additive entries for the new phases.
+  researching: Eye,
+  creating: Edit3,
+  browsing: Eye,
+  running: Activity,
+  deploying: Activity,
 };
 
 const PHASE_COLOR: Record<ExecutionPhase, string> = {
@@ -93,6 +99,12 @@ const PHASE_COLOR: Record<ExecutionPhase, string> = {
   cancelled: "var(--error)",
   awaiting_approval: "#e3b341",
   awaiting_input: "#e3b341",
+  // Station Control bridge (§9) — additive entries for the new phases.
+  researching: "var(--spark-primary)",
+  creating: "var(--litt-primary)",
+  browsing: "var(--spark-primary)",
+  running: "#e3b341",
+  deploying: "var(--litt-primary)",
 };
 
 export interface LiTTAmbientHUDProps {

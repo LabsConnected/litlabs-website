@@ -48,6 +48,21 @@ import {
   type QualityLoopSnapshot,
 } from "./quality-loop-flow";
 
+// Station Control Bridge (chunk E): importing the barrel registers every
+// station action into the station registry (module side effects); the
+// explicit call below advertises them into the tool registry. No import
+// cycle: station-control imports tool-registry, which never imports this
+// module.
+import { registerAllStationActions } from "@/lib/station-control";
+import { setStationEventSink, summarizeStationEvent } from "@/lib/station-control/loop-events";
+
+/**
+ * Advertise station actions as agent tools, once at module scope.
+ * Idempotent — on an id collision the EXISTING tool keeps its definition,
+ * so the stabilized registry is never clobbered by the bridge.
+ */
+registerAllStationActions();
+
 // ─── Types ────────────────────────────────────────────────────────
 
 export interface AgentLoopConfig {
@@ -559,6 +574,21 @@ export async function runAgentLoopV2(
   config: Partial<AgentLoopConfig> = {},
   progress?: ProgressEmitter,
 ): Promise<AgentLoopResult> {
+  try {
+    return await runAgentLoopV2Inner(userMessage, transport, config, progress);
+  } finally {
+    // Station Control Bridge (chunk E): always release this run's event
+    // sink, even when the run throws.
+    setStationEventSink(transport, null);
+  }
+}
+
+async function runAgentLoopV2Inner(
+  userMessage: string,
+  transport: WorkspaceTransport,
+  config: Partial<AgentLoopConfig> = {},
+  progress?: ProgressEmitter,
+): Promise<AgentLoopResult> {
   const cfg = { ...DEFAULT_LOOP_CONFIG, ...config };
   const startTime = Date.now();
 
@@ -591,6 +621,15 @@ export async function runAgentLoopV2(
   const localProgress = new ProgressEmitter((event) => {
     events.push(event);
     progress?.emit(event);
+  });
+
+  // Station Control Bridge (chunk E): route station action execution events
+  // (action_started / action_completed / action_failed / approval_required)
+  // into this run's Activity stream. Keyed by this run's transport instance
+  // — not a module global — so concurrent runs in one process cannot
+  // cross-wire events. Cleared in the exported wrapper's finally above.
+  setStationEventSink(transport, (event) => {
+    localProgress.emit({ type: "status", summary: summarizeStationEvent(event) });
   });
 
   const permissionEngine = new PermissionEngine();
@@ -1683,6 +1722,20 @@ export async function resumeAgentLoopV2(
   transport: WorkspaceTransport,
   progress?: ProgressEmitter,
 ): Promise<AgentLoopResult> {
+  try {
+    return await resumeAgentLoopV2Inner(resume, transport, progress);
+  } finally {
+    // Station Control Bridge (chunk E): always release this run's event
+    // sink, even when the run throws.
+    setStationEventSink(transport, null);
+  }
+}
+
+async function resumeAgentLoopV2Inner(
+  resume: ResumeInput,
+  transport: WorkspaceTransport,
+  progress?: ProgressEmitter,
+): Promise<AgentLoopResult> {
   const cfg = { ...DEFAULT_LOOP_CONFIG, ...resume.config };
   const startTime = Date.now();
 
@@ -1709,6 +1762,13 @@ export async function resumeAgentLoopV2(
   const localProgress = new ProgressEmitter((event) => {
     events.push(event);
     progress?.emit(event);
+  });
+
+  // Station Control Bridge (chunk E): route station action execution events
+  // into this resumed run's Activity stream. Same transport-keyed sink as
+  // runAgentLoopV2Inner; cleared in the exported wrapper's finally above.
+  setStationEventSink(transport, (event) => {
+    localProgress.emit({ type: "status", summary: summarizeStationEvent(event) });
   });
 
   const permissionEngine = new PermissionEngine();
