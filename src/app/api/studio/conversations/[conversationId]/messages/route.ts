@@ -100,6 +100,55 @@ const ANAPHORIC_CLARIFICATION_NUDGE =
  * 10. Increments conversation revision
  * 11. Returns canonical IDs and revision
  */
+
+/**
+ * Context for the V1→V2 re-route decision.
+ */
+export interface V1RerouteContext {
+  /** A workspace transport exists — a project with a verified workspace is in context. */
+  hasWorkspaceTransport: boolean;
+  /**
+   * The /ws-files reachability probe result (a3a8d837 honest-reachability).
+   * A dead file transport means a V2 retry would fail the same way — keep
+   * the honest V1 failure instead of re-routing.
+   */
+  fileOpsReachable: boolean;
+  /** The run was cancelled by the user — never re-route a cancelled turn. */
+  aborted: boolean;
+}
+
+/**
+ * V1→V2 re-route decision (defense in depth).
+ *
+ * When the V1 text-only lane produces tool-call markup naming a WORKSPACE
+ * tool while a verified, reachable workspace is in context, the router
+ * misclassified an execution request as think (e.g. a bare-filename file
+ * edit like "add a comment to the top of index.html and save"). Retry the
+ * turn as a V2 structured-tool execution instead of hard-failing with
+ * TOOL_CALL_PARSE_FAILED.
+ *
+ * Anything else — markup with no recognizable tool id, a non-workspace
+ * tool, no workspace in context, a dead file transport, or a cancelled
+ * run — returns null so the caller keeps the honest V1 failure.
+ *
+ * `isWorkspaceToolFn` is injected (the route resolves it via dynamic
+ * import) to keep this predicate pure and unit-testable.
+ *
+ * @returns the workspace tool id to re-route for, or null.
+ */
+export function resolveV1ToV2Reroute(
+  markupToolId: string | null | undefined,
+  isWorkspaceToolFn: (toolId: string) => boolean,
+  ctx: V1RerouteContext,
+): string | null {
+  if (!markupToolId) return null;
+  if (!isWorkspaceToolFn(markupToolId)) return null;
+  if (!ctx.hasWorkspaceTransport) return null;
+  if (!ctx.fileOpsReachable) return null;
+  if (ctx.aborted) return null;
+  return markupToolId;
+}
+
 async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const { userId, clerkId } = await auth(req);
   if (!userId) {
@@ -576,37 +625,44 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     );
   }
 
-  if (useV2 && v2Transport) {
-    v2Config = {
-      systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
-      executionMode: canonicalCtx.executionMode,
-      enableBuildFix: true,
-      model: typeof body.model === "string" ? body.model : undefined,
-      // Authenticated user — injected server-side into user-scoped tools
-      // (browser.*) at execution time; the model never supplies userId.
-      userId,
-      // Conversation scope — injected into browser.start_session so the
-      // agent reuses its live browser session across chat turns.
+  /**
+   * Build the V2 agent-loop config. Factored out so the V1→V2 re-route
+   * (V1 markup hit naming workspace tools with a verified workspace in
+   * context) can construct the same config the normal V2 path uses.
+   */
+  const buildV2Config = (): Partial<AgentLoopConfig> => ({
+    systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
+    executionMode: canonicalCtx.executionMode,
+    enableBuildFix: true,
+    model: typeof body.model === "string" ? body.model : undefined,
+    // Authenticated user — injected server-side into user-scoped tools
+    // (browser.*) at execution time; the model never supplies userId.
+    userId,
+    // Conversation scope — injected into browser.start_session so the
+    // agent reuses its live browser session across chat turns.
+    conversationId: conversation.id,
+    // Quality loop: gate serious ACT/AUTO-mode builds through the
+    // UNDERSTAND→VERIFY evidence stages + visual-quality judge.
+    qualityLoop: shouldEnableQualityLoop(canonicalCtx.executionMode, conversation.projectId)
+      ? {
+          enabled: true,
+          runId: randomUUID(),
+          projectId: conversation.projectId,
+          userId,
+          userRequest: resolvedMessage.slice(0, 2000),
+        }
+      : undefined,
+    evalMetadata: {
+      agentSlug,
+      agentMode: "v2-execution",
       conversationId: conversation.id,
-      // Quality loop: gate serious ACT/AUTO-mode builds through the
-      // UNDERSTAND→VERIFY evidence stages + visual-quality judge.
-      qualityLoop: shouldEnableQualityLoop(canonicalCtx.executionMode, conversation.projectId)
-        ? {
-            enabled: true,
-            runId: randomUUID(),
-            projectId: conversation.projectId,
-            userId,
-            userRequest: resolvedMessage.slice(0, 2000),
-          }
-        : undefined,
-      evalMetadata: {
-        agentSlug,
-        agentMode: "v2-execution",
-        conversationId: conversation.id,
-        userId,
-        projectId: conversation.projectId ?? undefined,
-      },
-    };
+      userId,
+      projectId: conversation.projectId ?? undefined,
+    },
+  });
+
+  if (useV2 && v2Transport) {
+    v2Config = buildV2Config();
   } else {
     // V1 fallback — read-only inspection only. Pass the transport (when a
     // workspace exists) so auto-inspection reads the user's real workspace.
@@ -696,7 +752,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   // the authenticated orchestration boundary — creates/resolves it once and
   // passes the full context down; lower-level tools must never rediscover
   // or invent task identity from model inputs.
-  if (useV2 && v2Transport && v2Config) {
+  //
+  // Factored out so the V1→V2 re-route can set up the same durable run
+  // before retrying the turn as a V2 execution. Returns false when run
+  // creation fails — the failure bookkeeping (message status, agent-run
+  // settlement, logging) is done here so both call sites share it.
+  const ensureActionRun = async (cfg: Partial<AgentLoopConfig>): Promise<boolean> => {
+    if (actionRun && actionContext) {
+      cfg.actionContext = actionContext;
+      return true;
+    }
+    if (!v2Transport) return false;
     try {
       actionRun = await createActionRun({
         userId,
@@ -723,7 +789,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           errorClass: taskErr instanceof Error ? taskErr.message : "unknown",
         });
       });
-      v2Config.actionContext = actionContext;
+      cfg.actionContext = actionContext;
+      return true;
     } catch (runErr) {
       const safeMessage = "LiTT couldn't start durable task tracking for this request.";
       studioLog("message:action_run_create_failed", {
@@ -743,8 +810,15 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           error: "ACTION_RUNTIME_UNAVAILABLE",
         }, reservedCredits, reservationId).catch(() => {});
       }
+      return false;
+    }
+  };
+
+  if (useV2 && v2Transport && v2Config) {
+    const actionRunReady = await ensureActionRun(v2Config);
+    if (!actionRunReady) {
       return NextResponse.json(
-        { error: safeMessage, code: "ACTION_RUNTIME_UNAVAILABLE" },
+        { error: "LiTT couldn't start durable task tracking for this request.", code: "ACTION_RUNTIME_UNAVAILABLE" },
         { status: 503 },
       );
     }
@@ -871,427 +945,450 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       let routedProvider = "auto";
       let routedModel: string | undefined;
       try {
-        if (v2Transport && v2Config) {
-          // ── V2 path: run agent loop INSIDE the stream with real-time events ──
-          // The ProgressEmitter streams events to the SSE controller as they
-          // happen, so the user can watch LiTT work in real-time.
-          if (actionContext && !executionAbort.signal.aborted) {
-            await transitionActionRunEventActivity({
-              runId: actionContext.actionRunId,
-              userId: actionContext.userId,
-              status: "working",
-              eventType: "run.started",
-              payload: { kind: "composite" },
-              message: "LiTT is working on the task",
-              patch: { currentActivity: "LiTT is working on the task" },
+      /**
+       * V2 execution body: the full agent loop with workspace tools, run
+       * inside the stream with real-time events. Extracted so the V1→V2
+       * re-route (a V1 markup hit naming workspace tools with a verified
+       * workspace in context) can retry the turn as a V2 execution instead
+       * of failing with TOOL_CALL_PARSE_FAILED.
+       *
+       * When `rerouted` is true the router classified the turn as
+       * non-execution (that is why it took the V1 lane); the markup hit
+       * proves it was an execution request, so requiresExecution — and
+       * the honest-completion zero-mutation guard — are forced on.
+       */
+      const runV2Execution = async (
+        cfg: Partial<AgentLoopConfig>,
+        transport: NonNullable<typeof v2Transport>,
+        rerouted: boolean,
+      ): Promise<void> => {
+        const effectiveRequiresExecution = rerouted
+          ? true
+          : built.kernelResult.decision.routing.requiresExecution;
+        // ── V2 path: run agent loop INSIDE the stream with real-time events ──
+        // The ProgressEmitter streams events to the SSE controller as they
+        // happen, so the user can watch LiTT work in real-time.
+        if (actionContext && !executionAbort.signal.aborted) {
+          await transitionActionRunEventActivity({
+            runId: actionContext.actionRunId,
+            userId: actionContext.userId,
+            status: "working",
+            eventType: "run.started",
+            payload: { kind: "composite" },
+            message: "LiTT is working on the task",
+            patch: { currentActivity: "LiTT is working on the task" },
+          });
+        }
+
+        const streamProgress = new ProgressEmitter((evt: ProgressEvent) => {
+          // Stream each event to the client immediately
+          if (evt.type === "tool_start") {
+            safeEvent({ type: "tool_execution", toolId: evt.toolId, summary: evt.summary });
+          } else if (evt.type === "tool_result") {
+            safeEvent({
+              type: "tool_execution",
+              toolId: evt.toolId,
+              success: evt.success,
+              summary: evt.summary,
+              durationMs: evt.durationMs,
+            });
+          } else if (evt.type === "approval_required") {
+            safeEvent({
+              type: "approval_required",
+              toolId: evt.toolId,
+              reason: evt.reason,
+            });
+          } else if (evt.type === "checkpoint") {
+            safeEvent({ type: "checkpoint", label: evt.label, gitSha: evt.gitSha });
+          } else if (evt.type === "build_start") {
+            safeEvent({ type: "build_start", check: evt.check });
+          } else if (evt.type === "build_result") {
+            safeEvent({ type: "build_result", check: evt.check, passed: evt.passed, errorCount: evt.errorCount, diagnostics: evt.diagnostics });
+          } else if (evt.type === "workspace_change") {
+            safeEvent({
+              type: "workspace_change",
+              status: evt.status,
+              files: evt.files,
+              diff: evt.diff,
+              additions: evt.additions,
+              deletions: evt.deletions,
+              checkpointSha: evt.checkpointSha,
+              unknownReason: evt.unknownReason,
+            });
+          } else if (evt.type === "phase") {
+            safeEvent({ type: "phase", phase: evt.phase, step: evt.step });
+          } else if (evt.type === "finished") {
+            safeEvent({ type: "finished", totalSteps: evt.totalSteps, totalDurationMs: evt.totalDurationMs, success: evt.success });
+          } else if (evt.type === "cancelled") {
+            safeEvent({ type: "cancelled", reason: evt.reason });
+          } else if (evt.type === "model_routing") {
+            routedProvider = evt.provider;
+            routedModel = evt.model;
+            safeEvent({
+              type: "model_routing",
+              model: evt.model,
+              provider: evt.provider,
+              fallbackFrom: evt.fallbackFrom,
+              category: evt.category,
+              latencyMs: evt.latencyMs,
+            });
+          } else if (evt.type === "model_response") {
+            safeEvent({
+              type: "model_response",
+              provider: evt.provider,
+              model: evt.model,
+              finishReason: evt.finishReason,
+              contentType: evt.contentType,
+              contentLength: evt.contentLength,
+              messageKeys: evt.messageKeys,
+              toolCalls: evt.toolCalls,
+            });
+          } else if (evt.type === "model_failed") {
+            safeEvent({
+              type: "model_failed",
+              model: evt.model,
+              category: evt.category,
+              message: evt.message,
+            });
+          } else if (evt.type === "reasoning") {
+            safeEvent({ type: "reasoning", summary: evt.summary });
+          } else if (evt.type === "status") {
+            safeEvent({ type: "status", summary: evt.summary });
+          } else if (evt.type === "repair_attempt") {
+            safeEvent({ type: "repair_attempt", attempt: evt.attempt, maxAttempts: evt.maxAttempts });
+          } else if (evt.type === "preview_start") {
+            safeEvent({ type: "preview_start" });
+          } else if (evt.type === "preview_status") {
+            safeEvent({ type: "preview_status", status: evt.status, healthy: evt.healthy });
+          } else if (evt.type === "preview_result") {
+            safeEvent({ type: "preview_result", success: evt.success, previewUrl: evt.previewUrl, error: evt.error });
+          } else if (evt.type === "deploy_start") {
+            safeEvent({ type: "deploy_start", environment: evt.environment, provider: evt.provider });
+          } else if (evt.type === "deploy_status") {
+            safeEvent({ type: "deploy_status", status: evt.status, deploymentId: evt.deploymentId });
+          } else if (evt.type === "deploy_result") {
+            safeEvent({ type: "deploy_result", success: evt.success, productionUrl: evt.productionUrl, error: evt.error });
+          } else if (evt.type === "deploy_verify") {
+            safeEvent({ type: "deploy_verify", url: evt.url, success: evt.success, detail: evt.detail });
+          } else if (evt.type === "step_timing") {
+            safeEvent({ type: "step_timing", step: evt.step, stepDurationMs: evt.stepDurationMs, elapsedMs: evt.elapsedMs });
+          }
+        });
+
+        // Run the full launch flow: plan → build → preview → deploy.
+        // This keeps V2 execution bounded, truthful, and auto-repairing.
+        launchFlowResult = await runLaunchFlow({
+          userMessage: resolvedMessage,
+          projectId: conversation.projectId ?? "",
+          userId,
+          transport,
+          systemPrompt: cfg.systemPrompt,
+          model: cfg.model,
+          executionMode: cfg.executionMode,
+          enableBuildFix: true,
+          // Quality loop: the launch flow passes this to the main agent-loop
+          // phase (it was silently dropped before AUTO-mode support).
+          qualityLoop: cfg.qualityLoop,
+          enableDeploy: built.kernelResult.decision.routing.mode === "ship",
+          requiresExecution: effectiveRequiresExecution,
+          // A production execution request is not complete until the
+          // agent-created website entry file is physically present in the
+          // verified workspace. This is enforced again after approval
+          // resume by the approvals route.
+          requireProjectArtifacts: effectiveRequiresExecution,
+          evalMetadata: cfg.evalMetadata,
+          progress: streamProgress,
+          signal: executionAbort.signal,
+          actionContext: actionContext ?? undefined,
+          conversationId: conversation.id,
+        });
+
+        v2Result = launchFlowResult.agentLoopResult ?? null;
+
+        // Stream the final text
+        assistantText = launchFlowResult.finalText;
+        safeEvent({ type: "text", text: assistantText });
+
+        // If V2 paused for approval, persist the paused state and flag it
+        let pausedRunId: string | undefined;
+        let pausedRunPersistFailed = false;
+        if (v2Result?.pendingApproval) {
+          try {
+            const pausedRun = await createPausedRun({
+              userId,
+              conversationId: conversation.id,
+              projectId: conversation.projectId ?? "",
+              workspaceId: canonicalCtx.workspaceId ?? "",
+              toolId: v2Result.pendingApproval.toolId,
+              toolCallId: v2Result.pendingApproval.toolCallId,
+              inputs: v2Result.pendingApproval.inputs,
+              reason: v2Result.pendingApproval.reason,
+              pausedMessages: v2Result.pendingApproval.pausedMessages,
+              executionMode: canonicalCtx.executionMode,
+              systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
+              checkpointId: v2Result.checkpoint?.checkpointId ?? null,
+              actionRunId: actionContext?.actionRunId ?? null,
+              qualityLoopState: v2Result.qualityLoopState,
+              deferredToolCalls: v2Result.pendingApproval.deferredToolCalls,
+              stepsUsed: v2Result.pendingApproval.stepsUsedAtPause,
+              hadInterveningMutation: v2Result.pendingApproval.hadInterveningMutationAtPause,
+            });
+            pausedRunId = pausedRun.id;
+            if (actionContext) {
+              try {
+                await transitionActionRunEventActivity({
+                  runId: actionContext.actionRunId,
+                  userId: actionContext.userId,
+                  status: "waiting_for_user",
+                  eventType: "approval.required",
+                  payload: {
+                    toolId: v2Result.pendingApproval.toolId,
+                    pausedRunId,
+                  },
+                  message: `Approval required for ${v2Result.pendingApproval.toolId}`,
+                  patch: {
+                    approvalReference: pausedRunId,
+                    currentActivity: `Approval required for ${v2Result.pendingApproval.toolId}`,
+                  },
+                });
+              } catch (approvalRunErr) {
+                pausedRunPersistFailed = true;
+                studioLog("message:action_run_waiting_transition_failed", {
+                  conversationId: conversation.id,
+                  userId,
+                  actionRunId: actionContext.actionRunId,
+                  pausedRunId,
+                  errorClass: approvalRunErr instanceof Error ? approvalRunErr.message : "unknown",
+                });
+              }
+            }
+          } catch (pausedErr) {
+            // If persistence fails, the gate cannot be resumed — there is
+            // no pausedRunId for the Approve button to act on. Emitting
+            // pending_approval anyway would mount a dead card that can
+            // never resolve (2026-09-18 defect: the transcript reconciler
+            // then attributed a stale expired run to this message and
+            // told the user the approval "expired before a decision was
+            // made" within seconds). Fail the turn honestly instead.
+            pausedRunPersistFailed = true;
+            studioLog("message:paused_run_persist_failed", {
+              conversationId: conversation.id,
+              projectId: conversation.projectId,
+              userId,
+              tool: v2Result.pendingApproval.toolId,
+              errorClass: pausedErr instanceof Error ? pausedErr.message : "unknown",
             });
           }
 
-          const streamProgress = new ProgressEmitter((evt: ProgressEvent) => {
-            // Stream each event to the client immediately
-            if (evt.type === "tool_start") {
-              safeEvent({ type: "tool_execution", toolId: evt.toolId, summary: evt.summary });
-            } else if (evt.type === "tool_result") {
-              safeEvent({
-                type: "tool_execution",
-                toolId: evt.toolId,
-                success: evt.success,
-                summary: evt.summary,
-                durationMs: evt.durationMs,
-              });
-            } else if (evt.type === "approval_required") {
-              safeEvent({
-                type: "approval_required",
-                toolId: evt.toolId,
-                reason: evt.reason,
-              });
-            } else if (evt.type === "checkpoint") {
-              safeEvent({ type: "checkpoint", label: evt.label, gitSha: evt.gitSha });
-            } else if (evt.type === "build_start") {
-              safeEvent({ type: "build_start", check: evt.check });
-            } else if (evt.type === "build_result") {
-              safeEvent({ type: "build_result", check: evt.check, passed: evt.passed, errorCount: evt.errorCount, diagnostics: evt.diagnostics });
-            } else if (evt.type === "workspace_change") {
-              safeEvent({
-                type: "workspace_change",
-                status: evt.status,
-                files: evt.files,
-                diff: evt.diff,
-                additions: evt.additions,
-                deletions: evt.deletions,
-                checkpointSha: evt.checkpointSha,
-                unknownReason: evt.unknownReason,
-              });
-            } else if (evt.type === "phase") {
-              safeEvent({ type: "phase", phase: evt.phase, step: evt.step });
-            } else if (evt.type === "finished") {
-              safeEvent({ type: "finished", totalSteps: evt.totalSteps, totalDurationMs: evt.totalDurationMs, success: evt.success });
-            } else if (evt.type === "cancelled") {
-              safeEvent({ type: "cancelled", reason: evt.reason });
-            } else if (evt.type === "model_routing") {
-              routedProvider = evt.provider;
-              routedModel = evt.model;
-              safeEvent({
-                type: "model_routing",
-                model: evt.model,
-                provider: evt.provider,
-                fallbackFrom: evt.fallbackFrom,
-                category: evt.category,
-                latencyMs: evt.latencyMs,
-              });
-            } else if (evt.type === "model_response") {
-              safeEvent({
-                type: "model_response",
-                provider: evt.provider,
-                model: evt.model,
-                finishReason: evt.finishReason,
-                contentType: evt.contentType,
-                contentLength: evt.contentLength,
-                messageKeys: evt.messageKeys,
-                toolCalls: evt.toolCalls,
-              });
-            } else if (evt.type === "model_failed") {
-              safeEvent({
-                type: "model_failed",
-                model: evt.model,
-                category: evt.category,
-                message: evt.message,
-              });
-            } else if (evt.type === "reasoning") {
-              safeEvent({ type: "reasoning", summary: evt.summary });
-            } else if (evt.type === "status") {
-              safeEvent({ type: "status", summary: evt.summary });
-            } else if (evt.type === "repair_attempt") {
-              safeEvent({ type: "repair_attempt", attempt: evt.attempt, maxAttempts: evt.maxAttempts });
-            } else if (evt.type === "preview_start") {
-              safeEvent({ type: "preview_start" });
-            } else if (evt.type === "preview_status") {
-              safeEvent({ type: "preview_status", status: evt.status, healthy: evt.healthy });
-            } else if (evt.type === "preview_result") {
-              safeEvent({ type: "preview_result", success: evt.success, previewUrl: evt.previewUrl, error: evt.error });
-            } else if (evt.type === "deploy_start") {
-              safeEvent({ type: "deploy_start", environment: evt.environment, provider: evt.provider });
-            } else if (evt.type === "deploy_status") {
-              safeEvent({ type: "deploy_status", status: evt.status, deploymentId: evt.deploymentId });
-            } else if (evt.type === "deploy_result") {
-              safeEvent({ type: "deploy_result", success: evt.success, productionUrl: evt.productionUrl, error: evt.error });
-            } else if (evt.type === "deploy_verify") {
-              safeEvent({ type: "deploy_verify", url: evt.url, success: evt.success, detail: evt.detail });
-            } else if (evt.type === "step_timing") {
-              safeEvent({ type: "step_timing", step: evt.step, stepDurationMs: evt.stepDurationMs, elapsedMs: evt.elapsedMs });
-            }
-          });
+          if (!pausedRunPersistFailed) {
+            safeEvent({
+              type: "pending_approval",
+              toolId: v2Result.pendingApproval.toolId,
+              reason: v2Result.pendingApproval.reason,
+              inputs: v2Result.pendingApproval.inputs,
+              pausedRunId,
+            });
+          }
+        }
 
-          // Run the full launch flow: plan → build → preview → deploy.
-          // This keeps V2 execution bounded, truthful, and auto-repairing.
-          launchFlowResult = await runLaunchFlow({
-            userMessage: resolvedMessage,
-            projectId: conversation.projectId ?? "",
-            userId,
-            transport: v2Transport,
-            systemPrompt: v2Config.systemPrompt,
-            model: v2Config.model,
-            executionMode: v2Config.executionMode,
-            enableBuildFix: true,
-            // Quality loop: the launch flow passes this to the main agent-loop
-            // phase (it was silently dropped before AUTO-mode support).
-            qualityLoop: v2Config.qualityLoop,
-            enableDeploy: built.kernelResult.decision.routing.mode === "ship",
-            requiresExecution: built.kernelResult.decision.routing.requiresExecution,
-            // A production execution request is not complete until the
-            // agent-created website entry file is physically present in the
-            // verified workspace. This is enforced again after approval
-            // resume by the approvals route.
-            requireProjectArtifacts: built.kernelResult.decision.routing.requiresExecution,
-            evalMetadata: v2Config.evalMetadata,
-            progress: streamProgress,
-            signal: executionAbort.signal,
-            actionContext: actionContext ?? undefined,
+        // An approval gate that could not be persisted is not actionable —
+        // surface it as a failed turn, never as a phantom approval card.
+        const actionableApproval = v2Result?.pendingApproval && !pausedRunPersistFailed
+          ? v2Result.pendingApproval
+          : undefined;
+        if (pausedRunPersistFailed) {
+          assistantText = "I needed your approval to continue, but the approval request couldn't be saved. Please send your request again and I'll ask for approval once more.";
+        }
+
+        // A run that produced no response text cannot be reported as
+        // completed — empty provider output is a failure, not success.
+        // (A persist-failed approval is not "empty": it failed honestly.)
+        const v2Empty = !launchFlowResult?.cancelled
+          && !actionableApproval
+          && !assistantText.trim();
+
+        // Honest completion: a mutation-required run that ended with
+        // zero tool calls and zero mutations must never be persisted or
+        // reported as "completed" — that is the silent fake-complete
+        // (e.g. a prose approval-ask settling Complete with nothing
+        // done and no approval card ever created). Fail it honestly.
+        const mutationRequired = effectiveRequiresExecution === true;
+        const v2ToolCalls = v2Result?.toolCalls ?? [];
+        const v2Mutations = v2ToolCalls.filter((c) => c.success && c.mutating).length;
+        const zeroMutationCompletion =
+          mutationRequired &&
+          !actionableApproval &&
+          !v2Result?.pendingApproval &&
+          !launchFlowResult?.cancelled &&
+          v2ToolCalls.length === 0 &&
+          v2Mutations === 0;
+        if (zeroMutationCompletion) {
+          assistantText =
+            "I couldn't complete the requested change: no file operations were performed, so nothing was modified. Please try again.";
+        }
+
+        const finalMessageStatus: MessageStatus = launchFlowResult?.cancelled
+          ? "cancelled"
+          : actionableApproval
+            ? "awaiting_approval"
+            : v2Result?.failedHonestly || zeroMutationCompletion
+              ? "failed"
+              : launchFlowResult?.success && !v2Empty && !pausedRunPersistFailed
+                ? "completed"
+                : "failed";
+
+        const statusPersisted = await updateMessageStatus(assistantMessage.id, userId, finalMessageStatus, assistantText);
+        let actionRunPersistenceFailed = false;
+        if (actionContext && finalMessageStatus !== "awaiting_approval") {
+          try {
+            await transitionActionRun(actionContext.actionRunId, actionContext.userId, finalMessageStatus, {
+              currentActivity: finalMessageStatus === "completed"
+                ? "Task completed"
+                : finalMessageStatus === "cancelled"
+                  ? "Task cancelled by user"
+                  : "Task failed",
+              approvalReference: null,
+              failureCode: finalMessageStatus === "failed" ? "TASK_FAILED" : null,
+              failureMessage: finalMessageStatus === "failed" ? assistantText.slice(0, 500) : null,
+            });
+          } catch (settleErr) {
+            actionRunPersistenceFailed = true;
+            studioLog("message:action_run_settle_failed", {
+              conversationId: conversation.id,
+              userId,
+              actionRunId: actionContext.actionRunId,
+              status: finalMessageStatus,
+              errorClass: settleErr instanceof Error ? settleErr.message : "unknown",
+            });
+          }
+        }
+        if (actionContext) {
+          const taskStatus = finalMessageStatus === "awaiting_approval"
+            ? "waiting_approval"
+            : finalMessageStatus === "cancelled"
+              ? "cancelled"
+              : finalMessageStatus === "completed"
+                ? "completed"
+                : "failed";
+          const verified = finalMessageStatus === "completed"
+            && (!v2Result?.qualityLoop || v2Result.qualityLoop.verdict.ok);
+          await settleConversationTask(userId, conversation.id, taskStatus, verified).catch((taskErr) => {
+            studioLog("message:task_settle_failed", {
+              conversationId: conversation.id,
+              userId,
+              actionRunId: actionContext?.actionRunId,
+              errorClass: taskErr instanceof Error ? taskErr.message : "unknown",
+            });
+          });
+        }
+        if (statusPersisted === false) {
+          // The run reached a terminal state but the transcript row did
+          // not learn it — the message stays 'streaming' and the GET
+          // reconciler is the only line of defense left. Log loudly so
+          // this is diagnosable instead of surfacing as a mystery
+          // "previous run ended" later.
+          studioLog(`message:terminal_status_write_failed mid=${assistantMessage.id}`, {
             conversationId: conversation.id,
+            status: finalMessageStatus,
           });
-
-          v2Result = launchFlowResult.agentLoopResult ?? null;
-
-          // Stream the final text
-          assistantText = launchFlowResult.finalText;
-          safeEvent({ type: "text", text: assistantText });
-
-          // If V2 paused for approval, persist the paused state and flag it
-          let pausedRunId: string | undefined;
-          let pausedRunPersistFailed = false;
-          if (v2Result?.pendingApproval) {
-            try {
-              const pausedRun = await createPausedRun({
-                userId,
-                conversationId: conversation.id,
-                projectId: conversation.projectId ?? "",
-                workspaceId: canonicalCtx.workspaceId ?? "",
-                toolId: v2Result.pendingApproval.toolId,
-                toolCallId: v2Result.pendingApproval.toolCallId,
-                inputs: v2Result.pendingApproval.inputs,
-                reason: v2Result.pendingApproval.reason,
-                pausedMessages: v2Result.pendingApproval.pausedMessages,
-                executionMode: canonicalCtx.executionMode,
-                systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
-                checkpointId: v2Result.checkpoint?.checkpointId ?? null,
-                actionRunId: actionContext?.actionRunId ?? null,
-                qualityLoopState: v2Result.qualityLoopState,
-                deferredToolCalls: v2Result.pendingApproval.deferredToolCalls,
-                stepsUsed: v2Result.pendingApproval.stepsUsedAtPause,
-                hadInterveningMutation: v2Result.pendingApproval.hadInterveningMutationAtPause,
-              });
-              pausedRunId = pausedRun.id;
-              if (actionContext) {
-                try {
-                  await transitionActionRunEventActivity({
-                    runId: actionContext.actionRunId,
-                    userId: actionContext.userId,
-                    status: "waiting_for_user",
-                    eventType: "approval.required",
-                    payload: {
-                      toolId: v2Result.pendingApproval.toolId,
-                      pausedRunId,
-                    },
-                    message: `Approval required for ${v2Result.pendingApproval.toolId}`,
-                    patch: {
-                      approvalReference: pausedRunId,
-                      currentActivity: `Approval required for ${v2Result.pendingApproval.toolId}`,
-                    },
-                  });
-                } catch (approvalRunErr) {
-                  pausedRunPersistFailed = true;
-                  studioLog("message:action_run_waiting_transition_failed", {
-                    conversationId: conversation.id,
-                    userId,
-                    actionRunId: actionContext.actionRunId,
-                    pausedRunId,
-                    errorClass: approvalRunErr instanceof Error ? approvalRunErr.message : "unknown",
-                  });
-                }
-              }
-            } catch (pausedErr) {
-              // If persistence fails, the gate cannot be resumed — there is
-              // no pausedRunId for the Approve button to act on. Emitting
-              // pending_approval anyway would mount a dead card that can
-              // never resolve (2026-09-18 defect: the transcript reconciler
-              // then attributed a stale expired run to this message and
-              // told the user the approval "expired before a decision was
-              // made" within seconds). Fail the turn honestly instead.
-              pausedRunPersistFailed = true;
-              studioLog("message:paused_run_persist_failed", {
-                conversationId: conversation.id,
-                projectId: conversation.projectId,
-                userId,
-                tool: v2Result.pendingApproval.toolId,
-                errorClass: pausedErr instanceof Error ? pausedErr.message : "unknown",
-              });
-            }
-
-            if (!pausedRunPersistFailed) {
-              safeEvent({
-                type: "pending_approval",
-                toolId: v2Result.pendingApproval.toolId,
-                reason: v2Result.pendingApproval.reason,
-                inputs: v2Result.pendingApproval.inputs,
-                pausedRunId,
-              });
-            }
-          }
-
-          // An approval gate that could not be persisted is not actionable —
-          // surface it as a failed turn, never as a phantom approval card.
-          const actionableApproval = v2Result?.pendingApproval && !pausedRunPersistFailed
-            ? v2Result.pendingApproval
-            : undefined;
-          if (pausedRunPersistFailed) {
-            assistantText = "I needed your approval to continue, but the approval request couldn't be saved. Please send your request again and I'll ask for approval once more.";
-          }
-
-          // A run that produced no response text cannot be reported as
-          // completed — empty provider output is a failure, not success.
-          // (A persist-failed approval is not "empty": it failed honestly.)
-          const v2Empty = !launchFlowResult?.cancelled
-            && !actionableApproval
-            && !assistantText.trim();
-
-          // Honest completion: a mutation-required run that ended with
-          // zero tool calls and zero mutations must never be persisted or
-          // reported as "completed" — that is the silent fake-complete
-          // (e.g. a prose approval-ask settling Complete with nothing
-          // done and no approval card ever created). Fail it honestly.
-          const mutationRequired = built.kernelResult.decision.routing.requiresExecution === true;
-          const v2ToolCalls = v2Result?.toolCalls ?? [];
-          const v2Mutations = v2ToolCalls.filter((c) => c.success && c.mutating).length;
-          const zeroMutationCompletion =
-            mutationRequired &&
-            !actionableApproval &&
-            !v2Result?.pendingApproval &&
-            !launchFlowResult?.cancelled &&
-            v2ToolCalls.length === 0 &&
-            v2Mutations === 0;
-          if (zeroMutationCompletion) {
-            assistantText =
-              "I couldn't complete the requested change: no file operations were performed, so nothing was modified. Please try again.";
-          }
-
-          const finalMessageStatus: MessageStatus = launchFlowResult?.cancelled
-            ? "cancelled"
-            : actionableApproval
-              ? "awaiting_approval"
-              : v2Result?.failedHonestly || zeroMutationCompletion
-                ? "failed"
-                : launchFlowResult?.success && !v2Empty && !pausedRunPersistFailed
-                  ? "completed"
-                  : "failed";
-
-          const statusPersisted = await updateMessageStatus(assistantMessage.id, userId, finalMessageStatus, assistantText);
-          let actionRunPersistenceFailed = false;
-          if (actionContext && finalMessageStatus !== "awaiting_approval") {
-            try {
-              await transitionActionRun(actionContext.actionRunId, actionContext.userId, finalMessageStatus, {
-                currentActivity: finalMessageStatus === "completed"
-                  ? "Task completed"
-                  : finalMessageStatus === "cancelled"
-                    ? "Task cancelled by user"
-                    : "Task failed",
-                approvalReference: null,
-                failureCode: finalMessageStatus === "failed" ? "TASK_FAILED" : null,
-                failureMessage: finalMessageStatus === "failed" ? assistantText.slice(0, 500) : null,
-              });
-            } catch (settleErr) {
-              actionRunPersistenceFailed = true;
-              studioLog("message:action_run_settle_failed", {
-                conversationId: conversation.id,
-                userId,
-                actionRunId: actionContext.actionRunId,
-                status: finalMessageStatus,
-                errorClass: settleErr instanceof Error ? settleErr.message : "unknown",
-              });
-            }
-          }
-          if (actionContext) {
-            const taskStatus = finalMessageStatus === "awaiting_approval"
-              ? "waiting_approval"
+        }
+        if (agentRunId) {
+          const actualCredits = runtimeAgent
+            ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
+            : 0;
+          settleRun(agentRunId, {
+            inputTokens: Math.ceil(finalPrompt.length / 4),
+            outputTokens: Math.ceil(assistantText.length / 4),
+            actualCredits,
+            status: finalMessageStatus === "completed"
+              ? "completed"
               : finalMessageStatus === "cancelled"
                 ? "cancelled"
-                : finalMessageStatus === "completed"
-                  ? "completed"
-                  : "failed";
-            const verified = finalMessageStatus === "completed"
-              && (!v2Result?.qualityLoop || v2Result.qualityLoop.verdict.ok);
-            await settleConversationTask(userId, conversation.id, taskStatus, verified).catch((taskErr) => {
-              studioLog("message:task_settle_failed", {
-                conversationId: conversation.id,
-                userId,
-                actionRunId: actionContext.actionRunId,
-                errorClass: taskErr instanceof Error ? taskErr.message : "unknown",
-              });
-            });
-          }
-          if (statusPersisted === false) {
-            // The run reached a terminal state but the transcript row did
-            // not learn it — the message stays 'streaming' and the GET
-            // reconciler is the only line of defense left. Log loudly so
-            // this is diagnosable instead of surfacing as a mystery
-            // "previous run ended" later.
-            studioLog(`message:terminal_status_write_failed mid=${assistantMessage.id}`, {
-              conversationId: conversation.id,
-              status: finalMessageStatus,
-            });
-          }
-          if (agentRunId) {
-            const actualCredits = runtimeAgent
-              ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
-              : 0;
-            settleRun(agentRunId, {
-              inputTokens: Math.ceil(finalPrompt.length / 4),
-              outputTokens: Math.ceil(assistantText.length / 4),
-              actualCredits,
-              status: finalMessageStatus === "completed"
-                ? "completed"
-                : finalMessageStatus === "cancelled"
-                  ? "cancelled"
-                  : "failed",
-            }, reservedCredits, reservationId).catch(() => {
-              // Best-effort settlement — must not leak unhandled rejection
-            });
-          }
+                : "failed",
+          }, reservedCredits, reservationId).catch(() => {
+            // Best-effort settlement — must not leak unhandled rejection
+          });
+        }
 
-          // A cancelled run's partial output must not be persisted as a
-          // normal conversation_summary — it would pollute long-term
-          // memory with truncated work. Persist memory only for runs that
-          // reached a non-cancelled terminal state.
-          if (finalMessageStatus !== "cancelled") {
-            persistMemory(
-              `User: ${message}\n${agentDisplayName}: ${assistantText}`,
-              userId,
-              conversation.projectId,
-              {
-                agentSlug,
-                agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
-                memoryNamespace: runtimeAgent?.memoryNamespace,
-                conversationId: conversation.id,
-                memoryType: "conversation_summary",
-              },
-            ).catch(() => {
-              // Best-effort memory persistence — must not leak unhandled rejection
-            });
-          }
-
-          const launchLatencyMs = launchFlowResult?.totalDurationMs ?? v2Result?.totalDurationMs ?? 0;
-          const launchSteps = v2Result?.stepsUsed ?? 0;
-          const launchToolCalls = v2Result?.toolCalls.length ?? 0;
-
-          studioLog("message:sent", {
-            conversationId: conversation.id,
-            projectId: conversation.projectId,
+        // A cancelled run's partial output must not be persisted as a
+        // normal conversation_summary — it would pollute long-term
+        // memory with truncated work. Persist memory only for runs that
+        // reached a non-cancelled terminal state.
+        if (finalMessageStatus !== "cancelled") {
+          persistMemory(
+            `User: ${message}\n${agentDisplayName}: ${assistantText}`,
             userId,
-            agentSlug,
-            agentInstanceId: runtimeAgent?.agentInstanceId || null,
-            provider: routedProvider,
-            model: routedModel,
-            latencyMs: launchLatencyMs,
-            revisionBefore: conversation.revision,
-            revisionAfter: newRevision,
-            v2: true,
-            stepsUsed: launchSteps,
-            toolCalls: launchToolCalls,
-          });
-
-          safeEvent({
-            type: "done",
-            userMessage,
-            assistantMessage: {
-              ...assistantMessage,
-              content: assistantText,
-              status: finalMessageStatus,
-              // `status` describes the MESSAGE STREAM only (completed/failed/cancelled/awaiting_approval).
-              // Whether the WORK completed is judged from `execution` below.
-              ...(v2Result ? {
-                execution: {
-                  mode: built.kernelResult.decision.routing.mode,
-                  toolCalls: v2Result.toolCalls.map((c) => ({
-                    toolId: c.toolId,
-                    success: c.success,
-                    mutating: c.mutating,
-                  })),
-                  deployment: deploymentEvidenceFrom(v2Result.toolCalls),
-                  workspaceChange: v2Result.workspaceChange ?? null,
-                },
-              } : {}),
+            conversation.projectId,
+            {
+              agentSlug,
+              agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
+              memoryNamespace: runtimeAgent?.memoryNamespace,
+              conversationId: conversation.id,
+              memoryType: "conversation_summary",
             },
-            revision: newRevision,
-            provider: routedProvider,
-            model: routedModel,
-            latencyMs: launchLatencyMs,
-            v2: true,
-            pendingApproval: actionableApproval ?? undefined,
-            launchStatus: launchFlowResult?.status ?? undefined,
-            actionRunId: actionContext?.actionRunId,
-            actionRunPersistence: actionRunPersistenceFailed ? "failed" : "ok",
-            previewUrl: launchFlowResult?.previewUrl ?? undefined,
-            productionUrl: launchFlowResult?.productionUrl ?? undefined,
+          ).catch(() => {
+            // Best-effort memory persistence — must not leak unhandled rejection
           });
+        }
+
+        const launchLatencyMs = launchFlowResult?.totalDurationMs ?? v2Result?.totalDurationMs ?? 0;
+        const launchSteps = v2Result?.stepsUsed ?? 0;
+        const launchToolCalls = v2Result?.toolCalls.length ?? 0;
+
+        studioLog("message:sent", {
+          conversationId: conversation.id,
+          projectId: conversation.projectId,
+          userId,
+          agentSlug,
+          agentInstanceId: runtimeAgent?.agentInstanceId || null,
+          provider: routedProvider,
+          model: routedModel,
+          latencyMs: launchLatencyMs,
+          revisionBefore: conversation.revision,
+          revisionAfter: newRevision,
+          v2: true,
+          stepsUsed: launchSteps,
+          toolCalls: launchToolCalls,
+        });
+
+        safeEvent({
+          type: "done",
+          userMessage,
+          assistantMessage: {
+            ...assistantMessage,
+            content: assistantText,
+            status: finalMessageStatus,
+            // `status` describes the MESSAGE STREAM only (completed/failed/cancelled/awaiting_approval).
+            // Whether the WORK completed is judged from `execution` below.
+            ...(v2Result ? {
+              execution: {
+                mode: built.kernelResult.decision.routing.mode,
+                toolCalls: v2Result.toolCalls.map((c) => ({
+                  toolId: c.toolId,
+                  success: c.success,
+                  mutating: c.mutating,
+                })),
+                deployment: deploymentEvidenceFrom(v2Result.toolCalls),
+                workspaceChange: v2Result.workspaceChange ?? null,
+              },
+            } : {}),
+          },
+          revision: newRevision,
+          provider: routedProvider,
+          model: routedModel,
+          latencyMs: launchLatencyMs,
+          v2: true,
+          pendingApproval: actionableApproval ?? undefined,
+          launchStatus: launchFlowResult?.status ?? undefined,
+          actionRunId: actionContext?.actionRunId,
+          actionRunPersistence: actionRunPersistenceFailed ? "failed" : "ok",
+          previewUrl: launchFlowResult?.previewUrl ?? undefined,
+          productionUrl: launchFlowResult?.productionUrl ?? undefined,
+        });
+      };
+
+        if (v2Transport && v2Config) {
+          await runV2Execution(v2Config, v2Transport, false);
         } else {
           // ── V1 fallback path: stream tool results, then run LLM ──
           if (v1Result?.ranTools) {
@@ -1371,14 +1468,54 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           // production defect — fail the run truthfully instead. Markup
           // without intent (quoted examples, orphan tags) is stripped so
           // it never reaches the transcript verbatim.
+          const toolRegistryModule = await import("@/lib/litt-intelligence/tool-registry");
           const v1ToolIds = new Set(
-            (await import("@/lib/litt-intelligence/tool-registry")).toolRegistry.list().map((t) => t.id),
+            toolRegistryModule.toolRegistry.list().map((t) => t.id),
           );
           const v1MarkupHit = !cancelledV1 && assistantText
             ? findToolCallMarkup(assistantText, v1ToolIds)
             : null;
           if (!cancelledV1 && !v1MarkupHit) {
             assistantText = stripToolCallMarkupText(assistantText);
+          }
+
+          // V1→V2 re-route (defense in depth): the model produced tool-call
+          // markup naming a WORKSPACE tool while a verified, reachable
+          // workspace is in context. The router misclassified an execution
+          // request as think (e.g. a bare-filename file edit); retry the
+          // turn as a V2 structured-tool execution instead of hard-failing
+          // with TOOL_CALL_PARSE_FAILED. Anything else keeps the honest
+          // failure below — see resolveV1ToV2Reroute.
+          const rerouteToolId = resolveV1ToV2Reroute(
+            v1MarkupHit?.toolId,
+            toolRegistryModule.isWorkspaceTool,
+            {
+              hasWorkspaceTransport: v2Transport !== null,
+              fileOpsReachable: v2Transport?.fileOpsReachable !== false,
+              aborted: cancelledV1 || executionAbort.signal.aborted,
+            },
+          );
+          if (rerouteToolId !== null && v2Transport !== null) {
+            studioLog("message:v1_to_v2_reroute", {
+              requestId: rid,
+              conversationId: conversation.id,
+              projectId: conversation.projectId,
+              userId,
+              tool: rerouteToolId,
+              errorClass: `v1_to_v2_reroute_${v1MarkupHit?.kind ?? "unknown"}`,
+            });
+            // The V1 text (unexecutable tool-call markup) already streamed;
+            // tell the client the turn is being retried as an executable
+            // task before the V2 progress events take over.
+            safeEvent({ type: "status", summary: "Retrying as an executable task…" });
+            const rerouteCfg = buildV2Config();
+            if (await ensureActionRun(rerouteCfg)) {
+              await runV2Execution(rerouteCfg, v2Transport, true);
+            }
+            // Either the V2 execution ran (it owns the final message/run
+            // state) or ensureActionRun failed (it already persisted the
+            // failure and settled the run) — skip the V1 finalization below.
+            return;
           }
 
           // Defense in depth: streamText now throws on empty provider

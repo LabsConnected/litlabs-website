@@ -152,6 +152,19 @@ const MODE_PATTERNS: ModePattern[] = [
       /\b(add|implement|support)\b.*\b(dark mode|feature|endpoint|route|page)\b/i,
       /\b(fix|debug|resolve|patch)\b.*\b(bug|error|issue|crash|fail)\b/i,
       /\b(edit|update|change|modify|rename|delete)\b.*\b(file|readme|config|code|component)\b/i,
+      // Bare-filename file mutations: "add a comment to the top of
+      // index.html and save", "update styles.css", "fix the typo in
+      // app/page.tsx". Every other build pattern pairs a verb with a
+      // category noun (file|page|component|…); a prompt naming a bare
+      // filename with no category noun fell straight through to think →
+      // the V1 text-only lane, where the model could only emit
+      // unexecutable tool-call markup and the run failed with
+      // TOOL_CALL_PARSE_FAILED. The mutation verb is the discriminator:
+      // "what does index.html do?" / "explain index.html" have none and
+      // stay think. Question-form openings (how/what/why/…) are excluded —
+      // "how do I add a comment to index.html?" is a question, not an
+      // execution request.
+      /^(?!\s*(how|what|why|when|where|which|who|explain|describe|tell\s+me|show\s+me)\b)[\s\S]*?\b(add|edit|update|change|modify|write|create|insert|append|prepend|remove|delete|rename|replace|fix|save)\b[\s\S]{0,200}\b[a-zA-Z0-9_][\w.-]*\.(html?|css|scss|sass|less|js|jsx|mjs|cjs|ts|tsx|mts|cts|json|jsonc|md|mdx|txt|text|xml|svg|yml|yaml|toml|ini|cfg|conf|env|properties|py|rb|go|rs|java|kt|kts|php|swift|c|h|cpp|hpp|cs|vue|svelte|sql|sh|bash|ps1|csv|tsv|png|jpe?g|gif|webp|ico|woff2?|ttf|mp4|webm)\b/i,
       // Existing product edits often describe the user-facing target rather
       // than naming a source file. They still require the executable V2 lane;
       // routing them to text-only chat silently drops the requested mutation.
