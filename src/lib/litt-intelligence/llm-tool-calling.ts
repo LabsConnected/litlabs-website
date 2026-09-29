@@ -47,6 +47,7 @@ import {
   type ProviderFailure,
   type RouteRequirements,
 } from "./provider-registry";
+import { recordModelAttemptOutcome } from "./model-registry";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -1286,12 +1287,19 @@ export async function callLLMWithTools(
      * and honor LLMMessage.images as image input.
      */
     requireVision?: boolean;
+    /**
+     * BUILD runs only: the initial model selection must start on a proven
+     * file writer (registry reliableFileWriting). The 3-step demotion
+     * guard (buildCapabilityGuard) stays as the mid-run safety net.
+     */
+    requireReliableFileWriting?: boolean;
   },
 ): Promise<LLMToolCallResponse> {
   const requirements: RouteRequirements = {
     tools: tools.length > 0,
     coding: tools.length > 0,
     vision: options?.requireVision === true,
+    reliableFileWriting: options?.requireReliableFileWriting === true,
   };
 
   const plan = planBasicRoutes(requirements, {
@@ -1406,6 +1414,8 @@ export async function callLLMWithTools(
         }
 
         recordProviderSuccess(route.provider);
+        // Registry learns too: this exact model just completed a call.
+        recordModelAttemptOutcome(route.provider, model, true, "");
         const latencyMs = Date.now() - t0;
         logRoute("attempt_success", {
           provider: route.provider,
@@ -1491,6 +1501,8 @@ export async function callLLMWithTools(
 
         if (failure.scope === "provider") {
           recordProviderFailure(route.provider, failure);
+          // Registry learns the outcome for this exact model as well.
+          recordModelAttemptOutcome(route.provider, model, false, failure.class);
           logRoute("fallback", {
             from: route.provider,
             to: nextProvider ?? "none",
@@ -1517,6 +1529,7 @@ export async function callLLMWithTools(
 
         // Model-scope failure — cool the model, try the provider's next model.
         recordModelFailure(route.provider, model);
+        recordModelAttemptOutcome(route.provider, model, false, failure.class);
       }
     }
   }

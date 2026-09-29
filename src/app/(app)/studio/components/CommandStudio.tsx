@@ -263,25 +263,30 @@ function CommandStudioContent() {
   const [studioMode, setStudioMode] = useState<StudioMode>(
     initial.destination === "studio" ? (initial.mode as StudioMode) ?? "preview" : "preview",
   );
-  // ── P0-2 welcome-state routing (Larry's standing rule) ─────────────
+  // ── Welcome-state routing (Larry's standing rule) ──────────────────
   // The center "Welcome to LiTT" onboarding shows ONLY for a brand-new
-  // untouched project. If the project was touched (starter-scaffolding
-  // manifest consumed by the first write) but the entry file still carries
-  // the welcome-screen marker — e.g. a trivial additive edit to the
-  // scaffolding, not a real build — the first successful build/open action
-  // must transition the center into the active workspace. Defaulting to the
-  // Code surface shows the user's actual file instead of a preview that
-  // renders the starter "Welcome to LiTT" page as if it were onboarding.
-  // Runs once per project on initial load; never overrides a manual
-  // surface switch, and fails soft (keeps preview) if the check errors.
+  // untouched project. The first successful build/edit permanently
+  // transitions the center into the active workspace: when the project was
+  // touched (starter-scaffolding manifest consumed by the first write, or a
+  // second git commit landed) but the entry file still carries the
+  // welcome-screen marker (e.g. a trivial additive edit to the starter,
+  // not a real build), default the center to the Code surface — the active
+  // workspace showing the user's actual files — instead of the Preview
+  // surface rendering the starter welcome page as if it were onboarding.
+  // Runs once per project on initial load; never overrides a manual surface
+  // choice (a switch back to Preview after the reroute is respected), and
+  // fails soft (keeps preview) if the check errors.
   const projectIdForWelcomeRouting = capabilities.projectId;
   const studioModeForWelcomeRouting = studioMode;
+  const welcomeRoutingDoneRef = useRef<string | null>(null);
   useEffect(() => {
     if (destination !== "studio") return;
     if (!projectIdForWelcomeRouting) return;
     // Never override an explicit surface choice — only reroute from the
-    // default preview surface.
+    // default preview surface, and only once per project.
     if (studioModeForWelcomeRouting !== "preview") return;
+    if (welcomeRoutingDoneRef.current === projectIdForWelcomeRouting) return;
+    welcomeRoutingDoneRef.current = projectIdForWelcomeRouting;
     let cancelled = false;
     (async () => {
       try {
@@ -298,9 +303,13 @@ function CommandStudioContent() {
         if (!res.ok || cancelled) return;
         const state = (await res.json().catch(() => null)) as {
           scaffolded?: boolean;
+          touched?: boolean;
           starterContent?: boolean;
         } | null;
-        if (state && state.scaffolded === false && state.starterContent === true && !cancelled) {
+        // Touched by either signal: the robust git/file check, or the
+        // scaffold-manifest check. Both mean "first build/edit landed".
+        const wasTouched = state?.touched === true || state?.scaffolded === false;
+        if (state && wasTouched && state.starterContent === true && !cancelled) {
           setStudioMode("code");
         }
       } catch {
@@ -1748,9 +1757,17 @@ function CommandStudioContent() {
           // ignore
         }
       }
-      // Update URL with project ID
+      // Rebind the chat to the NEW project synchronously, before the router
+      // settles: the old conversation stays selected otherwise and the first
+      // message goes to a conversation that belongs to the previous project
+      // ("Project mismatch"). Mirrors handleSelectProject's reset.
+      useConversationStore.getState().resetForProject();
+      // Update URL with project ID — and clear the stale conversation +
+      // agent-instance params so nothing can re-bind to the old chat.
       const params = new URLSearchParams(searchParams.toString());
       params.set("project", project.id);
+      params.delete("conversation");
+      params.delete("agentInstance");
       window.dispatchEvent(new CustomEvent("studio:project-switching"));
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });
       // Refresh capabilities so projectId propagates

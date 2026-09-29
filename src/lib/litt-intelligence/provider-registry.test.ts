@@ -12,6 +12,7 @@ import {
   providerDiagnostics,
   _resetProviderHealthForTests,
 } from "./provider-registry";
+import { validateEnvOverride, _resetModelRegistryForTests } from "./model-registry";
 
 const PROVIDER_ENVS = [
   "GEMINI_API_KEY",
@@ -37,12 +38,14 @@ const TOOL_REQ = { tools: true, coding: true };
 
 beforeEach(() => {
   _resetProviderHealthForTests();
+  _resetModelRegistryForTests();
   vi.unstubAllEnvs();
   for (const key of PROVIDER_ENVS) vi.stubEnv(key, "");
 });
 
 afterEach(() => {
   _resetProviderHealthForTests();
+  _resetModelRegistryForTests();
   vi.unstubAllEnvs();
 });
 
@@ -339,6 +342,51 @@ describe("provider registry — openrouter auto-router tool exclusion", () => {
   });
 });
 
+describe("provider registry — BUILD initial selection requires proven writers", () => {
+  const BUILD_REQ = { tools: true, coding: true, reliableFileWriting: true };
+
+  it("excludes chat-only and unproven models from the openrouter BUILD attempt list", () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(BUILD_REQ);
+    const or = plan.providers.find((p) => p.provider === "openrouter");
+    expect(or).toBeDefined();
+    // cohere/north-mini-code:free is proven read-only; qwen3.8-27b:free is
+    // not yet run-proven — neither may lead a BUILD.
+    expect(or!.models).not.toContain("cohere/north-mini-code:free");
+    expect(or!.models).not.toContain("qwen/qwen3.8-27b:free");
+    // Proven writers remain: gemma-4-31b-it:free via OpenRouter.
+    expect(or!.models).toContain("google/gemma-4-31b-it:free");
+  });
+
+  it("drops a chat-only model hint on BUILD requests instead of resurrecting it", () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(BUILD_REQ, { model: "cohere/north-mini-code:free" });
+    const or = plan.providers.find((p) => p.provider === "openrouter");
+    expect(or!.models).not.toContain("cohere/north-mini-code:free");
+    // Surfaced, not silent — the caller logs model_hint_dropped.
+    expect(plan.droppedModelHint).toBe("cohere/north-mini-code:free");
+  });
+
+  it("still honours a proven-writer hint on BUILD requests", () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(BUILD_REQ, { model: "google/gemma-4-31b-it:free" });
+    const or = plan.providers.find((p) => p.provider === "openrouter");
+    expect(or!.models[0]).toBe("google/gemma-4-31b-it:free");
+    expect(plan.droppedModelHint).toBeUndefined();
+  });
+
+  it("keeps chat-only models eligible for plain tool-chat (no writer requirement)", () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(TOOL_REQ);
+    const or = plan.providers.find((p) => p.provider === "openrouter");
+    expect(or!.models).toContain("cohere/north-mini-code:free");
+  });
+});
+
 describe("provider registry — failure classification", () => {
   it("classifies 401 as provider-scope auth_invalid", () => {
     const f = classifyHttpFailure(401, '{"error":"invalid key"}');
@@ -360,9 +408,37 @@ describe("provider registry — failure classification", () => {
     expect(model.scope).toBe("model");
   });
 
+  it("classifies 404 as model_unavailable (not auth_invalid)", () => {
+    const f = classifyHttpFailure(404, "model not found");
+    expect(f.class).toBe("model_unavailable");
+    expect(f.scope).toBe("model");
+    expect(f.class).not.toBe("auth_invalid");
+  });
+
+  it("classifies 503 as provider-scope server_error", () => {
+    const f = classifyHttpFailure(503, "Service unavailable");
+    expect(f.class).toBe("server_error");
+    expect(f.scope).toBe("provider");
+  });
+
   it("classifies 404 and 400 as model-scope", () => {
     expect(classifyHttpFailure(404, "model not found").scope).toBe("model");
     expect(classifyHttpFailure(400, "bad request").scope).toBe("model");
+  });
+
+  it("classifies Google 400 'API key not valid' as provider-scope auth_invalid (dead key, not dead model)", () => {
+    const f = classifyHttpFailure(
+      400,
+      '{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT"}}',
+    );
+    expect(f.class).toBe("auth_invalid");
+    expect(f.scope).toBe("provider");
+  });
+
+  it("classifies 403 with auth-shaped body as auth_invalid", () => {
+    const f = classifyHttpFailure(403, '{"error":"API key not valid"}');
+    expect(f.class).toBe("auth_invalid");
+    expect(f.scope).toBe("provider");
   });
 
   it("classifies 408/429/5xx correctly", () => {
@@ -401,5 +477,35 @@ describe("providerDiagnostics", () => {
     const diag = providerDiagnostics();
     expect(diag.gemini.credential).toBe("available");
     expect(JSON.stringify(diag)).not.toContain("super-secret-key-value");
+  });
+});
+
+describe("provider registry — env override safety (no silent unknown-model fallback)", () => {
+  it("an unknown OPENROUTER_MODEL string never enters the route plan", () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    for (const bad of ["fake-model-xyz", "unknown/fake-model:free"]) {
+      // The registry itself rejects the string…
+      const check = validateEnvOverride("OPENROUTER_MODEL", bad, { tools: true });
+      expect(check.valid).toBe(false);
+      // …and the planner never hands it to the OpenRouter adapter.
+      vi.stubEnv("OPENROUTER_MODEL", bad);
+      const plan = planBasicRoutes(TOOL_REQ, {});
+      const or = plan.providers.find((p) => p.provider === "openrouter");
+      expect(or).toBeDefined();
+      expect(or!.models).not.toContain(bad);
+      // Registry defaults are used instead: the plan still has models.
+      expect(or!.models.length).toBeGreaterThan(0);
+      expect(or!.models).toContain("qwen/qwen3.8-27b:free");
+    }
+  });
+
+  it("an unknown GEMINI_PRIMARY_MODEL never reaches the Gemini adapter", () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("GEMINI_PRIMARY_MODEL", "gemini-9.9-ultra");
+    const plan = planBasicRoutes(TOOL_REQ, {});
+    const gemini = plan.providers.find((p) => p.provider === "gemini");
+    expect(gemini).toBeDefined();
+    expect(gemini!.models).not.toContain("gemini-9.9-ultra");
+    expect(gemini!.models[0]).toBe("gemini-flash-latest");
   });
 });

@@ -31,6 +31,12 @@
 import "server-only";
 
 import { resolveOllamaEndpoint, OLLAMA_ENDPOINT_ENV_VARS } from "@litt/models";
+import {
+  findModelRecord,
+  getEligibleModels,
+  resolveRegistryModel,
+  validateEnvOverride,
+} from "./model-registry";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -109,6 +115,15 @@ export interface RouteRequirements {
   structuredOutput?: boolean;
   coding?: boolean;
   minContext?: number;
+  /**
+   * BUILD runs only: the initial model selection must start on a proven
+   * file writer (registry reliableFileWriting). Chat-only or unproven
+   * writers (e.g. cohere/north-mini-code:free) are excluded from the
+   * attempt list up front, so a BUILD never starts on them and waits for
+   * the 3-step demotion guard to rule them out. The demotion guard stays
+   * as the safety net for mid-run degradation of the proven models.
+   */
+  reliableFileWriting?: boolean;
 }
 
 export interface RoutePlanOptions {
@@ -152,18 +167,16 @@ export class ProviderAttemptError extends Error {
 
 const DEFAULT_ATTEMPT_TIMEOUT_MS = 30_000;
 
-/** Tool-capable OpenRouter :free models + the free auto-router. Paid slugs are
- *  never included: under the Basic cost policy they would be LITT_PAID.
- *  Ordering matters: the auto-router (openrouter/free) picks small random
- *  models that fail to emit tool calls, so it stays last — specific large
- *  free tool-callers are attempted first. */
-const OPENROUTER_FREE_MODELS = [
-  "qwen/qwen3-coder:free",
+/** Tool-capable OpenRouter :free models. The canonical model registry owns
+ *  ordering and eligibility (capability-verified, health-aware); the legacy
+ *  candidates below stay as tail fallbacks for routes the registry does not
+ *  manage yet. "qwen/qwen3-coder:free" is deliberately NOT listed — it 404s
+ *  in prod (Sep 2026). */
+const OPENROUTER_LEGACY_TAIL_MODELS = [
   "nvidia/nemotron-3.5-lightning:free",
   "nvidia/nemotron-3-super-120b-a12b:free",
   "nvidia/nemotron-3-ultra-550b-a55b:free",
   "nex-agi/nex-n2.5-pro:free",
-  "google/gemma-4-31b-it:free",
   "openrouter/free",
 ];
 
@@ -193,20 +206,70 @@ function envPresent(...names: string[]): boolean {
   return names.some((n) => !!process.env[n]);
 }
 
-function openRouterModels(): string[] {
-  // Honour an explicit override only when it is a free route — a paid
-  // OPENROUTER_MODEL would violate the Basic cost policy.
-  const override = process.env.OPENROUTER_MODEL;
-  const list = [...OPENROUTER_FREE_MODELS];
-  if (override && (override === "openrouter/free" || override.endsWith(":free"))) {
-    const idx = list.indexOf(override);
-    if (idx >= 0) list.splice(idx, 1);
-    list.unshift(override);
+function openRouterModels(requirements?: RouteRequirements): string[] {
+  // Registry-first ordering: capability-verified, health-aware models by
+  // priority (qwen3.8-27b:free, gemma-4-31b-it:free, ...). Legacy free
+  // candidates the registry does not manage stay as tail fallbacks; the
+  // auto-router (openrouter/free) stays last — it picks small random models
+  // that fail to emit tool calls (and is filtered out entirely when the
+  // caller requires tools).
+  //
+  // BUILD initial selection (requirements.reliableFileWriting): only proven
+  // file writers are listed — chat-only/unproven registry models and the
+  // unknown legacy tail are excluded so a BUILD never starts on a model
+  // that can read but never writes.
+  const requireWriters = requirements?.reliableFileWriting === true;
+  const registryIds = getEligibleModels({ tools: true, reliableFileWriting: requireWriters })
+    .filter((r) => r.provider === "openrouter")
+    .map((r) => r.providerModelId);
+  const list = [...registryIds];
+  if (!requireWriters) {
+    for (const m of OPENROUTER_LEGACY_TAIL_MODELS) {
+      if (!list.includes(m)) list.push(m);
+    }
+  }
+
+  // OPENROUTER_MODEL override: validated against the registry, never used
+  // as a raw string. Unknown or non-free values are rejected with an
+  // explicit structured warning and the registry defaults are used.
+  const override = (process.env.OPENROUTER_MODEL ?? "").trim();
+  if (override) {
+    if (override === "openrouter/free") {
+      const idx = list.indexOf(override);
+      if (idx >= 0) list.splice(idx, 1);
+      list.unshift(override);
+    } else if (override.endsWith(":free")) {
+      // BUILD runs additionally require a proven file writer — a chat-only
+      // override (e.g. north-mini-code) is rejected for BUILD routing with
+      // an explicit warning instead of silently starting a doomed build.
+      const check = validateEnvOverride("OPENROUTER_MODEL", override, {
+        tools: true,
+        reliableFileWriting: requireWriters,
+      });
+      if (check.valid) {
+        const idx = list.indexOf(override);
+        if (idx >= 0) list.splice(idx, 1);
+        list.unshift(override);
+      } else {
+        logRegistryWarn("env_override_rejected", {
+          envVar: "OPENROUTER_MODEL",
+          value: override,
+          reason: check.error,
+        });
+      }
+    } else {
+      // A paid OPENROUTER_MODEL would violate the Basic cost policy.
+      logRegistryWarn("env_override_rejected", {
+        envVar: "OPENROUTER_MODEL",
+        value: override,
+        reason: "not a :free route — paid slugs are refused under the Basic cost policy",
+      });
+    }
   }
   return list;
 }
 
-function providerDefs(): ProviderDef[] {
+function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
   return [
     {
       provider: "gemini",
@@ -216,9 +279,18 @@ function providerDefs(): ProviderDef[] {
       timeoutMs: DEFAULT_ATTEMPT_TIMEOUT_MS,
       credentialState: () =>
         envPresent("GEMINI_API_KEY", "GOOGLE_API_KEY") ? "available" : "missing",
+      // Model IDs come from the canonical registry: env overrides are
+      // validated (unknown strings rejected with a warning), otherwise the
+      // registry defaults (gemini-flash-latest alias + gemini-2.5-flash).
       models: () => [
-        process.env.GEMINI_PRIMARY_MODEL || "gemini-flash-latest",
-        process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash",
+        resolveRegistryModel("GEMINI_PRIMARY_MODEL", "gemini-flash", {
+          tools: true,
+          reliableFileWriting: true,
+        }).providerModelId,
+        resolveRegistryModel("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash", {
+          tools: true,
+          reliableFileWriting: true,
+        }).providerModelId,
       ],
     },
     {
@@ -232,7 +304,7 @@ function providerDefs(): ProviderDef[] {
       // deadline still bounds every attempt via computeAttemptTimeout.
       timeoutMs: Number(process.env.OPENROUTER_TIMEOUT_MS) || 60_000,
       credentialState: () => (envPresent("OPENROUTER_API_KEY") ? "available" : "missing"),
-      models: openRouterModels,
+      models: () => openRouterModels(requirements),
     },
     {
       provider: "groq",
@@ -460,7 +532,17 @@ function sanitizeBody(text: string): string {
     .replace(/Bearer\s+\S+/gi, "Bearer <redacted>")
     .replace(/sk-[A-Za-z0-9_-]+/g, "sk-<redacted>")
     .replace(/key-[A-Za-z0-9_-]+/g, "key-<redacted>")
+    .replace(/(token|secret|password)\s*[:=]\s*("[^"]*"|'[^']*'|\S+)/gi, "$1=<redacted>")
     .slice(0, 300);
+}
+
+/** Structured warning line for registry rejections (var name, value, reason). */
+function logRegistryWarn(event: string, fields: Record<string, unknown>): void {
+  const parts = Object.entries(fields)
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(" ");
+  console.warn(`[model-registry] ${event} ${parts}`);
 }
 
 export function parseRetryAfterMs(headers: Headers | null | undefined, bodyText: string): number | undefined {
@@ -487,7 +569,17 @@ export function classifyHttpFailure(
 ): ProviderFailure {
   const message = sanitizeBody(bodyText) || `HTTP ${status}`;
   switch (status) {
-    case 400:
+    case 400: {
+      // Evidence-based split (Sep 2026 P0): Google returns HTTP 400 — NOT
+      // 401 — for dead API keys, with "API key not valid" in the body.
+      // Treating every 400 as model_unavailable burned the model cooldown
+      // while the dead credential kept failing. Key-shaped 400s disable
+      // the provider; everything else stays model-scoped.
+      if (/api[_\s-]?key not valid|invalid api[_\s-]?key|api[_\s-]?key.{0,40}invalid/i.test(bodyText)) {
+        return { class: "auth_invalid", scope: "provider", httpStatus: status, message };
+      }
+      return { class: "model_unavailable", scope: "model", httpStatus: status, message };
+    }
     case 404:
       return { class: "model_unavailable", scope: "model", httpStatus: status, message };
     case 401:
@@ -495,10 +587,22 @@ export function classifyHttpFailure(
     case 402:
       return { class: "billing", scope: "provider", httpStatus: status, message };
     case 403: {
+      // Dead/revoked keys sometimes surface as 403 with auth-shaped bodies
+      // ("API key not valid", "invalid credential", "unauthenticated").
+      // Classify those as auth_invalid so the dead CREDENTIAL is disabled,
+      // not the model. A body that names the model stays model-scoped.
+      const authShaped =
+        /api[_\s-]?key.{0,40}(not valid|invalid|revoked|expired)|invalid[_\s-]?credential|unauthenticated|unauthorized/i.test(
+          bodyText,
+        );
+      const modelShaped = /\bmodel\b|deployment|not.?supported|does not exist/i.test(bodyText);
+      if (authShaped && !modelShaped) {
+        return { class: "auth_invalid", scope: "provider", httpStatus: status, message };
+      }
       // Narrowest proven scope: a body that names the model is a model-level
       // rejection; anything about keys/accounts/permissions is provider-level.
-      const modelScoped = /\bmodel\b|deployment|not.?supported|does not exist/i.test(bodyText)
-        && !/key|credential|account|permission|auth|forbidden to access/i.test(bodyText);
+      const modelScoped =
+        modelShaped && !/key|credential|account|permission|auth|forbidden to access/i.test(bodyText);
       return {
         class: "forbidden",
         scope: modelScoped ? "model" : "provider",
@@ -601,7 +705,7 @@ export function planBasicRoutes(
   const hint = resolveModelHint(opts.model);
   let droppedModelHint: string | undefined;
 
-  for (const def of providerDefs()) {
+  for (const def of providerDefs(requirements)) {
     // Cost policy — the Basic router never auto-uses LITT_PAID routes and
     // only uses USER_FUNDED routes when the user supplied a key this request.
     if (def.costClass === "LITT_PAID") {
@@ -678,6 +782,15 @@ export function planBasicRoutes(
         // An explicit hint must not resurrect the auto-router the tools
         // filter just removed — it cannot emit tool calls. Surface the
         // drop so the caller can report it instead of silently swapping.
+        droppedModelHint = opts.model;
+      } else if (
+        requirements.reliableFileWriting === true &&
+        findModelRecord(def.provider, hint.model)?.capabilities.reliableFileWriting !== true
+      ) {
+        // A BUILD run must not start on a hinted model that is not a proven
+        // file writer (chat-only or unknown) — drop the hint so routing
+        // starts on a proven writer, and surface the drop instead of
+        // silently swapping.
         droppedModelHint = opts.model;
       } else {
         models.unshift(hint.model);

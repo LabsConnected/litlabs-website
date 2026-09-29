@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { StudioTask, UpdateStudioTaskInput } from "@/lib/studio/task-types";
+import { dedupeTasksByConversation, type StudioTask, type UpdateStudioTaskInput } from "@/lib/studio/task-types";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 
 export function useStudioTasks(projectId: string | null) {
@@ -35,7 +35,10 @@ export function useStudioTasks(projectId: string | null) {
       });
       if (!res.ok) return;
       const data = await res.json() as { tasks?: StudioTask[]; closedTasks?: StudioTask[] };
-      const next = Array.isArray(data.tasks) ? data.tasks : [];
+      // Server dedupes too, but a raced double-adoption can land two rows
+      // for one conversation between POSTs — dedupe client-side so the bar
+      // never renders transient duplicate tabs (newest-first wins).
+      const next = dedupeTasksByConversation(Array.isArray(data.tasks) ? data.tasks : []);
       setTasks(next);
       setClosedTasks(Array.isArray(data.closedTasks) ? data.closedTasks : []);
       setActiveTaskId((current) => current && next.some((task) => task.id === current)
@@ -72,7 +75,10 @@ export function useStudioTasks(projectId: string | null) {
     if (!res.ok) return null;
     const data = await res.json() as { task?: StudioTask };
     if (!data.task) return null;
-    setTasks((current) => [data.task!, ...current.filter((task) => task.id !== data.task!.id)]);
+    // Dedupe by conversation as well as task id: a raced double-adoption
+    // POST can return a second row for the same conversation, and the bar
+    // must never show it as a duplicate "Current work" tab.
+    setTasks((current) => dedupeTasksByConversation([data.task!, ...current.filter((task) => task.id !== data.task!.id)]));
     setActiveTaskId(data.task.id);
     return data.task;
   }, [headers, projectId]);
@@ -154,7 +160,7 @@ export function useStudioTasks(projectId: string | null) {
     if (!res.ok) return null;
     const data = await res.json() as { task?: StudioTask };
     if (data.task) {
-      setTasks((current) => [data.task!, ...current.filter((task) => task.id !== taskId)]);
+      setTasks((current) => dedupeTasksByConversation([data.task!, ...current.filter((task) => task.id !== taskId)]));
       setClosedTasks((current) => current.filter((task) => task.id !== taskId));
       setActiveTaskId(taskId);
     }

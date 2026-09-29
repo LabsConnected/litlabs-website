@@ -43,7 +43,9 @@ import {
 import {
   _resetProviderHealthForTests,
   getProviderHealth,
+  planBasicRoutes,
 } from "./provider-registry";
+import { _resetModelRegistryForTests } from "./model-registry";
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
@@ -153,6 +155,7 @@ const WRITE_TOOL = {
 beforeEach(() => {
   mockFetch.mockReset();
   _resetProviderHealthForTests();
+  _resetModelRegistryForTests();
   _setOllamaProbeForTests(null);
   vi.unstubAllEnvs();
   clearProviderEnvs();
@@ -160,6 +163,7 @@ beforeEach(() => {
 
 afterEach(() => {
   _resetProviderHealthForTests();
+  _resetModelRegistryForTests();
   _setOllamaProbeForTests(null);
   vi.unstubAllEnvs();
 });
@@ -556,6 +560,92 @@ describe("callLLMWithTools — failure classification and failover", () => {
       .rejects.toThrow(AllRoutesFailedError);
     // One OR attempt only — a 500 is provider-scope.
     expect(callsTo("openrouter")).toHaveLength(1);
+  });
+});
+
+describe("callLLMWithTools — canonical model routing", () => {
+  it("a 404 on the primary model is model_unavailable: the next model in the same provider is attempted", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    mockFetch
+      .mockResolvedValueOnce(makeGeminiErrorResponse(404, "model not found"))
+      .mockResolvedValueOnce(makeGeminiSuccessResponse("Gemini fallback model answered."));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
+
+    expect(result.text).toBe("Gemini fallback model answered.");
+    expect(result.provider).toBe("gemini");
+    // A 404 is model-scope: the provider is NOT disabled, its next candidate
+    // model is tried (gemini-flash-latest → gemini-2.5-flash).
+    const geminiCalls = callsTo("generativelanguage");
+    expect(geminiCalls).toHaveLength(2);
+    expect(String(geminiCalls[0][0])).toContain("gemini-flash-latest");
+    expect(String(geminiCalls[1][0])).toContain("gemini-2.5-flash");
+    expect(callsTo("openrouter")).toHaveLength(0);
+  });
+
+  it("a 503 from the primary provider is server_error: the next provider is tried", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    mockFetch
+      .mockResolvedValueOnce(makeGeminiErrorResponse(503, "Service unavailable"))
+      .mockResolvedValueOnce(makeSuccessResponse("qwen/qwen3.8-27b:free", "OR fallback response."));
+
+    const result = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
+
+    expect(result.text).toBe("OR fallback response.");
+    expect(result.provider).toBe("openrouter");
+    // A 503 is provider-scope: no second model behind Gemini, the router
+    // moves straight on to OpenRouter.
+    expect(callsTo("generativelanguage")).toHaveLength(1);
+    expect(callsTo("openrouter")).toHaveLength(1);
+  });
+
+  it("terminates when all routes fail — exactly one attempt per provider on provider-scope failures", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    mockFetch.mockResolvedValue(makeErrorResponse(500, "down"));
+
+    const plan = planBasicRoutes({ tools: false, coding: false, vision: false }, {});
+
+    try {
+      await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(AllRoutesFailedError);
+      // Bounded: a 500 is provider-scope, so each provider is attempted
+      // exactly once — the loop cannot spin.
+      expect(mockFetch.mock.calls.length).toBe(plan.providers.length);
+      const e = err as AllRoutesFailedError;
+      expect(e.failures).toHaveLength(plan.providers.length);
+      expect(e.failures.every((f) => f.class === "server_error")).toBe(true);
+      expect(e.userMessage).toMatch(/AI routes/i);
+    }
+  });
+
+  it("model-scope failures try each model exactly once — total attempts bounded by the plan", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    // 404 is model-scope: every candidate model is tried once, then the
+    // chain terminates — no retries, no loops.
+    mockFetch.mockResolvedValue(makeErrorResponse(404, "model not found"));
+
+    const plan = planBasicRoutes({ tools: false, coding: false, vision: false }, {});
+    const plannedAttempts = plan.providers.reduce((n, p) => n + p.models.length, 0);
+    expect(plannedAttempts).toBeGreaterThan(1);
+
+    try {
+      await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []);
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(AllRoutesFailedError);
+      // Every planned model attempted exactly once — the attempt count is
+      // bounded by the route plan, never by an unbounded retry loop.
+      expect(mockFetch.mock.calls.length).toBe(plannedAttempts);
+      const e = err as AllRoutesFailedError;
+      expect(e.failures).toHaveLength(plannedAttempts);
+      expect(e.failures.every((f) => f.class === "model_unavailable")).toBe(true);
+      expect(e.userMessage).toMatch(/AI routes/i);
+    }
   });
 });
 
