@@ -3,6 +3,10 @@ import { getOrCreateUser } from "@/lib/user-db";
 import { anonymizeUser } from "@/lib/user-deletion";
 import { getAdminSupabase } from "@/lib/supabase-admin";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import {
+  PLAN_ENTITLEMENTS,
+  STARTER_GRANT_KEY_PREFIX,
+} from "@/config/plan-entitlements";
 import { Webhook } from "svix";
 
 /**
@@ -79,14 +83,16 @@ export async function POST(req: NextRequest) {
 
       const { isNew } = await getOrCreateUser(id, email, name);
 
-      // Grant the starter 500 LiTTBits to NEW users via the canonical
+      // Grant the Starter one-time LiTTBits to NEW users via the canonical
       // credit_ledger. This is idempotent (grant_credits RPC deduplicates
-      // by idempotency_key = "starter:{userId}"), so even if the webhook
+      // by idempotency_key = "starter:v1:{userId}"), so even if the webhook
       // fires twice or getCreditBalances also tries to grant, the second
-      // call is a no-op. Without this, a new user who goes straight to a
-      // marketplace agent chat (without first loading /api/wallet) would
-      // see 0 BITS and be blocked — the lazy grant in getCreditBalances
-      // only fires on wallet read.
+      // call is a no-op. The v1 namespace never collides with the legacy
+      // "starter:{userId}" 500 grants, which are honored as-is. Without
+      // this, a new user who goes straight to a marketplace agent chat
+      // (without first loading /api/wallet) would see 0 BITS and be
+      // blocked — the lazy grant in getCreditBalances only fires on wallet
+      // read.
       if (isNew && eventType === "user.created") {
         try {
           const admin = getSupabaseAdmin();
@@ -99,21 +105,23 @@ export async function POST(req: NextRequest) {
               .single();
             if (userRow?.id) {
               // Pre-check to avoid an unnecessary RPC round-trip
+              const starterKey = `${STARTER_GRANT_KEY_PREFIX}${userRow.id}`;
+              const starterBits = PLAN_ENTITLEMENTS.starter.oneTimeGrantBits;
               const { data: existingGrant } = await admin
                 .from("credit_ledger")
                 .select("id")
                 .eq("user_id", userRow.id)
-                .eq("idempotency_key", `starter:${userRow.id}`)
+                .eq("idempotency_key", starterKey)
                 .limit(1)
                 .maybeSingle();
               if (!existingGrant) {
                 await admin.rpc("grant_credits", {
                   p_user_id: userRow.id,
-                  p_amount: 500,
+                  p_amount: starterBits,
                   p_category: "subscription_grant",
                   p_balance_bucket: "monthly",
-                  p_description: "Starter one-time grant — 500 LiTTBits (webhook)",
-                  p_idempotency_key: `starter:${userRow.id}`,
+                  p_description: `Starter one-time grant — ${starterBits} LiTTBits (webhook)`,
+                  p_idempotency_key: starterKey,
                   p_reference_type: "starter_plan",
                   p_reference_id: "one_time",
                 });

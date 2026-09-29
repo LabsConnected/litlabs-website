@@ -83,20 +83,20 @@ Rules:
 ### Starter
 
 - **Price:** Free
-- **LiTTBits:** 500 once at account creation (not monthly)
+- **LiTTBits:** 1,500 once at account creation (not monthly)
 - **Projects:** 1 active project
 - **No credit card required**
 
 ### Creator Beta
 
 - **Price:** $15/month during beta (standard price: $25/month)
-- **LiTTBits:** 6,000 after each successful monthly billing event
+- **LiTTBits:** 7,500 after each successful monthly billing event
 - **Projects:** 5 active projects
 
 ### Pro Builder Beta
 
 - **Price:** $39/month during beta (standard price: $49/month)
-- **LiTTBits:** 20,000 after each successful monthly billing event
+- **LiTTBits:** 18,000 after each successful monthly billing event
 - **Projects:** 25 active projects
 
 ### Founding Member
@@ -120,7 +120,7 @@ LiTTBits are internal platform usage credits.
 
 | Category | Source | Expiration | Rollover |
 |---|---|---|---|
-| Starter | 500 once at account creation | Does not expire | N/A (one-time) |
+| Starter | 1,500 once at account creation | Does not expire | N/A (one-time) |
 | Monthly subscription | Granted after successful Stripe billing | Valid for current billing period; resets on next grant | Does not roll over |
 | Purchased | Bought via approved Stripe products | Does not expire | N/A |
 | Promotional / beta | Must define explicit expiration when created | Per grant | N/A |
@@ -182,7 +182,7 @@ documentation outside of archived files:
 - "coins" or "coin packs" (use "LiTTBits" or "credit packs")
 - "AI creative studio" as the sole product definition (use full canonical definition)
 - "AI project workspace" as the sole product definition
-- "500 monthly LiTTBits" for Starter (it's 500 once)
+- "500 monthly LiTTBits" for Starter (it's 1,500 once)
 - "15% off future credit packs" or "20% off credit packs"
 - "5,000 bonus LiTTBits" or "6,000 LiTTBits" for Founder
 - Claims that LiTTBits are stored in localStorage
