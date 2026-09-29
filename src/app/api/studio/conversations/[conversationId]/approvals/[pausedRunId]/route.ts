@@ -19,6 +19,7 @@ import {
 import { ProgressEmitter } from "@/lib/litt-intelligence/progress-events";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { resumeAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
+import { FILE_WRITE_TOOL_IDS } from "@/lib/litt-intelligence/model-registry";
 import { resolveAvailableCapabilities } from "@/lib/litt-intelligence/capabilities";
 import { ensureProjectPreviewReady } from "@/lib/litt-intelligence/launch-flow";
 import { buildPreviewProxyUrl } from "@/lib/terminal-internal-client";
@@ -646,6 +647,13 @@ export async function POST(
     // resumed run reuses the live browser session from before the pause.
     conversationId,
     actionContext,
+    // Build capability guard: a run that paused on a file-write approval is
+    // a BUILD run. Resume with the guard enabled so a model that stops
+    // writing files gets ruled out within 3 steps instead of burning the
+    // run budget — the same protection the main loop gets via launch-flow.
+    buildCapabilityGuard: FILE_WRITE_TOOL_IDS.has(resolved.toolId)
+      ? { maxStepsWithoutFileWrite: 3 }
+      : undefined,
     // Quality loop: resume with a fresh evidence session so the resumed
     // run is gated the same way (agent markers re-harvest from history).
     // AUTO resumes opt in too — an AUTO run pauses for deploy approval,

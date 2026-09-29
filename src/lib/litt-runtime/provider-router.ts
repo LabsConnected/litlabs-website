@@ -9,6 +9,7 @@
 
 import type { LLMOptions, LLMProvider, ModelCategory } from "@/lib/llm";
 import type { LiTTRunRequest } from "./types";
+import { getEligibleModels } from "@/lib/litt-intelligence/model-registry";
 
 const VALID_CATEGORIES: ModelCategory[] = ["auto", "free", "fast", "code", "creative", "vision", "byok"];
 
@@ -53,10 +54,15 @@ export function selectModelOptions(req: LiTTRunRequest): LLMOptions {
 
 /**
  * Resolve the Gemini model id for the multimodal (image) path.
- * Falls back to gemini-flash-latest when the requested model isn't a Gemini id.
+ * Falls back to the registry's highest-priority vision-capable model
+ * (gemini-flash) when the requested model isn't a Gemini id — never a
+ * hardcoded slug that can rot.
  */
 export function resolveGeminiVisionModel(req: LiTTRunRequest): string {
-  return typeof req.requestedModel === "string" && req.requestedModel.startsWith("gemini")
-    ? req.requestedModel
-    : "gemini-flash-latest";
+  if (typeof req.requestedModel === "string" && req.requestedModel.startsWith("gemini")) {
+    return req.requestedModel;
+  }
+  return (
+    getEligibleModels({ vision: true })[0]?.providerModelId ?? "gemini-flash-latest"
+  );
 }

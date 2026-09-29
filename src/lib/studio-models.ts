@@ -1,3 +1,17 @@
+/**
+ * Studio model catalog for the UI picker (ModelPicker) and the
+ * /api/litt/models endpoint.
+ *
+ * REGISTRY SYNC CONTRACT (Sep 2026): the canonical model registry
+ * (src/lib/litt-intelligence/model-registry.ts) is the routing authority
+ * for which model IDs are valid and what they can do. This file is
+ * imported by client components, so it CANNOT import the registry
+ * (server-only). Every `apiModel` below must therefore be a registry-known
+ * providerModelId — or a documented exception (BYOK user-supplied models,
+ * media aliases). When the registry retires or replaces a model ID, update
+ * the matching apiModel here in the same PR. Never invent a versioned slug
+ * here: prefer self-healing aliases (e.g. "gemini-flash-latest").
+ */
 export type StudioModel = {
   id: string;
   name: string;
