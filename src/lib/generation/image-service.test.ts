@@ -45,10 +45,40 @@ vi.mock("@/lib/generation/cost-engine", () => ({
 import {
   generateImage,
   handlePollinationsImage,
+  imageModelFor,
+  openAIImageResultFromPayload,
+  selectOpenAIImageModel,
   type ImageServiceDeps,
   type ImageGenerationInput,
 } from "./image-service";
 import type { GenerationJob } from "./types";
+
+describe("GPT Image routing", () => {
+  it("selects Flare for generation and Sunburst for edit/reference work", () => {
+    expect(selectOpenAIImageModel({ operation: "generate" })).toBe("gpt-image-2.5-flare");
+    expect(selectOpenAIImageModel({ operation: "edit" })).toBe("gpt-image-2.5-sunburst");
+    expect(selectOpenAIImageModel({ referenceUrl: "data:image/png;base64,abc" })).toBe(
+      "gpt-image-2.5-sunburst",
+    );
+  });
+
+  it("uses the selected GPT Image model for billing metadata", () => {
+    expect(imageModelFor("openai", { prompt: "new image", operation: "generate" })).toBe(
+      "gpt-image-2.5-flare",
+    );
+    expect(imageModelFor("openai", { prompt: "edit", operation: "edit" })).toBe(
+      "gpt-image-2.5-sunburst",
+    );
+  });
+
+  it("persists OpenAI base64 output as an inline image URL", () => {
+    const result = openAIImageResultFromPayload(
+      { data: [{ b64_json: "aGVsbG8=" }] },
+      "a generated image",
+    );
+    expect(result.downloadUrl).toBe("data:image/png;base64,aGVsbG8=");
+  });
+});
 
 function makeJob(overrides: Partial<GenerationJob> = {}): GenerationJob {
   return {

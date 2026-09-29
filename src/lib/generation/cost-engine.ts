@@ -48,7 +48,8 @@ const PROVIDER_COST_CENTS: Record<string, number> = {
   "cloudflare:flux-1-schnell": 0,
   "fal:flux-pro": 5,
   "together:flux-1-schnell-free": 0,
-  "openai:dall-e-3": 4,
+  "openai:gpt-image-2.5-flare": 5,
+  "openai:gpt-image-2.5-sunburst": 7,
   "recraft:recraft-v3": 4,
   "pollinations:flux": 0,
 

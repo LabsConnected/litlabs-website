@@ -16,6 +16,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { getProject } from "@/lib/projects/project-repository";
+import { getConversation } from "@/lib/studio/conversation-service";
 import {
   MEDIA_PROVIDERS,
   type MediaFormat,
@@ -102,9 +104,22 @@ async function handler(req: NextRequest) {
     );
   }
 
+  const requestedProjectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
+  const requestedConversationId = typeof body.conversationId === "string" ? body.conversationId.trim() : "";
+  const project = requestedProjectId ? await getProject(requestedProjectId, userId) : null;
+  if (requestedProjectId && !project) {
+    return NextResponse.json({ success: false, code: "FORBIDDEN", error: "Project is not available" }, { status: 403 });
+  }
+  const conversation = requestedConversationId ? await getConversation(requestedConversationId, userId) : null;
+  if (requestedConversationId && (!conversation || (project && conversation.projectId !== project.id))) {
+    return NextResponse.json({ success: false, code: "FORBIDDEN", error: "Conversation is not available for this project" }, { status: 403 });
+  }
+
   const result = await generateImage(
     {
       userId,
+      projectId: project?.id,
+      conversationId: conversation?.id,
       requestId:
         typeof body.requestId === "string" && body.requestId
           ? body.requestId
@@ -129,6 +144,7 @@ async function handler(req: NextRequest) {
       seed: typeof body.seed === "number" ? body.seed : undefined,
       referenceUrl:
         typeof body.referenceUrl === "string" ? body.referenceUrl : undefined,
+      operation: body.operation === "edit" ? "edit" : "generate",
       generationMode:
         body.generationMode === "auto-free" ||
         body.generationMode === "auto-quality"
@@ -159,7 +175,7 @@ export async function GET() {
   return NextResponse.json({
     providers: MEDIA_PROVIDERS,
     defaults: {
-      image: "pollinations" as MediaProviderId,
+      image: "openai" as MediaProviderId,
       video: "huggingface" as MediaProviderId,
     },
   });
