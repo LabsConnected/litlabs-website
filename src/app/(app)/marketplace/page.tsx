@@ -264,6 +264,10 @@ export default function Marketplace() {
     () => (showFeatured ? filtered.filter((i) => !i.is_featured) : filtered),
     [filtered, showFeatured],
   );
+  const hasInstallableItems = useMemo(
+    () => items.some((item) => item.installable && item.status !== "coming_soon"),
+    [items],
+  );
 
   const goToDetail = useCallback((slug: string) => {
     router.push(`/marketplace/${slug}`);
@@ -327,7 +331,9 @@ export default function Marketplace() {
             </span>
           </div>
           <p className="mt-2 max-w-xl text-sm text-white/55">
-            Give LiTT new abilities. Find a capability, install it, and LiTT can do more for you.
+            Browse verified capabilities for LiTT. {hasInstallableItems
+              ? "Installable items show a clear action; everything else is labeled Coming Soon."
+              : "Available items will show a clear Install or Use action when their executor is ready."}
           </p>
 
           {/* Search */}
@@ -487,7 +493,7 @@ const FeaturedCard = memo(function FeaturedCard({
   return (
     <button
       onClick={onOpen}
-      className="flex w-64 shrink-0 snap-start items-center gap-3 rounded-2xl border p-4 text-left transition hover:-translate-y-0.5"
+      className="flex w-[min(22rem,calc(100vw-2rem))] shrink-0 snap-start items-center gap-3 rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 sm:w-64"
       style={{ borderColor: borderColor + "40", backgroundColor: boxBg }}
       aria-label={`View ${item.name}`}
     >
@@ -498,7 +504,7 @@ const FeaturedCard = memo(function FeaturedCard({
         {item.icon || <TypeIcon size={20} style={{ color: categoryColor }} />}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-black" style={{ color: headerColor }}>{item.name}</div>
+        <div className="line-clamp-2 min-h-10 text-sm font-black" style={{ color: headerColor }}>{item.name}</div>
         <div className="mt-0.5 text-[10px] font-bold uppercase tracking-wide" style={{ color: categoryColor }}>
           {TYPE_LABELS[item.item_type]}
         </div>
