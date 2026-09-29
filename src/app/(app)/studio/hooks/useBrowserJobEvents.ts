@@ -12,7 +12,7 @@
  * Fallback: if EventSource is not available (older browsers, SSR),
  * the hook falls back to polling GET /api/browser/jobs/[id]/events.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface AgentJobEvent {
   id: string;
@@ -73,14 +73,6 @@ export function useBrowserJobEvents(jobId: string | null, canonical = false): Us
   const [error, setError] = useState<string | null>(null);
   const lastEventIdRef = useRef<string | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
-
-  const closeConnection = useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
-    setConnected(false);
-  }, []);
 
   useEffect(() => {
     if (!jobId) {

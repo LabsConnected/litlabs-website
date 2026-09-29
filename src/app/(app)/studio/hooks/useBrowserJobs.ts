@@ -185,8 +185,9 @@ export function useBrowserJobs(scope: { projectId?: string | null; conversationI
 
   const cancelJob = useCallback(async (jobId: string): Promise<boolean> => {
     try {
-      const res = await fetch(`/api/browser/jobs/${jobId}`, {
-        method: "DELETE",
+      const canonical = jobs.find((job) => job.jobId === jobId)?.requestedBy === "studio";
+      const res = await fetch(canonical ? `/api/action-runs/${encodeURIComponent(jobId)}/cancel` : `/api/browser/jobs/${jobId}`, {
+        method: canonical ? "POST" : "DELETE",
         credentials: "same-origin",
       });
       if (!res.ok) return false;
@@ -196,10 +197,11 @@ export function useBrowserJobs(scope: { projectId?: string | null; conversationI
     } catch {
       return false;
     }
-  }, [fetchJobs, fetchSelectedJob, selectedJobId]);
+  }, [fetchJobs, fetchSelectedJob, jobs, selectedJobId]);
 
   const approveJob = useCallback(async (jobId: string): Promise<boolean> => {
     try {
+      if (jobs.find((job) => job.jobId === jobId)?.requestedBy === "studio") return false;
       const res = await fetch(`/api/browser/jobs/${jobId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -213,7 +215,7 @@ export function useBrowserJobs(scope: { projectId?: string | null; conversationI
     } catch {
       return false;
     }
-  }, [fetchJobs, fetchSelectedJob, selectedJobId]);
+  }, [fetchJobs, fetchSelectedJob, jobs, selectedJobId]);
 
   const activeCount = jobs.filter((j) => ACTIVE_STATUSES.has(j.status)).length;
 
