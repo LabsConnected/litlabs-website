@@ -32,21 +32,21 @@ import "server-only";
 import {
   MAX_DESIGN_PASSES,
   QUALITY_STAGES,
+  REQUIRED_STAGES_BY_SCOPE,
   STAGE_REQUIREMENTS,
-  classifyQualityProfile,
+  classifyTaskScope,
   createQualityLoop,
-  isStageRequired,
-  profileOf,
   currentStage,
   declareSuccess,
   passStage,
   recordEvidence,
   skipStage,
+  skipStageOutOfScope,
   summarizeLoop,
   type EvidenceSource,
   type QualityLoopState,
-  type QualityProfile,
   type QualityStage,
+  type QualityTaskScope,
   type StageEvidence,
   type SuccessVerdict,
 } from "./quality-loop";
@@ -65,6 +65,12 @@ export interface QualityLoopSession {
   state: QualityLoopState;
   /** The user's original request — judge context + brief fallback. */
   userRequest: string;
+  /**
+   * System-determined task scope (trivial | standard | full): which stages
+   * apply to this run. Set at session start from the user's request; never
+   * agent-declared. Survives approval-pause via the snapshot.
+   */
+  taskScope: QualityTaskScope;
   /** Set once the preview reaches ready. */
   previewUrl?: string;
   /** Set once a deployment completes. */
@@ -94,6 +100,8 @@ export interface QualityLoopObservation {
 export interface QualityLoopSnapshot {
   state: QualityLoopState;
   userRequest: string;
+  /** System-determined task scope; absent in pre-scope snapshots. */
+  taskScope?: QualityTaskScope;
   previewUrl?: string;
   deployedUrl?: string;
   inspectionRan: boolean;
@@ -108,7 +116,11 @@ export function snapshotQualityLoopSession(session: QualityLoopSession): Quality
 }
 
 export function restoreQualityLoopSession(snapshot: QualityLoopSnapshot): QualityLoopSession {
-  return JSON.parse(JSON.stringify(snapshot)) as QualityLoopSession;
+  const session = JSON.parse(JSON.stringify(snapshot)) as QualityLoopSession;
+  // Snapshots predating task scopes carry no scope: classify deterministically
+  // from the stored request. The scope is system-computed either way.
+  if (!session.taskScope) session.taskScope = classifyTaskScope(session.userRequest ?? "");
+  return session;
 }
 
 export function startQualityLoopSession(opts: {
@@ -117,28 +129,25 @@ export function startQualityLoopSession(opts: {
   userId: string;
   userRequest: string;
   snapshot?: QualityLoopSnapshot;
-  /** Override the classifier (tests, explicit mission types). */
-  profile?: QualityProfile;
 }): QualityLoopSession {
   if (
     opts.snapshot &&
     opts.snapshot.state.projectId === opts.projectId &&
     opts.snapshot.state.userId === opts.userId
   ) {
-    // Snapshots from before profiles existed keep the full website gate
-    // (profileOf() defaults to "site") — a resume never loosens the gate.
+    // A resume never loosens the gate — the snapshot carries its scope.
     return restoreQualityLoopSession(opts.snapshot);
   }
 
-  const profile = opts.profile ?? classifyQualityProfile(opts.userRequest);
   const session: QualityLoopSession = {
     state: createQualityLoop({
       runId: opts.runId,
       projectId: opts.projectId,
       userId: opts.userId,
-      profile,
     }),
     userRequest: opts.userRequest,
+    // System-determined from the request — never agent-declared.
+    taskScope: classifyTaskScope(opts.userRequest),
     inspectionRan: false,
     critiqueFailed: false,
     observations: [],
@@ -146,13 +155,13 @@ export function startQualityLoopSession(opts: {
   };
 
   // UNDERSTAND for targeted work is established by the request itself:
-  // the system records it instead of demanding a written brief. A site
+  // the system records it instead of demanding a written brief. A full
   // build still needs the agent's structured brief (audience, goals…).
-  if (profile !== "site" && opts.userRequest.trim()) {
+  if (session.taskScope !== "full" && opts.userRequest.trim()) {
     fileObservation(session, "understand", {
-      summary: `Request captured (${profile} task): ${opts.userRequest.trim().slice(0, 300)}`,
+      summary: `Request captured (${session.taskScope} task): ${opts.userRequest.trim().slice(0, 300)}`,
       by: "system",
-      detail: { profile },
+      detail: { taskScope: session.taskScope },
     });
   }
   return session;
@@ -205,16 +214,29 @@ function hasMachineEvidence(
  * Whether a stage with evidence may be passed. Deploy/verify additionally
  * require at least one non-agent evidence record — agent self-report
  * alone leaves the stage open and the gate holds.
+ *
+ * Trivial-scope exception: for a trivial task the build IS the mutation,
+ * so a system-recorded successful mutation is machine evidence for BUILD.
+ * There is no "runnable entry artifact" to inspect for a one-line edit,
+ * and demanding one would stall every trivial task forever. The agent's
+ * word alone still never suffices (by !== "agent" is required).
  */
-function stagePassable(state: QualityLoopState, stage: QualityStage): boolean {
+function stagePassable(
+  state: QualityLoopState,
+  stage: QualityStage,
+  taskScope: QualityTaskScope = "full",
+): boolean {
   const s = state.stages[stage];
   if (s.evidence.length === 0) return false;
   if (blockedReason(state, stage)) return false;
+  if (taskScope === "trivial" && stage === "build") {
+    return s.evidence.some((e) => e.by !== "agent");
+  }
   if (MACHINE_EVIDENCE_STAGES.has(stage)) {
-    // Targeted work (edit/feature) is verified at the scale of the change:
-    // a successful mutation is the build, and reading the changed file
-    // back is an inspection. A site build keeps the strict website proofs.
-    const targeted = profileOf(state) !== "site";
+    // Targeted work (trivial/standard scope) is verified at the scale of the
+    // change: a successful mutation is the build, and reading the changed
+    // file back is an inspection. A full build keeps the strict proofs.
+    const targeted = taskScope !== "full";
     const predicates: Partial<Record<QualityStage, (detail: Record<string, unknown> | undefined) => boolean>> = {
       build: (detail) => detail?.artifactVerified === true || (targeted && detail?.mutationVerified === true),
       run: (detail) => detail?.reachable === true,
@@ -380,6 +402,7 @@ function blockedReason(state: QualityLoopState, stage: QualityStage): string | n
 
 function reconcile(session: QualityLoopSession): void {
   const state = session.state;
+  const required = new Set<QualityStage>(REQUIRED_STAGES_BY_SCOPE[session.taskScope]);
   let progressed = true;
   while (progressed) {
     progressed = false;
@@ -397,9 +420,15 @@ function reconcile(session: QualityLoopSession): void {
           state.stages[st].evidence.length > 0 ||
           session.observations.some((o) => o.stage === st),
       );
+      // Stages outside the task's scope never block: skip them with a
+      // recorded reason once later-stage work proves the run moved on.
+      // Deploy/verify keep their own rules (they bind to the deploy
+      // request, not to the task scope).
+      const scopeSkippable =
+        c !== "deploy" && c !== "verify" && !required.has(c);
       if (
         s.evidence.length > 0 &&
-        stagePassable(state, c) &&
+        stagePassable(state, c, session.taskScope) &&
         laterHasEvidence &&
         (s.status === "pending" || s.status === "active")
       ) {
@@ -412,17 +441,25 @@ function reconcile(session: QualityLoopSession): void {
       } else if (
         s.evidence.length === 0 &&
         laterHasEvidence &&
-        (IMPLICATION_SKIPPABLE.has(c) || !isStageRequired(state, c)) &&
+        (IMPLICATION_SKIPPABLE.has(c) || scopeSkippable) &&
         (s.status === "pending" || s.status === "active")
       ) {
         try {
-          skipStage(
-            state,
-            c,
-            isStageRequired(state, c) || IMPLICATION_SKIPPABLE.has(c)
-              ? "No evidence recorded; advanced by implication from later-stage work."
-              : `Not required for a ${profileOf(state)} task.`,
-          );
+          if (IMPLICATION_SKIPPABLE.has(c)) {
+            skipStage(
+              state,
+              c,
+              "No evidence recorded; advanced by implication from later-stage work.",
+            );
+          } else {
+            // Reachable only when scopeSkippable (see the branch condition).
+            skipStageOutOfScope(
+              state,
+              c,
+              session.taskScope,
+              `Stage does not apply to the ${session.taskScope} task scope (system-determined).`,
+            );
+          }
           progressed = true;
         } catch {
           // Leave open.
@@ -824,15 +861,18 @@ export interface QualityFinale {
 
 /**
  * Close out the loop and decide whether success may be declared.
- * The hard product rule lives here: every non-skippable stage must have
- * passed with evidence (deploy/verify bind to deployRequested), no stage
- * may have failed, and the verdict says so explicitly.
+ * The hard product rule lives here: every stage required by the task's
+ * scope must have passed with evidence (deploy/verify bind to
+ * deployRequested), no stage may have failed, and the verdict says so
+ * explicitly. Stages outside the task's scope are skipped with a recorded
+ * reason — they never block completion.
  */
 export function finalizeQualityLoop(
   session: QualityLoopSession,
   opts: { deployRequested: boolean },
 ): QualityFinale {
   const state = session.state;
+  const required = new Set<QualityStage>(REQUIRED_STAGES_BY_SCOPE[session.taskScope]);
 
   // Final sweep: file what became due, then pass or skip whatever is still
   // open, in order. Observations must be filed as the current stage moves
@@ -843,24 +883,26 @@ export function finalizeQualityLoop(
     const c = currentStage(state);
     if (!c) break;
     const s = state.stages[c];
+    // Stages outside the task's scope never block: skip with a recorded
+    // reason. Deploy/verify keep their own rules (deploy request, not scope).
+    const scopeSkippable =
+      c !== "deploy" && c !== "verify" && !required.has(c);
     try {
-      if (stagePassable(state, c)) {
+      if (stagePassable(state, c, session.taskScope)) {
         passStage(state, c);
-      } else if (
-        s.evidence.length === 0 &&
-        (STAGE_REQUIREMENTS[c].skippable || !isStageRequired(state, c))
-      ) {
+      } else if (s.evidence.length === 0 && STAGE_REQUIREMENTS[c].skippable) {
         const reason =
           (c === "inspect" || c === "critique") && session.inspectionNote
             ? session.inspectionNote
-            : isStageRequired(state, c) || STAGE_REQUIREMENTS[c].skippable
-              ? "Stage produced no evidence during the run."
-              : `Not required for a ${profileOf(state)} task.`;
+            : "Stage produced no evidence during the run.";
         skipStage(state, c, reason);
-      } else if (!isStageRequired(state, c) && !blockedReason(state, c)) {
-        // Optional for this profile and not failing — its partial evidence
-        // stays in the ledger, but it does not hold the gate.
-        skipStage(state, c, `Not required for a ${profileOf(state)} task (evidence kept).`);
+      } else if (s.evidence.length === 0 && scopeSkippable) {
+        skipStageOutOfScope(
+          state,
+          c,
+          session.taskScope,
+          `Stage does not apply to the ${session.taskScope} task scope (system-determined).`,
+        );
       } else {
         // Either no evidence on a required stage (gate holds), or the
         // latest evidence reports failure (gate holds harder).
@@ -871,7 +913,10 @@ export function finalizeQualityLoop(
     }
   }
 
-  const rawVerdict = declareSuccess(state, { deployRequested: opts.deployRequested });
+  const rawVerdict = declareSuccess(state, {
+    deployRequested: opts.deployRequested,
+    taskScope: session.taskScope,
+  });
   // Surface blocking failure reasons honestly: the verdict names the
   // stages, and the reason names why they are stuck.
   const blocked = QUALITY_STAGES.flatMap((stage) => {
@@ -926,27 +971,39 @@ export const QUALITY_LOOP_PROMPT_SECTION = [
   "a result (a deletion, a deployment, a passing check) that did not actually happen.",
 ].join("\n");
 
-/** Prompt section for targeted (edit / feature) work. */
-const TARGETED_PROMPT_SECTION = (profile: QualityProfile) => [
-  "",
-  `## Quality check (${profile === "edit" ? "targeted edit" : "feature"})`,
-  "",
-  profile === "edit"
-    ? "This is a targeted edit. Do not run the website workflow (no research, design or critique passes)."
-    : "This is a bounded feature. Plan briefly, then build; no website-level design or critique passes.",
-  "",
-  ...(profile === "feature"
-    ? ["- PLAN: declare it with a line `QUALITY: plan — <one-line plan>` before you change files."]
-    : []),
-  "- Make the change with the file tools.",
-  "- Verify it: read the changed file back, or run the relevant check (test/typecheck/lint/build).",
-  "  The system records this evidence automatically — you do not need to narrate stages.",
-  "- DEPLOY only when the user asked to ship.",
-  "",
-  "Never claim a result (a passing check, a deployment) that did not actually happen.",
-].join("\n");
+/**
+ * Scope-specific guidance appended to the quality prompt. The scope is
+ * system-determined from the user's request and is stated to the agent as
+ * a fact, not a negotiation: it tells the agent which stages apply so it
+ * neither performs rituals the task does not need (a preview for a typo
+ * fix) nor skips stages the task does need.
+ */
+const TASK_SCOPE_PROMPT: Record<QualityTaskScope, string[]> = {
+  trivial: [
+    "",
+    "Task scope for this run: TRIVIAL (determined by the system from the request).",
+    "This is a single small text/content change. Only the BUILD stage applies: make the",
+    "change with tools. The successful mutation is the evidence. Do not start previews,",
+    "run design passes, or execute test suites for a one-line edit, and do not emit",
+    "QUALITY markers for stages that do not apply.",
+  ],
+  standard: [
+    "",
+    "Task scope for this run: STANDARD (determined by the system from the request).",
+    "Required stages: understand, plan, build, test. Declare each with a QUALITY marker as",
+    "you complete it; run the checks and fix failures yourself. The other stages (design,",
+    "run, inspect, critique, polish) are recorded if you do them but do not block completion.",
+  ],
+  full: [
+    "",
+    "Task scope for this run: FULL (determined by the system from the request).",
+    "This is a product build: work every stage in order and declare each one. The visual",
+    "judge will score your preview; a below-threshold score means another design pass.",
+    "Deploy only if the user asked to ship.",
+  ],
+};
 
-/** The quality-loop prompt section sized to the run's profile. */
-export function qualityLoopPromptSection(profile: QualityProfile): string {
-  return profile === "site" ? QUALITY_LOOP_PROMPT_SECTION : TARGETED_PROMPT_SECTION(profile);
+/** The quality-loop prompt section tailored to the run's task scope. */
+export function buildQualityLoopPrompt(taskScope: QualityTaskScope): string {
+  return [QUALITY_LOOP_PROMPT_SECTION, ...TASK_SCOPE_PROMPT[taskScope]].join("\n");
 }

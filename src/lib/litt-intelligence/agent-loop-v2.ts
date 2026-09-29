@@ -16,7 +16,6 @@
 import "server-only";
 
 import { postRunCheckpointLabel } from "@/lib/studio/checkpoint-pairs";
-import { profileOf } from "./quality-loop";
 import type { WorkspaceTransport } from "./workspace-transport";
 import { ProgressEmitter, type ProgressEvent } from "./progress-events";
 import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from "./permission-engine";
@@ -33,6 +32,7 @@ import type { ActionExecutionContext } from "@/lib/action-runtime";
 import { resolveAvailableCapabilities } from "./capabilities";
 import type { LiTTToolDefinition } from "./types";
 import {
+  buildQualityLoopPrompt,
   buildRedesignPrompt,
   finalizeQualityLoop,
   harvestStageMarkers,
@@ -41,7 +41,6 @@ import {
   noteDeployment,
   noteToolResult,
   noteMutationReadBack,
-  qualityLoopPromptSection,
   runQualityInspection,
   snapshotQualityLoopSession,
   startQualityLoopSession,
@@ -675,7 +674,7 @@ async function runAgentLoopV2Inner(
       userRequest: cfg.qualityLoop.userRequest ?? userMessage,
       snapshot: cfg.qualityLoop.state,
     });
-    cfg.systemPrompt += qualityLoopPromptSection(profileOf(qualitySession.state));
+    cfg.systemPrompt += buildQualityLoopPrompt(qualitySession.taskScope);
   }
 
   const events: ProgressEvent[] = [];
@@ -1826,7 +1825,7 @@ async function resumeAgentLoopV2Inner(
       userRequest: cfg.qualityLoop.userRequest ?? "",
       snapshot: cfg.qualityLoop.state,
     });
-    cfg.systemPrompt += qualityLoopPromptSection(profileOf(qualitySession.state));
+    cfg.systemPrompt += buildQualityLoopPrompt(qualitySession.taskScope);
   }
 
   const events: ProgressEvent[] = [];

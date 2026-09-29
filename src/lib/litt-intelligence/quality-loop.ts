@@ -122,74 +122,71 @@ export const STAGE_REQUIREMENTS: Record<QualityStage, StageRequirement> = {
   },
 };
 
-// ─── Task-sized profiles ──────────────────────────────────────────
+// ─── Task scope ────────────────────────────────────────────────────
 
 /**
- * How much of the loop a request needs. Acceptance run 2026-09-28: a
- * one-line HTML-comment edit was refused because it lacked evidence for all
- * eight website stages (understand, plan, design, build, run, inspect,
- * critique, test). Required stages now scale with the task's intent:
+ * How much of the quality pipeline a task requires.
  *
- * - edit:    tiny, targeted change → understand, build, then verification
- *            by EITHER inspect (read-back) OR test.
- * - feature: a bounded addition to an existing project → understand, plan,
- *            build, then inspect OR test.
- * - site:    building a website/app → the full gated website workflow.
- *
- * Deploy/verify stay bound to whether a deployment was requested, for
- * every profile.
+ * The scope is determined by the SYSTEM from the user's request
+ * (classifyTaskScope) — never by the agent. A narrower scope means fewer
+ * stages apply, but the stages that remain still demand real evidence.
+ * Scope can narrow which stages apply; it can never fabricate evidence
+ * for the stages that remain, and it never excuses a failed stage.
  */
-export type QualityProfile = "edit" | "feature" | "site";
+export type QualityTaskScope = "trivial" | "standard" | "full";
 
-export interface ProfileRequirement {
-  /** Stages that must each pass with evidence. */
-  required: readonly QualityStage[];
-  /** At least ONE of these must pass (empty = no alternative group). */
-  verifyAnyOf: readonly QualityStage[];
-}
-
-export const PROFILE_REQUIREMENTS: Record<QualityProfile, ProfileRequirement> = {
-  edit: { required: ["understand", "build"], verifyAnyOf: ["inspect", "test"] },
-  feature: { required: ["understand", "plan", "build"], verifyAnyOf: ["inspect", "test"] },
-  site: {
-    required: ["understand", "plan", "design", "build", "run", "inspect", "critique", "test"],
-    verifyAnyOf: [],
-  },
+/**
+ * Stages that must pass with recorded evidence for each task scope.
+ * Deploy/verify bind to the deploy request instead (see declareSuccess)
+ * and are deliberately not listed here.
+ */
+export const REQUIRED_STAGES_BY_SCOPE: Record<QualityTaskScope, readonly QualityStage[]> = {
+  // A single text/content mutation with no behavioral change (typo fix,
+  // HTML comment, copy tweak). The work IS the mutation: only the build
+  // stage applies, proven by the machine-recorded mutation — not by the
+  // agent's word, and not by an artifact inspection that cannot exist
+  // for a one-line edit.
+  trivial: ["build"],
+  // Bug fixes, small features, multi-file changes. Understand the problem,
+  // plan the change, make it, prove the checks pass.
+  standard: ["understand", "plan", "build", "test"],
+  // A new product surface. The complete pipeline, as originally designed.
+  full: ["understand", "plan", "design", "build", "run", "inspect", "critique", "test"],
 };
 
-const SITE_BUILD_PATTERN =
-  /\b(build|create|make|design|generate|launch|scaffold|spin up|set up)\b[^.?!\n]{0,60}\b(website|web ?site|site|landing ?page|web ?app|app|portfolio|store|shop|storefront|home ?page|dashboard|saas)\b/i;
-const FROM_SCRATCH_PATTERN = /\b(from scratch|brand[- ]new (site|website|app)|new (website|site|web app))\b/i;
-const EDIT_VERB_PATTERN =
-  /\b(add|change|update|fix|rename|replace|remove|delete|tweak|adjust|set|insert|edit|move|swap|correct|bump|put|append|prepend|wrap)\b/i;
+/**
+ * Request patterns that ask for a whole product surface. Checked BEFORE
+ * the trivial patterns: "build me a website and fix a typo" is a full
+ * build, not a typo fix.
+ */
+const FULL_SCOPE_PATTERNS: RegExp[] = [
+  /\b(build|create|generate|make|design|redesign|rebuild|scaffold|develop|launch)\b[\s\S]{0,60}\b(website|web\s?site|webapp|web\s?app|app|application|landing\s?page|home\s?page|product|platform|dashboard|store|shop|portfolio|blog|site)\b/i,
+  /\bnew\b[\s\S]{0,30}\b(website|web\s?site|app|page|product|platform|site)\b/i,
+  /\bfrom scratch\b/i,
+  /\bredesign\b/i,
+];
+
+/** Request patterns for a single tiny text/content tweak. */
+const TRIVIAL_SCOPE_PATTERNS: RegExp[] = [
+  /\btypos?\b/i,
+  /\bhtml comment\b/i,
+  /\b(spelling|grammar|punctuation)\b/i,
+  /\b(change|update|edit|fix|tweak|adjust|modify)\b[\s\S]{0,40}\b(text|copy|wording|headline|title|heading|label|button text|link text)\b/i,
+  /\brename\b/i,
+];
 
 /**
- * Classify a request into a quality profile. Deliberately conservative in
- * one direction only: anything that looks like building a site/app gets
- * the full gate; a short, targeted edit gets the edit gate; everything
- * else is a feature.
+ * Deterministically classify a task's scope from the user's request.
+ * Conservative by design: unknown requests are "standard", and anything
+ * that smells like a product build is "full". The agent cannot change
+ * its scope mid-run — the scope lives on the session, not in the prompt.
  */
-export function classifyQualityProfile(request: string): QualityProfile {
-  const text = (request ?? "").trim();
-  if (!text) return "site";
-  if (SITE_BUILD_PATTERN.test(text) || FROM_SCRATCH_PATTERN.test(text)) return "site";
-  const sentences = text.split(/[.!?\n]+/).filter((p) => p.trim().length > 0).length;
-  if (EDIT_VERB_PATTERN.test(text) && text.length <= 400 && sentences <= 3) return "edit";
-  return "feature";
-}
-
-export function profileOf(state: Pick<QualityLoopState, "profile">): QualityProfile {
-  return state.profile ?? "site";
-}
-
-/** Whether `stage` must individually pass for this loop's profile. */
-export function isStageRequired(state: Pick<QualityLoopState, "profile">, stage: QualityStage): boolean {
-  return PROFILE_REQUIREMENTS[profileOf(state)].required.includes(stage);
-}
-
-/** Whether `stage` belongs to the profile's either/or verification group. */
-export function isVerificationAlternative(state: Pick<QualityLoopState, "profile">, stage: QualityStage): boolean {
-  return PROFILE_REQUIREMENTS[profileOf(state)].verifyAnyOf.includes(stage);
+export function classifyTaskScope(userRequest: string): QualityTaskScope {
+  const req = userRequest.trim();
+  if (!req) return "standard";
+  if (FULL_SCOPE_PATTERNS.some((p) => p.test(req))) return "full";
+  if (TRIVIAL_SCOPE_PATTERNS.some((p) => p.test(req))) return "trivial";
+  return "standard";
 }
 
 // ─── Evidence ─────────────────────────────────────────────────────
@@ -226,11 +223,6 @@ export interface QualityLoopState {
   projectId: string;
   userId: string;
   version: typeof QUALITY_LOOP_VERSION;
-  /**
-   * Task-sized requirement profile. Absent on snapshots persisted before
-   * profiles existed — those keep the original full website gate.
-   */
-  profile?: QualityProfile;
   stages: Record<QualityStage, StageState>;
   /** How many DESIGN←CRITIQUE fix passes have run (bounded by MAX_DESIGN_PASSES). */
   designPasses: number;
@@ -265,7 +257,6 @@ export function createQualityLoop(opts: {
   runId: string;
   projectId: string;
   userId: string;
-  profile?: QualityProfile;
 }): QualityLoopState {
   const stages = {} as Record<QualityStage, StageState>;
   for (const stage of QUALITY_STAGES) {
@@ -277,7 +268,6 @@ export function createQualityLoop(opts: {
     projectId: opts.projectId,
     userId: opts.userId,
     version: QUALITY_LOOP_VERSION,
-    profile: opts.profile ?? "site",
     stages,
     designPasses: 0,
     startedAt: now,
@@ -374,10 +364,45 @@ export function skipStage(state: QualityLoopState, stage: QualityStage, reason: 
       `Cannot skip stage "${stage}" while stage "${current ?? "none"}" is current.`,
     );
   }
-  if (!STAGE_REQUIREMENTS[stage].skippable && isStageRequired(state, stage)) {
+  if (!STAGE_REQUIREMENTS[stage].skippable) {
     throw new StageGateError(
       stage,
       `Stage "${stage}" is not skippable. It must pass with evidence: ${STAGE_REQUIREMENTS[stage].evidence}`,
+    );
+  }
+  if (!reason.trim()) {
+    throw new StageGateError(stage, `Skipping stage "${stage}" requires an explicit reason.`);
+  }
+  const s = state.stages[stage];
+  s.status = "skipped";
+  s.skipReason = reason;
+  touch(state);
+}
+
+/**
+ * Skip the current stage because it does not apply to the task's scope
+ * (e.g. UNDERSTAND for a trivial typo fix). Unlike skipStage, this is not
+ * limited to statically-skippable stages — but it REFUSES to skip a stage
+ * the scope requires, so scope can never excuse required work. The skip
+ * is recorded with an explicit reason and stays visible in the ledger.
+ */
+export function skipStageOutOfScope(
+  state: QualityLoopState,
+  stage: QualityStage,
+  taskScope: QualityTaskScope,
+  reason: string,
+): void {
+  const current = currentStage(state);
+  if (current !== stage) {
+    throw new StageGateError(
+      stage,
+      `Cannot skip stage "${stage}" while stage "${current ?? "none"}" is current.`,
+    );
+  }
+  if (REQUIRED_STAGES_BY_SCOPE[taskScope].includes(stage)) {
+    throw new StageGateError(
+      stage,
+      `Stage "${stage}" is required for ${taskScope}-scope tasks and cannot be skipped as out of scope.`,
     );
   }
   if (!reason.trim()) {
@@ -415,19 +440,27 @@ export interface SuccessVerdict {
 }
 
 /**
- * The hard product rule: success may be declared only when every
- * non-skippable stage has passed with evidence AND no stage has failed.
- * Deploy/verify are required only when a deployment was requested —
+ * The hard product rule: success may be declared only when every stage
+ * required by the task's scope has passed with evidence AND no stage has
+ * failed. Deploy/verify are required only when a deployment was requested —
  * otherwise they may remain pending (e.g. paused for user approval).
  * When a deployment WAS requested, deploy/verify must have passed with
  * evidence: skipping shipment is not an option.
  *
+ * The task scope (trivial | standard | full) is system-determined from the
+ * user's request. A narrower scope means fewer stages apply — but the
+ * stages that remain still demand real evidence, and a failed stage always
+ * blocks regardless of scope. Scope can never be used to bypass the gate.
+ *
  * @param deployRequested — true when the run was asked to ship/publish.
+ * @param taskScope — which stages apply; defaults to "full" (previous behavior).
  */
 export function declareSuccess(
   state: QualityLoopState,
-  opts: { deployRequested: boolean },
+  opts: { deployRequested: boolean; taskScope?: QualityTaskScope },
 ): SuccessVerdict {
+  const taskScope: QualityTaskScope = opts.taskScope ?? "full";
+  const required = new Set<QualityStage>(REQUIRED_STAGES_BY_SCOPE[taskScope]);
   const missing: QualityStage[] = [];
 
   for (const stage of QUALITY_STAGES) {
@@ -444,42 +477,26 @@ export function declareSuccess(
       if (s.status !== "passed") missing.push(stage);
       continue;
     }
-    if (!isStageRequired(state, stage)) continue;
+    // Stages outside the task's scope never block completion.
+    if (!required.has(stage)) continue;
     if (s.status !== "passed") missing.push(stage);
-  }
-
-  // Either/or verification group (edit / feature profiles): at least one
-  // of the alternatives must have passed with evidence.
-  const group = PROFILE_REQUIREMENTS[profileOf(state)].verifyAnyOf;
-  let groupMissing = false;
-  if (group.length > 0 && !group.some((stage) => state.stages[stage].status === "passed")) {
-    groupMissing = true;
-    for (const stage of group) if (!missing.includes(stage)) missing.push(stage);
   }
 
   if (missing.length === 0) {
     return {
       ok: true,
       missing: [],
-      reason: "All required quality-loop stages passed with recorded evidence.",
+      reason: `All required quality-loop stages passed with recorded evidence (task scope: ${taskScope}).`,
     };
   }
 
-  const individual = missing.filter((s) => !(groupMissing && group.includes(s)));
-  const parts: string[] = [];
-  if (individual.length > 0) {
-    parts.push(
-      `${individual.length} required stage(s) lack evidence: ` +
-        individual.map((s) => `"${s}" (${state.stages[s].status})`).join(", "),
-    );
-  }
-  if (groupMissing) {
-    parts.push(`the change was not verified — needs ${group.map((s) => `"${s}"`).join(" or ")}`);
-  }
   return {
     ok: false,
     missing,
-    reason: `Cannot declare success: ${parts.join("; ")}.`,
+    reason:
+      `Cannot declare success (task scope: ${taskScope}): ${missing.length} required stage(s) lack evidence: ` +
+      missing.map((s) => `"${s}" (${state.stages[s].status})`).join(", ") +
+      ".",
   };
 }
 
