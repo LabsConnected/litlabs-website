@@ -19,6 +19,7 @@ import { useConversationStore } from "../stores/useConversationStore";
 import {
   mapStudioTaskToWorktab,
   nextUntitledTitle,
+  resolveAdoptedTaskTitle,
   useWorktabSelections,
   type Worktab,
 } from "../hooks/useServerWorktabs";
@@ -1107,7 +1108,12 @@ function CommandStudioContent() {
     taskSeededRef.current = conversationId;
     const selected = conversation.conversations.find((item) => item.id === conversationId);
     void studioTasks.createTask({
-      title: selected?.title ?? "Current work",
+      // Untitled conversations mint a collision-free "Untitled N" instead
+      // of every adoption becoming another "Current work" tab.
+      title: resolveAdoptedTaskTitle(
+        selected?.title,
+        studioTasks.tasks.map((task) => task.title),
+      ),
       taskType: "general",
       conversationId,
     });
@@ -3192,6 +3198,9 @@ function CommandStudioContent() {
               activityPulse={conversation.busy}
               terminalBadge={["error", "pty_failed", "auth_failed"].includes(capabilities.terminalStatus)}
               activityContent={
+                // MissionCards live in the dock Activity tab (classic
+                // desktop topology) and in the shell's center `activity`
+                // stage surface; mobile keeps the build-status sheet.
                 <StudioActivityPanel
                   messages={conversation.messages}
                   busy={conversation.busy}
