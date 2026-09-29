@@ -8,7 +8,7 @@
  * - Native structured tool calling only. No text-parsed fake tool calls.
  * - Loop detection: cancel after 3 identical tool calls with no
  *   intervening workspace mutation or materially different result.
- * - Checkpoints before meaningful mutation batches.
+ * - Checkpoint before every meaningful mutation (per-mutation rollback points).
  * - Hard limits: max steps, max runtime, max output, max retries.
  * - Terminal server's isBlockedCommand() remains authoritative security.
  */
@@ -742,9 +742,6 @@ async function runAgentLoopV2Inner(
   // calls (the silent mid-build stall) — see resolveZeroToolCalls.
   let continuationNudges = 0;
 
-  // Check if any mutations have been requested (for checkpoint logic)
-  let mutationBatchPending = false;
-
   while (stepsUsed < cfg.maxSteps) {
     // Check runtime limit
     const elapsed = Date.now() - startTime;
@@ -902,8 +899,6 @@ async function runAgentLoopV2Inner(
     }
 
     // Process each tool call
-    let batchHasMutation = false;
-
     for (const toolCall of llmResponse.toolCalls) {
       const toolDef = availableTools.find((t) => t.id === toolCall.toolId);
 
@@ -1027,14 +1022,16 @@ async function runAgentLoopV2Inner(
         }
       }
 
-      // Create the pre-mutation checkpoint BEFORE the approval gate, so the
-      // resumed-after-approval run diffs the workspace truthfully instead of
-      // reporting "unknown". Safe when the user rejects: this only snapshots
-      // pre-mutation state and never writes workspace files.
-      if (!toolDef.readOnly && !mutationBatchPending && !checkpoint) {
+      // Create a pre-mutation checkpoint BEFORE the approval gate, ahead of
+      // EVERY mutating tool call — each mutation gets its own rollback
+      // point, so the resumed-after-approval run diffs the workspace
+      // truthfully instead of reporting "unknown". Safe when the user
+      // rejects: this only snapshots pre-mutation state and never writes
+      // workspace files. Read-only tools never checkpoint.
+      if (!toolDef.readOnly) {
         localProgress.emit({ type: "phase", phase: "execute", step: stepsUsed });
         checkpoint = await transport.createCheckpointBeforeMutation(
-          `Pre-agent-loop: ${userMessage.slice(0, 80)}`,
+          `Pre-mutation: ${toolCall.toolId} (step ${stepsUsed})`,
         ) ?? undefined;
         if (checkpoint) {
           localProgress.emit({
@@ -1043,8 +1040,6 @@ async function runAgentLoopV2Inner(
             gitSha: checkpoint.gitSha,
           });
         }
-        mutationBatchPending = true;
-        batchHasMutation = true;
       }
 
       if (permResult.requiresApproval) {
@@ -1195,7 +1190,6 @@ async function runAgentLoopV2Inner(
       // Track mutations
       if (!toolDef.readOnly) {
         hasInterveningMutation = true;
-        batchHasMutation = true;
         if (result.success) executedMutations.set(dedupeKey, result);
       }
 
@@ -1234,11 +1228,6 @@ async function runAgentLoopV2Inner(
     }
 
     if (cancelled) break;
-
-    // Reset mutation flag after batch
-    if (!batchHasMutation) {
-      mutationBatchPending = false;
-    }
 
     // Per-step timing: total step duration + cumulative elapsed, so the work log
     // can show exactly where the minutes went on a slow build.
@@ -1703,11 +1692,15 @@ export async function executeDeferredToolCalls(
       break;
     }
 
-    // Checkpoint before first mutation
-    if (!toolDef.readOnly && !state.mutationBatchPending && !state.checkpoint) {
+    // Checkpoint before EVERY mutation in the deferred batch (the same
+    // per-mutation guarantee as the initial loop): the resumed run keeps
+    // producing a rollback point for each mutation across the pause
+    // boundary, so the workspace always diffs truthfully. Read-only tools
+    // never checkpoint.
+    if (!toolDef.readOnly) {
       ctx.localProgress.emit({ type: "phase", phase: "execute", step: ctx.stepsUsed });
       state.checkpoint = await ctx.transport.createCheckpointBeforeMutation(
-        `Pre-agent-loop resume (deferred batch)`,
+        `Pre-mutation resume (deferred batch): ${toolCall.toolId}`,
       ) ?? undefined;
       if (state.checkpoint) {
         ctx.localProgress.emit({
@@ -1716,8 +1709,6 @@ export async function executeDeferredToolCalls(
           gitSha: state.checkpoint.gitSha,
         });
       }
-      state.mutationBatchPending = true;
-      state.batchHasMutation = true;
     }
 
     ctx.localProgress.emit({ type: "tool_start", toolId: toolCall.toolId, summary: `${toolCall.toolId} (deferred)` });
@@ -1881,6 +1872,9 @@ async function resumeAgentLoopV2Inner(
   let checkpoint = resume.existingCheckpoint;
   const toolCallLog: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }> = [];
   let completedDeployment: CompletedDeployment | null = null;
+  // NOTE: checkpoints are now created before EVERY mutation, so this flag no
+  // longer gates anything. It is retained only because it is part of the
+  // DeferredToolBatchState shape threaded through pause/resume records.
   let mutationBatchPending = false;
   let batchHasMutation = false;
   // Bounded recovery when the model announces more work but emits no tool
@@ -1997,7 +1991,6 @@ async function resumeAgentLoopV2Inner(
     // be cached as executed work or weaken loop detection.
     if (toolDef && !toolDef.readOnly && result.success) {
       hasInterveningMutation = true;
-      mutationBatchPending = true;
     }
   } else {
     // Rejected — inject rejection as tool result
@@ -2269,16 +2262,16 @@ async function resumeAgentLoopV2Inner(
         continue;
       }
 
-      // Create the pre-mutation checkpoint BEFORE the approval gate (same
-      // guarantee as the initial loop): a nested approval pause carries the
-      // checkpoint so the next resume diffs truthfully instead of "unknown".
-      if (!toolDef.readOnly && !mutationBatchPending && !checkpoint) {
-        checkpoint = await transport.createCheckpointBeforeMutation(`Pre-agent-loop resume`) ?? undefined;
+      // Create the pre-mutation checkpoint BEFORE the approval gate, ahead of
+      // EVERY mutating tool call (same per-mutation guarantee as the initial
+      // loop): a nested approval pause carries the latest checkpoint so the
+      // next resume diffs truthfully instead of "unknown". Read-only tools
+      // never checkpoint.
+      if (!toolDef.readOnly) {
+        checkpoint = await transport.createCheckpointBeforeMutation(`Pre-mutation resume: ${toolCall.toolId} (step ${stepsUsed})`) ?? undefined;
         if (checkpoint) {
           localProgress.emit({ type: "checkpoint", label: checkpoint.label, gitSha: checkpoint.gitSha });
         }
-        mutationBatchPending = true;
-        batchHasMutation = true;
       }
 
       if (permResult.requiresApproval) {
