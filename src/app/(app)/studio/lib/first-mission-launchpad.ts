@@ -16,7 +16,7 @@ export type FirstMissionLaunchpadKey =
   | "workspace_preparing"
   | "workspace_failed"
   | "provider_unavailable"
-  | "terminal_disconnected"
+  | "terminal_unreachable"
   | "verified"
   | "inspection_running"
   | "inspection_failed"
@@ -142,8 +142,10 @@ function factsFor(runtime: ProjectRuntimeState, providerHealth?: ProviderHealth)
     ),
     fact(
       "Terminal",
-      runtime.terminalConnected && runtime.executionAvailable ? "verified" : "unavailable",
-      runtime.terminalConnected && runtime.executionAvailable
+      // Server-side executability — the canonical runtime truth derives this
+      // from workspace + terminal-server reachability, NOT PTY attachment.
+      runtime.executionAvailable ? "verified" : "unavailable",
+      runtime.executionAvailable
         ? "Verified connection"
         : "No verified execution session",
     ),
@@ -265,14 +267,12 @@ function deriveLaunchpad(input: FirstMissionLaunchpadInput): LaunchpadStateWitho
     };
   }
 
-  if (
-    runtime.phase === "terminal_disconnected"
-    || runtime.phase === "terminal_reconnecting"
-    || !runtime.terminalConnected
-    || !runtime.executionAvailable
-  ) {
+  // Gate on executionAvailable alone — the canonical runtime truth. Server-side
+  // execution (transport.exec → terminal-server HTTP) never waits on an
+  // interactive PTY, so PTY attachment state is not a launch blocker.
+  if (!runtime.executionAvailable) {
     return {
-      key: "terminal_disconnected",
+      key: "terminal_unreachable",
       eyebrow: "One more step",
       title: "Almost there",
       description: "LiTT needs a live connection to run things. One tap to connect.",

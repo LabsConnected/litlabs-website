@@ -13,7 +13,6 @@ import {
   type ExecutionDetailRecord,
 } from "./ExecutionBlock";
 import { useVoiceSession } from "@/app/(app)/studio/context/VoiceSessionContext";
-import { useTerminalStore } from "@/stores/useTerminalStore";
 import {
   AGENT_META,
   type ChatMessage,
@@ -458,6 +457,7 @@ export default function StudioTranscript({
   onUndoCompletion,
   onContinueCompletion,
   overflowDownloads = false,
+  ptyUsable = false,
 }: {
   messages: ChatMessage[];
   busy: boolean;
@@ -474,9 +474,17 @@ export default function StudioTranscript({
    * vertical space. Desktop keeps the two pills.
    */
   overflowDownloads?: boolean;
+  /**
+   * True when the interactive PTY is usable right now. Sourced from the
+   * canonical runtime truth (useProjectRuntime's terminal.usable) by the
+   * parent — this component never reads useTerminalStore directly.
+   */
+  ptyUsable?: boolean;
 }) {
   const { speakText } = useVoiceSession();
-  const ptyUsable = useTerminalStore((s) => s.isUsable());
+  // ptyUsable comes from the canonical runtime truth via props (the parent
+  // passes runtime.terminal.usable). The "Run in terminal" button genuinely
+  // needs the PTY drawer — this is NOT the conflated executionAvailable.
   const agentMeta = AGENT_META[activeAgentId];
   const agentColor = agentMeta.color;
   const scrollRef = useRef<HTMLDivElement>(null);

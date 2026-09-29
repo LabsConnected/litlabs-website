@@ -15,10 +15,10 @@ import type { RuntimeFreshness } from "@/hooks/useLiTTRuntime";
 export type RuntimePhase =
   | "idle" // no project selected
   | "resolving" // resolving project + workspace
-  | "ready" // workspace mounted, terminal connected, execution available
+  | "ready" // workspace mounted, terminal server reachable, execution available
   | "workspace_not_provisioned" // project exists but no workspaceId
   | "workspace_not_ready" // workspaceId exists but workspaceStatus !== "ready"
-  | "terminal_disconnected" // workspace ready but terminal not connected
+  | "terminal_unreachable" // workspace ready but terminal server unreachable
   | "terminal_reconnecting" // attempting to reconnect terminal
   | "error" // unrecoverable error
   | "unauthenticated"; // no user
@@ -33,11 +33,15 @@ export interface ProjectRuntimeError {
 export interface ProjectRuntimeState {
   /** Current phase of the runtime — single source of truth for "is it ready" */
   phase: RuntimePhase;
-  /** True only when workspace is mounted AND terminal is connected */
+  /**
+   * True when the workspace is mounted AND the terminal server is reachable.
+   * This is server-side executability (transport.exec → terminal-server HTTP)
+   * — it does NOT require an interactive PTY to be attached.
+   */
   executionAvailable: boolean;
   /** True when workspace is provisioned and status is "ready" */
   workspaceProvisioned: boolean;
-  /** True when terminal WebSocket is connected (client-side transport) */
+  /** True when terminal WebSocket is connected (client-side transport; status feed only, NOT the execution pipe) */
   terminalConnected: boolean;
   /** True when terminal server is reachable (server-side health check) */
   terminalServerReachable: boolean;
@@ -140,8 +144,15 @@ export const INITIAL_RUNTIME_STATE: ProjectRuntimeState = {
 /**
  * Human-readable summary for the runtime phase.
  * Used by the Studio header and health panel.
+ *
+ * The parameter still accepts the legacy "terminal_disconnected" string: the
+ * phase was replaced by "terminal_unreachable" (dead-phase replacement), but
+ * this label case is intentionally left exactly as it was — PASS 2 owns the
+ * disconnected→idle semantic fix and will settle the wording.
  */
-export function runtimePhaseLabel(phase: RuntimePhase): string {
+export function runtimePhaseLabel(
+  phase: RuntimePhase | "terminal_disconnected",
+): string {
   switch (phase) {
     case "idle":
       return "No project selected";
@@ -158,6 +169,11 @@ export function runtimePhaseLabel(phase: RuntimePhase): string {
       // PTY isn't attached. Builds and commands run server-side regardless,
       // so this must never read as an outage.
       return "Terminal idle";
+    case "terminal_unreachable":
+      // PASS 2 owns the disconnected→idle semantic fix and will settle the
+      // real label for this phase. Until then, surface the raw phase key
+      // honestly — never "idle", never undefined.
+      return phase;
     case "terminal_reconnecting":
       return "Reconnecting terminal…";
     case "error":
@@ -203,7 +219,7 @@ export function deriveExecutionHint(
   const workspaceReady =
     runtime.workspaceProvisioned ||
     runtime.phase === "ready" ||
-    runtime.phase === "terminal_disconnected";
+    runtime.phase === "terminal_unreachable";
   if (!workspaceReady) return null;
   return "Live status feed is down — LiTT can still chat and run builds through the server.";
 }
@@ -228,9 +244,12 @@ export function runtimeRecoveryActions(
         { label: "Re-clone repository", action: "reclone_repo" },
         { label: "Select another branch", action: "select_branch" },
       ];
-    case "terminal_disconnected":
+    case "terminal_unreachable":
+      // No "reconnect" action: the socket.io transport in TerminalPanel
+      // already reconnects automatically with backoff (1s → 30s, infinite
+      // attempts). A manual "Reconnect" button that fires no reconnect is
+      // fake UI — the honest recovery path is checking the connection.
       return [
-        { label: "Reconnect terminal", action: "reconnect_terminal" },
         { label: "Open connection settings", action: "open_settings", href: "/settings" },
       ];
     case "terminal_reconnecting":

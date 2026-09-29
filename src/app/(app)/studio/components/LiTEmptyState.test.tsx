@@ -97,7 +97,7 @@ const renderCases = [
     input: {
       runtime: runtime({
         ...project,
-        phase: "terminal_disconnected",
+        phase: "terminal_unreachable",
         workspaceId: "workspace-1",
         workspaceStatus: "ready",
         workspaceProvisioned: true,
@@ -108,12 +108,12 @@ const renderCases = [
     },
   },
   {
-    name: "terminal disconnected",
+    name: "terminal unreachable",
     expected: "Connect",
     input: {
       runtime: runtime({
         ...project,
-        phase: "terminal_disconnected",
+        phase: "terminal_unreachable",
         workspaceId: "workspace-1",
         workspaceStatus: "ready",
         workspaceProvisioned: true,
