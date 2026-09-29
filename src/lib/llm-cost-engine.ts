@@ -103,6 +103,19 @@ const COST_CATALOG: ModelCostEntry[] = [
   },
 
   // ── OpenRouter (free models — provider cost is $0) ──────────────
+  // NOTE: entries are keyed by the REAL route provider ("openrouter") +
+  // the exact providerModelId. The legacy pseudo-provider keys below
+  // ("openrouter-qwen" etc.) predate the canonical model registry and no
+  // longer match what callers pass — they are kept for history, not
+  // matched. New registry free models get an entry keyed here.
+  {
+    provider: "openrouter",
+    model: "qwen/qwen3.8-27b:free",
+    promptCostPer1M: 0,
+    completionCostPer1M: 0,
+    billingClass: "free",
+    baseBitsPer1K: 0.5,
+  },
   {
     provider: "openrouter-free",
     model: "openrouter/free",

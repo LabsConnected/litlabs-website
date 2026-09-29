@@ -17,6 +17,15 @@
  *
  *   If no available list is provided, it falls back to the full catalog
  *   (for backward compatibility and tests).
+ *
+ * LANE NOTE (Sep 2026): this is the CLI product's own router — it is NOT
+ *   wired to the web runtime's canonical model registry
+ *   (src/lib/litt-intelligence/model-registry.ts), which owns Studio agent
+ *   routing (capability-gated BUILD selection, health, env-override
+ *   validation). The schemas differ (ModelChoice vs ModelRecord) and the
+ *   products ship separately, so a direct registry lookup is not possible
+ *   here; keep the ID sets from drifting by preferring self-healing
+ *   aliases over versioned slugs that rot.
  */
 
 import type { RoutingMode } from "../ink/cockpit-store.js";

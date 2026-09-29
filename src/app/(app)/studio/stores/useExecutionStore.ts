@@ -887,6 +887,21 @@ export function feedSSEEventToExecutionStore(
   const addEvent: typeof s.addEvent = (event) =>
     s.addEvent({ taskId: streamTaskId, ...event });
 
+  // Post-terminal guard: once the task's run has reached a terminal phase
+  // (done/failed/cancelled), late or duplicated progress events for that
+  // task must not resurrect it — no phase flips back to a working state
+  // and no phantom tool/feed entries. A new send calls startRun
+  // (phase -> "planning") before its stream opens, so any non-terminal
+  // event arriving while the task is terminal is by definition stale.
+  // Terminal events themselves stay idempotent (a duplicated `finished`
+  // must not be dropped).
+  const taskPhase = streamTaskId ? s.phaseForTask(streamTaskId) : s.phase;
+  const isTerminalPhase = taskPhase === "done" || taskPhase === "failed" || taskPhase === "cancelled";
+  const isTerminalEvent = evt.type === "finished" || evt.type === "cancelled";
+  if (isTerminalPhase && !isTerminalEvent) {
+    return;
+  }
+
   switch (evt.type) {
     case "tool_execution":
       if (evt.success === undefined) {

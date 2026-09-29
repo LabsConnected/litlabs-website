@@ -27,6 +27,15 @@ import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { buildPatchRecoveryMessage, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
 import { computeWorkspaceChange } from "./workspace-change-producer";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
+import { recordModelFailure } from "./provider-registry";
+import {
+  FILE_WRITE_TOOL_IDS,
+  NO_BUILD_CAPABLE_MODEL,
+  findModelRecord,
+  getModelConfigSource,
+  recordHealthOutcome,
+  selectBuildModel,
+} from "./model-registry";
 import { toolRegistry } from "./tool-registry";
 import type { ActionExecutionContext } from "@/lib/action-runtime";
 import { resolveAvailableCapabilities } from "./capabilities";
@@ -79,6 +88,17 @@ export interface AgentLoopConfig {
   enableBuildFix: boolean;
   /** Require a structured tool call on the first model turn of an execution flow. */
   requireToolCallOnFirstStep?: boolean;
+  /**
+   * Early bounded capability guard (BUILD runs): the loop tracks consecutive
+   * steps in which the model emitted tool calls but ZERO file-writing calls
+   * (files.write / apply_patch / edit). After maxStepsWithoutFileWrite such
+   * steps the serving model is ruled incompatible for this run and the loop
+   * switches to the next registry build model; when the chain is exhausted
+   * the run fails with NO_BUILD_CAPABLE_MODEL. Default 3; 0 disables.
+   */
+  buildCapabilityGuard?: {
+    maxStepsWithoutFileWrite?: number;
+  };
   /**
    * Messages to seed the conversation with before the user message.
    * Used by the launch flow's bounded reprompt to CONTINUE an existing
@@ -777,6 +797,22 @@ async function runAgentLoopV2Inner(
   // calls (the silent mid-build stall) — see resolveZeroToolCalls.
   let continuationNudges = 0;
 
+  // Early bounded capability guard (BUILD runs only, via
+  // cfg.buildCapabilityGuard): consecutive steps where the model emitted
+  // tool calls but ZERO file-writing calls. Fires within ~3 steps instead
+  // of burning the whole run budget on a model that can read but not write.
+  const buildGuardMaxSteps = cfg.buildCapabilityGuard?.maxStepsWithoutFileWrite ?? 0;
+  let buildGuardZeroWriteSteps = 0;
+  const buildGuardWindowModels = new Set<string>(); // canonicalIds ("" = unmapped)
+  let buildGuardWindowProvider = "";
+  let buildGuardWindowModel = "";
+  const buildGuardExcluded = new Set<string>();
+  const buildGuardTried: Array<{ canonicalId: string; reason: string }> = [];
+  let buildGuardModelHint: string | undefined;
+
+  // Check if any mutations have been requested (for checkpoint logic)
+  let mutationBatchPending = false;
+
   while (stepsUsed < cfg.maxSteps) {
     // Check runtime limit
     const elapsed = Date.now() - startTime;
@@ -794,19 +830,26 @@ async function runAgentLoopV2Inner(
     // Call LLM with tools (with automatic fallback)
     let llmResponse;
     const llmStartTime = Date.now();
+    // The build capability guard may have switched the serving model
+    // mid-run; its hint routes through planBasicRoutes on the next step.
+    const requestedModel = buildGuardModelHint ?? cfg.model;
     try {
       llmResponse = await callLLMWithTools(
         cfg.systemPrompt,
         llmMessages,
         toolDefs,
         {
-          model: cfg.model,
+          model: requestedModel,
           temperature: 0.15,
           maxTokens: 4096,
           toolChoice: cfg.requireToolCallOnFirstStep && stepsUsed === 1 ? "required" : "auto",
           evalMetadata: cfg.evalMetadata,
           deadlineMs: startTime + cfg.maxRuntimeMs,
           signal: cfg.signal,
+          // Preventive BUILD guard: when the run is capability-guarded, the
+          // initial routing starts on a proven file writer instead of a
+          // chat-only model that the 3-step guard would rule out anyway.
+          requireReliableFileWriting: cfg.buildCapabilityGuard != null,
         },
       );
       const llmDurationMs = Date.now() - llmStartTime;
@@ -816,12 +859,17 @@ async function runAgentLoopV2Inner(
       // Emit model routing event so LiTT Live shows which provider/model was actually used.
       // latencyMs records how long the model call took, so a slow step can be
       // attributed to the model call vs tool execution (tool_result has durationMs).
+      // canonicalId + configSource record the SELECTED model in run evidence
+      // (no secrets) — the registry is the source of truth for the mapping.
+      const routedRecord = findModelRecord(llmResponse.provider ?? "unknown", llmResponse.model);
       localProgress.emit({
         type: "model_routing",
         model: llmResponse.model,
         provider: llmResponse.provider ?? "unknown",
-        fallbackFrom: cfg.model && llmResponse.model !== cfg.model ? cfg.model : undefined,
+        fallbackFrom: requestedModel && llmResponse.model !== requestedModel ? requestedModel : undefined,
         latencyMs: llmDurationMs,
+        canonicalId: routedRecord?.canonicalId,
+        configSource: routedRecord ? getModelConfigSource(routedRecord.canonicalId) : undefined,
       });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -934,6 +982,10 @@ async function runAgentLoopV2Inner(
     }
 
     // Process each tool call
+    let batchHasMutation = false;
+    // Snapshot for the build capability guard: which log entries this step added.
+    const toolCallLogLenBeforeBatch = toolCallLog.length;
+
     for (const toolCall of llmResponse.toolCalls) {
       const toolDef = availableTools.find((t) => t.id === toolCall.toolId);
 
@@ -1075,6 +1127,8 @@ async function runAgentLoopV2Inner(
             gitSha: checkpoint.gitSha,
           });
         }
+        mutationBatchPending = true;
+        batchHasMutation = true;
       }
 
       if (permResult.requiresApproval) {
@@ -1225,6 +1279,7 @@ async function runAgentLoopV2Inner(
       // Track mutations
       if (!toolDef.readOnly) {
         hasInterveningMutation = true;
+        batchHasMutation = true;
         if (result.success) executedMutations.set(dedupeKey, result);
       }
 
@@ -1263,6 +1318,88 @@ async function runAgentLoopV2Inner(
     }
 
     if (cancelled) break;
+
+    // Early bounded capability guard (BUILD runs only): a model that keeps
+    // emitting tool calls but never file-writing calls is ruled out within
+    // ~buildGuardMaxSteps steps instead of burning the run budget. The
+    // cohere/north-mini-code incident (45 minutes, zero files) is exactly
+    // what this prevents. Zero-tool-call steps never reach here — they go
+    // through the resolveZeroToolCalls stall handling above.
+    if (buildGuardMaxSteps > 0) {
+      const stepCalls = toolCallLog.slice(toolCallLogLenBeforeBatch);
+      const fileWrites = stepCalls.filter((c) => FILE_WRITE_TOOL_IDS.has(c.toolId)).length;
+      if (fileWrites > 0) {
+        buildGuardZeroWriteSteps = 0;
+        buildGuardWindowModels.clear();
+      } else {
+        buildGuardZeroWriteSteps++;
+        const serving = findModelRecord(llmResponse.provider ?? "unknown", llmResponse.model);
+        buildGuardWindowModels.add(serving?.canonicalId ?? "");
+        buildGuardWindowProvider = llmResponse.provider ?? "unknown";
+        buildGuardWindowModel = llmResponse.model;
+      }
+
+      if (buildGuardZeroWriteSteps >= buildGuardMaxSteps) {
+        const distinctModels = [...buildGuardWindowModels].filter((id) => id !== "");
+        const reason = `${buildGuardZeroWriteSteps} consecutive steps with tool calls but zero file-writing calls`;
+        let excludedCanonicalId: string | undefined;
+        if (distinctModels.length === 1) {
+          // The whole window was served by one registry model: rule it out
+          // for this run. The registry records the failure (learns), and a
+          // 10-minute model cooldown keeps the per-step router off it for
+          // the rest of this run's budget.
+          excludedCanonicalId = distinctModels[0];
+          buildGuardExcluded.add(excludedCanonicalId);
+          recordHealthOutcome(excludedCanonicalId, false, "no_file_write_calls");
+          recordModelFailure(buildGuardWindowProvider, buildGuardWindowModel);
+          buildGuardTried.push({ canonicalId: excludedCanonicalId, reason });
+        } else {
+          buildGuardTried.push({
+            canonicalId: distinctModels.length === 0 ? "unmapped" : distinctModels.join("+"),
+            reason: `${reason} (serving model changed mid-window)`,
+          });
+        }
+        localProgress.emit({
+          type: "build_model_incompatible",
+          canonicalId: excludedCanonicalId ?? "unmapped",
+          provider: buildGuardWindowProvider,
+          stepsObserved: buildGuardZeroWriteSteps,
+          zeroWriteSteps: buildGuardZeroWriteSteps,
+          reason: "no_file_write_calls_in_window",
+        });
+
+        const next = selectBuildModel(buildGuardExcluded);
+        if (!next) {
+          const listing = buildGuardTried.map((t) => `- ${t.canonicalId}: ${t.reason}`).join("\n");
+          modelFailed = NO_BUILD_CAPABLE_MODEL;
+          modelFailureText =
+            `No build-capable model is available. Models tried:\n${listing}\n` +
+            `No model produced a file-writing tool call within the bounded window, so the run stops instead of burning the budget.`;
+          finalText =
+            "I couldn't complete this build: none of the available models produced file-writing tool calls. " +
+            "Your project and everything completed so far are preserved — try again later or pick a different model.";
+          localProgress.emit({
+            type: "status",
+            summary: "Stopping: no build-capable model produced file-writing tool calls.",
+          });
+          break;
+        }
+        // Continue the SAME conversation on the next eligible build model —
+        // the hint routes through planBasicRoutes on the following step.
+        buildGuardModelHint = next.providerModelId;
+        localProgress.emit({
+          type: "status",
+          summary: `Switching build model to ${next.canonicalId} — the previous model produced no file writes in ${buildGuardZeroWriteSteps} steps.`,
+        });
+        buildGuardZeroWriteSteps = 0;
+        buildGuardWindowModels.clear();
+      }
+    }
+
+    // Reset mutation flag after batch
+    if (!batchHasMutation) {
+      mutationBatchPending = false;
+    }
 
     // Per-step timing: total step duration + cumulative elapsed, so the work log
     // can show exactly where the minutes went on a slow build.
@@ -2142,6 +2279,9 @@ async function resumeAgentLoopV2Inner(
           evalMetadata: cfg.evalMetadata,
           deadlineMs: startTime + cfg.maxRuntimeMs,
           signal: cfg.signal,
+          // Same preventive BUILD guard as the main loop: a resumed BUILD
+          // run starts on a proven file writer.
+          requireReliableFileWriting: cfg.buildCapabilityGuard != null,
         },
       );
       if (llmResponse.responseShape && llmResponse.provider) {

@@ -559,6 +559,13 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           executionMode: options.executionMode ?? "act",
           enableBuildFix: options.enableBuildFix ?? true,
           requireToolCallOnFirstStep: options.requiresExecution === true,
+          // Early bounded capability guard: a BUILD run that goes 3
+          // consecutive steps with tool calls but zero file-writing calls
+          // rules that model out for this run and switches to the next
+          // registry build model — instead of burning the whole budget on
+          // a model that can read but never writes.
+          buildCapabilityGuard:
+            options.requiresExecution === true ? { maxStepsWithoutFileWrite: 3 } : undefined,
           evalMetadata: options.evalMetadata,
           // A bounded reprompt continues the SAME conversation: pass the
           // previous loop's messages so a patch-recovery (validation error
