@@ -262,6 +262,54 @@ function CommandStudioContent() {
   const [studioMode, setStudioMode] = useState<StudioMode>(
     initial.destination === "studio" ? (initial.mode as StudioMode) ?? "preview" : "preview",
   );
+  // ── P0-2 welcome-state routing (Larry's standing rule) ─────────────
+  // The center "Welcome to LiTT" onboarding shows ONLY for a brand-new
+  // untouched project. If the project was touched (starter-scaffolding
+  // manifest consumed by the first write) but the entry file still carries
+  // the welcome-screen marker — e.g. a trivial additive edit to the
+  // scaffolding, not a real build — the first successful build/open action
+  // must transition the center into the active workspace. Defaulting to the
+  // Code surface shows the user's actual file instead of a preview that
+  // renders the starter "Welcome to LiTT" page as if it were onboarding.
+  // Runs once per project on initial load; never overrides a manual
+  // surface switch, and fails soft (keeps preview) if the check errors.
+  const projectIdForWelcomeRouting = capabilities.projectId;
+  const studioModeForWelcomeRouting = studioMode;
+  useEffect(() => {
+    if (destination !== "studio") return;
+    if (!projectIdForWelcomeRouting) return;
+    // Never override an explicit surface choice — only reroute from the
+    // default preview surface.
+    if (studioModeForWelcomeRouting !== "preview") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await getToken?.();
+        const res = await fetch(
+          `/api/studio-projects/${encodeURIComponent(projectIdForWelcomeRouting)}/workspace-state`,
+          {
+            cache: "no-store",
+            credentials: "include",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            signal: AbortSignal.timeout(8000),
+          },
+        );
+        if (!res.ok || cancelled) return;
+        const state = (await res.json().catch(() => null)) as {
+          scaffolded?: boolean;
+          starterContent?: boolean;
+        } | null;
+        if (state && state.scaffolded === false && state.starterContent === true && !cancelled) {
+          setStudioMode("code");
+        }
+      } catch {
+        // Fail-soft: keep the default preview surface.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [destination, projectIdForWelcomeRouting, studioModeForWelcomeRouting, getToken]);
   const [createMode, setCreateMode] = useState<CreateMode>(
     initial.destination === "create" ? (initial.mode as CreateMode) ?? "image" : "image",
   );
