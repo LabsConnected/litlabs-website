@@ -26,6 +26,8 @@ export interface LogContext {
   pausedRunId?: string;
   finishReason?: string;
   failover?: string[];
+  claimLost?: boolean;
+  alreadyTerminal?: boolean;
 }
 
 export function studioLog(message: string, ctx: LogContext = {}): void {

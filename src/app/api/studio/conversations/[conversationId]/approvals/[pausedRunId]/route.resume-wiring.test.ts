@@ -19,12 +19,37 @@ vi.mock("@/lib/litt-intelligence/paused-run-store", () => ({
   getPausedRun: vi.fn(),
   resolvePausedRun: vi.fn(),
   markRunProcessing: vi.fn(),
-  markRunCompleted: vi.fn(() => Promise.resolve()),
-  markRunFailed: vi.fn(() => Promise.resolve()),
+  verifyRunClaim: vi.fn(() => Promise.resolve(true)),
+  releaseRunClaim: vi.fn(() => Promise.resolve(true)),
+  updatePausedRunActionRun: vi.fn(() => Promise.resolve(true)),
+  getRunOutcomeForPausedRun: vi.fn(),
   createPausedRun: vi.fn(),
   renewRunLease: vi.fn(() => Promise.resolve(true)),
   RUN_HEARTBEAT_MS: 30_000,
   resetRunForRetry: vi.fn(() => Promise.resolve(false)),
+}));
+
+vi.mock("@/lib/action-runtime", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    getActionRun: vi.fn(() => Promise.resolve({ id: "run-parent-1", status: "waiting_for_user" })),
+    transitionActionRunEventActivity: vi.fn(() => Promise.resolve({ id: "run-parent-1", status: "completed" })),
+    // Preview runtime events fired by the real launch-flow: persistence is
+    // out of scope for this wiring test.
+    recordActionEventActivity: vi.fn(() => Promise.resolve({})),
+  };
+});
+
+// The real resumeAgentLoopV2 drives the real tool registry, which records
+// per-tool events on the canonical run. Persistence is out of scope for
+// this wiring test — stub the tool-event sink so the mutation executes.
+vi.mock("@/lib/action-runtime/tool-runtime", () => ({
+  actionToolResultFailed: vi.fn(() => null),
+  recordActionToolStarted: vi.fn(() => Promise.resolve({})),
+  recordActionToolCompleted: vi.fn(() => Promise.resolve({})),
+  recordActionToolFailed: vi.fn(() => Promise.resolve({})),
+  markActionToolRunPersistenceDegraded: vi.fn(() => Promise.resolve()),
 }));
 
 const mkdirCalls: string[] = [];
@@ -81,10 +106,11 @@ import {
   getPausedRun,
   resolvePausedRun,
   markRunProcessing,
-  markRunCompleted,
-  markRunFailed,
+  verifyRunClaim,
+  releaseRunClaim,
 } from "@/lib/litt-intelligence/paused-run-store";
 import { callLLMWithTools, buildAssistantToolCallMessage } from "@/lib/litt-intelligence/llm-tool-calling";
+import { transitionActionRunEventActivity } from "@/lib/action-runtime";
 
 const CONV_ID = "conv-123";
 const PAUSED_ID = "paused-1";
@@ -124,6 +150,7 @@ function pendingRun() {
     executionMode: "act",
     systemPrompt: "You are LiTT.",
     checkpointId: null,
+    actionRunId: "run-parent-1",
     status: "pending",
     createdAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -160,20 +187,33 @@ describe("POST approval → real resume executes the approved mutation", () => {
     } as never);
   });
 
-  it("returns 202 and the detached resume executes files.mkdir, then marks completed", async () => {
+  it("returns 202 and the detached resume executes files.mkdir, then settles the canonical run", async () => {
     const resp = await POST(makeRequest("approved"), routeParams);
     expect(resp.status).toBe(202);
 
-    await waitFor(() => vi.mocked(markRunCompleted).mock.calls.length > 0);
+    await waitFor(() =>
+      vi.mocked(transitionActionRunEventActivity).mock.calls.some(
+        (c) => (c[0] as { status?: string }).status === "completed",
+      ),
+    );
     expect(mkdirCalls).toEqual(["src/app/(marketing)/roofing"]);
-    expect(vi.mocked(markRunFailed).mock.calls.length).toBe(0);
+    expect(
+      vi.mocked(transitionActionRunEventActivity).mock.calls.some(
+        (c) => (c[0] as { status?: string }).status === "failed",
+      ),
+    ).toBe(false);
 
-    const completedArg = vi.mocked(markRunCompleted).mock.calls[0][2] as {
-      toolCalls: Array<{ toolId: string; success: boolean; mutating: boolean }>;
-    };
-    const mkdirLog = completedArg.toolCalls.filter((c) => c.toolId === "files.mkdir");
+    const completedCall = vi.mocked(transitionActionRunEventActivity).mock.calls.find(
+      (c) => (c[0] as { status?: string }).status === "completed",
+    )![0] as { payload?: { result?: { toolCalls?: Array<{ toolId: string; success: boolean; mutating: boolean }> } } };
+    const mkdirLog = (completedCall.payload?.result?.toolCalls ?? []).filter(
+      (c) => c.toolId === "files.mkdir",
+    );
     expect(mkdirLog).toHaveLength(1);
     expect(mkdirLog[0].success).toBe(true);
     expect(mkdirLog[0].mutating).toBe(true);
+    // The claim was verified and released around the canonical write.
+    expect(verifyRunClaim).toHaveBeenCalled();
+    expect(releaseRunClaim).toHaveBeenCalledWith(PAUSED_ID, "user_123", expect.any(String), "completed");
   });
 });
