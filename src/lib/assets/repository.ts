@@ -29,6 +29,7 @@ import { generationJobsToStudioAssets } from "./adapters/generation-job";
 import { musicTracksToStudioAssets, type MusicTrackRow } from "./adapters/music-track";
 import type { AssetKind, StudioAsset } from "./types";
 import { rowToJob } from "@/lib/generation/jobs";
+import { filterProjectScopedRecords } from "@/lib/studio/project-scope";
 
 export interface ListStudioAssetsOptions {
   /** Clerk user ID of the authenticated user. */
@@ -151,11 +152,10 @@ async function fetchGenerationJobs(
     data.map((row) => rowToJob(row as Record<string, unknown>)),
   );
 
-  // When a projectId filter is active, exclude assets explicitly bound
-  // to a DIFFERENT project. Assets with no project binding (null) are
-  // always included — they are user-scoped, not project-scoped.
+  // Project surfaces are strict: unbound assets are account-wide Library
+  // records and must not appear as if they belong to this project.
   if (projectId) {
-    return assets.filter((a) => a.projectId === null || a.projectId === projectId);
+    return filterProjectScopedRecords(assets, projectId);
   }
   return assets;
 }
@@ -194,11 +194,10 @@ async function fetchMusicTracks(
 
   let tracks = data as MusicTrackRow[];
 
-  // When a projectId filter is active, exclude tracks explicitly bound
-  // to a DIFFERENT project. Tracks with no project binding (null) are
-  // always included — they are user-scoped, not project-scoped.
+  // Project surfaces are strict: unbound tracks remain account-wide Library
+  // records and must not appear as if they belong to this project.
   if (projectId) {
-    tracks = tracks.filter((t) => t.project_id === null || t.project_id === projectId);
+    tracks = tracks.filter((t) => t.project_id === projectId);
   }
 
   // Resolve audio URLs for each track.

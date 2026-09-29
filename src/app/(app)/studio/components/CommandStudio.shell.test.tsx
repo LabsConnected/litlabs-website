@@ -493,6 +493,7 @@ describe("StudioShell — desktop operating shell", () => {
     await waitFor(() => {
       expect(screen.getByTestId("stage-surface-design")).toHaveAttribute("data-active", "true");
       expect(screen.getByTestId("visual-canvas-builder")).toBeTruthy();
+      expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
     });
     // Preview stays mounted (hidden) — iframe/scroll state survives.
     const previewSurface = screen.getByTestId("stage-surface-preview");

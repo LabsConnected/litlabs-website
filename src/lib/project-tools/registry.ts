@@ -732,6 +732,19 @@ export const toolBrowserStartJob: ToolHandler = async (userId, args) => {
     return fail("Invalid requested_by. Valid: vapi, studio, cron, admin.");
   }
 
+  // Carry the active runtime scope into the queued record so Studio can
+  // render only the current project's browser history. Existing job-type
+  // parameters remain untouched.
+  const scopedParams = {
+    ...params,
+    ...(typeof args.project_id === "string" && typeof params.projectId !== "string" && typeof params.project_id !== "string"
+      ? { projectId: args.project_id }
+      : {}),
+    ...(typeof args.conversation_id === "string" && typeof params.conversationId !== "string" && typeof params.conversation_id !== "string"
+      ? { conversationId: args.conversation_id }
+      : {}),
+  };
+
   try {
     const { job, created } = await createJob({
       userId,
@@ -740,7 +753,7 @@ export const toolBrowserStartJob: ToolHandler = async (userId, args) => {
       riskLevel: riskLevelRaw as RiskLevel | undefined,
       requestedBy: requestedByRaw as RequestSource,
       idempotencyKey,
-      params,
+      params: scopedParams,
     });
 
     if (created && job.status === "queued") {

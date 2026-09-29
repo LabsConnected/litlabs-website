@@ -14,8 +14,8 @@
  * Empty state is truthful.
  */
 
-import Image from "next/image";
 import { useEffect, useState, useCallback } from "react";
+import Image from "next/image";
 import { useStudioContext } from "@/app/(app)/studio/context/StudioContext";
 import { useAssetsRefreshTrigger } from "@/app/(app)/studio/hooks/useAssetsRefresh";
 import type { StudioAsset } from "@/lib/assets/types";
@@ -62,6 +62,7 @@ export default function AssetsPanel({ projectId }: { projectId?: string | null }
   const { activeAssetId, setActiveAssetId } = useStudioContext();
   const refreshTrigger = useAssetsRefreshTrigger();
   const [assets, setAssets] = useState<StudioAsset[]>([]);
+  const [failedThumbnailIds, setFailedThumbnailIds] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [insertStates, setInsertStates] = useState<Record<string, InsertState>>({});
@@ -72,11 +73,18 @@ export default function AssetsPanel({ projectId }: { projectId?: string | null }
   const [editResult, setEditResult] = useState<string | null>(null);
 
   const fetchAssets = useCallback(async () => {
+    if (!projectId) {
+      setAssets([]);
+      setFailedThumbnailIds(new Set());
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams();
-      if (projectId) params.set("projectId", projectId);
+      params.set("projectId", projectId);
+      params.set("scope", "project");
       params.set("limit", "50");
       const res = await fetch(`/api/assets?${params.toString()}`, {
         headers: { "Content-Type": "application/json" },
@@ -89,6 +97,7 @@ export default function AssetsPanel({ projectId }: { projectId?: string | null }
       }
       const data = await res.json();
       setAssets(data.assets ?? []);
+      setFailedThumbnailIds(new Set());
     } catch {
       setError("Failed to load assets.");
       setAssets([]);
@@ -219,7 +228,7 @@ export default function AssetsPanel({ projectId }: { projectId?: string | null }
         </div>
       )}
       <div className="flex flex-col gap-1">
-        {assets.map((asset) => {
+      {assets.map((asset) => {
           const Icon = KIND_ICON[asset.kind] ?? FileBox;
           const isActive = activeAssetId === asset.id;
           const insertState = insertStates[asset.id] ?? "idle";
@@ -241,13 +250,13 @@ export default function AssetsPanel({ projectId }: { projectId?: string | null }
                   aria-pressed={isActive}
                 >
                   {/* Thumbnail or icon */}
-                  {asset.kind === "image" && asset.thumbnailUrl ? (
-                    <Image
-                      src={asset.thumbnailUrl}
+                  {asset.kind === "image" && !failedThumbnailIds.has(asset.id) ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={asset.thumbnailUrl ?? asset.url}
                       alt=""
-                      width={32}
-                      height={32}
                       className="h-8 w-8 shrink-0 rounded object-cover"
+                      onError={() => setFailedThumbnailIds((current) => new Set(current).add(asset.id))}
                     />
                   ) : (
                     <div
