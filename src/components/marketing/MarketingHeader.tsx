@@ -18,7 +18,7 @@ type MarketingNavItem = {
 // Studio · Capabilities · Pricing · Docs. Developers bounce from clutter.
 const NAV_ITEMS: MarketingNavItem[] = [
   { label: "Studio", href: "/studio" },
-  { label: "Capabilities", href: "/#what-we-do" },
+  { label: "Capabilities", href: "/capabilities" },
   { label: "Pricing", href: "/pricing", trackEvent: "pricing_link_click" },
   { label: "Docs", href: "/docs" },
 ];

@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { buildMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = buildMetadata({
-  title: "AI Agent and Creator Marketplace",
+  title: "Marketplace",
   description:
-    "Discover AI agents, creative tools, templates, themes, and resources for LiTTree LabStudios.",
+    "Browse the LiTT marketplace for agents, skills, and workflows that extend what your AI project operator can do.",
   path: "/marketplace",
   index: true,
 });

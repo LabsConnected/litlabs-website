@@ -35,12 +35,13 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
 
   title: {
-    default: DEFAULT_TITLE,
+    default: "LiTT — AI Project Operator | LiTTree LabStudios",
     template: `%s | ${SITE_NAME}`,
   },
 
-  description: DEFAULT_DESCRIPTION,
-  applicationName: SITE_NAME,
+  description:
+    "LiTT is an AI project operator that plans, builds, edits, verifies, and ships real projects from one connected workspace.",
+  applicationName: "LiTT",
 
   authors: [{ name: SITE_NAME, url: SITE_URL }],
   creator: SITE_NAME,
