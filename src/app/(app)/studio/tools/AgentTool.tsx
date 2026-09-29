@@ -1119,11 +1119,6 @@ function DetailSettings({ agent }: { agent: AgentDefinition }) {
           </div>
         </div>
       </div>
-      <Link href="/settings?section=agents"
-        className="block text-center text-[11px] py-2.5 rounded-lg border transition hover:opacity-80"
-        style={{ borderColor: `${T.borderColor}20`, color: T.textMuted }}>
-        <SettingsIcon size={11} className="inline mr-1" /> Agent Settings
-      </Link>
     </div>
   );
 }
