@@ -1084,6 +1084,13 @@ function CommandStudioContent() {
   const refreshTasks = studioTasks.refresh;
   const taskSeededRef = useRef<string | null>(null);
 
+  // Item 5a — the Activity truth is the persisted action_events log of the
+  // current conversation's run. The existing studio_tasks mapping carries it
+  // (activeActionRunId while working, latestActionRunId after settle); no
+  // parallel mapping is introduced.
+  const activityTask = studioTasks.tasks.find((task) => task.conversationId === conversation.selectedConversationId);
+  const activityRunId = activityTask?.activeActionRunId ?? activityTask?.latestActionRunId ?? null;
+
 
   useEffect(() => {
     const conversationId = conversation.selectedConversationId;
@@ -1138,7 +1145,16 @@ function CommandStudioContent() {
   }, [studioTasks]);
 
   useEffect(() => {
-    if (!conversation.busy) void refreshTasks();
+    if (!conversation.busy) {
+      void refreshTasks();
+      return;
+    }
+    // Item 5a — a new run attaches its actionRunId to the conversation's
+    // studio task server-side just after the send is accepted. Refresh
+    // once the run is underway so the Activity panel can resolve the run
+    // id (and read its persisted events) during the run, not only after.
+    const timer = setTimeout(() => { void refreshTasks(); }, 4000);
+    return () => clearTimeout(timer);
   }, [conversation.busy, refreshTasks]);
 
   const launchpadState = useMemo(
@@ -2646,7 +2662,7 @@ function CommandStudioContent() {
       case "activity":
         return (
           <StudioActivityPanel
-            messages={conversation.messages}
+            runId={activityRunId}
             busy={conversation.busy}
             modelLabel={modelLabel}
             projectName={capabilities.projectName}
@@ -3202,7 +3218,7 @@ function CommandStudioContent() {
                 // desktop topology) and in the shell's center `activity`
                 // stage surface; mobile keeps the build-status sheet.
                 <StudioActivityPanel
-                  messages={conversation.messages}
+                  runId={activityRunId}
                   busy={conversation.busy}
                   modelLabel={modelLabel}
                   projectName={capabilities.projectName}

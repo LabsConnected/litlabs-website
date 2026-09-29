@@ -7,6 +7,7 @@ vi.mock("./llm-tool-calling", async (importOriginal) => ({
 }));
 
 import { runAgentLoopV2, resumeAgentLoopV2, announcesMoreWork, resolveZeroToolCalls, type ResumeInput } from "./agent-loop-v2";
+import type { ProgressEvent } from "./progress-events";
 import { callLLMWithTools, AgentBudgetExhaustedError } from "./llm-tool-calling";
 import { toolRegistry } from "./tool-registry";
 
@@ -868,5 +869,89 @@ describe("runAgentLoopV2 — prose approval-ask stall guard", () => {
     expect(
       secondCallMessages.some((m) => m.role === "user" && m.content.includes("files.write")),
     ).toBe(true);
+  });
+});
+
+describe("runAgentLoopV2 — persistEvent hook (item 5a)", () => {
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "Done.",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test-model",
+    });
+  });
+
+  it("offers loop events to persistEvent in emit order", async () => {
+    const seen: ProgressEvent[] = [];
+    const result = await runAgentLoopV2(
+      "build a tiny landing page",
+      fakeTransport,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+        persistEvent: async (event) => {
+          seen.push(event);
+        },
+      },
+    );
+
+    expect(result.cancelled).toBe(false);
+    // The persistence chain drains asynchronously after the loop returns —
+    // wait for the final event rather than assuming it already landed.
+    const deadline = Date.now() + 10_000;
+    while (!seen.some((e) => e.type === "finished") && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    // The hook is offered the loop's full event stream in emit order.
+    // (Filtering stream noise is the mapping layer's job — see
+    // progress-event-persistence.test.ts.)
+    expect(seen.map((e) => e.type)).toEqual(result.events.map((e) => e.type));
+  });
+
+  it("a rejecting persistEvent never breaks the run", async () => {
+    const errors: unknown[] = [];
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      errors.push(args);
+    });
+    try {
+      const result = await runAgentLoopV2(
+        "build a tiny landing page",
+        fakeTransport,
+        {
+          model: "test-model",
+          systemPrompt: "You are LiTT.",
+          executionMode: "act",
+          enableBuildFix: false,
+          persistEvent: async () => {
+            throw new Error("db down");
+          },
+        },
+      );
+      expect(result.cancelled).toBe(false);
+      expect(result.events.some((e) => e.type === "finished")).toBe(true);
+      // The failure was logged, not thrown.
+      expect(errors.length).toBeGreaterThan(0);
+    } finally {
+      consoleSpy.mockRestore();
+    }
+  });
+
+  it("is optional — the loop behaves identically without it", async () => {
+    const result = await runAgentLoopV2(
+      "build a tiny landing page",
+      fakeTransport,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+      },
+    );
+    expect(result.cancelled).toBe(false);
+    expect(result.events.some((e) => e.type === "finished")).toBe(true);
   });
 });

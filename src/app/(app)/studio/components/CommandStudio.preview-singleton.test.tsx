@@ -952,8 +952,10 @@ describe("CommandStudio — mission panels live in the Activity dock", () => {
 
     // Ordering: Workspace/Model header → mission cards → activity feed.
     // (StudioActivityTimeline renders null when it has no entries, so the
-    // always-present feed empty-state marks the feed position instead.)
-    const feedEmpty = within(activity).getByText("No conversation activity yet.");
+    // always-present feed empty-state marks the feed position instead.
+    // Item 5a: the feed is the run's persisted action_events — with no run
+    // attached, the honest state is "No task run yet".)
+    const feedEmpty = within(activity).getByText(/No task run yet/);
     expect(
       cards.compareDocumentPosition(feedEmpty) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();

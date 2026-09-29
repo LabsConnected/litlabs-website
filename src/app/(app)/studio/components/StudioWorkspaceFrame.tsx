@@ -1,7 +1,7 @@
 "use client";
 
 import RunChangesPanel from "./RunChangesPanel";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   PanelRightClose,
   PanelRightOpen,
@@ -19,7 +19,7 @@ import type { ConnectionCapabilities } from "../hooks/useConnectionSummary";
 import { describeSourceRows } from "../lib/source-rows";
 import type { ChatMessage } from "../stores/useStudioAgentStore";
 import type { ProviderHealth } from "../stores/useStudioModelStore";
-import StudioActivityTimeline from "./StudioActivityTimeline";
+import { StudioActivityPanel } from "./StudioActivityPanel";
 import StudioHealthPanel from "./StudioHealthPanel";
 import StudioPreviewPanel from "./StudioPreviewPanel";
 import StudioProjectFiles from "./StudioProjectFiles";
@@ -490,90 +490,6 @@ export function StudioInspector({
   );
 }
 
-function activityTime(createdAt?: number) {
-  if (!createdAt) return "now";
-  const diff = Math.max(0, Date.now() - createdAt);
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  return `${Math.floor(diff / 3_600_000)}h ago`;
-}
 
-export function StudioActivityPanel({
-  messages,
-  busy,
-  modelLabel,
-  projectName,
-  terminalStatus,
-  missionContent,
-}: {
-  messages: ChatMessage[];
-  busy: boolean;
-  modelLabel: string;
-  projectName: string | null;
-  terminalStatus: string;
-  /** Operational project state (Mission / Checkpoints / Next actions)
-      rendered between the workspace header and the activity feed. */
-  missionContent?: React.ReactNode;
-}) {
-  const recent = messages.slice(-8).reverse();
-  const activityRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (busy) activityRef.current?.scrollIntoView({ block: "nearest" });
-  }, [busy]);
-
-  return (
-    <div ref={activityRef} className="space-y-2" data-testid="studio-activity-panel" aria-live="polite" aria-label="Studio activity">
-      <div className="grid grid-cols-2 gap-1.5">
-        <div className="rounded-lg border px-2.5 py-2" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
-          <div className="text-[9px] uppercase tracking-[0.14em]" style={{ color: "var(--text-muted)" }}>Workspace</div>
-          <div className="mt-1 truncate text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>{projectName ?? "No project"}</div>
-        </div>
-        <div className="rounded-lg border px-2.5 py-2" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
-          <div className="text-[9px] uppercase tracking-[0.14em]" style={{ color: "var(--text-muted)" }}>Model</div>
-          <div className="mt-1 truncate text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>{modelLabel}</div>
-        </div>
-      </div>
-      {missionContent}
-      {busy && (
-        <div className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-[10px]" style={{ borderColor: "rgba(167,139,250,0.25)", backgroundColor: "rgba(167,139,250,0.06)", color: "#c4b5fd" }}>
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400" aria-hidden />
-          Agent working in the active conversation
-        </div>
-      )}
-      {recent.length > 0 ? (
-        <div className="space-y-1">
-          {recent.map((message) => {
-            const isUser = message.role === "user";
-            const state = message.status === "failed" ? "Failed" : message.status === "streaming" ? "Streaming" : isUser ? "Prompt sent" : "Response";
-            return (
-              <div key={message.id ?? `${message.createdAt}-${message.content.slice(0, 12)}`} className="flex items-start gap-2 rounded-lg border px-2.5 py-2" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
-                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: message.status === "failed" ? "#ef4444" : isUser ? "#fb923c" : "var(--litt-primary)" }} aria-hidden />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>{isUser ? "You" : "LiTT"} · {state}</span>
-                    <span className="shrink-0 text-[9px]" style={{ color: "var(--text-muted)" }}>{activityTime(message.createdAt)}</span>
-                  </div>
-                  <div className="mt-0.5 truncate text-[9px]" style={{ color: "var(--text-secondary)" }}>{message.content || "Working…"}</div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <div
-          className="flex min-h-24 items-center justify-center rounded-lg border px-3 text-center text-[10px]"
-          style={{ borderColor: "var(--studio-border)", color: "var(--text-muted)" }}
-          role="status"
-        >
-          No conversation activity yet.
-        </div>
-      )}
-      <div className="flex items-center justify-between px-1 text-[9px]" style={{ color: "var(--text-muted)" }}>
-        <span>{terminalStatus}</span>
-        <span>{messages.length} message{messages.length === 1 ? "" : "s"}</span>
-      </div>
-      <StudioActivityTimeline />
-    </div>
-  );
-}
+// Re-exported for the existing CommandStudio import path ("./StudioWorkspaceFrame").
+export { StudioActivityPanel };

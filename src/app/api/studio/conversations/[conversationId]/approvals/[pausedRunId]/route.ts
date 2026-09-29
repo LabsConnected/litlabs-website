@@ -47,6 +47,9 @@ import {
   type ActionRunPatch,
   type ActionRunStatus,
 } from "@/lib/action-runtime";
+// Item 5a — deep import on purpose: the barrel is mocked in route tests,
+// and the persistence hook must stay the real one.
+import { makePersistProgressEvent } from "@/lib/action-runtime/progress-event-persistence";
 import { isTerminalActionRunStatus } from "@/lib/action-runtime/state-machine";
 import type { MessageStatus } from "@/lib/studio/types";
 
@@ -632,6 +635,13 @@ export async function POST(
     enableBuildFix: true,
     signal: abortController.signal,
     userId,
+    // Item 5a — persist the resumed loop's ProgressEvents to the parent
+    // run's action_events log, the same Activity truth as the initial run.
+    // resumeAgentLoopV2Inner spreads resume.config into cfg, so the hook
+    // reaches the loop's persistence chain unchanged.
+    persistEvent: actionContext
+      ? makePersistProgressEvent({ runId: actionContext.actionRunId, userId })
+      : undefined,
     // Conversation scope — injected into browser.start_session so the
     // resumed run reuses the live browser session from before the pause.
     conversationId,
