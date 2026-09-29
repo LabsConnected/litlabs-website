@@ -14,9 +14,9 @@ interface GeneratedImage {
 const PROVIDERS = [
   {
     id: "pollinations",
-    name: "Pollinations (Free)",
+    name: "Pollinations (Experimental)",
     cost: "FREE",
-    description: "FLUX + SDXL, works without API key · FREE",
+    description: "Manual-only experimental provider · never automatic",
   },
   {
     id: "gemini",
@@ -38,9 +38,9 @@ const PROVIDERS = [
   },
   {
     id: "openai",
-    name: "OpenAI (DALL-E 3)",
+    name: "OpenAI GPT Image",
     cost: "5",
-    description: "DALL-E 3 photorealistic, needs OPENAI_API_KEY · 5 🪙",
+    description: "GPT Image 2.5 Flare generation · needs OPENAI_API_KEY · 5 🪙",
   },
   {
     id: "recraft",
@@ -71,7 +71,7 @@ const QUICK_STARTERS = [
 
 export default function NeuralImagingStudio() {
   const [prompt, setPrompt] = useState("");
-  const [selectedProvider, setSelectedProvider] = useState("pollinations");
+  const [selectedProvider, setSelectedProvider] = useState("openai");
   const [selectedRatio, setSelectedRatio] = useState("1:1");
   const [batchSize, setBatchSize] = useState(1);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -152,22 +152,6 @@ export default function NeuralImagingStudio() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Generation failed");
-
-      // Fallback to pollinations
-      const { width, height } = (() => {
-        const [w, h] = selectedRatio.split(":").map(Number);
-        return { width: w * 100, height: h * 100 };
-      })();
-
-      const fallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${width}&height=${height}`;
-      const images = Array.from({ length: batchSize }, (_, i) => ({
-        url: fallbackUrl + (batchSize > 1 ? `&index=${i}` : ""),
-        prompt,
-        provider: "pollinations",
-        timestamp: Date.now() + i,
-      }));
-      setGeneratedImages(images);
-      setPreviewImage(images[0]?.url || null);
     } finally {
       setIsGenerating(false);
     }
