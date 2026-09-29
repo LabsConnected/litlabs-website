@@ -173,7 +173,10 @@ export default function Footer() {
               style={{ color: C.textColor }}
             >
               17082 Ontario Dr, Spring Lake, MI 49456 ·{" "}
-              <a href="tel:+12314285411" className="hover:opacity-100">
+              <a
+                href="tel:+12314285411"
+                className="underline! underline-offset-2 hover:opacity-100"
+              >
                 (231) 428-5411
               </a>
             </address>
