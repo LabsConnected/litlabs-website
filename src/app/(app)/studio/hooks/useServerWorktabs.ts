@@ -78,7 +78,7 @@ export function nextUntitledTitle(titles: Array<string | null | undefined>): str
  */
 export function resolveAdoptedTaskTitle(
   conversationTitle: string | null | undefined,
-  existingTaskTitles: Array<string | null | undefined>,
+  _existingTaskTitles: Array<string | null | undefined>,
 ): string {
   const raw = (conversationTitle ?? "").trim();
   return raw ? raw : "New conversation";
