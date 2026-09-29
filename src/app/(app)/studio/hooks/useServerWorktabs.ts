@@ -58,6 +58,20 @@ export function nextUntitledTitle(titles: Array<string | null | undefined>): str
 }
 
 /**
+ * Resolve the title for an adopted pre-Worktab conversation. A real
+ * conversation title is kept verbatim; an untitled conversation mints a
+ * collision-free "Untitled N" against the existing task titles so N
+ * adopted untitled conversations yield N distinct titles.
+ */
+export function resolveAdoptedTaskTitle(
+  conversationTitle: string | null | undefined,
+  existingTaskTitles: Array<string | null | undefined>,
+): string {
+  const raw = (conversationTitle ?? "").trim();
+  return raw ? raw : nextUntitledTitle(existingTaskTitles);
+}
+
+/**
  * Session-scoped ask-litt selection pinned per server task id.
  * Survives tab switches; cleared on reload (ephemeral by design).
  */

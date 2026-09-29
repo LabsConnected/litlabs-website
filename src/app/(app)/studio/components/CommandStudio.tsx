@@ -19,6 +19,7 @@ import { useConversationStore } from "../stores/useConversationStore";
 import {
   mapStudioTaskToWorktab,
   nextUntitledTitle,
+  resolveAdoptedTaskTitle,
   useWorktabSelections,
   type Worktab,
 } from "../hooks/useServerWorktabs";
@@ -58,6 +59,7 @@ import { deriveCreator, deriveWorkspaceStage } from "../context/derive-studio-co
 import { StudioCreatorHost } from "./creators/StudioCreatorHost";
 import { useViewportTier } from "../hooks/useViewportTier";
 import { useStudioTasks } from "../hooks/useStudioTasks";
+import { useProjectIsolation } from "../hooks/useProjectIsolation";
 import type { StudioTask } from "@/lib/studio/task-types";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { useExecutionStore, type MutationSummary } from "../stores/useExecutionStore";
@@ -72,7 +74,7 @@ import StudioDeploySurface from "./shell/StudioDeploySurface";
 import StudioOperatorBar from "./shell/StudioOperatorBar";
 import ElementInspectorPanel from "./shell/ElementInspectorPanel";
 import ImageStudio from "./shell/ImageStudio";
-import { modeToStageSurface, resolveStageSurface, type StudioStageSurface } from "./shell/stage-surfaces";
+import { canonicalSurfaceToPersist, modeToStageSurface, resolveStageSurface, type StudioStageSurface } from "./shell/stage-surfaces";
 import { centerStation, resolveInitialStation, stationToToolParam, toolParamToStation } from "./shell/station-url";
 import { useCanvasBuilderStore } from "./canvas/builder/store";
 import type { PreviewSelection } from "./StudioPreviewPanel";
@@ -261,6 +263,54 @@ function CommandStudioContent() {
   const [studioMode, setStudioMode] = useState<StudioMode>(
     initial.destination === "studio" ? (initial.mode as StudioMode) ?? "preview" : "preview",
   );
+  // ── P0-2 welcome-state routing (Larry's standing rule) ─────────────
+  // The center "Welcome to LiTT" onboarding shows ONLY for a brand-new
+  // untouched project. If the project was touched (starter-scaffolding
+  // manifest consumed by the first write) but the entry file still carries
+  // the welcome-screen marker — e.g. a trivial additive edit to the
+  // scaffolding, not a real build — the first successful build/open action
+  // must transition the center into the active workspace. Defaulting to the
+  // Code surface shows the user's actual file instead of a preview that
+  // renders the starter "Welcome to LiTT" page as if it were onboarding.
+  // Runs once per project on initial load; never overrides a manual
+  // surface switch, and fails soft (keeps preview) if the check errors.
+  const projectIdForWelcomeRouting = capabilities.projectId;
+  const studioModeForWelcomeRouting = studioMode;
+  useEffect(() => {
+    if (destination !== "studio") return;
+    if (!projectIdForWelcomeRouting) return;
+    // Never override an explicit surface choice — only reroute from the
+    // default preview surface.
+    if (studioModeForWelcomeRouting !== "preview") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await getToken?.();
+        const res = await fetch(
+          `/api/studio-projects/${encodeURIComponent(projectIdForWelcomeRouting)}/workspace-state`,
+          {
+            cache: "no-store",
+            credentials: "include",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            signal: AbortSignal.timeout(8000),
+          },
+        );
+        if (!res.ok || cancelled) return;
+        const state = (await res.json().catch(() => null)) as {
+          scaffolded?: boolean;
+          starterContent?: boolean;
+        } | null;
+        if (state && state.scaffolded === false && state.starterContent === true && !cancelled) {
+          setStudioMode("code");
+        }
+      } catch {
+        // Fail-soft: keep the default preview surface.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [destination, projectIdForWelcomeRouting, studioModeForWelcomeRouting, getToken]);
   const [createMode, setCreateMode] = useState<CreateMode>(
     initial.destination === "create" ? (initial.mode as CreateMode) ?? "image" : "image",
   );
@@ -1083,6 +1133,19 @@ function CommandStudioContent() {
   const refreshTasks = studioTasks.refresh;
   const taskSeededRef = useRef<string | null>(null);
 
+  // Item 5a — the Activity truth is the persisted action_events log of the
+  // current conversation's run. The existing studio_tasks mapping carries it
+  // (activeActionRunId while working, latestActionRunId after settle); no
+  // parallel mapping is introduced.
+  const activityTask = studioTasks.tasks.find((task) => task.conversationId === conversation.selectedConversationId);
+  const activityRunId = activityTask?.activeActionRunId ?? activityTask?.latestActionRunId ?? null;
+
+  // Phase 4 — project isolation: the URL's explicit ?project= is
+  // authoritative the instant it's present (capabilities.projectId can
+  // lag a refresh behind), so project-scoped runtime state resets the
+  // moment the switch lands, not after the capabilities round-trip.
+  useProjectIsolation(searchParams.get("project") ?? capabilities.projectId);
+
 
   useEffect(() => {
     const conversationId = conversation.selectedConversationId;
@@ -1107,7 +1170,12 @@ function CommandStudioContent() {
     taskSeededRef.current = conversationId;
     const selected = conversation.conversations.find((item) => item.id === conversationId);
     void studioTasks.createTask({
-      title: selected?.title ?? "Current work",
+      // Untitled conversations mint a collision-free "Untitled N" instead
+      // of every adoption becoming another "Current work" tab.
+      title: resolveAdoptedTaskTitle(
+        selected?.title,
+        studioTasks.tasks.map((task) => task.title),
+      ),
       taskType: "general",
       conversationId,
     });
@@ -1132,7 +1200,16 @@ function CommandStudioContent() {
   }, [studioTasks]);
 
   useEffect(() => {
-    if (!conversation.busy) void refreshTasks();
+    if (!conversation.busy) {
+      void refreshTasks();
+      return;
+    }
+    // Item 5a — a new run attaches its actionRunId to the conversation's
+    // studio task server-side just after the send is accepted. Refresh
+    // once the run is underway so the Activity panel can resolve the run
+    // id (and read its persisted events) during the run, not only after.
+    const timer = setTimeout(() => { void refreshTasks(); }, 4000);
+    return () => clearTimeout(timer);
   }, [conversation.busy, refreshTasks]);
 
   const launchpadState = useMemo(
@@ -2052,17 +2129,11 @@ function CommandStudioContent() {
     bindWorktab(tab);
   }, [capabilities.projectId, studioTasks, worktabTabs, serverActiveTaskId, bindWorktab]);
 
-  // Track the active tab's surface as the user navigates the workspace —
-  // persisted via PATCH lastOpenedSurface (server truth for restores).
-  // Idempotent: the guard below makes this exactly one PATCH per
-  // navigation (the response updates lastOpenedSurface, ending the loop).
-  useEffect(() => {
-    const id = serverActiveTaskId;
-    if (!capabilities.projectId || !id || studioTasks.loading) return;
-    const task = serverTasks.find((t) => t.id === id);
-    if (!task || task.lastOpenedSurface === currentSurface) return;
-    void studioTasks.activateTask(id, currentSurface);
-  }, [currentSurface, serverActiveTaskId, serverTasks, capabilities.projectId, studioTasks]);
+  // (Deleted — Phase 3: the old "track the active tab's surface" writer.
+  //  It raced the surface→task effect below with a different vocabulary
+  //  (encoded workspace surface vs shell stage surface), so each PATCH
+  //  re-triggered the other: infinite PATCH oscillation. There is now
+  //  exactly one persist effect; see below.)
 
   // The runtime auto-adopts a freshly provisioned conversation into a new
   // server task (auto-seed effect above). When that new task supersedes
@@ -2116,15 +2187,27 @@ function CommandStudioContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studioShellActive, serverActiveTaskId, serverTasks]);
 
-  // Surface → task: a user-initiated surface switch persists onto the
-  // active server task. Skips when already in sync (task switch path).
+  // Phase 3 — SINGLE authoritative surface-persist path. A user-initiated
+  // surface switch persists onto the active server task (server truth for
+  // restores). This is the only automatic writer of lastOpenedSurface:
+  // the canonical value and the in-sync guard both live in
+  // canonicalSurfaceToPersist(), and persistSurface() itself no-ops when
+  // the server value already matches — so no PATCH oscillation and no
+  // surface loops are possible by construction.
   useEffect(() => {
-    if (!studioShellActive || !serverActiveTaskId) return;
-    const task = serverTasks.find((t) => t.id === serverActiveTaskId);
-    if (!task || task.lastOpenedSurface === stageSurface) return;
-    if (resolveStageSurface(task.lastOpenedSurface) === stageSurface) return;
-    void studioTasks.updateTask(serverActiveTaskId, { lastOpenedSurface: stageSurface });
-  }, [studioShellActive, stageSurface, serverActiveTaskId, serverTasks, studioTasks]);
+    const id = serverActiveTaskId;
+    if (!capabilities.projectId || !id || studioTasks.loading) return;
+    const task = serverTasks.find((t) => t.id === id);
+    if (!task) return;
+    const toPersist = canonicalSurfaceToPersist({
+      shellActive: studioShellActive,
+      stageSurface,
+      currentSurface,
+      storedSurface: task.lastOpenedSurface,
+    });
+    if (toPersist === null) return;
+    void studioTasks.persistSurface(id, toPersist);
+  }, [studioShellActive, stageSurface, currentSurface, serverActiveTaskId, serverTasks, capabilities.projectId, studioTasks]);
 
   // An approval gate must never strand hidden: a paused run expands the
   // LiTT command layer so the approve/reject decision stays reachable.
@@ -2429,6 +2512,8 @@ function CommandStudioContent() {
         onDismissCompletion={() => setCompletion(null)}
         onUndoCompletion={handleUndoCompletion}
         overflowDownloads={isMobileLitt}
+        // Canonical runtime truth: the visible PTY is interactive right now.
+        ptyUsable={runtime?.terminal?.usable ?? false}
         onContinueCompletion={() => {
           const textarea = document.querySelector<HTMLTextAreaElement>("[data-testid='studio-command-composer'] textarea");
           textarea?.focus();
@@ -2638,7 +2723,7 @@ function CommandStudioContent() {
       case "activity":
         return (
           <StudioActivityPanel
-            messages={conversation.messages}
+            runId={activityRunId}
             busy={conversation.busy}
             modelLabel={modelLabel}
             projectName={capabilities.projectName}
@@ -3190,8 +3275,11 @@ function CommandStudioContent() {
               activityPulse={conversation.busy}
               terminalBadge={["error", "pty_failed", "auth_failed"].includes(capabilities.terminalStatus)}
               activityContent={
+                // MissionCards live in the dock Activity tab (classic
+                // desktop topology) and in the shell's center `activity`
+                // stage surface; mobile keeps the build-status sheet.
                 <StudioActivityPanel
-                  messages={conversation.messages}
+                  runId={activityRunId}
                   busy={conversation.busy}
                   modelLabel={modelLabel}
                   projectName={capabilities.projectName}
@@ -3739,6 +3827,7 @@ function StudioWorkSurface({
   onUndoCompletion,
   onContinueCompletion,
   overflowDownloads = false,
+  ptyUsable = false,
 }: {
   messages: import("../stores/useStudioAgentStore").ChatMessage[];
   conversationId: string | null;
@@ -3757,6 +3846,8 @@ function StudioWorkSurface({
   onUndoCompletion?: () => void;
   onContinueCompletion?: () => void;
   overflowDownloads?: boolean;
+  /** Canonical runtime truth: is the interactive PTY usable right now. */
+  ptyUsable?: boolean;
 }) {
   // P0.14-15: Only show empty state when messages are truly empty AND
   // conversations have finished loading from the server. During loading,
@@ -3814,6 +3905,9 @@ function StudioWorkSurface({
           onUndoCompletion={onUndoCompletion}
           onContinueCompletion={onContinueCompletion}
           overflowDownloads={overflowDownloads}
+          // Canonical runtime truth — the ONLY consumer path for PTY
+          // usability outside useProjectRuntime itself.
+          ptyUsable={ptyUsable}
         />
       )}
     </div>

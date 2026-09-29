@@ -18,6 +18,7 @@
  */
 
 import type { ToolPermissionLevel } from "./types";
+import { classifyTerminalCommand } from "./terminal-command-policy";
 
 export type ExecutionMode = "plan" | "act" | "auto";
 
@@ -90,7 +91,7 @@ const SENSITIVE_ACTIONS: ReadonlySet<string> = new Set([
 export class PermissionEngine {
   check(
     tool: ToolPermissionInfo,
-    _inputs: Record<string, unknown>,
+    inputs: Record<string, unknown>,
     mode: ExecutionMode,
     availableCapabilities: string[] = [],
   ): PermissionResult {
@@ -122,7 +123,41 @@ export class PermissionEngine {
       };
     }
 
-    // 3. PLAN mode: read-only only
+    // 3. terminal.execute: per-command policy, decided from inputs.command.
+    // Runs AFTER the disabled/capability gates above so a disabled tool is
+    // still refused wholesale and capability-unavailable tools never pass.
+    // Classification: safe = auto-run, risky = approval, deny = blocked.
+    // PLAN mode allows only safe commands (no mutations while planning).
+    if (tool.toolId === "terminal.execute") {
+      const command = typeof inputs.command === "string" ? inputs.command : "";
+      const risk = classifyTerminalCommand(command);
+      if (risk === "deny") {
+        return {
+          allowed: false,
+          requiresApproval: false,
+          reason: "Command is blocked by terminal command policy",
+        };
+      }
+      if (mode === "plan") {
+        return risk === "safe"
+          ? { allowed: true, requiresApproval: false }
+          : {
+              allowed: false,
+              requiresApproval: false,
+              reason: "PLAN mode only allows safe read-only terminal commands",
+            };
+      }
+      if (risk === "risky") {
+        return {
+          allowed: true,
+          requiresApproval: true,
+          reason: "Terminal mutation requires approval",
+        };
+      }
+      return { allowed: true, requiresApproval: false };
+    }
+
+    // 4. PLAN mode: read-only only
     if (mode === "plan") {
       if (!tool.isReadOnly) {
         return {

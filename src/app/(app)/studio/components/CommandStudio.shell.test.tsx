@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
@@ -728,5 +728,52 @@ describe("StudioShell — left chat dock", () => {
     await waitFor(() => {
       expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
     });
+  });
+});
+describe("MissionCards — shell center activity stage surface", () => {
+  it("renders the mission cards once in the center activity surface (shell mode has no bottom dock)", async () => {
+    const { user } = await renderStudioShell();
+    await user.click(screen.getByTestId("workspace-rail-activity"));
+    await waitFor(() => {
+      expect(screen.getByTestId("stage-surface-activity")).toHaveAttribute("data-active", "true");
+    });
+    // The shell renders no bottom dock, so the center surface carries the
+    // single MissionCards instance in this layout.
+    expect(screen.getAllByTestId("mission-cards")).toHaveLength(1);
+  });
+});
+
+describe("MissionCards — classic desktop dock", () => {
+  beforeEach(() => {
+    // Force the classic desktop layout (the only layout that renders the
+    // bottom StudioDock); the shell layout is covered above.
+    window.localStorage.setItem("litt:studio:layout-mode", "classic");
+  });
+  afterEach(() => {
+    window.localStorage.removeItem("litt:studio:layout-mode");
+  });
+
+  async function renderClassicStudio() {
+    const user = userEvent.setup();
+    render(<CommandStudio />);
+    await waitFor(() => {
+      if (!screen.queryByTestId("studio-dock")) {
+        throw new Error("StudioDock has not mounted");
+      }
+    });
+    return { user };
+  }
+
+  it("dock Activity tab renders the mission cards (classic desktop topology)", async () => {
+    const { user } = await renderClassicStudio();
+    await user.click(screen.getByTestId("dock-collapsed-toggle"));
+    await user.click(screen.getByTestId("dock-tab-activity"));
+    const activityContent = await screen.findByTestId("dock-content-activity");
+    // The dock Activity tab is the mission home in the classic desktop
+    // topology: it renders both the activity feed and the mission cards.
+    expect(
+      activityContent.querySelector('[data-testid="mission-cards"]'),
+    ).toBeTruthy();
+    expect(activityContent.querySelector('[data-testid="studio-activity-panel"]')).toBeTruthy();
   });
 });

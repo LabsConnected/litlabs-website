@@ -68,6 +68,52 @@ async function execInWorkspace(
   };
 }
 
+export interface RestoreWorkspaceCheckpointInput {
+  workspaceId: string;
+  userId: string;
+  /** Full 40-char hex git SHA recorded by createWorkspaceCheckpoint. */
+  gitSha: string;
+}
+
+export interface RestoreWorkspaceCheckpointResult {
+  gitSha: string;
+}
+
+/** A checkpoint SHA must be exactly 40 hex chars — anything else is refused
+ *  before it can reach the shell, so no command injection is possible. */
+const GIT_SHA_RE = /^[0-9a-f]{40}$/i;
+
+/**
+ * Restore the workspace EXACTLY to a checkpoint SHA: hard-reset tracked
+ * files to the checkpoint commit and delete untracked files created after
+ * it, so the working tree matches the checkpointed state byte-for-byte.
+ *
+ * Reuses the same execInWorkspace transport plumbing as checkpoint
+ * creation — no new execution path.
+ */
+export async function restoreWorkspaceCheckpoint(
+  input: RestoreWorkspaceCheckpointInput,
+): Promise<RestoreWorkspaceCheckpointResult> {
+  const { workspaceId, userId, gitSha } = input;
+  const sha = gitSha.trim();
+  if (!GIT_SHA_RE.test(sha)) {
+    throw new Error(
+      "Refusing to restore workspace: checkpoint SHA must be a 40-character hex git SHA",
+    );
+  }
+  const result = await execInWorkspace(
+    workspaceId,
+    userId,
+    `git reset --hard ${sha} && git clean -fd`,
+  );
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `Workspace restore to ${sha} failed (exit ${result.exitCode}): ${(result.stderr || result.stdout).slice(0, 500)}`,
+    );
+  }
+  return { gitSha: sha };
+}
+
 export async function createWorkspaceCheckpoint(
   input: WorkspaceCheckpointInput,
 ): Promise<WorkspaceCheckpointResult> {

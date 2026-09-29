@@ -9,6 +9,9 @@ describe("runtimePhaseLabel", () => {
   it("labels terminal_disconnected as Terminal idle — workspace ready, PTY unattached", () => {
     // Honesty fix: the workspace is ready and builds run server-side; only
     // the visible terminal PTY isn't attached. Must never read as an outage.
+    // NOTE: "terminal_disconnected" was replaced by "terminal_unreachable" in
+    // the RuntimePhase union (dead-phase replacement); the label case itself
+    // is intentionally unchanged — PASS 2 owns the disconnected→idle fix.
     expect(runtimePhaseLabel("terminal_disconnected")).toBe("Terminal idle");
   });
 
@@ -45,7 +48,7 @@ describe("deriveExecutionHint", () => {
   it("warns pre-send when the status feed is unreachable but the workspace is ready", () => {
     expect(
       deriveExecutionHint("unreachable", {
-        phase: "terminal_disconnected",
+        phase: "terminal_unreachable",
         workspaceProvisioned: true,
       }),
     ).toBe(

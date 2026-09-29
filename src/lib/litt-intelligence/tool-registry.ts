@@ -953,6 +953,19 @@ const NEVER_ALLOW_APPROVAL: ApprovalPolicy = {
   neverAllow: true,
 };
 
+// Terminal execute: the permission engine classifies each command
+// (terminal-command-policy.ts) as safe/risky/deny. This registry backstop
+// demands explicit approval for any non-read-only execution — the
+// permission engine is the per-command decision point (safe auto-runs via
+// hasApproval: true from the loop, risky needs user approval, deny never
+// reaches here).
+const TERMINAL_APPROVAL: ApprovalPolicy = {
+  required: false,
+  autoApproveReadOnly: false,
+  requireExplicitForMutations: true,
+  neverAllow: false,
+};
+
 export function registerInternalTools(): void {
   const tools: Array<{ tool: LiTTToolDefinition; handler?: (inputs: Record<string, unknown>) => Promise<unknown> }> = [
     // ─── Read-only tools ──────────────────────────────────────
@@ -1519,12 +1532,12 @@ export function registerInternalTools(): void {
         enabled: false, // No handler implemented
       },
     },
-    // ─── Terminal (disabled by default — enable when terminal connects) ────────
+    // ─── Terminal (governed by the terminal command policy) ────────
     {
       tool: {
         id: "terminal.execute",
         name: "Execute Terminal Command",
-        description: "Execute a terminal command. Read-only commands (git status, ls, cat, tsc, lint, tests) run automatically. Mutation commands (git commit, npm install, file writes) require approval.",
+        description: "Execute a terminal command. Read-only commands (git status, ls, cat, tsc, lint, tests) run automatically. Mutation commands (git commit, npm install, file writes) require approval. Destructive commands are never executed.",
         source: "internal",
         version: "2.0.0",
         inputSchema: { type: "object", properties: { command: { type: "string" }, projectId: { type: "string" }, hasApproval: { type: "boolean" } }, required: ["command", "projectId"] },
@@ -1532,12 +1545,12 @@ export function registerInternalTools(): void {
         requiredCapabilities: [],
         requiredPermissions: ["terminal:execute"],
         risk: "medium",
-        approvalPolicy: NEVER_ALLOW_APPROVAL,
+        approvalPolicy: TERMINAL_APPROVAL,
         timeoutMs: 30000,
         idempotent: false,
         readOnly: false,
         permissionLevel: 'workspace-write',
-        enabled: false,
+        enabled: true,
       },
       handler: lazyHandlers["terminal.execute"],
     },

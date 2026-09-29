@@ -93,7 +93,7 @@ const cases: Array<{
     input: {
       runtime: runtime({
         ...project,
-        phase: "terminal_disconnected",
+        phase: "terminal_unreachable",
         workspaceId: "workspace-1",
         workspaceStatus: "ready",
         workspaceProvisioned: true,
@@ -110,7 +110,7 @@ const cases: Array<{
     input: {
       runtime: runtime({
         ...project,
-        phase: "terminal_disconnected",
+        phase: "terminal_unreachable",
         workspaceId: "workspace-1",
         workspaceStatus: "ready",
         workspaceProvisioned: true,
@@ -119,7 +119,7 @@ const cases: Array<{
       runtimeLoading: false,
       providerHealth: "available",
     },
-    key: "terminal_disconnected",
+    key: "terminal_unreachable",
     action: "connect_terminal",
   },
   {

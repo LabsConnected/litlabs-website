@@ -178,12 +178,15 @@ export default function CommandStudioHeader({
   const hasAi = modelHealth === "available" || modelHealth === "degraded";
   const providerCount = hasAi ? 1 : 0;
 
-  const runtimeReady = runtime.phase === "ready" && runtime.executionAvailable;
+  // "ready" already implies executionAvailable (workspace mounted AND
+  // terminal server reachable) — the canonical hook derives them together,
+  // so no second condition can disagree.
+  const runtimeReady = runtime.phase === "ready";
   const statusLabel = runtimeLoading || runtime.phase === "resolving"
     ? "Runtime status checking"
     : runtime.phase === "idle" || !runtime.projectId
       ? "No project selected"
-      : runtime.phase === "terminal_disconnected"
+      : runtime.phase === "terminal_unreachable"
         // Canonical terminal wording — same label the operator bar and
         // Mission hints render (lib/studio/terminal-health.ts).
         ? terminalHealthOf(capabilities).label
@@ -202,7 +205,7 @@ export default function CommandStudioHeader({
       ? "#e3b341"
       : runtime.phase === "error" || runtime.phase === "unauthenticated" || modelHealth === "unavailable"
         ? "#ef4444"
-        : runtime.phase === "terminal_disconnected"
+        : runtime.phase === "terminal_unreachable"
           ? HEALTH_LEVEL_COLOR[terminalHealthOf(capabilities).level]
           : "#e3b341";
 

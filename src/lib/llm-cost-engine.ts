@@ -85,7 +85,7 @@ const COST_CATALOG: ModelCostEntry[] = [
   },
   {
     provider: "gemini",
-    model: "gemini-2.5-flash-lite",
+    model: "gemini-2.5-flash",
     promptCostPer1M: 0.0375,
     completionCostPer1M: 0.15,
     billingClass: "free",

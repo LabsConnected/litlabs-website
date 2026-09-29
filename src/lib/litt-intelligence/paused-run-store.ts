@@ -12,23 +12,36 @@
  *
  * Async execution:
  * - After approval, the resumed agent loop runs detached from the HTTP
- *   request. Its state is persisted in run_status / run_result / run_error
- *   so the client can poll the GET endpoint for completion.
+ *   request. The run's EXECUTION OUTCOME lives exclusively on the parent
+ *   action_run (action_runs + ordered action_events) — this store never
+ *   records it. run_status / execution_token / lease_expires_at on this
+ *   table are the RESUME-CLAIM lifecycle (NULL → 'processing' → terminal),
+ *   i.e. which executor currently owns the right to settle the run, not
+ *   what the run's state is. Consumers asking "what is the run's state?"
+ *   must read the canonical action_run (see getRunOutcomeForPausedRun).
  * - A claimed run is lease-owned: the executor renews lease_expires_at
  *   every RUN_HEARTBEAT_MS and carries its last observed progress on the
  *   same write. A dead process provably lapses in ≤ RUN_LEASE_MS; a live
  *   process working past the old age wall is never condemned.
- * - Terminal writes are fenced on execution_token, so a superseded or
+ * - Claim release is fenced on execution_token, so a superseded or
  *   stale-marked executor cannot overwrite the truth — and a fenced
  *   executor learns it lost the claim on its next beat and aborts.
  * - Runs that provably died (lease expired) or genuinely stalled
  *   (RUN_STALL_MS without progress) are marked failed on read; only a
- *   run whose lease has lapsed may be reset and re-driven.
+ *   run whose lease has lapsed may be reset and re-driven. The reaper
+ *   settles the canonical action_run too, so a reaped run can never leave
+ *   the run ledger non-terminal while the gate says failed.
  */
 
 import "server-only";
 
 import { supabaseAdmin } from "@/lib/supabase";
+import {
+  getActionRun,
+  isTerminalActionRunStatus,
+  listActionEvents,
+  transitionActionRun,
+} from "@/lib/action-runtime";
 import type { LLMMessage } from "./llm-tool-calling";
 import type { DeferredToolCall } from "./agent-loop-v2";
 import type { QualityFinale, QualityLoopSnapshot } from "./quality-loop-flow";
@@ -364,6 +377,25 @@ async function recoverStaleRun(record: PausedRunRecord): Promise<PausedRunRecord
     update.is("run_status", null);
   }
   await update;
+
+  // Settle the canonical action_run too: a reaped run must never leave the
+  // run ledger non-terminal while the gate says failed ("terminal said
+  // idle"). Best-effort — this runs on read paths. A terminal action_run
+  // (a racing executor already settled it) throws ACTION_RUN_TERMINAL_*,
+  // which is the honest outcome anyway, so all errors are swallowed.
+  if (record.actionRunId) {
+    try {
+      await transitionActionRun(record.actionRunId, record.userId, "failed", {
+        currentActivity: staleError,
+        failureCode: staleError.includes("stalled") ? "EXECUTION_STALLED" : "EXECUTION_LOST",
+        failureMessage: staleError,
+      });
+    } catch {
+      // Intentionally swallowed: read path, and any failure here means the
+      // action_run already holds its truth (or is gone).
+    }
+  }
+
   return {
     ...record,
     runStatus: "failed",
@@ -589,72 +621,180 @@ export async function renewRunLease(
 }
 
 /**
- * Mark a run as "completed" — the resumed execution finished successfully.
- *
- * When the caller presents its execution token, the write is fenced: it
- * only lands while that token still owns a live "processing" claim. A
- * stale-marked zombie or a superseded executor gets false and must not
- * treat its result as the record of truth.
+ * Fenced claim check: true iff the given token still owns a live
+ * "processing" claim on this approval gate. A superseded executor (or a
+ * reaped one) gets false and must not write the run's outcome anywhere.
  */
-export async function markRunCompleted(
+export async function verifyRunClaim(
   pausedRunId: string,
   userId: string,
-  result: RunResult,
-  executionToken?: string,
+  executionToken: string,
 ): Promise<boolean> {
   if (!supabaseAdmin) return false;
-
-  const now = new Date().toISOString();
-  const update = supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from(TABLE)
-    .update({
-      run_status: "completed",
-      run_result: result,
-      run_completed_at: now,
-    })
+    .select("id")
     .eq("id", pausedRunId)
-    .eq("user_id", userId);
-  if (executionToken) {
-    update
-      .eq("execution_token", executionToken)
-      .eq("run_status", "processing");
-  }
-  const { data, error } = await update.select("id");
+    .eq("user_id", userId)
+    .eq("execution_token", executionToken)
+    .eq("run_status", "processing")
+    .maybeSingle();
+  if (error) return false;
+  return !!data;
+}
+
+/**
+ * Release the resume claim after the executor recorded the terminal outcome
+ * on the canonical action_run.
+ *
+ * run_status on agent_paused_runs is the RESUME-CLAIM lifecycle, NOT the
+ * run's execution outcome: 'completed' here means "this claim recorded its
+ * outcome on the action_run and retired", 'failed' means "this claim ended
+ * in failure". The run's outcome lives exclusively on action_runs — never
+ * read run_status as execution state (see getRunOutcomeForPausedRun).
+ *
+ * Fenced: only lands while the token still owns a live "processing" claim.
+ * Returns false when another owner (reaper, retry) already released it.
+ */
+export async function releaseRunClaim(
+  pausedRunId: string,
+  userId: string,
+  executionToken: string,
+  claimOutcome: "completed" | "failed",
+): Promise<boolean> {
+  if (!supabaseAdmin) return false;
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .update({ run_status: claimOutcome })
+    .eq("id", pausedRunId)
+    .eq("user_id", userId)
+    .eq("execution_token", executionToken)
+    .eq("run_status", "processing")
+    .select("id");
   if (error) return false;
   return (data?.length ?? 0) > 0;
 }
 
 /**
- * Mark a run as "failed" — the resumed execution threw or returned an error.
- *
- * Same fencing contract as markRunCompleted when a token is presented.
- * Callers without a token (pre-claim failures, internal recovery paths)
- * keep the legacy unconditional write.
+ * Repoint an approval gate at a new canonical action_run. Used by the
+ * controlled retry path: a retry is a NEW execution attempt, so it gets a
+ * fresh run identity while the failed attempt's terminal state stays as
+ * honest history. One run = one execution attempt.
  */
-export async function markRunFailed(
+export async function updatePausedRunActionRun(
   pausedRunId: string,
   userId: string,
-  error: string,
-  executionToken?: string,
-): Promise<void> {
-  if (!supabaseAdmin) return;
-
-  const now = new Date().toISOString();
-  const update = supabaseAdmin
+  actionRunId: string,
+): Promise<boolean> {
+  if (!supabaseAdmin) return false;
+  const { data, error } = await supabaseAdmin
     .from(TABLE)
-    .update({
-      run_status: "failed",
-      run_error: error,
-      run_completed_at: now,
-    })
+    .update({ action_run_id: actionRunId })
     .eq("id", pausedRunId)
-    .eq("user_id", userId);
-  if (executionToken) {
-    update
-      .eq("execution_token", executionToken)
-      .eq("run_status", "processing");
+    .eq("user_id", userId)
+    .select("id")
+    .maybeSingle();
+  if (error) return false;
+  return !!data;
+}
+
+/** Execution outcome derived from the canonical action_run. */
+export interface DerivedRunOutcome {
+  runStatus: "processing" | "completed" | "failed" | null;
+  runResult: RunResult | null;
+  runError: string | null;
+  runStartedAt: string | null;
+  runCompletedAt: string | null;
+}
+
+const EMPTY_OUTCOME: DerivedRunOutcome = {
+  runStatus: null,
+  runResult: null,
+  runError: null,
+  runStartedAt: null,
+  runCompletedAt: null,
+};
+
+/**
+ * The single read path for "what is this approval gate's run doing?"
+ *
+ * The outcome is DERIVED from the canonical action_run (action_runs +
+ * ordered action_events) — never from this table's claim fields. Two
+ * writers can never present conflicting final states because there is
+ * only one writer of outcome (the fenced executor settling the action_run)
+ * and every consumer reads through here.
+ *
+ * Legacy gate rows with no parent action_run fall back to the row's own
+ * claim fields so old polls keep working.
+ */
+export async function getRunOutcomeForPausedRun(
+  record: PausedRunRecord,
+  userId: string,
+): Promise<DerivedRunOutcome> {
+  if (!record.actionRunId) {
+    return {
+      runStatus: record.runStatus,
+      runResult: record.runResult,
+      runError: record.runError,
+      runStartedAt: record.runStartedAt,
+      runCompletedAt: record.runCompletedAt,
+    };
   }
-  await update;
+  let run: Awaited<ReturnType<typeof getActionRun>>;
+  try {
+    run = await getActionRun(record.actionRunId, userId);
+    if (!run) {
+      return { ...EMPTY_OUTCOME, runStatus: record.runStatus };
+    }
+    const events = await listActionEvents(record.actionRunId, userId, { limit: 200 });
+    // Latest outcome-bearing event wins. Terminal transition events carry
+    // the RunResult in payload.result (written atomically with the status
+    // change by action_runtime_transition_event_activity).
+    for (let i = events.length - 1; i >= 0; i--) {
+      const payload = (events[i].payload ?? {}) as { result?: RunResult };
+      const result = payload.result ?? null;
+      if (events[i].type === "run.completed") {
+        return {
+          runStatus: "completed",
+          runResult: result,
+          runError: null,
+          runStartedAt: run.startedAt,
+          runCompletedAt: run.completedAt,
+        };
+      }
+      if (events[i].type === "run.failed" || events[i].type === "run.cancelled") {
+        return {
+          runStatus: "failed",
+          runResult: result,
+          runError: run.failureMessage,
+          runStartedAt: run.startedAt,
+          runCompletedAt: run.completedAt,
+        };
+      }
+      if (events[i].type === "approval.required" && result?.pendingApproval) {
+        // Nested-gate handoff: this attempt finished by opening a new gate.
+        return {
+          runStatus: "completed",
+          runResult: result,
+          runError: null,
+          runStartedAt: run.startedAt,
+          runCompletedAt: run.completedAt,
+        };
+      }
+    }
+    if (isTerminalActionRunStatus(run.status)) {
+      return {
+        runStatus: run.status === "completed" ? "completed" : "failed",
+        runResult: null,
+        runError: run.failureMessage,
+        runStartedAt: run.startedAt,
+        runCompletedAt: run.completedAt,
+      };
+    }
+    return { ...EMPTY_OUTCOME, runStatus: "processing", runStartedAt: run.startedAt };
+  } catch {
+    return { ...EMPTY_OUTCOME, runStatus: record.runStatus };
+  }
 }
 
 export async function expireStaleRuns(): Promise<number> {

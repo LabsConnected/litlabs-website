@@ -158,6 +158,7 @@ const DEFAULT_ATTEMPT_TIMEOUT_MS = 30_000;
  *  models that fail to emit tool calls, so it stays last — specific large
  *  free tool-callers are attempted first. */
 const OPENROUTER_FREE_MODELS = [
+  "qwen/qwen3-coder:free",
   "nvidia/nemotron-3.5-lightning:free",
   "nvidia/nemotron-3-super-120b-a12b:free",
   "nvidia/nemotron-3-ultra-550b-a55b:free",
@@ -216,8 +217,8 @@ function providerDefs(): ProviderDef[] {
       credentialState: () =>
         envPresent("GEMINI_API_KEY", "GOOGLE_API_KEY") ? "available" : "missing",
       models: () => [
-        process.env.GEMINI_PRIMARY_MODEL || "gemini-3.6-flash",
-        process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash-lite",
+        process.env.GEMINI_PRIMARY_MODEL || "gemini-flash-latest",
+        process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash",
       ],
     },
     {

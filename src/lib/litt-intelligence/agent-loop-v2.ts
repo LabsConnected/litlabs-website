@@ -8,7 +8,7 @@
  * - Native structured tool calling only. No text-parsed fake tool calls.
  * - Loop detection: cancel after 3 identical tool calls with no
  *   intervening workspace mutation or materially different result.
- * - Checkpoints before meaningful mutation batches.
+ * - Checkpoint before every meaningful mutation (per-mutation rollback points).
  * - Hard limits: max steps, max runtime, max output, max retries.
  * - Terminal server's isBlockedCommand() remains authoritative security.
  */
@@ -16,7 +16,6 @@
 import "server-only";
 
 import { postRunCheckpointLabel } from "@/lib/studio/checkpoint-pairs";
-import { profileOf } from "./quality-loop";
 import type { WorkspaceTransport } from "./workspace-transport";
 import { ProgressEmitter, type ProgressEvent } from "./progress-events";
 import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from "./permission-engine";
@@ -33,6 +32,7 @@ import type { ActionExecutionContext } from "@/lib/action-runtime";
 import { resolveAvailableCapabilities } from "./capabilities";
 import type { LiTTToolDefinition } from "./types";
 import {
+  buildQualityLoopPrompt,
   buildRedesignPrompt,
   finalizeQualityLoop,
   harvestStageMarkers,
@@ -41,7 +41,6 @@ import {
   noteDeployment,
   noteToolResult,
   noteMutationReadBack,
-  qualityLoopPromptSection,
   runQualityInspection,
   snapshotQualityLoopSession,
   startQualityLoopSession,
@@ -49,6 +48,7 @@ import {
   type QualityFinale,
   type QualityLoopSession,
   type QualityLoopSnapshot,
+  formatQualityVerdictBlock,
 } from "./quality-loop-flow";
 
 // Station Control Bridge (chunk E): importing the barrel registers every
@@ -103,6 +103,14 @@ export interface AgentLoopConfig {
   conversationId?: string;
   /** Parent ActionRun owning this work; injected server-side. */
   actionRunId?: string;
+  /**
+   * Item 5a — optional durable event sink for the Activity truth.
+   * When set, every ProgressEvent emitted through this run's
+   * `localProgress` is also offered to the hook. The loop invokes it in
+   * emit order on a per-run promise chain; failures are logged and
+   * swallowed — persistence can NEVER break the run.
+   */
+  persistEvent?: (event: ProgressEvent) => Promise<void>;
   /**
    * Canonical execution context for the entire run. Prefer this over the
    * legacy actionRunId field: it carries tenant, conversation, and project
@@ -639,6 +647,30 @@ async function finalizeQualityGatedRun(
 
 // ─── Agent Loop ───────────────────────────────────────────────────
 
+/**
+ * Item 5a — wire the optional `persistEvent` hook into a run's progress
+ * stream. Events flow through a per-run promise chain so they persist in
+ * emit order; each failure is logged and the chain continues. The loop
+ * itself never awaits persistence — it can only observe.
+ */
+function attachEventPersistence(
+  emitter: ProgressEmitter,
+  persistEvent: AgentLoopConfig["persistEvent"],
+): void {
+  if (!persistEvent) return;
+  let tail: Promise<void> = Promise.resolve();
+  emitter.on((event) => {
+    tail = tail
+      .then(() => persistEvent(event))
+      .catch((err) => {
+        // Persistence failure must NEVER break the run.
+        console.error("[agent-loop] persistEvent failed; continuing run", {
+          errorClass: err instanceof Error ? err.message : "unknown",
+        });
+      });
+  });
+}
+
 export async function runAgentLoopV2(
   userMessage: string,
   transport: WorkspaceTransport,
@@ -675,7 +707,7 @@ async function runAgentLoopV2Inner(
       userRequest: cfg.qualityLoop.userRequest ?? userMessage,
       snapshot: cfg.qualityLoop.state,
     });
-    cfg.systemPrompt += qualityLoopPromptSection(profileOf(qualitySession.state));
+    cfg.systemPrompt += buildQualityLoopPrompt(qualitySession.taskScope);
   }
 
   const events: ProgressEvent[] = [];
@@ -693,6 +725,8 @@ async function runAgentLoopV2Inner(
     events.push(event);
     progress?.emit(event);
   });
+  // Item 5a — persist loop events to the run's durable action_events log.
+  attachEventPersistence(localProgress, cfg.persistEvent);
 
   // Station Control Bridge (chunk E): route station action execution events
   // (action_started / action_completed / action_failed / approval_required)
@@ -742,9 +776,6 @@ async function runAgentLoopV2Inner(
   // Bounded recovery when the model announces more work but emits no tool
   // calls (the silent mid-build stall) — see resolveZeroToolCalls.
   let continuationNudges = 0;
-
-  // Check if any mutations have been requested (for checkpoint logic)
-  let mutationBatchPending = false;
 
   while (stepsUsed < cfg.maxSteps) {
     // Check runtime limit
@@ -903,8 +934,6 @@ async function runAgentLoopV2Inner(
     }
 
     // Process each tool call
-    let batchHasMutation = false;
-
     for (const toolCall of llmResponse.toolCalls) {
       const toolDef = availableTools.find((t) => t.id === toolCall.toolId);
 
@@ -1028,14 +1057,16 @@ async function runAgentLoopV2Inner(
         }
       }
 
-      // Create the pre-mutation checkpoint BEFORE the approval gate, so the
-      // resumed-after-approval run diffs the workspace truthfully instead of
-      // reporting "unknown". Safe when the user rejects: this only snapshots
-      // pre-mutation state and never writes workspace files.
-      if (!toolDef.readOnly && !mutationBatchPending && !checkpoint) {
+      // Create a pre-mutation checkpoint BEFORE the approval gate, ahead of
+      // EVERY mutating tool call — each mutation gets its own rollback
+      // point, so the resumed-after-approval run diffs the workspace
+      // truthfully instead of reporting "unknown". Safe when the user
+      // rejects: this only snapshots pre-mutation state and never writes
+      // workspace files. Read-only tools never checkpoint.
+      if (!toolDef.readOnly) {
         localProgress.emit({ type: "phase", phase: "execute", step: stepsUsed });
         checkpoint = await transport.createCheckpointBeforeMutation(
-          `Pre-agent-loop: ${userMessage.slice(0, 80)}`,
+          `Pre-mutation: ${toolCall.toolId} (step ${stepsUsed})`,
         ) ?? undefined;
         if (checkpoint) {
           localProgress.emit({
@@ -1044,8 +1075,6 @@ async function runAgentLoopV2Inner(
             gitSha: checkpoint.gitSha,
           });
         }
-        mutationBatchPending = true;
-        batchHasMutation = true;
       }
 
       if (permResult.requiresApproval) {
@@ -1196,7 +1225,6 @@ async function runAgentLoopV2Inner(
       // Track mutations
       if (!toolDef.readOnly) {
         hasInterveningMutation = true;
-        batchHasMutation = true;
         if (result.success) executedMutations.set(dedupeKey, result);
       }
 
@@ -1235,11 +1263,6 @@ async function runAgentLoopV2Inner(
     }
 
     if (cancelled) break;
-
-    // Reset mutation flag after batch
-    if (!batchHasMutation) {
-      mutationBatchPending = false;
-    }
 
     // Per-step timing: total step duration + cumulative elapsed, so the work log
     // can show exactly where the minutes went on a slow build.
@@ -1288,7 +1311,7 @@ async function runAgentLoopV2Inner(
   });
   const gatedFinalText =
     qualityFinale && !qualityFinale.verdict.ok
-      ? `${effectiveFinalText}\n\nQuality check — ${qualityFinale.verdict.reason.charAt(0).toLowerCase()}${qualityFinale.verdict.reason.slice(1)}`
+      ? `${effectiveFinalText}${formatQualityVerdictBlock(qualityFinale)}`
       : effectiveFinalText;
 
   // What did this run actually do to the files?
@@ -1704,11 +1727,15 @@ export async function executeDeferredToolCalls(
       break;
     }
 
-    // Checkpoint before first mutation
-    if (!toolDef.readOnly && !state.mutationBatchPending && !state.checkpoint) {
+    // Checkpoint before EVERY mutation in the deferred batch (the same
+    // per-mutation guarantee as the initial loop): the resumed run keeps
+    // producing a rollback point for each mutation across the pause
+    // boundary, so the workspace always diffs truthfully. Read-only tools
+    // never checkpoint.
+    if (!toolDef.readOnly) {
       ctx.localProgress.emit({ type: "phase", phase: "execute", step: ctx.stepsUsed });
       state.checkpoint = await ctx.transport.createCheckpointBeforeMutation(
-        `Pre-agent-loop resume (deferred batch)`,
+        `Pre-mutation resume (deferred batch): ${toolCall.toolId}`,
       ) ?? undefined;
       if (state.checkpoint) {
         ctx.localProgress.emit({
@@ -1717,8 +1744,6 @@ export async function executeDeferredToolCalls(
           gitSha: state.checkpoint.gitSha,
         });
       }
-      state.mutationBatchPending = true;
-      state.batchHasMutation = true;
     }
 
     ctx.localProgress.emit({ type: "tool_start", toolId: toolCall.toolId, summary: `${toolCall.toolId} (deferred)` });
@@ -1826,7 +1851,7 @@ async function resumeAgentLoopV2Inner(
       userRequest: cfg.qualityLoop.userRequest ?? "",
       snapshot: cfg.qualityLoop.state,
     });
-    cfg.systemPrompt += qualityLoopPromptSection(profileOf(qualitySession.state));
+    cfg.systemPrompt += buildQualityLoopPrompt(qualitySession.taskScope);
   }
 
   const events: ProgressEvent[] = [];
@@ -1838,6 +1863,9 @@ async function resumeAgentLoopV2Inner(
     events.push(event);
     progress?.emit(event);
   });
+  // Item 5a — persist resumed-loop events to the run's durable
+  // action_events log (same hook as the initial run).
+  attachEventPersistence(localProgress, cfg.persistEvent);
 
   // Station Control Bridge (chunk E): route station action execution events
   // into this resumed run's Activity stream. Same transport-keyed sink as
@@ -1882,6 +1910,9 @@ async function resumeAgentLoopV2Inner(
   let checkpoint = resume.existingCheckpoint;
   const toolCallLog: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }> = [];
   let completedDeployment: CompletedDeployment | null = null;
+  // NOTE: checkpoints are now created before EVERY mutation, so this flag no
+  // longer gates anything. It is retained only because it is part of the
+  // DeferredToolBatchState shape threaded through pause/resume records.
   let mutationBatchPending = false;
   let batchHasMutation = false;
   // Bounded recovery when the model announces more work but emits no tool
@@ -1998,7 +2029,6 @@ async function resumeAgentLoopV2Inner(
     // be cached as executed work or weaken loop detection.
     if (toolDef && !toolDef.readOnly && result.success) {
       hasInterveningMutation = true;
-      mutationBatchPending = true;
     }
   } else {
     // Rejected — inject rejection as tool result
@@ -2270,16 +2300,16 @@ async function resumeAgentLoopV2Inner(
         continue;
       }
 
-      // Create the pre-mutation checkpoint BEFORE the approval gate (same
-      // guarantee as the initial loop): a nested approval pause carries the
-      // checkpoint so the next resume diffs truthfully instead of "unknown".
-      if (!toolDef.readOnly && !mutationBatchPending && !checkpoint) {
-        checkpoint = await transport.createCheckpointBeforeMutation(`Pre-agent-loop resume`) ?? undefined;
+      // Create the pre-mutation checkpoint BEFORE the approval gate, ahead of
+      // EVERY mutating tool call (same per-mutation guarantee as the initial
+      // loop): a nested approval pause carries the latest checkpoint so the
+      // next resume diffs truthfully instead of "unknown". Read-only tools
+      // never checkpoint.
+      if (!toolDef.readOnly) {
+        checkpoint = await transport.createCheckpointBeforeMutation(`Pre-mutation resume: ${toolCall.toolId} (step ${stepsUsed})`) ?? undefined;
         if (checkpoint) {
           localProgress.emit({ type: "checkpoint", label: checkpoint.label, gitSha: checkpoint.gitSha });
         }
-        mutationBatchPending = true;
-        batchHasMutation = true;
       }
 
       if (permResult.requiresApproval) {
@@ -2437,7 +2467,7 @@ async function resumeAgentLoopV2Inner(
   });
   const gatedFinalText =
     qualityFinale && !qualityFinale.verdict.ok
-      ? `${effectiveFinalText}\n\nQuality check — ${qualityFinale.verdict.reason.charAt(0).toLowerCase()}${qualityFinale.verdict.reason.slice(1)}`
+      ? `${effectiveFinalText}${formatQualityVerdictBlock(qualityFinale)}`
       : effectiveFinalText;
 
   // What did this run actually do to the files?

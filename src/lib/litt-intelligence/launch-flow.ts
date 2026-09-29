@@ -88,6 +88,12 @@ export interface LaunchFlowOptions {
   actionContext?: ActionExecutionContext;
   /** Conversation scope for trusted context/user-scoped tools. */
   conversationId?: string;
+  /**
+   * Item 5a — optional durable event sink for the Activity truth.
+   * Forwarded into every agent-loop pass this flow starts so the run's
+   * ProgressEvents persist to the run's action_events log.
+   */
+  persistEvent?: AgentLoopConfig["persistEvent"];
   /** Injected for tests. */
   runAgentLoop?: (
     userMessage: string,
@@ -574,6 +580,9 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           userId: options.userId,
           conversationId: actionContext?.conversationId ?? options.conversationId,
           actionContext,
+          // Item 5a — persist this pass's loop events to the run's
+          // action_events log (the Activity truth).
+          persistEvent: options.persistEvent,
           // Quality loop: gate the main build phase when the caller opted in.
           // (The repair phase below runs without it — it is a bounded
           // sub-task of the already-gated build, not a new build.)
@@ -842,6 +851,8 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           userId: options.userId,
           conversationId: actionContext?.conversationId ?? options.conversationId,
           actionContext,
+          // Item 5a — the repair pass is part of the same run's story.
+          persistEvent: options.persistEvent,
         },
         progress,
       );

@@ -55,6 +55,9 @@ import {
   type ActionExecutionContext,
   type ActionRun,
 } from "@/lib/action-runtime";
+// Item 5a — deep import on purpose: the barrel is mocked in route tests,
+// and the persistence hook must stay the real one.
+import { makePersistProgressEvent } from "@/lib/action-runtime/progress-event-persistence";
 import type { ConversationTurn } from "@/lib/litt-intelligence/turn-resolver";
 import { attachActionRunToConversationTask, settleConversationTask } from "@/lib/studio/task-service";
 
@@ -1106,6 +1109,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
 
         // Run the full launch flow: plan → build → preview → deploy.
         // This keeps V2 execution bounded, truthful, and auto-repairing.
+        //
+        // Item 5a — persist the loop's progress events to the run's durable
+        // action_events log (the Activity truth). Persistence runs on the
+        // loop's own chain with failures logged and swallowed, so it can
+        // NEVER break the run.
+        const persistProgressEvent = actionContext
+          ? makePersistProgressEvent({
+              runId: actionContext.actionRunId,
+              userId: actionContext.userId,
+            })
+          : undefined;
         launchFlowResult = await runLaunchFlow({
           userMessage: resolvedMessage,
           projectId: conversation.projectId ?? "",
@@ -1130,6 +1144,10 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           signal: executionAbort.signal,
           actionContext: actionContext ?? undefined,
           conversationId: conversation.id,
+          // Item 5a — the loop persists its ProgressEvents to this run's
+          // action_events log; the Activity panel reads them back as the
+          // single Activity truth.
+          persistEvent: persistProgressEvent,
         });
 
         v2Result = launchFlowResult.agentLoopResult ?? null;
