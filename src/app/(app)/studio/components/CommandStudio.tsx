@@ -352,6 +352,11 @@ function CommandStudioContent() {
   // F1: holds the full StudioSelectionPayload when present, so the structured
   // selection reaches the real LLM send context — not just composer chrome.
   const [previewSelection, setPreviewSelection] = useState<PreviewSelection | StudioSelectionPayload | null>(null);
+  // A real preview/builder selection is useful inspector state. Open it on
+  // demand while keeping the clean first-run shell calm.
+  useEffect(() => {
+    if (previewSelection) setInspectorOpen(true);
+  }, [previewSelection]);
   // F1: session-scoped ask-litt selection pinned per server task id.
   // Ephemeral by design (never persisted) — declared up here because the
   // studio:ask-litt listener below stamps into it.
@@ -454,6 +459,7 @@ function CommandStudioContent() {
   // project has useful state to inspect.
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [littExpanded, setLittExpanded] = useState(false);
+
   // Surfaces stay mounted once visited — hidden, not unmounted — so
   // preview iframes, PTY sessions, and canvas state survive switching.
   const [mountedSurfaces, setMountedSurfaces] = useState<Set<StudioStageSurface>>(() => new Set(["preview"]));
