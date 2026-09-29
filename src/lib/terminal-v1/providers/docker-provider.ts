@@ -28,6 +28,11 @@ import type {
   PreviewEndpoint,
 } from "../types";
 import { DEFAULT_SANDBOX_LIMITS } from "../types";
+// Canonical execution-policy classifier (packages/litt-agent-core) — the
+// same deny/safe/risky tiers the ExecutionGateway enforces. `execute()`
+// used to run `docker exec … bash -c "<user command>"`, which bypassed the
+// policy entirely and allowed shell-string injection.
+import { classifyCommand } from "@litt/agent-core";
 
 const execFileAsync = promisify(execFile);
 
@@ -66,6 +71,70 @@ interface SandboxRecord {
 }
 
 const sandboxes = new Map<string, SandboxRecord>();
+
+/**
+ * Split a command line into argv tokens, honoring single/double quotes and
+ * backslash escapes.
+ *
+ * Used to execute commands WITHOUT a shell: `;`, `&&`, `|`, `$()`,
+ * backticks, and globs become literal argv entries instead of being
+ * interpreted (shell-string injection). Throws on unterminated quotes.
+ */
+export function tokenizeCommandLine(input: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+  let hasToken = false;
+
+  for (const ch of input) {
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      hasToken = true;
+      continue;
+    }
+    if (ch === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (ch === quote) {
+        quote = null;
+      } else {
+        current += ch;
+        hasToken = true;
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      hasToken = true;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (hasToken) {
+        tokens.push(current);
+        current = "";
+        hasToken = false;
+      }
+      continue;
+    }
+    current += ch;
+    hasToken = true;
+  }
+
+  if (quote) {
+    throw new Error("Unterminated quote in command");
+  }
+  if (escaped) {
+    throw new Error("Trailing escape in command");
+  }
+  if (hasToken) {
+    tokens.push(current);
+  }
+  return tokens;
+}
 
 async function ensureNetwork(runner: DockerCommandRunner): Promise<void> {
   try {
@@ -358,10 +427,27 @@ export class DockerSandboxProvider implements SandboxProvider {
     const startTime = Date.now();
     const timeout = input.timeoutMs ?? 120_000;
 
+    // Parameterize: tokenize the command line and exec argv directly with NO
+    // shell. Shell metacharacters (;, &&, |, $(), backticks) are passed as
+    // literal arguments, neutralizing shell-string injection.
+    const argv = tokenizeCommandLine(input.command);
+    if (argv.length === 0) {
+      throw new Error("Empty command");
+    }
+    const [command, ...args] = argv;
+
+    // Execution-policy enforcement: classify through the canonical
+    // ExecutionGateway tiers. Policy-denied ("dangerous") commands never
+    // reach the container.
+    const policy = classifyCommand(command, args);
+    if (policy.level === "dangerous") {
+      throw new Error(`Command denied by execution policy: ${policy.reason}`);
+    }
+
     try {
       const { stdout, stderr } = await execFileAsync(
         "docker",
-        ["exec", record.containerName, "bash", "-c", input.command],
+        ["exec", record.containerName, ...argv],
         {
           timeout,
           maxBuffer: 2 * 1024 * 1024,

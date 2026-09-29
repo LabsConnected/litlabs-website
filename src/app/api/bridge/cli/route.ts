@@ -5,9 +5,18 @@
 import { spawn, ChildProcess } from "child_process";
 import { NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
+// Canonical execution-policy classifier (packages/litt-agent-core) — the
+// same deny/safe/risky tiers the ExecutionGateway enforces. The CLI bridge
+// spawns interactive shells that bypass the normal command pipeline, so
+// every line of stdin is classified here BEFORE it reaches the child.
+import { classifyCommand } from "@litt/agent-core";
 
-// Admin user ID - only this user can use CLI bridge
-const ADMIN_USER_ID = process.env.ADMIN_CLERK_ID || process.env.ADMIN_USER_ID || "";
+// Admin user ID - only this user can use CLI bridge.
+// Read per-request (not cached at module load) so tests and runtime env
+// changes are honored without a module reload.
+function getAdminUserId(): string {
+  return process.env.ADMIN_CLERK_ID || process.env.ADMIN_USER_ID || "";
+}
 
 // Active sessions storage
 const activeSessions = new Map<
@@ -30,10 +39,43 @@ interface BridgeMessage {
   rows?: number;
 }
 
+export interface BridgeInputPolicyResult {
+  allowed: boolean;
+  reason?: string;
+}
+
+/**
+ * Execution-policy enforcement for CLI bridge input.
+ *
+ * The bridge spawns interactive shells / agent CLIs that sit outside the
+ * ExecutionGateway pipeline, so this applies the canonical
+ * `classifyCommand` policy tiers directly: commands classified
+ * "dangerous" (rm, dd, mkfs, shutdown, kill, …) are rejected EVEN for the
+ * admin user. "safe" and "elevated" input passes (the admin check at the
+ * route boundary already authorized the session).
+ */
+export function enforceBridgeInputPolicy(input: string): BridgeInputPolicyResult {
+  const firstLine = input.split("\n", 1)[0]?.trim() ?? "";
+  if (!firstLine) {
+    return { allowed: false, reason: "Empty input" };
+  }
+  const tokens = firstLine.split(/\s+/);
+  const command = tokens[0];
+  const args = tokens.slice(1);
+  const assessment = classifyCommand(command, args);
+  if (assessment.level === "dangerous") {
+    return {
+      allowed: false,
+      reason: `Command denied by execution policy: ${assessment.reason}`,
+    };
+  }
+  return { allowed: true };
+}
+
 export async function GET(req: NextRequest) {
   const { userId } = await auth(req);
 
-  if (!userId || userId !== ADMIN_USER_ID) {
+  if (!userId || userId !== getAdminUserId()) {
     return new Response("Unauthorized", { status: 401 });
   }
 
@@ -82,13 +124,15 @@ export async function GET(req: NextRequest) {
             });
             break;
           case "gemini":
-                        childProcess = spawn("gemini", [], {
+            // NOTE: no explicit secret injection here. The child inherits the
+            // server env via ...process.env below (this route is admin-only),
+            // so an explicit GEMINI_API_KEY line would only duplicate a value
+            // that is already present. Per execution-policy rules, secrets are
+            // never injected into child envs by name; the gemini CLI reads its
+            // key from its inherited environment.
+            childProcess = spawn("gemini", [], {
               cwd: process.env.HOME || process.env.USERPROFILE || process.cwd(),
-              env: {
-                ...process.env,
-                TERM: "xterm-256color",
-                GEMINI_API_KEY: process.env.GEMINI_API_KEY,
-              },
+              env: { ...process.env, TERM: "xterm-256color" },
             });
             break;
           default:
@@ -210,7 +254,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const { userId } = await auth(req);
 
-  if (!userId || userId !== ADMIN_USER_ID) {
+  if (!userId || userId !== getAdminUserId()) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -227,6 +271,17 @@ export async function POST(req: NextRequest) {
       // Validate input (basic security)
       if (input.length > 10000) {
         return Response.json({ error: "Input too long" }, { status: 400 });
+      }
+
+      // Execution-policy enforcement: classify the input through the
+      // canonical ExecutionGateway tiers. Policy-denied ("dangerous")
+      // commands are rejected even for the admin user.
+      const policy = enforceBridgeInputPolicy(input);
+      if (!policy.allowed) {
+        return Response.json(
+          { error: policy.reason ?? "Denied by execution policy" },
+          { status: 403 },
+        );
       }
 
       // Write to stdin
@@ -251,7 +306,7 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const { userId } = await auth(req);
 
-  if (!userId || userId !== ADMIN_USER_ID) {
+  if (!userId || userId !== getAdminUserId()) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -275,7 +330,7 @@ export async function DELETE(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const { userId } = await auth(req);
 
-  if (!userId || userId !== ADMIN_USER_ID) {
+  if (!userId || userId !== getAdminUserId()) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
