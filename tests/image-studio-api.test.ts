@@ -10,7 +10,7 @@
  *   - Alibaba text-to-image works
  *   - Alibaba image editing works (with reference image)
  *   - Cloudflare generation works
- *   - Auto Free falls through to the next provider on failure
+ *   - Auto Free falls through to the next configured provider on failure
  *   - Failed generations do not deduct LiTTBits
  *   - Successful paid generations deduct exactly once
  *   - Provider secrets never appear in responses or logs
@@ -491,20 +491,29 @@ describe("Image Studio API — Cloudflare handler", () => {
 });
 
 describe("Image Studio API — Auto Free router", () => {
-  it("falls through to the next provider when the first fails", async () => {
-    // Only configure Pollinations (always available) — no Cloudflare or Alibaba
+  it("falls through from OpenAI to the next configured provider when the first fails", async () => {
+    // Pollinations is manual-only. Configure OpenAI first and Cloudflare as
+    // the next automatic provider so the test proves the new contract.
     setEnv({
-      CLOUDFLARE_ACCOUNT_ID: undefined,
-      CLOUDFLARE_AI_API_TOKEN: undefined,
+      OPENAI_API_KEY: "openai-test-key",
+      CLOUDFLARE_ACCOUNT_ID: "cloudflare-test-account",
+      CLOUDFLARE_AI_API_TOKEN: "cloudflare-test-token",
       ALIBABA_DASHSCOPE_API_KEY: undefined,
     });
 
-    // Mock fetch for Pollinations
+    // OpenAI fails; configured Cloudflare succeeds. Pollinations must not be
+    // contacted as a silent automatic fallback.
     const originalFetch = global.fetch;
     global.fetch = vi.fn(async (url: string | URL | Request) => {
       const urlStr = url.toString();
-      if (urlStr.includes("image.pollinations.ai")) {
-        return new Response(Buffer.from("fake-pollinations-image"), {
+      if (urlStr.includes("api.openai.com/v1/images/generations")) {
+        return new Response(JSON.stringify({ error: { message: "OpenAI unavailable" } }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (urlStr.includes("api.cloudflare.com/client/v4/accounts/cloudflare-test-account/ai/run/")) {
+        return new Response(Buffer.from("fake-cloudflare-image"), {
           status: 200,
           headers: { "content-type": "image/jpeg" },
         });
@@ -521,9 +530,11 @@ describe("Image Studio API — Auto Free router", () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.success).toBe(true);
-    // Should have fallen through to Pollinations
-    expect(data.providerId).toBe("pollinations");
+    expect(data.providerId).toBe("cloudflare");
     expect(data.free).toBe(true);
+    expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls.some(([url]) =>
+      String(url).includes("image.pollinations.ai"),
+    )).toBe(false);
 
     global.fetch = originalFetch;
   });
