@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { useTerminalStore } from "@/stores/useTerminalStore";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useVoiceSession } from "../context/VoiceSessionContext";
 import { useStudioModelStore } from "../stores/useStudioModelStore";
@@ -149,12 +148,11 @@ export function useConnectionSummary(options?: { disabled?: boolean }) {
   const runtime = useProjectRuntime({ disabled: options?.disabled });
   const { state: runtimeState } = runtime;
 
-  // Client-side terminal store is the source of truth for PTY status
-  const terminalStatus = useTerminalStore((s) => s.status);
-  const terminalSessionId = useTerminalStore((s) => s.sessionId);
-  const terminalError = useTerminalStore((s) => s.error);
-  const terminalFailureStage = useTerminalStore((s) => s.failureStage);
-  const terminalCwd = useTerminalStore((s) => s.cwd);
+  // Client-side terminal state comes ONLY from useProjectRuntime — this
+  // hook never reads useTerminalStore directly. The `terminal` object below
+  // is the canonical derivation; capabilities fields are mapped, not
+  // re-derived.
+  const { terminal: runtimeTerminal } = runtime;
   const { voiceTransportConnected, voiceInputState } = useVoiceSession();
   const { getToken } = useClerkAuth();
   const searchParams = useSearchParams();
@@ -164,9 +162,8 @@ export function useConnectionSummary(options?: { disabled?: boolean }) {
     try {
       const token = await getToken?.();
       const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-      const [capsRes, termRes, voiceRes, llmRes] = await Promise.allSettled([
+      const [capsRes, voiceRes, llmRes] = await Promise.allSettled([
         fetch(`/api/capabilities${explicitProjectId ? `?projectId=${encodeURIComponent(explicitProjectId)}` : ""}`, { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
-        fetch("/api/capabilities/project-terminal", { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
         fetch("/api/voice/health", { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
         fetch("/api/llm/health", { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
       ]);
@@ -253,52 +250,17 @@ export function useConnectionSummary(options?: { disabled?: boolean }) {
       // check is not evidence the providers are down, and must never surface
       // as a stale "AI provider unavailable" badge while the router works.
 
-      // Use client-side terminal store as primary source of truth for PTY status
-      // Only fall back to server-side if client hasn't connected yet
-      // Terminal is only "available" when the store says connected AND
-      // a verified cwd exists (set by session:ready, not by socket connect).
-      if (terminalStatus === "connected" && terminalCwd) {
-        next.terminalStatus = "connected";
-        next.terminalSessionId = terminalSessionId;
-        next.terminalExecution = "available";
-        next.terminalCwd = terminalCwd;
-        next.terminalFailureStage = null;
-        next.terminalServerReachable = true;
-      } else if (terminalStatus === "connected" && !terminalCwd) {
-        // Store says connected but no cwd — PTY not truly ready yet
-        next.terminalStatus = "connecting";
-        next.terminalExecution = "connecting";
-        next.terminalFailureStage = "pty_creation_failed";
-        next.terminalServerReachable = true;
-      } else if (terminalStatus === "connecting") {
-        next.terminalStatus = "connecting";
-        next.terminalExecution = "connecting";
-        next.terminalFailureStage = terminalFailureStage;
-        next.terminalServerReachable = true;
-      } else if (terminalStatus === "error" || terminalStatus === "auth_failed" || terminalStatus === "pty_failed" || terminalStatus === "unavailable") {
-        next.terminalStatus = terminalStatus;
-        next.terminalError = terminalError;
-        next.terminalExecution = "error";
-        next.terminalFailureStage = terminalFailureStage;
-        // For error states, server reachability is unknown — leave as default (false)
-        // unless the server probe (termRes) updates it below.
-      } else {
-        // Client says disconnected — check if server is at least alive
-        if (termRes.status === "fulfilled" && termRes.value.ok) {
-          const termData = await termRes.value.json();
-          next.terminalServerReachable = !!termData.serverReachable;
-          // "idle" = server is reachable, no PTY session — normal idle state.
-          // "unavailable" = server unreachable — real error.
-          next.terminalStatus = "disconnected";
-          next.terminalSessionId = null;
-          next.terminalExecution = termData.serverReachable ? "idle" : "unavailable";
-          next.terminalError = termData.error ?? null;
-        } else {
-          next.terminalStatus = "disconnected";
-          next.terminalExecution = "unavailable";
-          next.terminalServerReachable = false;
-        }
-      }
+      // Terminal state — mapped from the canonical runtime truth.
+      // useProjectRuntime is the ONLY reader of useTerminalStore; this hook
+      // maps its derived `terminal` object into the capabilities shape.
+      // No re-derivation here.
+      next.terminalStatus = runtimeTerminal.status;
+      next.terminalSessionId = runtimeTerminal.sessionId;
+      next.terminalError = runtimeTerminal.error;
+      next.terminalFailureStage = runtimeTerminal.failureStage;
+      next.terminalCwd = runtimeTerminal.cwd;
+      next.terminalServerReachable = runtimeTerminal.serverReachable;
+      next.terminalExecution = runtimeTerminal.execution;
 
       // Allow writes when the terminal is connected (local dev) even if
       // the server-side workspace hasn't been provisioned. The terminal
@@ -306,14 +268,13 @@ export function useConnectionSummary(options?: { disabled?: boolean }) {
       // NOTE: writeAccess here means "a write surface exists", NOT "writes
       // don't need approval". Approval is a separate policy, always required.
       next.terminalHealth = deriveTerminalHealth({
-        storeStatus: terminalStatus,
-        cwd: terminalCwd,
-        // Only trust reachability we actually observed this refresh.
-        serverReachable:
-          next.terminalExecution === "unavailable" && termRes.status !== "fulfilled"
-            ? null
-            : next.terminalServerReachable,
-        error: next.terminalError ?? terminalError,
+        storeStatus: next.terminalStatus,
+        cwd: next.terminalCwd,
+        // Only trust reachability we actually observed: useProjectRuntime is
+        // the single prober now — its serverReachable is false until the
+        // first successful probe, so a stale "reachable" can never leak in.
+        serverReachable: next.terminalServerReachable,
+        error: next.terminalError,
       });
 
       if (next.terminalExecution === "available" && !next.writeAccess) {
@@ -350,7 +311,7 @@ export function useConnectionSummary(options?: { disabled?: boolean }) {
     } finally {
       setLoading(false);
     }
-  }, [terminalStatus, terminalSessionId, terminalError, terminalFailureStage, terminalCwd, voiceTransportConnected, voiceInputState, getToken, explicitProjectId, runtimeState.projectId, runtimeState.projectName, runtimeState.repository, runtimeState.branch, runtimeState.workspaceStatus, runtimeState.writeAccess, runtimeState.sourceType, runtimeState.sourceKind, runtimeState.sourceLabel, runtimeState.sourceStatus, runtimeState.versionControl, runtimeState.githubConnected]);
+  }, [runtimeTerminal, voiceTransportConnected, voiceInputState, getToken, explicitProjectId, runtimeState.projectId, runtimeState.projectName, runtimeState.repository, runtimeState.branch, runtimeState.workspaceStatus, runtimeState.writeAccess, runtimeState.sourceType, runtimeState.sourceKind, runtimeState.sourceLabel, runtimeState.sourceStatus, runtimeState.versionControl, runtimeState.githubConnected]);
 
   useEffect(() => {
     // A disabled instance performs no fetches and no polling — used when the

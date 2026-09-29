@@ -2429,6 +2429,8 @@ function CommandStudioContent() {
         onDismissCompletion={() => setCompletion(null)}
         onUndoCompletion={handleUndoCompletion}
         overflowDownloads={isMobileLitt}
+        // Canonical runtime truth: the visible PTY is interactive right now.
+        ptyUsable={runtime?.terminal?.usable ?? false}
         onContinueCompletion={() => {
           const textarea = document.querySelector<HTMLTextAreaElement>("[data-testid='studio-command-composer'] textarea");
           textarea?.focus();
@@ -3739,6 +3741,7 @@ function StudioWorkSurface({
   onUndoCompletion,
   onContinueCompletion,
   overflowDownloads = false,
+  ptyUsable = false,
 }: {
   messages: import("../stores/useStudioAgentStore").ChatMessage[];
   conversationId: string | null;
@@ -3757,6 +3760,8 @@ function StudioWorkSurface({
   onUndoCompletion?: () => void;
   onContinueCompletion?: () => void;
   overflowDownloads?: boolean;
+  /** Canonical runtime truth: is the interactive PTY usable right now. */
+  ptyUsable?: boolean;
 }) {
   // P0.14-15: Only show empty state when messages are truly empty AND
   // conversations have finished loading from the server. During loading,
@@ -3814,6 +3819,9 @@ function StudioWorkSurface({
           onUndoCompletion={onUndoCompletion}
           onContinueCompletion={onContinueCompletion}
           overflowDownloads={overflowDownloads}
+          // Canonical runtime truth — the ONLY consumer path for PTY
+          // usability outside useProjectRuntime itself.
+          ptyUsable={ptyUsable}
         />
       )}
     </div>
