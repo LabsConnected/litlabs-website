@@ -689,6 +689,18 @@ function CommandStudioContent() {
   // render only while the mobile chat sheet is open (see mounts below).
   const [mobileBuildOpen, setMobileBuildOpen] = useState(false);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+
+  // Workspace-first focus: selecting a real work surface collapses the large
+  // welcome/chat panel to the compact rail. Chat stays mounted and one click
+  // away through the rail, so this only changes emphasis, not availability.
+  const previousStageSurfaceRef = useRef<StudioStageSurface>(stageSurface);
+  useEffect(() => {
+    if (previousStageSurfaceRef.current === stageSurface) return;
+    previousStageSurfaceRef.current = stageSurface;
+    setLittCollapsed(true);
+    setLittExpanded(false);
+    setMobileLittOpen(false);
+  }, [stageSurface]);
   // Mobile density redesign: opening a tool from the Tools sheet closes both
   // sheets so the chosen tool becomes the one dominant surface (this also
   // fixes the old behavior where tool buttons switched the workspace
@@ -2720,7 +2732,7 @@ function CommandStudioContent() {
           />
         );
       case "browser":
-        return <StudioBrowserJobsPanel />;
+        return <StudioBrowserJobsPanel projectId={projectId} conversationId={conversation.selectedConversationId} />;
       case "code":
         return (
           <CodeWorkspace
@@ -3053,6 +3065,7 @@ function CommandStudioContent() {
                       surface: studioMode,
                       messages: conversation.messages,
                       busy: conversation.busy,
+                      conversationId: conversation.selectedConversationId,
                       workspaceRevision,
                       healthRunTrigger,
                       onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
@@ -3392,6 +3405,7 @@ function CommandStudioContent() {
                     surface: studioMode,
                     messages: conversation.messages,
                     busy: conversation.busy,
+                    conversationId: conversation.selectedConversationId,
                     workspaceRevision,
                     healthRunTrigger,
                     onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
@@ -3461,6 +3475,7 @@ function CommandStudioContent() {
                     surface: studioMode,
                     messages: conversation.messages,
                     busy: conversation.busy,
+                    conversationId: conversation.selectedConversationId,
                     workspaceRevision,
                     healthRunTrigger,
                     onFilesSaved: () => setWorkspaceRevision((value) => value + 1),

@@ -53,8 +53,6 @@ export interface BrowserJob {
 }
 
 const ACTIVE_STATUSES = new Set(["queued", "running", "awaiting_approval", "approved"]);
-const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
-
 const LIST_POLL_ACTIVE_MS = 2000;
 const LIST_POLL_IDLE_MS = 15000;
 const DETAIL_POLL_MS = 1500;
@@ -76,7 +74,7 @@ export interface UseBrowserJobsResult {
   approveJob: (jobId: string) => Promise<boolean>;
 }
 
-export function useBrowserJobs(): UseBrowserJobsResult {
+export function useBrowserJobs(scope: { projectId?: string | null; conversationId?: string | null } = {}): UseBrowserJobsResult {
   const [jobs, setJobs] = useState<BrowserJob[]>([]);
   const [selectedJob, setSelectedJob] = useState<BrowserJob | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -86,7 +84,10 @@ export function useBrowserJobs(): UseBrowserJobsResult {
 
   const fetchJobs = useCallback(async () => {
     try {
-      const res = await fetch("/api/browser/jobs?limit=20", { credentials: "same-origin" });
+      const params = new URLSearchParams({ limit: "20" });
+      if (scope.projectId) params.set("projectId", scope.projectId);
+      if (scope.conversationId) params.set("conversationId", scope.conversationId);
+      const res = await fetch(`/api/browser/jobs?${params.toString()}`, { credentials: "same-origin" });
       if (!res.ok) {
         if (res.status === 401) {
           setError("Unauthorized");
@@ -103,7 +104,7 @@ export function useBrowserJobs(): UseBrowserJobsResult {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [scope.conversationId, scope.projectId]);
 
   const fetchSelectedJob = useCallback(async (jobId: string) => {
     try {
@@ -157,6 +158,13 @@ export function useBrowserJobs(): UseBrowserJobsResult {
       if (active) {
         setSelectedJobId(active.jobId);
       }
+    }
+  }, [jobs, selectedJobId]);
+
+  useEffect(() => {
+    if (selectedJobId && !jobs.some((job) => job.jobId === selectedJobId)) {
+      setSelectedJobId(null);
+      setSelectedJob(null);
     }
   }, [jobs, selectedJobId]);
 

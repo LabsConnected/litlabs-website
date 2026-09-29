@@ -75,7 +75,14 @@ async function handler(req: NextRequest) {
   if (req.method === "GET") {
     const url = new URL(req.url);
     const status = url.searchParams.get("status") ?? undefined;
-    const jobs = await listJobs(userId, { status: status as JobStatus | undefined, limit: 20 });
+    const projectId = url.searchParams.get("projectId") ?? undefined;
+    const conversationId = url.searchParams.get("conversationId") ?? undefined;
+    const jobs = await listJobs(userId, {
+      status: status as JobStatus | undefined,
+      limit: 20,
+      projectId,
+      conversationId,
+    });
     return NextResponse.json({ jobs: jobs.map(serializeJob) });
   }
 
@@ -122,6 +129,16 @@ async function handler(req: NextRequest) {
     return NextResponse.json({ error: "params must be an object" }, { status: 400 });
   }
 
+  // Preserve the caller's active Studio scope in the durable job payload.
+  // This is additive and does not alter job execution parameters.
+  const projectId = typeof body.projectId === "string" ? body.projectId : undefined;
+  const conversationId = typeof body.conversationId === "string" ? body.conversationId : undefined;
+  const scopedParams = {
+    ...params,
+    ...(projectId && typeof params.projectId !== "string" && typeof params.project_id !== "string" ? { projectId } : {}),
+    ...(conversationId && typeof params.conversationId !== "string" && typeof params.conversation_id !== "string" ? { conversationId } : {}),
+  };
+
   // Validate idempotency_key if provided
   const idempotencyKey = typeof body.idempotency_key === "string" && body.idempotency_key.length > 0
     ? body.idempotency_key
@@ -141,7 +158,7 @@ async function handler(req: NextRequest) {
       riskLevel: riskLevelRaw as RiskLevel | undefined,
       requestedBy: (requestedByRaw as RequestSource | undefined) ?? requestedByDefault,
       idempotencyKey,
-      params,
+      params: scopedParams,
     });
 
     // Trigger async execution only for newly created jobs

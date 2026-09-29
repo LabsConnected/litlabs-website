@@ -584,7 +584,13 @@ function JobCard({
 
 // ─── Main Panel ──────────────────────────────────────────────
 
-export default function StudioBrowserJobsPanel() {
+export default function StudioBrowserJobsPanel({
+  projectId,
+  conversationId,
+}: {
+  projectId?: string | null;
+  conversationId?: string | null;
+}) {
   const {
     jobs,
     selectedJob,
@@ -596,7 +602,7 @@ export default function StudioBrowserJobsPanel() {
     refresh,
     cancelJob,
     approveJob,
-  } = useBrowserJobs();
+  } = useBrowserJobs({ projectId: projectId ?? null, conversationId: conversationId ?? null });
 
   const sortedJobs = useMemo(() => {
     // Active jobs first, then by createdAt descending

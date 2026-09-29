@@ -44,6 +44,7 @@ export default function ImageStudio({ projectId, onOpenCreate }: { projectId: st
   const refreshTrigger = useAssetsRefreshTrigger();
 
   const [assets, setAssets] = useState<StudioAsset[]>([]);
+  const [failedThumbnailIds, setFailedThumbnailIds] = useState<Set<string>>(() => new Set());
   const [assetsError, setAssetsError] = useState<string | null>(null);
   const [selected, setSelected] = useState<StudioAsset | null>(null);
   const [image, setImage] = useState<HTMLImageElement | null>(null);
@@ -65,16 +66,16 @@ export default function ImageStudio({ projectId, onOpenCreate }: { projectId: st
 
   // ── asset list ──────────────────────────────────────────────────────
   useEffect(() => {
-    if (!projectId) { setAssets([]); return; }
+    if (!projectId) { setAssets([]); setFailedThumbnailIds(new Set()); return; }
     let cancelled = false;
     (async () => {
       try {
-        const params = new URLSearchParams({ kind: "image", limit: "60" });
+        const params = new URLSearchParams({ kind: "image", limit: "60", scope: "project" });
         if (projectId) params.set("projectId", projectId);
         const res = await fetch(`/api/assets?${params}`, { credentials: "same-origin" });
         if (!res.ok) throw new Error(`assets ${res.status}`);
         const json = (await res.json()) as { assets?: StudioAsset[] };
-        if (!cancelled) { setAssets(json.assets ?? []); setAssetsError(null); }
+        if (!cancelled) { setAssets(json.assets ?? []); setFailedThumbnailIds(new Set()); setAssetsError(null); }
       } catch (err) {
         if (!cancelled) setAssetsError(err instanceof Error ? err.message : "Failed to load assets");
       }
@@ -302,8 +303,20 @@ export default function ImageStudio({ projectId, onOpenCreate }: { projectId: st
                 data-testid={`image-asset-${a.id}`}
                 title={a.name}
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={a.thumbnailUrl ?? a.url} alt={a.name} className="h-full w-full object-cover" loading="lazy" />
+                {failedThumbnailIds.has(a.id) ? (
+                  <span className="grid h-full w-full place-items-center" aria-label="Image unavailable">
+                    <ImageIcon size={18} style={{ color: MUTED }} aria-hidden />
+                  </span>
+                ) : (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    src={a.thumbnailUrl ?? a.url}
+                    alt=""
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                    onError={() => setFailedThumbnailIds((current) => new Set(current).add(a.id))}
+                  />
+                )}
               </button>
             ))}
           </div>
