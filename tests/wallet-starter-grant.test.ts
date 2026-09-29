@@ -1,7 +1,7 @@
 /**
  * Starter credit grant regression tests.
  *
- * Canonical policy: Starter receives 500 LiTTBits ONCE at account creation,
+ * Canonical policy: Starter receives 1,500 LiTTBits ONCE at account creation,
  * not monthly. The idempotency key must be user-scoped (no period) so
  * repeated calls to getCreditBalances() do not grant additional credits.
  *
@@ -108,20 +108,20 @@ describe("Starter credit grant — one-time only", () => {
     mockSubData = null;
   });
 
-  it("new Starter receives 500 once", async () => {
-    setupBalances(500, 0, 0);
+  it("new Starter receives 1,500 once", async () => {
+    setupBalances(1500, 0, 0);
 
     await getCreditBalances("clerk_new_user");
 
     // grant_credits should have been called with user-scoped key (no period)
     expect(mockRpc).toHaveBeenCalledWith("grant_credits", expect.objectContaining({
-      p_amount: 500,
-      p_idempotency_key: "starter:user-uuid-123",
+      p_amount: 1500,
+      p_idempotency_key: "starter:v1:user-uuid-123",
     }));
   });
 
   it("refreshing wallet does not grant more (ledger pre-check)", async () => {
-    setupBalances(500, 0, 0);
+    setupBalances(1500, 0, 0);
     // Simulate that the grant already exists in the ledger
     mockLedgerRows = [{ id: "ledger-1" }];
 
@@ -143,7 +143,7 @@ describe("Starter credit grant — one-time only", () => {
     expect(grantCall).toBeDefined();
     const key = (grantCall![1] as Record<string, unknown>).p_idempotency_key as string;
     // Must NOT contain a YYYY-MM suffix
-    expect(key).toBe("starter:user-uuid-123");
+    expect(key).toBe("starter:v1:user-uuid-123");
     expect(key).not.toMatch(/\d{4}-\d{2}$/);
   });
 
