@@ -13,7 +13,7 @@ import { NextRequest } from "next/server";
  *
  * These tests verify:
  *   - A completed resume writes its finalText onto the paused assistant
- *     message (status → completed) BEFORE markRunCompleted, so a polling
+ *     message (status → completed) BEFORE the canonical settle, so a polling
  *     client that sees runStatus=completed can loadMessages and get truth
  *   - A failed resume marks the message failed, never completed
  *   - A rejection closes out the awaiting message with a declined note
@@ -31,8 +31,10 @@ vi.mock("@/lib/litt-intelligence/paused-run-store", () => ({
   getPausedRun: vi.fn(),
   resolvePausedRun: vi.fn(),
   markRunProcessing: vi.fn(),
-  markRunCompleted: vi.fn(() => Promise.resolve()),
-  markRunFailed: vi.fn(() => Promise.resolve()),
+  verifyRunClaim: vi.fn(() => Promise.resolve(true)),
+  releaseRunClaim: vi.fn(() => Promise.resolve(true)),
+  updatePausedRunActionRun: vi.fn(() => Promise.resolve(true)),
+  getRunOutcomeForPausedRun: vi.fn(),
   createPausedRun: vi.fn(),
   renewRunLease: vi.fn(() => Promise.resolve(true)),
   RUN_HEARTBEAT_MS: 30_000,
@@ -84,8 +86,9 @@ import {
   getPausedRun,
   resolvePausedRun,
   markRunProcessing,
-  markRunCompleted,
-  markRunFailed,
+  verifyRunClaim,
+  releaseRunClaim,
+  getRunOutcomeForPausedRun,
   createPausedRun,
 } from "@/lib/litt-intelligence/paused-run-store";
 import { resumeAgentLoopV2 } from "@/lib/litt-intelligence/agent-loop-v2";
@@ -93,7 +96,6 @@ import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { getCheckpoint } from "@/lib/missions/mission-repository";
 import {
   getActionRun,
-  transitionActionRun,
   transitionActionRunEventActivity,
 } from "@/lib/action-runtime";
 import {
@@ -119,6 +121,23 @@ function makeRequest(decision: "approved" | "rejected"): NextRequest {
 }
 
 const routeParams = { params: Promise.resolve({ conversationId: CONV_ID, pausedRunId: PAUSED_ID }) };
+
+/**
+ * Find the canonical-settle call (transitionActionRunEventActivity) for a
+ * given action-run status. The outcome now lives on the action_run — there
+ * is exactly one writer, and these tests assert on it.
+ */
+function settleCall(status: string) {
+  const mocked = vi.mocked(transitionActionRunEventActivity);
+  const idx = mocked.mock.calls.findIndex(
+    (c) => (c[0] as { status?: string }).status === status,
+  );
+  if (idx < 0) return null;
+  return {
+    args: mocked.mock.calls[idx][0] as Record<string, any>,
+    order: mocked.mock.invocationCallOrder[idx],
+  };
+}
 
 const pendingRun = {
   id: PAUSED_ID,
@@ -192,11 +211,12 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
     const res = await POST(makeRequest("approved"), routeParams);
     expect(res.status).toBe(202);
 
-    await vi.waitFor(() => expect(markRunCompleted).toHaveBeenCalled());
+    await vi.waitFor(() => expect(settleCall("completed")).not.toBeNull());
 
     // Approval resumed under the same durable parent run: waiting→working
     // at decision time, the exact ActionExecutionContext in loop config,
-    // then the same run settled completed after the result writeback.
+    // then the same run settled completed after the result writeback —
+    // outcome event carries the RunResult on its payload.
     expect(transitionActionRunEventActivity).toHaveBeenCalledWith(
       expect.objectContaining({
         runId: "run-parent-1",
@@ -212,12 +232,25 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
       conversationId: CONV_ID,
       projectId: "proj-123",
     });
-    expect(transitionActionRun).toHaveBeenCalledWith(
-      "run-parent-1",
-      "user_123",
-      "completed",
-      expect.objectContaining({ currentActivity: "Task completed" }),
-    );
+    const completed = settleCall("completed");
+    expect(completed).not.toBeNull();
+    expect(completed!.args).toMatchObject({
+      runId: "run-parent-1",
+      userId: "user_123",
+      status: "completed",
+      eventType: "run.completed",
+      payload: {
+        pausedRunId: PAUSED_ID,
+        toolId: "files.write",
+        result: expect.objectContaining({
+          finalText: "Created index.html with the new hero.",
+        }),
+      },
+      patch: expect.objectContaining({ currentActivity: "Task completed" }),
+    });
+    // The claim was verified before the write and released after it.
+    expect(verifyRunClaim).toHaveBeenCalledWith(PAUSED_ID, "user_123", expect.any(String));
+    expect(releaseRunClaim).toHaveBeenCalledWith(PAUSED_ID, "user_123", expect.any(String), "completed");
 
     // The paused message becomes the completed reply — the real outcome,
     // not a fabricated regeneration.
@@ -227,10 +260,9 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
       "completed",
       "Created index.html with the new hero.",
     );
-    // Transcript writeback ran BEFORE the run was marked completed.
+    // Transcript writeback ran BEFORE the canonical settle.
     const writeOrder = vi.mocked(updateMessageStatus).mock.invocationCallOrder[0];
-    const completeOrder = vi.mocked(markRunCompleted).mock.invocationCallOrder[0];
-    expect(writeOrder).toBeLessThan(completeOrder);
+    expect(writeOrder).toBeLessThan(completed!.order);
     // No separate assistant message was inserted — the awaiting one was reused.
     expect(insertMessage).not.toHaveBeenCalled();
   });
@@ -241,7 +273,17 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
     const res = await POST(makeRequest("approved"), routeParams);
     expect(res.status).toBe(202);
 
-    await vi.waitFor(() => expect(markRunFailed).toHaveBeenCalled());
+    await vi.waitFor(() => expect(settleCall("failed")).not.toBeNull());
+    const failed = settleCall("failed");
+    expect(failed!.args).toMatchObject({
+      status: "failed",
+      eventType: "run.failed",
+      patch: expect.objectContaining({
+        failureCode: "TASK_FAILED",
+        failureMessage: "provider exploded",
+      }),
+    });
+    expect(releaseRunClaim).toHaveBeenCalledWith(PAUSED_ID, "user_123", expect.any(String), "failed");
     expect(updateMessageStatus).toHaveBeenCalledWith(
       "msg-assistant-1",
       "user_123",
@@ -268,20 +310,21 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
     const res = await POST(makeRequest("approved"), routeParams);
     expect(res.status).toBe(202);
 
-    await vi.waitFor(() => expect(markRunFailed).toHaveBeenCalled());
-    expect(markRunFailed).toHaveBeenCalledWith(
-      PAUSED_ID,
-      "user_123",
-      "LiTT couldn't complete this request because all currently available AI routes were unavailable or reached their limits.",
-      expect.any(String),
-    );
+    await vi.waitFor(() => expect(settleCall("failed")).not.toBeNull());
+    const failed = settleCall("failed");
+    expect(failed!.args.patch).toMatchObject({
+      failureCode: "TASK_FAILED",
+      failureMessage:
+        "LiTT couldn't complete this request because all currently available AI routes were unavailable or reached their limits.",
+    });
     expect(updateMessageStatus).toHaveBeenCalledWith(
       "msg-assistant-1",
       "user_123",
       "failed",
       expect.stringContaining("all currently available AI routes"),
     );
-    expect(markRunCompleted).not.toHaveBeenCalled();
+    // An honest loop failure is recorded as failed, never completed.
+    expect(settleCall("completed")).toBeNull();
   });
 
   it("a rejection closes the awaiting message with a truthful declined note and never resumes", async () => {
@@ -324,7 +367,7 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
     const res = await POST(makeRequest("approved"), routeParams);
     expect(res.status).toBe(202);
 
-    await vi.waitFor(() => expect(markRunCompleted).toHaveBeenCalled());
+    await vi.waitFor(() => expect(settleCall("waiting_for_user")).not.toBeNull());
 
     // The nested gate is a REAL paused run — resumable, not a dead end.
     expect(createPausedRun).toHaveBeenCalledWith(
@@ -335,18 +378,25 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
         actionRunId: "run-parent-1",
       }),
     );
-    const runResult = vi.mocked(markRunCompleted).mock.calls[0][2] as {
-      pendingApproval?: { pausedRunId?: string };
-    };
-    expect(runResult.pendingApproval?.pausedRunId).toBe("paused-2");
-    expect(transitionActionRunEventActivity).toHaveBeenCalledWith(
-      expect.objectContaining({
-        runId: "run-parent-1",
-        status: "waiting_for_user",
-        eventType: "approval.required",
-        payload: expect.objectContaining({ pausedRunId: "paused-2" }),
-      }),
-    );
+    // The outer attempt's outcome and the waiting_for_user transition land
+    // in ONE atomic RPC; the RunResult carries the nested gate's ID.
+    const handoff = settleCall("waiting_for_user");
+    expect(handoff!.args).toMatchObject({
+      runId: "run-parent-1",
+      status: "waiting_for_user",
+      eventType: "approval.required",
+      payload: {
+        pausedRunId: PAUSED_ID,
+        result: expect.objectContaining({
+          pendingApproval: expect.objectContaining({ pausedRunId: "paused-2" }),
+        }),
+      },
+      patch: expect.objectContaining({ approvalReference: "paused-2" }),
+    });
+    // No terminal outcome was recorded for the outer attempt — the run is
+    // waiting, not completed.
+    expect(settleCall("completed")).toBeNull();
+    expect(settleCall("failed")).toBeNull();
     // The transcript message stays awaiting_approval for the new gate.
     expect(updateMessageStatus).toHaveBeenCalledWith(
       "msg-assistant-1",
@@ -372,7 +422,7 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
     const res = await POST(makeRequest("approved"), routeParams);
     expect(res.status).toBe(202);
 
-    await vi.waitFor(() => expect(markRunCompleted).toHaveBeenCalled());
+    await vi.waitFor(() => expect(settleCall("completed")).not.toBeNull());
     expect(insertMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         conversationId: CONV_ID,

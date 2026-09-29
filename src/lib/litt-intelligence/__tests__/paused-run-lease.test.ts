@@ -110,8 +110,8 @@ vi.mock("@/lib/supabase", () => ({
 import {
   getPausedRun,
   markRunProcessing,
-  markRunCompleted,
-  markRunFailed,
+  verifyRunClaim,
+  releaseRunClaim,
   renewRunLease,
   resetRunForRetry,
   RUN_LEASE_MS,
@@ -160,13 +160,6 @@ function seedRow(overrides: Partial<Row> = {}): Row {
   rows.push(row);
   return row;
 }
-
-const RESULT = {
-  finalText: "done",
-  stepsUsed: 3,
-  toolCalls: [],
-  cancelled: false,
-};
 
 describe("resumed-run lease — liveness replaces age", () => {
   beforeEach(() => {
@@ -292,32 +285,35 @@ describe("resumed-run lease — claim, heartbeat, fencing", () => {
     expect(await renewRunLease(row.id as string, USER, "tok-1", "p")).toBe(false);
   });
 
-  it("a fenced executor cannot overwrite terminal truth when it finally finishes", async () => {
+  it("a fenced executor cannot release a claim it no longer owns", async () => {
     const row = seedRow();
     await markRunProcessing(row.id as string, USER, "tok-1");
 
     // The stale detector marks the run failed mid-flight (lease lapsed in
-    // this simulated world), then the zombie finishes and tries to write.
+    // this simulated world), then the zombie finishes and tries to release.
     row.run_status = "failed";
     row.run_error = "Execution lost (worker may have restarted)";
 
-    const wrote = await markRunCompleted(row.id as string, USER, RESULT, "tok-1");
-    expect(wrote).toBe(false);
+    expect(await verifyRunClaim(row.id as string, USER, "tok-1")).toBe(false);
+    const released = await releaseRunClaim(row.id as string, USER, "tok-1", "completed");
+    expect(released).toBe(false);
     expect(row.run_status).toBe("failed");
-    expect(row.run_result).toBeNull();
   });
 
-  it("markRunCompleted lands only while the token owns a live claim", async () => {
+  it("claim release lands only while the token owns a live claim", async () => {
     const row = seedRow();
     await markRunProcessing(row.id as string, USER, "tok-1");
 
-    const wrote = await markRunCompleted(row.id as string, USER, RESULT, "tok-1");
-    expect(wrote).toBe(true);
+    expect(await verifyRunClaim(row.id as string, USER, "tok-1")).toBe(true);
+    // A different token does not own the claim.
+    expect(await verifyRunClaim(row.id as string, USER, "tok-other")).toBe(false);
+
+    const released = await releaseRunClaim(row.id as string, USER, "tok-1", "completed");
+    expect(released).toBe(true);
     expect(row.run_status).toBe("completed");
-    expect(row.run_result).toEqual(RESULT);
   });
 
-  it("a zombie that outlives a retry cannot clobber the new claim's outcome", async () => {
+  it("a zombie that outlives a retry cannot clobber the new claim", async () => {
     const row = seedRow();
     await markRunProcessing(row.id as string, USER, "tok-1");
 
@@ -327,11 +323,11 @@ describe("resumed-run lease — claim, heartbeat, fencing", () => {
     expect(await resetRunForRetry(row.id as string, USER)).toBe(true);
     await markRunProcessing(row.id as string, USER, "tok-2");
 
-    // The zombie's late terminal write is fenced by token mismatch...
-    expect(await markRunCompleted(row.id as string, USER, RESULT, "tok-1")).toBe(false);
+    // The zombie's late claim release is fenced by token mismatch...
+    expect(await releaseRunClaim(row.id as string, USER, "tok-1", "completed")).toBe(false);
     expect(row.run_status).toBe("processing");
-    // ...and the new owner's write lands.
-    expect(await markRunCompleted(row.id as string, USER, RESULT, "tok-2")).toBe(true);
+    // ...and the new owner's release lands.
+    expect(await releaseRunClaim(row.id as string, USER, "tok-2", "completed")).toBe(true);
     expect(row.run_status).toBe("completed");
   });
 });
@@ -419,17 +415,16 @@ describe("resumed-run durability — durable gate state survives re-drive", () =
     expect(row.execution_token).toBe("tok-2");
   });
 
-  it("an executor failing itself keeps the run truthfully failed (token-fenced write)", async () => {
+  it("an executor ending its claim records the claim outcome, fenced by token", async () => {
     const row = seedRow();
     await markRunProcessing(row.id as string, USER, "tok-1");
 
-    await markRunFailed(row.id as string, USER, "boom", "tok-1");
+    const released = await releaseRunClaim(row.id as string, USER, "tok-1", "failed");
+    expect(released).toBe(true);
     expect(row.run_status).toBe("failed");
-    expect(row.run_error).toBe("boom");
 
-    // A different token cannot flip it back.
-    const wrote = await markRunCompleted(row.id as string, USER, RESULT, "tok-other");
-    expect(wrote).toBe(false);
+    // A different token cannot release (or flip) the claim.
+    expect(await releaseRunClaim(row.id as string, USER, "tok-other", "completed")).toBe(false);
     expect(row.run_status).toBe("failed");
   });
 });
