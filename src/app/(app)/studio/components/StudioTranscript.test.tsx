@@ -57,7 +57,7 @@ vi.mock("@/components/chat/MessageAvatar", () => ({
   UserMessageAvatar: () => <div data-testid="user-avatar" />,
 }));
 
-import StudioTranscript from "./StudioTranscript";
+import StudioTranscript, { parseQualityChecklist } from "./StudioTranscript";
 import type { ChatMessage, AgentId } from "../stores/useStudioAgentStore";
 import { useExecutionStore } from "../stores/useExecutionStore";
 
@@ -692,5 +692,70 @@ describe("StudioTranscript — conversation/execution separation", () => {
     renderTranscript([runMessage()]);
     expect(screen.queryByTestId("studio-execution-block")).toBeNull();
     expect(screen.getByText(/Here's your audit report/)).toBeInTheDocument();
+  });
+});
+
+describe("StudioTranscript — quality verdict checklist", () => {
+  const verdictContent =
+    "The build finished but deploy failed.\n" +
+    "\n" +
+    "Quality check — cannot declare success: 1 required stage(s) lack evidence: \"deploy\" (failed).\n" +
+    "```quality-checklist\n" +
+    "✓ plan — passed\n" +
+    "✗ deploy — failed\n" +
+    "○ verify — pending\n" +
+    "```";
+
+  function renderVerdict() {
+    const messages: ChatMessage[] = [
+      { role: "assistant", content: verdictContent, createdAt: Date.now() },
+    ];
+    render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteToolAction={vi.fn()}
+      />,
+    );
+  }
+
+  it("renders the verdict checklist collapsed, not as a code block", () => {
+    renderVerdict();
+    expect(screen.getByTestId("quality-checklist-block")).toBeTruthy();
+    // Collapsed: the item list is not in the document yet.
+    expect(screen.queryByTestId("quality-checklist")).toBeNull();
+    // The toggle summarizes the checks, including the failure count.
+    const toggle = screen.getByTestId("quality-checklist-toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle.textContent).toContain("3 checks");
+    expect(toggle.textContent).toContain("1 failed");
+  });
+
+  it("expands to a per-stage ✓/✗/○ checklist on toggle", () => {
+    renderVerdict();
+    fireEvent.click(screen.getByTestId("quality-checklist-toggle"));
+    const list = screen.getByTestId("quality-checklist");
+    expect(list).toBeTruthy();
+    expect(screen.getByTestId("quality-checklist-toggle")).toHaveAttribute("aria-expanded", "true");
+    const items = list.querySelectorAll("li");
+    expect(items).toHaveLength(3);
+    expect(items[0].textContent).toContain("✓");
+    expect(items[0].textContent).toContain("plan");
+    expect(items[1].textContent).toContain("✗");
+    expect(items[1].textContent).toContain("deploy");
+    expect(items[2].textContent).toContain("○");
+    expect(items[2].textContent).toContain("verify");
+  });
+
+  it("parseQualityChecklist parses checklist lines and skips junk", () => {
+    const items = parseQualityChecklist(
+      "✓ plan — passed\nnot a check line\n✗ deploy — failed\n\n○ verify — pending",
+    );
+    expect(items).toEqual([
+      { mark: "✓", label: "plan", status: "passed" },
+      { mark: "✗", label: "deploy", status: "failed" },
+      { mark: "○", label: "verify", status: "pending" },
+    ]);
   });
 });

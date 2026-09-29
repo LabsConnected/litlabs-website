@@ -935,6 +935,43 @@ export function finalizeQualityLoop(
   };
 }
 
+// ─── Verdict text block ───────────────────────────────────────────
+
+/**
+ * Format the appended quality verdict as a compact collapsed markdown
+ * checklist (one line per stage, ✓/✗/○). The leading "Quality check — "
+ * marker line is part of the contract: the approval-resume path strips
+ * the whole trailing block via {@link stripQualityVerdictSuffix}, and the
+ * chat renderer collapses the ```quality-checklist fenced block.
+ * Format-only: the verdict content (reason + per-stage statuses) is
+ * unchanged.
+ */
+export function formatQualityVerdictBlock(finale: QualityFinale): string {
+  const reason = finale.verdict.reason;
+  const lowered = reason.charAt(0).toLowerCase() + reason.slice(1);
+  const lines = finale.stages.map((s) => {
+    const mark =
+      s.status === "passed" ? "✓" : s.status === "failed" ? "✗" : "○";
+    return `${mark} ${s.stage} — ${s.status}`;
+  });
+  return (
+    `\n\nQuality check — ${lowered}\n` +
+    "```quality-checklist\n" +
+    lines.join("\n") +
+    "\n```"
+  );
+}
+
+/** Matcher for the trailing verdict block appended by
+ * {@link formatQualityVerdictBlock}. Removes the marker line and
+ * everything after it; ordinary model output is never touched. */
+const QUALITY_VERDICT_SUFFIX_RE = /\n\nQuality check — [\s\S]*$/i;
+
+/** Remove a stale machine-gate verdict suffix from resumed final text. */
+export function stripQualityVerdictSuffix(text: string): string {
+  return text.replace(QUALITY_VERDICT_SUFFIX_RE, "");
+}
+
 // ─── Agent prompt section ─────────────────────────────────────────
 
 /**

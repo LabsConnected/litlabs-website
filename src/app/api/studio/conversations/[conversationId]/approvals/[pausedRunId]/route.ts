@@ -29,6 +29,7 @@ import {
   restoreQualityLoopSession,
   shouldEnableQualityLoop,
   snapshotQualityLoopSession,
+  stripQualityVerdictSuffix,
 } from "@/lib/litt-intelligence/quality-loop-flow";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { getCheckpoint } from "@/lib/missions/mission-repository";
@@ -825,7 +826,7 @@ export async function POST(
             // The resumed agent may have finalized before the approval-boundary
             // preview check completed. Remove only that stale machine-gate
             // suffix; never suppress ordinary model output or a failed gate.
-            finalText = finalText.replace(/\n\nQuality check — [\s\S]*$/i, "");
+            finalText = stripQualityVerdictSuffix(finalText);
           }
         }
       }

@@ -48,6 +48,7 @@ import {
   type QualityFinale,
   type QualityLoopSession,
   type QualityLoopSnapshot,
+  formatQualityVerdictBlock,
 } from "./quality-loop-flow";
 
 // Station Control Bridge (chunk E): importing the barrel registers every
@@ -1276,7 +1277,7 @@ async function runAgentLoopV2Inner(
   });
   const gatedFinalText =
     qualityFinale && !qualityFinale.verdict.ok
-      ? `${effectiveFinalText}\n\nQuality check — ${qualityFinale.verdict.reason.charAt(0).toLowerCase()}${qualityFinale.verdict.reason.slice(1)}`
+      ? `${effectiveFinalText}${formatQualityVerdictBlock(qualityFinale)}`
       : effectiveFinalText;
 
   // What did this run actually do to the files?
@@ -2429,7 +2430,7 @@ async function resumeAgentLoopV2Inner(
   });
   const gatedFinalText =
     qualityFinale && !qualityFinale.verdict.ok
-      ? `${effectiveFinalText}\n\nQuality check — ${qualityFinale.verdict.reason.charAt(0).toLowerCase()}${qualityFinale.verdict.reason.slice(1)}`
+      ? `${effectiveFinalText}${formatQualityVerdictBlock(qualityFinale)}`
       : effectiveFinalText;
 
   // What did this run actually do to the files?

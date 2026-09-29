@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { UserMessageAvatar } from "@/components/chat/MessageAvatar";
 import { parseJarvisActions } from "@/lib/litt-context";
@@ -218,6 +218,104 @@ function StreamingProgress() {
         </ul>
       )}
       <ExecutionDetailsExpander details={rawDetails} />
+    </div>
+  );
+}
+
+/* ── Quality verdict checklist — collapsed rendering ────────────────
+   The agent loop appends the quality verdict as a ```quality-checklist
+   fenced block (see formatQualityVerdictBlock in
+   @/lib/litt-intelligence/quality-loop-flow). react-markdown strips raw
+   <details> HTML, so the fence is the collapse vehicle: it renders here
+   as a collapsed per-stage checklist instead of a code block. */
+const QUALITY_CHECKLIST_LINE_RE = /^([✓✗○])\s+(.+?)\s+—\s+(\S.*)$/;
+
+export interface QualityCheckItem {
+  mark: "✓" | "✗" | "○";
+  label: string;
+  status: string;
+}
+
+/** Parse the ```quality-checklist body into per-stage check items. */
+export function parseQualityChecklist(raw: string): QualityCheckItem[] {
+  return raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const m = QUALITY_CHECKLIST_LINE_RE.exec(line);
+      if (!m) return null;
+      return {
+        mark: m[1] as QualityCheckItem["mark"],
+        label: m[2],
+        status: m[3],
+      };
+    })
+    .filter((item): item is QualityCheckItem => item !== null);
+}
+
+function qualityCheckMarkColor(mark: QualityCheckItem["mark"]): string {
+  if (mark === "✓") return "var(--litt-primary)";
+  if (mark === "✗") return "#f87171";
+  return "var(--text-muted)";
+}
+
+function QualityChecklistBlock({ raw }: { raw: string }) {
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  const items = parseQualityChecklist(raw);
+  if (items.length === 0) return null;
+  const failed = items.filter((item) => item.mark === "✗").length;
+  return (
+    <div className="mt-1.5" data-testid="quality-checklist-block">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls={listId}
+        data-testid="quality-checklist-toggle"
+        className="flex items-center gap-1.5 text-[10px] font-bold transition hover:opacity-80"
+        style={{ color: "var(--text-muted)" }}
+      >
+        <span
+          className="inline-block h-0 w-0 border-y-[3px] border-l-[5px] border-y-transparent transition-transform"
+          style={{ borderLeftColor: "var(--text-muted)", transform: open ? "rotate(90deg)" : "none" }}
+          aria-hidden
+        />
+        Quality checklist
+        <span className="font-normal opacity-70">
+          · {items.length} check{items.length === 1 ? "" : "s"}
+          {failed > 0 ? `, ${failed} failed` : ""}
+        </span>
+      </button>
+      {open && (
+        <ul
+          id={listId}
+          data-testid="quality-checklist"
+          className="mt-1.5 flex max-h-48 flex-col gap-1 overflow-y-auto"
+        >
+          {items.map((item, idx) => (
+            <li
+              key={`${item.label}-${idx}`}
+              className="flex items-start gap-1.5 text-[10px] leading-4"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              <span
+                className="shrink-0 font-bold"
+                style={{ color: qualityCheckMarkColor(item.mark) }}
+                aria-hidden
+              >
+                {item.mark}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="font-semibold" style={{ color: "var(--text-primary)" }}>{item.label}</span>
+                {" — "}
+                {item.status}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -705,11 +803,17 @@ export default function StudioTranscript({
                           pre: ({ children }) => {
                             // Extract raw text from the code element for copying
                             let raw = "";
+                            let language = "";
                             if (typeof children === "string") {
                               raw = children;
                             } else if (children && typeof children === "object" && "props" in children) {
-                              const childProps = (children as React.ReactElement).props as { children?: React.ReactNode };
+                              const childProps = (children as React.ReactElement).props as { children?: React.ReactNode; className?: string };
+                              language = childProps.className ?? "";
                               raw = typeof childProps.children === "string" ? childProps.children : "";
+                            }
+                            // Quality verdict checklist: render collapsed, not as code.
+                            if (/\blanguage-quality-checklist\b/.test(language)) {
+                              return <QualityChecklistBlock raw={raw} />;
                             }
                             return <CodeBlockWithCopy code={raw}>{children}</CodeBlockWithCopy>;
                           },
