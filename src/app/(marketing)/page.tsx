@@ -20,7 +20,7 @@ export const metadata: Metadata = {
     path: "/",
     index: true,
   }),
-  title: { absolute: "LiTT — AI Project Operator & Creative Workspace | litlabs.net" },
+  title: { absolute: "LiTT — AI Project Operator & Creative Workspace | LiTTree LabStudios · litlabs.net" },
 };
 
 const homeSchema = {
