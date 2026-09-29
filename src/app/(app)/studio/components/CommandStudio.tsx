@@ -59,6 +59,7 @@ import { deriveCreator, deriveWorkspaceStage } from "../context/derive-studio-co
 import { StudioCreatorHost } from "./creators/StudioCreatorHost";
 import { useViewportTier } from "../hooks/useViewportTier";
 import { useStudioTasks } from "../hooks/useStudioTasks";
+import { useProjectIsolation } from "../hooks/useProjectIsolation";
 import type { StudioTask } from "@/lib/studio/task-types";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { useExecutionStore, type MutationSummary } from "../stores/useExecutionStore";
@@ -73,7 +74,7 @@ import StudioDeploySurface from "./shell/StudioDeploySurface";
 import StudioOperatorBar from "./shell/StudioOperatorBar";
 import ElementInspectorPanel from "./shell/ElementInspectorPanel";
 import ImageStudio from "./shell/ImageStudio";
-import { modeToStageSurface, resolveStageSurface, type StudioStageSurface } from "./shell/stage-surfaces";
+import { canonicalSurfaceToPersist, modeToStageSurface, resolveStageSurface, type StudioStageSurface } from "./shell/stage-surfaces";
 import { centerStation, resolveInitialStation, stationToToolParam, toolParamToStation } from "./shell/station-url";
 import { useCanvasBuilderStore } from "./canvas/builder/store";
 import type { PreviewSelection } from "./StudioPreviewPanel";
@@ -1139,6 +1140,12 @@ function CommandStudioContent() {
   const activityTask = studioTasks.tasks.find((task) => task.conversationId === conversation.selectedConversationId);
   const activityRunId = activityTask?.activeActionRunId ?? activityTask?.latestActionRunId ?? null;
 
+  // Phase 4 — project isolation: the URL's explicit ?project= is
+  // authoritative the instant it's present (capabilities.projectId can
+  // lag a refresh behind), so project-scoped runtime state resets the
+  // moment the switch lands, not after the capabilities round-trip.
+  useProjectIsolation(searchParams.get("project") ?? capabilities.projectId);
+
 
   useEffect(() => {
     const conversationId = conversation.selectedConversationId;
@@ -2122,17 +2129,11 @@ function CommandStudioContent() {
     bindWorktab(tab);
   }, [capabilities.projectId, studioTasks, worktabTabs, serverActiveTaskId, bindWorktab]);
 
-  // Track the active tab's surface as the user navigates the workspace —
-  // persisted via PATCH lastOpenedSurface (server truth for restores).
-  // Idempotent: the guard below makes this exactly one PATCH per
-  // navigation (the response updates lastOpenedSurface, ending the loop).
-  useEffect(() => {
-    const id = serverActiveTaskId;
-    if (!capabilities.projectId || !id || studioTasks.loading) return;
-    const task = serverTasks.find((t) => t.id === id);
-    if (!task || task.lastOpenedSurface === currentSurface) return;
-    void studioTasks.activateTask(id, currentSurface);
-  }, [currentSurface, serverActiveTaskId, serverTasks, capabilities.projectId, studioTasks]);
+  // (Deleted — Phase 3: the old "track the active tab's surface" writer.
+  //  It raced the surface→task effect below with a different vocabulary
+  //  (encoded workspace surface vs shell stage surface), so each PATCH
+  //  re-triggered the other: infinite PATCH oscillation. There is now
+  //  exactly one persist effect; see below.)
 
   // The runtime auto-adopts a freshly provisioned conversation into a new
   // server task (auto-seed effect above). When that new task supersedes
@@ -2186,15 +2187,27 @@ function CommandStudioContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studioShellActive, serverActiveTaskId, serverTasks]);
 
-  // Surface → task: a user-initiated surface switch persists onto the
-  // active server task. Skips when already in sync (task switch path).
+  // Phase 3 — SINGLE authoritative surface-persist path. A user-initiated
+  // surface switch persists onto the active server task (server truth for
+  // restores). This is the only automatic writer of lastOpenedSurface:
+  // the canonical value and the in-sync guard both live in
+  // canonicalSurfaceToPersist(), and persistSurface() itself no-ops when
+  // the server value already matches — so no PATCH oscillation and no
+  // surface loops are possible by construction.
   useEffect(() => {
-    if (!studioShellActive || !serverActiveTaskId) return;
-    const task = serverTasks.find((t) => t.id === serverActiveTaskId);
-    if (!task || task.lastOpenedSurface === stageSurface) return;
-    if (resolveStageSurface(task.lastOpenedSurface) === stageSurface) return;
-    void studioTasks.updateTask(serverActiveTaskId, { lastOpenedSurface: stageSurface });
-  }, [studioShellActive, stageSurface, serverActiveTaskId, serverTasks, studioTasks]);
+    const id = serverActiveTaskId;
+    if (!capabilities.projectId || !id || studioTasks.loading) return;
+    const task = serverTasks.find((t) => t.id === id);
+    if (!task) return;
+    const toPersist = canonicalSurfaceToPersist({
+      shellActive: studioShellActive,
+      stageSurface,
+      currentSurface,
+      storedSurface: task.lastOpenedSurface,
+    });
+    if (toPersist === null) return;
+    void studioTasks.persistSurface(id, toPersist);
+  }, [studioShellActive, stageSurface, currentSurface, serverActiveTaskId, serverTasks, capabilities.projectId, studioTasks]);
 
   // An approval gate must never strand hidden: a paused run expands the
   // LiTT command layer so the approve/reject decision stays reachable.
