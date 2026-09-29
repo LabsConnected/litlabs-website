@@ -87,7 +87,7 @@ export function useBrowserJobs(scope: { projectId?: string | null; conversationI
       const params = new URLSearchParams({ limit: "20" });
       if (scope.projectId) params.set("projectId", scope.projectId);
       if (scope.conversationId) params.set("conversationId", scope.conversationId);
-      const res = await fetch(`/api/browser/jobs?${params.toString()}`, { credentials: "same-origin" });
+      const res = await fetch(`/api/studio/browser?${params.toString()}`, { credentials: "same-origin" });
       if (!res.ok) {
         if (res.status === 401) {
           setError("Unauthorized");
@@ -108,14 +108,16 @@ export function useBrowserJobs(scope: { projectId?: string | null; conversationI
 
   const fetchSelectedJob = useCallback(async (jobId: string) => {
     try {
-      const res = await fetch(`/api/browser/jobs/${jobId}`, { credentials: "same-origin" });
+      const params = new URLSearchParams({ projectId: scope.projectId ?? "", runId: jobId });
+      if (scope.conversationId) params.set("conversationId", scope.conversationId);
+      const res = await fetch(`/api/studio/browser?${params.toString()}`, { credentials: "same-origin" });
       if (!res.ok) return;
       const data = await res.json() as { job: BrowserJob };
       if (data.job) setSelectedJob(data.job);
     } catch {
       // Silent — polling will retry
     }
-  }, []);
+  }, [scope.conversationId, scope.projectId]);
 
   // Initial load
   useEffect(() => {

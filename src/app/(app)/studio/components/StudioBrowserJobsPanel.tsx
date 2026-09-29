@@ -424,7 +424,7 @@ function JobCard({
   const canApprove = job.status === "awaiting_approval";
   // One SSE subscription per selected job, shared by the live view
   // (snapshot timeline) and the activity log.
-  const { events, connected, error: eventsError } = useBrowserJobEvents(job.jobId);
+  const { events, connected, error: eventsError } = useBrowserJobEvents(job.jobId, job.requestedBy === "studio");
 
   return (
     <div className="flex h-full flex-col" data-testid="browser-job-card">
