@@ -31,6 +31,58 @@ export interface RecoveredWorkspace {
   reprepared: boolean;
 }
 
+const PROVISIONING_POLL_MS = 500;
+const PROVISIONING_WAIT_MS = 120_000;
+
+function workspaceProvisioningError(project: CanonicalProject): Error {
+  return new Error(project.workspaceError || "Workspace provisioning failed");
+}
+
+function sanitizeProvisioningError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error || "Workspace provisioning failed");
+  return raw
+    .replace(/https?:\/\/[^\s]+/gi, "[redacted endpoint]")
+    .replace(/(?:api[-_]?key|token|secret|password)\s*[=:]\s*[^\s,}]+/gi, "credential=[redacted]")
+    .slice(0, 500) || "Workspace provisioning failed";
+}
+
+/**
+ * Observe an existing provisioning owner. This deliberately does not claim
+ * or POST another prepare request: the owner must be allowed to finish, or a
+ * stale lock must be recovered before a new owner is elected.
+ */
+async function waitForProvisioning(
+  projectId: string,
+  userId: string,
+): Promise<string | null> {
+  const deadline = Date.now() + PROVISIONING_WAIT_MS;
+
+  while (Date.now() < deadline) {
+    const current = await getProject(projectId, userId);
+    if (!current) throw new Error("Project not found");
+    if (current.workspaceStatus === "ready" && current.workspaceId) {
+      return current.workspaceId;
+    }
+    if (current.workspaceStatus === "failed") {
+      throw workspaceProvisioningError(current);
+    }
+    if (current.workspaceStatus !== "provisioning") return null;
+    await new Promise((resolve) => setTimeout(resolve, PROVISIONING_POLL_MS));
+  }
+
+  // The lock owner did not finish in time. Only now is it safe to recover the
+  // stale lock and let the caller below attempt one new claim.
+  await recoverStaleProvisioning(projectId, userId, PROVISIONING_WAIT_MS);
+  const current = await getProject(projectId, userId);
+  if (current?.workspaceStatus === "ready" && current.workspaceId) {
+    return current.workspaceId;
+  }
+  if (current?.workspaceStatus === "failed") {
+    throw workspaceProvisioningError(current);
+  }
+  return null;
+}
+
 /**
  * Check whether a workspace still exists on the terminal server.
  * If it doesn't, re-provision it automatically.
@@ -65,115 +117,10 @@ export async function reprepareWorkspace(
   projectId: string,
   userId: string,
 ): Promise<string> {
-  const project = await getProject(projectId, userId);
-  if (!project) {
-    throw new Error("Project not found");
-  }
-  if (project.userId !== userId) {
-    throw new Error("Forbidden");
-  }
-
-  // Reset ONLY the status. workspaceId and workspaceRoot are the
-  // adoption hints that let re-provisioning reattach to durable
-  // source still on the volume — nulling them strands it.
-  await updateProjectWorkspace(projectId, userId, {
-    workspaceStatus: "not_prepared",
-    workspaceError: null,
-  });
-
-  // Recover any stale provisioning locks
-  await recoverStaleProvisioning(projectId, userId);
-
-  // Ensure canonical project row exists
-  let canonical: CanonicalProject;
-  try {
-    canonical = await ensureCanonicalStudioProject(projectId, userId);
-  } catch {
-    throw new Error("Could not establish canonical project record for re-preparation");
-  }
-
-  if (canonical.workspaceStatus === "provisioning") {
-    // Another request is already provisioning — wait for it
-    const refreshed = await getProject(projectId, userId);
-    if (refreshed?.workspaceId && refreshed.workspaceStatus === "ready") {
-      return refreshed.workspaceId;
-    }
-    throw new Error("Workspace provisioning is already in progress");
-  }
-
-  // Claim the provisioning lock
-  const claimed = await claimProvisioningLock(projectId, userId);
-  if (!claimed) {
-    // Another request won the race — check if it already finished
-    const refreshed = await getProject(projectId, userId);
-    if (refreshed?.workspaceId && refreshed.workspaceStatus === "ready") {
-      return refreshed.workspaceId;
-    }
-    throw new Error("Workspace provisioning is already in progress");
-  }
-
-  // Provision the workspace
-  const adoption = {
-    existingRoot: project.workspaceRoot,
-    existingWorkspaceId: project.workspaceId,
-  };
-
-  let result;
-  if (isManagedSourceType(project.sourceType)) {
-    result = await prepareWorkspaceInternal({
-      sourceType: "managed",
-      userId,
-      projectId,
-      templateId: project.templateId ?? "blank-static",
-      ...adoption,
-    });
-  } else if (
-    project.sourceType === "github" &&
-    project.githubInstallationId &&
-    project.githubOwner &&
-    project.githubRepo
-  ) {
-    const githubToken = await getInstallationTokenForClone({
-      installationId: project.githubInstallationId,
-      owner: project.githubOwner,
-      repo: project.githubRepo,
-    });
-    result = await prepareWorkspaceInternal({
-      sourceType: "github",
-      userId,
-      projectId,
-      installationId: project.githubInstallationId,
-      owner: project.githubOwner,
-      repo: project.githubRepo,
-      branch: project.githubBranch ?? "main",
-      commitSha: project.latestCommitSha,
-      githubToken,
-      ...adoption,
-    });
-  } else {
-    await updateProjectWorkspace(projectId, userId, {
-      workspaceStatus: "failed",
-      workspaceError: "Project has no valid source for workspace provisioning",
-    });
-    throw new Error("Project has no valid source for workspace provisioning");
-  }
-
-  // Persist the new workspace — a failed write must surface, not return a
-  // workspaceId the project record never stored (the next request would
-  // see the stale status and re-prepare into a different workspace).
-  const persisted = await updateProjectWorkspace(projectId, userId, {
-    workspaceId: result.workspaceId,
-    workspaceStatus: "ready",
-    workspaceRoot: result.root,
-    workspaceBranch: result.branch ?? null,
-    workspacePreparedAt: new Date().toISOString(),
-    workspaceError: null,
-  });
-  if (!persisted) {
-    throw new Error("Workspace provisioned but the project record could not be persisted");
-  }
-
-  return result.workspaceId;
+  // All callers, including file recovery, use the same lock owner. In
+  // particular, this function must never claim a lock and then throw without
+  // transitioning it to failed.
+  return provisionWorkspaceForProject(projectId, userId);
 }
 
 /**
@@ -286,61 +233,80 @@ export async function provisionWorkspaceForProject(
     throw new Error("Could not establish canonical project record for provisioning");
   }
 
-  // If another request is already provisioning, don't duplicate — wait for it.
+  // If another request is already provisioning, observe it. Do not turn a
+  // single in-flight prepare into a repeated POST retry storm.
   if (canonical.workspaceStatus === "provisioning") {
-    const refreshed = await getProject(projectId, userId);
-    if (refreshed?.workspaceId && refreshed.workspaceStatus === "ready") {
-      return refreshed.workspaceId;
-    }
-    throw new Error("Workspace provisioning is already in progress");
+    const completed = await waitForProvisioning(projectId, userId);
+    if (completed) return completed;
   }
 
   // Atomically claim the provisioning lock.
   const claimed = await claimProvisioningLock(projectId, userId);
+  let owner = claimed;
   if (!claimed) {
+    const completed = await waitForProvisioning(projectId, userId);
+    if (completed) return completed;
+    // A stale lock may have been recovered between the initial read and the
+    // atomic claim. Re-read once and claim only if it is now claimable.
     const refreshed = await getProject(projectId, userId);
-    if (refreshed?.workspaceId && refreshed.workspaceStatus === "ready") {
+    if (refreshed?.workspaceStatus === "ready" && refreshed.workspaceId) {
       return refreshed.workspaceId;
     }
-    throw new Error("Workspace provisioning is already in progress");
+    if (!refreshed || refreshed.workspaceStatus === "provisioning") {
+      throw new Error("Workspace provisioning did not settle");
+    }
+    const retryClaim = await claimProvisioningLock(projectId, userId);
+    if (!retryClaim) throw new Error("Workspace provisioning did not settle");
+    owner = retryClaim;
   }
 
   // We own the lock — provision the workspace.
   try {
+    // Use the row returned by the atomic claim so adoption hints and source
+    // metadata cannot come from the stale pre-lock read.
+    const provisioningProject = {
+      ...project,
+      // The atomic claim result is authoritative for mutable workspace
+      // adoption fields, while the original project remains the source of
+      // truth for immutable source/template metadata in legacy test/migration
+      // paths that may return a partial claim row.
+      workspaceId: owner?.workspaceId ?? project.workspaceId,
+      workspaceRoot: owner?.workspaceRoot ?? project.workspaceRoot,
+    };
     const adoption = {
-      existingRoot: project.workspaceRoot,
-      existingWorkspaceId: project.workspaceId,
+      existingRoot: provisioningProject.workspaceRoot,
+      existingWorkspaceId: provisioningProject.workspaceId,
     };
 
     let result;
-    if (isManagedSourceType(project.sourceType)) {
+    if (isManagedSourceType(provisioningProject.sourceType)) {
       result = await prepareWorkspaceInternal({
         sourceType: "managed",
         userId,
         projectId,
-        templateId: project.templateId ?? "blank-static",
+        templateId: provisioningProject.templateId ?? "blank-static",
         ...adoption,
       });
     } else if (
-      project.sourceType === "github" &&
-      project.githubInstallationId &&
-      project.githubOwner &&
-      project.githubRepo
+      provisioningProject.sourceType === "github" &&
+      provisioningProject.githubInstallationId &&
+      provisioningProject.githubOwner &&
+      provisioningProject.githubRepo
     ) {
       const githubToken = await getInstallationTokenForClone({
-        installationId: project.githubInstallationId,
-        owner: project.githubOwner,
-        repo: project.githubRepo,
+        installationId: provisioningProject.githubInstallationId,
+        owner: provisioningProject.githubOwner,
+        repo: provisioningProject.githubRepo,
       });
       result = await prepareWorkspaceInternal({
         sourceType: "github",
         userId,
         projectId,
-        installationId: project.githubInstallationId,
-        owner: project.githubOwner,
-        repo: project.githubRepo,
-        branch: project.githubBranch ?? "main",
-        commitSha: project.latestCommitSha,
+        installationId: provisioningProject.githubInstallationId,
+        owner: provisioningProject.githubOwner,
+        repo: provisioningProject.githubRepo,
+        branch: provisioningProject.githubBranch ?? "main",
+        commitSha: provisioningProject.latestCommitSha,
         githubToken,
         ...adoption,
       });
@@ -366,7 +332,7 @@ export async function provisionWorkspaceForProject(
 
     return result.workspaceId;
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Workspace provisioning failed";
+    const message = sanitizeProvisioningError(err);
     try {
       await updateProjectWorkspace(projectId, userId, {
         workspaceStatus: "failed",
@@ -376,7 +342,7 @@ export async function provisionWorkspaceForProject(
       // The write failure is already logged inside updateProjectWorkspace —
       // don't let it mask the provisioning error being rethrown below.
     }
-    throw err;
+    throw new Error(message);
   }
 }
 
