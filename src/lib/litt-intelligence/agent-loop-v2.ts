@@ -104,6 +104,14 @@ export interface AgentLoopConfig {
   /** Parent ActionRun owning this work; injected server-side. */
   actionRunId?: string;
   /**
+   * Item 5a — optional durable event sink for the Activity truth.
+   * When set, every ProgressEvent emitted through this run's
+   * `localProgress` is also offered to the hook. The loop invokes it in
+   * emit order on a per-run promise chain; failures are logged and
+   * swallowed — persistence can NEVER break the run.
+   */
+  persistEvent?: (event: ProgressEvent) => Promise<void>;
+  /**
    * Canonical execution context for the entire run. Prefer this over the
    * legacy actionRunId field: it carries tenant, conversation, and project
    * identity together so tool handlers never reconstruct them from inputs.
@@ -639,6 +647,30 @@ async function finalizeQualityGatedRun(
 
 // ─── Agent Loop ───────────────────────────────────────────────────
 
+/**
+ * Item 5a — wire the optional `persistEvent` hook into a run's progress
+ * stream. Events flow through a per-run promise chain so they persist in
+ * emit order; each failure is logged and the chain continues. The loop
+ * itself never awaits persistence — it can only observe.
+ */
+function attachEventPersistence(
+  emitter: ProgressEmitter,
+  persistEvent: AgentLoopConfig["persistEvent"],
+): void {
+  if (!persistEvent) return;
+  let tail: Promise<void> = Promise.resolve();
+  emitter.on((event) => {
+    tail = tail
+      .then(() => persistEvent(event))
+      .catch((err) => {
+        // Persistence failure must NEVER break the run.
+        console.error("[agent-loop] persistEvent failed; continuing run", {
+          errorClass: err instanceof Error ? err.message : "unknown",
+        });
+      });
+  });
+}
+
 export async function runAgentLoopV2(
   userMessage: string,
   transport: WorkspaceTransport,
@@ -693,6 +725,8 @@ async function runAgentLoopV2Inner(
     events.push(event);
     progress?.emit(event);
   });
+  // Item 5a — persist loop events to the run's durable action_events log.
+  attachEventPersistence(localProgress, cfg.persistEvent);
 
   // Station Control Bridge (chunk E): route station action execution events
   // (action_started / action_completed / action_failed / approval_required)
@@ -1829,6 +1863,9 @@ async function resumeAgentLoopV2Inner(
     events.push(event);
     progress?.emit(event);
   });
+  // Item 5a — persist resumed-loop events to the run's durable
+  // action_events log (same hook as the initial run).
+  attachEventPersistence(localProgress, cfg.persistEvent);
 
   // Station Control Bridge (chunk E): route station action execution events
   // into this resumed run's Activity stream. Same transport-keyed sink as
