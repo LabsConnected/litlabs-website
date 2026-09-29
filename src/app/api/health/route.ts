@@ -12,7 +12,10 @@ async function checkDatabase(): Promise<{ status: string; detail?: string }> {
     const client = getSupabaseAdmin();
     if (!client) return { status: "degraded", detail: "Supabase not configured" };
     const { error } = await client.from("users").select("id").limit(1);
-    if (error) return { status: "degraded", detail: `DB query failed: ${error.code}` };
+    if (error) {
+      const detail = error.message || error.code || "unknown error";
+      return { status: "degraded", detail: `DB query failed: ${redactSecretLike(detail)}` };
+    }
     return { status: "ok" };
   } catch (err) {
     return { status: "error", detail: err instanceof Error ? err.message : "DB check failed" };
