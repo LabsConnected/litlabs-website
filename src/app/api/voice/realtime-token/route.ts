@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { emitUsageEvent } from "@/lib/metering";
 
 export const runtime = "nodejs";
 
@@ -48,6 +49,35 @@ export async function POST(req: NextRequest) {
     // Using the latest preview snapshot (2025-06-03) for best performance.
     const model = "gpt-4o-realtime-preview-2025-06-03";
 
+    // Canonical metering: record the session-creation attempt. Minting the
+    // ephemeral token is not billed; the audio minutes accrue inside the
+    // browser WebRTC session and are NOT metered by this route.
+    const requestId = crypto.randomUUID();
+    const startedAt = new Date();
+    const meteringBase = {
+      clerkId: session.clerkId ?? undefined,
+      feature: "voice-realtime" as const,
+      capability: "speech" as const,
+      provider: "openai",
+      model,
+      // P0 invariant: this single attempt is THE billable usage_event
+      // (emitter defaults billable=true on success). Token minting is not
+      // billed by the provider; browser audio minutes accrue outside this
+      // route and are not metered here.
+      providerCostMicros: 0,
+      chargedBits: 0,
+    };
+    const emitFailure = (error: string) =>
+      void emitUsageEvent({
+        ...meteringBase,
+        status: "failed",
+        billable: false,
+        error,
+        idempotencyKey: `metering:voice-realtime:${requestId}:0`,
+        startedAt,
+        finishedAt: new Date(),
+      });
+
     const tokenRes = await fetch(
       "https://api.openai.com/v1/realtime/sessions",
       {
@@ -73,10 +103,14 @@ export async function POST(req: NextRequest) {
           },
         }),
       },
-    );
+    ).catch((fetchErr: unknown) => {
+      emitFailure(String(fetchErr instanceof Error ? fetchErr.message : fetchErr).slice(0, 500));
+      throw fetchErr;
+    });
 
     if (!tokenRes.ok) {
       const errBody = await tokenRes.text();
+      emitFailure(`openai-realtime-sessions:${tokenRes.status} ${errBody.slice(0, 200)}`);
       return NextResponse.json(
         { error: `OpenAI Realtime token request failed: ${tokenRes.status}` },
         { status: 502 },
@@ -86,11 +120,20 @@ export async function POST(req: NextRequest) {
     const sessionData = await tokenRes.json();
     const token = sessionData.client_secret?.value;
     if (!token) {
+      emitFailure("openai-missing-client-secret");
       return NextResponse.json(
         { error: "OpenAI did not return a client secret" },
         { status: 502 },
       );
     }
+
+    void emitUsageEvent({
+      ...meteringBase,
+      status: "success",
+      idempotencyKey: `metering:voice-realtime:${requestId}:0`,
+      startedAt,
+      finishedAt: new Date(),
+    });
 
     return NextResponse.json({ token, model });
   } catch (err) {

@@ -14,7 +14,72 @@
 
 import "server-only";
 
+import { randomUUID } from "crypto";
 import { callLLMWithTools } from "./llm-tool-calling";
+import { emitUsageEvent, getMeteringContext } from "@/lib/metering";
+import { calculateLlmCost } from "@/lib/llm-cost-engine";
+
+// ─── Canonical metering (P0) ─────────────────────────────────────
+//
+// The judge is a provider-paid LLM vision call: one usage_events row + one
+// cost_events row per invocation via the canonical emitter.
+//
+// P0 invariant: exactly ONE billable usage_event per logical action (here:
+// one judge call). Successful judgments are billable; failed calls are
+// recorded billable=false with the cost still captured.
+//
+// Token counts are chars/4 ESTIMATES of the text prompt/response — the
+// screenshot's vision tokens are NOT estimated (no honest basis), which
+// understates input cost; labeled as estimates, never measured.
+// Emission is fire-and-forget: metering must never break the judge.
+function emitJudgeMetering(input: {
+  provider: string;
+  model: string;
+  promptChars: number;
+  outputChars: number;
+  status: "success" | "failed";
+  error?: string;
+}): void {
+  try {
+    const ctx = getMeteringContext();
+    const userId = ctx?.userId ?? null;
+    const clerkId = ctx?.clerkId ?? null;
+    if (!userId && !clerkId) return;
+
+    const feature = ctx?.feature ?? "unknown";
+    const capability = feature === "browser-agent" ? "browser" : "llm";
+    const inputTokens = Math.max(1, Math.ceil(Math.max(0, input.promptChars) / 4));
+    const outputTokens = Math.max(1, Math.ceil(Math.max(0, input.outputChars) / 4));
+    const { providerCostMicros } = calculateLlmCost({
+      provider: input.provider,
+      model: input.model,
+      promptTokens: inputTokens,
+      completionTokens: outputTokens,
+      isByok: false,
+    });
+    const idempotencyKey = `metering:judge:${randomUUID()}`;
+    void emitUsageEvent({
+      userId: userId ?? undefined,
+      clerkId: clerkId ?? undefined,
+      runId: ctx?.runId ?? undefined,
+      projectId: ctx?.projectId ?? undefined,
+      feature,
+      capability,
+      provider: input.provider,
+      model: input.model,
+      inputTokens,
+      outputTokens,
+      providerCostMicros,
+      status: input.status,
+      billable: input.status === "success",
+      error: input.error,
+      idempotencyKey,
+      originalRequestId: idempotencyKey,
+    }).catch(() => {});
+  } catch {
+    // Metering must never break the judge — swallow everything.
+  }
+}
 
 // ─── Dimensions ───────────────────────────────────────────────────
 
@@ -376,6 +441,7 @@ export async function runVisualJudge(options: JudgeOptions): Promise<JudgeOutcom
   const prompt = buildJudgePrompt(options.context);
   let text: string;
   let model: string;
+  let provider = "unknown";
   try {
     if (options.judgeCall) {
       const result = await options.judgeCall(prompt, screenshot);
@@ -390,8 +456,28 @@ export async function runVisualJudge(options: JudgeOptions): Promise<JudgeOutcom
       );
       text = response.text;
       model = response.model;
+      provider = response.provider ?? "unknown";
     }
+    // Canonical metering (P0): one billable event for the judge's LLM call.
+    // Token counts are text-only chars/4 estimates — the screenshot's
+    // vision tokens are not estimated (see helper).
+    emitJudgeMetering({
+      provider,
+      model,
+      promptChars: prompt.length,
+      outputChars: text.length,
+      status: "success",
+    });
   } catch (err) {
+    // Canonical metering (P0): failed attempts are recorded billable=false.
+    emitJudgeMetering({
+      provider,
+      model: "unknown",
+      promptChars: prompt.length,
+      outputChars: 0,
+      status: "failed",
+      error: (err instanceof Error ? err.message : String(err)).slice(0, 500),
+    });
     return {
       status: "unavailable",
       browserInspected: captureEvidence?.browserInspected ?? true,

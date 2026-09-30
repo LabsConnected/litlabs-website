@@ -4,6 +4,7 @@ import { rateLimit } from "@/lib/rate-limiter";
 import { getVoiceSession, startVoiceSession } from "@/lib/voice/voice-session-service";
 import { runLiTTForVoice } from "@/lib/voice/voice-runtime";
 import { insertMessage } from "@/lib/studio/conversation-service";
+import { emitLlmMetering } from "@/lib/metering";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -149,12 +150,58 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Route through the LiTT Runtime
-  const result = await runLiTTForVoice({
-    userId: session.userId,
-    projectId: session.projectId,
-    conversationId: session.conversationId,
-    message: userContent,
+  // Route through the LiTT Runtime.
+  //
+  // Canonical metering: runLiTTForVoice runs on callLLMWithTools, a
+  // provider layer that does NOT go through llm.ts's generateText, so it
+  // never emits metering itself. We record one usage_event per voice turn
+  // here. The runtime does not surface token counts per turn, so the event
+  // records the turn's provider/model and that spend occurred (tokens 0);
+  // voice turns are not wallet-billed today (billable: false).
+  const meteringRequestId = crypto.randomUUID();
+  const meteringStartedAt = new Date();
+  let result: Awaited<ReturnType<typeof runLiTTForVoice>>;
+  try {
+    result = await runLiTTForVoice({
+      userId: session.userId,
+      projectId: session.projectId,
+      conversationId: session.conversationId,
+      message: userContent,
+    });
+  } catch (turnErr: unknown) {
+    void emitLlmMetering({
+      clerkId: session.userId ?? undefined,
+      projectId: session.projectId ?? undefined,
+      feature: "vapi",
+      provider: "unknown",
+      model: "unknown",
+      status: "failed",
+      error: String(turnErr instanceof Error ? turnErr.message : turnErr).slice(0, 500),
+      chargedBits: 0,
+      billable: false,
+      idempotencyKey: `metering:vapi:${meteringRequestId}:0`,
+      startedAt: meteringStartedAt,
+      finishedAt: new Date(),
+    });
+    return NextResponse.json({ text: "I encountered an error. Please try again." }, { status: 500 });
+  }
+
+  void emitLlmMetering({
+    clerkId: session.userId ?? undefined,
+    projectId: session.projectId ?? undefined,
+    feature: "vapi",
+    provider: result.body.provider ?? "unknown",
+    model: result.body.model ?? "unknown",
+    // P0 invariant: per logical action (one voice turn) exactly ONE
+    // billable usage_event — this is it (emitter defaults billable=true
+    // on success). Voice turns are not wallet-billed today, so
+    // chargedBits stays 0.
+    status: result.status === 200 ? "success" : "failed",
+    billable: result.status === 200,
+    chargedBits: 0,
+    idempotencyKey: `metering:vapi:${meteringRequestId}:0`,
+    startedAt: meteringStartedAt,
+    finishedAt: new Date(),
   });
 
   if (result.status !== 200) {
