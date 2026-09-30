@@ -1492,6 +1492,11 @@ export async function callLLMWithTools(
             ? Math.max(0, options.deadlineMs - Date.now())
             : undefined,
         });
+        // Log the error on its own line — Railway truncates long log lines,
+        // which hid the actual Google error body on 2026-09-30.
+        if (failure.message) {
+          console.log(`[provider-router] attempt_error_detail provider=${route.provider} model=${model} error=${failure.message}`);
+        }
         logLLMCall({
           prompt: promptLog,
           systemPrompt,

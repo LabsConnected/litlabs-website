@@ -282,22 +282,36 @@ export function validateEnv(): EnvValidationResult[] {
 
   // AI — at least one provider key should be set
   const _aiResult = validateCategory("ai", optionalAISchema, "[ai]");
+  const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
   const hasAIKey = !!(
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
+    geminiKey ||
     process.env.OPENROUTER_API_KEY ||
     process.env.GROQ_API_KEY ||
     process.env.MISTRAL_API_KEY ||
     (process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_AI_API_TOKEN) ||
     process.env.OPENAI_API_KEY
   );
+  const aiWarnings: string[] = [];
+  // Validate Gemini key format at boot: Google API keys start with "AIza",
+  // are 39 chars, and contain only [A-Za-z0-9_-]. A corrupted paste
+  // (whitespace, truncation) returns HTTP 400 "API key not valid" on every
+  // call — catch it here instead of failing silently at runtime
+  // (2026-09-30 incident: bad key hid for 2 days).
+  if (geminiKey) {
+    if (geminiKey !== geminiKey.trim()) {
+      aiWarnings.push("[ai] GEMINI_API_KEY has leading/trailing whitespace — Google will reject it with 400 'API key not valid'. Re-paste the key cleanly.");
+    } else if (!/^AIza[A-Za-z0-9_-]{35}$/.test(geminiKey)) {
+      aiWarnings.push("[ai] GEMINI_API_KEY does not match Google API key format (AIza + 35 chars) — it may be truncated or the wrong key. Agent calls will fail.");
+    }
+  }
+  if (!hasAIKey) {
+    aiWarnings.push("[ai] No AI provider key set — AI features will be unavailable. Set at least one of: GEMINI_API_KEY, OPENROUTER_API_KEY, GROQ_API_KEY, MISTRAL_API_KEY, OPENAI_API_KEY");
+  }
   results.push({
     valid: true,
     category: "ai",
     errors: [],
-    warnings: hasAIKey
-      ? []
-      : ["[ai] No AI provider key set — AI features will be unavailable. Set at least one of: GEMINI_API_KEY, OPENROUTER_API_KEY, GROQ_API_KEY, MISTRAL_API_KEY, OPENAI_API_KEY"],
+    warnings: aiWarnings,
   });
 
   // Integration — optional, warnings only
