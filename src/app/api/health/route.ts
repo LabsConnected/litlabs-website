@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { resolveTerminalInternalUrl } from "@/lib/terminal-url";
 
 export const dynamic = "force-dynamic";
 
@@ -20,14 +21,13 @@ async function checkDatabase(): Promise<{ status: string; detail?: string }> {
 }
 
 async function checkTerminalServer(): Promise<{ status: string; detail?: string }> {
-  // Use HTTP URLs for the health check — wss:// URLs cannot be fetched
-  const terminalUrl = process.env.TERMINAL_SERVER_INTERNAL_URL ??
-    process.env.TERMINAL_SERVER_URL ??
-    process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL ??
-    null;
-  if (!terminalUrl) return { status: "degraded", detail: "Terminal server URL not configured" };
+  const resolution = resolveTerminalInternalUrl();
+  // Use HTTP URLs for the health check — wss:// URLs cannot be fetched.
+  if (!resolution.url) {
+    return { status: "degraded", detail: "Terminal server URL not configured (source: none)" };
+  }
   // Normalize: strip wss:// → https://, ws:// → http:// for the fetch
-  const httpUrl = terminalUrl
+  const httpUrl = resolution.url
     .replace(/^wss:\/\//, "https://")
     .replace(/^ws:\/\//, "http://");
   try {
@@ -35,10 +35,10 @@ async function checkTerminalServer(): Promise<{ status: string; detail?: string 
     const timeout = setTimeout(() => controller.abort(), 3000);
     const resp = await fetch(`${httpUrl}/health`, { signal: controller.signal });
     clearTimeout(timeout);
-    if (!resp.ok) return { status: "degraded", detail: `Terminal server returned ${resp.status}` };
-    return { status: "ok" };
+    if (!resp.ok) return { status: "degraded", detail: `Terminal server returned ${resp.status} (source: ${resolution.source})` };
+    return { status: "ok", detail: `source: ${resolution.source}` };
   } catch {
-    return { status: "degraded", detail: "Terminal server unreachable" };
+    return { status: "degraded", detail: `Terminal server unreachable (source: ${resolution.source})` };
   }
 }
 

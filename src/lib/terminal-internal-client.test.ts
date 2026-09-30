@@ -214,4 +214,18 @@ describe("terminal client functions wire timeouts", () => {
     expect(err).toBeInstanceOf(Error);
     expect((err as Error).message).toContain("timed out");
   }, 30_000);
+
+  it("uses the internal host when public and internal hosts differ", async () => {
+    process.env.TERMINAL_SERVER_INTERNAL_URL = "https://terminal.internal.test";
+    process.env.TERMINAL_SERVER_URL = "https://terminal.public.test";
+    vi.mocked(fetch).mockImplementation(() =>
+      okJson({ workspaceId: "ws1", status: "ready", logs: [] }),
+    );
+
+    await getWorkspaceInternal("ws1", "u");
+
+    const [url] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://terminal.internal.test/internal/workspace/ws1?userId=u");
+    expect(url).not.toContain("terminal.public.test");
+  });
 });
