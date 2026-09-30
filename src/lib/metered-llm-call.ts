@@ -62,22 +62,21 @@ export type MeteredLlmCallResult =
       code: "spend_ceiling_exceeded" | "insufficient_credits";
     };
 
+export type SpendAuthorization =
+  | { ok: true; billingExempt: boolean }
+  | { ok: false; status: 402 | 403; error: string; code: "spend_ceiling_exceeded" | "insufficient_credits" };
+
 /**
- * Execute one provider-paid LLM call with full metering + billing.
- *
- * Guarantees:
- * - No provider call happens unless the caller is authorized to spend
- *   (pre-flight auth) AND has a positive balance (non-exempt users).
- * - Every provider attempt is metered (usage_events + cost_events).
- * - Exactly one wallet debit per logical action (idempotent; retries reuse
- *   the billable usage_event via meteringBillableKey).
+ * Pre-flight spend authorization: owner exemption / spend ceiling + balance
+ * gate, run BEFORE any provider execution. Exported so routes that build
+ * their own provider calls (via shared wrappers) can enforce the same gate
+ * without duplicating the logic.
  */
-export async function meteredLlmCall(
-  input: MeteredLlmCallInput,
-): Promise<MeteredLlmCallResult> {
-  // 1. Pre-flight billing authorization — owner exemption / spend ceiling.
-  //    Runs BEFORE any provider spend.
-  const preflight = await preflightBillingAuth(input.clerkId, input.simulation);
+export async function assertSpendAuthorized(
+  clerkId: string,
+  simulation?: SimulatedPlan | null,
+): Promise<SpendAuthorization> {
+  const preflight = await preflightBillingAuth(clerkId, simulation);
   if (!preflight.allowed) {
     return {
       ok: false,
@@ -86,13 +85,10 @@ export async function meteredLlmCall(
       code: "spend_ceiling_exceeded",
     };
   }
-
-  // 2. Balance gate BEFORE provider execution (non-exempt users only).
-  //    A zero balance means the provider is never called — no free spend.
   if (!preflight.billingExempt) {
     let total = 0;
     try {
-      const balances = await getCreditBalances(input.clerkId);
+      const balances = await getCreditBalances(clerkId);
       total = balances.total;
     } catch {
       // Wallet lookup failure: fail closed for non-exempt users rather
@@ -112,6 +108,27 @@ export async function meteredLlmCall(
         code: "insufficient_credits",
       };
     }
+  }
+  return { ok: true, billingExempt: preflight.billingExempt };
+}
+
+/**
+ * Execute one provider-paid LLM call with full metering + billing.
+ *
+ * Guarantees:
+ * - No provider call happens unless the caller is authorized to spend
+ *   (pre-flight auth) AND has a positive balance (non-exempt users).
+ * - Every provider attempt is metered (usage_events + cost_events).
+ * - Exactly one wallet debit per logical action (idempotent; retries reuse
+ *   the billable usage_event via meteringBillableKey).
+ */
+export async function meteredLlmCall(
+  input: MeteredLlmCallInput,
+): Promise<MeteredLlmCallResult> {
+  // 1+2. Pre-flight billing authorization + balance gate, BEFORE provider spend.
+  const authz = await assertSpendAuthorized(input.clerkId, input.simulation);
+  if (!authz.ok) {
+    return authz;
   }
 
   // 3. Provider call WITH canonical metering context. llm.ts emits one
