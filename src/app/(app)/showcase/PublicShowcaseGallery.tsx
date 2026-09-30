@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { ArrowRight, FlaskConical } from "lucide-react";
 import { PROJECT_LIST } from "./projects";
+import {
+  formatBits,
+  getPlanCreditAllowance,
+} from "@/config/plan-entitlements";
 
 /**
  * PublicShowcaseGallery — the /showcase index for signed-out visitors.
@@ -80,7 +84,7 @@ export default function PublicShowcaseGallery() {
           Ready to run your own mission?
         </h2>
         <p className="mx-auto mb-6 max-w-xl text-sm leading-relaxed text-white/55">
-          Start free with 500 AI credits. Give LiTT a brief and watch it plan,
+          Start free with {formatBits(getPlanCreditAllowance("starter"))} AI credits. Give LiTT a brief and watch it plan,
           build, and verify — the same loop you just walked through.
         </p>
         <Link

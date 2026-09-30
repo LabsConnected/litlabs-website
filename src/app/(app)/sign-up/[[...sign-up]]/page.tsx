@@ -7,6 +7,10 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { getSafeRedirectUrl } from "@/lib/safe-redirect-url";
 import { SignupTracker } from "../SignupTracker";
+import {
+  formatBits,
+  getPlanCreditAllowance,
+} from "@/config/plan-entitlements";
 
 /**
  * Mirrors /sign-in: preserves the `redirect_url` query parameter (used by
@@ -33,7 +37,7 @@ function SignUpContent() {
             Create your free LiTT account
           </h1>
           <p className="text-xs opacity-70" style={{ color: "#94a3b8" }}>
-            Start with 500 credits. No credit card required.
+            Start with {formatBits(getPlanCreditAllowance("starter"))} credits. No credit card required.
           </p>
           <p
             className="text-[11px] mt-2 leading-relaxed opacity-60"
