@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { runAI } from "@/lib/ai/providers";
+import { emitLlmMetering } from "@/lib/metering";
 import {
   buildJarvisPrompt,
   collectJarvisContext,
@@ -12,7 +13,7 @@ import { detectAndExecuteTool, detectToolIntent } from "@/lib/litt-intelligence/
 import { withRateLimit } from "@/lib/rate-limiter";
 
 async function handler(req: NextRequest) {
-  const { userId } = await auth(req);
+  const { userId, clerkId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -58,15 +59,68 @@ async function handler(req: NextRequest) {
       { role: "user" as const, content: prompt },
     ];
 
+    // ── Canonical metering ──────────────────────────────────
+    // runAI is a direct-fetch provider layer (NOT llm.ts), so it never
+    // emits metering itself. We emit one usage_event per attempt, tied
+    // with retry_sequence + original_request_id. P0 invariant: only the
+    // SUCCESSFUL attempt in the retry chain is the billable usage_event;
+    // failed attempts are billable=false with the error recorded. runAI
+    // does not surface token counts, so the event records that the
+    // attempt happened (tokens 0, provider cost from the engine).
+    const meteringRequestId = crypto.randomUUID();
+    const meteringStartedAt = new Date();
+    const emitThinkAttempt = (
+      seq: number,
+      provider: string,
+      model: string,
+      status: "success" | "failed",
+      error?: string,
+    ) =>
+      void emitLlmMetering({
+        clerkId: clerkId ?? undefined,
+        feature: "litt-think",
+        provider,
+        model,
+        status,
+        billable: status === "success",
+        error,
+        chargedBits: 0,
+        idempotencyKey: `metering:litt-think:${meteringRequestId}:${seq}`,
+        retrySequence: seq,
+        originalRequestId: meteringRequestId,
+        startedAt: meteringStartedAt,
+        finishedAt: new Date(),
+      });
+
     let answer: string;
     try {
       answer = await runAI({ provider: "ollama", model: "llama3.2:3b", messages });
-    } catch {
-      answer = await runAI({
-        provider: "openrouter",
-        model: "google/gemini-2.5-flash",
-        messages,
-      });
+      emitThinkAttempt(0, "ollama", "llama3.2:3b", "success");
+    } catch (ollamaErr: unknown) {
+      emitThinkAttempt(
+        0,
+        "ollama",
+        "llama3.2:3b",
+        "failed",
+        String(ollamaErr instanceof Error ? ollamaErr.message : ollamaErr).slice(0, 500),
+      );
+      try {
+        answer = await runAI({
+          provider: "openrouter",
+          model: "google/gemini-2.5-flash",
+          messages,
+        });
+        emitThinkAttempt(1, "openrouter", "google/gemini-2.5-flash", "success");
+      } catch (openrouterErr: unknown) {
+        emitThinkAttempt(
+          1,
+          "openrouter",
+          "google/gemini-2.5-flash",
+          "failed",
+          String(openrouterErr instanceof Error ? openrouterErr.message : openrouterErr).slice(0, 500),
+        );
+        throw openrouterErr;
+      }
     }
 
     const parsed = parseJarvisActions(answer);

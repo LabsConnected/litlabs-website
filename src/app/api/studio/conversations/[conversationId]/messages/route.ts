@@ -20,6 +20,7 @@ import type { AgentSlug, MessageStatus } from "@/lib/studio/types";
 import { parseAgentSelection } from "@/lib/agent-selection";
 import { resolveRuntimeAgent, type RuntimeAgent } from "@/lib/agent-runtime";
 import { reserveCredits, settleRun, estimateCredits } from "@/lib/agent-billing";
+import { runWithMeteringContext } from "@/lib/metering";
 import {
   buildPrompt,
   buildRunContextFromStudio,
@@ -1120,7 +1121,20 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               userId: actionContext.userId,
             })
           : undefined;
-        launchFlowResult = await runLaunchFlow({
+        launchFlowResult = await runWithMeteringContext(
+          // Canonical metering (P0): thread identity + feature into the
+          // agent run. The v2 loop's per-step emission reads this context
+          // (feature "studio-chat"); runId links step events to the
+          // agent-billing run so settleRun links the ledger debit to the
+          // already-emitted billable attempt events instead of creating a
+          // duplicate billable event (P0 invariant).
+          {
+            clerkId: clerkId ?? undefined,
+            projectId: conversation.projectId ?? undefined,
+            runId: agentRunId ?? undefined,
+            feature: "studio-chat",
+          },
+          () => runLaunchFlow({
           userMessage: resolvedMessage,
           projectId: conversation.projectId ?? "",
           userId,
@@ -1148,7 +1162,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           // action_events log; the Activity panel reads them back as the
           // single Activity truth.
           persistEvent: persistProgressEvent,
-        });
+          }),
+        );
 
         v2Result = launchFlowResult.agentLoopResult ?? null;
 
@@ -1488,6 +1503,14 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                   maxTokens: 2048,
                   modelOverride,
                   signal: executionAbort.signal,
+                  // Canonical metering (P0): the llm.ts failover chain
+                  // emits one usage+cost event per provider attempt when
+                  // this context is present.
+                  metering: {
+                    clerkId: clerkId ?? undefined,
+                    projectId: conversation.projectId ?? undefined,
+                    feature: "studio-chat",
+                  },
                   evalMetadata: {
                     agentSlug,
                     agentMode: "v1-conversation",

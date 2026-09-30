@@ -267,4 +267,17 @@ describe("POST /api/demo/chat", () => {
     ];
     expect(options.provider).toBe("openrouter-free");
   });
+
+  it("threads canonical metering context into generateText", async () => {
+    const res = await POST(postRequest({ message: "hello" }));
+    expect(res.status).toBe(200);
+    const [, options] = generateTextMock.mock.calls[0] as [
+      string,
+      { metering?: { feature?: string } },
+    ];
+    // llm.ts emits one usage_event per provider attempt when metering
+    // context is present (the demo is anonymous, so the emitter skips
+    // the row for lack of a resolvable user — that is deliberate).
+    expect(options.metering).toMatchObject({ feature: "demo-chat" });
+  });
 });

@@ -30,11 +30,14 @@ import { getSupabaseAdmin, supabaseAdmin } from "@/lib/supabase";
 import {
   checkActionGate,
   recordBrowserAction,
+  getAccumulatorState,
   billingMetadata,
   settleBrowserSession,
   settleBrowserSessionFromRow,
   seedAccumulatorFromRow,
 } from "./browser-billing";
+import { runWithMeteringContext, emitUsageEvent } from "@/lib/metering";
+import { calculateLlmCost } from "@/lib/llm-cost-engine";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -771,6 +774,59 @@ export async function errorSession(
 
 // ─── Action execution ────────────────────────────────────────────
 
+// ─── Canonical metering (P0) ─────────────────────────────────────
+//
+// One metering event per browser action that made a provider model call.
+// P0 invariant: per logical action (here: one browser action) exactly ONE
+// billable usage_event — successful actions are billable, failed actions
+// are recorded billable=false with the cost still captured.
+//
+// The model calls are Stagehand-internal (act()/extract() against the
+// Browserbase session): provider model + token usage are opaque from here,
+// so they are recorded honestly as unknown/zero rather than invented.
+// providerCostMicros comes from calculateLlmCost (0 here — the call's
+// tokens are invisible); the ledger's provisional 45 bits/min +
+// 10 bits/call debit remains the charge until vendor-invoice reconciliation.
+// Emission is fire-and-forget: metering must never break the action.
+function emitBrowserActionMetering(input: {
+  sessionId: string;
+  /** Clerk id — the emitter resolves it to users.id (cached). */
+  userId: string;
+  /** 1-based per-session action index (from the billing accumulator). */
+  actionIndex: number;
+  success: boolean;
+  durationMs: number;
+}): void {
+  try {
+    const { providerCostMicros } = calculateLlmCost({
+      provider: "browserbase",
+      model: "stagehand",
+      promptTokens: 0,
+      completionTokens: 0,
+      isByok: false,
+    });
+    const idempotencyKey = `metering:browser:${input.sessionId}:${input.actionIndex}`;
+    void emitUsageEvent({
+      clerkId: input.userId,
+      feature: "browser-agent",
+      capability: "browser",
+      provider: "browserbase",
+      model: "stagehand",
+      providerCostMicros,
+      computeMs: input.durationMs,
+      toolCalls: 1,
+      status: input.success ? "success" : "failed",
+      billable: input.success,
+      idempotencyKey,
+      // The logical action IS this browser action — one event per action
+      // keeps per-original_request_id billable counts at <= 1.
+      originalRequestId: idempotencyKey,
+    }).catch(() => {});
+  } catch {
+    // Metering must never break the action — swallow everything.
+  }
+}
+
 /**
  * Execute a browser action and log it to the audit trail.
  * This is the canonical entry point for all browser tool handlers.
@@ -858,7 +914,14 @@ export async function executeBrowserAction(
 
   let result: BrowserActionResult;
   try {
-    result = await fn(stagehand);
+    // Canonical metering (P0): thread the browser-agent metering context
+    // into the action so any LLM call the action itself drives (visual
+    // judge, sub-loops) carries feature "browser-agent" + user identity.
+    // userId here is the Clerk id — the emitter resolves it (cached).
+    result = await runWithMeteringContext(
+      { clerkId: userId, feature: "browser-agent" },
+      () => fn(stagehand),
+    );
   } catch (err) {
     result = {
       success: false,
@@ -880,6 +943,20 @@ export async function executeBrowserAction(
     success: result.success,
     modelCalls: result.modelCalls ?? 0,
   });
+
+  // Canonical metering (P0): one event per browser action that made a
+  // provider model call (Stagehand act()/extract()). The ledger's
+  // provisional 45 bits/min + 10 bits/call debit stays the charge; this
+  // event is the per-action evidence behind it.
+  if ((result.modelCalls ?? 0) > 0) {
+    emitBrowserActionMetering({
+      sessionId,
+      userId,
+      actionIndex: getAccumulatorState(sessionId).actionCount,
+      success: result.success,
+      durationMs: result.durationMs ?? 0,
+    });
+  }
 
   // Log to audit trail
   await dbInsertAction({

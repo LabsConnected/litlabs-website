@@ -36,7 +36,7 @@ interface EnhanceResponse {
  * before applying.
  */
 async function handler(req: NextRequest) {
-  const { userId } = await auth(req);
+  const { userId, clerkId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -89,7 +89,13 @@ Rules:
   try {
     const result = await generateJSON<EnhanceResponse>(
       userPrompt,
-      { task: "creative", maxTokens: 2048 },
+      {
+        task: "creative",
+        maxTokens: 2048,
+        // Canonical metering: llm.ts emits one usage_event per provider
+        // attempt (billable on success) keyed to this feature.
+        metering: { clerkId: clerkId ?? undefined, feature: "music-enhance" },
+      },
       systemPrompt,
     );
     result.original = prompt;

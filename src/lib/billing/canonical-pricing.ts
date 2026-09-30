@@ -170,45 +170,75 @@ export async function recordChargeEvidence(
     idempotencyKey: string;
     rating: ChargeRating;
     usage?: ChargeUsage;
+    /**
+     * Idempotency key of the EXISTING billable usage_event for this logical
+     * action (e.g. from llm.ts metering). When provided, the usage_events
+     * upsert is skipped — the attempt event already exists — and the ledger
+     * stamp + rating chain attach to it. This is the P0 invariant: retry /
+     * failover attempts must NEVER create a second billable usage_event.
+     * When absent, falls back to upserting with idempotencyKey (legacy).
+     */
+    existingUsageEventKey?: string | null;
   },
 ): Promise<void> {
   const { rating } = input;
   let usageEventId: string | null = null;
   try {
     // 1. Evidence chain — replay-safe via usage_events.idempotency_key unique.
+    //    When the caller already emitted the billable attempt event (llm.ts
+    //    failover chain), reuse it instead of creating a duplicate.
     const now = new Date();
-    const { data: usageRow, error: usageErr } = await admin
-      .from("usage_events")
-      .upsert(
-        {
-          user_id: input.userId,
-          project_id: asUuid(input.usage?.projectId),
-          run_id: asUuid(input.usage?.runId),
-          provider: rating.provider,
-          model: rating.model,
-          capability: rating.capability,
-          input_tokens: input.usage?.promptTokens ?? 0,
-          output_tokens: input.usage?.completionTokens ?? 0,
-          compute_ms: input.usage?.computeMs ?? 0,
-          image_count: input.usage?.imageCount ?? 0,
-          video_seconds: input.usage?.videoSeconds ?? 0,
-          audio_seconds: input.usage?.audioSeconds ?? 0,
-          idempotency_key: input.idempotencyKey,
-          is_byok: input.usage?.isByok ?? false,
-          started_at: (input.usage?.startedAt ?? now).toISOString(),
-          finished_at: (input.usage?.finishedAt ?? now).toISOString(),
-        },
-        { onConflict: "idempotency_key" },
-      )
-      .select("usage_event_id")
-      .single();
-
-    if (usageErr || !usageRow) {
-      if (usageErr) {
-        console.error(`[pricing] usage_event insert failed for ${input.idempotencyKey}:`, usageErr.message);
+    if (input.existingUsageEventKey) {
+      const { data: existing, error: lookupErr } = await admin
+        .from("usage_events")
+        .select("usage_event_id")
+        .eq("idempotency_key", input.existingUsageEventKey)
+        .maybeSingle();
+      if (lookupErr) {
+        console.error(
+          `[pricing] usage_event lookup failed for ${input.existingUsageEventKey}:`,
+          lookupErr.message,
+        );
+      } else if (existing) {
+        usageEventId = existing.usage_event_id as string;
       }
-    } else {
-      usageEventId = usageRow.usage_event_id;
+      // If the attempt event isn't found (metering skipped / race), fall
+      // through to the upsert below so evidence still exists.
+    }
+    if (!usageEventId) {
+      const { data: usageRow, error: usageErr } = await admin
+        .from("usage_events")
+        .upsert(
+          {
+            user_id: input.userId,
+            project_id: asUuid(input.usage?.projectId),
+            run_id: asUuid(input.usage?.runId),
+            provider: rating.provider,
+            model: rating.model,
+            capability: rating.capability,
+            input_tokens: input.usage?.promptTokens ?? 0,
+            output_tokens: input.usage?.completionTokens ?? 0,
+            compute_ms: input.usage?.computeMs ?? 0,
+            image_count: input.usage?.imageCount ?? 0,
+            video_seconds: input.usage?.videoSeconds ?? 0,
+            audio_seconds: input.usage?.audioSeconds ?? 0,
+            idempotency_key: input.idempotencyKey,
+            is_byok: input.usage?.isByok ?? false,
+            started_at: (input.usage?.startedAt ?? now).toISOString(),
+            finished_at: (input.usage?.finishedAt ?? now).toISOString(),
+          },
+          { onConflict: "idempotency_key" },
+        )
+        .select("usage_event_id")
+        .single();
+
+      if (usageErr || !usageRow) {
+        if (usageErr) {
+          console.error(`[pricing] usage_event insert failed for ${input.idempotencyKey}:`, usageErr.message);
+        }
+      } else {
+        usageEventId = usageRow.usage_event_id;
+      }
     }
   } catch (err) {
     console.error("[pricing] usage_event insert threw:", err instanceof Error ? err.message : err);
