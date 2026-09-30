@@ -332,4 +332,19 @@ describe("deriveFirstMissionLaunchpadState", () => {
     });
     expect(withoutProject.projectId).toBeNull();
   });
+
+  it("keeps diagnostics out of the primary error copy without relaxing the blocked state", () => {
+    const result = deriveFirstMissionLaunchpadState({ runtime: verifiedRuntime, runtimeLoading: false, providerHealth: "available", runtimeError: "ECONNREFUSED internal-host:443" });
+    expect(result.key).toBe("blocked");
+    expect(result.description).not.toContain("ECONNREFUSED");
+    expect(result.mutationActionsAllowed).toBe(false);
+  });
+
+  it("offers workspace retry with useful copy while preserving project identity", () => {
+    const result = deriveFirstMissionLaunchpadState({ runtime: runtime({ ...project, phase: "workspace_not_ready", workspaceId: "workspace-1", workspaceStatus: "failed", error: { code: "WORKSPACE_NOT_READY", message: "Clone failed: internal diagnostic" } }), runtimeLoading: false, providerHealth: "available" });
+    expect(result.primaryAction?.id).toBe("retry_workspace");
+    expect(result.projectId).toBe("project-1");
+    expect(result.description).not.toContain("internal diagnostic");
+    expect(result.mutationActionsAllowed).toBe(false);
+  });
 });

@@ -12,6 +12,7 @@ import {
   Play,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 /**
  * BuildConsole — the dashboard's one universal composer.
@@ -119,8 +120,8 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
             What do you want to make?
           </h1>
           <p className="mt-2.5 max-w-2xl text-[15px] leading-relaxed text-zinc-400">
-            Describe it in plain words. LiTT opens the right Studio workspace
-            and gets to work.
+            Describe your idea, work with LiTT in Studio, preview the result,
+            then approve it before publishing.
           </p>
 
           <form
@@ -172,11 +173,15 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
             </p>
           )}
 
-          <div className="mt-7">
-            <p className="mb-3 text-[11px] font-bold uppercase tracking-[.2em] text-zinc-500">
-              Or start with a type
-            </p>
-            <div className="flex flex-wrap gap-2.5">
+          <div className="mt-5 flex flex-wrap gap-x-5 gap-y-3 text-sm text-zinc-300">
+            <Link href="/studio?tool=chat" className="rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4">Start blank</Link>
+            <Link href="/settings/connections" className="rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4">Connect GitHub</Link>
+          </div>
+          <details className="mt-7">
+            <summary className="min-h-11 cursor-pointer rounded py-3 text-[13px] font-semibold text-zinc-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4">
+              More ways to create
+            </summary>
+            <div className="mt-3 flex flex-wrap gap-2.5">
               {SUGGESTIONS.map(({ label, href, icon: Icon }) => (
                 <button
                   key={label}
@@ -200,7 +205,7 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
                 </button>
               ))}
             </div>
-          </div>
+          </details>
         </div>
       </div>
     </section>
