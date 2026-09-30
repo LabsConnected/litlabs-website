@@ -22,7 +22,7 @@ vi.mock("@/lib/github-app", () => ({
   getInstallationTokenForClone: vi.fn(),
 }));
 
-import { ensureWorkspaceAlive, normalizeFileError, provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
+import { ensureWorkspaceAlive, normalizeFileError, provisionWorkspaceForProject, reprepareWorkspace } from "@/lib/studio/workspace-recovery";
 import { getProject, updateProjectWorkspace, claimProvisioningLock, ensureCanonicalStudioProject } from "@/lib/projects/project-repository";
 import { getWorkspaceInternal, prepareWorkspaceInternal } from "@/lib/terminal-internal-client";
 import { getInstallationTokenForClone } from "@/lib/github-app";
@@ -64,6 +64,9 @@ describe("workspace-recovery", () => {
     it("re-prepares workspace when terminal server has lost it", async () => {
       // First call: workspace not found
       vi.mocked(getWorkspaceInternal).mockRejectedValueOnce(new Error("Workspace not found"));
+      // The shared provisioner checks the stale workspace again before
+      // re-adopting its durable root.
+      vi.mocked(getWorkspaceInternal).mockResolvedValueOnce(null);
       // After re-prepare, getProject returns new workspace
       vi.mocked(getProject).mockResolvedValue(fakeProject({ workspaceId: "ws-new", workspaceStatus: "ready" }));
       vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
@@ -320,6 +323,57 @@ describe("workspace-recovery", () => {
         workspaceStatus: "failed",
         workspaceError: "Disk full",
       }));
+    });
+
+    it("releases the lock when file recovery owns provisioning and terminal prepare fails", async () => {
+      vi.mocked(getProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(claimProvisioningLock).mockResolvedValue(fakeProject({ workspaceStatus: "provisioning" }));
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+      vi.mocked(prepareWorkspaceInternal).mockRejectedValue(new Error("terminal unavailable"));
+
+      await expect(reprepareWorkspace("proj-1", "user-1")).rejects.toThrow("terminal unavailable");
+      expect(updateProjectWorkspace).toHaveBeenCalledWith("proj-1", "user-1", expect.objectContaining({
+        workspaceStatus: "failed",
+        workspaceError: "terminal unavailable",
+      }));
+    });
+
+    it("observes an existing provisioning owner and returns its ready workspace without preparing again", async () => {
+      vi.mocked(getProject)
+        .mockResolvedValueOnce(fakeProject({ workspaceStatus: "provisioning" }))
+        .mockResolvedValueOnce(fakeProject({ workspaceId: "ws-owner", workspaceStatus: "ready" }));
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "provisioning" }));
+
+      await expect(provisionWorkspaceForProject("proj-1", "user-1")).resolves.toBe("ws-owner");
+      expect(claimProvisioningLock).not.toHaveBeenCalled();
+      expect(prepareWorkspaceInternal).not.toHaveBeenCalled();
+    });
+
+    it("allows only the winning concurrent caller to prepare a workspace", async () => {
+      let reads = 0;
+      vi.mocked(getProject).mockImplementation(async () => {
+        reads += 1;
+        return reads <= 2
+          ? fakeProject({ workspaceStatus: "not_prepared" })
+          : fakeProject({ workspaceId: "ws-winner", workspaceStatus: "ready" });
+      });
+      vi.mocked(ensureCanonicalStudioProject).mockResolvedValue(fakeProject({ workspaceStatus: "not_prepared" }));
+      vi.mocked(claimProvisioningLock)
+        .mockResolvedValueOnce(fakeProject({ workspaceStatus: "provisioning" }))
+        .mockResolvedValueOnce(null);
+      vi.mocked(updateProjectWorkspace).mockResolvedValue(fakeProject());
+      vi.mocked(prepareWorkspaceInternal).mockResolvedValue(
+        ({ workspaceId: "ws-winner", root: "/data/ws-winner" }) as unknown as WorkspacePrepareResponse,
+      );
+
+      const results = await Promise.all([
+        provisionWorkspaceForProject("proj-1", "user-1"),
+        provisionWorkspaceForProject("proj-1", "user-1"),
+      ]);
+
+      expect(results).toEqual(["ws-winner", "ws-winner"]);
+      expect(prepareWorkspaceInternal).toHaveBeenCalledTimes(1);
     });
 
     it("throws when project is not found", async () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { getVoiceServerUrl } from "./terminal-url";
+import { getVoiceServerUrl, resolveTerminalInternalUrl } from "./terminal-url";
 
 describe("getVoiceServerUrl", () => {
   const keys = ["VOICE_PUBLIC_URL", "NEXT_PUBLIC_VOICE_WS_URL"] as const;
@@ -36,5 +36,37 @@ describe("getVoiceServerUrl", () => {
   it("falls back to NEXT_PUBLIC_VOICE_WS_URL, normalized to https", () => {
     process.env.NEXT_PUBLIC_VOICE_WS_URL = "wss://proxy.example.com/voice";
     expect(getVoiceServerUrl()).toBe("https://proxy.example.com/voice");
+  });
+});
+
+describe("resolveTerminalInternalUrl", () => {
+  it("prefers the internal URL when both internal and public URLs exist", () => {
+    const resolved = resolveTerminalInternalUrl({
+      NODE_ENV: "production",
+      TERMINAL_SERVER_INTERNAL_URL: "http://terminal.internal:4001/",
+      TERMINAL_SERVER_URL: "https://terminal.public.example/",
+    });
+
+    expect(resolved).toEqual({
+      url: "http://terminal.internal:4001",
+      source: "internal",
+    });
+  });
+
+  it("uses the public URL only as a fallback when the internal URL is absent", () => {
+    expect(resolveTerminalInternalUrl({
+      NODE_ENV: "production",
+      TERMINAL_SERVER_URL: "https://terminal.public.example/",
+    })).toEqual({
+      url: "https://terminal.public.example",
+      source: "public-fallback",
+    });
+  });
+
+  it("does not invent a production Railway hostname when neither URL exists", () => {
+    expect(resolveTerminalInternalUrl({ NODE_ENV: "production" })).toEqual({
+      url: "",
+      source: "none",
+    });
   });
 });

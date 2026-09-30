@@ -46,6 +46,42 @@ export function getTerminalServerUrl(): string {
   return "https://litlabs-terminal-server-production-0be1.up.railway.app";
 }
 
+export type TerminalInternalUrlSource = "internal" | "public-fallback" | "none";
+
+export interface TerminalInternalUrlResolution {
+  url: string;
+  source: TerminalInternalUrlSource;
+}
+
+/**
+ * Resolve server-to-server terminal traffic.
+ *
+ * This is intentionally separate from getTerminalServerUrl(), which serves
+ * browser/iframe-facing URLs and may use public client configuration. Internal
+ * calls must prefer the Railway private URL whenever both values exist.
+ * There is no hardcoded production hostname here.
+ */
+export function resolveTerminalInternalUrl(
+  env: NodeJS.ProcessEnv = process.env,
+): TerminalInternalUrlResolution {
+  const internal = env.TERMINAL_SERVER_INTERNAL_URL?.trim();
+  if (internal) return { url: internal.replace(/\/+$/, ""), source: "internal" };
+
+  const publicFallback = env.TERMINAL_SERVER_URL?.trim();
+  if (publicFallback) return { url: publicFallback.replace(/\/+$/, ""), source: "public-fallback" };
+
+  if (env.NODE_ENV !== "production") {
+    return { url: "http://localhost:4001", source: "public-fallback" };
+  }
+
+  return { url: "", source: "none" };
+}
+
+/** Sanitized source-only diagnostic; never returns a URL or credential. */
+export function getTerminalInternalUrlSource(): TerminalInternalUrlSource {
+  return resolveTerminalInternalUrl().source;
+}
+
 /**
  * Resolve the voice-server base URL, or "" if it isn't configured.
  *

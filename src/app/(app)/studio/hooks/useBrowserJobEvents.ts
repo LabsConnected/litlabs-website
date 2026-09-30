@@ -12,7 +12,7 @@
  * Fallback: if EventSource is not available (older browsers, SSR),
  * the hook falls back to polling GET /api/browser/jobs/[id]/events.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface AgentJobEvent {
   id: string;
@@ -42,20 +42,37 @@ export interface UseBrowserJobEventsResult {
   error: string | null;
 }
 
-export function useBrowserJobEvents(jobId: string | null): UseBrowserJobEventsResult {
+function canonicalEvent(event: Record<string, unknown>, jobId: string): AgentJobEvent {
+  const payload = (event.payload ?? {}) as Record<string, unknown>;
+  const source = typeof event.type === "string" ? event.type : "action";
+  const type: AgentJobEvent["type"] = source === "run.completed" || source === "agent.completed"
+    ? "job.completed"
+    : source === "run.failed" || source === "agent.failed" || source === "run.cancelled"
+      ? "job.failed"
+      : source === "approval.required" || source === "browser.user_required"
+        ? "approval.required"
+        : source.includes("completed")
+          ? "step.completed"
+          : source.includes("started") || source === "run.started"
+            ? "step.started"
+            : "observation";
+  return {
+    id: String(event.id ?? `${jobId}:${event.createdAt ?? Date.now()}`),
+    jobId,
+    type,
+    step: null,
+    message: typeof payload.label === "string" ? payload.label : source,
+    metadata: payload,
+    createdAt: typeof event.createdAt === "string" ? event.createdAt : new Date().toISOString(),
+  };
+}
+
+export function useBrowserJobEvents(jobId: string | null, canonical = false): UseBrowserJobEventsResult {
   const [events, setEvents] = useState<AgentJobEvent[]>([]);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const lastEventIdRef = useRef<string | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
-
-  const closeConnection = useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
-    setConnected(false);
-  }, []);
 
   useEffect(() => {
     if (!jobId) {
@@ -70,6 +87,33 @@ export function useBrowserJobEvents(jobId: string | null): UseBrowserJobEventsRe
     setEvents([]);
     setError(null);
     lastEventIdRef.current = null;
+
+    if (canonical) {
+      let closed = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const load = async () => {
+        try {
+          const res = await fetch(`/api/action-runs/${encodeURIComponent(jobId)}`, { credentials: "same-origin", cache: "no-store" });
+          if (!res.ok) throw new Error(`run ${res.status}`);
+          const data = await res.json() as { run?: { status?: string }; events?: Record<string, unknown>[] };
+          if (closed) return;
+          setEvents((data.events ?? []).map((event) => canonicalEvent(event, jobId)));
+          setConnected(true);
+          setError(null);
+          if (!["completed", "failed", "cancelled"].includes(data.run?.status ?? "")) {
+            timer = setTimeout(load, 2500);
+          }
+        } catch (err) {
+          if (!closed) {
+            setConnected(false);
+            setError(err instanceof Error ? err.message : "run activity unavailable");
+            timer = setTimeout(load, 5000);
+          }
+        }
+      };
+      void load();
+      return () => { closed = true; if (timer) clearTimeout(timer); };
+    }
 
     // Check if EventSource is available
     if (typeof window === "undefined" || typeof window.EventSource === "undefined") {
@@ -168,7 +212,7 @@ export function useBrowserJobEvents(jobId: string | null): UseBrowserJobEventsRe
       }
       setConnected(false);
     };
-  }, [jobId]);
+  }, [canonical, jobId]);
 
   return { events, connected, error };
 }

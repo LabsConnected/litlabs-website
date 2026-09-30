@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { emitLlmMetering } from "@/lib/metering";
 import {
   buildSpokenSummarySystemPrompt,
   buildSpokenSummaryUserContent,
@@ -28,7 +29,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
  */
 async function handler(req: NextRequest) {
   try {
-    const { userId } = await auth(req);
+    const { userId, clerkId } = await auth(req);
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -45,6 +46,21 @@ async function handler(req: NextRequest) {
     }
     const agent: SpokenAgentId = agentId === "spark" ? "spark" : "litt";
 
+    // Canonical metering: one usage_event per summary attempt. Spoken
+    // summaries are an uncharged voice feature (no wallet debit).
+    const requestId = crypto.randomUUID();
+    const startedAt = new Date();
+    const meteringBase = {
+      clerkId: clerkId ?? undefined,
+      feature: "tts" as const,
+      provider: "openai",
+      model: "gpt-4o-mini",
+      // P0 invariant: this single attempt is THE billable usage_event for
+      // the action (emitter defaults billable=true on success). Spoken
+      // summaries are currently uncharged, so chargedBits stays 0.
+      chargedBits: 0,
+    };
+
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -60,9 +76,32 @@ async function handler(req: NextRequest) {
           { role: "user", content: buildSpokenSummaryUserContent(text) },
         ],
       }),
+    }).catch((fetchErr: unknown) => {
+      void emitLlmMetering({
+        ...meteringBase,
+        status: "failed",
+        billable: false,
+        error: String(fetchErr instanceof Error ? fetchErr.message : fetchErr).slice(0, 500),
+        idempotencyKey: `metering:llm:${requestId}:0`,
+        startedAt,
+        finishedAt: new Date(),
+      });
+      throw fetchErr;
     });
 
     if (!response.ok) {
+      // Provider attempt failed — the endpoint still returns 200 with a
+      // deterministic fallback so voice never breaks, but the attempt
+      // is metered as failed (provider bills $0 for failed calls).
+      void emitLlmMetering({
+        ...meteringBase,
+        status: "failed",
+        billable: false,
+        error: `openai-chat-completions:${response.status}`,
+        idempotencyKey: `metering:llm:${requestId}:0`,
+        startedAt,
+        finishedAt: new Date(),
+      });
       return NextResponse.json({
         spoken: truncateToSpokenFallback(text),
         fallback: true,
@@ -71,12 +110,36 @@ async function handler(req: NextRequest) {
 
     const data = await response.json();
     const spoken = (data?.choices?.[0]?.message?.content ?? "").trim();
+    const usage = data?.usage as
+      | { prompt_tokens?: number; completion_tokens?: number }
+      | undefined;
     if (!spoken) {
+      void emitLlmMetering({
+        ...meteringBase,
+        inputTokens: usage?.prompt_tokens ?? 0,
+        outputTokens: usage?.completion_tokens ?? 0,
+        status: "failed",
+        billable: false,
+        error: "empty-summary-content",
+        idempotencyKey: `metering:llm:${requestId}:0`,
+        startedAt,
+        finishedAt: new Date(),
+      });
       return NextResponse.json({
         spoken: truncateToSpokenFallback(text),
         fallback: true,
       });
     }
+
+    void emitLlmMetering({
+      ...meteringBase,
+      inputTokens: usage?.prompt_tokens ?? 0,
+      outputTokens: usage?.completion_tokens ?? 0,
+      status: "success",
+      idempotencyKey: `metering:llm:${requestId}:0`,
+      startedAt,
+      finishedAt: new Date(),
+    });
 
     // Hard cap: never speak more than ~40 words even if the model rambles.
     const words = spoken.split(/\s+/);

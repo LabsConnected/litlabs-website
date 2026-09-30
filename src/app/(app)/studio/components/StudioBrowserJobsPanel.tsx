@@ -421,10 +421,12 @@ function JobCard({
   const risk = riskBadge(job.riskLevel);
   const state = displayState(job.status);
   const canCancel = job.status === "queued" || job.status === "awaiting_approval";
-  const canApprove = job.status === "awaiting_approval";
+  // Canonical ActionRun approvals are resolved by the conversation approval
+  // surface; this legacy card must never offer a dead browser_jobs action.
+  const canApprove = job.status === "awaiting_approval" && typeof job.params.actionRunId !== "string";
   // One SSE subscription per selected job, shared by the live view
   // (snapshot timeline) and the activity log.
-  const { events, connected, error: eventsError } = useBrowserJobEvents(job.jobId);
+  const { events, connected, error: eventsError } = useBrowserJobEvents(job.jobId, job.requestedBy === "studio");
 
   return (
     <div className="flex h-full flex-col" data-testid="browser-job-card">
@@ -584,7 +586,13 @@ function JobCard({
 
 // ─── Main Panel ──────────────────────────────────────────────
 
-export default function StudioBrowserJobsPanel() {
+export default function StudioBrowserJobsPanel({
+  projectId,
+  conversationId,
+}: {
+  projectId?: string | null;
+  conversationId?: string | null;
+}) {
   const {
     jobs,
     selectedJob,
@@ -596,7 +604,7 @@ export default function StudioBrowserJobsPanel() {
     refresh,
     cancelJob,
     approveJob,
-  } = useBrowserJobs();
+  } = useBrowserJobs({ projectId: projectId ?? null, conversationId: conversationId ?? null });
 
   const sortedJobs = useMemo(() => {
     // Active jobs first, then by createdAt descending

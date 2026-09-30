@@ -9,18 +9,10 @@
  * operations. The browser calls Next.js, which calls terminal-server.
  */
 
+import { resolveTerminalInternalUrl } from "@/lib/terminal-url";
+
 const INTERNAL_KEY = () => process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
-const TERMINAL_BASE = () => {
-  const raw = process.env.TERMINAL_SERVER_URL ??
-    process.env.TERMINAL_SERVER_INTERNAL_URL ??
-    "";
-  if (raw && !raw.includes("localhost")) return raw;
-  // Dev fallback — only when not in production
-  if (process.env.NODE_ENV !== "production") {
-    return process.env.TERMINAL_SERVER_URL || "http://localhost:4001";
-  }
-  return raw || "";
-};
+const TERMINAL_BASE = () => resolveTerminalInternalUrl().url;
 
 /**
  * The project's previously-recorded workspace, so the terminal server

@@ -586,7 +586,7 @@ describe("Webhook event processing — state mutations", () => {
     // Verify: credits granted exactly once (from invoice.paid only)
     const grants = rpcCalls.filter((c) => c.fn === "grant_credits");
     expect(grants.length).toBe(1);
-    expect(grants[0].params.p_amount).toBe(6000);
+    expect(grants[0].params.p_amount).toBe(7500);
     expect(grants[0].params.p_idempotency_key).toBe("invoice_grant_in_chain");
 
     // Verify: subscription marked active
@@ -642,7 +642,7 @@ describe("Webhook event processing — state mutations", () => {
     expect(grants.length).toBe(1);
     expect(grants[0].params.p_idempotency_key).toBe("invoice_grant_in_test_123");
     // Creator Beta = 6000 credits
-    expect(grants[0].params.p_amount).toBe(6000);
+    expect(grants[0].params.p_amount).toBe(7500);
   });
 
   it("customer.subscription.deleted → marks subscription canceled", async () => {
@@ -806,8 +806,8 @@ describe("Webhook event processing — state mutations", () => {
     expect(updates.find((u) => u.patch.status === "refunded")).toBeDefined();
     const debits = rpcCalls.filter((c) => c.fn === "debit_credits");
     expect(debits.length).toBe(1);
-    // Creator Beta: 6000 credits over $15 (1500c). Refunding 750c = 50% → 3000 credits.
-    expect(debits[0].params.p_amount).toBe(3000);
+    // Creator Beta: 7500 credits over $15 (1500c). Refunding 750c = 50% → 3750 credits.
+    expect(debits[0].params.p_amount).toBe(3750);
   });
 });
 
@@ -820,7 +820,7 @@ describe("Entitlement resolution", () => {
     const ents = getEntitlementsForPlan("starter");
     expect(ents.planId).toBe("starter");
     expect(ents.activeProjectLimit).toBe(1);
-    expect(ents.monthlyCredits).toBe(500);
+    expect(ents.monthlyCredits).toBe(1500);
     expect(ents.terminal).toBe(false);
   });
 
@@ -828,7 +828,7 @@ describe("Entitlement resolution", () => {
     const ents = getEntitlementsForPlan("creator_beta");
     expect(ents.planId).toBe("creator_beta");
     expect(ents.activeProjectLimit).toBe(5);
-    expect(ents.monthlyCredits).toBe(6000);
+    expect(ents.monthlyCredits).toBe(7500);
     expect(ents.voice).toBe(true);
     expect(ents.terminal).toBe(false);
   });
@@ -837,7 +837,7 @@ describe("Entitlement resolution", () => {
     const ents = getEntitlementsForPlan("pro_builder_beta");
     expect(ents.planId).toBe("pro_builder_beta");
     expect(ents.activeProjectLimit).toBe(25);
-    expect(ents.monthlyCredits).toBe(20000);
+    expect(ents.monthlyCredits).toBe(18000);
     expect(ents.terminal).toBe(true);
     expect(ents.premiumModels).toBe(true);
   });

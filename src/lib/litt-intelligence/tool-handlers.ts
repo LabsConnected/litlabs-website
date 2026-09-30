@@ -32,8 +32,9 @@ import type { MediaProviderId } from "@/lib/media";
  * transport as the second argument and the handler takes the approving
  * user's identity from it as trusted server-side context.
  *
- * Uses auto-free mode (Pollinations) by default to avoid wallet
- * requirements. Returns a downloadUrl that can be rendered inline in chat.
+ * Uses the shared auto-free routing by default so Chat and Image Studio use
+ * the same provider/model selection and billing path. Returns a downloadUrl
+ * that can be rendered inline in chat.
  *
  * Stable operation identity: when the transport carries the approved
  * operation's identity (operationId), it becomes the service requestId, so
@@ -59,6 +60,7 @@ export async function handleImageGenerate(
       ? (transport as {
           userId?: unknown;
           projectId?: unknown;
+          conversationId?: unknown;
           operationId?: unknown;
         })
       : null;
@@ -84,6 +86,10 @@ export async function handleImageGenerate(
         projectId:
           typeof t?.projectId === "string" && t.projectId
             ? t.projectId
+            : undefined,
+        conversationId:
+          typeof t?.conversationId === "string" && t.conversationId
+            ? t.conversationId
             : undefined,
         requestId:
           typeof t?.operationId === "string" && t.operationId

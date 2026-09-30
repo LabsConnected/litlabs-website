@@ -21,6 +21,8 @@
 
 import { supabaseAdmin } from "@/lib/supabase";
 import { isBillingExempt, type SimulatedPlan } from "@/lib/owner";
+import { emitUsageEvent } from "@/lib/metering";
+import { calculateLlmCost } from "@/lib/llm-cost-engine";
 
 export interface AgentRunContext {
   clerkId: string;
@@ -357,7 +359,114 @@ export async function settleRun(
     return { ok: false, runId, reservationId, creditsCharged, creditsRefunded: 0 };
   }
 
+  // Canonical metering (P0): token-level provider-cost evidence for the
+  // settle. Best-effort — never breaks settlement.
+  await emitSettleMetering(runId, result, creditsCharged).catch(() => {});
+
   return { ok: true, runId, reservationId, creditsCharged, creditsRefunded };
+}
+
+// ─── Canonical metering (P0) ─────────────────────────────────────
+//
+// settleRun debits the ledger via settle_bits with only credit totals.
+// This adds the token-level evidence: one usage_events + one cost_events
+// row carrying the actual provider/model/tokens.
+//
+// P0 invariant (Larry): per logical action (here: one agent run) exactly
+// ONE billable usage_event. The agent loop already emits billable attempt
+// events per step (linked by run_id) — when one exists, the settle must
+// NOT create a duplicate: the ledger debit is linked to the existing
+// event instead (the existingUsageEventKey pattern from
+// recordChargeEvidence). Only when no billable attempt event exists
+// (metering skipped, or the run never went through the metered loop) is a
+// new event emitted — billable=true ONLY on the successful attempt;
+// failed/cancelled runs are recorded billable=false with cost kept.
+async function emitSettleMetering(
+  runId: string,
+  result: {
+    inputTokens: number;
+    outputTokens: number;
+    actualCredits: number;
+    status: "completed" | "failed" | "cancelled";
+    error?: string;
+  },
+  creditsCharged: number,
+): Promise<void> {
+  if (!supabaseAdmin) return;
+  try {
+    const settleKey = `${runId}:settle`;
+
+    // 1. Read the run row: user identity + provider/model. Per the audit,
+    //    model/provider live in the reservation-time input JSON; token
+    //    totals land in output at settle time.
+    const { data: runRow } = await supabaseAdmin
+      .from("agent_runs")
+      .select("user_id, input")
+      .eq("id", runId)
+      .maybeSingle();
+    const userId = (runRow?.user_id as string | undefined) ?? null;
+    const runInput = (runRow?.input ?? {}) as Record<string, unknown>;
+    const provider =
+      typeof runInput.provider === "string" && runInput.provider ? runInput.provider : "unknown";
+    const model =
+      typeof runInput.model === "string" && runInput.model ? runInput.model : "unknown";
+    if (!userId) return;
+
+    // 2. Already-emitted billable attempt event? Link the ledger debit to
+    //    it — never create a second billable event for the same action.
+    const { data: existing } = await supabaseAdmin
+      .from("usage_events")
+      .select("usage_event_id")
+      .eq("run_id", runId)
+      .eq("billable", true)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existing?.usage_event_id) {
+      await supabaseAdmin
+        .from("credit_ledger")
+        .update({ usage_event_id: existing.usage_event_id as string })
+        .eq("idempotency_key", settleKey);
+      return;
+    }
+
+    // 3. No billable attempt event — emit the token-level event.
+    //    ledgerIdempotencyKey stamps credit_ledger.usage_event_id on the
+    //    settle's debit row so charges join to their cost evidence.
+    const inputTokens = Math.max(0, Math.floor(result.inputTokens));
+    const outputTokens = Math.max(0, Math.floor(result.outputTokens));
+    const { providerCostMicros } = calculateLlmCost({
+      provider,
+      model,
+      promptTokens: inputTokens,
+      completionTokens: outputTokens,
+      isByok: false,
+    });
+    const idempotencyKey = `metering:agent-run:${runId}`;
+    await emitUsageEvent({
+      userId,
+      runId,
+      capability: "llm",
+      feature: "studio-chat",
+      provider,
+      model,
+      inputTokens,
+      outputTokens,
+      providerCostMicros,
+      chargedBits: Math.max(0, Math.floor(creditsCharged)),
+      status: result.status === "completed" ? "success" : "failed",
+      // billable=true only on the successful attempt.
+      billable: result.status === "completed",
+      error: result.error,
+      idempotencyKey,
+      // The logical action IS this run — one event per run keeps
+      // per-original_request_id billable counts at <= 1.
+      originalRequestId: idempotencyKey,
+      ledgerIdempotencyKey: settleKey,
+    });
+  } catch {
+    // Best-effort: metering must never break settlement.
+  }
 }
 
 /**

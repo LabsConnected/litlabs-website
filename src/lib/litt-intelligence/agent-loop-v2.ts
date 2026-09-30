@@ -15,7 +15,10 @@
 
 import "server-only";
 
+import { randomUUID } from "crypto";
 import { postRunCheckpointLabel } from "@/lib/studio/checkpoint-pairs";
+import { emitUsageEvent, getMeteringContext } from "@/lib/metering";
+import { calculateLlmCost } from "@/lib/llm-cost-engine";
 import type { WorkspaceTransport } from "./workspace-transport";
 import { ProgressEmitter, type ProgressEvent } from "./progress-events";
 import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from "./permission-engine";
@@ -121,6 +124,13 @@ export interface AgentLoopConfig {
    * must never supply it itself.
    */
   conversationId?: string;
+  /**
+   * Browser session this loop invocation is driving (when the loop IS the
+   * browser agent). Used for per-action metering idempotency keys
+   * (`metering:browser:{sessionId}:{actionIndex}`); the action index is the
+   * 1-based loop step. Unset for non-browser runs.
+   */
+  browserSessionId?: string;
   /** Parent ActionRun owning this work; injected server-side. */
   actionRunId?: string;
   /**
@@ -691,6 +701,124 @@ function attachEventPersistence(
   });
 }
 
+// ─── Canonical metering (P0) ─────────────────────────────────────
+//
+// Every LLM call the loop makes is one metered provider attempt: one
+// usage_events row + one cost_events row via the canonical emitter.
+//
+// P0 invariant (Larry): per logical user action there are N cost_events
+// (one per provider attempt — retries/failovers count) but exactly ONE
+// billable usage_event. Here one loop step = one logical action: a
+// successful step emits billable=true; a failed step emits billable=false
+// with the provider cost still recorded.
+//
+// callLLMWithTools does not expose real token usage, so input/output
+// tokens are chars/4 ESTIMATES — clearly labeled, never presented as
+// measured. Provider cost comes from calculateLlmCost (0 for free models).
+// The $1/1K-bit conversion behind retail bits is a PRICING MODEL, not fact.
+//
+// Emission is fire-and-forget: metering must never break or slow the run.
+
+/** Rough token estimate when the provider call exposes no usage. */
+const ESTIMATED_CHARS_PER_TOKEN = 4;
+
+function estimateTokensForChars(chars: number): number {
+  return Math.max(1, Math.ceil(Math.max(0, chars) / ESTIMATED_CHARS_PER_TOKEN));
+}
+
+function loopInputChars(messages: LLMMessage[]): number {
+  let chars = 0;
+  for (const m of messages) {
+    chars += m.content?.length ?? 0;
+    // Tool-call argument payloads are model input too.
+    if (m.tool_calls) {
+      for (const tc of m.tool_calls) chars += tc.function?.arguments?.length ?? 0;
+    }
+  }
+  return chars;
+}
+
+interface LoopStepMetering {
+  cfg: AgentLoopConfig;
+  /** 1-based loop step = the action index for this LLM call. */
+  stepIndex: number;
+  /** Stable id for this loop invocation (idempotency grain). */
+  meteringRunId: string;
+  provider: string;
+  model: string;
+  inputChars: number;
+  outputChars: number;
+  status: "success" | "failed";
+  error?: string;
+}
+
+/**
+ * Emit one canonical metering event for a loop step's LLM call.
+ * Identity/feature come from the ambient metering context (routes set it
+ * at the request boundary); falls back to the loop config's userId (a
+ * Clerk id in the standard auth path). No-ops when no identity resolves.
+ */
+function emitLoopStepMetering(input: LoopStepMetering): void {
+  try {
+    const ctx = getMeteringContext();
+    const userId = ctx?.userId ?? null;
+    // cfg.userId is the Clerk id in the standard auth path — pass it as
+    // clerkId so the emitter resolves it to users.id (cached lookup).
+    const clerkId = ctx?.clerkId ?? input.cfg.userId ?? null;
+    if (!userId && !clerkId) return;
+
+    const feature = ctx?.feature ?? "agent-chat";
+    // Browser-agent steps report under the "browser" capability so browser
+    // cost reconciles separately from studio-chat LLM cost.
+    const capability = feature === "browser-agent" ? "browser" : "llm";
+
+    // ESTIMATES — callLLMWithTools exposes no token usage. Labeled as
+    // estimates here and stored as plain token counts downstream.
+    const inputTokens = estimateTokensForChars(input.inputChars);
+    const outputTokens = estimateTokensForChars(input.outputChars);
+    const { providerCostMicros } = calculateLlmCost({
+      provider: input.provider,
+      model: input.model,
+      promptTokens: inputTokens,
+      completionTokens: outputTokens,
+      isByok: false,
+    });
+
+    const idempotencyKey =
+      feature === "browser-agent" && input.cfg.browserSessionId
+        ? `metering:browser:${input.cfg.browserSessionId}:${input.stepIndex}`
+        : `metering:llm:${input.meteringRunId}:${input.stepIndex}`;
+
+    // Fire-and-forget: the emitter is best-effort and never throws, but the
+    // loop must not even wait on it.
+    void emitUsageEvent({
+      userId: userId ?? undefined,
+      clerkId: clerkId ?? undefined,
+      runId: ctx?.runId ?? undefined,
+      projectId: ctx?.projectId ?? undefined,
+      feature,
+      capability,
+      provider: input.provider,
+      model: input.model,
+      inputTokens,
+      outputTokens,
+      providerCostMicros,
+      status: input.status,
+      // P0 invariant: exactly one billable event per logical action —
+      // failed attempts are recorded billable=false, cost still captured.
+      billable: input.status === "success",
+      error: input.error,
+      idempotencyKey,
+      // The logical action IS this LLM call: failover retries inside
+      // callLLMWithTools are invisible here, so one event per step keeps
+      // per-original_request_id billable counts at <= 1.
+      originalRequestId: idempotencyKey,
+    }).catch(() => {});
+  } catch {
+    // Metering must never break the run — swallow everything.
+  }
+}
+
 export async function runAgentLoopV2(
   userMessage: string,
   transport: WorkspaceTransport,
@@ -714,6 +842,14 @@ async function runAgentLoopV2Inner(
 ): Promise<AgentLoopResult> {
   const cfg = { ...DEFAULT_LOOP_CONFIG, ...config };
   const startTime = Date.now();
+
+  // Canonical metering: stable per-invocation id so per-step events are
+  // idempotent across replays. Prefers the ambient metering context's run
+  // id (set by the route to the agent-billing run) so settleRun can link
+  // the ledger debit to the already-emitted billable attempt events
+  // instead of creating a duplicate billable event (P0 invariant).
+  const meteringRunId =
+    getMeteringContext()?.runId ?? cfg.qualityLoop?.runId ?? randomUUID();
 
   // Quality loop (opt-in): create the evidence session and teach the agent
   // the stage contract. All hooks below degrade gracefully — the gate
@@ -871,8 +1007,34 @@ async function runAgentLoopV2Inner(
         canonicalId: routedRecord?.canonicalId,
         configSource: routedRecord ? getModelConfigSource(routedRecord.canonicalId) : undefined,
       });
+      // Canonical metering (P0): one usage+cost event per step's LLM call.
+      // provider/model are from the ACTUAL call; token counts are chars/4
+      // estimates (callLLMWithTools exposes no usage) — see helper.
+      emitLoopStepMetering({
+        cfg,
+        stepIndex: stepsUsed,
+        meteringRunId,
+        provider: llmResponse.provider ?? "unknown",
+        model: llmResponse.model,
+        inputChars: loopInputChars(llmMessages),
+        outputChars: llmResponse.text?.length ?? 0,
+        status: "success",
+      });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
+      // Canonical metering (P0): failed attempts are recorded billable=false
+      // with the cost still captured — never a second billable event.
+      emitLoopStepMetering({
+        cfg,
+        stepIndex: stepsUsed,
+        meteringRunId,
+        provider: "unknown",
+        model: requestedModel ?? "unknown",
+        inputChars: loopInputChars(llmMessages),
+        outputChars: 0,
+        status: "failed",
+        error: errMsg.slice(0, 500),
+      });
       // Emit model failure event with sanitized error (no secrets)
       localProgress.emit({
         type: "model_failed",
@@ -1976,6 +2138,11 @@ async function resumeAgentLoopV2Inner(
   const cfg = { ...DEFAULT_LOOP_CONFIG, ...resume.config };
   const startTime = Date.now();
 
+  // Canonical metering (P0): same per-step emission as the fresh loop —
+  // stable per-resume id so resumed steps stay idempotent.
+  const meteringRunId =
+    getMeteringContext()?.runId ?? cfg.qualityLoop?.runId ?? randomUUID();
+
   // Quality loop (opt-in): restore the server-persisted evidence session from
   // before the approval pause. The paused messages are still re-harvested for
   // idempotency, but conversation text is not the source of machine evidence.
@@ -2287,8 +2454,33 @@ async function resumeAgentLoopV2Inner(
       if (llmResponse.responseShape && llmResponse.provider) {
         localProgress.emit({ type: "model_response", provider: llmResponse.provider, model: llmResponse.model, ...llmResponse.responseShape, finishReason: llmResponse.finishReason });
       }
+      // Canonical metering (P0): one usage+cost event per resumed step's
+      // LLM call. provider/model are from the ACTUAL call; token counts
+      // are chars/4 estimates — see emitLoopStepMetering.
+      emitLoopStepMetering({
+        cfg,
+        stepIndex: stepsUsed,
+        meteringRunId,
+        provider: llmResponse.provider ?? "unknown",
+        model: llmResponse.model,
+        inputChars: loopInputChars(llmMessages),
+        outputChars: llmResponse.text?.length ?? 0,
+        status: "success",
+      });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
+      // Canonical metering (P0): failed attempts billable=false, cost kept.
+      emitLoopStepMetering({
+        cfg,
+        stepIndex: stepsUsed,
+        meteringRunId,
+        provider: "unknown",
+        model: cfg.model ?? "unknown",
+        inputChars: loopInputChars(llmMessages),
+        outputChars: 0,
+        status: "failed",
+        error: errMsg.slice(0, 500),
+      });
       localProgress.emit({
         type: "model_failed",
         model: cfg.model ?? "default",

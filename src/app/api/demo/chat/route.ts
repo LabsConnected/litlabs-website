@@ -259,6 +259,10 @@ export async function POST(req: NextRequest) {
         maxTokens: cfg.maxTokens,
         temperature: 0.7,
         timeoutMs: 30_000,
+        // Canonical metering: llm.ts emits one usage_event per provider
+        // attempt keyed to this feature. The demo is anonymous, so the
+        // emitter skips the row (no resolvable user) — this is deliberate.
+        metering: { feature: "demo-chat" },
         // NOTE: allowLittPaidProviders is deliberately NOT set — the pinned
         // provider is free-tier, and default-deny keeps it that way even if
         // config resolution ever changed.

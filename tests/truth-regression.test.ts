@@ -18,14 +18,14 @@ describe("Starter credit grant is one-time", () => {
     // monthlyCredits is the one-time grant amount; the grant itself is
     // gated by a user-scoped idempotency key in wallet-ledger.ts so it
     // never re-fires on subsequent balance lookups.
-    expect(PLANS.starter.monthlyCredits).toBe(500);
+    expect(PLANS.starter.monthlyCredits).toBe(1500);
   });
 
   it("starter grant idempotency key is user-scoped (no billing period)", async () => {
-    // The wallet-ledger uses `starter:${userId}` — no period suffix.
+    // The wallet-ledger uses `starter:v1:${userId}` — no period suffix.
     // Subscription grants use a period-scoped key so they re-fire each
     // cycle. The starter key must NOT include a period, otherwise a
-    // monthly reset would re-grant 500 credits.
+    // monthly reset would re-grant 1,500 credits.
     //
     // We verify the key shape by reading the source invariant: the
     // starter grant is only attempted when there is NO active

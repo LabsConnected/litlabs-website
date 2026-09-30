@@ -12,28 +12,18 @@ import StudioBrowserJobsPanel from "@/app/(app)/studio/components/StudioBrowserJ
 // ─── Mock data ─────────────────────────────────────────────────
 
 const runningJob = {
-  jobId: "job-running",
-  jobType: "ghl.workflow.inspect",
+  jobId: "action-run-running",
+  jobType: "studio.browser",
   goal: "Inspect GHL workflow",
   riskLevel: "low",
   requestedBy: "studio",
   status: "running",
-  params: { workflowName: "Test Workflow" },
+  params: { projectId: "project-a", conversationId: "conversation-a", actionRunId: "action-run-running", browserSessionId: "session-a" },
   result: null,
   error: null,
-  progress: {
-    step: 2,
-    totalSteps: 5,
-    steps: [
-      { label: "Start session", status: "completed" },
-      { label: "Navigate", status: "completed" },
-      { label: "Check auth", status: "running" },
-      { label: "Find workflow", status: "pending" },
-      { label: "Extract nodes", status: "pending" },
-    ],
-  },
-  browserSessionId: "sess-1",
-  liveViewUrl: "https://browserbase.com/view/abc123",
+  progress: { step: 0, totalSteps: 0, steps: [] },
+  browserSessionId: "session-a",
+  liveViewUrl: null,
   approvedBy: null,
   approvedAt: null,
   attempts: 1,
@@ -43,13 +33,13 @@ const runningJob = {
 };
 
 const completedJob = {
-  jobId: "job-done",
-  jobType: "ghl.workflow.list",
+  jobId: "action-run-done",
+  jobType: "studio.browser",
   goal: null,
   riskLevel: "low",
-  requestedBy: "vapi",
+  requestedBy: "studio",
   status: "completed",
-  params: {},
+  params: { projectId: "project-a", conversationId: "conversation-a", actionRunId: "action-run-done", browserSessionId: null },
   result: { workflows: [] },
   error: null,
   progress: { step: 3, totalSteps: 3, steps: [] },
@@ -67,15 +57,17 @@ function makeFetchMock(jobs: unknown[] = [runningJob, completedJob]) {
   return vi.fn(async (url: string, init?: RequestInit) => {
     const urlStr = String(url);
 
-    // Cancel (DELETE) or Approve (POST) on per-job endpoint
-    if (init?.method === "DELETE") {
+    // Canonical Studio cancellation is an ActionRun operation.
+    if (urlStr.includes("/api/action-runs/") && urlStr.endsWith("/cancel")) {
       return {
         ok: true,
         status: 200,
-        json: async () => ({ job: { ...(jobs[0] as Record<string, unknown>), status: "cancelled" } }),
+        json: async () => ({ ok: true }),
       } as Response;
     }
-    if (init?.method === "POST") {
+    // Canonical approvals stay on the conversation approval surface; this
+    // legacy endpoint is intentionally not used for Studio ActionRuns.
+    if (init?.method === "POST" && urlStr.includes("/api/browser/jobs/")) {
       return {
         ok: true,
         status: 200,
@@ -83,7 +75,21 @@ function makeFetchMock(jobs: unknown[] = [runningJob, completedJob]) {
       } as Response;
     }
 
-    // Per-job endpoint: /api/browser/jobs/<id>
+    // Canonical list/detail endpoint.
+    if (urlStr.includes("/api/studio/browser")) {
+      const runId = new URL(`http://localhost${urlStr}`).searchParams.get("runId");
+      const job = runId
+        ? (jobs as Record<string, unknown>[]).find((item) => item.jobId === runId)
+        : undefined;
+      return { ok: true, status: 200, json: async () => (runId ? { job } : { jobs }) } as Response;
+    }
+
+    // Canonical ActionRun activity endpoint.
+    if (urlStr.match(/\/api\/action-runs\/([^/?]+)$/)) {
+      return { ok: true, status: 200, json: async () => ({ run: { status: "working" }, events: [] }) } as Response;
+    }
+
+    // Legacy per-job endpoint remains available for legacy Vapi/cron coverage.
     const match = urlStr.match(/\/api\/browser\/jobs\/([^/?]+)$/);
     if (match) {
       const job = (jobs as Record<string, unknown>[]).find((j) => j.jobId === match[1]);
@@ -107,13 +113,17 @@ function makeFetchMock(jobs: unknown[] = [runningJob, completedJob]) {
       } as Response;
     }
 
-    // List endpoint
-    if (urlStr.includes("/api/browser/jobs")) {
-      return { ok: true, status: 200, json: async () => ({ jobs }) } as Response;
-    }
-
     return { ok: false, status: 404, json: async () => ({ error: "Not found" }) } as Response;
   });
+}
+
+function renderPanel(overrides: { projectId?: string | null; conversationId?: string | null } = {}) {
+  return render(
+    <StudioBrowserJobsPanel
+      projectId={overrides.projectId === undefined ? "project-a" : overrides.projectId}
+      conversationId={overrides.conversationId === undefined ? "conversation-a" : overrides.conversationId}
+    />,
+  );
 }
 
 // ─── Tests ─────────────────────────────────────────────────────
@@ -129,19 +139,19 @@ describe("StudioBrowserJobsPanel", () => {
   });
 
   it("renders header and loading state initially", () => {
-    render(<StudioBrowserJobsPanel />);
+    renderPanel();
     expect(screen.getByText("Browser Agent")).toBeDefined();
   });
 
   it("renders job list after fetch", async () => {
-    render(<StudioBrowserJobsPanel />);
+    renderPanel();
     await waitFor(() => {
       expect(screen.getByText("Inspect GHL workflow")).toBeDefined();
     });
   });
 
   it("shows active count badge when jobs are running", async () => {
-    render(<StudioBrowserJobsPanel />);
+    renderPanel();
     await waitFor(() => {
       expect(screen.getByText("1 active")).toBeDefined();
     });
@@ -150,28 +160,25 @@ describe("StudioBrowserJobsPanel", () => {
   it("shows empty state when no jobs exist", async () => {
     vi.unstubAllGlobals();
     vi.stubGlobal("fetch", makeFetchMock([]));
-    render(<StudioBrowserJobsPanel />);
+    renderPanel();
     await waitFor(() => {
       expect(screen.getByText("No browser jobs yet")).toBeDefined();
     });
   });
 
-  it("shows job detail with steps when a job is clicked", async () => {
-    render(<StudioBrowserJobsPanel />);
+  it("shows the canonical empty step state before ActionRun events arrive", async () => {
+    renderPanel();
     await waitFor(() => {
       expect(screen.getByText("Inspect GHL workflow")).toBeDefined();
     });
 
     fireEvent.click(screen.getByText("Inspect GHL workflow"));
 
-    await waitFor(() => {
-      expect(screen.getByText("Start session")).toBeDefined();
-      expect(screen.getByText("Check auth")).toBeDefined();
-    });
+    await waitFor(() => expect(screen.getByText("No steps yet — they appear here as the job starts working.")).toBeDefined());
   });
 
   it("renders live view iframe when the owner-checked live-view probe is live", async () => {
-    render(<StudioBrowserJobsPanel />);
+    renderPanel();
     await waitFor(() => {
       expect(screen.getByText("Inspect GHL workflow")).toBeDefined();
     });
@@ -212,7 +219,7 @@ describe("StudioBrowserJobsPanel", () => {
         return (base as (u: string, i?: RequestInit) => Promise<Response>)(url, init);
       }),
     );
-    render(<StudioBrowserJobsPanel />);
+    renderPanel();
     await waitFor(() => {
       expect(screen.getByTestId("live-view-fallback")).toBeDefined();
     });
@@ -228,40 +235,63 @@ describe("StudioBrowserJobsPanel", () => {
       status: 401,
       json: async () => ({ error: "Unauthorized" }),
     }) as Response));
-    render(<StudioBrowserJobsPanel />);
+    renderPanel();
     await waitFor(() => {
       expect(screen.getByText("Unauthorized")).toBeDefined();
     });
   });
 
-  it("shows approve button for awaiting_approval jobs", async () => {
+  it("does not offer legacy Approve for canonical ActionRun approval", async () => {
     const approvalJob = {
       ...runningJob,
-      jobId: "job-approval",
+      jobId: "action-run-approval",
       status: "awaiting_approval",
-      riskLevel: "high",
-      progress: { step: 1, totalSteps: 3, steps: [{ label: "Start", status: "completed" }] },
+      params: { ...runningJob.params, actionRunId: "action-run-approval" },
     };
     vi.unstubAllGlobals();
     vi.stubGlobal("fetch", makeFetchMock([approvalJob]));
-    render(<StudioBrowserJobsPanel />);
+    renderPanel();
     await waitFor(() => {
-      expect(screen.getByText("Approve")).toBeDefined();
+      expect(screen.queryByText("Approve")).toBeNull();
     });
+    expect(screen.getByText(/Waiting for approval/i)).toBeDefined();
   });
 
   it("shows cancel button for queued jobs", async () => {
     const queuedJob = {
       ...runningJob,
-      jobId: "job-queued",
+      jobId: "action-run-queued",
       status: "queued",
-      progress: { step: 0, totalSteps: 5, steps: [] },
+      params: { ...runningJob.params, actionRunId: "action-run-queued" },
     };
     vi.unstubAllGlobals();
     vi.stubGlobal("fetch", makeFetchMock([queuedJob]));
-    render(<StudioBrowserJobsPanel />);
+    renderPanel();
     await waitFor(() => {
       expect(screen.getByText("Cancel")).toBeDefined();
     });
+  });
+
+  it("uses the canonical ActionRun cancellation endpoint", async () => {
+    const queuedJob = { ...runningJob, status: "queued", jobId: "action-run-queued-cancel" };
+    const fetchMock = makeFetchMock([queuedJob]);
+    vi.unstubAllGlobals();
+    vi.stubGlobal("fetch", fetchMock);
+    renderPanel();
+    await waitFor(() => expect(screen.getByText("Cancel")).toBeDefined());
+    fireEvent.click(screen.getByText("Cancel"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/action-runs/action-run-queued-cancel/cancel",
+      expect.objectContaining({ method: "POST" }),
+    ));
+    expect(fetchMock.mock.calls.some(([url, init]) => String(url).includes("/api/browser/jobs/") && init?.method === "POST")).toBe(false);
+  });
+
+  it("shows a fresh project's honest empty state", async () => {
+    vi.unstubAllGlobals();
+    vi.stubGlobal("fetch", makeFetchMock([]));
+    renderPanel({ projectId: "fresh-project", conversationId: "fresh-conversation" });
+    await waitFor(() => expect(screen.getByText("No browser jobs yet")).toBeDefined());
+    expect(screen.queryByText("Inspect GHL workflow")).toBeNull();
   });
 });
