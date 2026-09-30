@@ -18,7 +18,8 @@ import { useCanonicalConversation } from "../hooks/useCanonicalConversation";
 import { useConversationStore } from "../stores/useConversationStore";
 import {
   mapStudioTaskToWorktab,
-  nextUntitledTitle,
+  displayWorktabTitle,
+  isPlaceholderTaskTitle,
   resolveAdoptedTaskTitle,
   useWorktabSelections,
   type Worktab,
@@ -448,8 +449,17 @@ function CommandStudioContent() {
   const [stageSurface, setStageSurface] = useState<StudioStageSurface>(() =>
     resolveInitialStation(searchParams.get("tool"), null),
   );
-  const [inspectorOpen, setInspectorOpen] = useState(true);
+  // First-run Studio should present one clear action. Keep the inspector
+  // available, but do not make it compete with Chat and Preview before the
+  // project has useful state to inspect.
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  // A real preview/builder selection is useful inspector state. Open it on
+  // demand while keeping the clean first-run shell calm.
+  useEffect(() => {
+    if (previewSelection) setInspectorOpen(true);
+  }, [previewSelection]);
   const [littExpanded, setLittExpanded] = useState(false);
+
   // Surfaces stay mounted once visited — hidden, not unmounted — so
   // preview iframes, PTY sessions, and canvas state survive switching.
   const [mountedSurfaces, setMountedSurfaces] = useState<Set<StudioStageSurface>>(() => new Set(["preview"]));
@@ -679,6 +689,18 @@ function CommandStudioContent() {
   // render only while the mobile chat sheet is open (see mounts below).
   const [mobileBuildOpen, setMobileBuildOpen] = useState(false);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+
+  // Workspace-first focus: selecting a real work surface collapses the large
+  // welcome/chat panel to the compact rail. Chat stays mounted and one click
+  // away through the rail, so this only changes emphasis, not availability.
+  const previousStageSurfaceRef = useRef<StudioStageSurface>(stageSurface);
+  useEffect(() => {
+    if (previousStageSurfaceRef.current === stageSurface) return;
+    previousStageSurfaceRef.current = stageSurface;
+    setLittCollapsed(true);
+    setLittExpanded(false);
+    setMobileLittOpen(false);
+  }, [stageSurface]);
   // Mobile density redesign: opening a tool from the Tools sheet closes both
   // sheets so the chosen tool becomes the one dominant surface (this also
   // fixes the old behavior where tool buttons switched the workspace
@@ -1179,8 +1201,8 @@ function CommandStudioContent() {
     taskSeededRef.current = conversationId;
     const selected = conversation.conversations.find((item) => item.id === conversationId);
     void studioTasks.createTask({
-      // Untitled conversations mint a collision-free "Untitled N" instead
-      // of every adoption becoming another "Current work" tab.
+      // Untitled conversations stay explicitly first-run until the first
+      // prompt gives the task a meaningful name.
       title: resolveAdoptedTaskTitle(
         selected?.title,
         studioTasks.tasks.map((task) => task.title),
@@ -1198,7 +1220,7 @@ function CommandStudioContent() {
   }, [conversation, studioTasks]);
 
   const createStudioTask = useCallback(async () => {
-    const task = await studioTasks.createTask({ title: "New task", taskType: "general" });
+    const task = await studioTasks.createTask({ title: "New conversation", taskType: "general" });
     if (!task?.conversationId) return;
     conversation.selectConversation(task.conversationId);
     await conversation.loadMessages(task.conversationId);
@@ -1969,18 +1991,32 @@ function CommandStudioContent() {
 
   const serverTasks = studioTasks.tasks;
   const serverActiveTaskId = studioTasks.activeTaskId;
+  const projectDisplayName = capabilities.projectName?.trim() || "New conversation";
+
+  // Keep stale placeholder rows recoverable on the server, but do not make
+  // a new user stare at inherited "Untitled N" / "Current work" tabs. The
+  // active row is retained so its conversation remains bound; the existing
+  // send path renames it as soon as the user provides a real request.
+  const visibleServerTasks = useMemo(() => {
+    const meaningful = serverTasks.filter((task) => !isPlaceholderTaskTitle(task.title));
+    const active = serverTasks.find((task) => task.id === serverActiveTaskId);
+    if (meaningful.length === 0) return active ? [active] : serverTasks.slice(0, 1);
+    if (active && !meaningful.some((task) => task.id === active.id)) return [active, ...meaningful];
+    return meaningful;
+  }, [serverActiveTaskId, serverTasks]);
 
   const worktabTabs = useMemo<Worktab[]>(
     () =>
-      serverTasks.map((t) =>
+      visibleServerTasks.map((t) =>
         mapStudioTaskToWorktab(t, {
           // Server truth first; a task that never recorded a surface
           // inherits the shell's current one (persisted on next switch).
           surface: t.lastOpenedSurface || currentSurface,
           selection: worktabSelections[t.id] ?? null,
+          fallbackTitle: projectDisplayName,
         }),
       ),
-    [serverTasks, worktabSelections, currentSurface],
+    [visibleServerTasks, worktabSelections, currentSurface, projectDisplayName],
   );
   const activeWorktabId = serverActiveTaskId;
   const activeWorktab = worktabTabs.find((t) => t.id === activeWorktabId) ?? null;
@@ -2054,7 +2090,7 @@ function CommandStudioContent() {
 
   const handleNewWorktab = useCallback(async () => {
     const task = await studioTasks.createTask({
-      title: nextUntitledTitle(serverTasks.map((t) => t.title)),
+      title: "New conversation",
       taskType: "general",
     });
     if (!task) return;
@@ -2063,12 +2099,12 @@ function CommandStudioContent() {
     // provisions one on first send); bind clears the selection and
     // restores the current surface.
     bindWorktab(
-      mapStudioTaskToWorktab(task, { surface: currentSurface, selection: null }),
+      mapStudioTaskToWorktab(task, { surface: currentSurface, selection: null, fallbackTitle: projectDisplayName }),
     );
     // Shell: a fresh task opens the LiTT command layer — it's where the
     // task gets its first prompt (which also names the task).
     if (studioShellActive) setLittExpanded(true);
-  }, [studioTasks, serverTasks, bindWorktab, currentSurface, studioShellActive]);
+  }, [studioTasks, bindWorktab, currentSurface, projectDisplayName, studioShellActive]);
 
   const handleCloseWorktab = useCallback(async (id: string) => {
     const idx = serverTasks.findIndex((t) => t.id === id);
@@ -2083,17 +2119,16 @@ function CommandStudioContent() {
     if (remaining.length === 0) {
       // Never leave zero tabs — seed a fresh server task. The closed
       // task's conversation stays on the server (close, never delete).
-      // Use the shared collision-free numbering against the full server
-      // list (not a hardcoded "Untitled 1") — the just-closed task and
-      // any other untitled tasks still exist server-side.
+      // Use an explicit first-run label; implementation-generated numbered
+      // placeholders must never become visible user identity.
       const task = await studioTasks.createTask({
-        title: nextUntitledTitle(serverTasks.map((t) => t.title)),
+        title: "New conversation",
         taskType: "general",
       });
       if (task) {
         useExecutionStore.getState().setActiveTaskId(task.id);
         bindWorktab(
-          mapStudioTaskToWorktab(task, { surface: closedSurface, selection: null }),
+          mapStudioTaskToWorktab(task, { surface: closedSurface, selection: null, fallbackTitle: projectDisplayName }),
         );
       }
       return;
@@ -2103,11 +2138,12 @@ function CommandStudioContent() {
     const view = mapStudioTaskToWorktab(next, {
       surface: next.lastOpenedSurface || currentSurface,
       selection: worktabSelections[next.id] ?? null,
+      fallbackTitle: projectDisplayName,
     });
     useExecutionStore.getState().setActiveTaskId(next.id);
     void studioTasks.activateTask(next.id, view.surface);
     bindWorktab(view);
-  }, [serverTasks, serverActiveTaskId, currentSurface, worktabSelections, bindWorktab, studioTasks]);
+  }, [serverTasks, serverActiveTaskId, currentSurface, worktabSelections, bindWorktab, projectDisplayName, studioTasks]);
 
   const handleReopenWorktab = useCallback(async (id: string) => {
     const task = await studioTasks.reopenTask(id);
@@ -2115,10 +2151,11 @@ function CommandStudioContent() {
     const view = mapStudioTaskToWorktab(task, {
       surface: task.lastOpenedSurface || currentSurface,
       selection: worktabSelections[task.id] ?? null,
+      fallbackTitle: projectDisplayName,
     });
     useExecutionStore.getState().setActiveTaskId(task.id);
     bindWorktab(view);
-  }, [studioTasks, currentSurface, worktabSelections, bindWorktab]);
+  }, [studioTasks, currentSurface, worktabSelections, bindWorktab, projectDisplayName]);
 
   // Clearing the selection (composer chip × or legacy strip) clears both
   // the active tab's pinned selection and the preview-selection mirror.
@@ -2695,7 +2732,7 @@ function CommandStudioContent() {
           />
         );
       case "browser":
-        return <StudioBrowserJobsPanel />;
+        return <StudioBrowserJobsPanel projectId={projectId} conversationId={conversation.selectedConversationId} />;
       case "code":
         return (
           <CodeWorkspace
@@ -2908,7 +2945,7 @@ function CommandStudioContent() {
                 onNew={() => { void handleNewWorktab(); }}
                 closedTabs={studioTasks.closedTasks.map((t) => ({
                   id: t.id,
-                  title: t.title?.trim() || "Untitled",
+                  title: displayWorktabTitle(t.title, projectDisplayName),
                 }))}
                 onReopen={(id) => { void handleReopenWorktab(id); }}
               />
@@ -3028,6 +3065,7 @@ function CommandStudioContent() {
                       surface: studioMode,
                       messages: conversation.messages,
                       busy: conversation.busy,
+                      conversationId: conversation.selectedConversationId,
                       workspaceRevision,
                       healthRunTrigger,
                       onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
@@ -3132,7 +3170,7 @@ function CommandStudioContent() {
               onNew={() => { void handleNewWorktab(); }}
               closedTabs={studioTasks.closedTasks.map((t) => ({
                 id: t.id,
-                title: t.title?.trim() || "Untitled",
+                title: displayWorktabTitle(t.title, projectDisplayName),
               }))}
               onReopen={(id) => { void handleReopenWorktab(id); }}
             />
@@ -3367,6 +3405,7 @@ function CommandStudioContent() {
                     surface: studioMode,
                     messages: conversation.messages,
                     busy: conversation.busy,
+                    conversationId: conversation.selectedConversationId,
                     workspaceRevision,
                     healthRunTrigger,
                     onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
@@ -3436,6 +3475,7 @@ function CommandStudioContent() {
                     surface: studioMode,
                     messages: conversation.messages,
                     busy: conversation.busy,
+                    conversationId: conversation.selectedConversationId,
                     workspaceRevision,
                     healthRunTrigger,
                     onFilesSaved: () => setWorkspaceRevision((value) => value + 1),

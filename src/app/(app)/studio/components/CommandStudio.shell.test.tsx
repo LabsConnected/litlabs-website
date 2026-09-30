@@ -447,12 +447,12 @@ describe("StudioShell — desktop operating shell", () => {
     });
   });
 
-  it("mounts rail + stage + inspector + left-docked LiTT panel by default", async () => {
+  it("mounts rail + stage + collapsed inspector + left-docked LiTT panel by default", async () => {
     await renderStudioShell();
     expect(screen.getByTestId("studio-shell")).toBeTruthy();
     expect(screen.getByTestId("studio-workspace-rail")).toBeTruthy();
     expect(screen.getByTestId("studio-stage")).toBeTruthy();
-    expect(screen.getByTestId("studio-context-inspector")).toBeTruthy();
+    expect(screen.queryByTestId("studio-context-inspector")).toBeNull();
     // Default chatDock is "left": the chat lives in the left panel and the
     // bottom command layer is not mounted.
     expect(screen.getByTestId("litt-panel")).toBeTruthy();
@@ -493,6 +493,7 @@ describe("StudioShell — desktop operating shell", () => {
     await waitFor(() => {
       expect(screen.getByTestId("stage-surface-design")).toHaveAttribute("data-active", "true");
       expect(screen.getByTestId("visual-canvas-builder")).toBeTruthy();
+      expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
     });
     // Preview stays mounted (hidden) — iframe/scroll state survives.
     const previewSurface = screen.getByTestId("stage-surface-preview");

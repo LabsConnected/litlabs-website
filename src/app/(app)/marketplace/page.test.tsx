@@ -166,7 +166,7 @@ describe("marketplace discovery page", () => {
     expect(await screen.findByRole("heading", { name: "Marketplace" })).toBeInTheDocument();
     // Beta is stated exactly once, at page level — never on cards.
     expect(screen.getAllByText("Beta")).toHaveLength(1);
-    expect(screen.getByText(/give LiTT new abilities/i)).toBeInTheDocument();
+    expect(screen.getByText(/browse verified capabilities for LiTT/i)).toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: "Search capabilities" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "All" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "development" })).toBeInTheDocument();

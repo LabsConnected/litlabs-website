@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { nextUntitledTitle, resolveAdoptedTaskTitle } from "./useServerWorktabs";
+import { displayWorktabTitle, isPlaceholderTaskTitle, nextUntitledTitle, resolveAdoptedTaskTitle } from "./useServerWorktabs";
+
+describe("placeholder worktab identity", () => {
+  it("does not expose implementation-generated tab names", () => {
+    expect(isPlaceholderTaskTitle("Untitled 2")).toBe(true);
+    expect(isPlaceholderTaskTitle("Current work")).toBe(true);
+    expect(isPlaceholderTaskTitle("New task")).toBe(true);
+    expect(isPlaceholderTaskTitle("Launch experience")).toBe(false);
+    expect(displayWorktabTitle("Untitled 2", "Acceptance project")).toBe("Acceptance project");
+    expect(displayWorktabTitle("Launch experience", "Acceptance project")).toBe("Launch experience");
+  });
+});
 
 describe("nextUntitledTitle", () => {
   it("starts at Untitled 1 for an empty list", () => {
@@ -30,10 +41,10 @@ describe("resolveAdoptedTaskTitle", () => {
     expect(resolveAdoptedTaskTitle("Dog grooming site", [])).toBe("Dog grooming site");
   });
 
-  it("mints Untitled 1 when the conversation has no title", () => {
-    expect(resolveAdoptedTaskTitle(null, [])).toBe("Untitled 1");
-    expect(resolveAdoptedTaskTitle(undefined, [])).toBe("Untitled 1");
-    expect(resolveAdoptedTaskTitle("   ", [])).toBe("Untitled 1");
+  it("uses a truthful first-run label when the conversation has no title", () => {
+    expect(resolveAdoptedTaskTitle(null, [])).toBe("New conversation");
+    expect(resolveAdoptedTaskTitle(undefined, [])).toBe("New conversation");
+    expect(resolveAdoptedTaskTitle("   ", [])).toBe("New conversation");
   });
 
   it("yields N distinct titles when adopting N untitled conversations", () => {
@@ -46,11 +57,10 @@ describe("resolveAdoptedTaskTitle", () => {
       adopted.push(title);
       titles.push(title);
     }
-    expect(adopted).toEqual(["Untitled 1", "Untitled 2", "Untitled 3"]);
-    expect(new Set(adopted).size).toBe(adopted.length);
+    expect(adopted).toEqual(["New conversation", "New conversation", "New conversation"]);
   });
 
-  it("does not collide with previously adopted untitled tasks", () => {
-    expect(resolveAdoptedTaskTitle("", ["Untitled 1", "Untitled 2"])).toBe("Untitled 3");
+  it("does not manufacture numbered Untitled tabs for an untitled conversation", () => {
+    expect(resolveAdoptedTaskTitle("", ["Untitled 1", "Untitled 2"])).toBe("New conversation");
   });
 });

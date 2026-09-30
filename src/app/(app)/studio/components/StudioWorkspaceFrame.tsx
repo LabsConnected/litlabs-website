@@ -269,6 +269,7 @@ export interface StudioInspectorData {
   surface: string;
   messages: ChatMessage[];
   busy: boolean;
+  conversationId?: string | null;
   workspaceRevision: number;
   /** Incremented to trigger a run-all health check from outside the panel */
   healthRunTrigger?: number;
@@ -349,7 +350,7 @@ function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspec
   }
 
   if (tab === "browser") {
-    return <StudioBrowserJobsPanel />;
+    return <StudioBrowserJobsPanel projectId={capabilities.projectId} conversationId={data.conversationId ?? null} />;
   }
 
   return (

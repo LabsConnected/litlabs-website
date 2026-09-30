@@ -90,6 +90,7 @@ export type ImageGenerationInput = {
   imageSize?: "1K" | "2K" | "4K";
   referenceUrl?: string;
   generationMode?: ImageGenerationMode;
+  operation?: "generate" | "edit";
 };
 
 type MediaResult = {
@@ -694,41 +695,85 @@ async function handleTogetherImage(
   throw new Error("Together.ai returned no image data");
 }
 
-async function handleOpenAIImage(prompt: string): Promise<MediaResult> {
-  if (!OPENAI_API_KEY)
-    throw new Error("OpenAI key missing — set OPENAI_API_KEY");
+async function openAIReferenceBlob(referenceUrl: string): Promise<Blob> {
+  if (referenceUrl.startsWith("data:image/")) {
+    const match = referenceUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
+    if (!match) throw new Error("OpenAI reference image is not valid base64");
+    return new Blob([Buffer.from(match[2], "base64")], { type: match[1] });
+  }
+  const response = await fetch(referenceUrl, { signal: AbortSignal.timeout(30_000) });
+  if (!response.ok) throw new Error(`Reference image fetch failed (${response.status})`);
+  return new Blob([await response.arrayBuffer()], { type: response.headers.get("content-type") || "image/png" });
+}
 
-  const res = await fetch("https://api.openai.com/v1/images/generations", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "dall-e-3",
-      prompt: prompt.trim(),
-      size: "1024x1024",
-      quality: "standard",
-      n: 1,
-    }),
-  });
+export function selectOpenAIImageModel(input: Pick<ImageGenerationInput, "referenceUrl" | "operation">): string {
+  return input.referenceUrl || input.operation === "edit"
+    ? "gpt-image-2.5-sunburst"
+    : "gpt-image-2.5-flare";
+}
+
+export function openAIImageResultFromPayload(
+  payload: { data?: Array<{ b64_json?: string; url?: string }> },
+  prompt: string,
+): MediaResult {
+  const encoded = payload.data?.[0]?.b64_json;
+  const url = payload.data?.[0]?.url;
+  if (!encoded && !url) throw new Error("OpenAI returned no image data");
+
+  return {
+    downloadUrl: encoded ? `data:image/png;base64,${encoded}` : url!,
+    id: `openai_${Date.now()}`,
+    status: "complete",
+    title: prompt.slice(0, 60),
+    format: "image",
+  };
+}
+
+async function handleOpenAIImage(args: {
+  prompt: string;
+  width: number;
+  height: number;
+  aspectRatio?: string;
+  referenceUrl?: string;
+  operation?: "generate" | "edit";
+}): Promise<MediaResult> {
+  if (!OPENAI_API_KEY) throw new Error("OpenAI key missing — set OPENAI_API_KEY");
+
+  const model = selectOpenAIImageModel(args);
+  const size = args.aspectRatio === "16:9" || args.aspectRatio === "3:2"
+    ? "1536x1024"
+    : args.aspectRatio === "9:16" || args.aspectRatio === "4:5"
+      ? "1024x1536"
+      : "1024x1024";
+
+  let res: Response;
+  if (args.referenceUrl) {
+    const form = new FormData();
+    form.append("model", model);
+    form.append("prompt", args.prompt.trim());
+    form.append("size", size);
+    form.append("quality", "high");
+    form.append("image", await openAIReferenceBlob(args.referenceUrl), "reference.png");
+    res = await fetch("https://api.openai.com/v1/images/edits", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
+      body: form,
+    });
+  } else {
+    res = await fetch("https://api.openai.com/v1/images/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${OPENAI_API_KEY}` },
+      body: JSON.stringify({ model, prompt: args.prompt.trim(), size, quality: "high", n: 1 }),
+    });
+  }
 
   if (!res.ok) {
     const err = await res.text().catch(() => "");
     throw new Error(`OpenAI error: ${err.slice(0, 200) || res.statusText}`);
   }
 
-  const data = await res.json();
-  const url = data.data?.[0]?.url;
-  if (!url) throw new Error("OpenAI returned no image URL");
-
-  return {
-    downloadUrl: url,
-    id: `openai_${Date.now()}`,
-    status: "complete",
-    title: prompt.slice(0, 60),
-    format: "image",
-  };
+  const data = await res.json() as { data?: Array<{ b64_json?: string; url?: string }> };
+  return openAIImageResultFromPayload(data, args.prompt);
 }
 
 async function handleRecraftImage(prompt: string): Promise<MediaResult> {
@@ -774,21 +819,19 @@ async function handleRecraftImage(prompt: string): Promise<MediaResult> {
 
 
 /**
- * Auto-free provider order: Pollinations → Cloudflare → Alibaba
- * Pollinations is always available (no key needed) so it goes first.
- * Cloudflare and Alibaba are tried as faster alternatives when configured.
+ * Automatic routing starts with OpenAI GPT Image when configured. Pollinations
+ * is never included in automatic routing.
  */
-const AUTO_FREE_ORDER: MediaProviderId[] = ["pollinations", "cloudflare", "alibaba"];
+const AUTO_FREE_ORDER: MediaProviderId[] = ["openai", "cloudflare", "alibaba"];
 
 /**
- * Auto-quality provider order: FAL → Recraft → Gemini → Pollinations
+ * Auto-quality provider order: OpenAI → FAL → Recraft → Gemini
  * FAL is the most reliable quality provider (fast, good output).
  * Recraft is preferred for vector/logo prompts.
- * Gemini is tried later since its key has had issues.
- * Pollinations is always appended as a last-resort fallback so users
- * never get a hard 502 when all quality providers are down or unconfigured.
+ * Gemini is tried after the configured primary providers. There is no silent
+ * Pollinations fallback when all configured providers fail.
  */
-const AUTO_QUALITY_ORDER: MediaProviderId[] = ["fal", "recraft", "gemini", "pollinations"];
+const AUTO_QUALITY_ORDER: MediaProviderId[] = ["openai", "fal", "recraft", "gemini"];
 
 function isProviderConfigured(providerId: MediaProviderId): boolean {
   switch (providerId) {
@@ -799,7 +842,7 @@ function isProviderConfigured(providerId: MediaProviderId): boolean {
     case "together": return !!TOGETHER_API_KEY;
     case "openai": return !!OPENAI_API_KEY;
     case "recraft": return !!RECRAFT_API_KEY;
-    case "pollinations": return true; // always available
+    case "pollinations": return true; // explicit experimental manual use only
     case "huggingface": return !!HF_API_KEY;
     default: return false;
   }
@@ -889,7 +932,14 @@ async function dispatchProvider(
     return handleTogetherImage(prompt, width, height);
   }
   if (providerId === "openai") {
-    return handleOpenAIImage(prompt);
+    return handleOpenAIImage({
+      prompt,
+      width,
+      height,
+      aspectRatio: body.aspectRatio,
+      referenceUrl: body.referenceUrl,
+      operation: body.operation,
+    });
   }
   if (providerId === "recraft") {
     return handleRecraftImage(prompt);
@@ -1063,6 +1113,19 @@ const defaultDeps: ImageServiceDeps = {
 const GEMINI_IMAGE_MODEL =
   process.env.GEMINI_IMAGE_MODEL || "gemini-3.1-flash-lite-image";
 
+export function imageModelFor(providerId: MediaProviderId, input: ImageGenerationInput): string {
+  if (providerId === "openai") {
+    return selectOpenAIImageModel(input);
+  }
+  if (providerId === "cloudflare") return CLOUDFLARE_IMAGE_MODEL;
+  if (providerId === "gemini") return process.env.GEMINI_IMAGE_MODEL || GEMINI_IMAGE_MODEL;
+  if (providerId === "alibaba") return process.env.ALIBABA_IMAGE_MODEL || "qwen-image-2.0";
+  if (providerId === "fal") return "flux-pro";
+  if (providerId === "recraft") return "recraft-v3";
+  if (providerId === "pollinations") return "flux";
+  return providerId;
+}
+
 /** A claimed job row younger than this is treated as still in flight. */
 const DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
 
@@ -1160,13 +1223,15 @@ export async function generateImage(
     }
     providerId = order[0];
   } else {
-    providerId = input.providerId ?? "pollinations";
+    providerId = input.providerId ?? "openai";
   }
 
   const provider = getProvider(providerId);
   if (!provider) {
     return fail("UNKNOWN_PROVIDER", "Unknown media provider", false, providerId);
   }
+
+  const requestedModel = imageModelFor(providerId, input);
   if (!provider.supportedFormats.includes(format)) {
     return fail(
       "FORMAT_NOT_SUPPORTED",
@@ -1181,7 +1246,7 @@ export async function generateImage(
   const costResult = calculateRetailBits({
     modality: "image",
     provider: providerId,
-    model: GEMINI_IMAGE_MODEL,
+    model: requestedModel,
   });
   const cost = provider.free ? 0 : Math.max(legacyCost, costResult.retailLiTTBits);
 
@@ -1224,7 +1289,7 @@ export async function generateImage(
         userId: internalUserId,
         modality: "image",
         provider: providerId,
-        model: GEMINI_IMAGE_MODEL,
+        model: requestedModel,
         prompt,
         requestId,
         littBitsCharged: cost,
@@ -1316,7 +1381,7 @@ export async function generateImage(
     const rawMsg = lastError?.message || "Generation failed";
     const isQuota = rawMsg.includes("429") || rawMsg.toLowerCase().includes("quota");
     const errorMsg = isQuota
-      ? `${usedProviderId} quota exceeded. Try "Auto Best (Free)" mode which uses Pollinations — no API key needed.`
+      ? `${usedProviderId} quota exceeded. Try again later or choose another configured provider.`
       : rawMsg;
     await failJob(errorMsg);
     const duration = Date.now() - startTime;
@@ -1345,10 +1410,11 @@ export async function generateImage(
 
   // ── 7. Debit — ONLY after provider success, idempotent on requestId ──
   const usedProvider = getProvider(usedProviderId)!;
+  const usedModel = imageModelFor(usedProviderId, input);
   const usedCostResult = calculateRetailBits({
     modality: "image",
     provider: usedProviderId,
-    model: GEMINI_IMAGE_MODEL,
+    model: usedModel,
   });
   const usedCost = usedProvider.free
     ? 0
@@ -1383,7 +1449,7 @@ export async function generateImage(
               rating: buildChargeRating({
                 capability: "image",
                 provider: usedProviderId,
-                model: GEMINI_IMAGE_MODEL,
+                model: usedModel,
                 providerCostMicros: usedCostResult.providerCostCents * 10_000,
                 bitsCharged: usedCost,
                 lane: "generation",
