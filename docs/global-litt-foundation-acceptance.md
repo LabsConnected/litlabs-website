@@ -22,7 +22,13 @@ The component tests mock navigation and native dialog methods. They do not prove
 
 ## Remaining integration
 
-PR #551 owns the reusable `litt-client` extraction and store context. Integrate that canonical runtime at the persistent authenticated layout before adding an in-place expanded transcript/run panel. The current bridge remains a navigation/composer entry, not the complete persistent operator acceptance.
+PR #551 owns reusable `litt-client` transport helpers, but its `store-context.tsx` and `store.ts` explicitly create a separate per-instance store that does not share Studio's canonical stores. Its `conversations.ts` explicitly leaves Studio's controller unreplaced. Stacking that PR alone therefore does not solve persistent shared runtime.
+
+The existing `useCanonicalConversation` controller owns revision retry, optimistic messages, streaming cancellation/reconciliation, and project generation fencing. Its URL synchronization currently writes the selected conversation onto the current pathname and clears selection when a URL has no conversation. Its project loader resets shared state when the resolved project changes. Simply mounting it above routes would mutate unrelated route URLs and disconnect conversations. `CommandStudio` also supplies live route callbacks, camera/preview selection, and explicitly authoritative URL project selection to prevent a known asynchronous stale-project race.
+
+The next Codex implementation step is to separate the Studio URL/project adapter from that single controller, register live Studio callbacks, then mount its voice/runtime/controller providers at the persistent authenticated layout and make both surfaces consume the shared controller. Add project-switch/revision/streaming continuity regression tests before in-place expanded interaction. This touches files owned by #545/#551; their extraction can be reused without merging, but the collision must be reconciled explicitly. No owner credentials are needed for this code work.
+
+The current bridge remains a navigation/composer entry, not the complete persistent operator acceptance.
 
 Route context is rebuilt at submit time and displayed locally. It is not yet a dedicated context provider consumed continuously by an active background run. Server-resolved role/capability hydration and richer selected-entity registration remain integration work.
 
