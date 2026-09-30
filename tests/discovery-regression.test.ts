@@ -16,8 +16,8 @@ const readFile = (rel: string) => readFileSync(path.join(publicDir, rel), "utf-8
 
 // ── Canonical identity ───────────────────────────────────
 describe("Discovery regression — canonical identity", () => {
-  it("SITE_URL is https://litlabs.net", () => {
-    expect(SITE_URL).toBe("https://litlabs.net");
+  it("SITE_URL is https://www.litlabs.net", () => {
+    expect(SITE_URL).toBe("https://www.litlabs.net");
   });
 
   it("SITE_NAME is LiTTree LabStudios", () => {
@@ -34,8 +34,8 @@ describe("Discovery regression — canonical identity", () => {
   });
 
   it("absoluteUrl produces canonical URLs", () => {
-    expect(absoluteUrl("/about")).toBe("https://litlabs.net/about");
-    expect(absoluteUrl("/pricing")).toBe("https://litlabs.net/pricing");
+    expect(absoluteUrl("/about")).toBe("https://www.litlabs.net/about");
+    expect(absoluteUrl("/pricing")).toBe("https://www.litlabs.net/pricing");
   });
 });
 
@@ -43,7 +43,7 @@ describe("Discovery regression — canonical identity", () => {
 describe("Discovery regression — buildMetadata", () => {
   it("sets canonical URL", () => {
     const m = buildMetadata({ title: "Test", path: "/test" });
-    expect(m.alternates?.canonical).toBe("https://litlabs.net/test");
+    expect(m.alternates?.canonical).toBe("https://www.litlabs.net/test");
   });
 
   it("sets OpenGraph with site name, title, description, and image", () => {
@@ -181,9 +181,9 @@ describe("Discovery regression — llms.txt", () => {
     expect(content).toContain("LiTTree LabStudios");
   });
 
-  it("contains canonical URL https://litlabs.net", () => {
+  it("contains canonical URL https://www.litlabs.net", () => {
     const content = readFile("llms.txt");
-    expect(content).toContain("https://litlabs.net");
+    expect(content).toContain("https://www.litlabs.net");
   });
 
   it("mentions LiTT and Spark", () => {
@@ -194,7 +194,7 @@ describe("Discovery regression — llms.txt", () => {
 
   it("links to About page", () => {
     const content = readFile("llms.txt");
-    expect(content).toContain("https://litlabs.net/about");
+    expect(content).toContain("https://www.litlabs.net/about");
   });
 });
 
@@ -214,7 +214,7 @@ describe("Discovery regression — llms-full.txt", () => {
 
   it("contains canonical URL", () => {
     const content = readFile("llms-full.txt");
-    expect(content).toContain("https://litlabs.net");
+    expect(content).toContain("https://www.litlabs.net");
   });
 });
 
@@ -229,7 +229,7 @@ describe("Discovery regression — .well-known/littree.json", () => {
     const data = JSON.parse(raw);
     expect(data.name).toBe("LiTTree LabStudios");
     expect(data.product).toBe("LiTTree");
-    expect(data.canonical_url).toBe("https://litlabs.net");
+    expect(data.canonical_url).toBe("https://www.litlabs.net");
     expect(data.ai_agent).toBe("LiTT");
     expect(data.creative_companion).toBe("Spark");
   });
@@ -237,8 +237,8 @@ describe("Discovery regression — .well-known/littree.json", () => {
   it("includes official resources with canonical URLs", () => {
     const raw = readFile(".well-known/littree.json");
     const data = JSON.parse(raw);
-    expect(data.official_resources.homepage).toBe("https://litlabs.net");
-    expect(data.official_resources.llms_txt).toBe("https://litlabs.net/llms.txt");
+    expect(data.official_resources.homepage).toBe("https://www.litlabs.net");
+    expect(data.official_resources.llms_txt).toBe("https://www.litlabs.net/llms.txt");
   });
 });
 
