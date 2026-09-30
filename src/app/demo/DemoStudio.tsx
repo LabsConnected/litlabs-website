@@ -91,6 +91,18 @@ const WELCOME_MESSAGE: ChatMessage = {
     "Hey — I'm LiTT. In the full Studio I turn ideas into working software: I build, preview, and deploy real projects with you. This is a limited demo, so I can chat and answer questions, but building, previews, and deploys unlock after you sign up. What are you thinking of building?",
 };
 
+/**
+ * Starter prompts shown above the composer until the visitor sends their
+ * first message. They must be answerable by the demo lane (chat only —
+ * nothing that implies building, previews, or deploys).
+ */
+const STARTER_PROMPTS = [
+  "What can you build for me in the full Studio?",
+  "Walk me through publishing a website with LiTT",
+  "What makes LiTT different from a regular chatbot?",
+  "How do I connect my GitHub to a project?",
+] as const;
+
 export default function DemoStudio({
   maxMessages,
   disabled,
@@ -129,9 +141,10 @@ export default function DemoStudio({
     setWallOpen(true);
   }, []);
 
-  const send = useCallback(async () => {
-    const text = input.trim();
-    if (!text || sending || disabled) return;
+  const send = useCallback(
+    async (override?: string) => {
+      const text = (override ?? input).trim();
+      if (!text || sending || disabled) return;
     setError(null);
     setSending(true);
 
@@ -198,7 +211,9 @@ export default function DemoStudio({
     } finally {
       setSending(false);
     }
-  }, [input, sending, disabled, messages, openWall]);
+  },
+  [input, sending, disabled, messages, openWall],
+  );
 
   if (disabled) {
     return (
@@ -394,6 +409,33 @@ export default function DemoStudio({
             className="shrink-0 border-t px-4 py-3 sm:px-8"
             style={{ borderColor: "var(--studio-border, rgba(155,77,255,0.12))", backgroundColor: "var(--studio-surface, #0d0916)" }}
           >
+            {/* Starter prompts — visible before the first message so the
+                demo's scope is obvious and visitors know what to ask. */}
+            {!messages.some((m) => m.role === "user") && remaining > 0 ? (
+              <div
+                data-testid="demo-starter-prompts"
+                className="mb-3 flex flex-wrap gap-2"
+                aria-label="Example prompts"
+              >
+                {STARTER_PROMPTS.map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    data-testid="demo-starter-prompt"
+                    onClick={() => void send(prompt)}
+                    disabled={sending}
+                    className="rounded-full border px-3.5 py-2 text-xs font-semibold transition hover:opacity-100 disabled:opacity-40"
+                    style={{
+                      borderColor: `${LIME}44`,
+                      backgroundColor: `${LIME}0d`,
+                      color: "var(--text-primary, #f5f1fa)",
+                    }}
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             {remaining === 0 ? (
               <button
                 type="button"
