@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
-import { generateText } from "@/lib/llm";
+import { meteredLlmCall } from "@/lib/metered-llm-call";
 
 export const runtime = "nodejs";
 
@@ -11,7 +12,12 @@ export const runtime = "nodejs";
  *
  * Returns: { response: string, provider, model, latencyMs, failover }
  *
- * Now backed by the unified LLM client (Gemini → OpenRouter free → specific models).
+ * Backed by the unified LLM client (Gemini → OpenRouter free → specific models).
+ *
+ * Billing (P0): every call runs through the canonical metered-LLM gateway —
+ * pre-flight balance/entitlement gate BEFORE provider execution, per-attempt
+ * metering (usage_events + cost_events), and exactly one wallet debit per
+ * logical action (retries reuse the billable usage_event).
  */
 async function handler(req: NextRequest) {
   const { userId } = await auth(req);
@@ -23,15 +29,25 @@ async function handler(req: NextRequest) {
     if (!message) {
       return NextResponse.json({ error: "Missing message" }, { status: 400 });
     }
-    const r = await generateText(
-      message,
-      {
+    const call = await meteredLlmCall({
+      clerkId: userId,
+      prompt: message,
+      systemPrompt,
+      llmOptions: {
         task: task || "creative",
         preferFree: !!preferFree,
         maxTokens: 1024,
       },
-      systemPrompt,
-    );
+      feature: "gemini-api",
+      callId: randomUUID(),
+    });
+    if (!call.ok) {
+      return NextResponse.json(
+        { error: call.error, code: call.code },
+        { status: call.status },
+      );
+    }
+    const r = call.result;
     return NextResponse.json({
       response: r.text,
       provider: r.provider,

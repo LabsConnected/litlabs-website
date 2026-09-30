@@ -1,9 +1,10 @@
 import { Supermemory } from "supermemory";
-import { generateText } from "@/lib/llm";
+import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { newRequestId, jsonError } from "@/lib/api-route-helpers";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { meteredLlmCall } from "@/lib/metered-llm-call";
 
 // ── Route configuration ──────────────────────────────────────────
 // Node.js runtime (uses Node-only SDKs). maxDuration gives Vercel enough
@@ -104,11 +105,22 @@ ${memoryContext ? `Relevant context from memory:\n${memoryContext}` : ""}
 Be direct, professional, and code-focused. Do not explain the code in prose unless asked.
 Output the code files immediately.`;
 
-    const result = await generateText(
-      lastMessage,
-      { task: "code", category: "code", maxTokens: 8192, timeoutMs: 15_000 },
+    // Canonical billing (P0): pre-flight balance/entitlement gate BEFORE
+    // provider execution, per-attempt metering (usage_events + cost_events),
+    // and exactly one wallet debit per logical action. No provider call may
+    // happen outside this path.
+    const call = await meteredLlmCall({
+      clerkId: uid,
+      prompt: lastMessage,
       systemPrompt,
-    );
+      llmOptions: { task: "code", category: "code", maxTokens: 8192, timeoutMs: 15_000 },
+      feature: "ai-chat",
+      callId: randomUUID(),
+    });
+    if (!call.ok) {
+      return jsonError(call.status, call.error, requestId);
+    }
+    const result = call.result;
 
     // Async save to memory
     if (sm) {

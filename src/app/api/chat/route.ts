@@ -53,7 +53,15 @@ async function handler(req: NextRequest) {
 
       const response = await generateText(
         `${agent.systemPrompt}\n\nPersonality: ${agent.personality}\nRole: ${agent.role}\n\nUser: ${message}\n\nRespond as ${agent.name} in character. Be helpful, concise, and natural.`,
-        { task: "chat", maxTokens: 1024 },
+        {
+          task: "chat",
+          maxTokens: 1024,
+          // Canonical metering (P1): record per-attempt usage_events +
+          // cost_events for reconciliation. The user was already charged a
+          // flat agent-run fee via chargeAgentRun above (preserved); this
+          // only adds provider-attempt visibility, no second debit.
+          metering: { clerkId, feature: "agent-chat" },
+        },
       );
 
       return NextResponse.json({

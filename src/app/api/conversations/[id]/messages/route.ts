@@ -152,7 +152,13 @@ Respond as ${agent.name} in character. Be helpful, concise (1-3 sentences), and 
     // Generate AI response via unified LLM client (auto-failover)
     let aiResponse = "I'm processing your request...";
     try {
-      const r = await generateText(prompt, { task: "chat", maxTokens: 1024 });
+      const r = await generateText(prompt, {
+        task: "chat",
+        maxTokens: 1024,
+        // Metering visibility: record provider attempts for reconciliation.
+        // (Full balance-gate enforcement is a separate follow-up.)
+        metering: { userId: dbUserId, feature: "conversations-messages" },
+      });
       aiResponse = r.text || "I'm thinking...";
     } catch {
       // AI error:
