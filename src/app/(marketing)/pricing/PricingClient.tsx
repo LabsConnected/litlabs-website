@@ -13,6 +13,10 @@ import {
   type PlanId,
 } from "@/config/plans";
 import {
+  formatBits,
+  getPlanCreditAllowance,
+} from "@/config/plan-entitlements";
+import {
   pricingGuestCheckoutUrl,
   savePendingPlanCheckout,
   takePendingPlanCheckout,
@@ -94,7 +98,7 @@ const usageRules = [
   },
   {
     title: "Credits per billing cycle",
-    copy: "Paid plans grant AI credits after each successful billing cycle. Starter includes a one-time 500-credit grant that does not expire.",
+    copy: `Paid plans grant AI credits after each successful billing cycle. Starter includes a one-time ${formatBits(getPlanCreditAllowance("starter"))}-credit grant that does not expire.`,
   },
   {
     title: "Fair usage tracking",

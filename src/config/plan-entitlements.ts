@@ -42,7 +42,9 @@ export interface PlanEntitlements {
    * One-time LiTTBits grant for free plans. Starter only (1,500).
    * Granted idempotently on first billable attempt via key
    * `starter:v1:{userId}` — never collides with the legacy
-   * `starter:{userId}` 500 grants, which are honored as-is.
+   * `starter:{userId}` 500 grants. Accounts holding only a legacy grant
+   * receive a one-time idempotent +1,000 top-up (`starter:topup-v1:{userId}`)
+   * so their lifetime Starter grant equals the locked 1,500.
    */
   oneTimeGrantBits: number;
   /** Price in cents per billing cycle. null = not purchasable. */
@@ -175,6 +177,14 @@ export function getPlanCreditAllowance(planId: PlanId): number {
 }
 
 /**
+ * Display formatting for LiTTBits allowances, e.g. 1500 -> "1,500".
+ * UI copy MUST use this (via getPlanCreditAllowance), never hardcoded numbers.
+ */
+export function formatBits(bits: number): string {
+  return bits.toLocaleString("en-US");
+}
+
+/**
  * Modeled provider-cost conversion: 1,000 LiTTBits ≈ $1.00 of provider spend.
  * MODEL ONLY — not validated against measured costs. Do not use as ground
  * truth for billing; it exists for capacity planning and margin estimates.
@@ -183,3 +193,23 @@ export const BITS_PER_USD_MODELED = 1000;
 
 /** Idempotency key namespace for the Starter one-time grant. */
 export const STARTER_GRANT_KEY_PREFIX = "starter:v1:";
+
+/** Idempotency key namespace for the legacy pre-v1 Starter grant (500 bits). */
+export const LEGACY_STARTER_GRANT_KEY_PREFIX = "starter:";
+
+/** Idempotency key namespace for the one-time legacy top-up (+1,000 bits). */
+export const STARTER_TOPUP_KEY_PREFIX = "starter:topup-v1:";
+
+/**
+ * Bits granted by the legacy pre-v1 Starter grant. Historical fact — the old
+ * grant issued exactly this amount under `starter:{userId}` keys.
+ */
+export const LEGACY_STARTER_GRANT_BITS = 500;
+
+/**
+ * One-time top-up for accounts that only ever received the legacy 500-bit
+ * Starter grant. Derived from the single source so the lifetime Starter
+ * grant always equals the locked allowance — never a second full grant.
+ */
+export const STARTER_TOPUP_BITS =
+  PLAN_ENTITLEMENTS.starter.oneTimeGrantBits - LEGACY_STARTER_GRANT_BITS;
