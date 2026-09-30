@@ -45,9 +45,10 @@ vi.mock("@/lib/supabase", () => ({
           })),
         };
       }
-      // credit_ledger table — supports two query shapes:
+      // credit_ledger table — supports three query shapes:
       // 1. Starter pre-check: .eq("user_id").eq("idempotency_key").limit(1).maybeSingle()
       // 2. Daily claim: .eq("user_id").eq("category").like("idempotency_key").order().limit(1).maybeSingle()
+      // 3. Top-up pre-check: .eq("user_id").in("idempotency_key", [...]).limit(2) [awaited directly]
       if (table === "credit_ledger") {
         const maybeSingleFn = vi.fn(async () => ({
           data: mockLedgerRows.length > 0 ? mockLedgerRows[0] : null,
@@ -60,10 +61,21 @@ vi.mock("@/lib/supabase", () => ({
           limit: limitFn,
           like: likeFn,
         }));
+        const inFn = vi.fn((_col: string, vals: string[]) => ({
+          limit: vi.fn(async () => ({
+            data: mockLedgerRows.filter((r) =>
+              vals.includes(
+                (r as Record<string, unknown>).idempotency_key as string,
+              ),
+            ),
+            error: null,
+          })),
+        }));
         return {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               eq: secondEqFn,
+              in: inFn,
             })),
           })),
         };
@@ -122,8 +134,8 @@ describe("Starter credit grant — one-time only", () => {
 
   it("refreshing wallet does not grant more (ledger pre-check)", async () => {
     setupBalances(1500, 0, 0);
-    // Simulate that the grant already exists in the ledger
-    mockLedgerRows = [{ id: "ledger-1" }];
+    // Simulate that the v1 grant already exists in the ledger
+    mockLedgerRows = [{ id: "ledger-1", idempotency_key: "starter:v1:user-uuid-123" }];
 
     await getCreditBalances("clerk_existing_user");
 
