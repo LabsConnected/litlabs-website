@@ -1484,6 +1484,10 @@ export async function callLLMWithTools(
           scope: failure.scope,
           latencyMs,
           retryAfterMs: failure.retryAfterMs,
+          // Include the sanitized upstream error message (already redacted
+          // by sanitizeBody) so the actual provider rejection reason is
+          // visible in deployment logs instead of being swallowed.
+          message: failure.message,
           remainingBudgetMs: options?.deadlineMs
             ? Math.max(0, options.deadlineMs - Date.now())
             : undefined,
