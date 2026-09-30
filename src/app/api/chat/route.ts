@@ -5,6 +5,7 @@ import { withRateLimit } from "@/lib/rate-limiter";
 import { AGENTS } from "@/lib/agents";
 import { generateText } from "@/lib/llm";
 import { auth } from "@/lib/auth";
+import { assertSpendAuthorized } from "@/lib/metered-llm-call";
 import { resolveAgentEntitlement, chargeAgentRun } from "@/lib/agent-entitlements";
 
 async function handler(req: NextRequest) {
@@ -92,6 +93,15 @@ async function handler(req: NextRequest) {
       );
     }
 
+    let responseBilling: { clerkId: string; callId: string } | undefined;
+    if (body.simulateResponse) {
+      const { clerkId } = await auth(req);
+      if (!clerkId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      const authorization = await assertSpendAuthorized(clerkId);
+      if (!authorization.ok) return NextResponse.json({ error: authorization.error }, { status: authorization.status });
+      responseBilling = { clerkId, callId: crypto.randomUUID() };
+    }
+
     // Send message
     const agentMessage = orchestrator.sendMessage(
       from,
@@ -104,7 +114,7 @@ async function handler(req: NextRequest) {
     // If simulating, generate a response
     let response = null;
     if (body.simulateResponse) {
-      response = await orchestrator.simulateAgentResponse(to, message);
+      response = await orchestrator.simulateAgentResponse(to, message, undefined, undefined, responseBilling);
       const reply = orchestrator.sendMessage(to, from, response, "chat");
 
       return NextResponse.json({

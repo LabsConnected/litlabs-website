@@ -99,8 +99,11 @@ describe("P0: failover metering invariant", () => {
     expect(res.failover.length).toBeGreaterThan(0);
     expect(res.text).toBe("fallback answer");
 
-    // Allow fire-and-forget metering promises to settle.
-    await new Promise((r) => setTimeout(r, 50));
+    // Metering is fire-and-forget. Wait for observable writes instead of a
+    // fixed sleep, which races module loading under parallel suite load.
+    await vi.waitFor(() => {
+      expect(writes.filter((w) => w.table === "cost_events").length).toBeGreaterThanOrEqual(2);
+    });
 
     const usageWrites = writes.filter((w) => w.table === "usage_events");
     const costWrites = writes.filter((w) => w.table === "cost_events");
@@ -147,7 +150,9 @@ describe("P0: failover metering invariant", () => {
       new RegExp(`^metering:llm:${res.metering.requestId}:\\d+$`),
     );
 
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.waitFor(() => {
+      expect(writes.filter((w) => w.table === "cost_events").length).toBeGreaterThanOrEqual(2);
+    });
     const usageWrites = writes.filter((w) => w.table === "usage_events");
     const keys = usageWrites.map((w) => w.row.idempotency_key as string);
     expect(keys).toContain(res.metering.billableIdempotencyKey);

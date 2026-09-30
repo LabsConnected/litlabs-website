@@ -4,6 +4,7 @@
 // module derives its AGENTS map from that registry so there is one source
 // of truth.
 import { generateText } from "@/lib/llm";
+import { meteredLlmCall } from "@/lib/metered-llm-call";
 import { AGENT_DEFINITIONS, type AgentDefinition } from "@/lib/agent-registry";
 
 export interface Agent {
@@ -229,6 +230,7 @@ export class AgentOrchestrator {
     incomingMessage: string,
     conversationContext?: string,
     projectContext?: ProjectContext,
+    billing?: { clerkId: string; callId: string },
   ): Promise<string> {
     const agent = this.agents.get(agentId);
     if (!agent) return "Unknown agent";
@@ -244,9 +246,17 @@ USER: ${incomingMessage}
 
 Respond as ${agent.name}. Stay in character. Be direct and useful. Match the user's energy.`;
 
-      const r = await generateText(prompt, { task: "chat" });
+      const call = billing ? await meteredLlmCall({
+        ...billing,
+        prompt,
+        feature: "agent-chat",
+        llmOptions: { task: "chat" },
+      }) : null;
+      if (call && !call.ok) throw new Error(call.error);
+      const r = call?.ok ? call.result : await generateText(prompt, { task: "chat" });
       return r.text || "I'm processing that...";
-    } catch {
+    } catch (error) {
+      if (billing) throw error;
       return `${agent.name} is thinking... (AI service temporarily unavailable)`;
     }
   }

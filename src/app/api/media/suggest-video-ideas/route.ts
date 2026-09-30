@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { auth } from "@/lib/auth";
-import { emitLlmMetering } from "@/lib/metering";
+import { meteredProviderCall } from "@/lib/metered-provider-call";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const IDEAS_MODEL = "gemini-2.5-flash";
@@ -47,18 +47,7 @@ async function handler(request: NextRequest) {
   if (!GEMINI_API_KEY)
     return NextResponse.json({ error: "Gemini API key not configured" }, { status: 500 });
 
-  // Canonical metering: one usage_event per ideas attempt. P0 invariant:
-  // this single attempt is THE billable usage_event (emitter defaults
-  // billable=true on success); failures are billable=false.
   const requestId = crypto.randomUUID();
-  const startedAt = new Date();
-  const meteringBase = {
-    clerkId: clerkId ?? undefined,
-    feature: "media-analyze" as const,
-    provider: "gemini",
-    model: IDEAS_MODEL,
-    chargedBits: 0,
-  };
 
   try {
     const { imageUrl, imageBytes, mimeType = "image/jpeg" } = await request.json();
@@ -83,17 +72,30 @@ async function handler(request: NextRequest) {
     }
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-    const response = await ai.models.generateContent({
+    const call = await meteredProviderCall({
+      clerkId: clerkId ?? userId,
+      feature: "media-analyze",
+      provider: "gemini",
       model: IDEAS_MODEL,
-      contents: [
-        { inlineData: { data: base64Data, mimeType: detectedMimeType } },
-        { text: IDEA_PROMPT },
-      ],
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0.9,
-      },
+      callId: requestId,
+      execute: () => ai.models.generateContent({
+        model: IDEAS_MODEL,
+        contents: [
+          { inlineData: { data: base64Data, mimeType: detectedMimeType } },
+          { text: IDEA_PROMPT },
+        ],
+        config: {
+          responseMimeType: "application/json",
+          temperature: 0.9,
+        },
+      }),
+      usage: (result) => ({
+        promptTokens: result.usageMetadata?.promptTokenCount ?? 0,
+        completionTokens: result.usageMetadata?.candidatesTokenCount ?? 0,
+      }),
     });
+    if (!call.ok) return NextResponse.json({ error: call.error }, { status: call.status });
+    const response = call.result;
 
     const text = response.text || "";
     let ideas: VideoIdea[] = [];
@@ -115,47 +117,14 @@ async function handler(request: NextRequest) {
     }
 
     if (ideas.length === 0) {
-      // The provider call itself succeeded (tokens consumed); only the
-      // JSON shaping failed — so this is recorded as the billable attempt,
-      // matching llm.ts's convention (a usable provider response = success).
-      void emitLlmMetering({
-        ...meteringBase,
-        inputTokens: response.usageMetadata?.promptTokenCount ?? 0,
-        outputTokens: response.usageMetadata?.candidatesTokenCount ?? 0,
-        status: "success",
-        error: "no-ideas-generated",
-        idempotencyKey: `metering:llm:${requestId}:0`,
-        startedAt,
-        finishedAt: new Date(),
-      });
       return NextResponse.json(
         { error: "Could not generate ideas from this image. Try a clearer or different photo." },
         { status: 422 },
       );
     }
 
-    const usage = response.usageMetadata;
-    void emitLlmMetering({
-      ...meteringBase,
-      inputTokens: usage?.promptTokenCount ?? 0,
-      outputTokens: usage?.candidatesTokenCount ?? 0,
-      status: "success",
-      idempotencyKey: `metering:llm:${requestId}:0`,
-      startedAt,
-      finishedAt: new Date(),
-    });
-
     return NextResponse.json({ ideas });
   } catch (error) {
-    void emitLlmMetering({
-      ...meteringBase,
-      status: "failed",
-      billable: false,
-      error: error instanceof Error ? error.message.slice(0, 500) : "Idea generation failed",
-      idempotencyKey: `metering:llm:${requestId}:0`,
-      startedAt,
-      finishedAt: new Date(),
-    });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Idea generation failed" },
       { status: 500 },

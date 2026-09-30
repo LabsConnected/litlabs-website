@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { resolveAgentEntitlement, chargeAgentRun } from "@/lib/agent-entitlements";
 import { chargeLlmUsage } from "@/lib/llm-billing";
+import { assertSpendAuthorized } from "@/lib/metered-llm-call";
 import { SpendGuardError } from "@/lib/spend-guards";
 import { randomUUID } from "crypto";
 
@@ -95,7 +96,7 @@ async function logConversation(
   }
 }
 
-async function handleAgentChat(body: UnifiedChatRequest) {
+async function handleAgentChat(body: UnifiedChatRequest, clerkId: string) {
   const { from, to, message, type = "chat", metadata, simulateResponse } = body;
 
   if (!from || !to || !message) {
@@ -119,10 +120,17 @@ async function handleAgentChat(body: UnifiedChatRequest) {
   type MessageType = (typeof validTypes)[number];
   const messageType: MessageType = validTypes.includes(type as MessageType) ? (type as MessageType) : "chat";
 
+  if (simulateResponse) {
+    const authorization = await assertSpendAuthorized(clerkId);
+    if (!authorization.ok) return NextResponse.json({ error: authorization.error }, { status: authorization.status });
+  }
+
   const agentMessage = orchestrator.sendMessage(from, to, message, messageType, metadata);
 
   if (simulateResponse) {
-    const response = await orchestrator.simulateAgentResponse(to, message);
+    const response = await orchestrator.simulateAgentResponse(to, message, undefined, undefined, {
+      clerkId, callId: randomUUID(),
+    });
     const reply = orchestrator.sendMessage(to, from, response, "chat");
 
     return NextResponse.json({
@@ -401,7 +409,8 @@ async function handler(req: NextRequest) {
 
     // Agent-to-agent mode is internal orchestration — no entitlement check.
     if (detectedMode === "agent") {
-      return await handleAgentChat(body);
+      if (!clerkId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return await handleAgentChat(body, clerkId);
     }
 
     // LLM and simple modes run the model for the user — require auth + entitlement.
