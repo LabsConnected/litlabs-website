@@ -50,19 +50,19 @@ describe("Pricing contract — single source of truth", () => {
     it("Starter is free", () => {
       expect(PLANS.starter.billingType).toBe("free");
       expect(PLANS.starter.monthlyPriceCents).toBe(0);
-      expect(PLANS.starter.monthlyCredits).toBe(500);
+      expect(PLANS.starter.monthlyCredits).toBe(1500);
     });
 
     it("Creator Beta is $15/month", () => {
       expect(PLANS.creator_beta.billingType).toBe("subscription");
       expect(PLANS.creator_beta.monthlyPriceCents).toBe(1500);
-      expect(PLANS.creator_beta.monthlyCredits).toBe(6000);
+      expect(PLANS.creator_beta.monthlyCredits).toBe(7500);
     });
 
     it("Pro Builder Beta is $39/month", () => {
       expect(PLANS.pro_builder_beta.billingType).toBe("subscription");
       expect(PLANS.pro_builder_beta.monthlyPriceCents).toBe(3900);
-      expect(PLANS.pro_builder_beta.monthlyCredits).toBe(20000);
+      expect(PLANS.pro_builder_beta.monthlyCredits).toBe(18000);
     });
 
     it("Founder is retired but keeps its historical shape", () => {

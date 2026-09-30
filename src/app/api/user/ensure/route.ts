@@ -27,8 +27,8 @@ export async function POST(req: NextRequest) {
     }
 
     // getOrCreateUser uses admin client server-side (bypasses RLS).
-    // The Starter 500 grant lives in credit_ledger, issued lazily by
-    // getCreditBalances below — idempotent via starter:{userId}.
+    // The Starter one-time grant lives in credit_ledger, issued lazily by
+    // getCreditBalances below — idempotent via starter:v1:{userId}.
     const { user, isNew } = await getOrCreateUser(clerkId, email, name);
 
     if (!user) {

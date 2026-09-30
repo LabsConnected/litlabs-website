@@ -3,7 +3,6 @@ import {
   PRODUCT_IDENTITY,
   CORE_PERSONALITIES,
   CORE_PERSONALITY_COUNT,
-  PLAN_CONTRACTS,
   LITTBITS_TERMINOLOGY,
   BANNED_PHRASES,
   DAILY_LITTBITS_ENABLED,
@@ -14,6 +13,7 @@ import {
   LEGACY_STRIPE_PRODUCTS,
 } from "@/config/product-truth";
 import { PLANS } from "@/config/plans";
+import { PLAN_ENTITLEMENTS } from "@/config/plan-entitlements";
 import { AGENT_DEFINITIONS, CORE_PERSONALITIES as REGISTRY_CORE } from "@/lib/agent-registry";
 
 describe("Product-truth consistency", () => {
@@ -70,7 +70,6 @@ describe("Product-truth consistency", () => {
   describe("Pricing — Founder", () => {
     it("Founder price is $149 (14900 cents)", () => {
       expect(PLANS.founder.monthlyPriceCents).toBe(14900);
-      expect(PLAN_CONTRACTS.founder.priceCents).toBe(14900);
     });
 
     it("Founder is NOT $49", () => {
@@ -79,17 +78,14 @@ describe("Product-truth consistency", () => {
 
     it("Founder name is 'Founding Member' (not 'Founding Supporter')", () => {
       expect(PLANS.founder.name).toBe("Founding Member");
-      expect(PLAN_CONTRACTS.founder.name).toBe("Founding Member");
     });
 
     it("Founder has no monthly credits", () => {
       expect(PLANS.founder.monthlyCredits).toBe(0);
-      expect(PLAN_CONTRACTS.founder.credits).toBe(0);
     });
 
-    it("Founder checkout is retired in both sources", () => {
+    it("Founder checkout is retired", () => {
       expect(PLANS.founder.enabled).toBe(false);
-      expect(PLAN_CONTRACTS.founder.checkoutEnabled).toBe(false);
     });
 
     it("Founder features do not mention six months, $49, or credit-pack discounts", () => {
@@ -111,12 +107,12 @@ describe("Product-truth consistency", () => {
   describe("Pricing — Starter", () => {
     it("Starter is free", () => {
       expect(PLANS.starter.monthlyPriceCents).toBe(0);
-      expect(PLAN_CONTRACTS.starter.priceCents).toBe(0);
     });
 
-    it("Starter has 500 LiTTBits", () => {
-      expect(PLANS.starter.monthlyCredits).toBe(500);
-      expect(PLAN_CONTRACTS.starter.credits).toBe(500);
+    it("Starter has a 1,500 LiTTBits one-time grant", () => {
+      expect(PLANS.starter.monthlyCredits).toBe(1500);
+      expect(PLAN_ENTITLEMENTS.starter.oneTimeGrantBits).toBe(1500);
+      expect(PLAN_ENTITLEMENTS.starter.monthlyBits).toBe(0);
     });
 
     it("Starter features do not say 'monthly LiTTBits'", () => {
@@ -168,24 +164,6 @@ describe("Product-truth consistency", () => {
 
     it("includes 'coin pack'", () => {
       expect(BANNED_PHRASES).toContain("coin pack");
-    });
-  });
-
-  describe("Plan contract alignment with plans.ts", () => {
-    it("Starter prices match", () => {
-      expect(PLAN_CONTRACTS.starter.priceCents).toBe(PLANS.starter.monthlyPriceCents);
-    });
-
-    it("Creator Beta prices match", () => {
-      expect(PLAN_CONTRACTS.creator_beta.priceCents).toBe(PLANS.creator_beta.monthlyPriceCents);
-    });
-
-    it("Pro Builder Beta prices match", () => {
-      expect(PLAN_CONTRACTS.pro_builder_beta.priceCents).toBe(PLANS.pro_builder_beta.monthlyPriceCents);
-    });
-
-    it("Founder prices match", () => {
-      expect(PLAN_CONTRACTS.founder.priceCents).toBe(PLANS.founder.monthlyPriceCents);
     });
   });
 

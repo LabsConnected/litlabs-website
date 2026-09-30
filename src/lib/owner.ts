@@ -94,9 +94,9 @@ export type SimulatedPlan =
 /** All valid simulation options, in display order. */
 export const SIMULATION_OPTIONS: { value: SimulatedPlan; label: string; description: string }[] = [
   { value: "owner", label: "OWNER", description: "Full owner access — all features, unlimited projects" },
-  { value: "starter", label: "Starter", description: "1 project, 500 LiTTBits, no terminal/voice/premium" },
-  { value: "creator_beta", label: "Creator Beta", description: "5 projects, 6K LiTTBits, voice + GitHub" },
-  { value: "pro_builder_beta", label: "Pro Builder Beta", description: "25 projects, 20K LiTTBits, terminal + premium models" },
+  { value: "starter", label: "Starter", description: "1 project, 1,500 LiTTBits (one-time), no terminal/voice/premium" },
+  { value: "creator_beta", label: "Creator Beta", description: "5 projects, 7.5K LiTTBits/mo, voice + GitHub" },
+  { value: "pro_builder_beta", label: "Pro Builder Beta", description: "25 projects, 18K LiTTBits/mo, terminal + premium models" },
   { value: "zero_bits", label: "Zero-LiTTBits Test", description: "Owner access but balance treated as 0 — tests insufficient-credit behavior" },
 ];
 

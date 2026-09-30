@@ -1,6 +1,10 @@
 import "server-only";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import {
+  PLAN_ENTITLEMENTS,
+  STARTER_GRANT_KEY_PREFIX,
+} from "@/config/plan-entitlements";
+import {
   recordChargeEvidence,
   type ChargeRating,
   type ChargeUsage,
@@ -43,26 +47,30 @@ export async function getCreditBalances(clerkId: string): Promise<CreditBalances
     .in("status", ["active", "trialing"])
     .maybeSingle();
   if (!subscription) {
-    // Starter plan: 500 BITS granted ONCE at account creation, not monthly.
-    // The idempotency key is user-scoped (no period) so the grant_credits
-    // RPC is a no-op on every subsequent call after the first successful one.
-    // We also pre-check the ledger to avoid an unnecessary RPC round-trip
-    // on the common path where the grant already exists.
+    // Starter plan: one-time grant (PLAN_ENTITLEMENTS.starter.oneTimeGrantBits)
+    // at account creation, not monthly. The idempotency key uses the v1
+    // namespace (`starter:v1:{userId}`) so it never collides with the legacy
+    // `starter:{userId}` 500 grants, which are honored as-is (grandfathered).
+    // The grant_credits RPC is a no-op on every subsequent call after the
+    // first successful one. We also pre-check the ledger to avoid an
+    // unnecessary RPC round-trip on the common path where the grant exists.
+    const starterKey = `${STARTER_GRANT_KEY_PREFIX}${userId}`;
+    const starterBits = PLAN_ENTITLEMENTS.starter.oneTimeGrantBits;
     const { data: existingGrant } = await admin
       .from("credit_ledger")
       .select("id")
       .eq("user_id", userId)
-      .eq("idempotency_key", `starter:${userId}`)
+      .eq("idempotency_key", starterKey)
       .limit(1)
       .maybeSingle();
     if (!existingGrant) {
       const { error: grantError } = await admin.rpc("grant_credits", {
         p_user_id: userId,
-        p_amount: 500,
+        p_amount: starterBits,
         p_category: "subscription_grant",
         p_balance_bucket: "monthly",
-        p_description: "Starter one-time grant — 500 LiTTBits",
-        p_idempotency_key: `starter:${userId}`,
+        p_description: `Starter one-time grant — ${starterBits} LiTTBits`,
+        p_idempotency_key: starterKey,
         p_reference_type: "starter_plan",
         p_reference_id: "one_time",
       });
