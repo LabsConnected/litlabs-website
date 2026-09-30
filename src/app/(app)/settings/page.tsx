@@ -15,19 +15,14 @@ import {
   Cpu, Bot, Mic, Plug, Zap, Bell, Coins, Shield, Gauge, Terminal,
   Search, ChevronRight, Check, Loader2, X,
   RotateCcw, ArrowLeft, Camera, Volume2,
-  Monitor, Moon, Sun, Lock,
+  Monitor, Moon, Sun,
 } from "lucide-react";
 import {
   useSettingsStore,
   SETTINGS_SECTIONS,
-  MODE_ORDER,
-  MODE_META,
-  type ControlMode,
   type SettingsSection,
 } from "@/stores/useSettingsStore";
 import {
-  sectionMinMode,
-  isSectionLocked,
   accentLabel,
   themeModeLabel,
   accountCardValue,
@@ -40,9 +35,7 @@ import {
   SectionHeader,
   ToggleRow,
   SettingsInput,
-  SaveBar,
   StatusBadge,
-  type SaveStatus,
 } from "@/components/settings/SettingsPrimitives";
 import { VisualPackSettings } from "@/components/settings/VisualPackSettings";
 import { WallpaperSection } from "@/components/settings/WallpaperSection";
@@ -68,12 +61,10 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
 export default function SettingsPage() {
   const { resolvedColors: T } = useTheme();
   const {
-    controlMode, activeSection, searchQuery, hasUnsavedChanges,
-    setControlMode, setActiveSection, setSearchQuery,
-    setUnsaved, visibleSections,
+    activeSection, searchQuery,
+    setActiveSection, setSearchQuery,
   } = useSettingsStore();
 
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [mobileSection, setMobileSection] = useState<string | null>(null);
   const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
@@ -91,7 +82,7 @@ export default function SettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  const sections = visibleSections();
+  const sections = SETTINGS_SECTIONS;
 
   const filteredSections = useMemo(() => {
     if (!searchQuery.trim()) return sections;
@@ -105,30 +96,6 @@ export default function SettingsPage() {
     () => SETTINGS_SECTIONS.find((s) => s.id === activeSection),
     [activeSection],
   );
-
-  const handleSave = useCallback(async () => {
-    setSaveStatus("saving");
-    try {
-      const res = await fetch("/api/settings/preferences", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ controlMode }),
-      });
-      if (!res.ok) throw new Error(`Save failed: ${res.status}`);
-      setSaveStatus("saved");
-      setUnsaved(false);
-      setTimeout(() => setSaveStatus("idle"), 2000);
-    } catch {
-      setSaveStatus("error");
-      setUnsaved(false);
-      setTimeout(() => setSaveStatus("idle"), 3000);
-    }
-  }, [controlMode, setUnsaved]);
-
-  const handleDiscard = useCallback(() => {
-    setUnsaved(false);
-    setSaveStatus("idle");
-  }, [setUnsaved]);
 
   const handleSectionClick = useCallback((sectionId: string) => {
     setActiveSection(sectionId);
@@ -150,18 +117,16 @@ export default function SettingsPage() {
       <div className="pointer-events-none absolute inset-0" style={{ backgroundColor: "rgba(5,6,10,0.45)" }} />
 
       {/* ── Section tab strip — sticky under the AppShell top bar ────────
-          Replaces the old 260px desktop sidebar: section tabs, search, and
-          the control-mode selector live here on every viewport. The strip
-          sticks below the AppShell header (56px bar + 48px mobile nav strip
-          on small screens, 56px bar alone on md+). */}
+          Replaces the old 260px desktop sidebar: section tabs and search
+          live here on every viewport. The strip sticks below the AppShell
+          header (56px bar + 48px mobile nav strip on small screens, 56px
+          bar alone on md+). */}
       <div className="relative">
         <SettingsTabStrip
           sections={filteredSections}
           allSections={SETTINGS_SECTIONS}
-          controlMode={controlMode}
           activeSection={activeSection}
           onSectionClick={handleSectionClick}
-          onModeChange={setControlMode}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           T={T}
@@ -196,7 +161,7 @@ export default function SettingsPage() {
                 title={activeSectionMeta.label}
                 description={activeSectionMeta.description}
               />
-              <SettingsContent section={activeSectionMeta.id} T={T} controlMode={controlMode} />
+              <SettingsContent section={activeSectionMeta.id} T={T} />
             </>
           )}
         </div>
@@ -210,28 +175,18 @@ export default function SettingsPage() {
             />
           </div>
           {activeSectionMeta && (
-            <SettingsContent section={activeSectionMeta.id} T={T} controlMode={controlMode} />
+            <SettingsContent section={activeSectionMeta.id} T={T} />
           )}
         </div>
       </div>
-
-      {/* ── Sticky save bar ──────────────────────────────────────── */}
-      <SaveBar
-        status={saveStatus}
-        onSave={handleSave}
-        onDiscard={handleDiscard}
-        hasChanges={hasUnsavedChanges}
-      />
 
       {mobileSettingsOpen && (
         <MobileSettingsSheet
           sections={filteredSections}
           allSections={SETTINGS_SECTIONS}
-          controlMode={controlMode}
           activeSection={activeSection}
           searchQuery={searchQuery}
           onSectionClick={handleSectionClick}
-          onModeChange={setControlMode}
           onClose={() => setMobileSettingsOpen(false)}
         />
       )}
@@ -243,18 +198,14 @@ export default function SettingsPage() {
  * Replaces the old 260px desktop sidebar. Sticky on every viewport:
  * sticks below the AppShell header — 56px bar + 48px mobile nav strip on
  * small screens (top-[104px]), 56px bar alone on md+ (md:top-14).
- * Tabs show icon + label; the active section is highlighted; locked
- * sections stay greyed out and switch the control mode on click, exactly
- * like the old sidebar did. Search + ModeSelector live in the strip so
- * they are always in reach. */
+ * Tabs show icon + label; the active section is highlighted. Search
+ * lives in the strip so it is always in reach. */
 
 function SettingsTabStrip({
   sections,
   allSections,
-  controlMode,
   activeSection,
   onSectionClick,
-  onModeChange,
   searchQuery,
   onSearchChange,
   T,
@@ -266,10 +217,8 @@ function SettingsTabStrip({
 }: {
   sections: SettingsSection[];
   allSections: SettingsSection[];
-  controlMode: ControlMode;
   activeSection: string;
   onSectionClick: (id: string) => void;
-  onModeChange: (m: ControlMode) => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
   T: ReturnType<typeof useTheme>["resolvedColors"];
@@ -279,7 +228,6 @@ function SettingsTabStrip({
   mobileSearchOpen: boolean;
   onToggleMobileSearch: () => void;
 }) {
-  const modeIdx = MODE_ORDER.indexOf(controlMode);
   const hasSearch = searchQuery.trim().length > 0;
   const displaySections = hasSearch ? sections : allSections;
 
@@ -332,13 +280,6 @@ function SettingsTabStrip({
         >
           <Search size={15} className="pointer-events-none" />
         </button>
-        <div className="relative ml-auto shrink-0 md:ml-0">
-          <ModeSelector
-            controlMode={controlMode}
-            onModeChange={onModeChange}
-            T={T}
-          />
-        </div>
       </div>
 
       <div className="px-3 pb-2.5 md:hidden">
@@ -388,31 +329,6 @@ function SettingsTabStrip({
         {displaySections.map((section) => {
           const Icon = ICONS[section.icon] ?? LayoutGrid;
           const isActive = activeSection === section.id;
-          const sIdx = MODE_ORDER.indexOf(section.minMode);
-          const isLocked = sIdx > modeIdx;
-          const lockedMode = MODE_META[section.minMode];
-
-          // Locked sections show which (free) control mode unlocks them — the
-          // lock is progressive disclosure, never a paywall. Clicking switches
-          // the mode; it never navigates away on its own.
-          if (isLocked) {
-            return (
-              <button
-                key={section.id}
-                type="button"
-                onClick={() => onModeChange(section.minMode)}
-                className="flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-[13px] font-bold transition-all hover:bg-white/5"
-                style={{ opacity: 0.62, color: "rgba(255,255,255,0.55)" }}
-                aria-label={`${section.label} — locked. Activate ${lockedMode.label} mode (free) to unlock.`}
-                title={`${section.label} — locked. Activate ${lockedMode.label} mode (free) to unlock.`}
-              >
-                <Icon size={14} className="pointer-events-none" style={{ color: `${lockedMode.color}80` }} />
-                <span className="whitespace-nowrap">{section.label}</span>
-                <Lock size={11} className="pointer-events-none shrink-0" aria-hidden style={{ color: `${lockedMode.color}90` }} />
-                <span className="whitespace-nowrap text-[10px] font-bold" style={{ color: `${lockedMode.color}90` }}>{lockedMode.label}</span>
-              </button>
-            );
-          }
 
           return (
             <button
@@ -441,23 +357,18 @@ function SettingsTabStrip({
 function MobileSettingsSheet({
   sections,
   allSections,
-  controlMode,
   activeSection,
   searchQuery,
   onSectionClick,
-  onModeChange,
   onClose,
 }: {
   sections: SettingsSection[];
   allSections: SettingsSection[];
-  controlMode: ControlMode;
   activeSection: string;
   searchQuery: string;
   onSectionClick: (id: string) => void;
-  onModeChange: (mode: ControlMode) => void;
   onClose: () => void;
 }) {
-  const modeIdx = MODE_ORDER.indexOf(controlMode);
   const hasSearch = searchQuery.trim().length > 0;
   const displaySections = hasSearch ? sections : allSections;
 
@@ -486,32 +397,25 @@ function MobileSettingsSheet({
             <h2 className="text-base font-black text-white">All settings</h2>
             <p className="text-xs text-white/60">Choose a category</p>
           </div>
-          <span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-bold text-white/60">{MODE_META[controlMode].label}</span>
         </header>
         <nav className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-3 py-4" aria-label="Settings sections">
           {displaySections.map((section) => {
             const Icon = ICONS[section.icon] ?? LayoutGrid;
             const isActive = activeSection === section.id;
-            const isLocked = MODE_ORDER.indexOf(section.minMode) > modeIdx;
-            const lockedMode = MODE_META[section.minMode];
             return (
               <button
                 key={section.id}
                 type="button"
                 onClick={() => {
-                  // Locked rows switch to the (free) required mode AND navigate —
-                  // one tap, no mystery about what the lock means.
-                  if (isLocked) onModeChange(section.minMode);
                   onSectionClick(section.id);
                 }}
                 className="flex min-h-14 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
                 style={{
                   borderColor: isActive ? "color-mix(in srgb, var(--color-accent) 45%, transparent)" : "rgba(255,255,255,0.1)",
                   backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "rgba(255,255,255,0.025)",
-                  opacity: isLocked ? 0.72 : 1,
                 }}
                 aria-current={isActive ? "page" : undefined}
-                aria-label={isLocked ? `${section.label} — locked. Activate ${lockedMode.label} mode (free) to unlock.` : section.label}
+                aria-label={section.label}
               >
                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-accent/90">
                   <Icon size={16} className="pointer-events-none" />
@@ -520,12 +424,7 @@ function MobileSettingsSheet({
                   <span className={`block text-sm font-bold ${isActive ? "text-accent" : "text-white/90"}`}>{section.label}</span>
                   <span className="block truncate text-xs text-white/60">{section.description}</span>
                 </span>
-                {isLocked ? (
-                  <span className="flex shrink-0 items-center gap-1 text-[10px] font-bold" style={{ color: `${lockedMode.color}90` }}>
-                    <Lock size={10} aria-hidden />
-                    {lockedMode.label}
-                  </span>
-                ) : isActive ? <Check size={16} className="shrink-0 text-accent" /> : <ChevronRight size={15} className="shrink-0 text-white/45" />}
+                {isActive ? <Check size={16} className="shrink-0 text-accent" /> : <ChevronRight size={15} className="shrink-0 text-white/45" />}
               </button>
             );
           })}
@@ -535,92 +434,18 @@ function MobileSettingsSheet({
   );
 }
 
-/* ── Mode selector (compact, top-right) ────────────────────────────── */
-
-function ModeSelector({
-  controlMode,
-  onModeChange,
-  T: _T,
-}: {
-  controlMode: ControlMode;
-  onModeChange: (m: ControlMode) => void;
-  T: ReturnType<typeof useTheme>["resolvedColors"];
-}) {
-  const [open, setOpen] = useState(false);
-  const meta = MODE_META[controlMode];
-
-  return (
-    <div className="relative shrink-0">
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-bold transition-all"
-        style={{
-          borderColor: `${meta.color}40`,
-          backgroundColor: `${meta.color}10`,
-          color: meta.color,
-        }}
-        aria-label={`Control mode: ${meta.label}`}
-        aria-expanded={open}
-      >
-        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: meta.color }} />
-        {meta.label}
-        <ChevronRight size={10} className={`pointer-events-none transition-transform ${open ? "rotate-90" : ""}`} />
-      </button>
-      {open && (
-        <>
-          <button className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-label="Close mode selector" />
-          <div
-            className="absolute right-0 top-full z-41 mt-1 w-64 rounded-xl border shadow-2xl"
-            style={{
-              backgroundColor: "rgba(10,12,18,0.98)",
-              borderColor: "rgba(255,255,255,0.08)",
-            }}
-          >
-            {MODE_ORDER.map((mode) => {
-              const m = MODE_META[mode];
-              const isActive = controlMode === mode;
-              return (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => { onModeChange(mode); setOpen(false); }}
-                  className="flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-white/5"
-                >
-                  <span className="mt-0.5 h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: m.color }} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-bold" style={{ color: isActive ? m.color : "rgba(255,255,255,0.8)" }}>
-                        {m.label}
-                      </span>
-                      {isActive && <Check size={10} style={{ color: m.color }} />}
-                    </div>
-                    <p className="text-[9px] text-white/40">{m.description}</p>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 /* ── Section content router ────────────────────────────────────────── */
 
 function SettingsContent({
   section,
   T,
-  controlMode,
 }: {
   section: string;
   T: ReturnType<typeof useTheme>["resolvedColors"];
-  controlMode: ControlMode;
 }) {
   switch (section) {
     case "overview":
-      return <OverviewSection T={T} controlMode={controlMode} />;
+      return <OverviewSection T={T} />;
     case "account":
       return <AccountSection T={T} />;
     case "appearance":
@@ -629,16 +454,10 @@ function SettingsContent({
       return <WorkspaceSection T={T} />;
     case "ai-models":
       return <AIModelsSection T={T} />;
-    case "agents":
-      return <AgentsSection T={T} />;
     case "voice-camera":
       return <VoiceCameraSection T={T} />;
     case "connections":
       return <ConnectionsSection T={T} />;
-    case "automation":
-      return <AutomationSection T={T} />;
-    case "notifications":
-      return <NotificationsSection T={T} />;
     case "billing":
       return <BillingSection T={T} />;
     case "privacy":
@@ -656,13 +475,13 @@ function SettingsContent({
 
 /* ── Overview ──────────────────────────────────────────────────────── */
 
-function OverviewSection({ T, controlMode }: { T: ReturnType<typeof useTheme>["resolvedColors"]; controlMode: ControlMode }) {
+function OverviewSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
   const { isSignedIn } = useClerkAuthContext();
   const { user, isLoaded: userLoaded } = useUser();
   const { theme } = useTheme();
   const { capabilities } = useConnectionSummary();
   const { selectedModel } = useStudioModelStore();
-  const { setActiveSection, setControlMode } = useSettingsStore();
+  const { setActiveSection } = useSettingsStore();
   const [micStatus, setMicStatus] = useState<"unknown" | "available" | "denied" | "error">("unknown");
 
   // Read existing permission state via Permissions API (no prompt).
@@ -700,15 +519,9 @@ function OverviewSection({ T, controlMode }: { T: ReturnType<typeof useTheme>["r
   const hasGitHub = connectedProviders.includes("repository");
   const hasTerminal = capabilities.terminalStatus === "connected";
 
-  // Cards that point at a mode-locked section unlock the (free) required mode
-  // on tap — the same rule as the tab strip, so the overview never silently
-  // bypasses a lock the nav bar enforces.
   const goToSection = useCallback((sectionId: string) => {
-    if (isSectionLocked(sectionId, controlMode)) {
-      setControlMode(sectionMinMode(sectionId));
-    }
     setActiveSection(sectionId);
-  }, [controlMode, setControlMode, setActiveSection]);
+  }, [setActiveSection]);
 
   const overviewCards = [
     {
@@ -775,8 +588,6 @@ function OverviewSection({ T, controlMode }: { T: ReturnType<typeof useTheme>["r
       {/* Status cards */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3">
         {overviewCards.map((card) => {
-          const locked = isSectionLocked(card.section, controlMode);
-          const lockMode = MODE_META[sectionMinMode(card.section)];
           return (
             <button
               key={card.label}
@@ -784,7 +595,7 @@ function OverviewSection({ T, controlMode }: { T: ReturnType<typeof useTheme>["r
               onClick={() => goToSection(card.section)}
               className="flex min-h-23 items-center justify-between rounded-2xl border px-5 py-4 text-left transition-all hover:bg-white/5"
               style={{ borderColor: "rgba(255,255,255,0.06)", backgroundColor: "rgba(255,255,255,0.02)" }}
-              aria-label={locked ? `${card.label} — locked. Activate ${lockMode.label} mode (free) to unlock.` : `${card.label}: ${card.value}. ${card.action}.`}
+              aria-label={`${card.label}: ${card.value}. ${card.action}.`}
             >
               <div className="flex items-center gap-3 min-w-0">
                 <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl" style={{ backgroundColor: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.5)" }}>
@@ -795,9 +606,8 @@ function OverviewSection({ T, controlMode }: { T: ReturnType<typeof useTheme>["r
                   <div className="mt-1 truncate text-xs leading-5 text-white/40">{card.value}</div>
                 </div>
               </div>
-              <span className="flex shrink-0 items-center gap-1.5 text-xs font-bold" style={{ color: locked ? `${lockMode.color}90` : T.accentColor }}>
-                {locked && <Lock size={11} className="pointer-events-none" aria-hidden />}
-                {locked ? lockMode.label : <>{card.action} →</>}
+              <span className="flex shrink-0 items-center gap-1.5 text-xs font-bold" style={{ color: T.accentColor }}>
+                <>{card.action} →</>
               </span>
             </button>
           );
@@ -823,19 +633,6 @@ function OverviewSection({ T, controlMode }: { T: ReturnType<typeof useTheme>["r
           </div>
         </SettingsCard>
       )}
-
-      {/* Current mode */}
-      <section className="rounded-2xl border border-white/10 bg-black/30 p-5">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: MODE_META[controlMode].color }} />
-            <div>
-              <div className="text-sm font-bold" style={{ color: MODE_META[controlMode].color }}>{MODE_META[controlMode].label}</div>
-              <p className="mt-0.5 text-xs text-white/40">{MODE_META[controlMode].description}</p>
-            </div>
-          </div>
-        </div>
-      </section>
     </div>
   );
 }
@@ -1403,10 +1200,6 @@ function WorkspaceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColor
 
 function AIModelsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
   const { selectedModel, selectModel, providerHealth } = useStudioModelStore();
-  const [spend, updateSpend] = useLocalSettings("spend-limits", {
-    dailyLimit: "5",
-    monthlyLimit: "50",
-  });
 
   const categoryLabels: Record<string, string> = {
     auto: "Auto Best",
@@ -1476,14 +1269,6 @@ function AIModelsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors
         </div>
       </SettingsCard>
 
-      {/* Spend limits */}
-      <SettingsCard title="Spending limits" description="Control AI costs">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <SettingsInput label="Daily spend limit ($)" value={spend.dailyLimit} onChange={(v) => updateSpend("dailyLimit", v)} type="number" />
-          <SettingsInput label="Monthly spend limit ($)" value={spend.monthlyLimit} onChange={(v) => updateSpend("monthlyLimit", v)} type="number" />
-        </div>
-      </SettingsCard>
-
       {/* Provider diagnostics */}
       <SettingsCard title="Provider diagnostics" description="Health and availability">
         <div className="space-y-2">
@@ -1506,187 +1291,6 @@ function AIModelsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors
           })}
         </div>
       </SettingsCard>
-    </div>
-  );
-}
-
-/* ── LiTT ──────────────────────────────────────────────────────────── */
-
-const AGENT_DEFAULT_SETTINGS = {
-  defaultAgent: "litt",
-  responseStyle: "concise",
-  spokenLength: "medium",
-  approvalRequired: true,
-  projectAwareness: true,
-  memoryUsage: true,
-  proactiveSuggestions: false,
-  terminalAccess: true,
-  fileWrite: false,
-  githubAccess: false,
-  deployApproval: true,
-  hiddenAgents: [] as string[],
-};
-
-function AgentsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
-  const STORAGE_KEY = "litlabs:agent-settings";
-
-  const [settings, setSettings] = useState(AGENT_DEFAULT_SETTINGS);
-  const [savedSettings, setSavedSettings] = useState(AGENT_DEFAULT_SETTINGS);
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [loaded, setLoaded] = useState(false);
-
-  // Load saved settings from localStorage on mount
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        const merged = { ...AGENT_DEFAULT_SETTINGS, ...parsed };
-        setSettings(merged);
-        setSavedSettings(merged);
-      }
-    } catch {
-      // ignore parse errors
-    }
-    setLoaded(true);
-  }, []);
-
-  // Track unsaved changes
-  const hasUnsavedChanges = loaded && JSON.stringify(settings) !== JSON.stringify(savedSettings);
-
-  const updateSetting = useCallback(<K extends keyof typeof settings>(key: K, value: (typeof settings)[K]) => {
-    setSettings((prev) => ({ ...prev, [key]: value }));
-  }, []);
-
-  const handleSave = useCallback(async () => {
-    setSaveStatus("saving");
-    try {
-      // Save to localStorage
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-
-      // Also try to persist server-side (fire-and-forget — works if migration is applied)
-      try {
-        await fetch("/api/settings/agents", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(settings),
-        });
-      } catch {
-        // Server-side save is best-effort — localStorage is the source of truth for now
-      }
-
-      setSavedSettings(settings);
-      setSaveStatus("saved");
-      setTimeout(() => setSaveStatus("idle"), 2000);
-    } catch {
-      setSaveStatus("error");
-      setTimeout(() => setSaveStatus("idle"), 3000);
-    }
-  }, [settings]);
-
-  const handleDiscard = useCallback(() => {
-    setSettings(savedSettings);
-    setSaveStatus("idle");
-  }, [savedSettings]);
-
-  return (
-    <div className="space-y-4">
-      <SettingsCard title="Default agent" description="Who responds first" icon={<Bot size={16} />}>
-        <div className="grid grid-cols-2 gap-2">
-          {[
-            { id: "litt", name: "LiTT", desc: "Operating agent" },
-          ].map((a) => (
-            <button key={a.id} type="button" onClick={() => updateSetting("defaultAgent", a.id)}
-              className="rounded-xl border p-3 text-left transition-all"
-              style={{ borderColor: settings.defaultAgent === a.id ? `${T.accentColor}40` : "rgba(255,255,255,0.06)", backgroundColor: settings.defaultAgent === a.id ? `${T.accentColor}10` : "transparent" }}>
-              <div className="text-sm font-bold" style={{ color: settings.defaultAgent === a.id ? T.accentColor : "rgba(255,255,255,0.8)" }}>{a.name}</div>
-              <div className="text-[10px] text-white/40">{a.desc}</div>
-            </button>
-          ))}
-        </div>
-      </SettingsCard>
-
-      <SettingsCard title="Response style" description="How agents communicate">
-        <div className="space-y-3">
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Response style</span>
-            <div className="mt-1 flex gap-2">
-              {["concise", "detailed", "casual"].map((v) => (
-                <button key={v} type="button" onClick={() => updateSetting("responseStyle", v)}
-                  className="rounded-lg border px-3 py-1.5 text-[10px] font-bold capitalize"
-                  style={{ borderColor: settings.responseStyle === v ? T.accentColor : "rgba(255,255,255,0.08)", color: settings.responseStyle === v ? T.accentColor : "rgba(255,255,255,0.5)" }}>
-                  {v}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Spoken response length</span>
-            <div className="mt-1 flex gap-2">
-              {["short", "medium", "long"].map((v) => (
-                <button key={v} type="button" onClick={() => updateSetting("spokenLength", v)}
-                  className="rounded-lg border px-3 py-1.5 text-[10px] font-bold capitalize"
-                  style={{ borderColor: settings.spokenLength === v ? T.accentColor : "rgba(255,255,255,0.08)", color: settings.spokenLength === v ? T.accentColor : "rgba(255,255,255,0.5)" }}>
-                  {v}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </SettingsCard>
-
-      <SettingsCard title="Behavior" description="Agent autonomy and awareness">
-        <div className="space-y-3">
-          <ToggleRow title="Require approval for actions" description="Ask before executing" checked={settings.approvalRequired} onChange={(v) => updateSetting("approvalRequired", v)} />
-          <ToggleRow title="Project awareness" description="Agents know your project context" checked={settings.projectAwareness} onChange={(v) => updateSetting("projectAwareness", v)} />
-          <ToggleRow title="Memory usage" description="Use conversation history and memory" checked={settings.memoryUsage} onChange={(v) => updateSetting("memoryUsage", v)} />
-          <ToggleRow title="Proactive suggestions" description="Agents suggest next steps" checked={settings.proactiveSuggestions} onChange={(v) => updateSetting("proactiveSuggestions", v)} />
-        </div>
-      </SettingsCard>
-
-      <SettingsCard title="Tool permissions" description="What agents are allowed to do">
-        <div className="space-y-3">
-          <ToggleRow title="Terminal execution" description="Allow agents to run commands" checked={settings.terminalAccess} onChange={(v) => updateSetting("terminalAccess", v)} />
-          <ToggleRow title="File write access" description="Allow agents to modify files" checked={settings.fileWrite} onChange={(v) => updateSetting("fileWrite", v)} />
-          <ToggleRow title="GitHub access" description="Allow agents to push and create PRs" checked={settings.githubAccess} onChange={(v) => updateSetting("githubAccess", v)} />
-          <ToggleRow title="Deployment approval" description="Require approval before deploying" checked={settings.deployApproval} onChange={(v) => updateSetting("deployApproval", v)} />
-        </div>
-      </SettingsCard>
-
-      {/* Save / Discard bar */}
-      <div className="sticky bottom-4 z-10 flex items-center justify-between rounded-xl border p-3"
-        style={{
-          borderColor: hasUnsavedChanges ? `${T.accentColor}40` : "rgba(255,255,255,0.06)",
-          backgroundColor: "rgba(10,10,15,0.95)",
-          backdropFilter: "blur(8px)",
-        }}>
-        <div className="flex items-center gap-2">
-          {saveStatus === "saved" && <Check size={14} style={{ color: T.accentColor }} />}
-          {saveStatus === "saving" && <Loader2 size={14} className="animate-spin" style={{ color: T.accentColor }} />}
-          <span className="text-[11px]" style={{
-            color: saveStatus === "error" ? "#ef4444"
-              : saveStatus === "saved" ? T.accentColor
-              : hasUnsavedChanges ? "rgba(255,255,255,0.6)"
-              : "rgba(255,255,255,0.3)",
-          }}>
-            {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved" : saveStatus === "error" ? "Save failed" : hasUnsavedChanges ? "Unsaved changes" : "All changes saved"}
-          </span>
-        </div>
-        <div className="flex gap-2">
-          {hasUnsavedChanges && (
-            <button type="button" onClick={handleDiscard}
-              className="rounded-lg border px-3 py-1.5 text-[11px] font-bold transition-all"
-              style={{ borderColor: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)" }}>
-              Discard
-            </button>
-          )}
-          <button type="button" onClick={handleSave} disabled={!hasUnsavedChanges || saveStatus === "saving"}
-            className="rounded-lg px-4 py-1.5 text-[11px] font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-            style={{ backgroundColor: T.accentColor, color: T.bgColor }}>
-            {saveStatus === "saving" ? "Saving..." : "Save Changes"}
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -2259,99 +1863,6 @@ function ConnectionsSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolve
   );
 }
 
-/* ── Automation ────────────────────────────────────────────────────── */
-
-function AutomationSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
-  const [s, update] = useLocalSettings("automation", {
-    autoRunTests: false,
-    autoOpenPreview: true,
-    autoSave: true,
-    requireDeployApproval: true,
-    requireFileWriteApproval: false,
-    autoRetry: true,
-    maxRetries: 3,
-  });
-
-  return (
-    <div className="space-y-4">
-      <SettingsCard title="Workflow automation" description="Auto-run rules and triggers" icon={<Zap size={16} />}>
-        <div className="space-y-3">
-          <ToggleRow title="Auto-run tests" description="Run tests on file changes" checked={s.autoRunTests} onChange={(v) => update("autoRunTests", v)} />
-          <ToggleRow title="Auto-open preview" description="Open preview after build" checked={s.autoOpenPreview} onChange={(v) => update("autoOpenPreview", v)} />
-          <ToggleRow title="Auto-save" description="Save changes automatically" checked={s.autoSave} onChange={(v) => update("autoSave", v)} />
-        </div>
-      </SettingsCard>
-      <SettingsCard title="Approval rules" description="When to ask before acting">
-        <div className="space-y-3">
-          <ToggleRow title="Require deployment approval" description="Ask before deploying to production" checked={s.requireDeployApproval} onChange={(v) => update("requireDeployApproval", v)} />
-          <ToggleRow title="Require file write approval" description="Ask before modifying files" checked={s.requireFileWriteApproval} onChange={(v) => update("requireFileWriteApproval", v)} />
-        </div>
-      </SettingsCard>
-      <SettingsCard title="Failure recovery" description="What happens when things go wrong">
-        <div className="space-y-3">
-          <ToggleRow title="Auto-retry on failure" description="Retry failed operations" checked={s.autoRetry} onChange={(v) => update("autoRetry", v)} />
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Max retries</span>
-            <div className="mt-1 flex gap-2">
-              {[1, 2, 3, 5].map((n) => (
-                <button key={n} type="button" onClick={() => update("maxRetries", n)}
-                  className="rounded-lg border px-3 py-1.5 text-[10px] font-bold"
-                  style={{ borderColor: s.maxRetries === n ? _T.accentColor : "rgba(255,255,255,0.08)", color: s.maxRetries === n ? _T.accentColor : "rgba(255,255,255,0.5)" }}>
-                  {n}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </SettingsCard>
-    </div>
-  );
-}
-
-/* ── Notifications ─────────────────────────────────────────────────── */
-
-function NotificationsSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
-  const [s, update] = useLocalSettings("notifications", {
-    browserNotifications: true,
-    emailNotifications: false,
-    missionCompletion: true,
-    deploymentFailures: true,
-    connectionErrors: true,
-    billingUsage: false,
-    securityAlerts: true,
-    quietHoursEnabled: false,
-    quietStart: "22:00",
-    quietEnd: "08:00",
-  });
-
-  return (
-    <div className="space-y-4">
-      <SettingsCard title="Alerts" description="What you get notified about" icon={<Bell size={16} />}>
-        <div className="space-y-3">
-          <ToggleRow title="Browser notifications" description="Show desktop notifications" checked={s.browserNotifications} onChange={(v) => update("browserNotifications", v)} />
-          <ToggleRow title="Email notifications" description="Send alerts to your email" checked={s.emailNotifications} onChange={(v) => update("emailNotifications", v)} />
-          <ToggleRow title="Mission completion" description="When a mission finishes" checked={s.missionCompletion} onChange={(v) => update("missionCompletion", v)} />
-          <ToggleRow title="Deployment failures" description="When a deployment fails" checked={s.deploymentFailures} onChange={(v) => update("deploymentFailures", v)} />
-          <ToggleRow title="Connection errors" description="When a service disconnects" checked={s.connectionErrors} onChange={(v) => update("connectionErrors", v)} />
-          <ToggleRow title="Billing usage" description="When you approach spend limits" checked={s.billingUsage} onChange={(v) => update("billingUsage", v)} />
-          <ToggleRow title="Security alerts" description="Suspicious activity on your account" checked={s.securityAlerts} onChange={(v) => update("securityAlerts", v)} />
-        </div>
-      </SettingsCard>
-      <SettingsCard title="Quiet hours" description="Mute notifications during specific times">
-        <div className="space-y-3">
-          <ToggleRow title="Enable quiet hours" description="Mute notifications during a time window" checked={s.quietHoursEnabled} onChange={(v) => update("quietHoursEnabled", v)} />
-          {s.quietHoursEnabled && (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <SettingsInput label="Start" value={s.quietStart} onChange={(v) => update("quietStart", v)} type="time" />
-              <SettingsInput label="End" value={s.quietEnd} onChange={(v) => update("quietEnd", v)} type="time" />
-            </div>
-          )}
-        </div>
-      </SettingsCard>
-    </div>
-  );
-}
-
 /* ── Billing & LiTTBits ─────────────────────────────────────────────── */
 
 type BillingData = {
@@ -2586,12 +2097,6 @@ function PrivacySection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCol
     createdAt?: string;
   }> | null>(null);
   const [auditFailed, setAuditFailed] = useState(false);
-  const [privacy, updatePrivacy] = useLocalSettings("privacy", {
-    analyticsOptIn: false,
-    publicProfile: true,
-    conversationStorage: true,
-    memoryUsage: true,
-  });
 
   // Real audit entries — "No recent activity" only shows when the API
   // actually returns an empty list, never as a hardcoded placeholder.
@@ -2660,15 +2165,6 @@ function PrivacySection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCol
 
   return (
     <div className="space-y-4">
-      <SettingsCard title="Data privacy" description="Control your data" icon={<Shield size={16} />}>
-        <div className="space-y-3">
-          <ToggleRow title="Analytics opt-in" description="Share usage data to improve LiTTree" checked={privacy.analyticsOptIn} onChange={(v) => updatePrivacy("analyticsOptIn", v)} />
-          <ToggleRow title="Public profile" description="Make your profile visible to others" checked={privacy.publicProfile} onChange={(v) => updatePrivacy("publicProfile", v)} />
-          <ToggleRow title="Conversation storage" description="Save conversations to your account" checked={privacy.conversationStorage} onChange={(v) => updatePrivacy("conversationStorage", v)} />
-          <ToggleRow title="Memory usage" description="Allow agents to remember context" checked={privacy.memoryUsage} onChange={(v) => updatePrivacy("memoryUsage", v)} />
-        </div>
-      </SettingsCard>
-
       <SettingsCard title="Active sessions" description="Devices logged into your account">
         <p className="text-xs text-white/40">Session management is coming soon — for now, sign out directly on each device.</p>
       </SettingsCard>
@@ -2823,35 +2319,13 @@ function PerformanceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
 /* ── Advanced ──────────────────────────────────────────────────────── */
 
 function AdvancedSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
-  const { controlMode, setControlMode, setActiveSection } = useSettingsStore();
-  const [dev, updateDev, resetDev] = useLocalSettings("developer", {
-    debugMode: false,
-    verboseLogging: false,
-    experimentalFeatures: false,
-  });
-  const [flags, updateFlag, resetFlags] = useLocalSettings("feature-flags", {
-    maintenanceMode: false,
-    newRegistration: true,
-    marketplace: true,
-    betaMode: true,
-    billingEnabled: false,
-  });
+  const { setActiveSection } = useSettingsStore();
   const [confirmResetAll, setConfirmResetAll] = useState(false);
   const [resetMsg, setResetMsg] = useState<string | null>(null);
 
-  // Every diagnostics row opens a real, working surface — no dead buttons.
   const goToSection = useCallback((sectionId: string) => {
-    if (isSectionLocked(sectionId, controlMode)) {
-      setControlMode(sectionMinMode(sectionId));
-    }
     setActiveSection(sectionId);
-  }, [controlMode, setControlMode, setActiveSection]);
-
-  const handleResetSection = useCallback(() => {
-    resetDev();
-    resetFlags();
-    setResetMsg("This section's settings were reset to defaults.");
-  }, [resetDev, resetFlags]);
+  }, [setActiveSection]);
 
   const handleResetAll = useCallback(() => {
     const removed = resetAllLocalSettings();
@@ -2861,24 +2335,6 @@ function AdvancedSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCo
 
   return (
     <div className="space-y-4">
-      <SettingsCard title="Developer options" description="Advanced overrides" icon={<Terminal size={16} />}>
-        <div className="space-y-3">
-          <ToggleRow title="Debug mode" description="Show debug information in UI" checked={dev.debugMode} onChange={(v) => updateDev("debugMode", v)} />
-          <ToggleRow title="Verbose logging" description="Detailed console output" checked={dev.verboseLogging} onChange={(v) => updateDev("verboseLogging", v)} />
-          <ToggleRow title="Experimental features" description="Enable beta features" checked={dev.experimentalFeatures} onChange={(v) => updateDev("experimentalFeatures", v)} />
-        </div>
-      </SettingsCard>
-
-      <SettingsCard title="Feature flags" description="Enable or disable platform features">
-        <div className="space-y-3">
-          <ToggleRow title="Maintenance mode" description="Take the platform offline" checked={flags.maintenanceMode} onChange={(v) => updateFlag("maintenanceMode", v)} />
-          <ToggleRow title="New user registration" description="Allow new signups" checked={flags.newRegistration} onChange={(v) => updateFlag("newRegistration", v)} />
-          <ToggleRow title="Marketplace" description="Enable marketplace" checked={flags.marketplace} onChange={(v) => updateFlag("marketplace", v)} />
-          <ToggleRow title="Beta mode" description="Show beta features to all users" checked={flags.betaMode} onChange={(v) => updateFlag("betaMode", v)} />
-          <ToggleRow title="Billing enablement" description="Allow purchases (disabled in beta)" checked={flags.billingEnabled} onChange={(v) => updateFlag("billingEnabled", v)} />
-        </div>
-      </SettingsCard>
-
       <SettingsCard title="Provider fallback" description="AI model fallback chain">
         <div className="space-y-2">
           {["Gemini 2.5 Flash", "Groq Llama 70B", "OpenRouter Free"].map((p, i) => (
@@ -2908,8 +2364,6 @@ function AdvancedSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCo
             { label: "AI provider health", desc: "Model provider availability", section: "ai-models" },
             { label: "Integration status", desc: "GitHub, AI keys, runtime services", section: "connections" },
           ].map((item) => {
-            const locked = isSectionLocked(item.section, controlMode);
-            const lockMode = MODE_META[sectionMinMode(item.section)];
             return (
               <button
                 key={item.label}
@@ -2917,16 +2371,15 @@ function AdvancedSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCo
                 onClick={() => goToSection(item.section)}
                 className="flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-xs font-bold transition-all hover:bg-white/5"
                 style={{ borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.7)" }}
-                aria-label={locked ? `${item.label} — locked. Activate ${lockMode.label} mode (free) to unlock.` : item.label}
+                aria-label={item.label}
               >
                 <span className="text-left">
                   {item.label}
                   <span className="block text-[10px] font-medium text-white/35">
-                    {item.desc}{locked ? ` · needs ${lockMode.label} mode` : ""}
+                    {item.desc}
                   </span>
                 </span>
                 <span className="flex shrink-0 items-center gap-1.5">
-                  {locked && <Lock size={11} className="pointer-events-none" aria-hidden style={{ color: `${lockMode.color}90` }} />}
                   <ChevronRight size={12} className="pointer-events-none text-white/30" />
                 </span>
               </button>
@@ -2937,14 +2390,6 @@ function AdvancedSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCo
 
       <SettingsCard title="Reset" description="Reset settings to defaults">
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={handleResetSection}
-            className="flex items-center gap-1.5 rounded-lg border border-red-400/20 px-3 py-1.5 text-xs font-bold text-red-300 transition-all hover:bg-red-400/10"
-          >
-            <RotateCcw size={12} className="pointer-events-none" />
-            Reset this section
-          </button>
           {confirmResetAll ? (
             <>
               <button

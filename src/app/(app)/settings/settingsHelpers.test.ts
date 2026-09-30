@@ -2,41 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   accountCardValue,
   accentLabel,
-  isSectionLocked,
   micCardValue,
   resetAllLocalSettings,
-  sectionMinMode,
   securityCardValue,
   themeModeLabel,
 } from "./settingsHelpers";
-
-describe("section locks", () => {
-  it("standard mode locks advanced and pro sections only", () => {
-    expect(isSectionLocked("overview", "standard")).toBe(false);
-    expect(isSectionLocked("account", "standard")).toBe(false);
-    expect(isSectionLocked("voice-camera", "standard")).toBe(true);
-    expect(isSectionLocked("performance", "standard")).toBe(true);
-    expect(isSectionLocked("ai-models", "standard")).toBe(true);
-    expect(isSectionLocked("connections", "standard")).toBe(true);
-  });
-
-  it("advanced mode unlocks advanced sections, keeps pro locked", () => {
-    expect(isSectionLocked("voice-camera", "advanced")).toBe(false);
-    expect(isSectionLocked("performance", "advanced")).toBe(false);
-    expect(isSectionLocked("ai-models", "advanced")).toBe(true);
-  });
-
-  it("pro mode unlocks everything", () => {
-    for (const id of ["overview", "voice-camera", "ai-models", "connections", "automation"]) {
-      expect(isSectionLocked(id, "pro")).toBe(false);
-    }
-  });
-
-  it("unknown sections default to standard (unlocked)", () => {
-    expect(sectionMinMode("nope")).toBe("standard");
-    expect(isSectionLocked("nope", "standard")).toBe(false);
-  });
-});
 
 describe("accountCardValue", () => {
   it("shows the real first name, never a bare placeholder", () => {
