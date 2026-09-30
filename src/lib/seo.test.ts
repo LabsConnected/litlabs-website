@@ -123,8 +123,8 @@ describe("SEO — Brand signals for LitLabs", () => {
       expect(SITE_NAME).toBe("LiTTree LabStudios");
     });
 
-    it("SITE_URL is https://litlabs.net", () => {
-      expect(SITE_URL).toBe("https://litlabs.net");
+    it("SITE_URL falls back to the canonical https://www.litlabs.net", () => {
+      expect(SITE_URL).toBe("https://www.litlabs.net");
     });
   });
 });

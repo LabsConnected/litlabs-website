@@ -6,7 +6,7 @@ This document provides a comprehensive machine-readable guide to LiTTree LabStud
 
 **Company Name:** LiTTree LabStudios
 **Product Name:** LiTTree / LitLabs
-**Primary Domain:** [https://litlabs.net](https://litlabs.net)
+**Primary Domain:** [https://www.litlabs.net](https://www.litlabs.net)
 **Mission:** To build an AI-powered creative operating system where humans and AI collaborate to build working products and media with total context and control.
 
 ## 2. Core AI Agents
@@ -82,8 +82,8 @@ Project data and conversation history are private to the user/organization. We d
 
 ## 7. Canonical Resources
 
-* **Homepage**: [https://litlabs.net](https://litlabs.net)
-* **Pricing**: [https://litlabs.net/pricing](https://litlabs.net/pricing)
-* **Docs**: [https://litlabs.net/docs](https://litlabs.net/docs)
-* **Sitemap**: [https://litlabs.net/sitemap.xml](https://litlabs.net/sitemap.xml)
-* **Robots**: [https://litlabs.net/robots.txt](https://litlabs.net/robots.txt)
+* **Homepage**: [https://www.litlabs.net](https://www.litlabs.net)
+* **Pricing**: [https://www.litlabs.net/pricing](https://www.litlabs.net/pricing)
+* **Docs**: [https://www.litlabs.net/docs](https://www.litlabs.net/docs)
+* **Sitemap**: [https://www.litlabs.net/sitemap.xml](https://www.litlabs.net/sitemap.xml)
+* **Robots**: [https://www.litlabs.net/robots.txt](https://www.litlabs.net/robots.txt)
