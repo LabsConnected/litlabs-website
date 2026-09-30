@@ -19,7 +19,7 @@ describe("useProjectIsolation", () => {
   beforeEach(() => {
     useExecutionStore.getState().reset();
     useTerminalStore.getState().reset();
-    useSettingsStore.getState().setControlMode("standard");
+    useSettingsStore.getState().setActiveSection("overview");
   });
 
   function seedProjectAState() {
@@ -42,7 +42,7 @@ describe("useProjectIsolation", () => {
       projectId: "proj-a",
     });
 
-    useSettingsStore.getState().setControlMode("pro");
+    useSettingsStore.getState().setActiveSection("billing");
   }
 
   it("resets execution + terminal state on project switch, keeps user globals", () => {
@@ -75,7 +75,7 @@ describe("useProjectIsolation", () => {
     expect(term.status).toBe("disconnected");
 
     // User-global preferences are NOT project-scoped — they survive.
-    expect(useSettingsStore.getState().controlMode).toBe("pro");
+    expect(useSettingsStore.getState().activeSection).toBe("billing");
   });
 
   it("does not reset when the project id is unchanged", () => {

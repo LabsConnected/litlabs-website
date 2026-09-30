@@ -2,25 +2,9 @@
  * settingsHelpers — pure helpers for the Settings page.
  *
  * Extracted so the truthfulness rules of the Overview cards (real user name,
- * real 2FA state, real theme labels, honest lock affordances) are unit-tested
- * instead of buried inline in the page component.
+ * real 2FA state, real theme labels) are unit-tested instead of buried inline
+ * in the page component.
  */
-import {
-  MODE_ORDER,
-  SETTINGS_SECTIONS,
-  type ControlMode,
-} from "@/stores/useSettingsStore";
-
-/* ── Section locks ─────────────────────────────────────────────────── */
-
-export function sectionMinMode(sectionId: string): ControlMode {
-  return SETTINGS_SECTIONS.find((s) => s.id === sectionId)?.minMode ?? "standard";
-}
-
-/** True when `sectionId` needs a higher control mode than the current one. */
-export function isSectionLocked(sectionId: string, controlMode: ControlMode): boolean {
-  return MODE_ORDER.indexOf(sectionMinMode(sectionId)) > MODE_ORDER.indexOf(controlMode);
-}
 
 /* ── Display labels ────────────────────────────────────────────────── */
 
