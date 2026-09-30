@@ -457,6 +457,49 @@ function parseImageDataUrl(dataUrl: string): { mimeType: string; data: string } 
   return { mimeType: match[1], data: match[2] };
 }
 
+/**
+ * Strip JSON-Schema keywords the Gemini API rejects in function declarations.
+ *
+ * The app passes tool input schemas (which may originate from MCP servers,
+ * zod conversions, or hand-written definitions) straight through to
+ * generativelanguage.googleapis.com. Google 400s the whole request on
+ * keywords outside its Schema subset — observed in production 2026-09-30:
+ * `Invalid JSON payload received. Unknown name "propertyNames" ...
+ * Unknown name "additionalProperties" ...` on gemini-2.5-flash.
+ *
+ * This recursively removes the known-offending metadata keywords while
+ * preserving the validation semantics Gemini does understand (type,
+ * properties, required, items, enum, description, etc.). Removing
+ * `additionalProperties`/`propertyNames` cannot break a call Google would
+ * otherwise accept — it only drops constraints Google ignores anyway.
+ */
+const GEMINI_UNSUPPORTED_SCHEMA_KEYS = new Set([
+  "additionalProperties",
+  "propertyNames",
+  "patternProperties",
+  "unevaluatedProperties",
+  "unevaluatedItems",
+  "$schema",
+  "$id",
+  "$defs",
+  "definitions",
+]);
+
+export function sanitizeSchemaForGemini(node: unknown): unknown {
+  if (Array.isArray(node)) {
+    return node.map(sanitizeSchemaForGemini);
+  }
+  if (node === null || typeof node !== "object") {
+    return node;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    if (GEMINI_UNSUPPORTED_SCHEMA_KEYS.has(key)) continue;
+    out[key] = sanitizeSchemaForGemini(value);
+  }
+  return out;
+}
+
 function toGeminiFunctionDeclarations(tools: ToolDefinition[]): GeminiFunctionDeclaration[] {
   return tools.map((tool) => {
     const schema = tool.inputSchema as Record<string, unknown>;
@@ -465,7 +508,7 @@ function toGeminiFunctionDeclarations(tools: ToolDefinition[]): GeminiFunctionDe
       description: tool.description,
       parameters: {
         type: SchemaType.OBJECT,
-        properties: (schema?.properties ?? {}) as Record<string, unknown>,
+        properties: sanitizeSchemaForGemini(schema?.properties ?? {}) as Record<string, unknown>,
         required: ((schema?.required ?? []) as string[]),
       },
     } as GeminiFunctionDeclaration;
