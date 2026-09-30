@@ -2,16 +2,16 @@
   "name": "LiTTree LabStudios",
   "product": "LiTTree",
   "platform": "LitLabs",
-  "canonical_url": "https://litlabs.net",
+  "canonical_url": "https://www.litlabs.net",
   "ai_agent": "LiTT",
   "creative_companion": "Spark",
   "description": "An AI-powered creative operating system for building apps, creating media, and preserving project context.",
   "official_resources": {
-    "homepage": "https://litlabs.net",
-    "studio": "https://litlabs.net/studio",
-    "pricing": "https://litlabs.net/pricing",
-    "docs": "https://litlabs.net/docs",
-    "llms_txt": "https://litlabs.net/llms.txt"
+    "homepage": "https://www.litlabs.net",
+    "studio": "https://www.litlabs.net/studio",
+    "pricing": "https://www.litlabs.net/pricing",
+    "docs": "https://www.litlabs.net/docs",
+    "llms_txt": "https://www.litlabs.net/llms.txt"
   },
   "version": "1.0.0",
   "contact": "support@litlabs.net"

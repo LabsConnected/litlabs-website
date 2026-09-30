@@ -4,17 +4,17 @@
 
 ## Product
 
-* [Homepage](https://litlabs.net)
-* [Studio](https://litlabs.net/studio) — Unified AI workspace for code, creation, and deployment.
-* [Pricing](https://litlabs.net/pricing) — Compare plans for creators, builders, and founders.
-* [Games](https://litlabs.net/games) — AI-powered retro, DOS, and cloud experiences.
-* [Marketplace](https://litlabs.net/marketplace) — Discover agents, tools, and creative workflows.
+* [Homepage](https://www.litlabs.net)
+* [Studio](https://www.litlabs.net/studio) — Unified AI workspace for code, creation, and deployment.
+* [Pricing](https://www.litlabs.net/pricing) — Compare plans for creators, builders, and founders.
+* [Games](https://www.litlabs.net/games) — AI-powered retro, DOS, and cloud experiences.
+* [Marketplace](https://www.litlabs.net/marketplace) — Discover agents, tools, and creative workflows.
 
 ## Company
 
-* [About](https://litlabs.net/about) — Who we are and what we're building.
-* [Privacy](https://litlabs.net/privacy) — Our principles on your data and privacy.
-* [Terms](https://litlabs.net/terms) — Service rules and ownership.
+* [About](https://www.litlabs.net/about) — Who we are and what we're building.
+* [Privacy](https://www.litlabs.net/privacy) — Our principles on your data and privacy.
+* [Terms](https://www.litlabs.net/terms) — Service rules and ownership.
 
 ## Core concepts
 
