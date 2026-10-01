@@ -23,6 +23,13 @@ let mockAuthLoaded = true;
 vi.mock("next/navigation", () => ({
   usePathname: () => mockPathname,
   useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+}));
+
+// GlobalLittEntry uses <dialog> which jsdom doesn't fully support.
+// These tests verify AppShell chrome, not the LiTT dialog.
+vi.mock("@/components/litt/GlobalLittEntry", () => ({
+  default: () => null,
 }));
 
 vi.mock("@/context/ThemeContext", () => ({
