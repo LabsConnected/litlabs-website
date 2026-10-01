@@ -48,12 +48,16 @@ describe("P0 nav aliases (issue #602)", () => {
   });
 
   it("agents catalog branches on the Clerk server session", () => {
-    const agents = readFileSync(
+    const page = readFileSync(
       path.join(repoRoot, "src/app/(marketing)/agents/page.tsx"),
       "utf8",
     );
-    expect(agents).toContain('from "@clerk/nextjs/server"');
-    expect(agents).toContain("You're signed in.");
-    expect(agents).toContain("Sign in or create an account to use agents.");
+    const catalog = readFileSync(
+      path.join(repoRoot, "src/app/(marketing)/agents/AgentsCatalog.tsx"),
+      "utf8",
+    );
+    expect(page).toContain('from "@clerk/nextjs/server"');
+    expect(catalog).toContain("You're signed in.");
+    expect(catalog).toContain("Sign in or create an account to use agents.");
   });
 });
