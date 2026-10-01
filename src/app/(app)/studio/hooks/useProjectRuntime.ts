@@ -36,6 +36,7 @@ import {
   type ProjectRuntimeState,
   type RuntimePhase,
 } from "@/lib/projects/runtime-state";
+import { resolveStudioProjectId } from "../lib/first-run-handoff";
 
 const POLL_INTERVAL_MS = 15_000;
 const STALE_MS = 30_000;
@@ -142,7 +143,7 @@ export function useProjectRuntime(options?: { disabled?: boolean }): UseProjectR
 
   const { getToken, isLoaded: authLoaded, isSignedIn } = useClerkAuth();
   const searchParams = useSearchParams();
-  const explicitProjectId = searchParams.get("project");
+  const explicitProjectId = resolveStudioProjectId(searchParams.get("project"));
 
   // Client-side terminal store — source of truth for the PTY status feed.
   // This hook is the ONLY consumer of the store besides the TerminalPanel

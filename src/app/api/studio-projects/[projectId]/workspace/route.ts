@@ -57,10 +57,11 @@ export async function GET(
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to query workspace";
     if (message.includes("TERMINAL_INTERNAL_SERVICE_KEY")) {
+      // Sanitize: never expose internal env var names to clients
       return NextResponse.json({
         workspaceId: project.workspaceId,
         workspaceStatus: "error",
-        workspaceError: message,
+        workspaceError: "Workspace unavailable — Retry.",
       }, { status: 502 });
     }
   }
