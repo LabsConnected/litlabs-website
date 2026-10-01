@@ -207,8 +207,10 @@ function StudioHub() {
         params.set("prompt", idea);
         params.set("tool", "chat");
         // Store prompt in sessionStorage as reliable handoff (URL params can be lost on rapid navigation)
+        // Mark onboarding complete so Studio doesn't show duplicate "Describe your business" step
         try {
           sessionStorage.setItem("litt:first-run-prompt", idea);
+          localStorage.setItem("litt:onboarding-complete", "true");
         } catch {}
         router.replace(`/studio?${params.toString()}`);
         setProjectCheck({ loading: false, hasProjects: true });

@@ -72,11 +72,13 @@ export default function LiTEmptyState({
   launchpadState,
   onPrimaryAction,
   onSelectConversation,
+  hideDescribeBox = false,
 }: {
   displayName?: string | null;
   launchpadState: FirstMissionLaunchpadState;
   onPrimaryAction: (action: FirstMissionActionId) => void;
   onSelectConversation?: (conversationId: string) => void;
+  hideDescribeBox?: boolean;
 }) {
   const [showChecks, setShowChecks] = useState(false);
   const greetingName = displayName?.trim();
@@ -161,13 +163,15 @@ export default function LiTEmptyState({
               })}
             </div>
 
-            <div className="w-full max-w-xl" data-testid="first-mission-describe-box">
-              <DescribeBusinessBox
-                variant="studio"
-                projectId={launchpadState.projectId}
-                onConfirmed={handleBusinessConfirmed}
-              />
-            </div>
+            {!hideDescribeBox && (
+              <div className="w-full max-w-xl" data-testid="first-mission-describe-box">
+                <DescribeBusinessBox
+                  variant="studio"
+                  projectId={launchpadState.projectId}
+                  onConfirmed={handleBusinessConfirmed}
+                />
+              </div>
+            )}
           </>
         )}
 

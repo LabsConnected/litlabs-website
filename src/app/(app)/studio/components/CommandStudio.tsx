@@ -3933,6 +3933,14 @@ function StudioWorkSurface({
   // conversations have finished loading from the server. During loading,
   // show a minimal spinner so users don't see the welcome screen flash.
   const isEmpty = messages.length === 0 && !loading;
+  // Hide duplicate "Describe your business" onboarding if user completed the welcome flow
+  const onboardingComplete = (() => {
+    try {
+      return localStorage.getItem("litt:onboarding-complete") === "true";
+    } catch {
+      return false;
+    }
+  })();
   return (
     <div
       className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
@@ -3963,6 +3971,7 @@ function StudioWorkSurface({
             displayName={displayName}
             onPrimaryAction={onFirstMissionAction}
             onSelectConversation={onSelectConversation}
+            hideDescribeBox={onboardingComplete}
           />
         </div>
       ) : loading && messages.length === 0 ? (
