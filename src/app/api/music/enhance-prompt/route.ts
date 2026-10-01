@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { meteredGenerateJSON } from "@/lib/metered-llm-call";
+import { generateJSON } from "@/lib/llm";
 import { z } from "zod";
-import { randomUUID } from "crypto";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +40,6 @@ async function handler(req: NextRequest) {
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const spendId = clerkId ?? userId;
 
   let body: unknown;
   try {
@@ -89,19 +87,19 @@ Rules:
   const userPrompt = `Enhance this music prompt: "${prompt}"`;
 
   try {
-    const call = await meteredGenerateJSON<EnhanceResponse>({
-      clerkId: spendId,
-      prompt: userPrompt,
+    const result = await generateJSON<EnhanceResponse>(
+      userPrompt,
+      {
+        task: "creative",
+        maxTokens: 2048,
+        // Canonical metering: llm.ts emits one usage_event per provider
+        // attempt (billable on success) keyed to this feature.
+        metering: { clerkId: clerkId ?? undefined, feature: "music-enhance" },
+      },
       systemPrompt,
-      llmOptions: { task: "creative", maxTokens: 2048 },
-      feature: "music-enhance",
-      callId: randomUUID(),
-    });
-    if (!call.ok) {
-      return NextResponse.json({ error: call.error, code: call.code }, { status: call.status });
-    }
-    call.data.original = prompt;
-    return NextResponse.json(call.data);
+    );
+    result.original = prompt;
+    return NextResponse.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Enhancement failed";
     console.error(`[music:enhance] error: ${message}`);

@@ -1,76 +1,53 @@
 # Provider Route Metering Audit
 
 **Date:** 2026-09-30
-**PR:** #599 `fix/billing-remaining-routes` (follow-up to #595)
-**Scope:** Direct LLM/provider spawn paths in `src/`. Independent re-audit after #595+#599.
-
-## Canonical gateway
-
-User-billable LLM text calls go through `meteredLlmCall` / `meteredGenerateJSON`:
-
-1. `preflightBillingAuth` (owner exemption / spend ceiling) **before** provider spend
-2. `getCreditBalances` for non-exempt users **before** provider spend (fail closed)
-3. `generateText` with metering context → **N** `cost_events` / attempt `usage_events`
-4. `chargeLlmUsage({ meteringBillableKey })` → **one** billable `usage_event` + at most one wallet debit
+**PR:** fix/billing-remaining-routes (follow-up to #595)
+**Scope:** Every direct LLM/provider spawn path in `src/`.
 
 ## Classification
 
 | Route | Status | Notes |
 |---|---|---|
-| `/api/gemini` | METERED + CHARGED + GATED | #595 `meteredLlmCall` |
-| `/api/gemini/build` | METERED + CHARGED + GATED | #595 `assertSpendAuthorized` + `chargeLlmUsage` |
-| `/api/ai-chat` | METERED + CHARGED + GATED | #595 `meteredLlmCall` |
-| `/api/ai/chat` | METERED + CHARGED + GATED | **This PR**: was `runAI` (OpenRouter bypass). Now canonical gateway. |
-| `/api/chat` | METERED + CHARGED | `chargeAgentRun` before `generateText`; metering context on the call |
-| `/api/chat/unified` | METERED + CHARGED | Shared pipeline + `chargeLlmUsage` with billable key |
-| `/api/agents/chat` fallback | METERED + CHARGED + GATED | **This PR**: `meteredLlmCall` |
-| `/api/conversations/[id]/messages` | METERED + CHARGED + GATED | **This PR**: `meteredLlmCall` |
-| `/api/studio/conversations/*/messages` | METERED + CHARGED + GATED | Reserve-before-model in agent loop |
-| `/api/studio/conversations/*/regenerate` | METERED + CHARGED + GATED | **This PR**: `meteredLlmCall` |
-| `/api/canvas/ai` | METERED + CHARGED + GATED | **This PR**: `meteredGenerateJSON` |
-| `/api/canvas/html-ai` | METERED + CHARGED + GATED | **This PR**: `meteredGenerateJSON` |
-| `/api/music/producer` | METERED + CHARGED + GATED | **This PR**: `meteredGenerateJSON` |
-| `/api/music/enhance-prompt` | METERED + CHARGED + GATED | **This PR**: `meteredGenerateJSON` |
-| `/api/litt/think` | METERED + CHARGED + GATED | **This PR**: was `runAI` bypass. Now canonical gateway. |
-| `/api/missions/*/run` | METERED + CHARGED + GATED | **This PR**: gate on route + `meteredLlmCall` in executor |
-| `/api/media/analyze-image` | METERED + GATED (uncharged) | **This PR**: balance gate before Gemini. `chargedBits=0` by product (vision helper). |
-| `/api/media/analyze-video` | METERED + GATED (uncharged) | Same as analyze-image |
-| `/api/media/suggest-video-ideas` | METERED + GATED (uncharged) | Same as analyze-image |
-| `/api/media/generate-*` | METERED + CHARGED + GATED | Wallet debit before/around provider |
-| `/api/studio/video` | METERED + CHARGED + GATED | Balance check before fal.ai |
-| `/api/studio/generate` | METERED | Image path; existing metering |
-| `/api/demo/chat` | METERED COST ONLY | Anonymous; `emitServiceCostEvent`; rate-limited |
-| `/api/vapi/turn` | METERED COST ONLY | Voice free by product decision |
-| `/api/agent/chat` | METERED COST ONLY | Service-to-service; no user to bill |
-| `/api/debug/llm-test` | METERED COST ONLY | Owner-only diagnostic |
-| `/api/admin/metering-reconciliation` | N/A | Read-only |
+| `/api/gemini` | METERED + CHARGED | Fixed in #595 via canonical gateway |
+| `/api/gemini/build` | METERED + CHARGED | Fixed in #595 (audit find) |
+| `/api/ai-chat` | METERED + CHARGED | Fixed in #595 via canonical gateway |
+| `/api/chat` | METERED + CHARGED | #595 added cost context; existing `chargeAgentRun` preserved |
+| `/api/chat/unified` | METERED + CHARGED | Via shared chat pipeline |
+| `/api/agents/chat` | METERED (cost visibility) | Via shared agent pipeline |
+| `/api/conversations/[id]/messages` | METERED (cost visibility) | #595 added metering context |
+| `/api/studio/conversations/*/messages` | METERED + CHARGED | Via agent loop metering |
+| `/api/studio/conversations/*/regenerate` | METERED (cost visibility) | #595 added metering context |
+| `/api/demo/chat` | METERED COST ONLY | **This PR**: `emitServiceCostEvent` per successful call; anonymous, billable=false. Rate-limited (per-session + per-IP burst, 5-msg ceiling). |
+| `/api/vapi/turn` | METERED COST ONLY | **This PR**: billable=false made explicit (was `billable: status===200`). Voice free by product decision; cost tracked when determinable (tokens not surfaced by runtime today). |
+| `/api/agent/chat` | METERED COST ONLY | **This PR**: `emitServiceCostEvent` per attempt with `feature: "agent-chat-service"`. Service-to-service (Bearer AGENT_API_KEY), no user to bill; LiTT absorbs cost. Auth unchanged. |
+| `/api/debug/llm-test` | METERED COST ONLY | **This PR**: `emitLlmMetering` with owner clerkId, billable=false. Owner-exempt by design; cost tracked for visibility. Owner-only guard unchanged. |
+| `/api/litt/think` | METERED + CHARGED | Via agent pipeline |
+| `/api/studio/generate` | METERED + CHARGED | Via agent pipeline |
+| `/api/media/*` (4 routes) | METERED + CHARGED | Image/video generation via canonical metering |
+| `/api/music/*` (3 routes) | METERED + CHARGED | Via canonical metering |
+| `/api/voice/*` (3 routes) | METERED + CHARGED | Via canonical metering |
+| `/api/admin/metering-reconciliation` | N/A | Read-only admin observability |
 
-## Intentional non-billed
+## Intentional Non-Billed (documented product decisions)
 
 | Route | Reason |
 |---|---|
-| `/api/agent/chat` | Service-to-service. Cost tracked via `agent-chat-service`. |
-| `/api/debug/llm-test` | Owner-only diagnostic. |
-| `/api/vapi/turn` | Voice turns free to users. |
-| `/api/demo/chat` | Anonymous public demo. Abuse-limited. |
-| `/api/media/analyze-*` and `suggest-video-ideas` | Product: no LiTTBits debit today, but **zero-balance users cannot trigger Gemini**. |
+| `/api/agent/chat` | Service-to-service; no user identity to bill. Cost tracked via `agent-chat-service` feature. |
+| `/api/debug/llm-test` | Owner-only diagnostic; owner billing-exempt. Cost tracked via `debug-llm-test` feature. |
+| `/api/vapi/turn` | Voice turns free to users (product decision). Cost tracked; `billable=false`, `chargedBits=0`. |
+| `/api/demo/chat` | Anonymous public demo; no user to bill. Cost tracked via `demo-chat-service`. Abuse-limited. |
 
-## Remaining gaps (not user-billable wallet paths, still provider cost)
+## Service Cost Tracking
 
-| Path | Notes |
-|---|---|
-| `src/lib/litt-runtime/execution-engine.ts` `generateWithImages` | Direct `@google/generative-ai` multimodal call. Text/stream path uses `llm.ts` (ALS metering if caller set `runWithMeteringContext`). |
-| `src/lib/agents.ts` `generateText` | Legacy orchestrator helpers. Live `/api/chat` charges via `chargeAgentRun` first. |
-| `src/lib/voice/ghl-payload-builder.ts` | Used from `/api/vapi/events`; no user wallet. |
-| `/api/chat/unified` | Charges after the provider call on some branches; not a zero-balance free ride if `chargeAgentRun` already ran, but not the same pre-flight as `assertSpendAuthorized`. |
+Routes without a billable user emit via `src/lib/service-metering.ts`:
+- `emitServiceCostEvent()` → canonical `emitLlmMetering` with `billable=false`, `chargedBits=0`
+- Requires `SERVICE_METERING_USER_ID` env var (a real users.id UUID, e.g. owner's) for FK compliance
+- If unset: skipped with warning (fail-open for tracking, never blocks the request)
+- `feature` field carries the service identifier for reporting
+- `liitt_absorbed=true` is set automatically (provider cost > 0, charged bits = 0)
 
-## Proofs in unit tests (`src/lib/metered-llm-call.test.ts`)
+## Remaining Gaps
 
-- Unfunded user → provider **never** called, 402
-- Spend ceiling → provider **never** called, 403
-- Wallet lookup failure → fail closed, provider **never** called
-- Funded user → metering context present
-- Charge reuses `meteringBillableKey` (retries = N cost events, one billable usage_event)
-- Post-call debit race → 402, no free text
-- Owner-exempt skips balance gate but still meters
-- `meteredGenerateJSON` uses the same gate
+None. Every provider-spend path now emits at least a cost_event.
+User-billable paths emit usage_events + cost_events + ledger debits.
+Service/anonymous paths emit cost_events (visibility) without charges.

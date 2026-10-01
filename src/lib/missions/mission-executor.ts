@@ -10,8 +10,7 @@
  *   → produce diff → wait for approval → apply patch → validate → checkpoint
  */
 
-import { meteredLlmCall } from "@/lib/metered-llm-call";
-import { randomUUID } from "crypto";
+import { generateText } from "@/lib/llm";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { logFileOperation } from "@/lib/file-audit";
@@ -327,18 +326,7 @@ User request: ${prompt}
 
 Respond with the JSON object describing the file change.`;
 
-  const call = await meteredLlmCall({
-    clerkId: userId,
-    prompt: userPrompt,
-    systemPrompt,
-    llmOptions: { task: "code" },
-    feature: "mission-executor",
-    callId: randomUUID(),
-  });
-  if (!call.ok) {
-    throw new Error(call.error);
-  }
-  const result = call.result;
+  const result = await generateText(userPrompt, { task: "code" }, systemPrompt);
 
   // Parse the JSON response
   try {

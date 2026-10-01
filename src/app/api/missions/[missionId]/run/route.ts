@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getMission } from "@/lib/missions/mission-repository";
 import { startMissionRun } from "@/lib/missions/mission-executor";
-import { assertSpendAuthorized } from "@/lib/metered-llm-call";
 
 /**
  * POST /api/missions/[missionId]/run
@@ -16,12 +15,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ missionId: string }> },
 ) {
-  const { userId, clerkId } = await auth(request);
+  const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const authz = await assertSpendAuthorized(clerkId ?? userId);
-  if (!authz.ok) {
-    return NextResponse.json({ error: authz.error, code: authz.code }, { status: authz.status });
-  }
 
   const { missionId } = await params;
 

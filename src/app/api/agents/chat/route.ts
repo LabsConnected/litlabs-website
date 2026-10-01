@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { orchestrator } from "@/lib/agents";
-import { meteredLlmCall } from "@/lib/metered-llm-call";
-import { randomUUID } from "crypto";
+import { generateText } from "@/lib/llm";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getUserByClerkId } from "@/lib/user-db";
 import { Supermemory } from "supermemory";
@@ -308,19 +307,17 @@ async function handler(req: NextRequest) {
       // echo a fake tool call as a chat reply (mirrors the messages V1
       // lane's markup boundary).
       const fallbackToolIds = new Set(toolManifest.tools.map((t) => t.id));
-      const call = await meteredLlmCall({
-        clerkId: userId,
-        prompt: buildToollessPrompt(
+      const r = await generateText(
+        buildToollessPrompt(
           `${directorPrompt}\n\n${memoryContext}USER: ${message}\n\nRespond as LiTT Director. Be direct and useful.`,
         ),
-        llmOptions: { task: "chat" },
-        feature: "agents-chat-fallback",
-        callId: randomUUID(),
-      });
-      if (!call.ok) {
-        return NextResponse.json({ error: call.error, code: call.code }, { status: call.status });
-      }
-      const r = call.result;
+        {
+          task: "chat",
+          // Metering visibility: record provider attempts for reconciliation.
+          // (Full balance-gate enforcement is a separate follow-up.)
+          metering: { clerkId: userId, feature: "agents-chat-fallback" },
+        },
+      );
       const markupHit = scanToollessOutput(r.text, fallbackToolIds);
       // Fail honestly on invocation intent — never return or persist the
       // pseudo-call. Intent-free markup gets hygiene-stripped instead.

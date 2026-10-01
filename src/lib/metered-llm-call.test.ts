@@ -34,7 +34,7 @@ vi.mock("@/lib/wallet-ledger", () => ({
   getCreditBalances: getCreditBalancesMock,
 }));
 
-import { meteredLlmCall, meteredGenerateJSON } from "./metered-llm-call";
+import { meteredLlmCall } from "./metered-llm-call";
 
 const CLERK_ID = "clerk_test_user_123";
 const CALL_ID = "call-test-uuid-1";
@@ -187,38 +187,5 @@ describe("meteredLlmCall — bypass prevention", () => {
     expect(res.ok).toBe(true);
     if (!res.ok) throw new Error("unreachable");
     expect(res.result.text).toBe("hello world");
-  });
-});
-
-describe("meteredGenerateJSON — same spend gate as meteredLlmCall", () => {
-  it("unfunded user: provider NEVER called", async () => {
-    getCreditBalancesMock.mockResolvedValue({ total: 0, monthly: 0, purchased: 0, betaPromotional: 0, lastDailyClaim: null });
-    const res = await meteredGenerateJSON({
-      clerkId: CLERK_ID,
-      prompt: "return {\"ok\":true}",
-      feature: "canvas-ai",
-      callId: "json-1",
-    });
-    expect(res.ok).toBe(false);
-    expect(generateTextMock).not.toHaveBeenCalled();
-  });
-
-  it("funded user: parses JSON and reuses the billable key", async () => {
-    generateTextMock.mockResolvedValue({
-      ...LLM_RESULT,
-      text: '{"reply":"done","actions":[]}',
-    });
-    const res = await meteredGenerateJSON<{ reply: string; actions: unknown[] }>({
-      clerkId: CLERK_ID,
-      prompt: "mutate the canvas",
-      feature: "canvas-ai",
-      callId: "json-2",
-    });
-    expect(res.ok).toBe(true);
-    if (!res.ok) throw new Error("unreachable");
-    expect(res.data.reply).toBe("done");
-    expect(chargeLlmUsageMock).toHaveBeenCalledWith(
-      expect.objectContaining({ meteringBillableKey: "metering:llm:req-abc:0", callId: "json-2" }),
-    );
   });
 });

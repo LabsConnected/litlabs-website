@@ -3,7 +3,6 @@ import { GoogleGenAI } from "@google/genai";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { auth } from "@/lib/auth";
 import { emitLlmMetering } from "@/lib/metering";
-import { assertSpendAuthorized } from "@/lib/metered-llm-call";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const IDEAS_MODEL = "gemini-2.5-flash";
@@ -47,11 +46,6 @@ async function handler(request: NextRequest) {
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!GEMINI_API_KEY)
     return NextResponse.json({ error: "Gemini API key not configured" }, { status: 500 });
-  const spendId = clerkId ?? userId;
-  const authz = await assertSpendAuthorized(spendId);
-  if (!authz.ok) {
-    return NextResponse.json({ error: authz.error, code: authz.code }, { status: authz.status });
-  }
 
   // Canonical metering: one usage_event per ideas attempt. P0 invariant:
   // this single attempt is THE billable usage_event (emitter defaults

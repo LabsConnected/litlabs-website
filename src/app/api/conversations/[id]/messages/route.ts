@@ -2,7 +2,7 @@
 import { auth } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { meteredLlmCall } from "@/lib/metered-llm-call";
+import { generateText } from "@/lib/llm";
 
 async function getUserId(req: NextRequest) {
   const { userId: clerkId } = await auth(req);
@@ -74,9 +74,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { userId: clerkId } = await auth(req);
     const dbUserId = await getUserId(req);
-    if (!dbUserId || !clerkId) {
+    if (!dbUserId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -153,17 +152,14 @@ Respond as ${agent.name} in character. Be helpful, concise (1-3 sentences), and 
     // Generate AI response via unified LLM client (auto-failover)
     let aiResponse = "I'm processing your request...";
     try {
-      const call = await meteredLlmCall({
-        clerkId,
-        prompt,
-        llmOptions: { task: "chat", maxTokens: 1024 },
-        feature: "conversations-messages",
-        callId: conversationId,
+      const r = await generateText(prompt, {
+        task: "chat",
+        maxTokens: 1024,
+        // Metering visibility: record provider attempts for reconciliation.
+        // (Full balance-gate enforcement is a separate follow-up.)
+        metering: { userId: dbUserId, feature: "conversations-messages" },
       });
-      if (!call.ok) {
-        return NextResponse.json({ error: call.error, code: call.code }, { status: call.status });
-      }
-      aiResponse = call.result.text || "I'm thinking...";
+      aiResponse = r.text || "I'm thinking...";
     } catch {
       // AI error:
       aiResponse = `${agent.name} is temporarily unavailable. Please try again.`;
