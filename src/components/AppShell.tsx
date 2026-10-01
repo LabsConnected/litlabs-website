@@ -40,6 +40,7 @@ import {
   type NavMenuSection,
 } from "@/lib/navigation";
 import { BrandLogo } from "@/components/branding/BrandLogo";
+import GlobalLittEntry from "@/components/litt/GlobalLittEntry";
 
 /* ─── Identity Dock ────────────────────────────────────────────────── */
 
@@ -546,6 +547,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <Suspense fallback={<div className="h-14 shrink-0" />}>
         <TopBar />
       </Suspense>
+      <Suspense fallback={null}><GlobalLittEntry /></Suspense>
 
       {/* Main content */}
       <main
