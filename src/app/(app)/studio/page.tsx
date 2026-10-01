@@ -6,6 +6,7 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useTheme } from "@/context/ThemeContext";
 import { track } from "@/lib/analytics";
 import CommandStudio from "./components/CommandStudio";
+import FirstRunWelcome from "./components/FirstRunWelcome";
 import { Terminal, Loader2 } from "lucide-react";
 
 /**
@@ -41,7 +42,7 @@ function StudioLoadingState({ onRetry }: { onRetry: () => void }) {
   if (elapsed) {
     return (
       <div
-        className="relative flex min-h-full items-center justify-center overflow-hidden p-6"
+        className="relative flex min-h-dvh items-center justify-center overflow-hidden p-6"
         style={{ backgroundColor: tokens.background }}
         data-testid="studio-timeout"
       >
@@ -70,7 +71,7 @@ function StudioLoadingState({ onRetry }: { onRetry: () => void }) {
 
   return (
     <div
-      className="relative flex min-h-full items-center justify-center overflow-hidden p-6"
+      className="relative flex min-h-dvh items-center justify-center overflow-hidden p-6"
       style={{ backgroundColor: tokens.background }}
       data-testid="studio-loading"
     >
@@ -125,16 +126,113 @@ function StudioHub() {
   const { isLoaded, isSignedIn } = useClerkAuth();
   const router = useRouter();
   const [retryKey, setRetryKey] = useState(0);
-  // Clerk's injected session state can make isLoaded resolve true before
-  // hydration while SSR always renders the loading branch — gate the first
-  // client render on mounted so server and client markup match (React #418).
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const [projectCheck, setProjectCheck] = useState<{
+    loading: boolean;
+    hasProjects: boolean | null;
+    error: string | null;
+  }>({ loading: true, hasProjects: null, error: null });
+  const [isCreating, setIsCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const handleRetry = useCallback(() => {
     // Retry restarts the failed initialization by forcing a full
     // re-mount of the loading state + Clerk re-check, not merely
     // re-animating the spinner.
+    setRetryKey((k) => k + 1);
+  }, []);
+
+  // Check if user has any projects (fresh user detection)
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn) return;
+
+    // Skip check if there's already a project in the URL
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("project")) {
+      setProjectCheck({ loading: false, hasProjects: true, error: null });
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/studio-projects", {
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(`Failed to check projects (${res.status})`);
+        const data = await res.json();
+        const projects = data.projects || data || [];
+        const hasProjects = Array.isArray(projects) ? projects.length > 0 : false;
+        if (!cancelled) {
+          setProjectCheck({ loading: false, hasProjects, error: null });
+        }
+      } catch (err) {
+        if (!cancelled) {
+          // On error, assume has projects to avoid blocking existing users
+          // The welcome screen is only for confirmed fresh users
+          setProjectCheck({
+            loading: false,
+            hasProjects: true,
+            error: err instanceof Error ? err.message : "Unknown error",
+          });
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoaded, isSignedIn, retryKey]);
+
+  // Handle first-run project creation
+  const handleFirstRunSubmit = useCallback(
+    async (idea: string) => {
+      setIsCreating(true);
+      setCreateError(null);
+      try {
+        const res = await fetch("/api/studio-projects", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sourceType: "blank",
+            name: idea.slice(0, 60) || "Untitled Project",
+            templateId: "blank-static",
+            initialPrompt: idea,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(
+            (err as { error?: string }).error || `Failed to create project (${res.status})`
+          );
+        }
+
+        const { project } = await res.json();
+        if (!project?.id) throw new Error("Project created but no ID returned");
+
+        // Navigate to Studio with the new project selected and prompt preloaded
+        const params = new URLSearchParams(window.location.search);
+        params.set("project", project.id);
+        params.set("prompt", idea);
+        params.set("tool", "chat");
+        router.replace(`/studio?${params.toString()}`);
+        // Force a reload of the project check
+        setProjectCheck({ loading: false, hasProjects: true, error: null });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to create project";
+        setCreateError(msg);
+      } finally {
+        setIsCreating(false);
+      }
+    },
+    [router]
+  );
+
+  const handleFirstRunRetry = useCallback(() => {
+    setCreateError(null);
+    setProjectCheck({ loading: true, hasProjects: null, error: null });
     setRetryKey((k) => k + 1);
   }, []);
 
@@ -151,7 +249,7 @@ function StudioHub() {
     }
   }, [isLoaded, isSignedIn, router]);
 
-  if (!mounted || !isLoaded) {
+  if (!isLoaded) {
     return <StudioLoadingState key={retryKey} onRetry={handleRetry} />;
   }
 
@@ -159,6 +257,23 @@ function StudioHub() {
     // Brief loading state while the redirect fires — never a custom
     // "member-only" screen (middleware is the source of truth).
     return <StudioLoadingState key={retryKey} onRetry={handleRetry} />;
+  }
+
+  // Fresh user with no projects → show first-run welcome
+  // This is the single entry point for new users: one prompt, one action
+  if (projectCheck.loading) {
+    return <StudioLoadingState key={retryKey} onRetry={handleRetry} />;
+  }
+
+  if (projectCheck.hasProjects === false) {
+    return (
+      <FirstRunWelcome
+        onSubmit={handleFirstRunSubmit}
+        isCreating={isCreating}
+        error={createError}
+        onRetry={handleFirstRunRetry}
+      />
+    );
   }
 
   return <CommandStudio />;
@@ -171,7 +286,7 @@ export default function StudioPage() {
     <Suspense
       fallback={
         <div
-          className="flex min-h-full items-center justify-center p-6"
+          className="flex min-h-dvh items-center justify-center p-6"
           style={{
             backgroundColor: tokens.background,
             color: tokens.textMuted,
