@@ -203,7 +203,7 @@ function WalletContent() {
               How AI credits work
             </h2>
             <ul className="space-y-2 text-sm opacity-75">
-              <li>• New accounts start with 500 starter AI credits (one-time).</li>
+              <li>• New accounts start with 1,500 LiTTBits (one-time).</li>
               <li>
                 • Paid plans grant AI credits after each successful billing cycle.
               </li>

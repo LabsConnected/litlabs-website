@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { AGENT_DEFINITIONS } from "@/lib/agent-registry";
 import { buildMetadata } from "@/lib/seo";
+import { AgentsSessionNote } from "./AgentsSessionNote";
 
 export const metadata: Metadata = buildMetadata({ title: "Agents", description: "Meet the specialist agents that support LiTT in Studio. Describe your goal, review the result, and approve before publishing.", path: "/agents", index: true });
 
@@ -18,7 +19,7 @@ export default function AgentsPage() {
           <Link href="/studio?tool=agents" className="rounded-xl bg-lime-400 px-5 py-3 font-bold text-black">Open agents in Studio</Link>
           <Link href="/pricing" className="rounded-xl border border-white/20 px-5 py-3 font-bold">View plans</Link>
         </div>
-        <p className="mt-3 text-sm text-white/55">Sign in or create an account to use agents. Availability depends on your plan and connected tools.</p>
+        <AgentsSessionNote />
         <section aria-label="Specialist agents" className="mt-14 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {agents.map((agent) => (
             <article key={agent.id} className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Bot,
@@ -8,6 +9,13 @@ import {
   Plus,
   Activity,
 } from "lucide-react";
+import {
+  mergeCanonicalProjectList,
+  studioProjectHref,
+  STUDIO_PROJECTS_API,
+  type CanonicalListProject,
+} from "@/lib/projects/canonical-project-list";
+import { describeProjectState } from "@/lib/projects/project-state";
 
 function Card({
   children,
@@ -161,26 +169,92 @@ function EmptyState({
   );
 }
 
+function RecentProjectsCard() {
+  const [projects, setProjects] = useState<CanonicalListProject[] | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch(STUDIO_PROJECTS_API, { cache: "no-store", credentials: "include" })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((json) => {
+        if (active) setProjects(mergeCanonicalProjectList(json));
+      })
+      .catch(() => {
+        if (active) setProjects([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return (
+    <Card>
+      <SectionHeader
+        title="Recent Projects"
+        action="View all"
+        actionHref="/projects"
+      />
+      {projects === null ? (
+        <p style={{ fontSize: "13px", color: "#71717a" }}>Loading projects…</p>
+      ) : projects.length === 0 ? (
+        <EmptyState
+          icon={<FolderOpen size={36} />}
+          title="No projects yet"
+          desc="Start with a prompt, a repository, or a template."
+          actionLabel="Start a project"
+          actionHref="/create"
+        />
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          {projects.slice(0, 6).map((project) => {
+            const state = describeProjectState({
+              workspaceStatus: project.workspaceStatus ?? "",
+              runtimeStatus: project.runtimeStatus ?? "",
+              updatedAt: project.updatedAt ?? new Date().toISOString(),
+              workspaceError: project.workspaceError,
+              runtimeError: project.runtimeError,
+            });
+            return (
+              <Link
+                key={project.id}
+                href={studioProjectHref(project.id)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "12px",
+                  padding: "12px 14px",
+                  borderRadius: "12px",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(255,255,255,0.02)",
+                  textDecoration: "none",
+                  color: "#f5f5f7",
+                }}
+              >
+                <span style={{ fontSize: "14px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {project.name}
+                </span>
+                <span style={{ fontSize: "11px", fontWeight: 700, color: state.color, flexShrink: 0 }}>
+                  {state.label}
+                </span>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export function ProfileOverview() {
   return (
     <div className="ov-grid">
       {/* === MAIN COLUMN === */}
       <div className="ov-main">
-        {/* Recent Projects */}
-        <Card>
-          <SectionHeader
-            title="Recent Projects"
-            action="View all"
-            actionHref="/projects"
-          />
-          <EmptyState
-            icon={<FolderOpen size={36} />}
-            title="No projects yet"
-            desc="Start with a prompt, a repository, or a template."
-            actionLabel="Start a project"
-            actionHref="/create"
-          />
-        </Card>
+        <RecentProjectsCard />
 
         {/* Published Agents */}
         <Card>

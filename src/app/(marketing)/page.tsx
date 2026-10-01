@@ -105,7 +105,7 @@ const homeSchema = {
           priceCurrency: "USD",
           url: absoluteUrl("/pricing"),
           description:
-            `Free forever. ${formatBits(getPlanCreditAllowance("starter"))} AI credits (one-time), 1 active project.`,
+            `Free forever. ${formatBits(getPlanCreditAllowance("starter"))} LiTTBits (one-time), 1 active project.`,
         },
         {
           "@type": "Offer",

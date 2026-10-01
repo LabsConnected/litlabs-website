@@ -20,6 +20,11 @@ import type { PlayerTrack } from "@/context/MusicPlayerContext";
 import type { DashboardProject, DashboardMediaItem, PulseItem } from "./types";
 import { creationToMediaItem } from "./media-helpers";
 import { getFavorites } from "./types";
+import {
+  mergeCanonicalProjectList,
+  STUDIO_PROJECTS_API,
+  type CanonicalListProject,
+} from "@/lib/projects/canonical-project-list";
 
 // ── Mission Control hook ───────────────────────────────────────────
 
@@ -70,6 +75,83 @@ export function useMissionControl(): MissionControlData {
   }, [refreshKey]);
 
   return { data, loading, error, refresh };
+}
+
+// ── Canonical studio projects (same source as /projects and /profile) ──
+
+interface CanonicalProjectsData {
+  projects: DashboardProject[];
+  loading: boolean;
+  error: string | null;
+  refresh: () => void;
+}
+
+export function mapCanonicalProjectToDashboard(
+  project: CanonicalListProject,
+): DashboardProject {
+  const ws = project.workspaceStatus ?? "";
+  const rt = project.runtimeStatus ?? "";
+  let status: DashboardProject["status"] = "draft";
+  if (["failed", "error"].includes(ws) || rt === "failed") status = "failed";
+  else if (["provisioning", "preparing"].includes(ws) || rt === "starting") {
+    status = "building";
+  } else if (rt === "ready") status = "live";
+
+  return {
+    id: project.id,
+    name: project.name,
+    type: "project",
+    branch: project.githubBranch || "main",
+    status,
+    updatedAt: project.updatedAt ?? null,
+    repository: project.githubFullName ?? null,
+    latestCommit: null,
+    deploymentState: "none",
+    previewState: rt || "idle",
+    workspaceState: ws || "missing",
+    terminalState: "disconnected",
+  };
+}
+
+export function useCanonicalProjects(): CanonicalProjectsData {
+  const [projects, setProjects] = useState<DashboardProject[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
+
+    fetch(STUDIO_PROJECTS_API, {
+      cache: "no-store",
+      credentials: "include",
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((json) => {
+        if (!active) return;
+        const merged = mergeCanonicalProjectList(json);
+        setProjects(merged.map(mapCanonicalProjectToDashboard));
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setError(err instanceof Error ? err.message : "Projects unavailable");
+        setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [refreshKey]);
+
+  return { projects, loading, error, refresh };
 }
 
 // ── Recent Creations hook ──────────────────────────────────────────

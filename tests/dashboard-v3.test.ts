@@ -108,7 +108,7 @@ describe("Dashboard v3 — launchpad composition", () => {
   it("derives project and pulse from real data", () => {
     expect(dashboardSrc).toContain("deriveProject");
     expect(dashboardSrc).toContain("derivePulseItems");
-    expect(dashboardSrc).toContain("deriveRecentProjects");
+    expect(dashboardSrc).toContain("useCanonicalProjects");
   });
 
   it("has Ctrl+K / Cmd+K shortcut for command palette", () => {

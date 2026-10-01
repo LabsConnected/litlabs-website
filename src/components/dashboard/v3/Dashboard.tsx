@@ -36,9 +36,9 @@ import { useMediaDock } from "./useMediaDock";
 import {
   useMissionControl,
   useDashboardMedia,
+  useCanonicalProjects,
   deriveProject,
   derivePulseItems,
-  deriveRecentProjects,
 } from "./useDashboardData";
 import type { DashboardProject } from "./types";
 
@@ -51,6 +51,7 @@ export function Dashboard() {
   // ── Data ────────────────────────────────────────────────────────
   const missionControl = useMissionControl();
   const dashboardMedia = useDashboardMedia();
+  const canonicalProjects = useCanonicalProjects();
 
   // ── Media dock (coordinates MediaHub + LiTT audio) ──────────────
   const { dock, actions: mediaActions } = useMediaDock();
@@ -58,7 +59,7 @@ export function Dashboard() {
   // ── Derived data ────────────────────────────────────────────────
   const currentProject = deriveProject(missionControl.data?.project ?? null);
   const pulseItems = derivePulseItems(missionControl.data ?? null);
-  const recentProjects = deriveRecentProjects(missionControl.data ?? null);
+  const recentProjects = canonicalProjects.projects;
 
   // ── UI state ────────────────────────────────────────────────────
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -200,7 +201,7 @@ export function Dashboard() {
           <div className="dashboard-card-in" style={{ animationDelay: "120ms" }}>
             <RecentWork
               projects={recentProjects}
-              loading={missionControl.loading}
+              loading={canonicalProjects.loading}
               onOpenTerminal={handleOpenTerminal}
             />
           </div>

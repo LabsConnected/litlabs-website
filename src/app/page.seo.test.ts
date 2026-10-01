@@ -74,7 +74,7 @@ const homeSchema = {
           priceCurrency: "USD",
           url: absoluteUrl("/pricing"),
           description:
-            "Free forever. 500 AI credits (one-time), 1 active project.",
+            "Free forever. 1,500 LiTTBits (one-time), 1 active project.",
         },
         {
           "@type": "Offer",
@@ -83,7 +83,7 @@ const homeSchema = {
           priceCurrency: "USD",
           url: absoluteUrl("/pricing"),
           description:
-            "Beta pricing. Research, write, and market with AI agents. 6,000 AI credits monthly, 5 active projects.",
+            "Beta pricing. Research, write, and market with AI agents. 7,500 AI credits monthly, 5 active projects.",
         },
         {
           "@type": "Offer",
@@ -92,7 +92,7 @@ const homeSchema = {
           priceCurrency: "USD",
           url: absoluteUrl("/pricing"),
           description:
-            "Beta pricing. Build, debug, and deploy with full AI tooling. 20,000 AI credits monthly, 25 active projects.",
+            "Beta pricing. Build, debug, and deploy with full AI tooling. 18,000 AI credits monthly, 25 active projects.",
         },
       ],
     },
