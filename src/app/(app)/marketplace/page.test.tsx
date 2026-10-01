@@ -37,7 +37,7 @@ vi.mock("@/components/ProductPageFrame", () => ({
   ProductFrame: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-import MarketplacePage from "./page";
+import MarketplaceClient from "./MarketplaceClient";
 
 const BASE = {
   compatible_assistants: ["litt"],
@@ -150,6 +150,13 @@ function installFetchMock() {
   return { fetchMock, calls };
 }
 
+function renderMarketplace(opts?: { initialItems?: typeof ALL; initialError?: boolean }) {
+  if (opts?.initialError) {
+    return render(<MarketplaceClient initialItems={[]} initialError />);
+  }
+  return render(<MarketplaceClient initialItems={[...(opts?.initialItems ?? ALL)] as never} />);
+}
+
 describe("marketplace discovery page", () => {
   beforeEach(() => {
     itemsMode = "ok";
@@ -162,7 +169,7 @@ describe("marketplace discovery page", () => {
   });
 
   it("shows the header: title, one beta badge, description, search, filters", async () => {
-    render(<MarketplacePage />);
+    renderMarketplace();
     expect(await screen.findByRole("heading", { name: "Marketplace" })).toBeInTheDocument();
     // Beta is stated exactly once, at page level — never on cards.
     expect(screen.getAllByText("Beta")).toHaveLength(1);
@@ -175,7 +182,7 @@ describe("marketplace discovery page", () => {
   });
 
   it("renders the card hierarchy without registry metadata", async () => {
-    render(<MarketplacePage />);
+    renderMarketplace();
     await screen.findByText("Code Review");
     // Hierarchy: icon+name, type, benefit description, requires, price, CTA.
     expect(screen.getByText("Tool")).toBeInTheDocument();
@@ -190,7 +197,7 @@ describe("marketplace discovery page", () => {
   });
 
   it("shows the requires line only when there is a critical dependency", async () => {
-    render(<MarketplacePage />);
+    renderMarketplace();
     await screen.findByText("Code Review");
     expect(screen.getByText("Requires GitHub")).toBeInTheDocument();
     expect(screen.getByText("Requires Vercel")).toBeInTheDocument();
@@ -199,7 +206,7 @@ describe("marketplace discovery page", () => {
   });
 
   it("gives every card exactly one honest CTA", async () => {
-    render(<MarketplacePage />);
+    renderMarketplace();
     await screen.findByText("Code Review");
     // installable item -> Install
     expect(screen.getByRole("button", { name: "Install Real Executor" })).toBeInTheDocument();
@@ -214,7 +221,7 @@ describe("marketplace discovery page", () => {
   it("shows Installed for installed items", async () => {
     installationsMode = "one";
     installFetchMock();
-    render(<MarketplacePage />);
+    renderMarketplace();
     await screen.findByText("Code Review");
     expect(
       screen.getByRole("button", { name: "Real Executor installed — manage" }),
@@ -225,7 +232,7 @@ describe("marketplace discovery page", () => {
   });
 
   it("shows featured as a small horizontal row, then Explore", async () => {
-    render(<MarketplacePage />);
+    renderMarketplace();
     await screen.findByText("Code Review");
     expect(screen.getByRole("region", { name: "Featured capabilities" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Explore capabilities" })).toBeInTheDocument();
@@ -234,7 +241,7 @@ describe("marketplace discovery page", () => {
   });
 
   it("navigates to the detail view when a card is clicked", async () => {
-    render(<MarketplacePage />);
+    renderMarketplace();
     const card = await screen.findByRole("link", { name: "View Code Review" });
     await act(async () => {
       fireEvent.click(card);
@@ -243,7 +250,7 @@ describe("marketplace discovery page", () => {
   });
 
   it("filters by search query", async () => {
-    render(<MarketplacePage />);
+    renderMarketplace();
     await screen.findByText("Code Review");
     await act(async () => {
       fireEvent.change(screen.getByRole("searchbox", { name: "Search capabilities" }), {
@@ -257,7 +264,7 @@ describe("marketplace discovery page", () => {
   });
 
   it("filters by category", async () => {
-    render(<MarketplacePage />);
+    renderMarketplace();
     await screen.findByText("Code Review");
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "integration" }));
@@ -269,7 +276,7 @@ describe("marketplace discovery page", () => {
   it("Installed view shows only installed capabilities", async () => {
     installationsMode = "one";
     installFetchMock();
-    render(<MarketplacePage />);
+    renderMarketplace();
     await screen.findByText("Code Review");
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Installed" }));
@@ -280,7 +287,7 @@ describe("marketplace discovery page", () => {
 
   it("Installed view asks signed-out users to sign in", async () => {
     signedIn = false;
-    render(<MarketplacePage />);
+    renderMarketplace();
     await screen.findByText("Code Review");
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Installed" }));
@@ -290,7 +297,7 @@ describe("marketplace discovery page", () => {
 
   it("installs the installable item and toasts success", async () => {
     const { calls } = installFetchMock();
-    render(<MarketplacePage />);
+    renderMarketplace();
     const installButton = await screen.findByRole("button", { name: "Install Real Executor" });
     await act(async () => {
       installButton.click();
@@ -306,7 +313,7 @@ describe("marketplace discovery page", () => {
   it("shows an error toast when the install POST fails", async () => {
     installMode = "fail500";
     installFetchMock();
-    render(<MarketplacePage />);
+    renderMarketplace();
     const installButton = await screen.findByRole("button", { name: "Install Real Executor" });
     await act(async () => {
       installButton.click();
@@ -320,7 +327,7 @@ describe("marketplace discovery page", () => {
   it("shows the retry UI when items fail to load, and retry refetches", async () => {
     itemsMode = "fail500";
     installFetchMock();
-    render(<MarketplacePage />);
+    renderMarketplace({ initialError: true });
     await screen.findByText("Marketplace couldn’t load.");
     itemsMode = "ok";
     await act(async () => {
@@ -332,7 +339,7 @@ describe("marketplace discovery page", () => {
   it("shows an honest empty state when there are no items", async () => {
     itemsMode = "empty";
     installFetchMock();
-    render(<MarketplacePage />);
+    renderMarketplace({ initialItems: [] });
     await screen.findByText("No capabilities listed yet. Check back soon.");
   });
 });

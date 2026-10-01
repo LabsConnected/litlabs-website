@@ -17,7 +17,7 @@ import { CAPABILITY_REGISTRY } from "@/lib/capability-registry";
 
 function mockSupabaseItems(data: unknown[]) {
   const query: Record<string, unknown> = {};
-  for (const name of ["select", "order", "eq", "contains"]) {
+  for (const name of ["select", "order", "eq", "contains", "abortSignal"]) {
     query[name] = vi.fn(() => query);
   }
   query.then = (resolve: (v: unknown) => void) => resolve({ data, error: null });
