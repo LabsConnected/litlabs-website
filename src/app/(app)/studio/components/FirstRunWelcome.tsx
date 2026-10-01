@@ -145,7 +145,7 @@ export default function FirstRunWelcome({
             data-testid="first-run-error"
           >
             <p className="text-sm font-bold" style={{ color: "#fca5a5" }}>
-              Couldn't create your project
+              Couldn&apos;t create your project
             </p>
             <p className="mt-1 text-[13px]" style={{ color: "var(--text-secondary)" }}>
               {error}
