@@ -11,6 +11,25 @@
 
 import { GoogleGenerativeAI, type GenerationConfig } from "@google/generative-ai";
 import { generateJSON, generateText, streamText } from "./llm";
+import type { MeteringContext } from "./metering";
+
+/** Options for the gemini.ts wrapper functions. */
+export interface GeminiWrapperOptions {
+  /** Canonical metering context — when set, the provider attempt is metered. */
+  metering?: MeteringContext;
+}
+
+/** Result of a wrapper call: text plus the metering linkage for billing. */
+export interface GeminiWrapperResult {
+  text: string;
+  metering: {
+    requestId: string;
+    billableIdempotencyKey: string | null;
+  };
+  provider: string;
+  model: string;
+  usage?: { prompt?: number; completion?: number };
+}
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "");
 
@@ -68,7 +87,11 @@ export async function streamChat(
  * Generate page/component code from description.
  * Now uses the unified client with code-task routing.
  */
-export async function generateComponent(description: string, existingCode?: string): Promise<string> {
+export async function generateComponent(
+  description: string,
+  existingCode?: string,
+  opts?: GeminiWrapperOptions,
+): Promise<GeminiWrapperResult> {
   const prompt = existingCode
     ? `You are an expert Next.js/TypeScript developer. Modify the following component according to these instructions: "${description}"
 
@@ -101,8 +124,15 @@ Rules:
 - Ensure responsive design (mobile-first)
 - Add smooth animations with Tailwind classes`;
 
-  const r = await generateText(prompt, { task: "code", maxTokens: 8192 });
-  return r.text;
+  const r = await generateText(
+    prompt,
+    {
+      task: "code",
+      maxTokens: 8192,
+      ...(opts?.metering ? { metering: opts.metering } : {}),
+    },
+  );
+  return { text: r.text, metering: r.metering, provider: r.provider, model: r.model, usage: r.usage };
 }
 
 /**
@@ -112,7 +142,8 @@ export async function directorPlan(
   backlog: string,
   completed: string,
   projectContext: string,
-): Promise<string> {
+  opts?: GeminiWrapperOptions,
+): Promise<GeminiWrapperResult> {
   const prompt = `You are the LiTTree-LabStudios Hive Mind Copilot. Analyze the project state and plan the next task.
 
 PROJECT CONTEXT:
@@ -141,8 +172,15 @@ Rules:
 - Focus on visual quality and user experience
 - Follow the Volcanic Cyber aesthetic`;
 
-  const r = await generateText(prompt, { task: "json", maxTokens: 4096 });
-  return r.text;
+  const r = await generateText(
+    prompt,
+    {
+      task: "json",
+      maxTokens: 4096,
+      ...(opts?.metering ? { metering: opts.metering } : {}),
+    },
+  );
+  return { text: r.text, metering: r.metering, provider: r.provider, model: r.model, usage: r.usage };
 }
 
 /**
@@ -153,7 +191,8 @@ export async function executorCode(
   targetFile: string,
   existingCode?: string,
   errorLogs?: string,
-): Promise<string> {
+  opts?: GeminiWrapperOptions,
+): Promise<GeminiWrapperResult> {
   let prompt = `You are the LiTTree-LabStudios Hive Mind Executor. Implement the code for: ${targetFile}
 
 COPILOT INSTRUCTIONS:
@@ -188,8 +227,15 @@ STRICT RULES:
 - Smooth Tailwind animations
 - @/ alias for all imports`;
 
-  const r = await generateText(prompt, { task: "code", maxTokens: 8192 });
-  return r.text;
+  const r = await generateText(
+    prompt,
+    {
+      task: "code",
+      maxTokens: 8192,
+      ...(opts?.metering ? { metering: opts.metering } : {}),
+    },
+  );
+  return { text: r.text, metering: r.metering, provider: r.provider, model: r.model, usage: r.usage };
 }
 
 // Re-export the JSON helper for direct structured-output use

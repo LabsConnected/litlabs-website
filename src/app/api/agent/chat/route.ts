@@ -27,6 +27,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
 import { generateText } from "@/lib/llm";
 import { AGENTS } from "@/lib/agents";
+import { emitServiceCostEvent } from "@/lib/service-metering";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -101,11 +102,30 @@ async function handleChat(message: string, history: HistoryEntry[], agentSlug: s
 
   const prompt = buildPrompt(agent, message, history);
 
+  const meteringRequestId = crypto.randomUUID();
+  const meteringStartedAt = new Date();
+
   const result = await generateText(
     prompt,
     { task: "chat", maxTokens: 2048 },
     undefined,
   );
+
+  // Cost visibility: service-to-service calls have no billable user, but
+  // every provider attempt must be tracked. Emit via the canonical
+  // service metering path (billable=false, LiTT absorbs the cost).
+  // Best-effort — never fails the chat response.
+  void emitServiceCostEvent({
+    feature: "agent-chat-service",
+    provider: result.provider,
+    model: result.model,
+    inputTokens: result.usage?.prompt ?? 0,
+    outputTokens: result.usage?.completion ?? 0,
+    idempotencyKey: `metering:agent-chat:${meteringRequestId}:0`,
+    status: "success",
+    startedAt: meteringStartedAt,
+    finishedAt: new Date(),
+  });
 
   return {
     agent: { id: agent.id, name: agent.name, slug: agentSlug },

@@ -3,6 +3,7 @@ import { streamText, generateText, llmHealth } from "@/lib/llm";
 import { auth } from "@/lib/auth";
 import { isOwnerClerkId } from "@/lib/mission-control";
 import { getRole } from "@/lib/roles";
+import { emitLlmMetering } from "@/lib/metering";
 
 export const runtime = "nodejs";
 
@@ -69,6 +70,10 @@ export async function GET(req: NextRequest) {
   }[] = [];
 
   // Test 1: Non-streaming generateText
+  // Cost visibility: owner is billing-exempt by design, but every provider
+  // attempt must be tracked. Emit via canonical metering (billable=false).
+  const test1RequestId = crypto.randomUUID();
+  const test1StartedAt = new Date();
   try {
     const r = await generateText("Say hello in 3 words", { task: "chat", category: "auto" });
     results.push({
@@ -78,6 +83,20 @@ export async function GET(req: NextRequest) {
       latencyMs: r.latencyMs,
       failover: r.failover,
     });
+    void emitLlmMetering({
+      clerkId: userId,
+      feature: "debug-llm-test",
+      provider: r.provider,
+      model: r.model,
+      inputTokens: r.usage?.prompt ?? 0,
+      outputTokens: r.usage?.completion ?? 0,
+      status: "success",
+      billable: false,
+      chargedBits: 0,
+      idempotencyKey: `metering:debug-llm-test:${test1RequestId}:0`,
+      startedAt: test1StartedAt,
+      finishedAt: new Date(),
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const category = msg.includes("auth") || msg.includes("403") || msg.includes("leaked")
@@ -86,9 +105,24 @@ export async function GET(req: NextRequest) {
         ? "key_missing"
         : "unknown";
     results.push({ provider: "generate", ok: false, error: msg, errorCategory: category });
+    void emitLlmMetering({
+      clerkId: userId,
+      feature: "debug-llm-test",
+      provider: "unknown",
+      model: "unknown",
+      status: "failed",
+      error: msg.slice(0, 500),
+      billable: false,
+      chargedBits: 0,
+      idempotencyKey: `metering:debug-llm-test:${test1RequestId}:0`,
+      startedAt: test1StartedAt,
+      finishedAt: new Date(),
+    });
   }
 
   // Test 2: Streaming streamText
+  const test2RequestId = crypto.randomUUID();
+  const test2StartedAt = new Date();
   try {
     let streamed = "";
     const r = await streamText(
@@ -104,6 +138,20 @@ export async function GET(req: NextRequest) {
       latencyMs: r.latencyMs,
       failover: r.failover,
     });
+    void emitLlmMetering({
+      clerkId: userId,
+      feature: "debug-llm-test",
+      provider: r.provider,
+      model: r.model,
+      // streamText does not return token usage — cost is tracked with
+      // the provider/model that responded (tokens 0).
+      status: "success",
+      billable: false,
+      chargedBits: 0,
+      idempotencyKey: `metering:debug-llm-test:${test2RequestId}:0`,
+      startedAt: test2StartedAt,
+      finishedAt: new Date(),
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const category = msg.includes("auth") || msg.includes("403") || msg.includes("leaked")
@@ -112,6 +160,19 @@ export async function GET(req: NextRequest) {
         ? "key_missing"
         : "unknown";
     results.push({ provider: "stream", ok: false, error: msg, errorCategory: category });
+    void emitLlmMetering({
+      clerkId: userId,
+      feature: "debug-llm-test",
+      provider: "unknown",
+      model: "unknown",
+      status: "failed",
+      error: msg.slice(0, 500),
+      billable: false,
+      chargedBits: 0,
+      idempotencyKey: `metering:debug-llm-test:${test2RequestId}:0`,
+      startedAt: test2StartedAt,
+      finishedAt: new Date(),
+    });
   }
 
   return NextResponse.json({
