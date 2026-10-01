@@ -197,6 +197,12 @@ export function Dashboard() {
           </div>
 
           {/* 3: recent projects */}
+          {missionControl.error ? (
+            <div role="alert" className="rounded-2xl border border-white/10 p-5 text-sm text-zinc-300">
+              <p>LiTT couldn’t load your recent projects right now. Try again in a moment.</p>
+              <button type="button" onClick={missionControl.refresh} className="mt-3 min-h-11 rounded-lg border border-white/20 px-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4">Try again</button>
+            </div>
+          ) : (missionControl.loading || recentProjects.length > 0) && (
           <div className="dashboard-card-in" style={{ animationDelay: "120ms" }}>
             <RecentWork
               projects={recentProjects}
@@ -204,6 +210,7 @@ export function Dashboard() {
               onOpenTerminal={handleOpenTerminal}
             />
           </div>
+          )}
         </div>
       </main>
 
