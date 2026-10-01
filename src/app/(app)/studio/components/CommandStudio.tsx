@@ -210,6 +210,20 @@ function CommandStudioContent() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+
+  // First-run: preload prompt from URL (?prompt=...) into chat composer
+  // This runs once on mount when arriving from FirstRunWelcome
+  useEffect(() => {
+    const prompt = searchParams.get("prompt");
+    if (prompt && prompt.trim()) {
+      const timer = setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent("studio:ask-litt", { detail: { prompt: prompt.trim() } })
+        );
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const {
     capabilities,
     refresh: refreshCapabilities,
