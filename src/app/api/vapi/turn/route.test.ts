@@ -81,7 +81,9 @@ describe("POST /api/vapi/turn metering", () => {
       provider: "gemini",
       model: "gemini-2.5-flash",
       status: "success",
-      billable: true,
+      // PRODUCT DECISION: voice turns are free to users (billable=false).
+      // LiTT absorbs the provider cost; the event provides cost visibility.
+      billable: false,
       clerkId: "clerk_vapi_user",
       chargedBits: 0,
     });
