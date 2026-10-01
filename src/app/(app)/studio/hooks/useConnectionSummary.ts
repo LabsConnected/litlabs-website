@@ -8,6 +8,7 @@ import { useStudioModelStore } from "../stores/useStudioModelStore";
 import { useProjectRuntime } from "./useProjectRuntime";
 import type { TerminalStatus } from "@/lib/capabilities/types";
 import { deriveTerminalHealth, type TerminalHealth } from "@/lib/studio/terminal-health";
+import { resolveStudioProjectId } from "../lib/first-run-handoff";
 
 export interface VoiceHealthState {
   /** Inworld env vars are set (server-side check) */
@@ -156,7 +157,7 @@ export function useConnectionSummary(options?: { disabled?: boolean }) {
   const { voiceTransportConnected, voiceInputState } = useVoiceSession();
   const { getToken } = useClerkAuth();
   const searchParams = useSearchParams();
-  const explicitProjectId = searchParams.get("project");
+  const explicitProjectId = resolveStudioProjectId(searchParams.get("project"));
 
   const refresh = useCallback(async () => {
     try {

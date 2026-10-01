@@ -31,6 +31,12 @@ import type { ArtifactAction } from "@/lib/canvas/types";
 import { STUDIO_EVENT_OPEN_DOCK, STUDIO_EVENT_OPEN_FILE, STUDIO_EVENT_REQUEST_DEPLOY } from "@/lib/canvas/panel-actions";
 import { INITIAL_RUNTIME_STATE, deriveExecutionHint } from "@/lib/projects/runtime-state";
 import { useLiTTRuntime } from "@/hooks/useLiTTRuntime";
+import {
+  isOnboardingComplete,
+  markFirstRunPromptConsumed,
+  resolveStudioProjectId,
+  takeFirstRunPrompt,
+} from "../lib/first-run-handoff";
 
 import CommandStudioHeader from "./CommandStudioHeader";
 import StudioDock, { type StudioDockTab } from "./StudioDock";
@@ -210,29 +216,7 @@ function CommandStudioContent() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-
-  // First-run: preload prompt from URL (?prompt=...) or sessionStorage into chat composer
-  // Handles both fresh mount and param changes (e.g. router.replace from welcome flow)
-  const handledPromptRef = useRef<string | null>(null);
-  useEffect(() => {
-    // Check URL param first, then sessionStorage fallback (reliable across rapid navigation)
-    let prompt = searchParams.get("prompt");
-    if (!prompt) {
-      try {
-        prompt = sessionStorage.getItem("litt:first-run-prompt");
-        if (prompt) sessionStorage.removeItem("litt:first-run-prompt");
-      } catch {}
-    }
-    if (prompt && prompt.trim() && handledPromptRef.current !== prompt) {
-      handledPromptRef.current = prompt;
-      const timer = setTimeout(() => {
-        window.dispatchEvent(
-          new CustomEvent("studio:ask-litt", { detail: { prompt: prompt.trim() } })
-        );
-      }, 800);
-      return () => clearTimeout(timer);
-    }
-  }, [searchParams]);
+  const activeProjectId = resolveStudioProjectId(searchParams.get("project"));
   const {
     capabilities,
     refresh: refreshCapabilities,
@@ -961,6 +945,25 @@ function CommandStudioContent() {
     return () => window.removeEventListener("studio:ask-litt", handler);
   }, [isMobileLitt, setWorktabSelection, studioShellActive, chatDock]);
 
+  useEffect(() => {
+    const prompt = takeFirstRunPrompt(searchParams.get("prompt"));
+    if (!prompt) return;
+    setComposerValue((current) => (current.trim() ? current : prompt));
+    markFirstRunPromptConsumed();
+    if (isMobileLitt) {
+      setMobileLittOpen(true);
+    } else if (studioShellActive) {
+      if (chatDock === "left") {
+        setLittCollapsed(false);
+      } else {
+        setLittExpanded(true);
+      }
+    } else {
+      setLittCollapsed(false);
+    }
+    setLittActiveTab("chat");
+  }, [searchParams, isMobileLitt, studioShellActive, chatDock]);
+
   // Canvas ActionPanel events — the studio.* ArtifactActions execute
   // client-side: executeAction dispatches these DOM events and the owning
   // surfaces react. Deploy routes through the existing ask-litt path
@@ -1176,7 +1179,7 @@ function CommandStudioContent() {
     // revision counter and surfaces as a spurious "stale revision" 409 on
     // the very first message. The explicit URL project always wins here;
     // capabilities.projectId is only used when no project is named in the URL.
-    serverProjectId: searchParams.get("project") ?? capabilities.projectId,
+    serverProjectId: activeProjectId ?? capabilities.projectId,
     cameraState: { active: cameraDock.open, status: cameraStatus },
     previewSelection,
     // Shared capabilities — the hook must not start a second poll stack.
@@ -1198,7 +1201,7 @@ function CommandStudioContent() {
   // authoritative the instant it's present (capabilities.projectId can
   // lag a refresh behind), so project-scoped runtime state resets the
   // moment the switch lands, not after the capabilities round-trip.
-  useProjectIsolation(searchParams.get("project") ?? capabilities.projectId);
+  useProjectIsolation(activeProjectId ?? capabilities.projectId);
 
 
   useEffect(() => {
@@ -1303,6 +1306,9 @@ function CommandStudioContent() {
     }
     // Build the target URL with ?tool=
     const params = new URLSearchParams(searchParams.toString());
+    const projectId = resolveStudioProjectId(searchParams.get("project"));
+    if (projectId) params.set("project", projectId);
+    params.delete("prompt");
 
   // Canonical: always tool=chat for the LiTT conversation surface.
     // Workspace stages (code/canvas/preview) get their own tool value.
@@ -2589,6 +2595,9 @@ function CommandStudioContent() {
         onDismissCompletion={() => setCompletion(null)}
         onUndoCompletion={handleUndoCompletion}
         overflowDownloads={isMobileLitt}
+        suppressEmptyState={
+          isOnboardingComplete(userId, activeProjectId) || Boolean(composerValue.trim())
+        }
         // Canonical runtime truth: the visible PTY is interactive right now.
         ptyUsable={runtime?.terminal?.usable ?? false}
         onContinueCompletion={() => {
@@ -3908,6 +3917,7 @@ function StudioWorkSurface({
   onContinueCompletion,
   overflowDownloads = false,
   ptyUsable = false,
+  suppressEmptyState = false,
 }: {
   messages: import("../stores/useStudioAgentStore").ChatMessage[];
   conversationId: string | null;
@@ -3928,19 +3938,9 @@ function StudioWorkSurface({
   overflowDownloads?: boolean;
   /** Canonical runtime truth: is the interactive PTY usable right now. */
   ptyUsable?: boolean;
+  suppressEmptyState?: boolean;
 }) {
-  // P0.14-15: Only show empty state when messages are truly empty AND
-  // conversations have finished loading from the server. During loading,
-  // show a minimal spinner so users don't see the welcome screen flash.
-  const isEmpty = messages.length === 0 && !loading;
-  // Hide duplicate "Describe your business" onboarding if user completed the welcome flow
-  const onboardingComplete = (() => {
-    try {
-      return localStorage.getItem("litt:onboarding-complete") === "true";
-    } catch {
-      return false;
-    }
-  })();
+  const isEmpty = messages.length === 0 && !loading && !suppressEmptyState;
   return (
     <div
       className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
@@ -3971,7 +3971,6 @@ function StudioWorkSurface({
             displayName={displayName}
             onPrimaryAction={onFirstMissionAction}
             onSelectConversation={onSelectConversation}
-            hideDescribeBox={onboardingComplete}
           />
         </div>
       ) : loading && messages.length === 0 ? (

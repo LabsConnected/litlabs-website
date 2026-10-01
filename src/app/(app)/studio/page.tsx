@@ -7,6 +7,10 @@ import { useTheme } from "@/context/ThemeContext";
 import { track } from "@/lib/analytics";
 import CommandStudio from "./components/CommandStudio";
 import FirstRunWelcome from "./components/FirstRunWelcome";
+import {
+  peekFirstRunProjectId,
+  writeFirstRunHandoff,
+} from "./lib/first-run-handoff";
 import { Terminal, Loader2 } from "lucide-react";
 
 /**
@@ -123,9 +127,10 @@ function StudioLoadingState({ onRetry }: { onRetry: () => void }) {
 }
 
 function StudioHub() {
-  const { isLoaded, isSignedIn } = useClerkAuth();
+  const { isLoaded, isSignedIn, userId } = useClerkAuth();
   const router = useRouter();
   const [retryKey, setRetryKey] = useState(0);
+  const [createdProjectId, setCreatedProjectId] = useState<string | null>(null);
   // Clerk's injected session state can make isLoaded resolve true before
   // hydration while SSR always renders the loading branch — gate the first
   // client render on mounted so server and client markup match (React #418).
@@ -153,7 +158,7 @@ function StudioHub() {
 
     // Skip check if project already in URL
     const params = new URLSearchParams(window.location.search);
-    if (params.get("project")) {
+    if (params.get("project") || peekFirstRunProjectId()) {
       setProjectCheck({ loading: false, hasProjects: true });
       return;
     }
@@ -202,16 +207,16 @@ function StudioHub() {
         const { project } = await res.json();
         if (!project?.id) throw new Error("No project ID returned");
 
+        writeFirstRunHandoff({
+          prompt: idea,
+          projectId: project.id,
+          userId,
+        });
+        setCreatedProjectId(project.id);
         const params = new URLSearchParams(window.location.search);
         params.set("project", project.id);
         params.set("prompt", idea);
         params.set("tool", "chat");
-        // Store prompt in sessionStorage as reliable handoff (URL params can be lost on rapid navigation)
-        // Mark onboarding complete so Studio doesn't show duplicate "Describe your business" step
-        try {
-          sessionStorage.setItem("litt:first-run-prompt", idea);
-          localStorage.setItem("litt:onboarding-complete", "true");
-        } catch {}
         router.replace(`/studio?${params.toString()}`);
         setProjectCheck({ loading: false, hasProjects: true });
       } catch (err) {
@@ -220,7 +225,7 @@ function StudioHub() {
         setIsCreating(false);
       }
     },
-    [router]
+    [router, userId]
   );
 
   const handleFirstRunRetry = useCallback(() => {
@@ -257,7 +262,7 @@ function StudioHub() {
     return <StudioLoadingState key={retryKey} onRetry={handleRetry} />;
   }
 
-  if (projectCheck.hasProjects === false) {
+  if (projectCheck.hasProjects === false && !createdProjectId) {
     return (
       <FirstRunWelcome
         onSubmit={handleFirstRunSubmit}
