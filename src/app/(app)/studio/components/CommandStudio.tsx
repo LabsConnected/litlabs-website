@@ -211,11 +211,18 @@ function CommandStudioContent() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  // First-run: preload prompt from URL (?prompt=...) into chat composer
+  // First-run: preload prompt from URL (?prompt=...) or sessionStorage into chat composer
   // Handles both fresh mount and param changes (e.g. router.replace from welcome flow)
   const handledPromptRef = useRef<string | null>(null);
   useEffect(() => {
-    const prompt = searchParams.get("prompt");
+    // Check URL param first, then sessionStorage fallback (reliable across rapid navigation)
+    let prompt = searchParams.get("prompt");
+    if (!prompt) {
+      try {
+        prompt = sessionStorage.getItem("litt:first-run-prompt");
+        if (prompt) sessionStorage.removeItem("litt:first-run-prompt");
+      } catch {}
+    }
     if (prompt && prompt.trim() && handledPromptRef.current !== prompt) {
       handledPromptRef.current = prompt;
       const timer = setTimeout(() => {

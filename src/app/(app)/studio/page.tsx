@@ -206,6 +206,10 @@ function StudioHub() {
         params.set("project", project.id);
         params.set("prompt", idea);
         params.set("tool", "chat");
+        // Store prompt in sessionStorage as reliable handoff (URL params can be lost on rapid navigation)
+        try {
+          sessionStorage.setItem("litt:first-run-prompt", idea);
+        } catch {}
         router.replace(`/studio?${params.toString()}`);
         setProjectCheck({ loading: false, hasProjects: true });
       } catch (err) {
