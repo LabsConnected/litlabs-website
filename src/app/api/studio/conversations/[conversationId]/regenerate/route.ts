@@ -320,6 +320,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         category,
         maxTokens: 2048,
         modelOverride,
+        // Metering visibility: record provider attempts for reconciliation.
+        // (Full balance-gate enforcement is a separate follow-up.)
+        metering: { clerkId: userId, feature: "studio-regenerate" },
       },
       undefined,
     );

@@ -118,9 +118,12 @@ describe("loop-integrity: domain-failure normalization", () => {
   it("resume-continuation execute site normalizes handler failures", () => {
     // The :1366 site previously recorded { ok: true, payload: { success: false } }
     // as success:true (phantom mutation → false "completed").
+    // Window widened 2026-09-30: the Tool Orchestrator (capability planning,
+    // reference-match, tool health, observability) added legitimate setup
+    // code between resumeAgentLoopV2Inner and the handler-error site.
     expect(
       AGENT_LOOP_SRC.match(
-        /resumeAgentLoopV2[\s\S]{0,6000}const handlerError = handlerFailureError\(execResult\.result\)/,
+        /resumeAgentLoopV2[\s\S]{0,12000}const handlerError = handlerFailureError\(execResult\.result\)/,
       ),
     ).not.toBeNull();
   });

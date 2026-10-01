@@ -62,6 +62,56 @@ import {
   type QualityLoopSnapshot,
   formatQualityVerdictBlock,
 } from "./quality-loop-flow";
+// LiTT Tool Orchestrator (fix/litt-tool-orchestrator): goal → capability
+// planning, tool health, reference-match workflow, run observability.
+import { planCapabilities, buildCapabilityPlanPrompt } from "./capability-planner";
+import {
+  resolveToolHealth,
+  filterOfferableTools,
+  buildToolHealthPromptNote,
+} from "./tool-health";
+import {
+  isReferenceMatchRequest,
+  extractReferenceUrls,
+  REFERENCE_MATCH_WORKFLOW,
+} from "./reference-match";
+import {
+  startRunObservability,
+  recordToolsOffered,
+  recordToolCall as recordObsToolCall,
+  recordApproval as recordObsApproval,
+  recordFallback as recordObsFallback,
+  recordVerificationEvidence,
+  finishRunObservability,
+  friendlyActivityLabel,
+} from "./run-observability";
+import { isTerminalOwnerUser } from "@/lib/terminal-owner";
+
+/**
+ * Apply the Tool Orchestrator prompts to a loop config (Parts A, B, H).
+ * Idempotent per config object — safe to call on both the initial run
+ * and the approval-resume path (which rebuilds cfg from the original
+ * config and would otherwise lose the orchestration prompts).
+ *
+ * Returns the computed capability plan for observability wiring.
+ */
+function applyOrchestratorPrompts(
+  cfg: { systemPrompt: string },
+  userMessage: string,
+): import("./capability-planner").CapabilityPlan {
+  const capabilityPlan = planCapabilities(userMessage);
+  cfg.systemPrompt += "\n\n" + buildCapabilityPlanPrompt(capabilityPlan);
+
+  if (capabilityPlan.isReferenceMatch || isReferenceMatchRequest(userMessage)) {
+    const refUrls = extractReferenceUrls(userMessage);
+    cfg.systemPrompt +=
+      "\n\n" + REFERENCE_MATCH_WORKFLOW +
+      (refUrls.length > 0
+        ? `\nReference URL(s) supplied: ${refUrls.join(", ")}`
+        : `\nNo reference URL detected in the message — ask the user for the reference link or screenshot before implementing.`);
+  }
+  return capabilityPlan;
+}
 
 // Station Control Bridge (chunk E): importing the barrel registers every
 // station action into the station registry (module side effects); the
@@ -266,6 +316,12 @@ export interface AgentLoopResult {
    * error + re-read file content) survives the second attempt.
    */
   finalMessages?: LLMMessage[];
+  /**
+   * Run observability record (Part J): goal, capability plan, tools
+   * offered/called, failures, fallbacks, approvals, verification
+   * evidence. Internal diagnostics — not user-facing.
+   */
+  runObservability?: import("./run-observability").RunObservability;
 }
 
 // ─── Loop detection ───────────────────────────────────────────────
@@ -866,6 +922,22 @@ async function runAgentLoopV2Inner(
     cfg.systemPrompt += buildQualityLoopPrompt(qualitySession.taskScope);
   }
 
+  // ── LiTT Tool Orchestrator: goal → capability planning (Parts A, B, H) ──
+  // Classify what this goal needs BEFORE substantive execution. The plan
+  // is internal machine-readable state; its prompt rendering tells the
+  // model which of its real capabilities materially improve THIS goal.
+  // Reference-match requests ("make mine look like this") trigger the
+  // reference workflow instead of a generic build.
+  const capabilityPlan = applyOrchestratorPrompts(cfg, userMessage);
+
+  // ── Run observability (Part J) ──
+  const runObs = startRunObservability({
+    runId: meteringRunId,
+    goal: userMessage.slice(0, 500),
+    agentMode: cfg.executionMode,
+    capabilityPlan,
+  });
+
   const events: ProgressEvent[] = [];
   const toolCallRecords: ToolCallRecord[] = [];
   let hasInterveningMutation = false;
@@ -908,7 +980,50 @@ async function runAgentLoopV2Inner(
     return permissionEngine.check(permInfo, {}, cfg.executionMode, availableCapabilities).allowed;
   });
 
-  const toolDefs = availableTools.map(toToolDefinition);
+  // ── Tool health (Part F) ──
+  // Don't advertise tools that cannot execute. The terminal owner gate
+  // (terminal-server) returns Forbidden for non-owners by design — for
+  // those users terminal.execute resolves UNAVAILABLE here, so the model
+  // never sees it and can't burn steps retrying a guaranteed failure.
+  // This is truthful capability reporting, not an auth bypass: the
+  // terminal server remains the authoritative enforcer.
+  const toolHealthMap = resolveToolHealth(
+    availableTools.map((t) => t.id),
+    {
+      terminal: {
+        userId: cfg.userId,
+        // Mirror of terminal-server/terminal-owner-gate.ts for health
+        // reporting only. Undefined (unknown) → degraded, not unavailable.
+        isTerminalOwner:
+          cfg.userId != null ? isTerminalOwnerUser(cfg.userId) : undefined,
+      },
+    },
+  );
+  const { offerable: offerableToolIds, degraded: degradedToolIds } =
+    filterOfferableTools(toolHealthMap);
+  const offerableTools = availableTools.filter((t) => offerableToolIds.includes(t.id));
+  const healthNote = buildToolHealthPromptNote(toolHealthMap);
+  if (healthNote) {
+    cfg.systemPrompt += "\n\n" + healthNote;
+  }
+
+  // ── Observability: record what the model was offered (Part J) ──
+  recordToolsOffered(
+    runObs,
+    offerableTools.map((t) => t.id),
+    [...toolHealthMap.values()],
+  );
+  if (degradedToolIds.length > 0) {
+    for (const id of degradedToolIds) {
+      recordObsFallback(runObs, {
+        fromToolId: id,
+        toAlternative: "safe alternative or honest report",
+        reason: "tool degraded at offer time",
+      });
+    }
+  }
+
+  const toolDefs = offerableTools.map(toToolDefinition);
 
   // Conversation messages for the LLM. A reprompt continues the SAME
   // conversation: seeded messages (e.g. a patch-recovery message with the
@@ -1335,6 +1450,8 @@ async function runAgentLoopV2Inner(
             cancelled: false,
             events,
             checkpoint: checkpoint ?? undefined,
+            // Observability (Part J): the run pauses here awaiting approval.
+            runObservability: finishRunObservability(runObs, "awaiting_approval"),
             pendingApproval: {
               toolId: toolCall.toolId,
               toolCallId: toolCall.toolCallId,
@@ -1448,7 +1565,26 @@ async function runAgentLoopV2Inner(
       // Log the call
       const summary = summarizeToolResult(toolCall.toolId, result.result);
       toolCallLog.push({ toolId: toolCall.toolId, success: result.success, summary, mutating: !toolDef.readOnly });
-      completedDeployment = readDeploymentOutcome(toolCall.toolId, result.result) ?? completedDeployment;
+      // Observability (Part J): record the tool call for the run record.
+      recordObsToolCall(runObs, {
+        toolId: toolCall.toolId,
+        success: result.success,
+        summary: summary.slice(0, 200),
+        mutating: !toolDef.readOnly,
+        latencyMs: toolDuration,
+        errorClass: result.success ? undefined : "tool_error",
+      });
+      // Friendly Activity label for the UI (Part J).
+      localProgress.emit({
+        type: "status",
+        summary: friendlyActivityLabel(toolCall.toolId),
+      });
+      const deploymentOutcome = readDeploymentOutcome(toolCall.toolId, result.result);
+      if (deploymentOutcome) {
+        // Verification evidence (Part J): a deployment produced a live URL.
+        recordVerificationEvidence(runObs, "deployment", deploymentOutcome.publicUrl);
+      }
+      completedDeployment = deploymentOutcome ?? completedDeployment;
       if (qualitySession) {
         noteToolResult(
           qualitySession,
@@ -1668,6 +1804,11 @@ async function runAgentLoopV2Inner(
       : undefined,
     qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
     finalMessages: [...llmMessages],
+    // Observability (Part J): the complete run record.
+    runObservability: finishRunObservability(
+      runObs,
+      cancelled ? "cancelled" : modelFailed || failedHonestly ? "failed" : "completed",
+    ),
   };
 }
 
@@ -2158,6 +2299,29 @@ async function resumeAgentLoopV2Inner(
     cfg.systemPrompt += buildQualityLoopPrompt(qualitySession.taskScope);
   }
 
+  // ── LiTT Tool Orchestrator on resume (Parts A, B, H, D) ──
+  // The resume rebuilds cfg from the original config, losing the initial
+  // run's orchestration prompts. Re-apply deterministically from the
+  // original user message (first user-role message in the paused
+  // conversation) so the resumed run keeps the same capability plan and
+  // reference-match workflow — tool-chain continuity across the approval
+  // pause.
+  const resumeUserMessage =
+    resume.pausedMessages.find((m) => m.role === "user")?.content ?? "";
+  const resumeCapabilityPlan =
+    applyOrchestratorPrompts(cfg, resumeUserMessage);
+
+  // ── Run observability on resume (Part J, D) ──
+  // The approval pause breaks the original run's observability record
+  // (not yet persisted across pauses); start a continuation record linked
+  // by runId so the resumed segment's tool use is still captured.
+  const resumeRunObs = startRunObservability({
+    runId: `${meteringRunId}:resume`,
+    goal: resumeUserMessage.slice(0, 500),
+    agentMode: cfg.executionMode,
+    capabilityPlan: resumeCapabilityPlan,
+  });
+
   const events: ProgressEvent[] = [];
   const toolCallRecords: ToolCallRecord[] = [];
   let hasInterveningMutation = resume.hadInterveningMutation;
@@ -2193,7 +2357,29 @@ async function resumeAgentLoopV2Inner(
     return permissionEngine.check(permInfo, {}, cfg.executionMode, availableCapabilities).allowed;
   });
 
-  const toolDefs = availableTools.map(toToolDefinition);
+  // ── Tool health on resume (Part F) ──
+  // Same truthful filtering as the initial run: don't re-advertise tools
+  // that cannot execute (e.g. terminal for non-owners).
+  const resumeToolHealthMap = resolveToolHealth(
+    availableTools.map((t) => t.id),
+    {
+      terminal: {
+        userId: cfg.userId,
+        isTerminalOwner:
+          cfg.userId != null ? isTerminalOwnerUser(cfg.userId) : undefined,
+      },
+    },
+  );
+  const { offerable: resumeOfferableIds } = filterOfferableTools(resumeToolHealthMap);
+  const resumeOfferableTools = availableTools.filter((t) =>
+    resumeOfferableIds.includes(t.id),
+  );
+  const resumeHealthNote = buildToolHealthPromptNote(resumeToolHealthMap);
+  if (resumeHealthNote) {
+    cfg.systemPrompt += "\n\n" + resumeHealthNote;
+  }
+
+  const toolDefs = resumeOfferableTools.map(toToolDefinition);
 
   // Resume from paused messages — these are server-verified, not client-supplied
   const llmMessages: LLMMessage[] = [
@@ -2303,6 +2489,15 @@ async function resumeAgentLoopV2Inner(
     // tool as mutating rather than silently crediting a read-only step.
     const resumedReadOnly = availableTools.find((t) => t.id === resume.toolId)?.readOnly ?? false;
     toolCallLog.push({ toolId: resume.toolId, success: result.success, summary, mutating: !resumedReadOnly });
+    // Observability (Part J): record the approved tool execution.
+    recordObsToolCall(resumeRunObs, {
+      toolId: resume.toolId,
+      success: result.success,
+      summary: summary.slice(0, 200),
+      mutating: !resumedReadOnly,
+      errorClass: result.success ? undefined : "tool_error",
+    });
+    recordObsApproval(resumeRunObs, resume.toolId, "granted");
     completedDeployment = readDeploymentOutcome(resume.toolId, result.result) ?? completedDeployment;
     // Acceptance 2026-09-28: the APPROVED tool — the actual edit in an
     // approval-gated run — was never fed to the quality ledger, so a
@@ -2862,6 +3057,11 @@ async function resumeAgentLoopV2Inner(
       : undefined,
     qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
     finalMessages: [...llmMessages],
+    // Observability (Part J): the resumed segment's run record.
+    runObservability: finishRunObservability(
+      resumeRunObs,
+      cancelled ? "cancelled" : modelFailed || failedHonestly ? "failed" : "completed",
+    ),
   };
 }
 
