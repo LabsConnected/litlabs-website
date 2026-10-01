@@ -311,7 +311,12 @@ async function handler(req: NextRequest) {
         buildToollessPrompt(
           `${directorPrompt}\n\n${memoryContext}USER: ${message}\n\nRespond as LiTT Director. Be direct and useful.`,
         ),
-        { task: "chat" },
+        {
+          task: "chat",
+          // Metering visibility: record provider attempts for reconciliation.
+          // (Full balance-gate enforcement is a separate follow-up.)
+          metering: { clerkId: userId, feature: "agents-chat-fallback" },
+        },
       );
       const markupHit = scanToollessOutput(r.text, fallbackToolIds);
       // Fail honestly on invocation intent — never return or persist the
