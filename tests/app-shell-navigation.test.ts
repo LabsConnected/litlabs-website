@@ -43,6 +43,17 @@ describe("AppShell Navigation", () => {
       ]);
     });
 
+    it("does not link to the dead short aliases (issue #602)", () => {
+      const hrefs = [
+        ...APP_NAV_MAIN.map((i) => i.href),
+        ...APP_NAV_MORE.map((i) => i.href),
+        ...APP_NAV_SECONDARY.flatMap((s) => s.items.map((i) => i.href)),
+      ];
+      for (const dead of ["/assets", "/missions", "/files", "/saved", "/connections"]) {
+        expect(hrefs).not.toContain(dead);
+      }
+    });
+
     it("no competing legacy nav bars remain (single flat main list)", () => {
       // One source of truth — no sectioned groups duplicating the bar.
       expect(APP_NAV_MAIN.length).toBe(5);
