@@ -212,10 +212,12 @@ function CommandStudioContent() {
   const searchParams = useSearchParams();
 
   // First-run: preload prompt from URL (?prompt=...) into chat composer
-  // This runs once on mount when arriving from FirstRunWelcome
+  // Handles both fresh mount and param changes (e.g. router.replace from welcome flow)
+  const handledPromptRef = useRef<string | null>(null);
   useEffect(() => {
     const prompt = searchParams.get("prompt");
-    if (prompt && prompt.trim()) {
+    if (prompt && prompt.trim() && handledPromptRef.current !== prompt) {
+      handledPromptRef.current = prompt;
       const timer = setTimeout(() => {
         window.dispatchEvent(
           new CustomEvent("studio:ask-litt", { detail: { prompt: prompt.trim() } })
@@ -223,7 +225,7 @@ function CommandStudioContent() {
       }, 800);
       return () => clearTimeout(timer);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchParams]);
   const {
     capabilities,
     refresh: refreshCapabilities,
