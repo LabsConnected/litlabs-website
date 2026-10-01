@@ -172,3 +172,52 @@ export async function meteredLlmCall(
 
   return { ok: true, result, billing };
 }
+
+function parseJsonPayload<T>(text: string): T {
+  const cleaned = text
+    .trim()
+    .replace(/^```(?:json)?\s*\n?/i, "")
+    .replace(/\n?```\s*$/i, "")
+    .trim();
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch {
+    const match = cleaned.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+    if (match) {
+      return JSON.parse(match[0]) as T;
+    }
+    throw new Error(`LLM did not return valid JSON. Raw: ${text.slice(0, 300)}`);
+  }
+}
+
+export type MeteredGenerateJsonResult<T> =
+  | { ok: true; data: T; result: LLMResult; billing: LlmBillingResult }
+  | {
+      ok: false;
+      status: 402 | 403;
+      error: string;
+      code: "spend_ceiling_exceeded" | "insufficient_credits";
+    };
+
+/**
+ * JSON variant of the canonical gateway. Balance authorization still happens
+ * before any provider call; retries still produce N cost_events and one
+ * billable usage_event via meteredLlmCall.
+ */
+export async function meteredGenerateJSON<T>(
+  input: MeteredLlmCallInput,
+): Promise<MeteredGenerateJsonResult<T>> {
+  const call = await meteredLlmCall({
+    ...input,
+    prompt: `${input.prompt}\n\nRespond with valid JSON only. No markdown, no commentary, no code fences.`,
+    llmOptions: { ...input.llmOptions, task: "json" },
+  });
+  if (!call.ok) return call;
+  return {
+    ok: true,
+    data: parseJsonPayload<T>(call.result.text),
+    result: call.result,
+    billing: call.billing,
+  };
+}
+

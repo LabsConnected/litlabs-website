@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { GoogleGenAI } from "@google/genai";
 import { emitLlmMetering } from "@/lib/metering";
+import { assertSpendAuthorized } from "@/lib/metered-llm-call";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const VIDEO_MODEL = "gemini-3.1-pro-preview";
@@ -16,6 +17,11 @@ async function handler(req: NextRequest) {
       { error: "Gemini API key not configured" },
       { status: 500 },
     );
+  const spendId = clerkId ?? userId;
+  const authz = await assertSpendAuthorized(spendId);
+  if (!authz.ok) {
+    return NextResponse.json({ error: authz.error, code: authz.code }, { status: authz.status });
+  }
 
   // Canonical metering: one usage_event per analyze attempt.
   const requestId = crypto.randomUUID();

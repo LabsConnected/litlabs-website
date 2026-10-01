@@ -1,18 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { runAI } from "@/lib/ai/providers";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { meteredLlmCall } from "@/lib/metered-llm-call";
+import { randomUUID } from "crypto";
 
 async function handler(req: NextRequest) {
-  const { userId } = await auth(req);
+  const { userId, clerkId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const spendId = clerkId ?? userId;
   try {
     const body = await req.json().catch(() => ({}));
 
     const message = body.message;
-    const model = body.model ?? "llama3.2:3b";
 
     if (!message) {
       return NextResponse.json(
@@ -21,40 +22,28 @@ async function handler(req: NextRequest) {
       );
     }
 
-    const messages = [
-      {
-        role: "system" as const,
-        content:
-          "You are LiTT, the AI operating layer for LiTTree-LabStudios. Be direct, useful, and practical. " +
-          "Never claim voice, microphone, terminal, repository, or any system capability is working unless the request includes verified evidence. " +
-          "If asked about system status without verified context, say that status is still being checked.",
-      },
-      { role: "user" as const, content: message },
-    ];
+    const systemPrompt =
+      "You are LiTT, the AI operating layer for LiTTree-LabStudios. Be direct, useful, and practical. " +
+      "Never claim voice, microphone, terminal, repository, or any system capability is working unless the request includes verified evidence. " +
+      "If asked about system status without verified context, say that status is still being checked.";
 
-    let reply: string;
-    let provider: "ollama" | "openrouter" = "ollama";
-    try {
-      reply = await runAI({ provider: "ollama", model, messages });
-    } catch (ollamaErr) {
-      try {
-        reply = await runAI({
-          provider: "openrouter",
-          model: "google/gemini-2.5-flash",
-          messages,
-        });
-        provider = "openrouter";
-      } catch {
-        const errMsg = ollamaErr instanceof Error ? ollamaErr.message : "AI backend unavailable";
-        throw new Error(errMsg);
-      }
+    const call = await meteredLlmCall({
+      clerkId: spendId,
+      prompt: String(message),
+      systemPrompt,
+      llmOptions: { task: "chat" },
+      feature: "ai-chat-legacy",
+      callId: randomUUID(),
+    });
+    if (!call.ok) {
+      return NextResponse.json({ ok: false, error: call.error, code: call.code }, { status: call.status });
     }
 
     return NextResponse.json({
       ok: true,
-      provider,
-      model,
-      reply,
+      provider: call.result.provider,
+      model: call.result.model,
+      reply: call.result.text,
     });
   } catch (error) {
     return NextResponse.json(

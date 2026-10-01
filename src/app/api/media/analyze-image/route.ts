@@ -3,6 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { auth } from "@/lib/auth";
 import { emitLlmMetering } from "@/lib/metering";
+import { assertSpendAuthorized } from "@/lib/metered-llm-call";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const VISION_MODEL = "gemini-3.5-flash";
@@ -11,6 +12,11 @@ async function handler(request: NextRequest) {
   const { userId, clerkId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!GEMINI_API_KEY) return NextResponse.json({ error: "Gemini API key not configured" }, { status: 500 });
+  const spendId = clerkId ?? userId;
+  const authz = await assertSpendAuthorized(spendId);
+  if (!authz.ok) {
+    return NextResponse.json({ error: authz.error, code: authz.code }, { status: authz.status });
+  }
 
   // Canonical metering: one usage_event per analyze attempt. Provider cost
   // comes from the canonical cost engine (the $1/1K-bit conversion behind

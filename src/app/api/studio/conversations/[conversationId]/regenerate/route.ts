@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
-import { generateText, type ModelCategory, type LLMProvider } from "@/lib/llm";
+import { type ModelCategory, type LLMProvider } from "@/lib/llm";
+import { meteredLlmCall } from "@/lib/metered-llm-call";
+import { randomUUID } from "crypto";
 import {
   getConversation,
   getMessage,
@@ -312,20 +314,23 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       ? { [provider]: body.model } as Record<string, string>
       : undefined;
 
-    const r = await generateText(
+    const call = await meteredLlmCall({
+      clerkId: userId,
       prompt,
-      {
+      llmOptions: {
         task: "chat",
         provider: category ? undefined : provider,
         category,
         maxTokens: 2048,
         modelOverride,
-        // Metering visibility: record provider attempts for reconciliation.
-        // (Full balance-gate enforcement is a separate follow-up.)
-        metering: { clerkId: userId, feature: "studio-regenerate" },
       },
-      undefined,
-    );
+      feature: "studio-regenerate",
+      callId: randomUUID(),
+    });
+    if (!call.ok) {
+      return NextResponse.json({ error: call.error, code: call.code }, { status: call.status });
+    }
+    const r = call.result;
 
     // Tool-protocol boundary for the regenerate path (mirrors the
     // messages V1 lane): this endpoint is chat-only — no agent loop, no

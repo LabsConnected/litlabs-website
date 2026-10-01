@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { generateJSON } from "@/lib/llm";
+import { meteredGenerateJSON } from "@/lib/metered-llm-call";
 import { rateLimit } from "@/lib/rate-limiter";
 import { jsonError, newRequestId } from "@/lib/api-route-helpers";
 
@@ -36,10 +36,11 @@ interface HtmlFileInput {
 
 async function handler(req: NextRequest) {
   const requestId = newRequestId();
-  const { userId } = await auth(req);
+  const { userId, clerkId } = await auth(req);
   if (!userId) {
     return jsonError(401, "Authentication required", requestId);
   }
+  const spendId = clerkId ?? userId;
 
   const rateLimitResult = await rateLimit(req, 20, 60);
   if (!rateLimitResult.success) {
@@ -110,11 +111,18 @@ User request: ${body.prompt}
 Respond with JSON: { "reply": "...", "files": [...] }`;
 
   try {
-    const result = await generateJSON(
-      userPrompt,
-      { task: "json", category: "auto" },
+    const call = await meteredGenerateJSON<Record<string, unknown>>({
+      clerkId: spendId,
+      prompt: userPrompt,
       systemPrompt,
-    );
+      llmOptions: { task: "json", category: "auto" },
+      feature: "canvas-html-ai",
+      callId: requestId,
+    });
+    if (!call.ok) {
+      return jsonError(call.status, call.error, requestId);
+    }
+    const result = call.data;
 
     const reply = (result as Record<string, unknown>).reply as string ?? "Done.";
     const files = (result as Record<string, unknown>).files as Array<{ name: string; content: string }> ?? [];

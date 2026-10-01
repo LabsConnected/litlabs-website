@@ -155,9 +155,15 @@ export async function POST(req: NextRequest) {
   // Canonical metering: runLiTTForVoice runs on callLLMWithTools, a
   // provider layer that does NOT go through llm.ts's generateText, so it
   // never emits metering itself. We record one usage_event per voice turn
-  // here. The runtime does not surface token counts per turn, so the event
-  // records the turn's provider/model and that spend occurred (tokens 0);
-  // voice turns are not wallet-billed today (billable: false).
+  // here.
+  //
+  // PRODUCT DECISION (documented): Voice turns are FREE to users today
+  // (billable=false, chargedBits=0). LiTT absorbs the provider cost.
+  // The runtime does not surface token counts per turn, so the event
+  // records the turn's provider/model and that spend occurred (tokens 0,
+  // cost 0). If the runtime surfaces token counts in the future, pass
+  // them through inputTokens/outputTokens for accurate cost_events.
+  // Cost visibility is maintained even though no charge occurs.
   const meteringRequestId = crypto.randomUUID();
   const meteringStartedAt = new Date();
   let result: Awaited<ReturnType<typeof runLiTTForVoice>>;
@@ -192,12 +198,10 @@ export async function POST(req: NextRequest) {
     feature: "vapi",
     provider: result.body.provider ?? "unknown",
     model: result.body.model ?? "unknown",
-    // P0 invariant: per logical action (one voice turn) exactly ONE
-    // billable usage_event — this is it (emitter defaults billable=true
-    // on success). Voice turns are not wallet-billed today, so
-    // chargedBits stays 0.
+    // PRODUCT DECISION: voice turns are free to users (billable=false).
+    // Cost is tracked for visibility; LiTT absorbs it.
     status: result.status === 200 ? "success" : "failed",
-    billable: result.status === 200,
+    billable: false,
     chargedBits: 0,
     idempotencyKey: `metering:vapi:${meteringRequestId}:0`,
     startedAt: meteringStartedAt,
