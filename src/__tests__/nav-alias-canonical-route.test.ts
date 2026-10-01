@@ -47,12 +47,13 @@ describe("P0 nav aliases (issue #602)", () => {
     expect(wallet).not.toContain("500 starter AI credits");
   });
 
-  it("agents catalog does not hardcode the signed-out CTA", () => {
+  it("agents catalog branches on the Clerk server session", () => {
     const agents = readFileSync(
       path.join(repoRoot, "src/app/(marketing)/agents/page.tsx"),
       "utf8",
     );
-    expect(agents).toContain("AgentsSessionNote");
-    expect(agents).not.toContain("Sign in or create an account to use agents.");
+    expect(agents).toContain('from "@clerk/nextjs/server"');
+    expect(agents).toContain("You're signed in.");
+    expect(agents).toContain("Sign in or create an account to use agents.");
   });
 });
