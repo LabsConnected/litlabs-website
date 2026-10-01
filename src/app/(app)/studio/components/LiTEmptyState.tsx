@@ -106,8 +106,8 @@ export default function LiTEmptyState({
       aria-label="First mission launchpad"
     >
       <div className="relative mx-auto flex w-full max-w-3xl flex-col items-center gap-5">
-        <div className="relative grid min-h-[140px] place-items-center" style={{ overflow: "visible" }}>
-          <LiTTPresence state="idle" variant="empty-state" size="xl" />
+        <div className="relative grid min-h-[104px] place-items-center sm:min-h-[140px]" style={{ overflow: "visible" }}>
+          <LiTTPresence state="idle" variant="empty-state" size="lg" />
           <span
             className="glass-status-pill absolute -bottom-2"
             style={{
@@ -130,7 +130,7 @@ export default function LiTEmptyState({
             className="mx-auto mt-2 max-w-xl text-[13px] leading-relaxed sm:text-sm"
             style={{ color: "var(--text-secondary)" }}
           >
-            {launchpadState.description}
+            {launchpadState.description || "Tell LiTT what you want built. You can review every change before it lands."}
           </p>
         </div>
 
