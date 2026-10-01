@@ -27,6 +27,7 @@ import {
 vi.mock("next/navigation", () => ({
   usePathname: () => "/settings",
   useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
 }));
 
 vi.mock("@/context/ThemeContext", () => ({
