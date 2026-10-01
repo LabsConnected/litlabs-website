@@ -17,6 +17,7 @@ import {
   resetDemoStore,
 } from "@/lib/demo/rate-limit";
 import { hashDemoValue, logDemoUsage } from "@/lib/demo/logging";
+import { emitServiceCostEvent } from "@/lib/service-metering";
 
 export const runtime = "nodejs";
 
@@ -297,6 +298,21 @@ export async function POST(req: NextRequest) {
     provider: providerUsed,
     model: modelUsed,
     ipHash: hashDemoValue(clientIp),
+  });
+
+  // Cost visibility: the demo is anonymous (no billable user), but every
+  // provider attempt must be tracked. Emit via canonical service metering
+  // (billable=false, LiTT absorbs the cost). Best-effort.
+  // Abuse prevention: per-session + per-IP burst limits and a hard
+  // per-session message ceiling (cfg.maxMessages) are enforced above.
+  void emitServiceCostEvent({
+    feature: "demo-chat-service",
+    provider: providerUsed,
+    model: modelUsed,
+    inputTokens: promptTokens,
+    outputTokens: completionTokens,
+    idempotencyKey: `metering:demo-chat:${sessionId}:${messageIndex}`,
+    status: "success",
   });
 
   const res = withSessionCookie(
