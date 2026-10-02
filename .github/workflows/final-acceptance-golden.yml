@@ -60,7 +60,13 @@ jobs:
       - name: Create disposable fresh acceptance account
         id: fresh-user
         if: ${{ !inputs.provision_only }}
-        run: echo "user_id=$(node scripts/final-acceptance/create-fresh-user.mjs)" >> "$GITHUB_OUTPUT"
+        run: |
+          set +x
+          USER_ID="$(node scripts/final-acceptance/create-fresh-user.mjs)"
+          # Mask before the id is stored as a step output. The next step's
+          # env block would otherwise print this throwaway Clerk user id.
+          echo "::add-mask::${USER_ID}"
+          echo "user_id=${USER_ID}" >> "$GITHUB_OUTPUT"
         env:
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
 
@@ -80,10 +86,17 @@ jobs:
           # engages, approves via the real endpoint, and fetches the live URL.
           LITT_ACCEPTANCE_DEPLOY: "1"
 
+      - name: Redact tokens in acceptance artifacts
+        if: always()
+        run: node scripts/final-acceptance/redact-artifacts.mjs artifacts/final-acceptance
+
       - name: Upload acceptance artifacts (verdict, SSE log, screenshots, video)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: final-acceptance-golden-${{ github.run_id }}
           path: artifacts/final-acceptance/**
-          retention-days: 14
+          # Public repo: keep a short window for a failed manual run.
+          # Text artifacts are redacted first; screenshots and video are the
+          # viewport only (the preview chrome does not render the token URL).
+          retention-days: 3

@@ -70,12 +70,12 @@
     },
     "preview_iframe_present": {
       "ok": true,
-      "detail": "https://terminal.litlabs.net/preview/ws-c5ea8b60-2fe4-4744-8692-9c60c8341a63?token=6fbfec4fd43b2b77388eda37213a541d5694a97dca6a82bc4eacd88b8ab2991f&studioRefres",
+      "detail": "https://terminal.litlabs.net/preview/ws-c5ea8b60-2fe4-4744-8692-9c60c8341a63?token=REDACTED&studioRefres=",
       "at": "2026-09-16T01:43:09.458Z"
     },
     "preview_frame_loaded": {
       "ok": true,
-      "detail": "frames=[\"https://www.litlabs.net/studio?project=c5ea8b60-2fe4-4744-8692-9c60c8341a63&tool=preview&agent=litt&\",\"https://terminal.litlabs.net/preview/ws-c5ea8b60-2fe4-4744-8692-9c60c8341a63?token=6fbfec4fd43b2b773\"]",
+      "detail": "frames=[\"https://www.litlabs.net/studio?project=c5ea8b60-2fe4-4744-8692-9c60c8341a63&tool=preview&agent=litt&\",\"https://terminal.litlabs.net/preview/ws-c5ea8b60-2fe4-4744-8692-9c60c8341a63?token=REDACTED\"]",
       "at": "2026-09-16T01:43:17.458Z"
     },
     "preview_serves_content": {
@@ -269,7 +269,7 @@
     {
       "type": "preview_result",
       "success": true,
-      "previewUrl": "https://terminal.litlabs.net/preview/ws-c5ea8b60-2fe4-4744-8692-9c60c8341a63?token=6fbfec4fd43b2b77388eda37213a541d5694a97dca6a82bc4eacd88b8ab2991f"
+      "previewUrl": "https://terminal.litlabs.net/preview/ws-c5ea8b60-2fe4-4744-8692-9c60c8341a63?token=REDACTED"
     },
     {
       "type": "text",
@@ -478,7 +478,7 @@
         ]
       },
       "launchStatus": "preview_ready",
-      "previewUrl": "https://terminal.litlabs.net/preview/ws-c5ea8b60-2fe4-4744-8692-9c60c8341a63?token=6fbfec4fd43b2b77388eda37213a541d5694a97dca6a82bc4eacd88b8ab2991f"
+      "previewUrl": "https://terminal.litlabs.net/preview/ws-c5ea8b60-2fe4-4744-8692-9c60c8341a63?token=REDACTED"
     },
     {
       "type": "DONE"

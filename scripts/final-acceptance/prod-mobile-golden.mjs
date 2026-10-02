@@ -36,6 +36,7 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
 import path from "path";
 import { resolveAcceptanceUserId } from "./acceptance-user.mjs";
 import { exitCodeForVerdict } from "./verdict-exit.mjs";
+import { maskForActions, maskUrl, redactText, redactValue } from "./redact-secrets.mjs";
 
 // ─── Config ────────────────────────────────────────────────────
 const BASE = (process.env.LITT_PROD_BASE_URL || "https://www.litlabs.net").replace(/\/$/, "");
@@ -51,6 +52,19 @@ let USER_ID = FRESH_ACCOUNT_REQUESTED
       envUserId: process.env.LITT_ACCEPTANCE_USER_ID,
     });
 const DEPLOY_REQUESTED = (process.env.LITT_ACCEPTANCE_DEPLOY ?? "1") !== "0";
+
+// Throwaway Clerk user ids and preview tokens must not reach the public log
+// or the uploaded artifact. The real id stays in memory for the Clerk call.
+maskForActions(USER_ID);
+function redact(text) {
+  return redactText(text, [USER_ID]);
+}
+function writeRedactedJson(file, data) {
+  writeFileSync(file, JSON.stringify(redactValue(data, [USER_ID]), null, 2));
+}
+function writeRedactedText(file, text) {
+  writeFileSync(file, redact(typeof text === "string" ? text : String(text ?? "")));
+}
 
 const STAMP = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
 
@@ -99,7 +113,7 @@ function loadSecret() {
 // ─── Result accumulator ────────────────────────────────────────
 const verdict = {
   base: BASE,
-  userId: USER_ID,
+  userId: "[redacted]",
   goldenProjectId: GOLDEN_PROJECT_ID,
   prompt: PROMPT,
   startedAt: new Date().toISOString(),
@@ -116,8 +130,9 @@ const verdict = {
 };
 
 function step(name, ok, detail) {
-  verdict.steps[name] = { ok, detail: detail ?? null, at: new Date().toISOString() };
-  console.log(`${ok ? "✅" : "❌"} ${name}${detail ? ` — ${detail}` : ""}`);
+  const safe = typeof detail === "string" ? redact(detail) : (detail ?? null);
+  verdict.steps[name] = { ok, detail: safe, at: new Date().toISOString() };
+  console.log(`${ok ? "✅" : "❌"} ${name}${safe ? ` — ${safe}` : ""}`);
 }
 
 async function shot(page, name) {
@@ -196,6 +211,7 @@ function parseSSE(raw) {
 async function main() {
   const secretKey = loadSecret();
   const signInUrl = await createSignInUrl(secretKey);
+  maskUrl(signInUrl);
 
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
@@ -338,7 +354,7 @@ async function main() {
     if (projectId) {
       const prepResp = await page.request.post(`${BASE}/api/studio-projects/${projectId}/workspace/prepare`, { timeout: 120_000 });
       const prepBody = await prepResp.json().catch(() => null);
-      verdict.notes.push(`workspace/prepare → ${prepResp.status()} ${JSON.stringify(prepBody)?.slice(0, 200)}`);
+      verdict.notes.push(redact(`workspace/prepare → ${prepResp.status()} ${JSON.stringify(prepBody)?.slice(0, 200)}`));
       workspaceReady = prepResp.status() === 200 && prepBody?.workspaceStatus === "ready";
       // If a 409 "provisioning" race occurred, poll the preview endpoint until ready.
       const prepDeadline = Date.now() + 3 * 60 * 1000;
@@ -461,7 +477,7 @@ async function main() {
 
     const events = parseSSE(messagesApiResponseBody || "");
     verdict.sseEvents = events.map((e) => ({ ...e, text: e.text ? String(e.text).slice(0, 200) : e.text, summary: e.summary ? String(e.summary).slice(0, 200) : e.summary }));
-    writeFileSync(path.join(ARTIFACT_DIR, "sse-events.json"), JSON.stringify(events, null, 2));
+    writeRedactedJson(path.join(ARTIFACT_DIR, "sse-events.json"), events);
 
     const toolEvents = events.filter((e) => e.type === "tool_execution");
     // Count only successful real file mutations — a read-only tool (files.list,
@@ -481,7 +497,7 @@ async function main() {
     verdict.filesChangedEvents = await page.evaluate(() => window.__littFilesChanged || []);
 
     const responseShapeEvents = events.filter((e) => e.type === "model_response");
-    writeFileSync(path.join(ARTIFACT_DIR, "provider-response-shapes.json"), JSON.stringify(responseShapeEvents, null, 2));
+    writeRedactedJson(path.join(ARTIFACT_DIR, "provider-response-shapes.json"), responseShapeEvents);
     step("provider_response_evidence", responseShapeEvents.length > 0,
       responseShapeEvents.length > 0
         ? responseShapeEvents.map((e) => `${e.provider}/${e.model} toolCalls=${e.toolCalls.length}`).join("; ")
@@ -508,12 +524,13 @@ async function main() {
       firstApprovalBody = firstApprovalResponse
         ? await firstApprovalResponse.json().catch(() => null)
         : null;
-      writeFileSync(path.join(ARTIFACT_DIR, "first-approval-response.json"), JSON.stringify(firstApprovalBody, null, 2));
+      writeRedactedJson(path.join(ARTIFACT_DIR, "first-approval-response.json"), firstApprovalBody);
     }
 
     const previewResult = events.find((e) => e.type === "preview_result");
     const previewStart = events.find((e) => e.type === "preview_start");
     const previewUrl = previewResult?.previewUrl || null;
+    if (previewUrl) maskUrl(previewUrl);
     // A run that paused before the preview phase emits no preview events —
     // preview arrives later through the approval-resume boundary and is
     // proven by the iframe/status checks below, not by stream events.
@@ -569,6 +586,7 @@ async function main() {
         }
       }
     }
+    if (iframeSrc) maskUrl(iframeSrc);
     step("preview_iframe_present", !!iframeSrc,
       iframeSrc ? `${iframeSrc.slice(0, 160)}${manualRecovery ? " (after manual refresh)" : ""}` : "no iframe src");
 
@@ -576,6 +594,7 @@ async function main() {
       // Wait for the frame to load
       await page.waitForTimeout(8000);
       const frameUrls = page.frames().map((f) => f.url());
+      for (const frameUrl of frameUrls) maskUrl(frameUrl);
       const childFrame = page.frames().find((f) => f !== page.mainFrame());
       step("preview_frame_loaded", !!childFrame && !!childFrame.url() && childFrame.url() !== "about:blank",
         `frames=${JSON.stringify(frameUrls.map((u) => u.slice(0, 100)))}`);
@@ -585,7 +604,7 @@ async function main() {
       const status = typeof direct.status === "function" ? direct.status() : -1;
       const body = typeof direct.text === "function" ? await direct.text() : "";
       step("preview_serves_content", status === 200 && body.length > 100, `HTTP ${status}, ${body.length} bytes`);
-      writeFileSync(path.join(ARTIFACT_DIR, "preview-body.html"), body.slice(0, 50_000));
+      writeRedactedText(path.join(ARTIFACT_DIR, "preview-body.html"), body.slice(0, 50_000));
       await shot(page, "07-preview-iframe");
     }
 
@@ -631,7 +650,7 @@ async function main() {
         pendingBody = null;
         if (currentPause.toolId === "project.deploy") {
           deployApprovalMeta = { status: approval?.status() ?? null, body: approvalBody };
-          writeFileSync(path.join(ARTIFACT_DIR, "deploy-approval-response.json"), JSON.stringify(approvalBody, null, 2));
+          writeRedactedJson(path.join(ARTIFACT_DIR, "deploy-approval-response.json"), approvalBody);
         }
 
         let runResult = approvalBody?.runResult ?? null;
@@ -719,7 +738,7 @@ async function main() {
         const prodResp = await page.request.get(productionUrl, { timeout: 45_000 }).catch(() => null);
         const prodStatus = prodResp?.status() ?? -1;
         const prodBody = prodResp ? await prodResp.text().catch(() => "") : "";
-        writeFileSync(path.join(ARTIFACT_DIR, "deployment-body.html"), prodBody.slice(0, 50_000));
+        writeRedactedText(path.join(ARTIFACT_DIR, "deployment-body.html"), prodBody.slice(0, 50_000));
         verdict.liveDeploymentUrl = productionUrl;
         step("production_url_verified",
           prodStatus === 200 && prodBody.length > 100 && /ember roast/i.test(prodBody),
@@ -756,7 +775,7 @@ async function main() {
     let indexHtml = await readWorkspaceFile("index.html");
     verdict.expectedLiteral = EXPECTED_LITERAL;
     if (indexHtml !== null) {
-      writeFileSync(path.join(ARTIFACT_DIR, "index.html"), indexHtml);
+      writeRedactedText(path.join(ARTIFACT_DIR, "index.html"), indexHtml);
     }
     step("file_content_exact",
       indexHtml !== null && indexHtml.includes(EXPECTED_LITERAL),
@@ -804,6 +823,7 @@ async function main() {
       ? await page.request.get(`${BASE}/api/studio-projects/${projectId}/preview`, { timeout: 60_000 }).catch(() => null)
       : null;
     const prevBody = prevProbe ? await prevProbe.json().catch(() => null) : null;
+    if (typeof prevBody?.previewUrl === "string") maskUrl(prevBody.previewUrl);
     step("preview_recovers_after_refresh",
       !!prevProbe && prevProbe.status() === 200 &&
         !!(prevBody?.previewUrl || prevBody?.runtimeStatus === "ready" || prevBody?.runtimeStatus === "running" || prevBody?.runtimeStatus === "starting"),
@@ -873,9 +893,9 @@ async function main() {
         // mistaken for a successful edit.
         const followUpRaw = await followUpResult.text().catch(() => "");
         const followUpEvents = parseSSE(followUpRaw);
-        writeFileSync(path.join(ARTIFACT_DIR, "follow-up-sse-events.json"), JSON.stringify(followUpEvents, null, 2));
+        writeRedactedJson(path.join(ARTIFACT_DIR, "follow-up-sse-events.json"), followUpEvents);
         const followUpProviderShapes = followUpEvents.filter((event) => event.type === "model_response");
-        writeFileSync(path.join(ARTIFACT_DIR, "follow-up-provider-response-shapes.json"), JSON.stringify(followUpProviderShapes, null, 2));
+        writeRedactedJson(path.join(ARTIFACT_DIR, "follow-up-provider-response-shapes.json"), followUpProviderShapes);
         step("post_build_follow_up_provider_evidence", followUpProviderShapes.length > 0,
           followUpProviderShapes.length > 0
             ? followUpProviderShapes.map((event) => `${event.provider}/${event.model} toolCalls=${event.toolCalls?.length ?? 0}`).join("; ")
@@ -931,7 +951,7 @@ async function main() {
   const failed = Object.entries(verdict.steps).filter(([, v]) => !v.ok).map(([k]) => k);
   verdict.verdict = failed.length === 0 ? "PASS" : `FAIL: ${failed.join(", ")}`;
   verdict.finishedAt = new Date().toISOString();
-  writeFileSync(path.join(ARTIFACT_DIR, "verdict.json"), JSON.stringify(verdict, null, 2));
+  writeRedactedJson(path.join(ARTIFACT_DIR, "verdict.json"), verdict);
   console.log(`\n=== VERDICT: ${verdict.verdict} ===`);
   console.log(`Artifacts: ${ARTIFACT_DIR}`);
 
@@ -943,8 +963,9 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("RUNNER ERROR:", err);
+  const message = err instanceof Error ? err.message : String(err);
+  console.error("RUNNER ERROR:", redact(message));
   verdict.verdict = "RUNNER_ERROR";
-  writeFileSync(path.join(ARTIFACT_DIR, "verdict.json"), JSON.stringify(verdict, null, 2));
+  writeRedactedJson(path.join(ARTIFACT_DIR, "verdict.json"), verdict);
   process.exit(1);
 });

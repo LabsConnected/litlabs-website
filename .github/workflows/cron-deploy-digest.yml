@@ -15,19 +15,44 @@ jobs:
           DIGEST_URL: ${{ vars.DIGEST_URL || 'https://www.litlabs.net' }}
           INTERNAL_API_KEY: ${{ secrets.INTERNAL_API_KEY }}
         run: |
-          if [ -z "$INTERNAL_API_KEY" ]; then
+          set -euo pipefail
+          set +x
+          if [ -z "${INTERNAL_API_KEY}" ]; then
             echo "::error::INTERNAL_API_KEY secret is not set"
             exit 1
           fi
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-            -A "LiTT-DeployDigest/1.0" \
-            -H "Authorization: Bearer $INTERNAL_API_KEY" \
-            "${DIGEST_URL}/api/deployments/digest")
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          BODY=$(echo "$RESPONSE" | head -n -1)
-          echo "HTTP status: $HTTP_CODE"
-          echo "Response body: $BODY"
-          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
-            echo "::error::Deploy digest endpoint returned HTTP $HTTP_CODE"
-            exit 1
+
+          body_file="$(mktemp)"
+          header_file="$(mktemp)"
+          trap 'rm -f "$body_file" "$header_file"' EXIT
+          umask 077
+          # Header file keeps the bearer token out of argv and the log.
+          # Nothing in this step prints the file or the response body.
+          printf 'Authorization: Bearer %s\n' "$INTERNAL_API_KEY" > "$header_file"
+          printf 'User-Agent: LiTT-DeployDigest/1.0\n' >> "$header_file"
+
+          http_code="$(curl --silent --show-error --header "@${header_file}" \
+            --output "$body_file" --write-out '%{http_code}' \
+            --request POST "${DIGEST_URL}/api/deployments/digest" || true)"
+          rm -f "$header_file"
+
+          echo "HTTP status: ${http_code}"
+          if jq -e . >/dev/null 2>&1 < "$body_file"; then
+            # Counts only. Do not print items, URLs, or error messages.
+            total="$(jq -r '(.digest.total // .total // "unknown") | tostring' "$body_file")"
+            failed="$(jq -r '(.digest.failed // .failed // []) | length' "$body_file")"
+            pending="$(jq -r '(.digest.pending // .pending // []) | length' "$body_file")"
+            success="$(jq -r 'if has("success") then (.success | tostring) else "n/a" end' "$body_file")"
+            echo "Summary: success=${success} total=${total} failed=${failed} pending=${pending}"
+          else
+            echo "Summary: response was not JSON (body omitted)"
           fi
+          rm -f "$body_file"
+
+          case "$http_code" in
+            2*) ;;
+            *)
+              echo "::error::Deploy digest endpoint returned HTTP ${http_code}"
+              exit 1
+              ;;
+          esac
