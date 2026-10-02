@@ -47,7 +47,7 @@ export function ExecutionDetailsExpander({
   const listId = useId();
   if (details.length === 0) return null;
   return (
-    <div className="mt-1.5">
+    <div className="pointer-events-auto mt-1.5">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -110,7 +110,7 @@ export function ExecutionBlock({
     <section
       data-testid="studio-execution-block"
       aria-label="Execution details"
-      className="mt-1.5 w-full min-w-0 rounded-xl border px-3 py-2"
+      className="pointer-events-none mt-1.5 w-full min-w-0 rounded-xl border px-3 py-2"
       style={{
         borderColor: "var(--studio-border, rgba(255,255,255,0.08))",
         backgroundColor: "rgba(255,255,255,0.02)",

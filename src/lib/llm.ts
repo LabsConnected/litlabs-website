@@ -264,13 +264,20 @@ function markModelUnavailable(provider: string): void {
  */
 function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
   const chain = rawDefaultChain(task, opts);
-  if (opts.allowLittPaidProviders) return chain;
 
-  const included = chain.filter((p) => !isLittPaidProvider(p));
+  // P1 launch: Gemini billing is depleted (HTTP 402). Until credits are
+  // restored, explicitly skip Gemini — do not rely on health checks or
+  // wait for it to fail first. Set GEMINI_DISABLED=true in production.
+  const geminiDisabled = process.env.GEMINI_DISABLED === "true";
+  const withoutGemini = geminiDisabled ? chain.filter((p) => p !== "gemini") : chain;
+
+  if (opts.allowLittPaidProviders) return withoutGemini;
+
+  const included = withoutGemini.filter((p) => !isLittPaidProvider(p));
   if (included.length > 0) return included;
 
   // Every candidate was litt_paid (e.g. a forged provider: "openai").
-  return INCLUDED_FALLBACK_CHAIN.filter((p) => !isLittPaidProvider(p));
+  return INCLUDED_FALLBACK_CHAIN.filter((p) => !isLittPaidProvider(p) && (!geminiDisabled || p !== "gemini"));
 }
 
 function rawDefaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
