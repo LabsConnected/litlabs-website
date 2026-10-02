@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { runLaunchFlow, type LaunchFlowOptions } from "@/lib/litt-intelligence/launch-flow";
 import { registerInternalTools, toolRegistry } from "@/lib/litt-intelligence/tool-registry";
 import type { WorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";

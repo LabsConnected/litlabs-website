@@ -1,6 +1,7 @@
 // @vitest-environment node
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { streamText, AllProvidersEmptyError } from "./llm";
+import type { ModelCategory } from "./llm";
 
 /**
  * Provider-level abort coverage — proves an explicit execution abort
@@ -282,7 +283,7 @@ describe("generateText — entitled pinned-provider-filtered-out fallback", () =
     const result = await generateText("hello", {
       task: "chat",
       provider: "gemini", // Studio picker pin (persisted gemini-2.5-flash)
-      category: "advanced", // non-"auto", so the pin passes through
+      category: "advanced" as ModelCategory, // non-"auto", so the pin passes through (route casts body.category the same way)
       allowLittPaidProviders: true, // owner / premium entitlement
     });
 
@@ -300,7 +301,7 @@ describe("generateText — entitled pinned-provider-filtered-out fallback", () =
       generateText("hello", {
         task: "chat",
         provider: "gemini",
-        category: "advanced",
+        category: "advanced" as ModelCategory,
         allowLittPaidProviders: false,
       }),
     ).rejects.toThrow(/All LLM providers failed/);
