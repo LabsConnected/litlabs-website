@@ -69,7 +69,7 @@ describe("GET /api/studio-projects/[projectId]/workspace-state", () => {
       { params: Promise.resolve({ projectId: "p1" }) },
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ scaffolded: true, touched: false, starterContent: true });
+    expect(await res.json()).toEqual({ scaffolded: true, touched: false, starterContent: true, hasUserContent: false });
   });
 
   it("reports touched=true for the P0-2 case (manifest consumed, second commit landed, marker kept)", async () => {
@@ -82,7 +82,7 @@ describe("GET /api/studio-projects/[projectId]/workspace-state", () => {
       { params: Promise.resolve({ projectId: "p1" }) },
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ scaffolded: false, touched: true, starterContent: true });
+    expect(await res.json()).toEqual({ scaffolded: false, touched: true, starterContent: true, hasUserContent: true });
   });
 
   it("reports scaffolded=false, touched=true, starterContent=false for a real project", async () => {
@@ -93,7 +93,7 @@ describe("GET /api/studio-projects/[projectId]/workspace-state", () => {
       { params: Promise.resolve({ projectId: "p1" }) },
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ scaffolded: false, touched: true, starterContent: false });
+    expect(await res.json()).toEqual({ scaffolded: false, touched: true, starterContent: false, hasUserContent: true });
   });
 
   it("returns 401 when unauthenticated", async () => {

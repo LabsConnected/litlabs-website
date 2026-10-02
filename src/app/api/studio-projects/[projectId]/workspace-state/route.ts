@@ -24,6 +24,10 @@ export const dynamic = "force-dynamic";
  * - `starterContent`: the entry file (index.html) still contains the
  *   LITT-WELCOME-SCREEN marker — the project shows the seeded welcome page,
  *   not real user content.
+ * - `hasUserContent`: the project contains real user-generated content.
+ *   This is the canonical truth for "has the user actually built anything yet?"
+ *   A touched workspace (build/edit landed) OR scaffolded workspace with
+ *   non-starter entry content both count as having user content.
  *
  * The center "Welcome to LiTT" onboarding shows ONLY for a brand-new
  * untouched project. When a project was touched (manifest consumed by the
@@ -170,13 +174,19 @@ export async function GET(
     // real project. A missing entry file is not starter content.
     const starterContent = entry !== null && entry.includes(WELCOME_SCREEN_MARKER);
 
-    return NextResponse.json({ scaffolded, touched, starterContent });
+    // Canonical "has the user built anything yet?" flag:
+    // - touched workspace (first build/edit landed) = has user content
+    // - scaffolded workspace with non-starter entry content = has user content
+    // - scaffolded workspace with only starter content = no user content yet
+    const hasUserContent = touched || (scaffolded && !starterContent);
+
+    return NextResponse.json({ scaffolded, touched, starterContent, hasUserContent });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to get workspace state";
     // Fail-soft: the caller treats an error as "unknown" and keeps the
     // default center surface. Never block Studio loading on this check.
     return NextResponse.json(
-      { error: msg, scaffolded: false, touched: false, starterContent: false },
+      { error: msg, scaffolded: false, touched: false, starterContent: false, hasUserContent: false },
       { status: 500 },
     );
   }

@@ -19,7 +19,7 @@ import { StudioSecretsPanel } from "./StudioSecretsPanel";
  * Internal transitional states (loading, stale, restarting) are kept for
  * UX but map onto the canonical five for display.
  */
-type PreviewState = "loading" | "not_started" | "starting" | "ready" | "stale" | "unreachable" | "failed" | "restarting";
+type PreviewState = "loading" | "not_started" | "starting" | "ready" | "stale" | "unreachable" | "failed" | "restarting" | "empty";
 type DeviceMode = "desktop" | "tablet" | "mobile";
 
 export interface PreviewSelection {
@@ -55,6 +55,7 @@ const STATUS_DOT_COLOR: Record<PreviewState, string> = {
   unreachable: "#6b7280",
   failed: "#EF4444",
   not_started: "#6b7280",
+  empty: "#6b7280",
 };
 
 /**
@@ -280,6 +281,9 @@ export default function StudioPreviewPanel({
   // Sequence counter for status fetches — late responses from an older
   // request must never overwrite newer state.
   const statusSeqRef = useRef(0);
+  // Workspace state (scaffolded, touched, hasUserContent) to decide whether
+  // to auto-start preview or show empty state.
+  const [workspaceState, setWorkspaceState] = useState<{ scaffolded: boolean; touched: boolean; hasUserContent: boolean } | null>(null);
   // Bounded startup polling: a start that never resolves must become a
   // terminal failure, never an infinite spinner.
   const startPollAttemptsRef = useRef(0);
@@ -463,39 +467,63 @@ export default function StudioPreviewPanel({
       return;
     }
     const seq = ++statusSeqRef.current;
+    // Background status checks must NOT unmount a healthy iframe.
+    // Only set "loading" for initial resolution or project change.
+    // When already "ready", preserve the frame and only update metadata.
     if (stale) setState((current) => current === "ready" ? "stale" : current);
-    else setState("loading");
+    else setState((current) => (current === "ready" ? "ready" : "loading"));
     setIframeFailed(false);
     try {
-      const response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/preview`, {
-        cache: "no-store",
-        credentials: "include",
-        headers: await authHeaders(),
-        // A hung status check must not wedge the panel in "loading" forever.
-        signal: AbortSignal.timeout(15000),
-      });
+      // Fetch both preview status and workspace state in parallel.
+      const [previewResp, workspaceResp] = await Promise.all([
+        fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/preview`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: await authHeaders(),
+          signal: AbortSignal.timeout(15000),
+        }),
+        fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace-state`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: await authHeaders(),
+          signal: AbortSignal.timeout(15000),
+        }).catch(() => null),
+      ]);
       // Ignore late responses — a newer request has already superseded this one.
       if (seq !== statusSeqRef.current) return;
-      const payload = await response.json().catch(() => null) as PreviewPayload | null;
-      if (!response.ok || !payload) {
-        throw new Error(typeof payload?.runtimeError === "string" ? payload.runtimeError : `Preview status failed (${response.status})`);
+      const payload = await previewResp.json().catch(() => null) as PreviewPayload | null;
+      if (!previewResp.ok || !payload) {
+        throw new Error(typeof payload?.runtimeError === "string" ? payload.runtimeError : `Preview status failed (${previewResp.status})`);
       }
+      const workspacePayload = workspaceResp && workspaceResp.ok
+        ? (await workspaceResp.json().catch(() => null) as { scaffolded?: boolean; touched?: boolean; hasUserContent?: boolean } | null)
+        : null;
+      setWorkspaceState(
+        workspacePayload
+          ? { scaffolded: workspacePayload.scaffolded ?? false, touched: workspacePayload.touched ?? false, hasUserContent: workspacePayload.hasUserContent ?? false }
+          : { scaffolded: false, touched: false, hasUserContent: false }
+      );
       const next = statusFromPayload(payload, workspaceStatus);
       const runtimeStatusRaw = typeof payload.runtimeStatus === "string" ? payload.runtimeStatus : null;
       // Display-only: pin the staged-loading indicator to what the status
       // logic can truthfully distinguish. null → the honest single state.
       setStartPhase(deriveStartPhase(next.state, workspaceStatus, runtimeStatusRaw));
       setState((prevState) => {
+        // If the runtime says not_started but the project has no user content yet,
+        // show "empty" instead of auto-starting a dev server for fake content.
+        const finalState = (next.state === "not_started" && workspacePayload?.hasUserContent === false)
+          ? "empty"
+          : next.state;
         // Only reload iframe when transitioning from non-ready to ready,
         // or when a file change explicitly requested a refresh.
         const shouldReloadFrame =
-          (next.state === "ready" && prevState !== "ready" && prevState !== "stale") ||
-          (next.state === "ready" && reloadFrameOnNextReadyRef.current);
+          (finalState === "ready" && prevState !== "ready" && prevState !== "stale") ||
+          (finalState === "ready" && reloadFrameOnNextReadyRef.current);
         if (shouldReloadFrame) {
           reloadFrameOnNextReadyRef.current = false;
           setFrameKey((value) => value + 1);
         }
-        return next.state;
+        return finalState;
       });
       setPreviewUrl(next.url);
       setError(next.error);
@@ -527,32 +555,10 @@ export default function StudioPreviewPanel({
     if (refreshKey > 0) void loadStatus(true);
   }, [loadStatus, refreshKey]);
 
-  // Welcome-screen bridge: the blank-state preview (terminal-server/
-  // workspace/welcome-screen.ts) posts `litt-welcome` messages when the user
-  // taps a starter prompt or the Start Building CTA. Turn those into the
-  // canonical `studio:ask-litt` event so LiTT chat opens with the prompt
-  // pre-filled. The message is only honored when it comes from this panel's
-  // own preview iframe — anything else is ignored.
-  useEffect(() => {
-    const handler = (event: MessageEvent) => {
-      const frame = iframeRef.current?.contentWindow ?? null;
-      if (!frame || event.source !== frame) return;
-      const data = event.data as { source?: unknown; type?: unknown; prompt?: unknown } | null;
-      if (!data || data.source !== "litt-welcome" || typeof data.type !== "string") return;
-      if (data.type === "starter-prompt") {
-        if (typeof data.prompt !== "string") return;
-        const prompt = data.prompt.slice(0, 500).trim();
-        if (!prompt) return;
-        window.dispatchEvent(new CustomEvent("studio:ask-litt", { detail: { prompt } }));
-        return;
-      }
-      if (data.type === "welcome-cta") {
-        window.dispatchEvent(new CustomEvent("studio:ask-litt", { detail: {} }));
-      }
-    };
-    window.addEventListener("message", handler);
-    return () => window.removeEventListener("message", handler);
-  }, []);
+  // NOTE: Welcome-screen bridge removed — we no longer render the
+  // welcome-screen iframe for untouched projects. The empty state is
+  // Studio-side only. The old bridge turned litt-welcome messages into
+  // studio:ask-litt events; this is no longer needed.
 
   // Style-probe listener: the injected inspector script reports whether
   // Tailwind utilities actually applied in the preview frame. The probe
@@ -792,6 +798,10 @@ export default function StudioPreviewPanel({
   // provisioned or dev server not running), automatically start it. The
   // normal user path must NOT require pressing "Prepare preview".
   //
+  // EXCEPTION: do NOT auto-start for untouched projects (no user content yet).
+  // The welcome-screen starter content is NOT a real project — we should
+  // show an empty state instead of spinning up a dev server for fake content.
+  //
   // Single-flight is enforced by startInFlightRef (checked in preparePreview)
   // and autoStartedForRef (prevents re-triggering for the same project after
   // the first attempt, regardless of outcome). A ready preview does not
@@ -801,9 +811,15 @@ export default function StudioPreviewPanel({
     if (!projectId) return;
     if (autoStartedForRef.current === projectId) return;
     if (startInFlightRef.current) return;
+    // Don't auto-start for untouched projects — no user content to preview yet.
+    if (workspaceState?.hasUserContent === false) {
+      setState("empty");
+      autoStartedForRef.current = projectId; // mark as handled so we don't keep checking
+      return;
+    }
     autoStartedForRef.current = projectId;
     void preparePreview();
-  }, [state, projectId, preparePreview]);
+  }, [state, projectId, preparePreview, workspaceState?.hasUserContent]);
 
   const handleCopyUrl = useCallback(async () => {
     if (!previewUrl) return;
@@ -852,10 +868,11 @@ export default function StudioPreviewPanel({
   // The v4 @import trap: a Tailwind-intended preview that renders unstyled
   // must surface honestly — never a green "Preview ready" over dead CSS.
   const stylingFailed = state === "ready" && styleProbe?.tailwindDetected === true && styleProbe.styled === false;
-  const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (iframeFailed ? "Preview failed to load" : stylingFailed ? "Preview styling failed to apply" : "Preview ready") : state === "stale" ? "Preview may be stale" : state === "not_started" ? "Preview not started" : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : "Preview failed to start") : "Preview runtime unreachable";
-  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "not_started" ? "Preparing your preview automatically…" : state === "unreachable" ? (error ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (error ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : error ?? "The dev server failed to start. Try restarting it.") : error ?? "The preview surface reports only real project runtime state.";
+  const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (iframeFailed ? "Preview failed to load" : stylingFailed ? "Preview styling failed to apply" : "Preview ready") : state === "stale" ? "Preview may be stale" : state === "not_started" ? "Preview not started" : state === "empty" ? "No preview yet" : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : "Preview failed to start") : "Preview runtime unreachable";
+  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "not_started" ? "Preparing your preview automatically…" : state === "empty" ? "Tell LiTT what you want to build — the preview will start after your first project content is created." : state === "unreachable" ? (error ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (error ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : error ?? "The dev server failed to start. Try restarting it.") : error ?? "The preview surface reports only real project runtime state.";
   const dotColor = stylingFailed ? STATUS_DOT_COLOR.stale : STATUS_DOT_COLOR[state];
-  const isLive = state === "ready" || state === "stale";
+  const showEmpty = state === "empty";
+  const isLive = (state === "ready" || state === "stale") && !showEmpty;
   const sourceSummary = formatSourceSummary({
     kind: sourceKind,
     status: sourceStatus,
@@ -1083,7 +1100,25 @@ export default function StudioPreviewPanel({
 
       {/* Preview surface */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ backgroundColor: "rgba(0,0,0,0.2)" }}>
-        {isLive && displayUrl ? (
+        {state === "empty" ? (
+          <div className="flex min-h-[280px] flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+            <div
+              className="grid h-12 w-12 place-items-center rounded-2xl"
+              style={{
+                backgroundColor: "color-mix(in srgb, var(--color-accent) 10%, transparent)",
+                color: "var(--litt-primary)",
+                border: "1px solid color-mix(in srgb, var(--color-accent) 20%, transparent)",
+                boxShadow: "0 0 24px rgba(168,255,47,0.08)",
+              }}
+            >
+              <Eye size={20} />
+            </div>
+            <div className="flex flex-col gap-2">
+              <p className="text-sm font-medium text-gray-200">No preview yet</p>
+              <p className="text-xs text-gray-400 max-w-[320px]">Tell LiTT what you want to build — the preview will start after your first project content is created.</p>
+            </div>
+          </div>
+        ) : isLive && displayUrl ? (
           <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-2">
             <iframe
               key={frameKey}
