@@ -110,6 +110,14 @@ export const metadata: Metadata = {
 //
 // In production builds (NODE_ENV=production), a missing key throws a
 // clear error instead of silently using the placeholder.
+//
+// CRITICAL: The publishable key MUST decode to the proxy URL
+// (litlabs.net/__clerk), not the legacy custom domain (clerk.litlabs.net).
+// The key is base64-encoded: pk_live_<base64("litlabs.net/__clerk$")>
+//   = pk_live_bGl0bGFicy5uZXQvX19jbGVyayQ=
+// If the key points to clerk.litlabs.net, OAuth fails with
+// "authorization_invalid" because Clerk's backend expects the proxy URL.
+// See src/proxy.ts for the full explanation.
 const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 if (!clerkKey && process.env.NODE_ENV === "production" && !process.env.SKIP_CLERK_CHECK) {
   console.error("✗ Clerk configuration missing — set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY");

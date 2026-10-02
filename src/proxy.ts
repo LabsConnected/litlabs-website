@@ -557,6 +557,25 @@ const CLERK_PROXY_CANONICAL_HOST = "litlabs.net";
 const CLERK_FAPI_URL = "https://clerk.litlabs.net";
 
 /**
+ * CRITICAL: The NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY must decode to the
+ * proxy URL (litlabs.net/__clerk), NOT the legacy custom domain
+ * (clerk.litlabs.net).
+ *
+ * The publishable key is a base64-encoded Frontend API URL. If it points
+ * to clerk.litlabs.net (stale), the Clerk SDK will make OAuth requests
+ * directly to that domain, which Clerk's backend no longer recognizes
+ * for OAuth (it expects the proxy URL). This causes
+ * "authorization_invalid" errors on the OAuth callback.
+ *
+ * Correct key format: pk_live_<base64("litlabs.net/__clerk$")>
+ *   = pk_live_bGl0bGFicy5uZXQvX19jbGVyayQ=
+ *
+ * The CLERK_FAPI_URL above is the BACKEND URL for server-side proxying
+ * (handleClerkProxy forwards /__clerk requests here). It is NOT the
+ * SDK's URL — the SDK gets its URL from the publishable key.
+ */
+
+/**
  * Resolves the host to forward to Clerk's proxy as x-forwarded-host.
  * Always the fixed, Dashboard-registered canonical host — Clerk validates
  * Clerk-Proxy-Url against its exact registered proxy_url (most strictly on

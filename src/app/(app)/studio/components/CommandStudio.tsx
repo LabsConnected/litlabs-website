@@ -1,6 +1,5 @@
 "use client";
 
-import { terminalHealthOf } from "@/lib/studio/terminal-health";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { Image as ImageIcon } from "lucide-react";
@@ -18,9 +17,7 @@ import { useCanonicalConversation } from "../hooks/useCanonicalConversation";
 import { useConversationStore } from "../stores/useConversationStore";
 import {
   mapStudioTaskToWorktab,
-  displayWorktabTitle,
-  isPlaceholderTaskTitle,
-  resolveAdoptedTaskTitle,
+  nextUntitledTitle,
   useWorktabSelections,
   type Worktab,
 } from "../hooks/useServerWorktabs";
@@ -31,12 +28,6 @@ import type { ArtifactAction } from "@/lib/canvas/types";
 import { STUDIO_EVENT_OPEN_DOCK, STUDIO_EVENT_OPEN_FILE, STUDIO_EVENT_REQUEST_DEPLOY } from "@/lib/canvas/panel-actions";
 import { INITIAL_RUNTIME_STATE, deriveExecutionHint } from "@/lib/projects/runtime-state";
 import { useLiTTRuntime } from "@/hooks/useLiTTRuntime";
-import {
-  isOnboardingComplete,
-  markFirstRunPromptConsumed,
-  resolveStudioProjectId,
-  takeFirstRunPrompt,
-} from "../lib/first-run-handoff";
 
 import CommandStudioHeader from "./CommandStudioHeader";
 import StudioDock, { type StudioDockTab } from "./StudioDock";
@@ -66,7 +57,6 @@ import { deriveCreator, deriveWorkspaceStage } from "../context/derive-studio-co
 import { StudioCreatorHost } from "./creators/StudioCreatorHost";
 import { useViewportTier } from "../hooks/useViewportTier";
 import { useStudioTasks } from "../hooks/useStudioTasks";
-import { useProjectIsolation } from "../hooks/useProjectIsolation";
 import type { StudioTask } from "@/lib/studio/task-types";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { useExecutionStore, type MutationSummary } from "../stores/useExecutionStore";
@@ -81,8 +71,7 @@ import StudioDeploySurface from "./shell/StudioDeploySurface";
 import StudioOperatorBar from "./shell/StudioOperatorBar";
 import ElementInspectorPanel from "./shell/ElementInspectorPanel";
 import ImageStudio from "./shell/ImageStudio";
-import { canonicalSurfaceToPersist, modeToStageSurface, resolveStageSurface, type StudioStageSurface } from "./shell/stage-surfaces";
-import { centerStation, resolveInitialStation, stationToToolParam, toolParamToStation } from "./shell/station-url";
+import { modeToStageSurface, resolveStageSurface, type StudioStageSurface } from "./shell/stage-surfaces";
 import { useCanvasBuilderStore } from "./canvas/builder/store";
 import type { PreviewSelection } from "./StudioPreviewPanel";
 import StudioProjectFiles from "./StudioProjectFiles";
@@ -216,7 +205,6 @@ function CommandStudioContent() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const activeProjectId = resolveStudioProjectId(searchParams.get("project"));
   const {
     capabilities,
     refresh: refreshCapabilities,
@@ -271,30 +259,25 @@ function CommandStudioContent() {
   const [studioMode, setStudioMode] = useState<StudioMode>(
     initial.destination === "studio" ? (initial.mode as StudioMode) ?? "preview" : "preview",
   );
-  // ── Welcome-state routing (Larry's standing rule) ──────────────────
+  // ── P0-2 welcome-state routing (Larry's standing rule) ─────────────
   // The center "Welcome to LiTT" onboarding shows ONLY for a brand-new
-  // untouched project. The first successful build/edit permanently
-  // transitions the center into the active workspace: when the project was
-  // touched (starter-scaffolding manifest consumed by the first write, or a
-  // second git commit landed) but the entry file still carries the
-  // welcome-screen marker (e.g. a trivial additive edit to the starter,
-  // not a real build), default the center to the Code surface — the active
-  // workspace showing the user's actual files — instead of the Preview
-  // surface rendering the starter welcome page as if it were onboarding.
-  // Runs once per project on initial load; never overrides a manual surface
-  // choice (a switch back to Preview after the reroute is respected), and
-  // fails soft (keeps preview) if the check errors.
+  // untouched project. If the project was touched (starter-scaffolding
+  // manifest consumed by the first write) but the entry file still carries
+  // the welcome-screen marker — e.g. a trivial additive edit to the
+  // scaffolding, not a real build — the first successful build/open action
+  // must transition the center into the active workspace. Defaulting to the
+  // Code surface shows the user's actual file instead of a preview that
+  // renders the starter "Welcome to LiTT" page as if it were onboarding.
+  // Runs once per project on initial load; never overrides a manual
+  // surface switch, and fails soft (keeps preview) if the check errors.
   const projectIdForWelcomeRouting = capabilities.projectId;
   const studioModeForWelcomeRouting = studioMode;
-  const welcomeRoutingDoneRef = useRef<string | null>(null);
   useEffect(() => {
     if (destination !== "studio") return;
     if (!projectIdForWelcomeRouting) return;
     // Never override an explicit surface choice — only reroute from the
-    // default preview surface, and only once per project.
+    // default preview surface.
     if (studioModeForWelcomeRouting !== "preview") return;
-    if (welcomeRoutingDoneRef.current === projectIdForWelcomeRouting) return;
-    welcomeRoutingDoneRef.current = projectIdForWelcomeRouting;
     let cancelled = false;
     (async () => {
       try {
@@ -311,13 +294,9 @@ function CommandStudioContent() {
         if (!res.ok || cancelled) return;
         const state = (await res.json().catch(() => null)) as {
           scaffolded?: boolean;
-          touched?: boolean;
           starterContent?: boolean;
         } | null;
-        // Touched by either signal: the robust git/file check, or the
-        // scaffold-manifest check. Both mean "first build/edit landed".
-        const wasTouched = state?.touched === true || state?.scaffolded === false;
-        if (state && wasTouched && state.starterContent === true && !cancelled) {
+        if (state && state.scaffolded === false && state.starterContent === true && !cancelled) {
           setStudioMode("code");
         }
       } catch {
@@ -451,43 +430,14 @@ function CommandStudioContent() {
 
   const studioShellActive =
     destination === "studio" && viewportTier !== null && !isMobileLitt && !classicOverride;
-  // Initial station honors an explicit ?tool= deep link (URL, state and
-  // the visible station must agree from the first paint).
-  const [stageSurface, setStageSurface] = useState<StudioStageSurface>(() =>
-    resolveInitialStation(searchParams.get("tool"), null),
-  );
-  // First-run Studio should present one clear action. Keep the inspector
-  // available, but do not make it compete with Chat and Preview before the
-  // project has useful state to inspect.
-  const [inspectorOpen, setInspectorOpen] = useState(false);
-  // A real preview/builder selection is useful inspector state. Open it on
-  // demand while keeping the clean first-run shell calm.
-  useEffect(() => {
-    if (previewSelection) setInspectorOpen(true);
-  }, [previewSelection]);
+  const [stageSurface, setStageSurface] = useState<StudioStageSurface>("preview");
+  const [inspectorOpen, setInspectorOpen] = useState(true);
   const [littExpanded, setLittExpanded] = useState(false);
-
   // Surfaces stay mounted once visited — hidden, not unmounted — so
   // preview iframes, PTY sessions, and canvas state survive switching.
   const [mountedSurfaces, setMountedSurfaces] = useState<Set<StudioStageSurface>>(() => new Set(["preview"]));
 
-  // Terminal P0: attach the workspace PTY as soon as a project is open,
-  // not only after the user visits the Terminal station. The surface is
-  // mounted hidden (stay-alive), so the shell is live — and LiTT's
-  // terminal health is green — without the user opening anything.
-  // Respects the explicit opt-out ("litt:terminalAutoStart" = "0").
-  useEffect(() => {
-    if (!studioShellActive || !capabilities.projectId) return;
-    try {
-      if (window.localStorage.getItem("litt:terminalAutoStart") === "0") return;
-    } catch {
-      // Storage unavailable — default to auto-attach.
-    }
-    setMountedSurfaces((prev) => (prev.has("terminal") ? prev : new Set(prev).add("terminal")));
-  }, [studioShellActive, capabilities.projectId]);
-
-  const openStageSurface = useCallback((requested: StudioStageSurface) => {
-    const surface = centerStation(requested);
+  const openStageSurface = useCallback((surface: StudioStageSurface) => {
     setDestination("studio");
     setStageSurface(surface);
     setMountedSurfaces((prev) => (prev.has(surface) ? prev : new Set(prev).add(surface)));
@@ -577,13 +527,9 @@ function CommandStudioContent() {
       // Shell: a Studio deep-link selects the corresponding stage surface
       // (drawer overlays map to their surfaces too — terminal, files…).
       if (studioShellActive) {
-        // The station named in the URL is authoritative; legacy tool
-        // values fall back to the old mode/drawer mapping.
-        const legacySurface = mapped.openDrawer
+        const surface = mapped.openDrawer
           ? (DOCK_TAB_TO_SURFACE[mapped.openDrawer as StudioDockTab] ?? null)
           : modeToStageSurface(newMode);
-        const named = toolParamToStation(fromUrl) ?? legacySurface;
-        const surface = named ? centerStation(named) : null;
         if (surface) {
           setStageSurface(surface);
           setMountedSurfaces((prev) => (prev.has(surface) ? prev : new Set(prev).add(surface)));
@@ -632,7 +578,6 @@ function CommandStudioContent() {
   // state, and a laptop first-run default (collapsed) that never
   // overrides an explicit stored user preference.
   const LITT_COLLAPSED_KEY = "littree:studio:litt-collapsed";
-  const MOBILE_LITT_OPEN_KEY = "littree:studio:mobile-litt-open";
 
   // Whether the user has an explicit stored collapse preference — captured
   // once at init (constant state) so the mount-time persistence write below
@@ -640,41 +585,26 @@ function CommandStudioContent() {
   const [littCollapsedHadStoredPref] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     try {
-      // A value written by the previous localStorage behaviour is still
-      // honoured as an explicit preference, so a user who deliberately
-      // collapsed the dock is not silently overridden by this change.
-      return (
-        sessionStorage.getItem(LITT_COLLAPSED_KEY) !== null ||
-        localStorage.getItem(LITT_COLLAPSED_KEY) !== null
-      );
+      return localStorage.getItem(LITT_COLLAPSED_KEY) !== null;
     } catch {
       return false;
     }
   });
 
-  // Studio enters with LiTT Chat + Workspace, not a collapsed rail.
-  //
-  // The collapse preference is session-scoped: a manual collapse is honoured
-  // for the rest of the session (so refresh and in-session navigation keep the
-  // correct state) but no longer pins the panel shut permanently across
-  // sessions. Previously the preference lived in localStorage, so once a user
-  // collapsed the dock it stayed collapsed on every future visit and the
-  // conversation composer rendered hidden.
   const [littCollapsed, setLittCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return true;
     try {
-      const session = sessionStorage.getItem(LITT_COLLAPSED_KEY);
-      if (session !== null) return session === "true";
-      const legacy = localStorage.getItem(LITT_COLLAPSED_KEY);
-      if (legacy !== null) return legacy === "true";
+      const stored = localStorage.getItem(LITT_COLLAPSED_KEY);
+      // F1 workspace-first: first run opens on the 64px rail (no
+      // permanent LiTT column). An explicit stored preference wins.
+      return stored === null ? true : stored === "true";
     } catch {
-      // noop
+      return true;
     }
-    return true;
   });
   useEffect(() => {
     try {
-      sessionStorage.setItem(LITT_COLLAPSED_KEY, String(littCollapsed));
+      localStorage.setItem(LITT_COLLAPSED_KEY, String(littCollapsed));
     } catch {
       // ignore
     }
@@ -708,52 +638,10 @@ function CommandStudioContent() {
   // desktop-rail vs mobile-sheet LiTT presentation — null until first
   // client measurement (SSR-safe — see hook docs).
   const [mobileLittOpen, setMobileLittOpen] = useState(false);
-  // On mobile, Studio enters with the LiTT chat surface open. Session-scoped
-  // for the same reason as the desktop dock: a manual close sticks for this
-  // session, a fresh entry restores it. The composer is never focused
-  // automatically, so the on-screen keyboard does not pop.
-  const [mobileLittHadStoredPref] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    try {
-      return sessionStorage.getItem(MOBILE_LITT_OPEN_KEY) !== null;
-    } catch {
-      return false;
-    }
-  });
-  const mobileLittDefaultAppliedRef = useRef(false);
-  useEffect(() => {
-    if (mobileLittDefaultAppliedRef.current) return;
-    if (viewportTier === null) return;
-    mobileLittDefaultAppliedRef.current = true;
-    if (!isMobileLitt) return;
-    if (!mobileLittHadStoredPref) setMobileLittOpen(true);
-  }, [viewportTier, isMobileLitt, mobileLittHadStoredPref]);
-  useEffect(() => {
-    // Only persist once the entry default has been applied — otherwise the
-    // mount-time write would immediately masquerade as a stored preference.
-    if (!mobileLittDefaultAppliedRef.current) return;
-    try {
-      sessionStorage.setItem(MOBILE_LITT_OPEN_KEY, String(mobileLittOpen));
-    } catch {
-      // ignore
-    }
-  }, [mobileLittOpen]);
   // Mobile density redesign: progressive-disclosure sheet state. Both sheets
   // render only while the mobile chat sheet is open (see mounts below).
   const [mobileBuildOpen, setMobileBuildOpen] = useState(false);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
-
-  // Workspace-first focus: selecting a real work surface collapses the large
-  // welcome/chat panel to the compact rail. Chat stays mounted and one click
-  // away through the rail, so this only changes emphasis, not availability.
-  const previousStageSurfaceRef = useRef<StudioStageSurface>(stageSurface);
-  useEffect(() => {
-    if (previousStageSurfaceRef.current === stageSurface) return;
-    previousStageSurfaceRef.current = stageSurface;
-    setLittCollapsed(true);
-    setLittExpanded(false);
-    setMobileLittOpen(false);
-  }, [stageSurface]);
   // Mobile density redesign: opening a tool from the Tools sheet closes both
   // sheets so the chosen tool becomes the one dominant surface (this also
   // fixes the old behavior where tool buttons switched the workspace
@@ -991,25 +879,6 @@ function CommandStudioContent() {
     return () => window.removeEventListener("studio:ask-litt", handler);
   }, [isMobileLitt, setWorktabSelection, studioShellActive, chatDock]);
 
-  useEffect(() => {
-    const prompt = takeFirstRunPrompt(searchParams.get("prompt"));
-    if (!prompt) return;
-    setComposerValue((current) => (current.trim() ? current : prompt));
-    markFirstRunPromptConsumed();
-    if (isMobileLitt) {
-      setMobileLittOpen(true);
-    } else if (studioShellActive) {
-      if (chatDock === "left") {
-        setLittCollapsed(false);
-      } else {
-        setLittExpanded(true);
-      }
-    } else {
-      setLittCollapsed(false);
-    }
-    setLittActiveTab("chat");
-  }, [searchParams, isMobileLitt, studioShellActive, chatDock]);
-
   // Canvas ActionPanel events — the studio.* ArtifactActions execute
   // client-side: executeAction dispatches these DOM events and the owning
   // surfaces react. Deploy routes through the existing ask-litt path
@@ -1225,7 +1094,7 @@ function CommandStudioContent() {
     // revision counter and surfaces as a spurious "stale revision" 409 on
     // the very first message. The explicit URL project always wins here;
     // capabilities.projectId is only used when no project is named in the URL.
-    serverProjectId: activeProjectId ?? capabilities.projectId,
+    serverProjectId: searchParams.get("project") ?? capabilities.projectId,
     cameraState: { active: cameraDock.open, status: cameraStatus },
     previewSelection,
     // Shared capabilities — the hook must not start a second poll stack.
@@ -1235,19 +1104,6 @@ function CommandStudioContent() {
   const studioTasks = useStudioTasks(capabilities.projectId);
   const refreshTasks = studioTasks.refresh;
   const taskSeededRef = useRef<string | null>(null);
-
-  // Item 5a — the Activity truth is the persisted action_events log of the
-  // current conversation's run. The existing studio_tasks mapping carries it
-  // (activeActionRunId while working, latestActionRunId after settle); no
-  // parallel mapping is introduced.
-  const activityTask = studioTasks.tasks.find((task) => task.conversationId === conversation.selectedConversationId);
-  const activityRunId = activityTask?.activeActionRunId ?? activityTask?.latestActionRunId ?? null;
-
-  // Phase 4 — project isolation: the URL's explicit ?project= is
-  // authoritative the instant it's present (capabilities.projectId can
-  // lag a refresh behind), so project-scoped runtime state resets the
-  // moment the switch lands, not after the capabilities round-trip.
-  useProjectIsolation(activeProjectId ?? capabilities.projectId);
 
 
   useEffect(() => {
@@ -1273,12 +1129,7 @@ function CommandStudioContent() {
     taskSeededRef.current = conversationId;
     const selected = conversation.conversations.find((item) => item.id === conversationId);
     void studioTasks.createTask({
-      // Untitled conversations stay explicitly first-run until the first
-      // prompt gives the task a meaningful name.
-      title: resolveAdoptedTaskTitle(
-        selected?.title,
-        studioTasks.tasks.map((task) => task.title),
-      ),
+      title: selected?.title ?? "Current work",
       taskType: "general",
       conversationId,
     });
@@ -1292,7 +1143,7 @@ function CommandStudioContent() {
   }, [conversation, studioTasks]);
 
   const createStudioTask = useCallback(async () => {
-    const task = await studioTasks.createTask({ title: "New conversation", taskType: "general" });
+    const task = await studioTasks.createTask({ title: "New task", taskType: "general" });
     if (!task?.conversationId) return;
     conversation.selectConversation(task.conversationId);
     await conversation.loadMessages(task.conversationId);
@@ -1303,16 +1154,7 @@ function CommandStudioContent() {
   }, [studioTasks]);
 
   useEffect(() => {
-    if (!conversation.busy) {
-      void refreshTasks();
-      return;
-    }
-    // Item 5a — a new run attaches its actionRunId to the conversation's
-    // studio task server-side just after the send is accepted. Refresh
-    // once the run is underway so the Activity panel can resolve the run
-    // id (and read its persisted events) during the run, not only after.
-    const timer = setTimeout(() => { void refreshTasks(); }, 4000);
-    return () => clearTimeout(timer);
+    if (!conversation.busy) void refreshTasks();
   }, [conversation.busy, refreshTasks]);
 
   const launchpadState = useMemo(
@@ -1352,9 +1194,6 @@ function CommandStudioContent() {
     }
     // Build the target URL with ?tool=
     const params = new URLSearchParams(searchParams.toString());
-    const projectId = resolveStudioProjectId(searchParams.get("project"));
-    if (projectId) params.set("project", projectId);
-    params.delete("prompt");
 
   // Canonical: always tool=chat for the LiTT conversation surface.
     // Workspace stages (code/canvas/preview) get their own tool value.
@@ -1365,10 +1204,6 @@ function CommandStudioContent() {
     if (destination === "create") {
       params.delete("tool");
       params.set("creator", createMode);
-    } else if (destination === "studio" && studioShellActive && workSurface !== "builder") {
-      // Shell: the URL names the station the center actually renders.
-      params.set("tool", stationToToolParam(stageSurface));
-      params.delete("creator");
     } else {
       params.set("tool", legacyTool);
       params.delete("creator");
@@ -1388,7 +1223,7 @@ function CommandStudioContent() {
       router.replace(target, { scroll: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [destination, studioMode, createMode, moreMode, workSurface, pathname, router, studioShellActive, stageSurface]);
+  }, [destination, studioMode, createMode, moreMode, workSurface, pathname, router]);
 
   // Handle legacy "studio:switch-tool" events emitted from inside tools.
   useEffect(() => {
@@ -1854,17 +1689,9 @@ function CommandStudioContent() {
           // ignore
         }
       }
-      // Rebind the chat to the NEW project synchronously, before the router
-      // settles: the old conversation stays selected otherwise and the first
-      // message goes to a conversation that belongs to the previous project
-      // ("Project mismatch"). Mirrors handleSelectProject's reset.
-      useConversationStore.getState().resetForProject();
-      // Update URL with project ID — and clear the stale conversation +
-      // agent-instance params so nothing can re-bind to the old chat.
+      // Update URL with project ID
       const params = new URLSearchParams(searchParams.toString());
       params.set("project", project.id);
-      params.delete("conversation");
-      params.delete("agentInstance");
       window.dispatchEvent(new CustomEvent("studio:project-switching"));
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });
       // Refresh capabilities so projectId propagates
@@ -2066,32 +1893,18 @@ function CommandStudioContent() {
 
   const serverTasks = studioTasks.tasks;
   const serverActiveTaskId = studioTasks.activeTaskId;
-  const projectDisplayName = capabilities.projectName?.trim() || "New conversation";
-
-  // Keep stale placeholder rows recoverable on the server, but do not make
-  // a new user stare at inherited "Untitled N" / "Current work" tabs. The
-  // active row is retained so its conversation remains bound; the existing
-  // send path renames it as soon as the user provides a real request.
-  const visibleServerTasks = useMemo(() => {
-    const meaningful = serverTasks.filter((task) => !isPlaceholderTaskTitle(task.title));
-    const active = serverTasks.find((task) => task.id === serverActiveTaskId);
-    if (meaningful.length === 0) return active ? [active] : serverTasks.slice(0, 1);
-    if (active && !meaningful.some((task) => task.id === active.id)) return [active, ...meaningful];
-    return meaningful;
-  }, [serverActiveTaskId, serverTasks]);
 
   const worktabTabs = useMemo<Worktab[]>(
     () =>
-      visibleServerTasks.map((t) =>
+      serverTasks.map((t) =>
         mapStudioTaskToWorktab(t, {
           // Server truth first; a task that never recorded a surface
           // inherits the shell's current one (persisted on next switch).
           surface: t.lastOpenedSurface || currentSurface,
           selection: worktabSelections[t.id] ?? null,
-          fallbackTitle: projectDisplayName,
         }),
       ),
-    [visibleServerTasks, worktabSelections, currentSurface, projectDisplayName],
+    [serverTasks, worktabSelections, currentSurface],
   );
   const activeWorktabId = serverActiveTaskId;
   const activeWorktab = worktabTabs.find((t) => t.id === activeWorktabId) ?? null;
@@ -2165,7 +1978,7 @@ function CommandStudioContent() {
 
   const handleNewWorktab = useCallback(async () => {
     const task = await studioTasks.createTask({
-      title: "New conversation",
+      title: nextUntitledTitle(serverTasks.map((t) => t.title)),
       taskType: "general",
     });
     if (!task) return;
@@ -2174,12 +1987,12 @@ function CommandStudioContent() {
     // provisions one on first send); bind clears the selection and
     // restores the current surface.
     bindWorktab(
-      mapStudioTaskToWorktab(task, { surface: currentSurface, selection: null, fallbackTitle: projectDisplayName }),
+      mapStudioTaskToWorktab(task, { surface: currentSurface, selection: null }),
     );
     // Shell: a fresh task opens the LiTT command layer — it's where the
     // task gets its first prompt (which also names the task).
     if (studioShellActive) setLittExpanded(true);
-  }, [studioTasks, bindWorktab, currentSurface, projectDisplayName, studioShellActive]);
+  }, [studioTasks, serverTasks, bindWorktab, currentSurface, studioShellActive]);
 
   const handleCloseWorktab = useCallback(async (id: string) => {
     const idx = serverTasks.findIndex((t) => t.id === id);
@@ -2194,16 +2007,17 @@ function CommandStudioContent() {
     if (remaining.length === 0) {
       // Never leave zero tabs — seed a fresh server task. The closed
       // task's conversation stays on the server (close, never delete).
-      // Use an explicit first-run label; implementation-generated numbered
-      // placeholders must never become visible user identity.
+      // Use the shared collision-free numbering against the full server
+      // list (not a hardcoded "Untitled 1") — the just-closed task and
+      // any other untitled tasks still exist server-side.
       const task = await studioTasks.createTask({
-        title: "New conversation",
+        title: nextUntitledTitle(serverTasks.map((t) => t.title)),
         taskType: "general",
       });
       if (task) {
         useExecutionStore.getState().setActiveTaskId(task.id);
         bindWorktab(
-          mapStudioTaskToWorktab(task, { surface: closedSurface, selection: null, fallbackTitle: projectDisplayName }),
+          mapStudioTaskToWorktab(task, { surface: closedSurface, selection: null }),
         );
       }
       return;
@@ -2213,12 +2027,11 @@ function CommandStudioContent() {
     const view = mapStudioTaskToWorktab(next, {
       surface: next.lastOpenedSurface || currentSurface,
       selection: worktabSelections[next.id] ?? null,
-      fallbackTitle: projectDisplayName,
     });
     useExecutionStore.getState().setActiveTaskId(next.id);
     void studioTasks.activateTask(next.id, view.surface);
     bindWorktab(view);
-  }, [serverTasks, serverActiveTaskId, currentSurface, worktabSelections, bindWorktab, projectDisplayName, studioTasks]);
+  }, [serverTasks, serverActiveTaskId, currentSurface, worktabSelections, bindWorktab, studioTasks]);
 
   const handleReopenWorktab = useCallback(async (id: string) => {
     const task = await studioTasks.reopenTask(id);
@@ -2226,11 +2039,10 @@ function CommandStudioContent() {
     const view = mapStudioTaskToWorktab(task, {
       surface: task.lastOpenedSurface || currentSurface,
       selection: worktabSelections[task.id] ?? null,
-      fallbackTitle: projectDisplayName,
     });
     useExecutionStore.getState().setActiveTaskId(task.id);
     bindWorktab(view);
-  }, [studioTasks, currentSurface, worktabSelections, bindWorktab, projectDisplayName]);
+  }, [studioTasks, currentSurface, worktabSelections, bindWorktab]);
 
   // Clearing the selection (composer chip × or legacy strip) clears both
   // the active tab's pinned selection and the preview-selection mirror.
@@ -2258,11 +2070,17 @@ function CommandStudioContent() {
     bindWorktab(tab);
   }, [capabilities.projectId, studioTasks, worktabTabs, serverActiveTaskId, bindWorktab]);
 
-  // (Deleted — Phase 3: the old "track the active tab's surface" writer.
-  //  It raced the surface→task effect below with a different vocabulary
-  //  (encoded workspace surface vs shell stage surface), so each PATCH
-  //  re-triggered the other: infinite PATCH oscillation. There is now
-  //  exactly one persist effect; see below.)
+  // Track the active tab's surface as the user navigates the workspace —
+  // persisted via PATCH lastOpenedSurface (server truth for restores).
+  // Idempotent: the guard below makes this exactly one PATCH per
+  // navigation (the response updates lastOpenedSurface, ending the loop).
+  useEffect(() => {
+    const id = serverActiveTaskId;
+    if (!capabilities.projectId || !id || studioTasks.loading) return;
+    const task = serverTasks.find((t) => t.id === id);
+    if (!task || task.lastOpenedSurface === currentSurface) return;
+    void studioTasks.activateTask(id, currentSurface);
+  }, [currentSurface, serverActiveTaskId, serverTasks, capabilities.projectId, studioTasks]);
 
   // The runtime auto-adopts a freshly provisioned conversation into a new
   // server task (auto-seed effect above). When that new task supersedes
@@ -2298,45 +2116,30 @@ function CommandStudioContent() {
   // Runs BEFORE the persist effect below so a task switch never
   // overwrites the new task's stored surface.
   const lastSyncedTaskRef = useRef<string | null>(null);
-  const didInitialTaskSyncRef = useRef(false);
   useEffect(() => {
     if (!studioShellActive) return;
     if (serverActiveTaskId === lastSyncedTaskRef.current) return;
     lastSyncedTaskRef.current = serverActiveTaskId;
-    const isFirstSync = !didInitialTaskSyncRef.current;
-    didInitialTaskSyncRef.current = true;
     const task = serverTasks.find((t) => t.id === serverActiveTaskId);
-    // First load: an explicit ?tool= deep link beats the remembered
-    // surface (acceptance: tool=preview rendered the stale "plan" surface).
-    const urlStation = isFirstSync ? toolParamToStation(searchParams.get("tool")) : null;
-    const mapped = urlStation ?? centerStation(resolveStageSurface(task?.lastOpenedSurface));
-    setStageSurface((current) => (current === mapped ? current : mapped));
-    setMountedSurfaces((prev) => (prev.has(mapped) ? prev : new Set(prev).add(mapped)));
-    // searchParams is read only on the first sync — deliberately not a dep.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setStageSurface((current) => {
+      const mapped = resolveStageSurface(task?.lastOpenedSurface);
+      return current === mapped ? current : mapped;
+    });
+    if (task && task.lastOpenedSurface) {
+      const mapped = resolveStageSurface(task.lastOpenedSurface);
+      setMountedSurfaces((prev) => (prev.has(mapped) ? prev : new Set(prev).add(mapped)));
+    }
   }, [studioShellActive, serverActiveTaskId, serverTasks]);
 
-  // Phase 3 — SINGLE authoritative surface-persist path. A user-initiated
-  // surface switch persists onto the active server task (server truth for
-  // restores). This is the only automatic writer of lastOpenedSurface:
-  // the canonical value and the in-sync guard both live in
-  // canonicalSurfaceToPersist(), and persistSurface() itself no-ops when
-  // the server value already matches — so no PATCH oscillation and no
-  // surface loops are possible by construction.
+  // Surface → task: a user-initiated surface switch persists onto the
+  // active server task. Skips when already in sync (task switch path).
   useEffect(() => {
-    const id = serverActiveTaskId;
-    if (!capabilities.projectId || !id || studioTasks.loading) return;
-    const task = serverTasks.find((t) => t.id === id);
-    if (!task) return;
-    const toPersist = canonicalSurfaceToPersist({
-      shellActive: studioShellActive,
-      stageSurface,
-      currentSurface,
-      storedSurface: task.lastOpenedSurface,
-    });
-    if (toPersist === null) return;
-    void studioTasks.persistSurface(id, toPersist);
-  }, [studioShellActive, stageSurface, currentSurface, serverActiveTaskId, serverTasks, capabilities.projectId, studioTasks]);
+    if (!studioShellActive || !serverActiveTaskId) return;
+    const task = serverTasks.find((t) => t.id === serverActiveTaskId);
+    if (!task || task.lastOpenedSurface === stageSurface) return;
+    if (resolveStageSurface(task.lastOpenedSurface) === stageSurface) return;
+    void studioTasks.updateTask(serverActiveTaskId, { lastOpenedSurface: stageSurface });
+  }, [studioShellActive, stageSurface, serverActiveTaskId, serverTasks, studioTasks]);
 
   // An approval gate must never strand hidden: a paused run expands the
   // LiTT command layer so the approve/reject decision stays reachable.
@@ -2641,11 +2444,6 @@ function CommandStudioContent() {
         onDismissCompletion={() => setCompletion(null)}
         onUndoCompletion={handleUndoCompletion}
         overflowDownloads={isMobileLitt}
-        suppressEmptyState={
-          isOnboardingComplete(userId, activeProjectId) || Boolean(composerValue.trim())
-        }
-        // Canonical runtime truth: the visible PTY is interactive right now.
-        ptyUsable={runtime?.terminal?.usable ?? false}
         onContinueCompletion={() => {
           const textarea = document.querySelector<HTMLTextAreaElement>("[data-testid='studio-command-composer'] textarea");
           textarea?.focus();
@@ -2744,7 +2542,7 @@ function CommandStudioContent() {
         useExecutionStore.getState().endRun("cancelled");
       }}
       onResolveApproval={handleResolveApproval}
-      terminalStatus={terminalHealthOf(capabilities).label}
+      terminalStatus={capabilities.terminalStatus}
       modelLabel={modelLabel}
     />
   );
@@ -2810,7 +2608,7 @@ function CommandStudioContent() {
           />
         );
       case "browser":
-        return <StudioBrowserJobsPanel projectId={projectId} conversationId={conversation.selectedConversationId} />;
+        return <StudioBrowserJobsPanel />;
       case "code":
         return (
           <CodeWorkspace
@@ -2855,11 +2653,11 @@ function CommandStudioContent() {
       case "activity":
         return (
           <StudioActivityPanel
-            runId={activityRunId}
+            messages={conversation.messages}
             busy={conversation.busy}
             modelLabel={modelLabel}
             projectName={capabilities.projectName}
-            terminalStatus={terminalHealthOf(capabilities).label}
+            terminalStatus={capabilities.terminalStatus}
             missionContent={
               <MissionCards
                 capabilities={capabilities}
@@ -3023,7 +2821,7 @@ function CommandStudioContent() {
                 onNew={() => { void handleNewWorktab(); }}
                 closedTabs={studioTasks.closedTasks.map((t) => ({
                   id: t.id,
-                  title: displayWorktabTitle(t.title, projectDisplayName),
+                  title: t.title?.trim() || "Untitled",
                 }))}
                 onReopen={(id) => { void handleReopenWorktab(id); }}
               />
@@ -3143,7 +2941,6 @@ function CommandStudioContent() {
                       surface: studioMode,
                       messages: conversation.messages,
                       busy: conversation.busy,
-                      conversationId: conversation.selectedConversationId,
                       workspaceRevision,
                       healthRunTrigger,
                       onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
@@ -3248,7 +3045,7 @@ function CommandStudioContent() {
               onNew={() => { void handleNewWorktab(); }}
               closedTabs={studioTasks.closedTasks.map((t) => ({
                 id: t.id,
-                title: displayWorktabTitle(t.title, projectDisplayName),
+                title: t.title?.trim() || "Untitled",
               }))}
               onReopen={(id) => { void handleReopenWorktab(id); }}
             />
@@ -3408,15 +3205,12 @@ function CommandStudioContent() {
               activityPulse={conversation.busy}
               terminalBadge={["error", "pty_failed", "auth_failed"].includes(capabilities.terminalStatus)}
               activityContent={
-                // MissionCards live in the dock Activity tab (classic
-                // desktop topology) and in the shell's center `activity`
-                // stage surface; mobile keeps the build-status sheet.
                 <StudioActivityPanel
-                  runId={activityRunId}
+                  messages={conversation.messages}
                   busy={conversation.busy}
                   modelLabel={modelLabel}
                   projectName={capabilities.projectName}
-                  terminalStatus={terminalHealthOf(capabilities).label}
+                  terminalStatus={capabilities.terminalStatus}
                   missionContent={
                     <MissionCards
                       capabilities={capabilities}
@@ -3483,7 +3277,6 @@ function CommandStudioContent() {
                     surface: studioMode,
                     messages: conversation.messages,
                     busy: conversation.busy,
-                    conversationId: conversation.selectedConversationId,
                     workspaceRevision,
                     healthRunTrigger,
                     onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
@@ -3553,7 +3346,6 @@ function CommandStudioContent() {
                     surface: studioMode,
                     messages: conversation.messages,
                     busy: conversation.busy,
-                    conversationId: conversation.selectedConversationId,
                     workspaceRevision,
                     healthRunTrigger,
                     onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
@@ -3962,8 +3754,6 @@ function StudioWorkSurface({
   onUndoCompletion,
   onContinueCompletion,
   overflowDownloads = false,
-  ptyUsable = false,
-  suppressEmptyState = false,
 }: {
   messages: import("../stores/useStudioAgentStore").ChatMessage[];
   conversationId: string | null;
@@ -3982,11 +3772,11 @@ function StudioWorkSurface({
   onUndoCompletion?: () => void;
   onContinueCompletion?: () => void;
   overflowDownloads?: boolean;
-  /** Canonical runtime truth: is the interactive PTY usable right now. */
-  ptyUsable?: boolean;
-  suppressEmptyState?: boolean;
 }) {
-  const isEmpty = messages.length === 0 && !loading && !suppressEmptyState;
+  // P0.14-15: Only show empty state when messages are truly empty AND
+  // conversations have finished loading from the server. During loading,
+  // show a minimal spinner so users don't see the welcome screen flash.
+  const isEmpty = messages.length === 0 && !loading;
   return (
     <div
       className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
@@ -4039,9 +3829,6 @@ function StudioWorkSurface({
           onUndoCompletion={onUndoCompletion}
           onContinueCompletion={onContinueCompletion}
           overflowDownloads={overflowDownloads}
-          // Canonical runtime truth — the ONLY consumer path for PTY
-          // usability outside useProjectRuntime itself.
-          ptyUsable={ptyUsable}
         />
       )}
     </div>
