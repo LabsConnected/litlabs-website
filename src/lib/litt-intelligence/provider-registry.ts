@@ -729,11 +729,23 @@ export function planBasicRoutes(
   const hint = resolveModelHint(opts.model);
   let droppedModelHint: string | undefined;
 
+  // DIAGNOSTIC (temporary): log entitlement input
+  console.log("[PROVIDER-DIAG]", JSON.stringify({
+    allowLittPaidProviders: opts.allowLittPaidProviders,
+    hasUserApiKey: !!opts.userApiKey,
+  }));
+
   for (const def of providerDefs(requirements)) {
     // Cost policy — LITT_PAID routes require explicit server-derived
     // entitlement (allowLittPaidProviders). Default: deny.
     // USER_FUNDED routes require the user to supply a key this request.
     if (def.costClass === "LITT_PAID" && !opts.allowLittPaidProviders) {
+      console.log("[PROVIDER-DIAG]", JSON.stringify({
+        excluded: def.provider,
+        reason: "litt_paid_not_allowed_for_basic",
+        costClass: def.costClass,
+        allowLittPaidProviders: opts.allowLittPaidProviders,
+      }));
       excluded.push({ provider: def.provider, reason: "litt_paid_not_allowed_for_basic" });
       continue;
     }

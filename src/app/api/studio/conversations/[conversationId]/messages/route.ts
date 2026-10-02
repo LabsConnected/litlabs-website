@@ -39,6 +39,7 @@ import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-tran
 import { createPausedRun, getLatestPausedRunForConversation, getPendingPausedRunForConversation, pausedRunBelongsToMessage } from "@/lib/litt-intelligence/paused-run-store";
 import { getActiveExecution, registerExecution, unregisterExecution } from "@/lib/studio/execution-registry";
 import { getOwnerAwareEntitlements } from "@/lib/entitlements";
+import { isOwnerClerkId } from "@/lib/owner-identity";
 import { resolveTurn } from "@/lib/litt-intelligence/turn-resolver";
 import {
   buildCanonicalRuntimeContext,
@@ -164,15 +165,32 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   // allowLittPaidProviders is NEVER accepted from client request input —
   // it is derived from the authenticated user's plan/owner status.
   // This enables OpenAI (LiTT's own key) for entitled users.
+  // DIAGNOSTIC (temporary): log the full entitlement decision chain
   let allowLittPaidProviders = false;
   if (clerkId) {
     try {
       const entitlements = await getOwnerAwareEntitlements(clerkId);
+      const isOwnerCheck = isOwnerClerkId(clerkId);
+      console.log("[ENTITLEMENT-DIAG]", JSON.stringify({
+        clerkId,
+        isOwner: entitlements.isOwner,
+        isOwnerClerkId: isOwnerCheck,
+        premiumModels: entitlements.premiumModels,
+        planId: entitlements.planId,
+        planName: entitlements.planName,
+        billingExempt: entitlements.billingExempt,
+        envOwnerId: process.env.LITTLABS_VAPI_OWNER_CLERK_ID ? "set" : "missing",
+        envOwnerIdMatch: process.env.LITTLABS_VAPI_OWNER_CLERK_ID === clerkId,
+        computedAllowPaid: entitlements.isOwner || entitlements.premiumModels,
+      }));
       allowLittPaidProviders = entitlements.isOwner || entitlements.premiumModels;
-    } catch {
+    } catch (e) {
       // On entitlement lookup failure, default-deny (safe)
+      console.log("[ENTITLEMENT-DIAG]", JSON.stringify({ clerkId, error: String(e), computedAllowPaid: false }));
       allowLittPaidProviders = false;
     }
+  } else {
+    console.log("[ENTITLEMENT-DIAG]", JSON.stringify({ clerkId: null, computedAllowPaid: false, reason: "no_clerkId" }));
   }
 
   const body = await req.json().catch(() => null) as Record<string, unknown> | null;
