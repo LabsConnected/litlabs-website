@@ -965,6 +965,19 @@ function compatEndpointFor(
       const baseUrl = secrets.byokBaseUrl?.replace(/\/+$/, "") || OPENAI_BASE;
       return { baseUrl, headers: { Authorization: `Bearer ${key}` } };
     }
+    case "openai": {
+      // P1: Managed OpenAI — platform credential, NOT user BYOK.
+      // Only reachable when allowLittPaidProviders=true (server-derived).
+      const key = process.env.OPENAI_API_KEY ?? "";
+      if (!key) {
+        throw new ProviderAttemptError("openai", route.models[0] ?? "unknown", {
+          class: "auth_invalid",
+          scope: "provider",
+          message: "OPENAI_API_KEY not set",
+        });
+      }
+      return { baseUrl: OPENAI_BASE, headers: { Authorization: `Bearer ${key}` } };
+    }
     default:
       throw new ProviderAttemptError(route.provider, route.models[0] ?? "unknown", {
         class: "bad_response",
@@ -1336,6 +1349,12 @@ export async function callLLMWithTools(
      * guard (buildCapabilityGuard) stays as the mid-run safety net.
      */
     requireReliableFileWriting?: boolean;
+    /**
+     * P1: Server-derived entitlement for managed paid providers.
+     * NEVER from client input. When true, LITT_PAID routes (managed
+     * OpenAI) are eligible as last-resort fallback.
+     */
+    allowLittPaidProviders?: boolean;
   },
 ): Promise<LLMToolCallResponse> {
   const requirements: RouteRequirements = {
@@ -1351,6 +1370,7 @@ export async function callLLMWithTools(
     byokProvider: options?.byokProvider,
     byokModel: options?.byokModel,
     byokBaseUrl: options?.byokBaseUrl,
+    allowLittPaidProviders: options?.allowLittPaidProviders,
   });
 
   if (plan.droppedModelHint) {
