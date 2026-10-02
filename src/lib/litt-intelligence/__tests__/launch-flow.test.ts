@@ -1,13 +1,28 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { runLaunchFlow, type LaunchFlowOptions } from "@/lib/litt-intelligence/launch-flow";
 import { registerInternalTools, toolRegistry } from "@/lib/litt-intelligence/tool-registry";
 import type { WorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import type { AgentLoopResult } from "@/lib/litt-intelligence/agent-loop-v2";
 import type { BuildFixLoopResult } from "@/lib/litt-intelligence/build-fix-loop";
 import { recordActionEventActivity } from "@/lib/action-runtime";
+import { _resetProviderHealthForTests } from "@/lib/litt-intelligence/provider-registry";
 
 vi.mock("@/lib/action-runtime", () => ({
   recordActionEventActivity: vi.fn(() => Promise.resolve({})),
+}));
+
+// The real runAgentLoopV2 path (exercised by the paid-fallback tests below)
+// fire-and-forgets metering events; keep them hermetic so the test never
+// touches the network or DB. Existing tests in this file inject a fake
+// runAgentLoop and never trigger metering, so this mock is inert for them.
+vi.mock("@/lib/metering", () => ({
+  emitUsageEvent: vi.fn(() => Promise.resolve({ usageEventId: null, skipped: "test" })),
+  emitLlmMetering: vi.fn(() => Promise.resolve({ usageEventId: null, skipped: "test" })),
+  getMeteringContext: vi.fn(() => undefined),
+  runWithMeteringContext: vi.fn((_ctx: unknown, fn: () => unknown) => fn()),
+  resolveMeteringUserUuid: vi.fn(() => Promise.resolve(null)),
+  _clearMeteringUserCache: vi.fn(),
+  METERING_FEATURES: ["agent-chat", "browser", "studio", "launch"],
 }));
 
 // ─── Mocks ──────────────────────────────────────────────────────────
@@ -1125,5 +1140,169 @@ describe("Launch Flow: artifact gate mutation-aware marker skip (#551b2)", () =>
       undefined,
     );
     expect(result.ok).toBe(true);
+  });
+});
+
+// ─── Tests: entitled paid fallback through the REAL runLaunchFlow path ───
+
+/**
+ * P0 regression: the V1 streamText lane routes through defaultChain and never
+ * calls planBasicRoutes, so PR #610's V2 wiring never fired there — an
+ * entitled user whose pinned provider was filtered out (GEMINI_DISABLED) got
+ * an empty provider chain and failed with zero attempts.
+ *
+ * These tests exercise the REAL runLaunchFlow (no injected runAgentLoop):
+ * runLaunchFlow → runAgentLoopV2 → callLLMWithTools → planBasicRoutes.
+ * Only the network boundary (fetch) is mocked. First OpenAI call returns a
+ * native tool call to files.write; the second returns final text so the loop
+ * terminates. files.write runs in executionMode "auto" so the
+ * auto-approve-safe mutation policy executes it without an approval pause.
+ */
+describe("Launch Flow: entitled paid fallback (real runLaunchFlow path)", () => {
+  const OPENAI_HOST = "api.openai.com";
+
+  function openAiToolCallResponse() {
+    return new Response(
+      JSON.stringify({
+        id: "chatcmpl-test-1",
+        object: "chat.completion",
+        created: 1,
+        model: "gpt-4o",
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [
+                {
+                  id: "call_1",
+                  type: "function",
+                  function: {
+                    // Wire naming per buildToolIdReverseMap: files.write → files_write
+                    name: "files_write",
+                    arguments: JSON.stringify({
+                      projectId: "proj-test",
+                      path: "hello.txt",
+                      content: "hello world",
+                    }),
+                  },
+                },
+              ],
+            },
+            finish_reason: "tool_calls",
+          },
+        ],
+        usage: { prompt_tokens: 50, completion_tokens: 10, total_tokens: 60 },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  function openAiFinalResponse() {
+    return new Response(
+      JSON.stringify({
+        id: "chatcmpl-test-2",
+        object: "chat.completion",
+        created: 2,
+        model: "gpt-4o",
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: "Done — hello.txt is written." },
+            finish_reason: "stop",
+          },
+        ],
+        usage: { prompt_tokens: 60, completion_tokens: 8, total_tokens: 68 },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  function stubFetchForPaidFallback() {
+    let openAiCalls = 0;
+    const fetchMock = vi.fn(async (url: unknown, _init?: RequestInit) => {
+      const u = String(url);
+      if (!u.includes(OPENAI_HOST)) {
+        // Every free provider is down for this test.
+        return new Response("upstream error", { status: 500 });
+      }
+      openAiCalls++;
+      return openAiCalls === 1 ? openAiToolCallResponse() : openAiFinalResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  function makeRealLoopOptions(overrides: Partial<LaunchFlowOptions> = {}) {
+    const transport = createMockTransport();
+    const options: LaunchFlowOptions = {
+      userMessage: "Write hello.txt",
+      projectId: "proj-test",
+      userId: "user-test",
+      transport,
+      systemPrompt: "",
+      enableBuildFix: false,
+      enableDeploy: false,
+      // files.write is auto-approve-safe in AUTO mode — in "act" the loop
+      // would pause for approval and the tool would never execute.
+      executionMode: "auto",
+      buildPreviewUrl: () => "https://preview.litlabs.net/preview/ws-test",
+      allowLittPaidProviders: true,
+      ...overrides,
+    };
+    return { options, transport };
+  }
+
+  beforeEach(() => {
+    toolRegistry.clear();
+    registerInternalTools();
+    _resetProviderHealthForTests();
+    vi.stubEnv("GEMINI_DISABLED", "true");
+    vi.stubEnv("OPENAI_API_KEY", "test-openai-key");
+    vi.stubEnv("GROQ_API_KEY", "");
+    vi.stubEnv("OPENROUTER_API_KEY", "");
+    vi.stubEnv("GEMINI_API_KEY", "");
+    vi.stubEnv("GOOGLE_API_KEY", "");
+    vi.stubEnv("MISTRAL_API_KEY", "");
+    vi.stubEnv("CLOUDFLARE_API_TOKEN", "");
+    // Keep the plan deterministic: only the managed OpenAI route survives.
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "true");
+    vi.stubEnv("OPENAI_MODEL", "gpt-4o");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("reaches the paid fallback through the genuine path and executes the tool call", async () => {
+    const fetchMock = stubFetchForPaidFallback();
+    const { options, transport } = makeRealLoopOptions();
+
+    const result = await runLaunchFlow(options);
+
+    // (1) Paid fallback attempted through the genuine orchestration path
+    // (runLaunchFlow → runAgentLoopV2 → callLLMWithTools → planBasicRoutes),
+    // not a direct router call.
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes(OPENAI_HOST))).toBe(true);
+    // (2) The OpenAI-returned tool call really executed against the transport.
+    expect(transport.writeFile).toHaveBeenCalled();
+    expect(transport.writeFile).toHaveBeenCalledWith("hello.txt", "hello world");
+    expect(result.status).toBe("preview_ready");
+  });
+
+  it("unentitled → no paid route attempted; run reports model failure (negative control)", async () => {
+    const fetchMock = stubFetchForPaidFallback();
+    const { options, transport } = makeRealLoopOptions({ allowLittPaidProviders: false });
+
+    const result = await runLaunchFlow(options);
+
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes(OPENAI_HOST))).toBe(false);
+    expect(transport.writeFile).not.toHaveBeenCalled();
+    expect(result.status).toBe("failed");
+    expect(result.error).toBeTruthy();
   });
 });

@@ -271,7 +271,14 @@ function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
   const geminiDisabled = process.env.GEMINI_DISABLED === "true";
   const withoutGemini = geminiDisabled ? chain.filter((p) => p !== "gemini") : chain;
 
-  if (opts.allowLittPaidProviders) return withoutGemini;
+  if (opts.allowLittPaidProviders) {
+    if (withoutGemini.length > 0) return withoutGemini;
+    // The pinned provider was filtered out (e.g. GEMINI_DISABLED): the pin
+    // cannot be honored, so drop it and route through the full entitled
+    // chain (incl. LITT_PAID) instead of failing with zero attempts.
+    const unpinned = rawDefaultChain(task, { ...opts, provider: undefined });
+    return geminiDisabled ? unpinned.filter((p) => p !== "gemini") : unpinned;
+  }
 
   const included = withoutGemini.filter((p) => !isLittPaidProvider(p));
   if (included.length > 0) return included;
