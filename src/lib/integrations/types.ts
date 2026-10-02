@@ -67,10 +67,6 @@ export const INTEGRATION_ENV_REQUIREMENTS: Record<string, string[]> = {
     "GITHUB_APP_ID",
     "GITHUB_PRIVATE_KEY",
   ],
-  vercel: [
-    "VERCEL_TOKEN",
-    "VERCEL_PROJECT_ID",
-  ],
   r2: [
     "R2_ACCOUNT_ID",
     "R2_ACCESS_KEY_ID",

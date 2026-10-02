@@ -165,9 +165,6 @@ const optionalIntegrationSchema = z.object({
   RAILWAY_ENVIRONMENT_ID: z.string().optional(),
   RAILWAY_PROJECT_ID: z.string().optional(),
   DEPLOY_PRODUCTION_URL: z.string().optional(),
-  VERCEL_TOKEN: z.string().optional(),
-  VERCEL_PROJECT_ID: z.string().optional(),
-  VERCEL_PROJECT_NAME: z.string().optional(),
   AGENT_API_KEY: z.string().optional(),
 });
 
