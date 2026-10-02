@@ -1178,6 +1178,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           // action_events log; the Activity panel reads them back as the
           // single Activity truth.
           persistEvent: persistProgressEvent,
+            // P1: Server-derived paid-provider entitlement (never from client).
+            allowLittPaidProviders,
           }),
         );
 

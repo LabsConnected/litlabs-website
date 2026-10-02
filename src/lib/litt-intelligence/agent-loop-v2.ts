@@ -215,6 +215,12 @@ export interface AgentLoopConfig {
     /** Server-persisted evidence restored after an approval pause. */
     state?: QualityLoopSnapshot;
   };
+  /**
+   * P1: Server-derived entitlement for managed paid providers.
+   * NEVER from client input. When true, LITT_PAID routes (managed
+   * OpenAI) are eligible as last-resort fallback in v2 routing.
+   */
+  allowLittPaidProviders?: boolean;
 }
 
 export const DEFAULT_LOOP_CONFIG: AgentLoopConfig = {
@@ -1101,6 +1107,8 @@ async function runAgentLoopV2Inner(
           // initial routing starts on a proven file writer instead of a
           // chat-only model that the 3-step guard would rule out anyway.
           requireReliableFileWriting: cfg.buildCapabilityGuard != null,
+          // P1: Server-derived paid-provider entitlement (never from client).
+          allowLittPaidProviders: cfg.allowLittPaidProviders,
         },
       );
       const llmDurationMs = Date.now() - llmStartTime;
@@ -1666,7 +1674,12 @@ async function runAgentLoopV2Inner(
           reason: "no_file_write_calls_in_window",
         });
 
-        const next = selectBuildModel(buildGuardExcluded);
+        // P1: entitlement-aware. The guard must never switch an unentitled run
+        // onto a LITT_PAID registry model that planBasicRoutes would refuse to
+        // route to — that combination ends the run with NO_BUILD_CAPABLE_MODEL.
+        const next = selectBuildModel(buildGuardExcluded, {
+          allowLittPaidProviders: cfg.allowLittPaidProviders,
+        });
         if (!next) {
           const listing = buildGuardTried.map((t) => `- ${t.canonicalId}: ${t.reason}`).join("\n");
           modelFailed = NO_BUILD_CAPABLE_MODEL;
@@ -1714,7 +1727,7 @@ async function runAgentLoopV2Inner(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg)),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg), cfg.allowLittPaidProviders),
     });
   }
 
@@ -2644,6 +2657,8 @@ async function resumeAgentLoopV2Inner(
           // Same preventive BUILD guard as the main loop: a resumed BUILD
           // run starts on a proven file writer.
           requireReliableFileWriting: cfg.buildCapabilityGuard != null,
+          // P1: Server-derived paid-provider entitlement (never from client).
+          allowLittPaidProviders: cfg.allowLittPaidProviders,
         },
       );
       if (llmResponse.responseShape && llmResponse.provider) {
@@ -2969,7 +2984,7 @@ async function resumeAgentLoopV2Inner(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg)),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg), cfg.allowLittPaidProviders),
     });
   }
 
@@ -3084,6 +3099,8 @@ export function createAutonomousRepairCallback(
   // closed as "incapable" — the same unified-gate guarantee as the main loop.
   availableCapabilities: string[] = resolveAvailableCapabilities({ transport }),
   actionContext?: ActionExecutionContext,
+  // P1: Server-derived paid-provider entitlement (never from client).
+  allowLittPaidProviders?: boolean,
 ): (attempt: number, errors: string) => Promise<boolean> {
   const permissionEngine = new PermissionEngine();
   return async (attempt: number, errors: string) => {
@@ -3103,6 +3120,8 @@ export function createAutonomousRepairCallback(
           maxTokens: 4096,
           deadlineMs,
           signal,
+          // P1: Server-derived paid-provider entitlement (never from client).
+          allowLittPaidProviders,
         });
 
         if (response.toolCalls.length === 0) {
