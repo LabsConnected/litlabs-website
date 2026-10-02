@@ -20,6 +20,7 @@ import {
 import {
   useSettingsStore,
   SETTINGS_SECTIONS,
+  SETTINGS_GROUPS,
   type SettingsSection,
 } from "@/stores/useSettingsStore";
 import {
@@ -319,36 +320,73 @@ function SettingsTabStrip({
         </div>
       )}
 
-      {/* Desktop category tabs. Mobile uses the full-screen selector sheet. */}
+      {/* Desktop category tabs. Mobile uses the full-screen selector sheet.
+          When searching, show flat filtered results. Otherwise group by
+          App Settings / LiTT Capabilities / Advanced. */}
       <nav
         className="hidden items-center gap-1 overflow-x-auto px-3 py-2.5 md:px-4 lg:flex"
         aria-label="Settings sections"
         data-testid="desktop-settings-sections"
         style={{ scrollbarWidth: "none" }}
       >
-        {displaySections.map((section) => {
-          const Icon = ICONS[section.icon] ?? LayoutGrid;
-          const isActive = activeSection === section.id;
-
-          return (
-            <button
-              key={section.id}
-              type="button"
-              onClick={() => onSectionClick(section.id)}
-              className="flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-[13px] font-bold transition-all"
-              style={{
-                backgroundColor: isActive ? `${T.accentColor}14` : "transparent",
-                color: isActive ? T.accentColor : "rgba(255,255,255,0.55)",
-                boxShadow: isActive ? `inset 0 -2px 0 ${T.accentColor}` : "none",
-              }}
-              aria-current={isActive ? "page" : undefined}
-              title={section.description}
-            >
-              <Icon size={14} className="pointer-events-none" />
-              <span className="whitespace-nowrap">{section.label}</span>
-            </button>
-          );
-        })}
+        {hasSearch ? (
+          displaySections.map((section) => {
+            const Icon = ICONS[section.icon] ?? LayoutGrid;
+            const isActive = activeSection === section.id;
+            return (
+              <button
+                key={section.id}
+                type="button"
+                onClick={() => onSectionClick(section.id)}
+                className="flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-[13px] font-bold transition-all"
+                style={{
+                  backgroundColor: isActive ? `${T.accentColor}14` : "transparent",
+                  color: isActive ? T.accentColor : "rgba(255,255,255,0.55)",
+                  boxShadow: isActive ? `inset 0 -2px 0 ${T.accentColor}` : "none",
+                }}
+                aria-current={isActive ? "page" : undefined}
+                title={section.description}
+              >
+                <Icon size={14} className="pointer-events-none" />
+                <span className="whitespace-nowrap">{section.label}</span>
+              </button>
+            );
+          })
+        ) : (
+          SETTINGS_GROUPS.map((group) => {
+            const groupSections = allSections.filter((s) => s.group === group.id);
+            if (groupSections.length === 0) return null;
+            return (
+              <div key={group.id} className="flex items-center gap-1" data-testid={`desktop-settings-group-${group.id}`}>
+                <span className="shrink-0 px-2 text-[10px] font-black uppercase tracking-[0.14em] text-white/35">
+                  {group.label}
+                </span>
+                {groupSections.map((section) => {
+                  const Icon = ICONS[section.icon] ?? LayoutGrid;
+                  const isActive = activeSection === section.id;
+                  return (
+                    <button
+                      key={section.id}
+                      type="button"
+                      onClick={() => onSectionClick(section.id)}
+                      className="flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-[13px] font-bold transition-all"
+                      style={{
+                        backgroundColor: isActive ? `${T.accentColor}14` : "transparent",
+                        color: isActive ? T.accentColor : "rgba(255,255,255,0.55)",
+                        boxShadow: isActive ? `inset 0 -2px 0 ${T.accentColor}` : "none",
+                      }}
+                      aria-current={isActive ? "page" : undefined}
+                      title={section.description}
+                    >
+                      <Icon size={14} className="pointer-events-none" />
+                      <span className="whitespace-nowrap">{section.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })
+        )}
       </nav>
     </div>
   );
@@ -398,36 +436,81 @@ function MobileSettingsSheet({
             <p className="text-xs text-white/60">Choose a category</p>
           </div>
         </header>
-        <nav className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-3 py-4" aria-label="Settings sections">
-          {displaySections.map((section) => {
-            const Icon = ICONS[section.icon] ?? LayoutGrid;
-            const isActive = activeSection === section.id;
-            return (
-              <button
-                key={section.id}
-                type="button"
-                onClick={() => {
-                  onSectionClick(section.id);
-                }}
-                className="flex min-h-14 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
-                style={{
-                  borderColor: isActive ? "color-mix(in srgb, var(--color-accent) 45%, transparent)" : "rgba(255,255,255,0.1)",
-                  backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "rgba(255,255,255,0.025)",
-                }}
-                aria-current={isActive ? "page" : undefined}
-                aria-label={section.label}
-              >
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-accent/90">
-                  <Icon size={16} className="pointer-events-none" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className={`block text-sm font-bold ${isActive ? "text-accent" : "text-white/90"}`}>{section.label}</span>
-                  <span className="block truncate text-xs text-white/60">{section.description}</span>
-                </span>
-                {isActive ? <Check size={16} className="shrink-0 text-accent" /> : <ChevronRight size={15} className="shrink-0 text-white/45" />}
-              </button>
-            );
-          })}
+        <nav className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-3 py-4" aria-label="Settings sections" data-testid="mobile-settings-sections">
+          {hasSearch ? (
+            displaySections.map((section) => {
+              const Icon = ICONS[section.icon] ?? LayoutGrid;
+              const isActive = activeSection === section.id;
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  onClick={() => {
+                    onSectionClick(section.id);
+                  }}
+                  className="flex min-h-14 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+                  style={{
+                    borderColor: isActive ? "color-mix(in srgb, var(--color-accent) 45%, transparent)" : "rgba(255,255,255,0.1)",
+                    backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "rgba(255,255,255,0.025)",
+                  }}
+                  aria-current={isActive ? "page" : undefined}
+                  aria-label={section.label}
+                >
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-accent/90">
+                    <Icon size={16} className="pointer-events-none" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className={`block text-sm font-bold ${isActive ? "text-accent" : "text-white/90"}`}>{section.label}</span>
+                    <span className="block truncate text-xs text-white/60">{section.description}</span>
+                  </span>
+                  {isActive ? <Check size={16} className="shrink-0 text-accent" /> : <ChevronRight size={15} className="shrink-0 text-white/45" />}
+                </button>
+              );
+            })
+          ) : (
+            SETTINGS_GROUPS.map((group) => {
+              const groupSections = allSections.filter((s) => s.group === group.id);
+              if (groupSections.length === 0) return null;
+              return (
+                <div key={group.id} data-testid={`mobile-settings-group-${group.id}`}>
+                  <h3 className="px-1 pb-1 pt-3 text-[10px] font-black uppercase tracking-[0.16em] text-white/40">
+                    {group.label}
+                  </h3>
+                  <div className="space-y-2">
+                    {groupSections.map((section) => {
+                      const Icon = ICONS[section.icon] ?? LayoutGrid;
+                      const isActive = activeSection === section.id;
+                      return (
+                        <button
+                          key={section.id}
+                          type="button"
+                          onClick={() => {
+                            onSectionClick(section.id);
+                          }}
+                          className="flex min-h-14 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+                          style={{
+                            borderColor: isActive ? "color-mix(in srgb, var(--color-accent) 45%, transparent)" : "rgba(255,255,255,0.1)",
+                            backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "rgba(255,255,255,0.025)",
+                          }}
+                          aria-current={isActive ? "page" : undefined}
+                          aria-label={section.label}
+                        >
+                          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-accent/90">
+                            <Icon size={16} className="pointer-events-none" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className={`block text-sm font-bold ${isActive ? "text-accent" : "text-white/90"}`}>{section.label}</span>
+                            <span className="block truncate text-xs text-white/60">{section.description}</span>
+                          </span>
+                          {isActive ? <Check size={16} className="shrink-0 text-accent" /> : <ChevronRight size={15} className="shrink-0 text-white/45" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })
+          )}
         </nav>
       </section>
     </div>
