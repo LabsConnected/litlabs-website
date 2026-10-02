@@ -68,7 +68,7 @@ export async function GET(
 
   try {
     const { workspaceId } = await verifyProjectWorkspace(projectId, userId);
-    const { token } = createTerminalToken(userId);
+    const { token } = createTerminalToken(userId, { workspaceId, projectId });
 
     const mime = getMimeType(filePath);
     const binaryMime = mime !== "application/octet-stream" &&

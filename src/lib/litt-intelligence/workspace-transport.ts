@@ -18,7 +18,7 @@ import { createTerminalToken } from "@/lib/terminal-auth";
 import { isCanonicalBase64 } from "@/lib/deployments/user-deployment";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createWorkspaceCheckpoint } from "@/lib/missions/workspace-checkpoint";
-import { getTerminalServerUrl } from "@/lib/terminal-url";
+import { resolveTerminalInternalUrl } from "@/lib/terminal-url";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -186,10 +186,13 @@ export interface WorkspaceTransport {
 // ─── Helpers ──────────────────────────────────────────────────────
 
 function terminalBase(): string {
-  return (
-    process.env.TERMINAL_SERVER_INTERNAL_URL ??
-    getTerminalServerUrl()
-  );
+  const resolved = resolveTerminalInternalUrl();
+  if (!resolved.url) {
+    throw new Error(
+      "TERMINAL_SERVER_INTERNAL_URL is not configured. Server-to-server terminal calls cannot run.",
+    );
+  }
+  return resolved.url;
 }
 
 function internalServiceKey(): string {

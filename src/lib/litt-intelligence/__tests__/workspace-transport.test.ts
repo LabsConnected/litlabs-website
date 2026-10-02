@@ -70,6 +70,7 @@ describe("createWorkspaceTransport — reachability probe", () => {
 
   beforeEach(() => {
     process.env.TERMINAL_AUTH_SECRET = "x".repeat(32);
+    process.env.TERMINAL_SERVER_INTERNAL_URL = "http://terminal.test";
     process.env.TERMINAL_PUBLIC_URL = "http://terminal.test";
   });
 
