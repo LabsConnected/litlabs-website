@@ -94,6 +94,12 @@ export interface LaunchFlowOptions {
    * ProgressEvents persist to the run's action_events log.
    */
   persistEvent?: AgentLoopConfig["persistEvent"];
+  /**
+   * P1: Server-derived entitlement for managed paid providers.
+   * NEVER from client input. Forwarded to agent-loop so v2 routing
+   * can include LITT_PAID routes (managed OpenAI) as last resort.
+   */
+  allowLittPaidProviders?: boolean;
   /** Injected for tests. */
   runAgentLoop?: (
     userMessage: string,
@@ -596,6 +602,8 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           qualityLoop: options.qualityLoop
             ? { ...options.qualityLoop, state: qualityState }
             : undefined,
+          // P1: Server-derived paid-provider entitlement (never from client).
+          allowLittPaidProviders: options.allowLittPaidProviders,
         },
         progress,
       );
@@ -860,6 +868,8 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           actionContext,
           // Item 5a — the repair pass is part of the same run's story.
           persistEvent: options.persistEvent,
+          // P1: Server-derived paid-provider entitlement (never from client).
+          allowLittPaidProviders: options.allowLittPaidProviders,
         },
         progress,
       );

@@ -127,13 +127,32 @@ function seedRecords(): Map<string, ModelRecord> {
       enabled: true,
       capabilities: {
         text: true,
-        structuredOutput: true,
-        toolCalling: true,
+        structuredOutput: true,        toolCalling: true,
         reliableFileWriting: true,
         vision: true,
         contextWindow: 1_048_576,
       },
       priority: 20,
+      healthState: "unknown",
+    },
+    {
+      // P1: Managed OpenAI — platform credential (OPENAI_API_KEY).
+      // Used as LAST-resort fallback for entitled users when free
+      // providers fail. gpt-4o is the proven tool-calling model used
+      // by the v1 managed path.
+      provider: "openai",
+      canonicalId: "openai-gpt-4o",
+      providerModelId: "gpt-4o",
+      enabled: true,
+      capabilities: {
+        text: true,
+        structuredOutput: true,
+        toolCalling: true,
+        reliableFileWriting: true,
+        vision: true,
+        contextWindow: 128_000,
+      },
+      priority: 100, // Last — only as fallback for entitled users
       healthState: "unknown",
     },
     {

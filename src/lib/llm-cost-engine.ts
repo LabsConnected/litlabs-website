@@ -190,6 +190,19 @@ const COST_CATALOG: ModelCostEntry[] = [
     billingClass: "byok",
     baseBitsPer1K: 0,
   },
+
+  // ── Managed OpenAI (P1) ─────────────────────────────────────────
+  // Platform-managed credential (OPENAI_API_KEY). NOT BYOK.
+  // Pricing from OpenAI public pricing (gpt-4o).
+  // billingClass "premium" — real provider cost, real LiTTBits charge.
+  {
+    provider: "openai",
+    model: "gpt-4o",
+    promptCostPer1M: 2.50,
+    completionCostPer1M: 10.00,
+    billingClass: "premium",
+    baseBitsPer1K: 5,
+  },
 ];
 
 // ── LiTT Alias → billing class mapping ─────────────────────────────────

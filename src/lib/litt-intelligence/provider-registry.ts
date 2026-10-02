@@ -138,6 +138,14 @@ export interface RoutePlanOptions {
   byokModel?: string;
   /** BYOK: base URL for openai-compatible endpoints. */
   byokBaseUrl?: string;
+  /**
+   * P1: Server-derived entitlement for managed paid providers.
+   * NEVER accepted from client request input — must be derived from
+   * the authenticated user's plan/owner status server-side.
+   * When true, LITT_PAID providers (managed OpenAI) are eligible.
+   * Default: false (deny).
+   */
+  allowLittPaidProviders?: boolean;
 }
 
 export interface RoutePlan {
@@ -365,6 +373,22 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
       // Resolved against RoutePlanOptions.userApiKey in the planner.
       credentialState: () => "missing",
       models: () => [],
+    },
+    {
+      // P1: Managed OpenAI fallback — LAST in route order.
+      // Platform-managed credential (OPENAI_API_KEY), NOT user BYOK.
+      // Only eligible when allowLittPaidProviders=true (server-derived
+      // entitlement: owner or premiumModels). Default: denied.
+      provider: "openai",
+      adapter: "openai-compatible",
+      costClass: "LITT_PAID",
+      capabilities: TOOL_CAPABLE,
+      timeoutMs: DEFAULT_ATTEMPT_TIMEOUT_MS,
+      credentialState: () =>
+        envPresent("OPENAI_API_KEY") ? "available" : "missing",
+      models: () => [
+        process.env.OPENAI_MODEL || "gpt-4o",
+      ],
     },
   ];
 }
@@ -706,9 +730,10 @@ export function planBasicRoutes(
   let droppedModelHint: string | undefined;
 
   for (const def of providerDefs(requirements)) {
-    // Cost policy — the Basic router never auto-uses LITT_PAID routes and
-    // only uses USER_FUNDED routes when the user supplied a key this request.
-    if (def.costClass === "LITT_PAID") {
+    // Cost policy — LITT_PAID routes require explicit server-derived
+    // entitlement (allowLittPaidProviders). Default: deny.
+    // USER_FUNDED routes require the user to supply a key this request.
+    if (def.costClass === "LITT_PAID" && !opts.allowLittPaidProviders) {
       excluded.push({ provider: def.provider, reason: "litt_paid_not_allowed_for_basic" });
       continue;
     }
