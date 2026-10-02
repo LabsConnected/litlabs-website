@@ -12,7 +12,22 @@
 import { resolveTerminalInternalUrl } from "@/lib/terminal-url";
 
 const INTERNAL_KEY = () => process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
-const TERMINAL_BASE = () => resolveTerminalInternalUrl().url;
+
+/**
+ * Server-to-server origin. Empty URL used to produce relative fetches like
+ * `/internal/workspace/...` which Node cannot parse — production 2026-10-02
+ * had TERMINAL_SERVER_INTERNAL_URL unset while terminal-server /health was ok.
+ * Fail closed with a config error. Do not invent a host and do not skip auth.
+ */
+function TERMINAL_BASE(): string {
+  const resolved = resolveTerminalInternalUrl();
+  if (!resolved.url) {
+    throw new Error(
+      "TERMINAL_SERVER_INTERNAL_URL is not configured. Server-to-server terminal calls cannot run. Set TERMINAL_SERVER_INTERNAL_URL to the terminal-server http(s) origin (for example http://<service>.railway.internal:<port>).",
+    );
+  }
+  return resolved.url;
+}
 
 /**
  * The project's previously-recorded workspace, so the terminal server
