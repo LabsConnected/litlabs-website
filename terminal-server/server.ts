@@ -80,6 +80,7 @@ import { dispatchCommand } from "./command-bridge";
 import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manager";
 import { requireInternalServiceAuth, type AuthenticatedRequest } from "./internal-auth";
 import { mintTerminalToken, verifyTerminalToken, bearerToken } from "./auth";
+import { bindWorkspaceFromToken } from "./workspace-token-bind";
 import { isTerminalOwner, warnIfOwnerAllowlistUnset } from "./terminal-owner-gate";
 import { verifyClerkToken } from "./clerk-verify";
 import { resolveBindHost } from "./network-bind";
@@ -1387,13 +1388,19 @@ function resolveWorkspacePath(workspaceId: string, userId: string, filePath: str
 /** Middleware: extract workspaceId from header and verify it belongs to the user. */
 function requireWorkspaceAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   try {
-    const userId = verifyTerminalToken(bearerToken(req.headers.authorization)).sub;
+    const payload = verifyTerminalToken(bearerToken(req.headers.authorization));
+    const userId = payload.sub;
     req.terminalUserId = userId;
-    const workspaceId = req.headers["x-workspace-id"] as string | undefined;
-    if (!workspaceId) {
-      res.status(400).json({ error: "Missing X-Workspace-Id header" });
+    const headerWorkspaceId = req.headers["x-workspace-id"] as string | undefined;
+    const bound = bindWorkspaceFromToken({
+      tokenWorkspaceId: payload.wid,
+      headerWorkspaceId,
+    });
+    if (!bound.ok) {
+      res.status(bound.status).json({ error: bound.error });
       return;
     }
+    const workspaceId = bound.workspaceId;
     const ws = getWorkspace(workspaceId);
     if (!ws) {
       res.status(404).json({ error: "Workspace not found" });

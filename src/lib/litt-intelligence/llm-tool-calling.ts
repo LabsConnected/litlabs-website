@@ -1236,17 +1236,35 @@ export interface RouteAttemptFailure {
  * secret-free message for the user.
  */
 export class AllRoutesFailedError extends Error {
-  readonly userMessage =
-    "LiTT couldn't complete this request because all currently available AI routes " +
-    "were unavailable or reached their limits. Your project and completed work are " +
-    "preserved — try again shortly, connect a local model, or use a personal provider key.";
-
   constructor(
     public readonly failures: RouteAttemptFailure[],
     public readonly excluded: Array<{ provider: string; reason: string }>,
   ) {
     super(buildAllFailedMessage(failures, excluded));
     this.name = "AllRoutesFailedError";
+  }
+
+  get userMessage(): string {
+    if (this.failures.length === 0) {
+      return (
+        "LiTT couldn't complete this request because no eligible AI routes were configured. " +
+        "Your project and completed work are preserved — connect a provider key, a local model, " +
+        "or a personal provider key."
+      );
+    }
+    const authOnly = this.failures.every((f) => f.class === "auth_invalid");
+    if (authOnly) {
+      return (
+        "LiTT couldn't complete this request because the configured AI provider rejected the " +
+        "credentials. Other AI routes were not configured. Your project and completed work are " +
+        "preserved — connect a valid provider key, a local model, or a personal provider key."
+      );
+    }
+    return (
+      "LiTT couldn't complete this request because all currently available AI routes " +
+      "were unavailable or reached their limits. Your project and completed work are " +
+      "preserved — try again shortly, connect a local model, or use a personal provider key."
+    );
   }
 }
 

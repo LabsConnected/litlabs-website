@@ -67,7 +67,7 @@ export async function GET(
 
     const { workspaceId } = verified;
     const path = request.nextUrl.searchParams.get("path") || ".";
-    const { token } = createTerminalToken(userId);
+    const { token } = createTerminalToken(userId, { workspaceId, projectId });
 
     let resp = await fetch(
       `${TERMINAL_BASE()}/ws-files?path=${encodeURIComponent(path)}`,
@@ -85,7 +85,7 @@ export async function GET(
       try {
         const recovered = await ensureWorkspaceAlive(projectId, userId, workspaceId);
         if (recovered.reprepared) {
-          const newToken = createTerminalToken(userId);
+          const newToken = createTerminalToken(userId, { workspaceId: recovered.workspaceId, projectId });
           resp = await fetch(
             `${TERMINAL_BASE()}/ws-files?path=${encodeURIComponent(path)}`,
             {
@@ -185,7 +185,7 @@ export async function POST(
         throw verifyErr;
       }
     }
-    let token = createTerminalToken(userId);
+    let token = createTerminalToken(userId, { workspaceId, projectId });
 
     let resp = await fetch(`${TERMINAL_BASE()}/ws-files/${action}`, {
       method: "POST",
@@ -203,7 +203,7 @@ export async function POST(
         const recovered = await ensureWorkspaceAlive(projectId, userId, workspaceId);
         if (recovered.reprepared) {
           workspaceId = recovered.workspaceId;
-          token = createTerminalToken(userId);
+          token = createTerminalToken(userId, { workspaceId, projectId });
           resp = await fetch(`${TERMINAL_BASE()}/ws-files/${action}`, {
             method: "POST",
             headers: {

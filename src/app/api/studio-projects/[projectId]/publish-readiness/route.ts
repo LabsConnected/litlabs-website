@@ -90,7 +90,7 @@ export async function GET(
     );
   }
 
-  const { token } = createTerminalToken(userId);
+  const { token } = createTerminalToken(userId, { workspaceId, projectId });
   const headers = {
     Authorization: `Bearer ${token}`,
     "X-Workspace-Id": workspaceId,

@@ -228,4 +228,17 @@ describe("terminal client functions wire timeouts", () => {
     expect(url).toBe("https://terminal.internal.test/internal/workspace/ws1?userId=u");
     expect(url).not.toContain("terminal.public.test");
   });
+
+  it("fails closed in production when no internal or public terminal URL is configured", async () => {
+    delete process.env.TERMINAL_SERVER_INTERNAL_URL;
+    delete process.env.TERMINAL_SERVER_URL;
+    process.env.NODE_ENV = "production";
+    const fetchMock = vi.mocked(fetch);
+
+    const err = await getWorkspaceInternal("ws1", "u").catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain("TERMINAL_SERVER_INTERNAL_URL is not configured");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
