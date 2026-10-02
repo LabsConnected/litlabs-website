@@ -190,6 +190,19 @@ const COST_CATALOG: ModelCostEntry[] = [
     billingClass: "byok",
     baseBitsPer1K: 0,
   },
+
+  // ── Managed OpenAI (P1) ─────────────────────────────────────────
+  // Platform-managed credential (OPENAI_API_KEY). NOT BYOK.
+  // Pricing from OpenAI public pricing (gpt-4o).
+  // billingClass "premium" — real provider cost, real LiTTBits charge.
+  {
+    provider: "openai",
+    model: "gpt-4o",
+    promptCostPer1M: 2.50,
+    completionCostPer1M: 10.00,
+    billingClass: "premium",
+    baseBitsPer1K: 5,
+  },
 ];
 
 // ── LiTT Alias → billing class mapping ─────────────────────────────────
@@ -214,12 +227,19 @@ const MARGIN_TARGET = parseFloat(process.env.LLM_COST_MARGIN_TARGET || "0.50");
  * Look up a model in the cost catalog by provider + model name.
  * Falls back to a provider-level default, then a generic default.
  */
-function lookupCostEntry(provider: string, model: string): ModelCostEntry {
-  // Exact match
+function lookupCostEntry(provider: string, model: string, isByok: boolean = false): ModelCostEntry {
+  // Exact match — prefer non-BYOK for managed, BYOK for user-funded
   const exact = COST_CATALOG.find(
-    (e) => e.provider === provider && e.model === model,
+    (e) => e.provider === provider && e.model === model &&
+      (isByok ? e.billingClass === "byok" : e.billingClass !== "byok"),
   );
   if (exact) return exact;
+
+  // Fallback to any exact provider+model match
+  const anyExact = COST_CATALOG.find(
+    (e) => e.provider === provider && e.model === model,
+  );
+  if (anyExact) return anyExact;
 
   // Provider-level fallback (first entry for that provider)
   const providerFallback = COST_CATALOG.find((e) => e.provider === provider);
@@ -252,7 +272,7 @@ function lookupCostEntry(provider: string, model: string): ModelCostEntry {
  *   providerCostMicros = 0
  */
 export function calculateLlmCost(input: CostEngineInput): CostCalculation {
-  const entry = lookupCostEntry(input.provider, input.model);
+  const entry = lookupCostEntry(input.provider, input.model, input.isByok);
   const totalTokens = input.promptTokens + input.completionTokens;
 
   // BYOK: no model inference charge
