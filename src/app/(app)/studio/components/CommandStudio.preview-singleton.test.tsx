@@ -549,15 +549,21 @@ describe("CommandStudio — canvas-first 2-zone layout", () => {
     const { user } = await renderCommandStudio();
     await settle();
 
+    // Studio enters with the LiTT chat surface open; closing it reaches the
+    // canvas view this test toggles from. Chat is never unmounted.
+    const mount = screen.getByTestId("litt-mobile-sheet-mount");
+    expect(mount.style.display).toBe("");
+    expect(screen.getByTestId("studio-command-composer")).toBeTruthy();
+    await user.click(screen.getByTestId("litt-mobile-sheet-close"));
+    await settle();
+
     // The segmented switcher is the primary fast path on the canvas view.
     expect(screen.getByTestId("mobile-surface-switcher")).toBeTruthy();
     expect(screen.getByTestId("mobile-switch-chat")).toBeTruthy();
     expect(screen.getByTestId("mobile-switch-canvas")).toBeTruthy();
 
     // Chat surface is mounted but hidden — never unmounted while switching.
-    const mount = screen.getByTestId("litt-mobile-sheet-mount");
     expect(mount.style.display).toBe("none");
-    expect(screen.getByTestId("studio-command-composer")).toBeTruthy();
 
     // Tap Chat — the sheet becomes visible; the composer instance is the
     // same one (state, drafts, and SSE connections survive).
