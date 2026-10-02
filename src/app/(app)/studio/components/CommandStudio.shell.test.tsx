@@ -569,6 +569,11 @@ describe("StudioShell — left chat dock", () => {
     window.localStorage.removeItem("littree:studio:chat-dock");
     window.localStorage.removeItem("littree:studio:litt-dock-width");
     window.localStorage.removeItem("littree:studio:litt-collapsed");
+    // The collapse preference is session-scoped (a manual collapse sticks for
+    // the session; a fresh entry restores Chat + Workspace). Clear it between
+    // cases so one test's manual collapse cannot leak into the next.
+    window.sessionStorage.removeItem("littree:studio:litt-collapsed");
+    window.sessionStorage.removeItem("littree:studio:mobile-litt-open");
 
     globalThis.__TEST_VIEWPORT_WIDTH__ = DESKTOP_WIDTH;
     window.innerWidth = DESKTOP_WIDTH;
@@ -715,6 +720,32 @@ describe("StudioShell — left chat dock", () => {
     await waitFor(() => {
       expect(window.localStorage.getItem("littree:studio:litt-dock-width")).toBe("300");
     });
+  });
+
+  it("P0: a fresh Studio entry shows LiTT Chat and a visible composer on desktop", async () => {
+    await renderStudioShell();
+    // The dock is expanded, not a collapsed rail.
+    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
+    // The conversation composer is visible on initial load — this is the exact
+    // regression that made Studio look empty to users.
+    await expect(screen.getByTestId("studio-command-composer")).toBeVisible();
+  });
+
+  it("P0: a manual collapse is honoured for the rest of the session", async () => {
+    const { user } = await renderStudioShell();
+    await user.click(screen.getByTestId("litt-panel-collapse"));
+    await waitFor(() => {
+      expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
+    });
+    // Survives a reload within the session (refresh preserves state).
+    expect(window.sessionStorage.getItem("littree:studio:litt-collapsed")).toBe("true");
+  });
+
+  it("P0: an explicit stored collapse preference is still honoured", async () => {
+    window.localStorage.setItem("littree:studio:litt-collapsed", "true");
+    await renderStudioShell();
+    // The fix must not silently override a deliberate user choice.
+    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
   });
 
   it("Ask LiTT expands a collapsed left dock panel", async () => {

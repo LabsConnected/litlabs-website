@@ -632,6 +632,7 @@ function CommandStudioContent() {
   // state, and a laptop first-run default (collapsed) that never
   // overrides an explicit stored user preference.
   const LITT_COLLAPSED_KEY = "littree:studio:litt-collapsed";
+  const MOBILE_LITT_OPEN_KEY = "littree:studio:mobile-litt-open";
 
   // Whether the user has an explicit stored collapse preference — captured
   // once at init (constant state) so the mount-time persistence write below
@@ -639,26 +640,41 @@ function CommandStudioContent() {
   const [littCollapsedHadStoredPref] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     try {
-      return localStorage.getItem(LITT_COLLAPSED_KEY) !== null;
+      // A value written by the previous localStorage behaviour is still
+      // honoured as an explicit preference, so a user who deliberately
+      // collapsed the dock is not silently overridden by this change.
+      return (
+        sessionStorage.getItem(LITT_COLLAPSED_KEY) !== null ||
+        localStorage.getItem(LITT_COLLAPSED_KEY) !== null
+      );
     } catch {
       return false;
     }
   });
 
+  // Studio enters with LiTT Chat + Workspace, not a collapsed rail.
+  //
+  // The collapse preference is session-scoped: a manual collapse is honoured
+  // for the rest of the session (so refresh and in-session navigation keep the
+  // correct state) but no longer pins the panel shut permanently across
+  // sessions. Previously the preference lived in localStorage, so once a user
+  // collapsed the dock it stayed collapsed on every future visit and the
+  // conversation composer rendered hidden.
   const [littCollapsed, setLittCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return true;
     try {
-      const stored = localStorage.getItem(LITT_COLLAPSED_KEY);
-      // F1 workspace-first: first run opens on the 64px rail (no
-      // permanent LiTT column). An explicit stored preference wins.
-      return stored === null ? true : stored === "true";
+      const session = sessionStorage.getItem(LITT_COLLAPSED_KEY);
+      if (session !== null) return session === "true";
+      const legacy = localStorage.getItem(LITT_COLLAPSED_KEY);
+      if (legacy !== null) return legacy === "true";
     } catch {
-      return true;
+      // noop
     }
+    return true;
   });
   useEffect(() => {
     try {
-      localStorage.setItem(LITT_COLLAPSED_KEY, String(littCollapsed));
+      sessionStorage.setItem(LITT_COLLAPSED_KEY, String(littCollapsed));
     } catch {
       // ignore
     }
@@ -692,6 +708,36 @@ function CommandStudioContent() {
   // desktop-rail vs mobile-sheet LiTT presentation — null until first
   // client measurement (SSR-safe — see hook docs).
   const [mobileLittOpen, setMobileLittOpen] = useState(false);
+  // On mobile, Studio enters with the LiTT chat surface open. Session-scoped
+  // for the same reason as the desktop dock: a manual close sticks for this
+  // session, a fresh entry restores it. The composer is never focused
+  // automatically, so the on-screen keyboard does not pop.
+  const [mobileLittHadStoredPref] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return sessionStorage.getItem(MOBILE_LITT_OPEN_KEY) !== null;
+    } catch {
+      return false;
+    }
+  });
+  const mobileLittDefaultAppliedRef = useRef(false);
+  useEffect(() => {
+    if (mobileLittDefaultAppliedRef.current) return;
+    if (viewportTier === null) return;
+    mobileLittDefaultAppliedRef.current = true;
+    if (!isMobileLitt) return;
+    if (!mobileLittHadStoredPref) setMobileLittOpen(true);
+  }, [viewportTier, isMobileLitt, mobileLittHadStoredPref]);
+  useEffect(() => {
+    // Only persist once the entry default has been applied — otherwise the
+    // mount-time write would immediately masquerade as a stored preference.
+    if (!mobileLittDefaultAppliedRef.current) return;
+    try {
+      sessionStorage.setItem(MOBILE_LITT_OPEN_KEY, String(mobileLittOpen));
+    } catch {
+      // ignore
+    }
+  }, [mobileLittOpen]);
   // Mobile density redesign: progressive-disclosure sheet state. Both sheets
   // render only while the mobile chat sheet is open (see mounts below).
   const [mobileBuildOpen, setMobileBuildOpen] = useState(false);

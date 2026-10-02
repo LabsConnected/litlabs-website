@@ -1294,12 +1294,26 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.queryByTestId("litt-mobile-sheet")).toBeNull();
     });
 
+    it("P0: mobile enters Studio with the LiTT chat surface and composer visible", async () => {
+      globalThis.__TEST_VIEWPORT_WIDTH__ = 390;
+      await renderCommandStudio();
+      // The chat sheet is open on entry, so the composer is actually visible.
+      expect(screen.getByTestId("litt-mobile-sheet-mount").style.display).toBe("");
+      await expect(screen.getByTestId("studio-command-composer")).toBeVisible();
+      // No automatic keyboard: nothing is focused on entry.
+      expect(document.activeElement).not.toBe(
+        screen.getByRole("textbox", { name: /message input/i }),
+      );
+    });
+
     it("mobile tier does not render the desktop LiTT rail or a 64px HUD", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
-      await renderCommandStudio();
+      const { user } = await renderCommandStudio();
       expect(screen.queryByTestId("litt-panel")).toBeNull();
       expect(screen.queryByTestId("litt-ambient-hud")).toBeNull();
-      // Mobile access control must be present instead.
+      // Close the entry-open sheet to reach the workspace-only state and its
+      // mobile access control.
+      await user.click(screen.getByTestId("litt-mobile-sheet-close"));
       expect(screen.getByTestId("litt-mobile-trigger")).toBeTruthy();
     });
 
@@ -1307,6 +1321,8 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
       mockCapabilities = { ...defaultCapabilities(), projectName: "Test Project", activeBranch: "main" };
       const { user } = await renderCommandStudio();
+      // Chat is open on entry; close it so the trigger path is exercised.
+      await user.click(screen.getByTestId("litt-mobile-sheet-close"));
       expect(screen.getByRole("button", { name: "Ask LiTT to build" })).toBeTruthy();
       await user.click(screen.getByTestId("litt-mobile-trigger"));
       await user.click(screen.getByTestId("litt-mobile-tab-chat"));
@@ -1339,7 +1355,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     it("mobile chat shows the compact Build status bar instead of the Mission card stack", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
       const { user } = await renderCommandStudio();
-      await user.click(screen.getByTestId("litt-mobile-trigger"));
+      // The chat sheet is open on entry, already on the Chat tab.
       await user.click(screen.getByTestId("litt-mobile-tab-chat"));
 
       // Mobile density redesign: one ~36px status bar, no card stack.
@@ -1426,7 +1442,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       const { user } = await renderCommandStudio();
       // Mobile: no desktop rail.
       expect(screen.queryByTestId("litt-panel")).toBeNull();
-      await user.click(screen.getByTestId("litt-mobile-trigger"));
+      // The mobile chat sheet is open on entry.
       expect(screen.getByTestId("litt-mobile-sheet")).toBeTruthy();
       // The sheet's Live tab shows activity.
       await user.click(screen.getByTestId("litt-mobile-tab-live"));
@@ -1439,8 +1455,13 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       // Store the desktop collapse preference before opening the sheet.
       localStorage.setItem("littree:studio:litt-collapsed", "false");
       const { user } = await renderCommandStudio();
+      // Entering with the sheet open must still leave the desktop-specific
+      // collapse preference untouched.
+      expect(screen.getByTestId("litt-mobile-sheet")).toBeTruthy();
+      expect(localStorage.getItem("littree:studio:litt-collapsed")).toBe("false");
+      // And an explicit open via the trigger must not mutate it either.
+      await user.click(screen.getByTestId("litt-mobile-sheet-close"));
       await user.click(screen.getByTestId("litt-mobile-trigger"));
-      // The desktop-specific collapse preference must be untouched.
       expect(localStorage.getItem("littree:studio:litt-collapsed")).toBe("false");
     });
 
