@@ -567,8 +567,8 @@ const CLERK_FAPI_URL = "https://clerk.litlabs.net";
  * for OAuth (it expects the proxy URL). This causes
  * "authorization_invalid" errors on the OAuth callback.
  *
- * Correct key format: pk_live_<base64("litlabs.net/__clerk$")>
- *   = pk_live_bGl0bGFicy5uZXQvX19jbGVyayQ=
+ * Correct key format: pk_live_<base64("www.litlabs.net/__clerk$")>
+ *   = pk_live_d3d3LmxpdGxhYnMubmV0L19fY2xlcmsk
  *
  * The CLERK_FAPI_URL above is the BACKEND URL for server-side proxying
  * (handleClerkProxy forwards /__clerk requests here). It is NOT the

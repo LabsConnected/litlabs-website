@@ -113,8 +113,8 @@ export const metadata: Metadata = {
 //
 // CRITICAL: The publishable key MUST decode to the proxy URL
 // (litlabs.net/__clerk), not the legacy custom domain (clerk.litlabs.net).
-// The key is base64-encoded: pk_live_<base64("litlabs.net/__clerk$")>
-//   = pk_live_bGl0bGFicy5uZXQvX19jbGVyayQ=
+// The key is base64-encoded: pk_live_<base64("www.litlabs.net/__clerk$")>
+//   = pk_live_d3d3LmxpdGxhYnMubmV0L19fY2xlcmsk
 // If the key points to clerk.litlabs.net, OAuth fails with
 // "authorization_invalid" because Clerk's backend expects the proxy URL.
 // See src/proxy.ts for the full explanation.
