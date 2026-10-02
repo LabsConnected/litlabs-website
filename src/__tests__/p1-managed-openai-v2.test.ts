@@ -16,6 +16,8 @@
  * 12. controlled failover through free providers reaches OpenAI for entitled users
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { planBasicRoutes } from "@/lib/litt-intelligence/provider-registry";
 import { getEligibleModels } from "@/lib/litt-intelligence/model-registry";
 
@@ -89,8 +91,8 @@ describe("P1: managed OpenAI v2 provider", () => {
       // This test verifies the type exists (for server use) but documents
       // that client input must not flow here. The actual enforcement is
       // in the route handler which we verify via source inspection.
-      const routeSource = require("fs").readFileSync(
-        require("path").join(__dirname, "../app/api/studio/conversations/[conversationId]/messages/route.ts"),
+      const routeSource = readFileSync(
+        join(__dirname, "../app/api/studio/conversations/[conversationId]/messages/route.ts"),
         "utf-8"
       );
       // Must derive from entitlements, not body
@@ -231,7 +233,40 @@ describe("P1: managed OpenAI v2 provider", () => {
       expect(cost.retailLiTTBits).toBeGreaterThan(0);
     });
 
-    it("14. no duplicate charging on fallback", async () => {
+    it("14. BYOK OpenAI stays zero-cost and user-funded", async () => {
+      // The catalog holds TWO openai/gpt-4o entries (managed "premium" and
+      // BYOK "byok") disambiguated by lookupCostEntry(provider, model, isByok).
+      // This proves the BYOK record is selected for a user-funded call, so a
+      // user's own key never books platform spend — and, symmetrically, that
+      // the managed record is not shadowed.
+      const { calculateLlmCost } = await import("@/lib/llm-cost-engine");
+
+      const byok = calculateLlmCost({
+        provider: "openai",
+        model: "gpt-4o",
+        promptTokens: 1000,
+        completionTokens: 500,
+        isByok: true,
+      });
+      expect(byok.billingClass).toBe("byok");
+      expect(byok.providerCostMicros).toBe(0);
+      expect(byok.retailLiTTBits).toBe(0);
+      expect(byok.shouldDebit).toBe(false);
+
+      // Same provider+model, managed: real cost, real charge.
+      const managed = calculateLlmCost({
+        provider: "openai",
+        model: "gpt-4o",
+        promptTokens: 1000,
+        completionTokens: 500,
+        isByok: false,
+      });
+      expect(managed.billingClass).toBe("premium");
+      expect(managed.providerCostMicros).toBeGreaterThan(0);
+      expect(managed.shouldDebit).toBe(true);
+    });
+
+    it("15. no duplicate charging on fallback", async () => {
       // Each provider attempt emits its own cost event;
       // the customer usage event is emitted once per logical action,
       // not per provider attempt. This is enforced by the metering

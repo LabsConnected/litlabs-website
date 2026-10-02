@@ -127,7 +127,8 @@ function seedRecords(): Map<string, ModelRecord> {
       enabled: true,
       capabilities: {
         text: true,
-        structuredOutput: true,        toolCalling: true,
+        structuredOutput: true,
+        toolCalling: true,
         reliableFileWriting: true,
         vision: true,
         contextWindow: 1_048_576,
@@ -310,10 +311,32 @@ export function getEligibleModels(required: CapabilityRequirements): ModelRecord
 }
 
 /** Highest-priority BUILD model: tool-calling + proven file writer. */
-export function selectBuildModel(excludeCanonicalIds?: Iterable<string>): ModelRecord | null {
+/**
+ * Providers whose routes spend LiTT's own platform credential.
+ *
+ * The model registry holds no auth state by design, so callers that pick a
+ * BUILD model must reconcile this list against the run's server-derived
+ * entitlement. Without that, an unentitled build guard would preselect a
+ * LITT_PAID model that planBasicRoutes then correctly refuses to route to,
+ * ending the run with NO_BUILD_CAPABLE_MODEL.
+ */
+export const LITT_PAID_PROVIDERS: ReadonlySet<string> = new Set(["openai"]);
+
+/**
+ * Entitlement-aware build-model selection.
+ *
+ * `allowLittPaidProviders` must be server-derived (never request input) and
+ * defaults to deny: when it is not explicitly true, LITT_PAID models are
+ * withheld so the guard only ever picks a model the cost policy will allow.
+ */
+export function selectBuildModel(
+  excludeCanonicalIds?: Iterable<string>,
+  opts?: { allowLittPaidProviders?: boolean },
+): ModelRecord | null {
   const excluded = new Set(excludeCanonicalIds ?? []);
+  const entitled = opts?.allowLittPaidProviders === true;
   const eligible = getEligibleModels({ tools: true, reliableFileWriting: true }).filter(
-    (r) => !excluded.has(r.canonicalId),
+    (r) => !excluded.has(r.canonicalId) && (entitled || !LITT_PAID_PROVIDERS.has(r.provider)),
   );
   return eligible[0] ?? null;
 }

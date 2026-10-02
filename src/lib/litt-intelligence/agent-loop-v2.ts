@@ -1674,7 +1674,12 @@ async function runAgentLoopV2Inner(
           reason: "no_file_write_calls_in_window",
         });
 
-        const next = selectBuildModel(buildGuardExcluded);
+        // P1: entitlement-aware. The guard must never switch an unentitled run
+        // onto a LITT_PAID registry model that planBasicRoutes would refuse to
+        // route to — that combination ends the run with NO_BUILD_CAPABLE_MODEL.
+        const next = selectBuildModel(buildGuardExcluded, {
+          allowLittPaidProviders: cfg.allowLittPaidProviders,
+        });
         if (!next) {
           const listing = buildGuardTried.map((t) => `- ${t.canonicalId}: ${t.reason}`).join("\n");
           modelFailed = NO_BUILD_CAPABLE_MODEL;

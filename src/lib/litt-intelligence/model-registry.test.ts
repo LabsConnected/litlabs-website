@@ -44,10 +44,14 @@ describe("model registry — eligibility", () => {
     const vision = getEligibleModels({ vision: true });
     // qwen3.8-27b:free takes image input per the OpenRouter catalog
     // (modality text+image+video->text); gemma/north-mini/nemotron do not.
+    // Managed OpenAI is listed because gpt-4o does accept image input. This is
+    // capability only — planBasicRoutes still withholds the LITT_PAID route
+    // from unentitled runs, and selectBuildModel does the same.
     expect(vision.map((m) => m.canonicalId)).toEqual([
       "gemini-flash",
       "gemini-2.5-flash",
       "openrouter-qwen3.8-27b",
+      "openai-gpt-4o",
     ]);
   });
 
@@ -55,6 +59,46 @@ describe("model registry — eligibility", () => {
     const m = selectBuildModel();
     expect(m?.canonicalId).toBe("gemini-flash");
     expect(m?.providerModelId).toBe("gemini-flash-latest");
+  });
+
+  it("selectBuildModel withholds LITT_PAID models from unentitled runs", () => {
+    // The registry holds no auth state, so the build guard must be told the
+    // run's entitlement. Otherwise an unentitled BUILD would preselect
+    // managed OpenAI, which planBasicRoutes then refuses to route to — ending
+    // the run with NO_BUILD_CAPABLE_MODEL instead of using a free model.
+    const freeBuilders = getEligibleModels({
+      tools: true,
+      reliableFileWriting: true,
+    })
+      .map((m) => m.canonicalId)
+      .filter((id) => id !== "openai-gpt-4o");
+
+    // Free provider selection is unchanged: the normal first pick is still a
+    // free model, and it stays the same with and without entitlement.
+    expect(selectBuildModel()?.canonicalId).not.toBe("openai-gpt-4o");
+    expect(selectBuildModel(undefined, { allowLittPaidProviders: true })?.canonicalId).toBe(
+      selectBuildModel()?.canonicalId,
+    );
+
+    // Unentitled (default and explicit false): with every free writer excluded
+    // there is nothing left — never the paid model as a silent fallback.
+    expect(selectBuildModel(freeBuilders)).toBeNull();
+    expect(
+      selectBuildModel(freeBuilders, { allowLittPaidProviders: false }),
+    ).toBeNull();
+
+    // Entitled: managed OpenAI becomes selectable as the last resort.
+    expect(
+      selectBuildModel(freeBuilders, { allowLittPaidProviders: true })?.canonicalId,
+    ).toBe("openai-gpt-4o");
+  });
+
+  it("selectBuildModel prefers free models over managed OpenAI when entitled", () => {
+    // Entitlement must not reorder anything: managed OpenAI is last-resort,
+    // so a free build model is still the first pick for an entitled run.
+    expect(selectBuildModel(undefined, { allowLittPaidProviders: true })?.canonicalId).toBe(
+      "gemini-flash",
+    );
   });
 
   it("selectBuildModel honours exclusions and returns null when exhausted", () => {
