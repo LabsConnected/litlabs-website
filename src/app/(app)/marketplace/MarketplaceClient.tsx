@@ -116,7 +116,7 @@ function ctaStateFor(item: MarketplaceItem, installed: boolean): CtaState {
 
 // --- Page ---
 
-export default function Marketplace({ initialItems, initialError = false }: { initialItems?: MarketplaceItem[]; initialError?: boolean }) {
+export default function Marketplace({ initialItems, initialError = false, headerRendered = false }: { initialItems?: MarketplaceItem[]; initialError?: boolean; headerRendered?: boolean }) {
   const router = useRouter();
   const { isSignedIn } = useClerkAuth();
   const { resolvedColors: T } = useTheme();
@@ -279,6 +279,9 @@ export default function Marketplace({ initialItems, initialError = false }: { in
       )}
 
       {/* === HEADER === */}
+      {/* When the server already rendered the H1/intro (SSR), the client only
+          renders the interactive search + filters below. */}
+      {!headerRendered ? (
       <div className="border-b border-white/10 bg-gradient-to-b from-white/[.03] to-transparent px-4 py-8 sm:px-6 sm:py-10">
         <ProductFrame>
           <div className="flex items-center gap-3">
@@ -350,6 +353,59 @@ export default function Marketplace({ initialItems, initialError = false }: { in
           </div>
         </ProductFrame>
       </div>
+      ) : (
+      /* Server rendered the H1/intro — client only needs the interactive controls. */
+      <div className="border-b border-white/10 px-4 py-6 sm:px-6">
+        <ProductFrame>
+          <div className="relative max-w-md">
+            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search capabilities…"
+              aria-label="Search capabilities"
+              className="w-full rounded-xl border border-white/10 bg-white/[0.04] py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:border-white/25 focus:outline-none"
+            />
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            {categories.map((c) => (
+              <button
+                key={c}
+                onClick={() => setCategory(c)}
+                aria-pressed={category === c}
+                className="rounded-full px-3.5 py-1.5 text-xs font-bold capitalize transition"
+                style={
+                  category === c
+                    ? { backgroundColor: T.accentColor, color: "#000" }
+                    : { backgroundColor: "rgba(255,255,255,0.05)", color: T.textMuted }
+                }
+              >
+                {c === "all" ? "All" : c.replace(/_/g, " ")}
+              </button>
+            ))}
+            <span className="mx-1 hidden h-5 w-px bg-white/10 sm:block" aria-hidden="true" />
+            <div className="flex overflow-hidden rounded-full border border-white/10" role="group" aria-label="Capability view">
+              {(["all", "installed"] as const).map((v) => (
+                <button
+                  key={v}
+                  onClick={() => setView(v)}
+                  aria-pressed={view === v}
+                  className="px-3.5 py-1.5 text-xs font-bold capitalize transition"
+                  style={
+                    view === v
+                      ? { backgroundColor: "rgba(255,255,255,0.12)", color: T.headerColor }
+                      : { color: T.textMuted }
+                  }
+                >
+                  {v === "all" ? "Explore" : "Installed"}
+                </button>
+              ))}
+            </div>
+          </div>
+        </ProductFrame>
+      </div>
+      )}
 
       {/* === BODY === */}
       <ProductFrame className="py-6">
