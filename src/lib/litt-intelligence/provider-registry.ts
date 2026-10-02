@@ -726,6 +726,12 @@ export function planBasicRoutes(
       excluded.push({ provider: def.provider, reason: "ollama_not_configured_or_deployed" });
       continue;
     }
+    // P1 launch: Gemini billing depleted (HTTP 402). Explicitly skip Gemini
+    // via GEMINI_DISABLED=true — do not rely on health checks.
+    if (def.provider === "gemini" && process.env.GEMINI_DISABLED === "true") {
+      excluded.push({ provider: def.provider, reason: "gemini_disabled_by_config" });
+      continue;
+    }
 
     const cred = def.provider === "byok" ? ("available" as CredentialState) : def.credentialState();
     if (cred === "missing" || cred === "invalid") {
