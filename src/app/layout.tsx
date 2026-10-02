@@ -170,11 +170,10 @@ export default function RootLayout({
         </a>
         <ClerkProvider
           publishableKey={resolvedClerkKey}
-          // Same-origin proxy: the SDK calls /__clerk (same origin as the
-          // page) instead of clerk.litlabs.net (third-party). This avoids
-          // Firefox/Safari third-party cookie blocking which breaks OAuth.
-          // The /__clerk route in src/proxy.ts forwards to Clerk's backend.
-          proxyUrl="/__clerk"
+          // No same-origin proxy — the browser loads Clerk JS directly from
+          // clerk.litlabs.net (DNS-only in Cloudflare, CNAME → Clerk FAPI).
+          // Hardcoded URLs because Dockerfile ENV sets NEXT_PUBLIC_* vars to
+          // empty string when build args are not provided.
           signInUrl="/sign-in"
           signUpUrl="/sign-up"
           signInFallbackRedirectUrl="/studio"
