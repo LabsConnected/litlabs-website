@@ -71,6 +71,21 @@ const STATUS_DOT_COLOR: Record<PreviewState, string> = {
  * single honest "Preparing preview…" state instead of inventing stages.
  */
 type StartPhase = "provision" | "devserver" | null;
+
+/**
+ * Workspace content truth, as reported by /api/studio-projects/[id]/workspace-state.
+ * Tri-state on purpose — "unknown" is a real, blocking state:
+ *   unknown     — the lookup is in flight (or was never run). Auto-start is
+ *                 BLOCKED. A `state !== "not_started"`-only check treats the
+ *                 pre-load `null` as permission to start, which fires a
+ *                 preview for an untouched project before we know the truth.
+ *   has_content — the project carries real user/build output; normal
+ *                 auto-start is allowed.
+ *   no_content  — brand-new/untouched workspace, or the lookup failed. Auto-start
+ *                 stays blocked (fail-safe: never boot a preview that would only
+ *                 serve the starter welcome screen or a default page).
+ */
+type WorkspaceTruth = "unknown" | "has_content" | "no_content";
 const START_STAGES = ["Provision", "Dev server"] as const;
 
 function deriveStartPhase(state: PreviewState, workspaceStatus: string | null, runtimeStatusRaw: string | null): StartPhase {
@@ -254,6 +269,9 @@ export default function StudioPreviewPanel({
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [startPhase, setStartPhase] = useState<StartPhase>(null);
+  // Content truth gates auto-start. Starts as "unknown" (blocking) so the
+  // very first render can never auto-start on an unresolved truth.
+  const [workspaceTruth, setWorkspaceTruth] = useState<WorkspaceTruth>("unknown");
   // Project secrets editor (Clerk keys for the preview runtime). Toggled
   // from the toolbar; auto-opened from the auth-config error CTA.
   const [secretsOpen, setSecretsOpen] = useState(false);
@@ -520,6 +538,46 @@ export default function StudioPreviewPanel({
     setStartPhase(null);
     void loadStatus();
   }, [loadStatus]);
+
+  // Workspace content truth. Re-read on project change and on refreshKey so a
+  // first build/edit unblocks auto-start. Fails safe: any error, non-OK
+  // response, or unreadable payload leaves truth at "no_content", which keeps
+  // auto-start blocked rather than booting a default/welcome preview.
+  useEffect(() => {
+    if (!projectId) {
+      setWorkspaceTruth("no_content");
+      return;
+    }
+    let cancelled = false;
+    setWorkspaceTruth("unknown");
+    (async () => {
+      try {
+        const res = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace-state`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: await authHeaders(),
+          signal: AbortSignal.timeout(8000),
+        });
+        if (cancelled) return;
+        if (!res.ok) {
+          setWorkspaceTruth("no_content");
+          return;
+        }
+        const payload = await res.json().catch(() => null) as { scaffolded?: unknown; touched?: unknown } | null;
+        if (cancelled || !payload) {
+          setWorkspaceTruth("no_content");
+          return;
+        }
+        // Same signal CommandStudio uses: a second git commit or a consumed
+        // scaffold manifest both mean real content exists.
+        const hasContent = payload.touched === true || payload.scaffolded === false;
+        setWorkspaceTruth(hasContent ? "has_content" : "no_content");
+      } catch {
+        if (!cancelled) setWorkspaceTruth("no_content");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [projectId, refreshKey, authHeaders]);
 
   // Refresh when refreshKey prop changes (used by CodeWorkspace split view
   // and the permanent preview column's workspaceRevision prop)
@@ -796,14 +854,20 @@ export default function StudioPreviewPanel({
   // and autoStartedForRef (prevents re-triggering for the same project after
   // the first attempt, regardless of outcome). A ready preview does not
   // restart — auto-start only fires for the not_started state.
+  //
+  // workspaceTruth is a hard gate: not_started alone is NOT sufficient. Until
+  // the workspace-state lookup resolves ("unknown") or reports no content, we
+  // must not start a preview — otherwise the first render races the lookup and
+  // boots a dev server for an untouched project.
   useEffect(() => {
     if (state !== "not_started") return;
     if (!projectId) return;
+    if (workspaceTruth !== "has_content") return;
     if (autoStartedForRef.current === projectId) return;
     if (startInFlightRef.current) return;
     autoStartedForRef.current = projectId;
     void preparePreview();
-  }, [state, projectId, preparePreview]);
+  }, [state, projectId, preparePreview, workspaceTruth]);
 
   const handleCopyUrl = useCallback(async () => {
     if (!previewUrl) return;
@@ -852,8 +916,11 @@ export default function StudioPreviewPanel({
   // The v4 @import trap: a Tailwind-intended preview that renders unstyled
   // must surface honestly — never a green "Preview ready" over dead CSS.
   const stylingFailed = state === "ready" && styleProbe?.tailwindDetected === true && styleProbe.styled === false;
-  const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (iframeFailed ? "Preview failed to load" : stylingFailed ? "Preview styling failed to apply" : "Preview ready") : state === "stale" ? "Preview may be stale" : state === "not_started" ? "Preview not started" : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : "Preview failed to start") : "Preview runtime unreachable";
-  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "not_started" ? "Preparing your preview automatically…" : state === "unreachable" ? (error ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (error ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : error ?? "The dev server failed to start. Try restarting it.") : error ?? "The preview surface reports only real project runtime state.";
+  // An untouched project has nothing to preview yet — say so honestly instead
+  // of an indefinite "Preparing your preview automatically…".
+  const awaitingFirstContent = state === "not_started" && workspaceTruth === "no_content";
+  const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (iframeFailed ? "Preview failed to load" : stylingFailed ? "Preview styling failed to apply" : "Preview ready") : state === "stale" ? "Preview may be stale" : state === "not_started" ? (awaitingFirstContent ? "No preview yet" : "Preview not started") : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : "Preview failed to start") : "Preview runtime unreachable";
+  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "not_started" ? (awaitingFirstContent ? "Build something in this project and the preview will start automatically." : "Preparing your preview automatically…") : state === "unreachable" ? (error ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (error ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : error ?? "The dev server failed to start. Try restarting it.") : error ?? "The preview surface reports only real project runtime state.";
   const dotColor = stylingFailed ? STATUS_DOT_COLOR.stale : STATUS_DOT_COLOR[state];
   const isLive = state === "ready" || state === "stale";
   const sourceSummary = formatSourceSummary({
