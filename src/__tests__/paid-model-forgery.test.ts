@@ -76,7 +76,10 @@ describe("paid-model forgery protection", () => {
       // The gate must exist: allowLittPaidProviders controls whether paid
       // providers are included. The exact variable returned may vary (e.g.
       // with GEMINI_DISABLED filtering), but the gate itself must be present.
-      expect(LLM_SOURCE).toMatch(/if\s*\(\s*opts\.allowLittPaidProviders\s*\)\s*return/);
+      // Form may be the one-liner `if (…) return …` or a block handling the
+      // empty-chain fallback for entitled users — either way the condition
+      // must be the entry point for paid providers.
+      expect(LLM_SOURCE).toMatch(/if\s*\(\s*opts\.allowLittPaidProviders\s*\)\s*(\{|return)/);
       expect(LLM_SOURCE).toContain("!isLittPaidProvider(p)");
     });
 
