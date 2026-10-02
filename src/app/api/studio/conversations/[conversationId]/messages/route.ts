@@ -38,6 +38,7 @@ import { ProgressEmitter, type ProgressEvent } from "@/lib/litt-intelligence/pro
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { createPausedRun, getLatestPausedRunForConversation, getPendingPausedRunForConversation, pausedRunBelongsToMessage } from "@/lib/litt-intelligence/paused-run-store";
 import { getActiveExecution, registerExecution, unregisterExecution } from "@/lib/studio/execution-registry";
+import { getOwnerAwareEntitlements } from "@/lib/entitlements";
 import { resolveTurn } from "@/lib/litt-intelligence/turn-resolver";
 import {
   buildCanonicalRuntimeContext,
@@ -157,6 +158,21 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const { userId, clerkId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // P1: Wire paid-provider authorization from server-side entitlement.
+  // allowLittPaidProviders is NEVER accepted from client request input —
+  // it is derived from the authenticated user's plan/owner status.
+  // This enables OpenAI (LiTT's own key) for entitled users.
+  let allowLittPaidProviders = false;
+  if (clerkId) {
+    try {
+      const entitlements = await getOwnerAwareEntitlements(clerkId);
+      allowLittPaidProviders = entitlements.isOwner || entitlements.premiumModels;
+    } catch {
+      // On entitlement lookup failure, default-deny (safe)
+      allowLittPaidProviders = false;
+    }
   }
 
   const body = await req.json().catch(() => null) as Record<string, unknown> | null;
@@ -1503,6 +1519,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                   maxTokens: 2048,
                   modelOverride,
                   signal: executionAbort.signal,
+                  // P1: Server-side entitlement gates paid providers.
+                  // Never from client input — derived from auth above.
+                  allowLittPaidProviders,
                   // Canonical metering (P0): the llm.ts failover chain
                   // emits one usage+cost event per provider attempt when
                   // this context is present.

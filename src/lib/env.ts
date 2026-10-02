@@ -292,16 +292,16 @@ export function validateEnv(): EnvValidationResult[] {
     process.env.OPENAI_API_KEY
   );
   const aiWarnings: string[] = [];
-  // Validate Gemini key format at boot: Google API keys start with "AIza",
-  // are 39 chars, and contain only [A-Za-z0-9_-]. A corrupted paste
-  // (whitespace, truncation) returns HTTP 400 "API key not valid" on every
-  // call — catch it here instead of failing silently at runtime
+  // Validate Gemini key format at boot: Google API keys are either legacy
+  // "AIza" + 35 chars (39 total) or the new "AQ.Ab..." format. A corrupted
+  // paste (whitespace, truncation) returns HTTP 400 "API key not valid" on
+  // every call — catch it here instead of failing silently at runtime
   // (2026-09-30 incident: bad key hid for 2 days).
   if (geminiKey) {
     if (geminiKey !== geminiKey.trim()) {
       aiWarnings.push("[ai] GEMINI_API_KEY has leading/trailing whitespace — Google will reject it with 400 'API key not valid'. Re-paste the key cleanly.");
-    } else if (!/^AIza[A-Za-z0-9_-]{35}$/.test(geminiKey)) {
-      aiWarnings.push("[ai] GEMINI_API_KEY does not match Google API key format (AIza + 35 chars) — it may be truncated or the wrong key. Agent calls will fail.");
+    } else if (!/^AIza[A-Za-z0-9_-]{35}$/.test(geminiKey) && !/^AQ\.Ab[A-Za-z0-9_-]+$/.test(geminiKey)) {
+      aiWarnings.push("[ai] GEMINI_API_KEY does not match Google API key format (AIza + 35 chars, or new AQ.Ab... format) — it may be truncated or the wrong key. Agent calls will fail.");
     }
   }
   if (!hasAIKey) {

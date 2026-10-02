@@ -57,7 +57,7 @@ export function createWorkspaceLifecycleManager(
 
       // 2. If workspace is already ready, just create a new sandbox
       if (workspace.state === "ready") {
-        return await createSandboxForWorkspace(workspaceService, workspace);
+        return await createSandboxForWorkspace(workspaceService, workspace, input.userId);
       }
 
       // 3. Clone the repository (if GitHub source)
@@ -92,14 +92,12 @@ export function createWorkspaceLifecycleManager(
       const readyWorkspace = await workspaceService.getById(workspace.workspaceId);
       if (!readyWorkspace) throw new Error("Workspace disappeared after prepare");
 
-      return await createSandboxForWorkspace(workspaceService, readyWorkspace);
+      return await createSandboxForWorkspace(workspaceService, readyWorkspace, input.userId);
     },
 
     async getWorkspace(workspaceId: string, userId: string) {
-      const ws = await workspaceService.getById(workspaceId);
-      if (!ws) return null;
-      if (ws.userId !== userId) return null;
-      return ws;
+      // Scoped lookup: never retrieves another user's workspace
+      return await workspaceService.getByIdAndUser(workspaceId, userId);
     },
 
     async listUserWorkspaces(userId: string) {
@@ -107,9 +105,9 @@ export function createWorkspaceLifecycleManager(
     },
 
     async stopWorkspace(workspaceId: string, userId: string) {
-      const ws = await workspaceService.getById(workspaceId);
+      // Scoped lookup: 404 if not found OR belongs to another user (no info leak)
+      const ws = await workspaceService.getByIdAndUser(workspaceId, userId);
       if (!ws) throw new Error("Workspace not found");
-      if (ws.userId !== userId) throw new Error("Forbidden");
 
       if (ws.currentSandboxId) {
         const provider = getSandboxProvider();
@@ -121,9 +119,9 @@ export function createWorkspaceLifecycleManager(
     },
 
     async deleteWorkspace(workspaceId: string, userId: string) {
-      const ws = await workspaceService.getById(workspaceId);
+      // Scoped lookup: 404 if not found OR belongs to another user (no info leak)
+      const ws = await workspaceService.getByIdAndUser(workspaceId, userId);
       if (!ws) throw new Error("Workspace not found");
-      if (ws.userId !== userId) throw new Error("Forbidden");
 
       // Destroy sandbox if running
       if (ws.currentSandboxId) {
@@ -144,12 +142,20 @@ export function createWorkspaceLifecycleManager(
 async function createSandboxForWorkspace(
   workspaceService: WorkspaceService,
   workspace: Workspace,
+  authenticatedUserId: string,
 ): Promise<{ workspace: Workspace; sandbox: SandboxInstance; token: TerminalToken }> {
+  // The authenticated userId is canonical. The workspace must belong to them
+  // (verified by the scoped lookup upstream). If there's a mismatch, fail
+  // closed rather than minting a token with the wrong identity.
+  if (workspace.userId !== authenticatedUserId) {
+    throw new Error("Workspace owner mismatch — refusing to create sandbox");
+  }
+
   const provider = getSandboxProvider();
 
   const sandbox = await provider.create({
     workspaceId: workspace.workspaceId,
-    userId: workspace.userId,
+    userId: authenticatedUserId,
     projectId: workspace.projectId,
   });
 
@@ -158,10 +164,11 @@ async function createSandboxForWorkspace(
     currentSandboxId: sandbox.sandboxId,
   });
 
-  // Issue token
+  // Issue token — minted from the authenticated userId, not workspace.userId,
+  // so the token chain matches the request identity exactly.
   const { createTerminalTokenV1 } = await import("./token");
   const token = createTerminalTokenV1({
-    userId: workspace.userId,
+    userId: authenticatedUserId,
     projectId: workspace.projectId,
     workspaceId: workspace.workspaceId,
     sandboxId: sandbox.sandboxId,

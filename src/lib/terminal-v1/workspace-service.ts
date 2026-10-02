@@ -145,6 +145,27 @@ export class WorkspaceService {
   }
 
   /**
+   * Get a workspace by ID, scoped to the authenticated user.
+   * Returns null if the workspace doesn't exist OR belongs to a different user.
+   * Use this instead of getById() when the caller has an authenticated userId —
+   * it prevents retrieving stale state from another user and detecting the
+   * mismatch later.
+   */
+  async getByIdAndUser(workspaceId: string, userId: string): Promise<Workspace | null> {
+    const { data, error } = await this.client
+      .from("terminal_workspaces")
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error) throw new Error(`Failed to get workspace: ${error.message}`);
+    if (!data) return null;
+
+    return rowToWorkspace(data as WorkspaceRow);
+  }
+
+  /**
    * Get a workspace by user ID and project ID.
    */
   async getByUserAndProject(userId: string, projectId: string): Promise<Workspace | null> {
