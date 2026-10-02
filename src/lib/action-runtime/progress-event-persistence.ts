@@ -254,7 +254,9 @@ export function mapProgressEventToActionEvent(
           model: event.model,
           category: event.category,
           message: event.message,
-          label: `Model failed: ${event.model}`,
+          label: event.model === "all-routes"
+            ? "All AI routes unavailable"
+            : `Model failed: ${event.model}`,
         },
       };
     case "reasoning":

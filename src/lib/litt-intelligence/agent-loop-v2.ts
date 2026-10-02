@@ -1159,9 +1159,12 @@ async function runAgentLoopV2Inner(
         error: errMsg.slice(0, 500),
       });
       // Emit model failure event with sanitized error (no secrets)
+      // NOTE: Use "all-routes" not cfg.model — cfg.model is the user's hint
+      // (e.g. "gemini-2.5-flash") which may have been excluded by config
+      // (e.g. GEMINI_DISABLED). Reporting the hint as "failed" is misleading.
       localProgress.emit({
         type: "model_failed",
-        model: cfg.model ?? "default",
+        model: "all-routes",
         category: "all_fallbacks_exhausted",
         message: errMsg.slice(0, 200),
       });
@@ -2693,7 +2696,7 @@ async function resumeAgentLoopV2Inner(
       });
       localProgress.emit({
         type: "model_failed",
-        model: cfg.model ?? "default",
+        model: "all-routes",
         category: "all_fallbacks_exhausted",
         message: errMsg.slice(0, 200),
       });
