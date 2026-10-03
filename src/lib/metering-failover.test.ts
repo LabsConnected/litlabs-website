@@ -144,7 +144,7 @@ describe("P0: failover metering invariant", () => {
 
     expect(res.metering.requestId).toBeTruthy();
     expect(res.metering.billableIdempotencyKey).toMatch(
-      new RegExp(`^metering:llm:${res.metering.requestId}:\\d+$`),
+      new RegExp(`^metering:llm:${res.metering.requestId}$`),
     );
 
     await new Promise((r) => setTimeout(r, 50));
