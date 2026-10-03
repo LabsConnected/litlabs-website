@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase";
+import { GLOBAL_LITT_SYSTEM_KEY } from "@/lib/litt/system-project";
 import type { StudioCapabilities, ResolvedStudioContext, AgentSlug, AgentMode } from "./types";
 
 interface ProjectRecord {
@@ -13,6 +14,13 @@ interface ProjectRecord {
   framework: string | null;
   scan_status: string;
   scan_summary: Record<string, unknown> | null;
+}
+
+interface SystemProjectRecord {
+  id: string;
+  owner_id: string;
+  system_key: string;
+  name: string;
 }
 
 interface LegacyProjectRecord {
@@ -43,8 +51,8 @@ export interface ResolvedProject {
 
 /**
  * Resolve a project server-side from the authenticated user's Clerk ID
- * and a project UUID. Checks studio_projects first, then falls back to
- * the legacy projects table.
+ * and a project UUID. Checks studio_projects first, then the hidden LiTT
+ * system-project table, then falls back to the legacy projects table.
  *
  * Never trusts client-supplied repository metadata.
  */
@@ -82,6 +90,39 @@ export async function resolveProject(
         connectionSummary: repoConnected
           ? `Connected: repository (${studioProject.github_full_name})`
           : "No services connected.",
+      },
+    };
+  }
+
+  // Global LiTT owns a durable hidden project that never appears in normal
+  // studio project lists/counts. Resolve it only by authenticated owner + id.
+  const { data: systemProject } = await supabaseAdmin
+    .from("litt_system_projects")
+    .select("id, owner_id, system_key, name")
+    .eq("id", projectId)
+    .eq("owner_id", clerkUserId)
+    .eq("system_key", GLOBAL_LITT_SYSTEM_KEY)
+    .maybeSingle() as { data: SystemProjectRecord | null; error: unknown };
+
+  if (systemProject) {
+    return {
+      projectId: systemProject.id,
+      projectName: systemProject.name,
+      projectDescription: "Private system workspace for Global LiTT conversations and memory.",
+      repositoryProvider: null,
+      repositoryOwner: null,
+      repositoryName: null,
+      repositoryDefaultBranch: null,
+      activeBranch: null,
+      framework: null,
+      scanStatus: null,
+      scanSummary: null,
+      capabilities: {
+        repositoryConnected: false,
+        repositoryName: null,
+        terminalConnected: false,
+        availableTools: [],
+        connectionSummary: "No project services connected.",
       },
     };
   }
