@@ -102,8 +102,9 @@ export default function LayoutShell({
   }
 
   // Authenticated routes — use the unified AppShell with the sticky top bar.
-  // Studio flows through AppShell too but skips footer,
-  // global companion, and YouTube shell since it manages its own full-height chrome.
+  // Studio flows through AppShell too but skips footer and YouTube shell since
+  // it manages its own full-height chrome. Signed-in AppShell owns the one
+  // canonical Global LiTT operator; the legacy companion remains guest-only.
   return (
     <>
       <AnimatedBackgroundWrapper />
@@ -111,7 +112,7 @@ export default function LayoutShell({
         {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
         <AppShell>{children}</AppShell>
         {!ownChrome && !isStudio && <FooterWrapper />}
-        {!isStudio && <GlobalCompanion />}
+        {!isStudio && !isSignedIn && <GlobalCompanion />}
         {!isStudio && <YouTubePlayerShell />}
         <CookieConsent />
         <ServiceWorkerRegistration />
