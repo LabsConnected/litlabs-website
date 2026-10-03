@@ -845,11 +845,13 @@ const middleware = (req: NextRequest, ...rest: never[]): Promise<NextResponse> =
   if (nakedRedirect) return Promise.resolve(nakedRedirect);
 
   // Break broken OAuth state cycles: if the sign-in/sign-up page has a
-  // stale `sign_in_force_redirect` param from a failed OAuth attempt, the
-  // Clerk SDK fails to initialize (empty mount point). Strip the param
-  // and redirect to a clean URL so the user gets a fresh sign-in form.
+  // stale `sign_in_force_redirect` or `sign_in_fallback_redirect` param from
+  // a failed OAuth attempt, the Clerk SDK fails to initialize. Strip the
+  // param and redirect to a clean URL so the user gets a fresh form.
   const pathname = req.nextUrl.pathname;
-  if ((pathname === "/sign-in" || pathname === "/sign-up") && req.nextUrl.searchParams.has("sign_in_force_redirect")) {
+  const hasBrokenParam = req.nextUrl.searchParams.has("sign_in_force_redirect") ||
+    req.nextUrl.searchParams.has("sign_in_fallback_redirect");
+  if ((pathname === "/sign-in" || pathname === "/sign-up") && hasBrokenParam) {
     const cleanUrl = new URL(pathname, req.url);
     // Preserve redirect_url if present (legitimate post-sign-in destination)
     const redirectUrl = req.nextUrl.searchParams.get("redirect_url");
