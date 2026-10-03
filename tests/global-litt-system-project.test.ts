@@ -65,18 +65,25 @@ describe("Global LiTT hidden system project architecture", () => {
     expect(context).toContain("userId && isCompanionSurface && !effectiveProjectId");
     expect(context).toContain("getOrCreateGlobalLittSystemProject(userId)");
     expect(context).toContain("conversation?.projectId === effectiveProjectId");
+    expect(context).toContain("m.clientRequestId !== req.clientRequestId");
     expect(context).toContain("project?.projectId ?? effectiveProjectId ?? null");
   });
 
-  it("persists Global LiTT turns through one canonical endpoint", () => {
+  it("claims Global LiTT idempotency before any provider execution", () => {
     const route = read("src/app/api/litt/global/route.ts");
 
     expect(route).toContain("getOrCreateGlobalLittConversation(userId)");
     expect(route).toContain('item.clientRequestId === clientRequestId');
     expect(route).toContain('"try_increment_conversation_revision"');
+    expect(route).toContain('status: "completed"');
+    expect(route).toContain("assistantLockId(clientRequestId)");
+    expect(route).toContain('status: "streaming"');
+    expect(route).toContain("if (assistantInsert.duplicate)");
     expect(route).toContain("runLiTT({");
     expect(route).toContain('surface: "global_companion"');
-    expect(route).toContain('role: "user"');
-    expect(route).toContain('role: "assistant"');
+    expect(route).toContain("updateMessageStatus(");
+
+    expect(route.indexOf('role: "user"')).toBeLessThan(route.indexOf("runLiTT({"));
+    expect(route.indexOf("assistantLockId(clientRequestId)")).toBeLessThan(route.indexOf("runLiTT({"));
   });
 });
