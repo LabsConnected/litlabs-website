@@ -409,7 +409,7 @@ function TopBar() {
   const searchParams = useSearchParams();
   const { resolvedColors: T } = useTheme();
   const { isSignedIn } = useClerkAuth();
-  const { balance, isLoading: walletLoading, isError: walletError } = useWallet();
+  const { balance, displayBalance, isLoading: walletLoading, isError: walletError } = useWallet();
   const littHealth = useLittHealth();
 
   // Studio manages its own mobile chrome (header, bottom nav, composer),
@@ -497,7 +497,7 @@ function TopBar() {
             ) : walletError ? (
               <>-- <span style={{ color: T.accentColor }}>LiTTBits</span></>
             ) : (
-              <>{balance.toLocaleString()} <span style={{ color: T.accentColor }}>LiTTBits</span></>
+              <>{displayBalance ?? balance.toLocaleString()} <span style={{ color: T.accentColor }}>LiTTBits</span></>
             )}
           </span>
         )}
