@@ -863,6 +863,19 @@ const middleware = (req: NextRequest, ...rest: never[]): Promise<NextResponse> =
   const nakedRedirect = redirectNakedToWww(req);
   if (nakedRedirect) return Promise.resolve(nakedRedirect);
 
+  // Break broken OAuth state cycles: if the sign-in/sign-up page has a
+  // stale `sign_in_force_redirect` param from a failed OAuth attempt, the
+  // Clerk SDK fails to initialize (empty mount point). Strip the param
+  // and redirect to a clean URL so the user gets a fresh sign-in form.
+  const pathname = req.nextUrl.pathname;
+  if ((pathname === "/sign-in" || pathname === "/sign-up") && req.nextUrl.searchParams.has("sign_in_force_redirect")) {
+    const cleanUrl = new URL(pathname, req.url);
+    // Preserve redirect_url if present (legitimate post-sign-in destination)
+    const redirectUrl = req.nextUrl.searchParams.get("redirect_url");
+    if (redirectUrl) cleanUrl.searchParams.set("redirect_url", redirectUrl);
+    return Promise.resolve(NextResponse.redirect(cleanUrl, 302));
+  }
+
   // Legacy /profile/<username> -> /u/<username>. Runs before auth so
   // signed-out visitors reach the public profile (see redirectLegacyProfileToU).
   const legacyProfileRedirect = redirectLegacyProfileToU(req);
