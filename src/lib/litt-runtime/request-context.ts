@@ -163,6 +163,9 @@ export async function resolveRequestContext(
 
   // Resolve conversation + DB history when authenticated and a conversation is supplied.
   // A conversation may only hydrate history inside the same project boundary.
+  // If the caller persisted the current user turn before provider execution,
+  // exclude that same clientRequestId from history so the prompt contains the
+  // current message exactly once (as req.message, never duplicated in history).
   let conversationId: string | null = req.conversationId ?? null;
   let history: HistoryEntry[] = [];
   if (userId && conversationId) {
@@ -172,7 +175,11 @@ export async function resolveRequestContext(
       conversationId = conversation.id;
       const allMessages = await listMessages(conversation.id, userId);
       history = allMessages
-        .filter((m) => m.status === "completed" && (m.role === "user" || m.role === "assistant"))
+        .filter((m) =>
+          m.status === "completed" &&
+          (m.role === "user" || m.role === "assistant") &&
+          (!req.clientRequestId || m.clientRequestId !== req.clientRequestId),
+        )
         .slice(-HISTORY_LIMIT)
         .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
     } else {
