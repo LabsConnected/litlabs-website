@@ -13,6 +13,9 @@ describe("Global LiTT hidden system project architecture", () => {
     expect(migration).toContain("CREATE TABLE IF NOT EXISTS public.litt_system_projects");
     expect(migration).toContain("UNIQUE (owner_id, system_key)");
     expect(migration).toContain("CHECK (system_key IN ('global_litt'))");
+    expect(migration).toContain("primary_conversation_id uuid");
+    expect(migration).toContain("REFERENCES public.studio_conversations(id) ON DELETE SET NULL");
+    expect(migration).toContain("UNIQUE (primary_conversation_id)");
     expect(migration).toContain("ALTER TABLE public.litt_system_projects ENABLE ROW LEVEL SECURITY");
     expect(migration).toContain("FOR ALL TO service_role");
     expect(migration).not.toContain("ALTER TABLE public.studio_projects");
@@ -25,6 +28,17 @@ describe("Global LiTT hidden system project architecture", () => {
     expect(source).toContain('.eq("owner_id", ownerId)');
     expect(source).toContain('.eq("system_key", GLOBAL_LITT_SYSTEM_KEY)');
     expect(source).toContain('error?.code === "23505"');
+    expect(source).toContain("claimGlobalLittPrimaryConversation");
+    expect(source).toContain('.is("primary_conversation_id", null)');
+  });
+
+  it("owns one race-safe persistent primary conversation", () => {
+    const source = read("src/lib/litt/global-conversation.ts");
+
+    expect(source).toContain("getOrCreateGlobalLittConversation");
+    expect(source).toContain("systemProject.primaryConversationId");
+    expect(source).toContain("claimGlobalLittPrimaryConversation");
+    expect(source).toContain("archiveConversation(candidate.id, ownerId)");
   });
 
   it("uses the hidden project instead of creating visible LiTT Chat projects", () => {
@@ -52,5 +66,17 @@ describe("Global LiTT hidden system project architecture", () => {
     expect(context).toContain("getOrCreateGlobalLittSystemProject(userId)");
     expect(context).toContain("conversation?.projectId === effectiveProjectId");
     expect(context).toContain("project?.projectId ?? effectiveProjectId ?? null");
+  });
+
+  it("persists Global LiTT turns through one canonical endpoint", () => {
+    const route = read("src/app/api/litt/global/route.ts");
+
+    expect(route).toContain("getOrCreateGlobalLittConversation(userId)");
+    expect(route).toContain('item.clientRequestId === clientRequestId');
+    expect(route).toContain('"try_increment_conversation_revision"');
+    expect(route).toContain("runLiTT({");
+    expect(route).toContain('surface: "global_companion"');
+    expect(route).toContain('role: "user"');
+    expect(route).toContain('role: "assistant"');
   });
 });
