@@ -16,6 +16,7 @@ import { recallMemories, formatMemoryContext } from "@/lib/studio/memory-service
 import { getConversation, listMessages } from "@/lib/studio/conversation-service";
 import { adaptLegacyCapability } from "@/lib/litt-kernel";
 import { isBrowserBetaAllowed } from "@/lib/litt-intelligence/browser-agent";
+import { getOrCreateGlobalLittSystemProject } from "@/lib/litt/system-project";
 import type { CapabilityRecord } from "@/lib/litt-kernel";
 import type { RawCapabilities } from "@/lib/capabilities/translate";
 import type { AgentSlug } from "@/lib/studio/types";
@@ -103,9 +104,11 @@ function browserCapabilityRecord(userId: string | null): CapabilityRecord {
  * Resolve the full server-authoritative context for a run.
  *
  * For authenticated Studio/CLI/voice requests, project + conversation +
- * history are loaded from Supabase. For the anonymous global companion,
- * no project/conversation/memory is loaded and a strict limited contract
- * is returned (the prompt builder enforces the companion guardrails).
+ * history are loaded from Supabase. Authenticated Global LiTT requests with
+ * no explicit project are scoped to the user's hidden system project. For the
+ * anonymous global companion, no project/conversation/memory is loaded and a
+ * strict limited contract is returned (the prompt builder enforces the
+ * companion guardrails).
  */
 export async function resolveRequestContext(
   httpRequest: NextRequest,
@@ -142,10 +145,20 @@ export async function resolveRequestContext(
 
   const uid = userId ?? (isDev ? "anonymous-dev" : null);
 
-  // Resolve project server-side when a projectId is supplied.
+  // Authenticated Global LiTT has a durable hidden project even when the
+  // caller is not currently inside a user project. Explicit project scope is
+  // preserved and always wins; clients cannot forge ownership because the
+  // subsequent resolveProject call is owner-scoped.
+  let effectiveProjectId = req.projectId ?? null;
+  if (userId && isCompanionSurface && !effectiveProjectId) {
+    const systemProject = await getOrCreateGlobalLittSystemProject(userId);
+    effectiveProjectId = systemProject.id;
+  }
+
+  // Resolve project server-side when a projectId is supplied/resolved.
   let project: ResolvedRunContext["project"] = null;
-  if (userId && req.projectId) {
-    project = await resolveProject(userId, req.projectId);
+  if (userId && effectiveProjectId) {
+    project = await resolveProject(userId, effectiveProjectId);
   }
 
   // Resolve conversation + DB history when authenticated and a conversation is supplied.
@@ -225,7 +238,7 @@ export async function resolveRequestContext(
     isAnonymousCompanion: false,
     isDev,
     mode,
-    projectId: project?.projectId ?? req.projectId ?? null,
+    projectId: project?.projectId ?? effectiveProjectId ?? null,
     projectName: project?.projectName ?? null,
     conversationId,
     project,
