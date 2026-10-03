@@ -162,11 +162,13 @@ export async function resolveRequestContext(
   }
 
   // Resolve conversation + DB history when authenticated and a conversation is supplied.
+  // A conversation may only hydrate history inside the same project boundary.
   let conversationId: string | null = req.conversationId ?? null;
   let history: HistoryEntry[] = [];
   if (userId && conversationId) {
     const conversation = await getConversation(conversationId, userId);
-    if (conversation) {
+    const sameProject = !effectiveProjectId || conversation?.projectId === effectiveProjectId;
+    if (conversation && sameProject) {
       conversationId = conversation.id;
       const allMessages = await listMessages(conversation.id, userId);
       history = allMessages
