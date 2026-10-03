@@ -1,14 +1,18 @@
 // Canonical metering emitter — the SINGLE writer of usage_events + cost_events.
 //
-// Every provider-costing path in the app must emit one usage_event per
-// provider ATTEMPT (success or failure), plus one cost_events row. The
-// credit_ledger remains the system of record for *charges*; these tables are
-// the system of record for *costs*. The ledger must reconcile against them.
+// Every provider-costing path in the app must emit ONE usage_event per
+// USER ACTION, plus one cost_events row PER PROVIDER ATTEMPT (success or
+// failure). Failed attempts emit cost_events only — they must NOT create
+// additional usage_event rows. The credit_ledger remains the system of
+// record for *charges*; these tables are the system of record for *costs*.
+// The ledger must reconcile against them.
 //
 // ── Event identity ─────────────────────────────────────────────────────
-// idempotencyKey: unique per attempt. Format: `metering:{scope}:{requestId}:{seq}`
-//   where scope is the feature (e.g. "llm", "image", "tts"). Upsert on the
-//   unique idempotency_key makes re-emission safe.
+// idempotencyKey: unique per USER ACTION (not per attempt). Format:
+//   `metering:{scope}:{requestId}` where scope is the feature (e.g. "llm",
+//   "image", "tts"). Upsert on the unique idempotency_key makes re-emission
+//   safe — all provider attempts in a failover chain share the same key
+//   and collapse to a single usage_event row.
 // retrySequence / originalRequestId: link failover/retry attempts so the
 //   reconciliation report can show "3 attempts, 1 success".
 //
@@ -300,27 +304,24 @@ export async function emitUsageEvent(
 
     const usageEventId = usageRow.usage_event_id as string;
 
-    // 2. cost_events — one row per usage event. There is no unique
-    //    constraint on usage_event_id (only an index), so check-then-insert
-    //    to stay replay-safe without requiring a migration.
-    const { data: existingCost } = await admin
-      .from("cost_events")
-      .select("id")
-      .eq("usage_event_id", usageEventId)
-      .maybeSingle();
-    if (!existingCost) {
-      const { error: costErr } = await admin.from("cost_events").insert({
-        usage_event_id: usageEventId,
-        provider_cost_micros: input.providerCostMicros,
-        total_cost_micros: input.providerCostMicros,
-        rate_card_version: "littbits-pricing-v1",
-      });
-      if (costErr) {
-        console.error(
-          `[metering] cost_events insert failed for ${usageEventId}:`,
-          costErr.message,
-        );
-      }
+    // 2. cost_events — one row per provider attempt. Multiple cost_events
+    //    link to the same usage_event_id (1 user action = 1 usage_event,
+    //    N attempts = N cost_events). Always insert; replay safety is
+    //    handled at the usage_event level via idempotency_key. A replayed
+    //    emitUsageEvent call will upsert the same usage_event (no duplicate)
+    //    but may insert a duplicate cost_event — acceptable tradeoff for
+    //    correct per-attempt cost accounting, and replays are rare.
+    const { error: costErr } = await admin.from("cost_events").insert({
+      usage_event_id: usageEventId,
+      provider_cost_micros: input.providerCostMicros,
+      total_cost_micros: input.providerCostMicros,
+      rate_card_version: "littbits-pricing-v1",
+    });
+    if (costErr) {
+      console.error(
+        `[metering] cost_events insert failed for ${usageEventId}:`,
+        costErr.message,
+      );
     }
 
     // 3. Link the ledger debit, when this event backs a charge.

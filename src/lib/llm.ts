@@ -138,12 +138,13 @@ export interface LLMOptions {
    */
   signal?: AbortSignal;
   /**
-   * Canonical metering context for this call. When set, each provider
-   * attempt (success or failure) emits one usage_events + cost_events row
-   * via the metering emitter. Routes set this at the request boundary:
-   * `{ userId | clerkId, projectId?, feature }`. When absent, the ambient
-   * AsyncLocalStorage context (if any) is used; when neither exists the
-   * attempt is still executed but no metering row is emitted.
+   * Canonical metering context for this call. When set, the user action
+   * emits one usage_events row, and each provider attempt (success or
+   * failure) emits one cost_events row via the metering emitter. Routes
+   * set this at the request boundary: `{ userId | clerkId, projectId?,
+   * feature }`. When absent, the ambient AsyncLocalStorage context (if
+   * any) is used; when neither exists the attempt is still executed but
+   * no metering row is emitted.
    */
   metering?: MeteringContext;
 }
@@ -672,7 +673,8 @@ async function generateViaOpenAI(
 }
 
 /* ------------------------------------------------------------------ */
-/*  Canonical metering — one usage_events + cost_events row per attempt  */
+/*  Canonical metering — 1 usage_event per user action, N cost_events     */
+/*  (one per provider attempt). Failed attempts emit cost_events only.   */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -718,7 +720,7 @@ function meterLlmAttempt(args: {
     billable: args.status === "success",
     error: args.error,
     isByok: !!args.options.userApiKey,
-    idempotencyKey: `metering:llm:${args.requestId}:${args.attemptIndex}`,
+    idempotencyKey: `metering:llm:${args.requestId}`,
     retrySequence: args.attemptIndex,
     originalRequestId: args.requestId,
     startedAt: args.startedAt,
