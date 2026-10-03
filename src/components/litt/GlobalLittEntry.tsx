@@ -47,6 +47,11 @@ function clientRequestId(): string {
   return `global_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function messageDisplayContent(message: ConversationMessage): string {
+  if (message.status === "streaming" && !message.content) return "LiTT is working…";
+  return message.content;
+}
+
 /**
  * Persistent authenticated Global LiTT operator.
  *
@@ -120,7 +125,7 @@ export default function GlobalLittEntry() {
   }, [isSignedIn, userId, loadGlobalConversation]);
 
   useEffect(() => {
-    messagesEnd.current?.scrollIntoView({ block: "end" });
+    messagesEnd.current?.scrollIntoView?.({ block: "end" });
   }, [messages, busy]);
 
   if (!isSignedIn) return null;
@@ -274,7 +279,7 @@ export default function GlobalLittEntry() {
                     ? "ml-8 rounded-2xl bg-lime-300 px-3 py-2 text-sm text-black"
                     : "mr-8 rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-zinc-100"}
                 >
-                  <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                  <p className="whitespace-pre-wrap break-words">{messageDisplayContent(message)}</p>
                   {message.status === "failed" ? <p className="mt-1 text-[11px] opacity-70">Failed</p> : null}
                 </div>
               ))}
