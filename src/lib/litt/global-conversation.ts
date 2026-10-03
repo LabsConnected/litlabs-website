@@ -2,8 +2,8 @@ import {
   archiveConversation,
   createConversation,
   getConversation,
-  type Conversation,
 } from "@/lib/studio/conversation-service";
+import type { Conversation } from "@/lib/studio/types";
 import {
   claimGlobalLittPrimaryConversation,
   getGlobalLittSystemProject,
