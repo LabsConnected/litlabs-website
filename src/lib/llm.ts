@@ -833,7 +833,7 @@ export async function generateText(
         // action. Charge paths must reuse its idempotency key.
         metering: {
           requestId: meteringRequestId,
-          billableIdempotencyKey: `metering:llm:${meteringRequestId}:${attemptIndex}`,
+          billableIdempotencyKey: `metering:llm:${meteringRequestId}`,
         },
       };
       logLLMCall({
@@ -1116,7 +1116,7 @@ export async function streamText(
         // action. Charge paths must reuse its idempotency key.
         metering: {
           requestId: meteringRequestId,
-          billableIdempotencyKey: `metering:llm:${meteringRequestId}:${attemptIndex}`,
+          billableIdempotencyKey: `metering:llm:${meteringRequestId}`,
         },
       };
     } catch (err) {
