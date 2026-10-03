@@ -856,7 +856,11 @@ const middleware = (req: NextRequest, ...rest: never[]): Promise<NextResponse> =
     // Preserve redirect_url if present (legitimate post-sign-in destination)
     const redirectUrl = req.nextUrl.searchParams.get("redirect_url");
     if (redirectUrl) cleanUrl.searchParams.set("redirect_url", redirectUrl);
-    return Promise.resolve(NextResponse.redirect(cleanUrl, 302));
+    // Force no-cache so browsers don't serve a stale cached error page
+    const res = NextResponse.redirect(cleanUrl, 302);
+    res.headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
+    res.headers.set("Pragma", "no-cache");
+    return Promise.resolve(res);
   }
 
   // Legacy /profile/<username> -> /u/<username>. Runs before auth so
