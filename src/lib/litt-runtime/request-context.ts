@@ -145,32 +145,45 @@ export async function resolveRequestContext(
 
   const uid = userId ?? (isDev ? "anonymous-dev" : null);
 
-  // Authenticated Global LiTT has a durable hidden project even when the
-  // caller is not currently inside a user project. Explicit project scope is
-  // preserved and always wins; clients cannot forge ownership because the
-  // subsequent resolveProject call is owner-scoped.
+  // Authenticated Global LiTT has a durable hidden project when the caller is
+  // not inside a user project. Client project ids never become authoritative:
+  // they must resolve for this owner or they are rejected. A rejected Global
+  // companion scope falls back only to this user's own hidden system project.
   let effectiveProjectId = req.projectId ?? null;
   if (userId && isCompanionSurface && !effectiveProjectId) {
     const systemProject = await getOrCreateGlobalLittSystemProject(userId);
     effectiveProjectId = systemProject.id;
   }
 
-  // Resolve project server-side when a projectId is supplied/resolved.
   let project: ResolvedRunContext["project"] = null;
+  let projectScopeRejected = false;
   if (userId && effectiveProjectId) {
     project = await resolveProject(userId, effectiveProjectId);
+    if (!project) {
+      projectScopeRejected = true;
+      if (isCompanionSurface) {
+        const systemProject = await getOrCreateGlobalLittSystemProject(userId);
+        effectiveProjectId = systemProject.id;
+        project = await resolveProject(userId, systemProject.id);
+        projectScopeRejected = !project;
+      } else {
+        effectiveProjectId = null;
+      }
+    }
   }
 
   // Resolve conversation + DB history when authenticated and a conversation is supplied.
-  // A conversation may only hydrate history inside the same project boundary.
-  // If the caller persisted the current user turn before provider execution,
-  // exclude that same clientRequestId from history so the prompt contains the
-  // current message exactly once (as req.message, never duplicated in history).
+  // A rejected project scope may never hydrate unrelated history. Otherwise a
+  // conversation must stay inside the resolved project boundary. If the caller
+  // persisted the current user turn before provider execution, exclude that
+  // same clientRequestId so the current prompt appears exactly once.
   let conversationId: string | null = req.conversationId ?? null;
   let history: HistoryEntry[] = [];
   if (userId && conversationId) {
     const conversation = await getConversation(conversationId, userId);
-    const sameProject = !effectiveProjectId || conversation?.projectId === effectiveProjectId;
+    const sameProject = !projectScopeRejected && (
+      !effectiveProjectId || conversation?.projectId === effectiveProjectId
+    );
     if (conversation && sameProject) {
       conversationId = conversation.id;
       const allMessages = await listMessages(conversation.id, userId);
@@ -185,13 +198,13 @@ export async function resolveRequestContext(
     } else {
       conversationId = null;
     }
-  } else if (req.history) {
+  } else if (req.history && !projectScopeRejected) {
     history = req.history.slice(-HISTORY_LIMIT);
   }
 
   // Recall project-scoped memories (authenticated users only).
   let memoryContext = "";
-  if (userId && project) {
+  if (userId && project && !projectScopeRejected) {
     const agentSlug = (req.agentSlug ?? "litt") as AgentSlug;
     const memories = await recallMemories(req.message, userId, project.projectId, {
       agentSlug,
@@ -247,7 +260,7 @@ export async function resolveRequestContext(
     isAnonymousCompanion: false,
     isDev,
     mode,
-    projectId: project?.projectId ?? effectiveProjectId ?? null,
+    projectId: project?.projectId ?? (!projectScopeRejected ? effectiveProjectId : null),
     projectName: project?.projectName ?? null,
     conversationId,
     project,
