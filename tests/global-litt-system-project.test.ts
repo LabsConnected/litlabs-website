@@ -59,14 +59,17 @@ describe("Global LiTT hidden system project architecture", () => {
     expect(resolver).toContain('.eq("system_key", GLOBAL_LITT_SYSTEM_KEY)');
   });
 
-  it("binds authenticated global companion runs to the hidden project", () => {
+  it("binds authenticated global companion runs to the hidden project and rejects forged scope", () => {
     const context = read("src/lib/litt-runtime/request-context.ts");
 
     expect(context).toContain("userId && isCompanionSurface && !effectiveProjectId");
     expect(context).toContain("getOrCreateGlobalLittSystemProject(userId)");
+    expect(context).toContain("projectScopeRejected = true");
+    expect(context).toContain("projectScopeRejected = !project");
+    expect(context).toContain("!projectScopeRejected && (");
     expect(context).toContain("conversation?.projectId === effectiveProjectId");
     expect(context).toContain("m.clientRequestId !== req.clientRequestId");
-    expect(context).toContain("project?.projectId ?? effectiveProjectId ?? null");
+    expect(context).toContain("!projectScopeRejected ? effectiveProjectId : null");
   });
 
   it("claims Global LiTT idempotency before any provider execution", () => {
