@@ -50,6 +50,7 @@ describe("Global LiTT hidden system project architecture", () => {
 
     expect(context).toContain("userId && isCompanionSurface && !effectiveProjectId");
     expect(context).toContain("getOrCreateGlobalLittSystemProject(userId)");
+    expect(context).toContain("conversation?.projectId === effectiveProjectId");
     expect(context).toContain("project?.projectId ?? effectiveProjectId ?? null");
   });
 });
