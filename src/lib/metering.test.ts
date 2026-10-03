@@ -158,7 +158,7 @@ describe("emitUsageEvent", () => {
     expect(writes.length).toBe(0);
   });
 
-  it("is replay-safe: same idempotency key upserts usage_events, does not duplicate cost_events", async () => {
+  it("allows multiple cost_events per usage_event (one per attempt)", async () => {
     const input = {
       userId: USER_UUID,
       feature: "image-gen" as const,
@@ -168,23 +168,24 @@ describe("emitUsageEvent", () => {
       imageCount: 1,
       providerCostMicros: 30000,
       status: "success" as const,
-      idempotencyKey: "metering:image:req-5:0",
+      idempotencyKey: "metering:image:req-5",
     };
-    // First emission: cost_events empty → insert.
+    // First emission: usage_event upserted, cost_event inserted.
     await emitUsageEvent(input);
-    // Second emission with same key: cost row already exists → no new insert.
-    const costChain = makeQueryChain("cost_events");
-    (
-      costChain.maybeSingle as ReturnType<typeof vi.fn>
-    ).mockResolvedValue({ data: { id: "cost-1" }, error: null });
-    fromMock.mockImplementation((table: string) =>
-      table === "cost_events" ? costChain : makeQueryChain(table),
-    );
+    // Second emission with same key: usage_event upserts (no duplicate),
+    // cost_event inserts again (one per attempt). This is intentional:
+    // 1 user action = 1 usage_event, N attempts = N cost_events.
     await emitUsageEvent(input);
 
+    const usageUpserts = writes.filter(
+      (w) => w.table === "usage_events" && w.op === "upsert",
+    );
     const costInserts = writes.filter(
       (w) => w.table === "cost_events" && w.op === "insert",
     );
-    expect(costInserts.length).toBe(1);
+    // Usage events: 2 upserts but same idempotency key → 1 row in DB
+    expect(usageUpserts.length).toBe(2);
+    // Cost events: one per emit call (per attempt)
+    expect(costInserts.length).toBe(2);
   });
 });
