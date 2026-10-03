@@ -345,12 +345,14 @@ const LEGACY_LIST_COLUMNS =
  * projects that don't have a studio_projects counterpart.
  */
 export async function listProjects(userId: string): Promise<ProjectListResult> {
-  // Fetch from both tables in parallel
+  // Fetch from both tables in parallel.
+  // Exclude system projects (e.g. Global LiTT) from normal lists.
   const [studioResult, legacyResult] = await Promise.all([
     supabaseAdmin
       .from(TABLE)
       .select(STUDIO_LIST_COLUMNS)
       .eq("user_id", userId)
+      .eq("is_system", false)
       .order("updated_at", { ascending: false }),
     supabaseAdmin
       .from(LEGACY_TABLE)
