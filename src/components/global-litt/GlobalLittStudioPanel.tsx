@@ -69,6 +69,7 @@ export default function GlobalLittStudioPanel({ onClose }: { onClose: () => void
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          agentSlug: "litt",
           message: text,
           stream: false,
           globalLittProjectId: projectId,
