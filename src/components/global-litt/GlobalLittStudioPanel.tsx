@@ -71,7 +71,12 @@ export default function GlobalLittStudioPanel({ onClose }: { onClose: () => void
         body: JSON.stringify({
           agentSlug: "litt",
           message: text,
+          history: messages.slice(-10).map((m) => ({ role: m.role, content: m.content })),
           stream: false,
+          userName: "Member",
+          capabilities: {
+            connectionSummary: "global litt studio",
+          },
           globalLittProjectId: projectId,
         }),
       });
