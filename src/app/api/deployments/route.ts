@@ -26,6 +26,7 @@ async function getPublishedSites(userId: string) {
       .from("studio_projects")
       .select("id,name")
       .eq("user_id", userId)
+      .eq("is_system", false)
       .in("id", projectIds);
     const names = new Map(
       ((projects ?? []) as Array<{ id: string; name: string }>).map((p) => [p.id, p.name]),

@@ -62,11 +62,12 @@ export async function GET(req: NextRequest) {
     // Ledger not available
   }
 
-  // Project count
+  // Project count (excludes system projects like Global LiTT)
   const { count: projectCount } = await admin
     .from("studio_projects")
     .select("*", { count: "exact", head: true })
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .eq("is_system", false);
 
   const effectivePlan = sub?.status === "active" ? sub.plan : "starter";
 

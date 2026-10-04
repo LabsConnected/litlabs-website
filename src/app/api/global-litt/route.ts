@@ -34,39 +34,40 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ project: existing });
     }
 
-    // Not found — create it. Use upsert to handle race conditions
-    // (unique index on user_id, system_type ensures idempotency).
+    // Not found — create it with a normal INSERT.
+    // The partial unique index UNIQUE (user_id, system_type) WHERE is_system=true
+    // guarantees exactly one Global LiTT project per user. If two requests race,
+    // the loser gets a 23505 unique violation — we then fetch the winner's row.
+    // (We do NOT use upsert with onConflict:"user_id,system_type" because
+    // PostgreSQL cannot infer a partial index from a plain column list.)
     const { data: created, error: createError } = await supabaseAdmin
       .from("studio_projects")
-      .upsert(
-        {
-          user_id: userId,
-          name: "Global LiTT",
-          slug: "global-litt",
-          is_system: true,
-          system_type: "global_litt",
-          scan_status: "complete",
-        },
-        {
-          onConflict: "user_id,system_type",
-          ignoreDuplicates: false,
-        }
-      )
+      .insert({
+        user_id: userId,
+        name: "Global LiTT",
+        slug: "global-litt",
+        is_system: true,
+        system_type: "global_litt",
+        scan_status: "complete",
+      })
       .select("id, name, slug, created_at, updated_at")
       .single();
 
     if (createError) {
-      // If upsert failed due to race, try fetching again
-      const { data: retry } = await supabaseAdmin
-        .from("studio_projects")
-        .select("id, name, slug, created_at, updated_at")
-        .eq("user_id", userId)
-        .eq("is_system", true)
-        .eq("system_type", "global_litt")
-        .single();
+      // 23505 = unique_violation — a concurrent request created it first.
+      // Fetch the existing row and return it. Do not swallow other errors.
+      if (createError.code === "23505") {
+        const { data: retry, error: retryError } = await supabaseAdmin
+          .from("studio_projects")
+          .select("id, name, slug, created_at, updated_at")
+          .eq("user_id", userId)
+          .eq("is_system", true)
+          .eq("system_type", "global_litt")
+          .single();
 
-      if (retry) {
-        return NextResponse.json({ project: retry });
+        if (retry && !retryError) {
+          return NextResponse.json({ project: retry });
+        }
       }
 
       return NextResponse.json(
