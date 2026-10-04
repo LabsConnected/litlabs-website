@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useWallet } from "@/context/WalletContext";
 import StudioProjectPicker from "./StudioProjectPicker";
+import GlobalLittStudioEntry from "@/components/global-litt/GlobalLittStudioEntry";
 import {
   useStudioModelStore,
   type ProviderHealth,
@@ -263,6 +264,9 @@ export default function CommandStudioHeader({
         onDeleteProject={(projectId) => onDeleteProjectAction?.(projectId)}
         onProjectRenamed={(projectId, name) => onProjectRenamedAction?.(projectId, name)}
       />
+
+      {/* Global LiTT — persistent operator, separate from ordinary projects */}
+      <GlobalLittStudioEntry />
 
       {/* Agent-status pill — truthful: working / approval needed / ambient runtime.
           Clicking opens the full workspace-status popover. */}
