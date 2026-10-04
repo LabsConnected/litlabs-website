@@ -59,8 +59,8 @@ export default function GlobalLittStudioPanel({ onClose }: { onClose: () => void
 
     setInput("");
     setError(null);
-    setMessages((prev) => [...prev, { role: "user", content: text }]);
     setBusy(true);
+    setMessages((prev) => [...prev, { role: "user", content: text }]);
 
     try {
       const response = await fetch("/api/gemini/chat", {
@@ -70,6 +70,7 @@ export default function GlobalLittStudioPanel({ onClose }: { onClose: () => void
         },
         body: JSON.stringify({
           message: text,
+          stream: false,
           globalLittProjectId: projectId,
         }),
       });
