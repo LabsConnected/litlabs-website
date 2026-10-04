@@ -568,6 +568,7 @@ export async function ensureCanonicalStudioProject(
     .select("*")
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .maybeSingle();
 
   if (existingErr) {
@@ -707,6 +708,7 @@ export async function claimProvisioningLock(
     })
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .in("workspace_status", ["not_prepared", "failed"])
     .select()
     .maybeSingle();
@@ -953,6 +955,7 @@ export async function updateProjectWorkspaceType(
     })
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .select()
     .maybeSingle();
 
