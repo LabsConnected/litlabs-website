@@ -751,6 +751,7 @@ export async function recoverStaleProvisioning(
     .select("workspace_error")
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .eq("workspace_status", "provisioning")
     .lt("updated_at", cutoff)
     .maybeSingle();
@@ -779,6 +780,7 @@ export async function recoverStaleProvisioning(
     })
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .eq("workspace_status", "provisioning")
     .lt("updated_at", cutoff);
 

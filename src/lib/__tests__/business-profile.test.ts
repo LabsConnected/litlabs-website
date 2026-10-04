@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 type FakeRow = {
   id: string;
   user_id: string;
+  is_system: boolean;
   settings: Record<string, unknown> | null;
   updated_at: string;
 };
@@ -365,6 +366,7 @@ describe("business-profile-server", () => {
       {
         id: "proj-1",
         user_id: "user_1",
+        is_system: false,
         settings: {
           businessProfile: { businessName: "Acme", businessType: "retail-store" },
           otherKey: "keep-me",
@@ -374,12 +376,14 @@ describe("business-profile-server", () => {
       {
         id: "proj-2",
         user_id: "user_1",
+        is_system: false,
         settings: { otherKey: "no-profile" },
         updated_at: "2026-09-16T08:00:00Z",
       },
       {
         id: "proj-3",
         user_id: "user_2",
+        is_system: false,
         settings: { businessProfile: { businessName: "Other User Biz" } },
         updated_at: "2026-09-16T09:00:00Z",
       },
@@ -448,4 +452,15 @@ describe("business-profile-server", () => {
     expect((await getBusinessProfile({ userId: "user_1" }))?.businessName).toBe("Acme");
     expect(await getBusinessProfile({ userId: "nobody" })).toBeNull();
   });
+});
+
+it("excludes a newer owned system profile from normal reads and writes", async () => {
+  fakeRows = [
+    { id: "system", user_id: "user_1", is_system: true, settings: { businessProfile: { businessName: "System" } }, updated_at: "2026-10-04" },
+    { id: "normal", user_id: "user_1", is_system: false, settings: { businessProfile: { businessName: "Normal" } }, updated_at: "2026-10-01" },
+  ];
+  expect((await getDefaultBusinessProfile("user_1"))?.businessName).toBe("Normal");
+  expect(await getBusinessProfileForProject("system", "user_1")).toBeNull();
+  expect(await saveBusinessProfileForProject("system", "user_1", { businessName: "Attempt" })).toBeNull();
+  expect(fakeRows[0].settings).toEqual({ businessProfile: { businessName: "System" } });
 });

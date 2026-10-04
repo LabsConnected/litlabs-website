@@ -70,6 +70,7 @@ async function resolveById(
     .select("id, user_id, name, github_full_name, github_owner, github_repo, github_default_branch, github_branch, workspace_status, source_type, updated_at")
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .maybeSingle();
 
   if (studioErr) {

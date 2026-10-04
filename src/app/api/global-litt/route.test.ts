@@ -45,7 +45,7 @@ describe("GET /api/global-litt", () => {
     };
 
     const mockSingle = vi.fn().mockResolvedValue({ data: mockProject, error: null });
-    const mockEq3 = vi.fn().mockReturnValue({ single: mockSingle });
+    const mockEq3 = vi.fn().mockReturnValue({ single: mockSingle, maybeSingle: mockSingle });
     const mockEq2 = vi.fn().mockReturnValue({ eq: mockEq3 });
     const mockEq1 = vi.fn().mockReturnValue({ eq: mockEq2 });
     const mockSelect = vi.fn().mockReturnValue({ eq: mockEq1 });
@@ -80,8 +80,8 @@ describe("GET /api/global-litt", () => {
         callCount++;
         if (callCount === 1) {
           // Find existing: not found
-          const mockSingle = vi.fn().mockResolvedValue({ data: null, error: { code: "PGRST116" } });
-          const mockEq3 = vi.fn().mockReturnValue({ single: mockSingle });
+          const mockSingle = vi.fn().mockResolvedValue({ data: null, error: null });
+          const mockEq3 = vi.fn().mockReturnValue({ single: mockSingle, maybeSingle: mockSingle });
           const mockEq2 = vi.fn().mockReturnValue({ eq: mockEq3 });
           const mockEq1 = vi.fn().mockReturnValue({ eq: mockEq2 });
           const mockSelect = vi.fn().mockReturnValue({ eq: mockEq1 });
@@ -89,7 +89,7 @@ describe("GET /api/global-litt", () => {
         } else {
           // INSERT (not upsert): creates
           const mockSingle = vi.fn().mockResolvedValue({ data: mockNewProject, error: null });
-          const mockSelect = vi.fn().mockReturnValue({ single: mockSingle });
+          const mockSelect = vi.fn().mockReturnValue({ single: mockSingle, maybeSingle: mockSingle });
           const mockInsert = vi.fn().mockImplementation(() => {
             usedInsert = true;
             return { select: mockSelect };
@@ -130,8 +130,8 @@ describe("GET /api/global-litt", () => {
         callCount++;
         if (callCount === 1) {
           // Find existing: not found (race window)
-          const mockSingle = vi.fn().mockResolvedValue({ data: null, error: { code: "PGRST116" } });
-          const mockEq3 = vi.fn().mockReturnValue({ single: mockSingle });
+          const mockSingle = vi.fn().mockResolvedValue({ data: null, error: null });
+          const mockEq3 = vi.fn().mockReturnValue({ single: mockSingle, maybeSingle: mockSingle });
           const mockEq2 = vi.fn().mockReturnValue({ eq: mockEq3 });
           const mockEq1 = vi.fn().mockReturnValue({ eq: mockEq2 });
           const mockSelect = vi.fn().mockReturnValue({ eq: mockEq1 });
@@ -142,13 +142,13 @@ describe("GET /api/global-litt", () => {
             data: null,
             error: { code: "23505", message: "duplicate key value violates unique constraint" },
           });
-          const mockSelect = vi.fn().mockReturnValue({ single: mockSingle });
+          const mockSelect = vi.fn().mockReturnValue({ single: mockSingle, maybeSingle: mockSingle });
           const mockInsert = vi.fn().mockReturnValue({ select: mockSelect });
           return { insert: mockInsert } as any;
         } else {
           // Fetch existing (the winner's row)
           const mockSingle = vi.fn().mockResolvedValue({ data: mockExistingProject, error: null });
-          const mockEq3 = vi.fn().mockReturnValue({ single: mockSingle });
+          const mockEq3 = vi.fn().mockReturnValue({ single: mockSingle, maybeSingle: mockSingle });
           const mockEq2 = vi.fn().mockReturnValue({ eq: mockEq3 });
           const mockEq1 = vi.fn().mockReturnValue({ eq: mockEq2 });
           const mockSelect = vi.fn().mockReturnValue({ eq: mockEq1 });
@@ -175,8 +175,8 @@ describe("GET /api/global-litt", () => {
       if (table === "studio_projects") {
         callCount++;
         if (callCount === 1) {
-          const mockSingle = vi.fn().mockResolvedValue({ data: null, error: { code: "PGRST116" } });
-          const mockEq3 = vi.fn().mockReturnValue({ single: mockSingle });
+          const mockSingle = vi.fn().mockResolvedValue({ data: null, error: null });
+          const mockEq3 = vi.fn().mockReturnValue({ single: mockSingle, maybeSingle: mockSingle });
           const mockEq2 = vi.fn().mockReturnValue({ eq: mockEq3 });
           const mockEq1 = vi.fn().mockReturnValue({ eq: mockEq2 });
           const mockSelect = vi.fn().mockReturnValue({ eq: mockEq1 });
@@ -187,7 +187,7 @@ describe("GET /api/global-litt", () => {
             data: null,
             error: { code: "08006", message: "connection failure" },
           });
-          const mockSelect = vi.fn().mockReturnValue({ single: mockSingle });
+          const mockSelect = vi.fn().mockReturnValue({ single: mockSingle, maybeSingle: mockSingle });
           const mockInsert = vi.fn().mockReturnValue({ select: mockSelect });
           return { insert: mockInsert } as any;
         }
@@ -202,5 +202,19 @@ describe("GET /api/global-litt", () => {
     expect(res.status).toBe(500);
     const data = await res.json();
     expect(data.error).toContain("connection failure");
+  });
+});
+
+
+describe("Global LiTT lookup failures", () => {
+  it("does not INSERT after a failed lookup", async () => {
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" });
+    const insert = vi.fn();
+    const chain: any = { select: () => chain, eq: () => chain, maybeSingle: async () => ({ data: null, error: { code: "08006", message: "connection failure" } }), insert };
+    vi.mocked(supabaseAdmin.from).mockReturnValue(chain);
+    const response = await GET(new NextRequest("http://localhost/api/global-litt"));
+    expect(response.status).toBe(500);
+    expect(insert).not.toHaveBeenCalled();
+    expect(await response.json()).toEqual({ error: "connection failure" });
   });
 });
