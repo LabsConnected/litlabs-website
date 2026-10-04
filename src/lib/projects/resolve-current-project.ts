@@ -116,6 +116,7 @@ async function resolveLatestStudioProject(
     .from("studio_projects")
     .select("id, user_id, name, github_full_name, github_owner, github_repo, github_default_branch, github_branch, workspace_status, source_type, updated_at")
     .eq("user_id", userId)
+    .eq("is_system", false)
     .order("updated_at", { ascending: false })
     .limit(1);
 

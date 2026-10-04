@@ -207,12 +207,15 @@ export async function getProject(
   projectId: string,
   userId: string,
 ): Promise<CanonicalProject | null> {
-  // Check canonical table first
+  // Check canonical table first.
+  // System projects (e.g., Global LiTT) are excluded from normal project APIs.
+  // Use the dedicated /api/global-litt route for system project access.
   const { data: studioRow } = await supabaseAdmin
     .from(TABLE)
     .select("*")
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .maybeSingle();
 
   if (studioRow) {
@@ -419,6 +422,7 @@ export async function updateProjectWorkspace(
     .update(update)
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .select()
     .maybeSingle();
 
@@ -812,6 +816,7 @@ export async function updateProjectRuntime(
     .update(update)
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .select()
     .maybeSingle();
 
@@ -846,6 +851,7 @@ export async function deleteProject(
     .delete()
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .select("id")
     .maybeSingle();
 
@@ -865,6 +871,7 @@ export async function renameProject(
     .update({ name: normalizedName, slug: slugify(normalizedName), updated_at: new Date().toISOString() })
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .select()
     .maybeSingle();
   if (error || !data) return null;
