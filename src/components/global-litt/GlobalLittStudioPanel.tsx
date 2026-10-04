@@ -63,6 +63,7 @@ export default function GlobalLittStudioPanel({ onClose }: { onClose: () => void
     setMessages((prev) => [...prev, { role: "user", content: text }]);
 
     try {
+      setError(null);
       const response = await fetch("/api/gemini/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -91,9 +92,10 @@ export default function GlobalLittStudioPanel({ onClose }: { onClose: () => void
         }),
       });
 
+      // Debug: show HTTP status
       if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.detail || err.error || "LiTT is reconnecting");
+        const errText = await response.text().catch(() => "no body");
+        throw new Error(`HTTP ${response.status}: ${errText.slice(0, 200)}`);
       }
 
       const data = await response.json();
