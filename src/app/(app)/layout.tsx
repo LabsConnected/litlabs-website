@@ -4,6 +4,7 @@ import { VisualProvider } from "@/context/VisualContext";
 import { MediaHubProvider } from "@/components/media/MediaHubProvider";
 import { YouTubePlayerProvider } from "@/context/YouTubePlayerContext";
 import { MusicPlayerProvider } from "@/context/MusicPlayerContext";
+import { GlobalLittProvider } from "@/components/global-litt/GlobalLittProvider";
 import LayoutShell from "@/components/LayoutShell";
 
 /**
@@ -34,7 +35,9 @@ export default function AppLayout({
           <MediaHubProvider>
             <YouTubePlayerProvider>
               <MusicPlayerProvider>
-                <LayoutShell>{children}</LayoutShell>
+                <GlobalLittProvider>
+                  <LayoutShell>{children}</LayoutShell>
+                </GlobalLittProvider>
               </MusicPlayerProvider>
             </YouTubePlayerProvider>
           </MediaHubProvider>

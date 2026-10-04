@@ -17,6 +17,18 @@ export const dynamic = "force-dynamic";
  * Copy rule: sites are "Published with LiTT Hosting". Infrastructure
  * provider names never appear here.
  */
+async function getSystemProjectIds(userId: string, projectIds: string[]): Promise<Set<string>> {
+  if (!projectIds.length) return new Set();
+  const { data, error } = await supabaseAdmin
+    .from("studio_projects")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("is_system", true)
+    .in("id", projectIds);
+  if (error) throw error;
+  return new Set((data ?? []).map((project) => project.id));
+}
+
 async function getPublishedSites(userId: string) {
   try {
     const latest = await listLatestDeploymentsForUser(userId);
@@ -26,11 +38,13 @@ async function getPublishedSites(userId: string) {
       .from("studio_projects")
       .select("id,name")
       .eq("user_id", userId)
+      .eq("is_system", false)
       .in("id", projectIds);
     const names = new Map(
       ((projects ?? []) as Array<{ id: string; name: string }>).map((p) => [p.id, p.name]),
     );
-    return latest.map((d) => ({
+    const systemIds = await getSystemProjectIds(userId, projectIds);
+    return latest.filter((d) => !systemIds.has(d.projectId)).map((d) => ({
       id: d.id,
       projectId: d.projectId,
       projectName: names.get(d.projectId) ?? "Untitled project",
@@ -92,7 +106,10 @@ export async function GET(req: NextRequest) {
 
     const { data, error } = await query;
     if (error) throw error;
-    const deployments = data ?? [];
+    const rows = data ?? [];
+    const projectIds = [...new Set(rows.map((row) => row.integration_project_id).filter(Boolean))];
+    const systemIds = await getSystemProjectIds(userId, projectIds);
+    const deployments = rows.filter((row) => !systemIds.has(row.integration_project_id));
 
     const sites = await getPublishedSites(userId);
 

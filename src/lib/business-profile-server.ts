@@ -54,6 +54,7 @@ export async function getBusinessProfileForProject(
     .select("settings")
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .maybeSingle();
 
   if (error || !data) return null;
@@ -85,6 +86,7 @@ export async function saveBusinessProfileForProject(
     .select("settings")
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .maybeSingle();
 
   if (readError || !current) return null;
@@ -100,6 +102,7 @@ export async function saveBusinessProfileForProject(
     .update({ settings, updated_at: now })
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .select("settings")
     .maybeSingle();
 
@@ -120,6 +123,7 @@ export async function getDefaultBusinessProfile(
     .from(TABLE)
     .select("settings, updated_at")
     .eq("user_id", userId)
+    .eq("is_system", false)
     .order("updated_at", { ascending: false })
     .limit(25);
 

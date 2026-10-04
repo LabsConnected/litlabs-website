@@ -207,12 +207,15 @@ export async function getProject(
   projectId: string,
   userId: string,
 ): Promise<CanonicalProject | null> {
-  // Check canonical table first
+  // Check canonical table first.
+  // System projects (e.g., Global LiTT) are excluded from normal project APIs.
+  // Use the dedicated /api/global-litt route for system project access.
   const { data: studioRow } = await supabaseAdmin
     .from(TABLE)
     .select("*")
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .maybeSingle();
 
   if (studioRow) {
@@ -345,12 +348,14 @@ const LEGACY_LIST_COLUMNS =
  * projects that don't have a studio_projects counterpart.
  */
 export async function listProjects(userId: string): Promise<ProjectListResult> {
-  // Fetch from both tables in parallel
+  // Fetch from both tables in parallel.
+  // Exclude system projects (e.g. Global LiTT) from normal lists.
   const [studioResult, legacyResult] = await Promise.all([
     supabaseAdmin
       .from(TABLE)
       .select(STUDIO_LIST_COLUMNS)
       .eq("user_id", userId)
+      .eq("is_system", false)
       .order("updated_at", { ascending: false }),
     supabaseAdmin
       .from(LEGACY_TABLE)
@@ -417,6 +422,7 @@ export async function updateProjectWorkspace(
     .update(update)
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .select()
     .maybeSingle();
 
@@ -562,6 +568,7 @@ export async function ensureCanonicalStudioProject(
     .select("*")
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .maybeSingle();
 
   if (existingErr) {
@@ -701,6 +708,7 @@ export async function claimProvisioningLock(
     })
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .in("workspace_status", ["not_prepared", "failed"])
     .select()
     .maybeSingle();
@@ -743,6 +751,7 @@ export async function recoverStaleProvisioning(
     .select("workspace_error")
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .eq("workspace_status", "provisioning")
     .lt("updated_at", cutoff)
     .maybeSingle();
@@ -771,6 +780,7 @@ export async function recoverStaleProvisioning(
     })
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .eq("workspace_status", "provisioning")
     .lt("updated_at", cutoff);
 
@@ -810,6 +820,7 @@ export async function updateProjectRuntime(
     .update(update)
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .select()
     .maybeSingle();
 
@@ -844,6 +855,7 @@ export async function deleteProject(
     .delete()
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .select("id")
     .maybeSingle();
 
@@ -863,6 +875,7 @@ export async function renameProject(
     .update({ name: normalizedName, slug: slugify(normalizedName), updated_at: new Date().toISOString() })
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .select()
     .maybeSingle();
   if (error || !data) return null;
@@ -944,6 +957,7 @@ export async function updateProjectWorkspaceType(
     })
     .eq("id", projectId)
     .eq("user_id", userId)
+    .eq("is_system", false)
     .select()
     .maybeSingle();
 
