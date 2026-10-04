@@ -73,10 +73,7 @@ export default function GlobalLittStudioPanel({ onClose }: { onClose: () => void
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          messages: [...messages, { role: "user", content: text }].map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
+          message: text,
           globalLittProjectId: projectId,
         }),
       });
