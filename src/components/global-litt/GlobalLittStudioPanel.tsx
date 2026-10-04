@@ -163,7 +163,7 @@ export default function GlobalLittStudioPanel({ onClose }: { onClose: () => void
             <div className="flex h-full items-center justify-center text-center">
               <div className="max-w-xs">
                 <div className="mb-2 text-sm font-medium text-white/80">
-                  Hey, I'm LiTT.
+                  Hey, I&apos;m LiTT.
                 </div>
                 <div className="text-sm text-white/50">
                   I remember our conversations across Studio. Ask me anything,
