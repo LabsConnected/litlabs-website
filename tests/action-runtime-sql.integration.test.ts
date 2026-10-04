@@ -36,7 +36,9 @@ async function docker(args: string[]) {
 async function waitForPostgres() {
   for (let i = 0; i < 45; i++) {
     try {
-      const { stdout } = await docker(["exec", CONTAINER_NAME, "pg_isready", "-U", "postgres"]);
+      // The image starts a socket-only temporary server during initialization.
+      // Require TCP readiness so the host Client cannot race that server shutdown.
+      const { stdout } = await docker(["exec", CONTAINER_NAME, "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]);
       if (stdout.includes("accepting connections")) return;
     } catch {
       // Container may still be starting.
