@@ -65,9 +65,7 @@ export default function GlobalLittStudioPanel({ onClose }: { onClose: () => void
     try {
       const response = await fetch("/api/gemini/chat", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           agentSlug: "litt",
           message: text,
@@ -75,7 +73,19 @@ export default function GlobalLittStudioPanel({ onClose }: { onClose: () => void
           stream: false,
           userName: "Member",
           capabilities: {
+            repository: "none",
+            repositoryIndexed: false,
+            terminalExecution: "unavailable",
+            writeAccess: false,
+            connectedProviders: [],
+            availableTools: [],
             connectionSummary: "global litt studio",
+          },
+          pageContext: {
+            surface: "global_litt_studio",
+            route: "/studio",
+            pageTitle: "Studio",
+            authenticated: true,
           },
           globalLittProjectId: projectId,
         }),
