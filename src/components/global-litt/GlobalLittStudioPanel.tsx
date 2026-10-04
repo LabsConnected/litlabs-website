@@ -14,7 +14,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { X, Send, Loader2 } from "lucide-react";
 import { useGlobalLitt } from "@/components/global-litt/GlobalLittProvider";
-import { useClerkAuth } from "@/hooks/useClerkAuth";
 
 interface Message {
   role: "user" | "assistant";
@@ -23,7 +22,6 @@ interface Message {
 
 export default function GlobalLittStudioPanel({ onClose }: { onClose: () => void }) {
   const { projectId, project } = useGlobalLitt();
-  const { getToken } = useClerkAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -65,12 +63,10 @@ export default function GlobalLittStudioPanel({ onClose }: { onClose: () => void
     setBusy(true);
 
     try {
-      const token = await getToken();
       const response = await fetch("/api/gemini/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
           message: text,
@@ -94,7 +90,7 @@ export default function GlobalLittStudioPanel({ onClose }: { onClose: () => void
     } finally {
       setBusy(false);
     }
-  }, [input, busy, projectId, messages, getToken]);
+  }, [input, busy, projectId, messages]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
