@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { runWithMeteringContext } from "@/lib/metering";
+import { auth } from "@/lib/auth";
 import {
   runLiTT,
   resolveRequestContext,
@@ -107,8 +108,10 @@ async function handler(req: NextRequest) {
       // Canonical metering: Global LiTT and companion chats must emit
       // usage_events like any other AI surface. The feature is derived
       // from the requesting surface so the ledger attributes correctly.
+      // Use auth() directly for clerkId — simpler and more reliable than
+      // resolveRequestContext, which can fail silently and skip metering.
       {
-        clerkId: (await resolveRequestContext(req, runRequest).catch(() => null))?.clerkId ?? undefined,
+        clerkId: (await auth(req).catch(() => null))?.clerkId ?? undefined,
         projectId: typeof body.globalLittProjectId === "string" ? body.globalLittProjectId : undefined,
         feature:
           (runRequest.pageContext as { surface?: string } | undefined)?.surface === "global_litt_studio"
