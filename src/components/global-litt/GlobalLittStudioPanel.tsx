@@ -22,7 +22,25 @@ interface Message {
 
 export default function GlobalLittStudioPanel({ onClose }: { onClose: () => void }) {
   const { projectId, project } = useGlobalLitt();
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(() => {
+    // Restore conversation across navigation/reload (same browser).
+    // Server-side cross-device history is a Phase 3 item.
+    try {
+      const raw = localStorage.getItem("global-litt-studio-messages");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(
+            (m): m is Message =>
+              m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string"
+          ).slice(-50);
+        }
+      }
+    } catch {
+      // Corrupt storage — start fresh
+    }
+    return [];
+  });
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +54,15 @@ export default function GlobalLittStudioPanel({ onClose }: { onClose: () => void
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
+
+  // Persist conversation to localStorage so it survives navigation/reload.
+  useEffect(() => {
+    try {
+      localStorage.setItem("global-litt-studio-messages", JSON.stringify(messages.slice(-50)));
+    } catch {
+      // Storage full or unavailable — conversation stays in memory only
+    }
+  }, [messages]);
 
   // Focus input on open (desktop only — mobile keyboard would jump)
   useEffect(() => {
