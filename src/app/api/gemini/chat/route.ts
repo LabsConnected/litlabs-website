@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { runWithMeteringContext } from "@/lib/metering";
 import {
   runLiTT,
   resolveRequestContext,
@@ -102,7 +103,22 @@ async function handler(req: NextRequest) {
       return runLiTTStreamLegacy({ httpRequest: req, req: runRequest, agentId: agent.id });
     }
 
-    const { status, body: resultBody, outcome } = await runLiTT({ httpRequest: req, req: runRequest });
+    const { status, body: resultBody, outcome } = await runWithMeteringContext(
+      // Canonical metering: Global LiTT and companion chats must emit
+      // usage_events like any other AI surface. The feature is derived
+      // from the requesting surface so the ledger attributes correctly.
+      {
+        clerkId: (await resolveRequestContext(req, runRequest).catch(() => null))?.clerkId ?? undefined,
+        projectId: typeof body.globalLittProjectId === "string" ? body.globalLittProjectId : undefined,
+        feature:
+          (runRequest.pageContext as { surface?: string } | undefined)?.surface === "global_litt_studio"
+            ? "global-litt-chat"
+            : (runRequest.pageContext as { surface?: string } | undefined)?.surface === "global_companion"
+              ? "global-companion"
+              : "legacy-gemini-chat",
+      },
+      () => runLiTT({ httpRequest: req, req: runRequest }),
+    );
     if (status !== 200) {
       const errMsg = status === 401 ? "Authentication required" : "Runtime error";
       return NextResponse.json({ error: errMsg }, { status });
