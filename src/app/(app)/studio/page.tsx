@@ -263,12 +263,20 @@ function StudioHub() {
   }
 
   if (projectCheck.hasProjects === false && !createdProjectId) {
+    // Handoff from dashboard "Ask LiTT" (?tool=chat&prompt=...) — pre-fill the
+    // welcome input so the user's prompt isn't dropped on the fresh-user path.
+    // (Existing users render CommandStudio below, which already consumes ?prompt=.)
+    const handoffPrompt =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("prompt")
+        : null;
     return (
       <FirstRunWelcome
         onSubmit={handleFirstRunSubmit}
         isCreating={isCreating}
         error={createError}
         onRetry={handleFirstRunRetry}
+        initialIdea={handoffPrompt}
       />
     );
   }

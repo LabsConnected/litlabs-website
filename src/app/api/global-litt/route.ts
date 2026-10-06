@@ -15,12 +15,33 @@ import { supabaseAdmin } from "@/lib/supabase";
  */
 
 export async function GET(request: NextRequest) {
-  const { userId } = await auth(request);
-  if (!userId) {
+  const { clerkId } = await auth(request);
+  if (!clerkId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
+    // Resolve the Clerk ID to the internal users.id (UUID).
+    // studio_projects.user_id is a UUID foreign key — the Clerk ID
+    // (user_xxx) must never be used directly against it, or the lookup
+    // fails and a fresh user's project is never created.
+    const { data: userRow, error: userError } = await supabaseAdmin
+      .from("users")
+      .select("id")
+      .eq("clerk_id", clerkId)
+      .maybeSingle();
+
+    if (userError) {
+      return NextResponse.json({ error: userError.message }, { status: 500 });
+    }
+    if (!userRow?.id) {
+      return NextResponse.json(
+        { error: "User not provisioned", project: null },
+        { status: 404 }
+      );
+    }
+    const userId = userRow.id;
+
     // Try to find existing Global LiTT project
     const { data: existing, error: findError } = await supabaseAdmin
       .from("studio_projects")

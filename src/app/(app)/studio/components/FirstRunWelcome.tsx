@@ -22,14 +22,17 @@ export default function FirstRunWelcome({
   isCreating,
   error,
   onRetry,
+  initialIdea,
 }: {
   displayName?: string | null;
   onSubmit: (idea: string) => void;
   isCreating: boolean;
   error: string | null;
   onRetry: () => void;
+  /** Pre-fill from the ?prompt= handoff (e.g. dashboard "Ask LiTT"). */
+  initialIdea?: string | null;
 }) {
-  const [idea, setIdea] = useState("");
+  const [idea, setIdea] = useState(initialIdea ?? "");
   const greetingName = displayName?.trim();
   const canSubmit = idea.trim().length > 0 && !isCreating;
 
