@@ -150,7 +150,10 @@ describe("GET /api/global-litt", () => {
       if (table === "studio_projects") {
         callCount++;
         if (callCount === 1) {
-          return mockFindProject(null) as any; // not found
+          return mockFindProject(null) as any; // no UUID project
+        }
+        if (callCount === 2) {
+          return mockFindProject(null) as any; // no legacy Clerk-ID project
         }
         // INSERT (not upsert): capture the row to verify user_id
         const mockSingle = vi.fn().mockResolvedValue({ data: mockNewProject, error: null });
@@ -179,6 +182,57 @@ describe("GET /api/global-litt", () => {
     expect(insertedRow!.user_id).not.toBe(CLERK_ID);
   });
 
+  it("migrates a legacy Clerk-ID project to the UUID instead of duplicating", async () => {
+    const users = mockUsersTable(INTERNAL_UUID);
+    const legacyProject = {
+      id: "proj-legacy-999",
+      name: "Global LiTT",
+      slug: "global-litt",
+      created_at: "2026-10-06T18:04:06Z",
+      updated_at: "2026-10-06T18:04:06Z",
+    };
+
+    let callCount = 0;
+    let migratedUserId: string | null = null;
+    vi.mocked(supabaseAdmin.from).mockImplementation((table: string) => {
+      if (table === "users") return users as any;
+      if (table === "studio_projects") {
+        callCount++;
+        if (callCount === 1) {
+          return mockFindProject(null) as any; // no UUID project
+        }
+        if (callCount === 2) {
+          // Legacy lookup by Clerk ID: found
+          const mockSingle = vi.fn().mockResolvedValue({ data: legacyProject, error: null });
+          const mockEq3 = vi.fn().mockReturnValue({ single: mockSingle, maybeSingle: mockSingle });
+          const mockEq2 = vi.fn().mockReturnValue({ eq: mockEq3 });
+          const mockEq1 = vi.fn().mockReturnValue({ eq: mockEq2 });
+          const mockSelect = vi.fn().mockReturnValue({ eq: mockEq1 });
+          return { select: mockSelect, _eq1: mockEq1 } as any;
+        }
+        // Migration UPDATE: capture the new user_id
+        const mockSingle = vi.fn().mockResolvedValue({ data: { ...legacyProject }, error: null });
+        const mockSelect = vi.fn().mockReturnValue({ single: mockSingle });
+        const mockEq = vi.fn().mockReturnValue({ select: mockSelect });
+        const mockUpdate = vi.fn().mockImplementation((row: Record<string, unknown>) => {
+          migratedUserId = row.user_id as string;
+          return { eq: mockEq };
+        });
+        return { update: mockUpdate } as any;
+      }
+      throw new Error(`unexpected table: ${table}`);
+    });
+
+    const req = new NextRequest("http://localhost/api/global-litt");
+    const res = await GET(req);
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.project.id).toBe("proj-legacy-999");
+    // Migrated to the canonical UUID, not left on the Clerk ID
+    expect(migratedUserId).toBe(INTERNAL_UUID);
+  });
+
   it("handles concurrent creation via 23505: fetches existing instead of failing", async () => {
     const users = mockUsersTable(INTERNAL_UUID);
     const mockExistingProject = {
@@ -195,8 +249,10 @@ describe("GET /api/global-litt", () => {
       if (table === "studio_projects") {
         callCount++;
         if (callCount === 1) {
-          return mockFindProject(null) as any; // race window: not found
+          return mockFindProject(null) as any; // race window: no UUID project
         } else if (callCount === 2) {
+          return mockFindProject(null) as any; // no legacy project either
+        } else if (callCount === 3) {
           // INSERT fails with 23505 (concurrent request won the race)
           return mockInsertProject(null, {
             code: "23505",
@@ -226,6 +282,9 @@ describe("GET /api/global-litt", () => {
         callCount++;
         if (callCount === 1) {
           return mockFindProject(null) as any;
+        }
+        if (callCount === 2) {
+          return mockFindProject(null) as any; // no legacy project
         }
         // INSERT fails with a NON-23505 error (e.g., connection issue)
         return mockInsertProject(null, {

@@ -59,6 +59,37 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ project: existing });
     }
 
+    // Legacy: before the UUID-resolution fix, projects were created with the
+    // raw Clerk ID as user_id (text). If such a row exists, migrate it to the
+    // canonical UUID instead of creating a duplicate.
+    const { data: legacy, error: legacyError } = await supabaseAdmin
+      .from("studio_projects")
+      .select("id, name, slug, created_at, updated_at")
+      .eq("user_id", clerkId)
+      .eq("is_system", true)
+      .eq("system_type", "global_litt")
+      .maybeSingle();
+
+    if (legacyError) {
+      return NextResponse.json({ error: legacyError.message }, { status: 500 });
+    }
+
+    if (legacy) {
+      const { data: migrated, error: migrateError } = await supabaseAdmin
+        .from("studio_projects")
+        .update({ user_id: userId })
+        .eq("id", legacy.id)
+        .select("id, name, slug, created_at, updated_at")
+        .single();
+
+      if (migrateError) {
+        // Migration failed (e.g., raced with another migrator) — return the
+        // legacy row rather than failing; the next call will retry.
+        return NextResponse.json({ project: legacy });
+      }
+      return NextResponse.json({ project: migrated });
+    }
+
     // Not found — create it with a normal INSERT.
     // The partial unique index UNIQUE (user_id, system_type) WHERE is_system=true
     // guarantees exactly one Global LiTT project per user. If two requests race,
