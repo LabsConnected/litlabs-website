@@ -65,6 +65,21 @@ function postStyleProbe(payload: { tailwindDetected: boolean; styled: boolean })
   });
 }
 
+/**
+ * "Preview ready" is committed before the previewUrl effect subscribes to
+ * window "message". findBy* can observe the badge in that gap (a
+ * MutationObserver microtask runs before the useEffect macrotask), and a
+ * probe posted then is dropped — the badge stays green. Wait until the
+ * iframe exists (previewUrl is set) and flush the effect first.
+ */
+async function whenPreviewListenerReady() {
+  await screen.findByText("Preview ready");
+  await screen.findByTitle("Demo preview");
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
+
 describe("StudioPreviewPanel — style probe honesty", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -73,15 +88,19 @@ describe("StudioPreviewPanel — style probe honesty", () => {
 
   it("flips the badge when a Tailwind-intended preview renders unstyled", async () => {
     renderReadyPreview();
-    await screen.findByText("Preview ready");
+    await whenPreviewListenerReady();
     postStyleProbe({ tailwindDetected: true, styled: false });
-    await screen.findByText("Preview styling failed to apply");
+    await screen.findByText("Preview styling failed to apply", {}, { timeout: 5000 });
+    expect(screen.getByTestId("preview-status-dot")).toHaveAttribute(
+      "aria-label",
+      "Runtime status: Preview styling failed to apply",
+    );
     expect(screen.queryByText("Preview ready")).toBeNull();
   });
 
   it("keeps 'Preview ready' when Tailwind applied", async () => {
     renderReadyPreview();
-    await screen.findByText("Preview ready");
+    await whenPreviewListenerReady();
     postStyleProbe({ tailwindDetected: true, styled: true });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -92,7 +111,7 @@ describe("StudioPreviewPanel — style probe honesty", () => {
 
   it("keeps 'Preview ready' for pages without Tailwind intent", async () => {
     renderReadyPreview();
-    await screen.findByText("Preview ready");
+    await whenPreviewListenerReady();
     postStyleProbe({ tailwindDetected: false, styled: true });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -102,7 +121,7 @@ describe("StudioPreviewPanel — style probe honesty", () => {
 
   it("ignores style-probe messages from other origins", async () => {
     renderReadyPreview();
-    await screen.findByText("Preview ready");
+    await whenPreviewListenerReady();
     act(() => {
       window.dispatchEvent(
         new MessageEvent("message", {

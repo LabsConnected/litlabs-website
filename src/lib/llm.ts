@@ -237,6 +237,11 @@ function markModelUnavailable(provider: string): void {
   _modelCooldowns.set(provider, Date.now() + MODEL_COOLDOWN_MS);
 }
 
+/** Test-only: 404s park a provider for 15 minutes. Clear that between cases. */
+export function _resetModelCooldownsForTests(): void {
+  _modelCooldowns.clear();
+}
+
 /* ------------------------------------------------------------------ */
 /*  Default chain per task                                             */
 /* ------------------------------------------------------------------ */
@@ -414,6 +419,37 @@ export function isEmptyProviderResponse(err: unknown): boolean {
     err !== null &&
     (err as { code?: unknown }).code === "EMPTY_PROVIDER_RESPONSE"
   );
+}
+
+function isAbortError(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as { name?: unknown }).name === "AbortError";
+}
+
+/**
+ * Transport and SDK failures often arrive as plain Error / TypeError /
+ * AbortError (fetchWithTimeout does not wrap them). The failover chain
+ * treats every non-abort provider failure as retryable on the next
+ * candidate, so normalize before that decision.
+ */
+function toProviderFailure(err: unknown, provider: LLMProvider): ProviderError {
+  if (err instanceof ProviderError) return err;
+  const message = err instanceof Error ? err.message : String(err);
+  if (isAbortError(err)) return new ProviderError(provider, 408, message);
+  return new ProviderError(provider, null, message);
+}
+
+function routeErrorDiagnostics(err: unknown): { httpStatus: number | null; errorType: string } {
+  const httpStatus = err instanceof ProviderError ? err.status : null;
+  const errorType = err instanceof EmptyProviderResponseError ? "MALFORMED_RESPONSE"
+    : httpStatus === 401 || httpStatus === 403 ? "AUTH"
+    : httpStatus === 404 ? "NOT_FOUND"
+    : httpStatus === 429 ? "RATE_LIMIT"
+    : httpStatus !== null && httpStatus >= 500 ? "PROVIDER_5XX"
+    : httpStatus === 408 || isAbortError(err) ? "TIMEOUT"
+    : err instanceof TypeError ? "NETWORK"
+    : err instanceof ProviderError && err.isRetryable ? "RETRYABLE"
+    : "UNKNOWN";
+  return { httpStatus, errorType };
 }
 
 async function fetchWithTimeout(
@@ -873,15 +909,11 @@ export async function generateText(
     } catch (err) {
       lastErr = err;
       const isProviderError = err instanceof ProviderError;
-      const httpStatus = isProviderError ? err.status : null;
-      // Classify the error for [ai-route] diagnostics
-      const errorType = httpStatus === 401 || httpStatus === 403 ? "AUTH"
-        : httpStatus === 429 ? "RATE_LIMIT"
-        : httpStatus !== null && httpStatus >= 500 ? "PROVIDER_5XX"
-        : httpStatus === 408 ? "TIMEOUT"
-        : isProviderError && err.isRetryable ? "RETRYABLE"
-        : "UNKNOWN";
-      const willFallback = isProviderError && err.isRetryable;
+      const { httpStatus, errorType } = routeErrorDiagnostics(err);
+      // The chain always advances after a provider failure. willFallback
+      // reports that decision, including auth (401/403) and missing-model
+      // (404) failures — not only errors whose status is "retryable".
+      const willFallback = chain.indexOf(provider) < chain.length - 1;
 
       console.info(`[ai-route] attempt_failure`, {
         requestId: meteringRequestId,
@@ -915,17 +947,11 @@ export async function generateText(
         error: err instanceof Error ? err.message.slice(0, 500) : String(err).slice(0, 500),
         startedAt: attemptStartedAt,
       });
-      // Mark model unavailable on 404 (model not found)
+      // Mark model unavailable on 404 (model not found), then still advance.
+      // Auth, missing-model, and other non-retryable statuses are not terminal.
       if (isProviderError && err.status === 404) {
         markModelUnavailable(provider);
       }
-      // Don't retry non-retryable errors (e.g. 400 bad request) — skip to next
-      if (!isProviderError || !err.isRetryable) {
-        // For non-retryable, skip to the next provider in the chain
-        failover.push(provider);
-        continue;
-      }
-      // Retryable: try the next provider
       failover.push(provider);
     }
   }
@@ -1065,8 +1091,8 @@ export async function streamText(
         throw new SpendGuardError(guard);
       }
     }
+    const chunksBefore = _chunks.length;
     try {
-      const chunksBefore = _chunks.length;
       let result: { provider: LLMProvider; model: string; latencyMs: number; failover: LLMProvider[]; finishReason?: string };
       if (provider === "gemini") {
         result = await streamViaGemini(
@@ -1173,24 +1199,22 @@ export async function streamText(
           ? err
           : new DOMException("The operation was aborted.", "AbortError");
       }
-      lastErr = err;
-      const isProviderError = err instanceof ProviderError;
-      const httpStatusStream = isProviderError ? err.status : null;
-      const isMalformed = err instanceof EmptyProviderResponseError;
-      const errorTypeStream = isMalformed ? "MALFORMED_RESPONSE"
-        : httpStatusStream === 401 || httpStatusStream === 403 ? "AUTH"
-        : httpStatusStream === 429 ? "RATE_LIMIT"
-        : httpStatusStream !== null && httpStatusStream >= 500 ? "PROVIDER_5XX"
-        : httpStatusStream === 408 ? "TIMEOUT"
-        : isProviderError && err.isRetryable ? "RETRYABLE"
-        : "UNKNOWN";
-      // Fallback decision:
-      // - AUTH: do NOT retry same provider, but ALLOW fallback to different provider
-      // - RETRYABLE (429/5xx/timeout/network/malformed): allow fallback
-      // - Non-provider errors (app bugs): do NOT fallback, throw immediately
-      const isAuth = errorTypeStream === "AUTH";
-      const canFallback = isProviderError && (err.isRetryable || isAuth || isMalformed);
-      const willFallbackStream = canFallback;
+      // Classify the original error (so a raw TypeError stays NETWORK and
+      // a timeout AbortError stays TIMEOUT), then normalize so 404s,
+      // missing keys, and unwrapped transport/SDK errors fall through.
+      const { httpStatus: httpStatusStream, errorType: errorTypeStream } = routeErrorDiagnostics(err);
+      const failure = toProviderFailure(err, provider);
+      lastErr = failure;
+      const attemptText = _chunks.slice(chunksBefore).join("");
+      const hasUsableOutput = attemptText.trim().length > 0;
+      const chunksEmitted = _chunks.length;
+      // Whitespace-only output is not a partial answer. Drop it so the
+      // next provider is not blocked and does not inherit blank chunks.
+      if (!hasUsableOutput) _chunks.splice(chunksBefore);
+      // Stop only when this attempt already delivered text. Every other
+      // provider failure — 401/403, 404, 429, 5xx, timeout, network,
+      // empty/whitespace — advances to the next candidate.
+      const willFallbackStream = !hasUsableOutput && chain.indexOf(provider) < chain.length - 1;
 
       console.info(`[ai-route] attempt_failure`, {
         requestId,
@@ -1200,8 +1224,8 @@ export async function streamText(
         errorType: errorTypeStream,
         willFallback: willFallbackStream,
         latencyMs: Date.now() - t0,
-        chunksEmitted: _chunks.length,
-        message: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+        chunksEmitted,
+        message: failure.message.slice(0, 200),
       });
 
       recordLLMCall({
@@ -1220,40 +1244,29 @@ export async function streamText(
         status: "failed",
         requestId: meteringRequestId,
         attemptIndex,
-        error: err instanceof Error ? err.message.slice(0, 500) : String(err).slice(0, 500),
+        error: failure.message.slice(0, 500),
         startedAt: attemptStartedAt,
       });
-      // Mark model unavailable on 404 (model not found)
-      if (isProviderError && err.status === 404) {
+      // Mark model unavailable on 404 (model not found) but still fall through.
+      if (failure.status === 404) {
         markModelUnavailable(provider);
       }
-      // Non-provider errors (app bugs, aborts) do NOT fallback —
-      // fail fast instead of trying the next provider.
-      if (!canFallback) {
-        console.warn(`[ai-route] non_retryable`, {
-          requestId,
-          provider,
-          errorType: errorTypeStream,
-          message: "Not falling back for non-provider error",
-        });
-        throw err;
-      }
-      // Retryable/Auth/Malformed: check if partial output was already streamed.
-      // If chunks were emitted, do NOT fallback (would duplicate/concatenate).
-      if (_chunks.length > 0) {
+      if (hasUsableOutput) {
         console.warn(`[ai-route] partial_stream_abort`, {
           requestId,
           provider,
-          chunksEmitted: _chunks.length,
+          chunksEmitted,
           message: "Primary failed after partial output — not falling back to avoid duplication",
         });
-        throw err;
+        throw failure;
       }
-      console.info(`[ai-route] fallback`, {
-        requestId,
-        fromProvider: provider,
-        reason: errorTypeStream,
-      });
+      if (willFallbackStream) {
+        console.info(`[ai-route] fallback`, {
+          requestId,
+          fromProvider: provider,
+          reason: errorTypeStream,
+        });
+      }
       failover.push(provider);
     }
   }
