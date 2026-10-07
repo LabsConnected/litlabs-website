@@ -822,7 +822,7 @@ function compactBuildInputs(
   }
   
   const availableForMessages = maxInputTokens - baseTokens;
-  let messageTokens = estimateTokensForChars(loopInputChars(messages));
+  const messageTokens = estimateTokensForChars(loopInputChars(messages));
   
   if (messageTokens <= availableForMessages) {
     return { systemPrompt, messages, compacted: false };
