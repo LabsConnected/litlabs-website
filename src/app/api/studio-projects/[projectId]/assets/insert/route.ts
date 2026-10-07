@@ -179,7 +179,7 @@ export async function POST(
 
     // 3. Write to the project workspace
     let { workspaceId } = await verifyProjectWorkspace(projectId, userId);
-    let token = createTerminalToken(userId);
+    let token = createTerminalToken(userId, { workspaceId, projectId });
 
     let resp = await fetch(`${TERMINAL_BASE()}/ws-files/write`, {
       method: "POST",
@@ -201,7 +201,7 @@ export async function POST(
         const recovered = await ensureWorkspaceAlive(projectId, userId, workspaceId);
         if (recovered.reprepared) {
           workspaceId = recovered.workspaceId;
-          token = createTerminalToken(userId);
+          token = createTerminalToken(userId, { workspaceId, projectId });
           resp = await fetch(`${TERMINAL_BASE()}/ws-files/write`, {
             method: "POST",
             headers: {

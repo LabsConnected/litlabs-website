@@ -433,6 +433,21 @@ describe("callLLMWithTools — failure classification and failover", () => {
     expect(getProviderHealth("gemini").state).toBe("disabled");
   });
 
+  it("OpenRouter 401 with no other routes throws AllRoutesFailedError (not a limits story)", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "dead-or-key");
+    vi.stubEnv("RAILWAY_ENVIRONMENT", "production");
+    mockFetch.mockResolvedValue(makeErrorResponse(401, '{"error":{"message":"User not found.","code":401}}'));
+
+    const err = await callLLMWithTools("sys", [{ role: "user", content: "hi" }], []).catch((e) => e);
+
+    expect(err).toBeInstanceOf(AllRoutesFailedError);
+    expect(err.failures.length).toBeGreaterThan(0);
+    expect(err.failures.every((f: { class: string }) => f.class === "auth_invalid")).toBe(true);
+    expect(err.failures[0].httpStatus).toBe(401);
+    expect(err.userMessage).toMatch(/rejected the credentials/i);
+    expect(err.userMessage).not.toMatch(/reached their limits/i);
+  });
+
   it("provider-level 403 disables the provider; model-level 403 tries the next model", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
     vi.stubEnv("MISTRAL_API_KEY", "test-mistral-key");

@@ -242,7 +242,7 @@ export async function resolveMissionApproval(
 // ─── Helper functions ───────────────────────────────────────────
 
 async function listWorkspaceFiles(workspaceId: string, userId: string, path: string) {
-  const { token } = createTerminalToken(userId);
+  const { token } = createTerminalToken(userId, { workspaceId });
   const resp = await fetch(
     `${TERMINAL_BASE()}/ws-files?path=${encodeURIComponent(path)}`,
     { headers: { Authorization: `Bearer ${token}`, "X-Workspace-Id": workspaceId } },
@@ -252,7 +252,7 @@ async function listWorkspaceFiles(workspaceId: string, userId: string, path: str
 }
 
 async function readWorkspaceFile(workspaceId: string, userId: string, filePath: string): Promise<string> {
-  const { token } = createTerminalToken(userId);
+  const { token } = createTerminalToken(userId, { workspaceId });
   const resp = await fetch(`${TERMINAL_BASE()}/ws-files/read`, {
     method: "POST",
     headers: {
@@ -271,7 +271,7 @@ async function readWorkspaceFile(workspaceId: string, userId: string, filePath: 
 }
 
 async function writeWorkspaceFile(workspaceId: string, userId: string, filePath: string, content: string): Promise<void> {
-  const { token } = createTerminalToken(userId);
+  const { token } = createTerminalToken(userId, { workspaceId });
   const resp = await fetch(`${TERMINAL_BASE()}/ws-files/write`, {
     method: "POST",
     headers: {

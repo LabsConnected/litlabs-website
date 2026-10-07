@@ -79,7 +79,7 @@ async function readWorkspaceFile(
   userId: string,
   path: string,
 ): Promise<string | null> {
-  const { token } = createTerminalToken(userId);
+  const { token } = createTerminalToken(userId, { workspaceId });
   const resp = await fetch(`${TERMINAL_BASE()}/ws-files/read`, {
     method: "POST",
     headers: {
@@ -100,7 +100,7 @@ async function listRootFiles(
   workspaceId: string,
   userId: string,
 ): Promise<Array<{ name: string; type: string }> | null> {
-  const { token } = createTerminalToken(userId);
+  const { token } = createTerminalToken(userId, { workspaceId });
   const resp = await fetch(`${TERMINAL_BASE()}/ws-files?path=${encodeURIComponent(".")}`, {
     headers: {
       Authorization: `Bearer ${token}`,
