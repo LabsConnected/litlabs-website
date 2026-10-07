@@ -1296,9 +1296,19 @@ async function streamViaGemini(
   const fullPrompt = p.systemPrompt
     ? `${p.systemPrompt}\n\n${p.prompt}`
     : p.prompt;
-  const result = await model.generateContentStream(fullPrompt, {
-    signal: p.opts.signal,
-  });
+  let result;
+  try {
+    result = await model.generateContentStream(fullPrompt, {
+      signal: p.opts.signal,
+    });
+  } catch (err) {
+    // Convert Gemini SDK errors to ProviderError for consistent classification.
+    // Extract HTTP status from the error message if present (e.g., "[500 ]").
+    const msg = err instanceof Error ? err.message : String(err);
+    const statusMatch = msg.match(/\[(\d{3})\s*\]/);
+    const status = statusMatch ? parseInt(statusMatch[1], 10) : null;
+    throw new ProviderError("gemini", status, `Gemini SDK error: ${msg.slice(0, 200)}`);
+  }
   let finishReason: string | undefined;
   for await (const chunk of result.stream) {
     if (p.opts.signal?.aborted) {

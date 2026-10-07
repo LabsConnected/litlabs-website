@@ -422,23 +422,27 @@ describe("streamText — Groq → Gemini fallback chain", () => {
     expect(result.failover).toContain("groq");
   });
 
-  it("6. Both providers fail → one clean classified final error", async () => {
+  it("6. Both providers fail → falls back to next in chain", async () => {
     const fetchMock = vi.fn(async (url: unknown) => {
       const u = String(url);
       if (u.includes("api.groq.com")) return groq429();
       if (u.includes("generativelanguage")) return groq500(); // Gemini also fails
-      return groqSse("unexpected");
+      // openrouter-free succeeds as the final fallback
+      return groqSse("openrouter fallback");
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    // Both providers fail — should throw (either the aggregate error or the last provider error)
-    await expect(
-      streamText("hi", () => {}, {
-        task: "chat",
-        provider: "groq",
-        category: "litt-alias",
-      }),
-    ).rejects.toThrow();
+    const chunks: string[] = [];
+    const result = await streamText("hi", (c) => chunks.push(c), {
+      task: "chat",
+      provider: "groq",
+      category: "litt-alias",
+    });
+
+    // Should succeed via openrouter-free after groq and gemini fail
+    expect(chunks.join("")).toBe("openrouter fallback");
+    expect(result.failover).toContain("groq");
+    expect(result.failover).toContain("gemini");
   });
 });
 
