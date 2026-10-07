@@ -39,6 +39,17 @@ function getTerminalSecret(): string {
   return secret;
 }
 
+// Log fingerprint at module load (terminal service side)
+if (typeof process !== "undefined" && process.env.TERMINAL_AUTH_SECRET) {
+  const secret = process.env.TERMINAL_AUTH_SECRET;
+  let hash = 0;
+  for (let i = 0; i < secret.length; i++) {
+    hash = ((hash << 5) - hash + secret.charCodeAt(i)) | 0;
+  }
+  const fingerprint = Math.abs(hash).toString(16).padStart(8, '0');
+  console.log(`[terminal-auth] terminal-service: TERMINAL_AUTH_SECRET fingerprint=${fingerprint} len=${secret.length}`);
+}
+
 function sign(encodedPayload: string, secret: string): string {
   return createHmac("sha256", secret).update(encodedPayload).digest("base64url");
 }
