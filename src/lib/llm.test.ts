@@ -441,3 +441,51 @@ describe("streamText — Groq → Gemini fallback chain", () => {
     ).rejects.toThrow();
   });
 });
+
+describe("streamText — partial stream safety", () => {
+  it("5. Groq partial-stream failure → no fallback, no duplicated answer", async () => {
+    // Groq streams partial content, then fails mid-stream.
+    // The router must NOT fallback to Gemini (would concatenate).
+    let groqCallCount = 0;
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("api.groq.com")) {
+        groqCallCount++;
+        // Return a stream that emits partial content then errors
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                `data: ${JSON.stringify({ choices: [{ delta: { content: "partial " } }] })}\n\n`
+              )
+            );
+            // Then fail the stream
+            controller.error(new Error("Stream interrupted"));
+          },
+        });
+        return new Response(stream, {
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }
+      // Gemini should NEVER be called after partial output
+      throw new Error(`Gemini must not be called after partial stream, but got ${u}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const chunks: string[] = [];
+    // Should throw (not fallback) because partial output was already emitted
+    await expect(
+      streamText("hi", (c) => chunks.push(c), {
+        task: "chat",
+        provider: "groq",
+        category: "litt-alias",
+      }),
+    ).rejects.toThrow();
+
+    // Partial content was emitted but no Gemini fallback occurred
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("generativelanguage"))).toBe(false);
+    // No duplication: Gemini was never called, so chunks contain only what Groq emitted
+    // (the exact content depends on stream timing; the critical guarantee is no fallback)
+  });
+});
