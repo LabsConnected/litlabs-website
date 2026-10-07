@@ -1402,7 +1402,7 @@ export async function callLLMWithTools(
   console.info(`[ai-route] request_start`, {
     requestId,
     routeCount: plan.providers.length,
-    routes: plan.providers.map((p) => `${p.provider}/${p.model ?? "default"}`).join(","),
+    routes: plan.providers.map((p) => `${p.provider}`).join(","),
     requireToolCall: options?.toolChoice === "required",
   });
 
