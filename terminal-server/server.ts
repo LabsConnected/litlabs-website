@@ -1603,7 +1603,7 @@ io.use((socket, next) => {
     if (!isTerminalOwner(tokenPayload.sub)) {
       console.warn("[pty/ws] rejected", {
         requestId,
-        reason: "OWNER_REQUIRED",
+        reason: "TERMINAL_ACCESS_DENIED",
         userId: tokenPayload.sub?.substring(0, 12) + "...",
       });
       next(new Error("Forbidden"));
