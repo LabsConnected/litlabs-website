@@ -76,9 +76,13 @@ async function routeRunIntent(ctx: ResolvedRunContext, req: LiTTRunRequest): Pro
  * ("What is LiTTree?") into a Studio interrogation ("What should LiTT work
  * on? Tell me the project..."), so companion-surface requests bypass
  * routing entirely and carry no intent/plan.
+ *
+ * Global LiTT's Studio panel is the same kind of surface: a persistent
+ * general chat, not a Studio project mutation. It must bypass too.
  */
 function isCompanionSurfaceRequest(req: LiTTRunRequest): boolean {
-  return req.pageContext?.surface === "global_companion";
+  return req.pageContext?.surface === "global_companion" ||
+    req.pageContext?.surface === "global_litt_studio";
 }
 
 async function resolveAgentForRun(

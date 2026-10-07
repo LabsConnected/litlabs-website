@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ArrowRight, Loader2, Sparkles } from "lucide-react";
 import LiTTPresence from "./LiTTPresence";
+import GlobalLittStudioEntry from "@/components/global-litt/GlobalLittStudioEntry";
 
 /**
  * FirstRunWelcome — the dedicated welcome screen for fresh users.
@@ -22,14 +23,17 @@ export default function FirstRunWelcome({
   isCreating,
   error,
   onRetry,
+  initialIdea,
 }: {
   displayName?: string | null;
   onSubmit: (idea: string) => void;
   isCreating: boolean;
   error: string | null;
   onRetry: () => void;
+  /** Pre-fill from the ?prompt= handoff (e.g. dashboard "Ask LiTT"). */
+  initialIdea?: string | null;
 }) {
-  const [idea, setIdea] = useState("");
+  const [idea, setIdea] = useState(initialIdea ?? "");
   const greetingName = displayName?.trim();
   const canSubmit = idea.trim().length > 0 && !isCreating;
 
@@ -172,6 +176,11 @@ export default function FirstRunWelcome({
         >
           No setup needed. Just describe it and go.
         </p>
+
+        {/* Global LiTT entry — available even before any project exists */}
+        <div className="mt-2 flex justify-center">
+          <GlobalLittStudioEntry />
+        </div>
       </div>
     </div>
   );
