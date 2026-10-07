@@ -873,6 +873,27 @@ export async function generateText(
     } catch (err) {
       lastErr = err;
       const isProviderError = err instanceof ProviderError;
+      const httpStatus = isProviderError ? err.status : null;
+      // Classify the error for [ai-route] diagnostics
+      const errorType = httpStatus === 401 || httpStatus === 403 ? "AUTH"
+        : httpStatus === 429 ? "RATE_LIMIT"
+        : httpStatus !== null && httpStatus >= 500 ? "PROVIDER_5XX"
+        : httpStatus === 408 ? "TIMEOUT"
+        : isProviderError && err.isRetryable ? "RETRYABLE"
+        : "UNKNOWN";
+      const willFallback = isProviderError && err.isRetryable;
+
+      console.info(`[ai-route] attempt_failure`, {
+        requestId: meteringRequestId,
+        attempt: attempted,
+        provider,
+        httpStatus,
+        errorType,
+        willFallback,
+        latencyMs: Date.now() - t0,
+        message: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+      });
+
       recordLLMCall({
         provider,
         model: "unknown",
@@ -991,6 +1012,15 @@ export async function streamText(
   const t0 = Date.now();
   // Stable id for canonical metering: one usage_event per provider attempt.
   const meteringRequestId = newLlmRequestId();
+  // Request ID for [ai-route] diagnostics (same as metering ID for correlation)
+  const requestId = meteringRequestId;
+
+  console.info(`[ai-route] request_start`, {
+    requestId,
+    task,
+    chain: chain.join(","),
+    chainLength: chain.length,
+  });
 
   // Accumulate streamed chunks for Braintrust logging on stream completion.
   const _chunks: string[] = [];
@@ -1014,6 +1044,14 @@ export async function streamText(
     attempted++;
     const attemptStartedAt = new Date();
     const attemptIndex = attempted - 1;
+
+    console.info(`[ai-route] attempt_start`, {
+      requestId,
+      attempt: attempted,
+      provider,
+      task,
+    });
+
     // Hard spend/runaway guard — per-attempt, fail-open.
     if (options.metering) {
       const guard = await checkRunawayGuards({
@@ -1110,6 +1148,14 @@ export async function streamText(
         attemptIndex,
         startedAt: attemptStartedAt,
       });
+      console.info(`[ai-route] attempt_success`, {
+        requestId,
+        attempt: attempted,
+        provider: result.provider,
+        model: result.model,
+        latencyMs: Date.now() - t0,
+        failoverCount: failover.length,
+      });
       return {
         ...result,
         // The successful attempt is the ONE billable event for this logical
@@ -1129,6 +1175,27 @@ export async function streamText(
       }
       lastErr = err;
       const isProviderError = err instanceof ProviderError;
+      const httpStatusStream = isProviderError ? err.status : null;
+      const errorTypeStream = httpStatusStream === 401 || httpStatusStream === 403 ? "AUTH"
+        : httpStatusStream === 429 ? "RATE_LIMIT"
+        : httpStatusStream !== null && httpStatusStream >= 500 ? "PROVIDER_5XX"
+        : httpStatusStream === 408 ? "TIMEOUT"
+        : isProviderError && err.isRetryable ? "RETRYABLE"
+        : "UNKNOWN";
+      const willFallbackStream = isProviderError && err.isRetryable;
+
+      console.info(`[ai-route] attempt_failure`, {
+        requestId,
+        attempt: attempted,
+        provider,
+        httpStatus: httpStatusStream,
+        errorType: errorTypeStream,
+        willFallback: willFallbackStream,
+        latencyMs: Date.now() - t0,
+        chunksEmitted: _chunks.length,
+        message: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+      });
+
       recordLLMCall({
         provider,
         model: "unknown",
@@ -1152,16 +1219,48 @@ export async function streamText(
       if (isProviderError && err.status === 404) {
         markModelUnavailable(provider);
       }
+      // Non-retryable errors (AUTH, malformed, app bugs) do NOT fallback —
+      // fail fast with the classified error instead of trying the next provider.
       if (!isProviderError || !err.isRetryable) {
-        failover.push(provider);
-        continue;
+        console.warn(`[ai-route] non_retryable`, {
+          requestId,
+          provider,
+          errorType: errorTypeStream,
+          message: "Not falling back for non-retryable error",
+        });
+        throw err;
       }
+      // Retryable error: check if partial output was already streamed.
+      // If chunks were emitted, do NOT fallback (would duplicate/concatenate).
+      if (_chunks.length > 0) {
+        console.warn(`[ai-route] partial_stream_abort`, {
+          requestId,
+          provider,
+          chunksEmitted: _chunks.length,
+          message: "Primary failed after partial output — not falling back to avoid duplication",
+        });
+        throw err;
+      }
+      console.info(`[ai-route] fallback`, {
+        requestId,
+        fromProvider: provider,
+        reason: errorTypeStream,
+      });
       failover.push(provider);
     }
   }
   if (attempted > 0 && emptyProviders.length === attempted) {
     throw new AllProvidersEmptyError(emptyProviders);
   }
+  // Final summary: all providers failed — log the complete failure chain
+  console.error(`[ai-route] all_failed`, {
+    requestId,
+    task,
+    attempted,
+    providersTried: [...failover].join(","),
+    lastError: lastErr instanceof Error ? lastErr.message.slice(0, 300) : String(lastErr).slice(0, 300),
+    latencyMs: Date.now() - t0,
+  });
   throw new Error(
     `All LLM streaming providers failed. Tried: ${[...failover].join(", ")}. Last error: ${lastErr instanceof Error ? lastErr.message : String(lastErr)
     }`,

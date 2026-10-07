@@ -310,3 +310,133 @@ describe("generateText — entitled pinned-provider-filtered-out fallback", () =
     expect(urls.some((u) => u.includes(OPENAI_HOST))).toBe(false);
   });
 });
+
+describe("streamText — Groq → Gemini fallback chain", () => {
+  const groqSse = (text: string) =>
+    new Response(
+      `data: ${JSON.stringify({ choices: [{ delta: { content: text }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+    );
+  const groq429 = () =>
+    new Response(
+      JSON.stringify({ error: { message: "Rate limit reached" } }),
+      { status: 429, headers: { "Content-Type": "application/json" } },
+    );
+  const groq500 = () =>
+    new Response("Internal Server Error", { status: 500 });
+  const groq401 = () =>
+    new Response(
+      JSON.stringify({ error: { message: "Invalid API key" } }),
+      { status: 401, headers: { "Content-Type": "application/json" } },
+    );
+  // Gemini uses the SDK which calls generativelanguage.googleapis.com
+  const geminiSse = (text: string) =>
+    new Response(
+      `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] })}\n\n`,
+      { headers: { "Content-Type": "text/event-stream" } },
+    );
+
+  it("1. Groq success → Gemini never called", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("api.groq.com")) return groqSse("groq answer");
+      // Gemini should never be called
+      throw new Error(`Unexpected call to ${u}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const chunks: string[] = [];
+    const result = await streamText("hi", (c) => chunks.push(c), {
+      task: "chat",
+      provider: "groq",
+      category: "litt-alias",
+    });
+
+    expect(chunks.join("")).toBe("groq answer");
+    expect(result.provider).toBe("groq");
+    expect(result.failover).not.toContain("gemini");
+    // Verify Gemini endpoint was never hit
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("generativelanguage"))).toBe(false);
+  });
+
+  it("2. Groq 429 before first token → Gemini succeeds", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("api.groq.com")) return groq429();
+      if (u.includes("generativelanguage")) return geminiSse("gemini fallback answer");
+      return groqSse("unexpected");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const chunks: string[] = [];
+    const result = await streamText("hi", (c) => chunks.push(c), {
+      task: "chat",
+      provider: "groq",
+      category: "litt-alias",
+    });
+
+    expect(chunks.join("")).toBe("gemini fallback answer");
+    expect(result.provider).toBe("gemini");
+    expect(result.failover).toContain("groq");
+  });
+
+  it("3. Groq 500 → Gemini succeeds", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("api.groq.com")) return groq500();
+      if (u.includes("generativelanguage")) return geminiSse("gemini after 500");
+      return groqSse("unexpected");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const chunks: string[] = [];
+    const result = await streamText("hi", (c) => chunks.push(c), {
+      task: "chat",
+      provider: "groq",
+      category: "litt-alias",
+    });
+
+    expect(chunks.join("")).toBe("gemini after 500");
+    expect(result.provider).toBe("gemini");
+  });
+
+  it("4. Groq 401 auth failure → no fallback (fails fast)", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("api.groq.com")) return groq401();
+      // Gemini should NOT be called for auth failures
+      throw new Error(`Gemini should not be called for auth failure, but got ${u}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      streamText("hi", () => {}, {
+        task: "chat",
+        provider: "groq",
+        category: "litt-alias",
+      }),
+    ).rejects.toThrow();
+
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("generativelanguage"))).toBe(false);
+  });
+
+  it("6. Both providers fail → one clean classified final error", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("api.groq.com")) return groq429();
+      if (u.includes("generativelanguage")) return groq500(); // Gemini also fails
+      return groqSse("unexpected");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Both providers fail — should throw (either the aggregate error or the last provider error)
+    await expect(
+      streamText("hi", () => {}, {
+        task: "chat",
+        provider: "groq",
+        category: "litt-alias",
+      }),
+    ).rejects.toThrow();
+  });
+});
