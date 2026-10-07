@@ -400,25 +400,26 @@ describe("streamText — Groq → Gemini fallback chain", () => {
     expect(result.provider).toBe("gemini");
   });
 
-  it("4. Groq 401 auth failure → no fallback (fails fast)", async () => {
+  it("4. Groq 401 auth failure → fallback to Gemini (different provider)", async () => {
     const fetchMock = vi.fn(async (url: unknown) => {
       const u = String(url);
       if (u.includes("api.groq.com")) return groq401();
-      // Gemini should NOT be called for auth failures
-      throw new Error(`Gemini should not be called for auth failure, but got ${u}`);
+      if (u.includes("generativelanguage")) return geminiSse("gemini after groq auth fail");
+      return groqSse("unexpected");
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(
-      streamText("hi", () => {}, {
-        task: "chat",
-        provider: "groq",
-        category: "litt-alias",
-      }),
-    ).rejects.toThrow();
+    const chunks: string[] = [];
+    const result = await streamText("hi", (c) => chunks.push(c), {
+      task: "chat",
+      provider: "groq",
+      category: "litt-alias",
+    });
 
-    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
-    expect(urls.some((u) => u.includes("generativelanguage"))).toBe(false);
+    // AUTH on Groq should fallback to Gemini (different provider with independent credentials)
+    expect(chunks.join("")).toBe("gemini after groq auth fail");
+    expect(result.provider).toBe("gemini");
+    expect(result.failover).toContain("groq");
   });
 
   it("6. Both providers fail → one clean classified final error", async () => {

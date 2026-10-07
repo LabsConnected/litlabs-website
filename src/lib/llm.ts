@@ -1176,13 +1176,21 @@ export async function streamText(
       lastErr = err;
       const isProviderError = err instanceof ProviderError;
       const httpStatusStream = isProviderError ? err.status : null;
-      const errorTypeStream = httpStatusStream === 401 || httpStatusStream === 403 ? "AUTH"
+      const isMalformed = err instanceof EmptyProviderResponseError;
+      const errorTypeStream = isMalformed ? "MALFORMED_RESPONSE"
+        : httpStatusStream === 401 || httpStatusStream === 403 ? "AUTH"
         : httpStatusStream === 429 ? "RATE_LIMIT"
         : httpStatusStream !== null && httpStatusStream >= 500 ? "PROVIDER_5XX"
         : httpStatusStream === 408 ? "TIMEOUT"
         : isProviderError && err.isRetryable ? "RETRYABLE"
         : "UNKNOWN";
-      const willFallbackStream = isProviderError && err.isRetryable;
+      // Fallback decision:
+      // - AUTH: do NOT retry same provider, but ALLOW fallback to different provider
+      // - RETRYABLE (429/5xx/timeout/network/malformed): allow fallback
+      // - Non-provider errors (app bugs): do NOT fallback, throw immediately
+      const isAuth = errorTypeStream === "AUTH";
+      const canFallback = isProviderError && (err.isRetryable || isAuth || isMalformed);
+      const willFallbackStream = canFallback;
 
       console.info(`[ai-route] attempt_failure`, {
         requestId,
@@ -1219,18 +1227,18 @@ export async function streamText(
       if (isProviderError && err.status === 404) {
         markModelUnavailable(provider);
       }
-      // Non-retryable errors (AUTH, malformed, app bugs) do NOT fallback —
-      // fail fast with the classified error instead of trying the next provider.
-      if (!isProviderError || !err.isRetryable) {
+      // Non-provider errors (app bugs, aborts) do NOT fallback —
+      // fail fast instead of trying the next provider.
+      if (!canFallback) {
         console.warn(`[ai-route] non_retryable`, {
           requestId,
           provider,
           errorType: errorTypeStream,
-          message: "Not falling back for non-retryable error",
+          message: "Not falling back for non-provider error",
         });
         throw err;
       }
-      // Retryable error: check if partial output was already streamed.
+      // Retryable/Auth/Malformed: check if partial output was already streamed.
       // If chunks were emitted, do NOT fallback (would duplicate/concatenate).
       if (_chunks.length > 0) {
         console.warn(`[ai-route] partial_stream_abort`, {
