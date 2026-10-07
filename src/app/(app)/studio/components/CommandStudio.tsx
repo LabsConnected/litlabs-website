@@ -42,6 +42,7 @@ import CommandStudioHeader from "./CommandStudioHeader";
 import StudioDock, { type StudioDockTab } from "./StudioDock";
 import { ApprovalCard } from "./ApprovalCard";
 import MissionCards from "./MissionCards";
+import StudioPrimaryAction, { type PrimaryActionState } from "./StudioPrimaryAction";
 import PersistentMusicPlayer from "./PersistentMusicPlayer";
 import { MobileCommandNav, type MobileStudioSurface } from "./CommandStudioNav";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
@@ -430,6 +431,24 @@ function CommandStudioContent() {
   const approvalError = useExecutionStore((s) => s.approvalError);
   const approvalRetryable = useExecutionStore((s) => s.approvalRetryable);
   const approvalExpired = useExecutionStore((s) => s.approvalExpired);
+
+  // ── Phase 3B: Primary action state derivation ──────────────────────
+  // Derives the one primary action from existing execution/approval/deployment
+  // state. Uses no new state machine; all handlers are existing.
+  const primaryActionState: PrimaryActionState = (() => {
+    // Approval required takes precedence — canonical ApprovalCard is actionable
+    if (pendingApproval) return "approval_required";
+    // TODO: Derive building/publishing/live from execution store and
+    // deployment projection once the preview integration is verified.
+    // For now, idle when no approval is pending.
+    return "idle";
+  })();
+
+  // Focus the canonical ApprovalCard (scrolls to it, no duplicate button)
+  const handleFocusApproval = useCallback(() => {
+    const el = document.querySelector('[data-testid="approval-card"]');
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, []);
 
   // ── StudioShell — the desktop Studio destination IS the operating
   // shell: workspace rail + central stage + contextual inspector + the
@@ -3347,8 +3366,26 @@ function CommandStudioContent() {
                   /* Preview is the primary workspace tab — the live preview
                      consumes the full workspace width. No second preview
                      column is ever mounted beside it (canvas-first 2-zone
-                     layout). */
-                  <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                     layout).
+                     Phase 3B: Primary action bar above the preview. */
+                  <div className="min-h-0 min-w-0 flex-1 overflow-hidden flex flex-col">
+                    {primaryActionState !== "idle" && (
+                      <div
+                        className="shrink-0 border-b px-4 py-2.5 flex items-center justify-between"
+                        style={{
+                          borderColor: "var(--glass-border)",
+                          backgroundColor: "var(--glass-bg)",
+                        }}
+                        data-testid="studio-primary-action-bar"
+                      >
+                        <StudioPrimaryAction
+                          state={primaryActionState}
+                          onDeploy={handleDeployRequest}
+                          onFocusApproval={handleFocusApproval}
+                        />
+                      </div>
+                    )}
+                    <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
                     <StudioPreviewPanel
                       projectId={capabilities.projectId}
                       projectName={capabilities.projectName}
@@ -3360,6 +3397,7 @@ function CommandStudioContent() {
                       workspaceStatus={capabilities.workspaceStatus ?? null}
                       onSelectionChange={setPreviewSelection}
                     />
+                    </div>
                   </div>
                 ) : isMedia ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-auto pb-28 lg:pb-0">
