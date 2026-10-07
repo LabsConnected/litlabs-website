@@ -1,5 +1,7 @@
 import "server-only";
 
+import { LEGACY_PROD_TERMINAL_URL } from "./terminal-url-client";
+
 /**
  * Centralized terminal-server and voice-server URL resolution.
  *
@@ -43,7 +45,7 @@ export function getTerminalServerUrl(): string {
 
   // 4. Legacy hardcoded production URL — must match the Railway service
   // deploy-terminal.yml actually deploys to (litlabs-terminal-server).
-  return "https://litlabs-terminal-server-production-0be1.up.railway.app";
+  return LEGACY_PROD_TERMINAL_URL;
 }
 
 export type TerminalInternalUrlSource = "internal" | "public-fallback" | "none";

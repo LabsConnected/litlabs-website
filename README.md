@@ -36,6 +36,6 @@ The app uses the LiTT surfaces at `/litt` and `/litt-terminal`; older routes suc
 
 ## Deployment
 
-Production deploys run through Railway. The terminal service and voice worker are deployed as separate Railway services. See `RAILWAY.md` for the full deployment guide. Heavy Studio and media builds are intended for GitHub Codespaces, as described in `.devin-config.json`.
+Production deploys run through Railway. The terminal service and voice worker are deployed as separate Railway services. See `RAILWAY.md` for the full deployment guide and `docs/ENVIRONMENTS.md` for which environments exist and how CI relates to production. Heavy Studio and media builds are intended for GitHub Codespaces, as described in `.devin-config.json`.
 
 Never commit `.env.local` or any secret-bearing environment file.
