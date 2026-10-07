@@ -811,8 +811,9 @@ export function planBasicRoutes(
     if (hint?.kind === "route" && hint.provider === def.provider) {
       // Honour the requested model first inside its provider when it is
       // eligible under the cost policy (free OR models, direct providers).
+      // NOTE: Do NOT remove the model from the candidate list when dropping
+      // the hint — it must remain available as a normal candidate.
       const idx = models.indexOf(hint.model);
-      if (idx >= 0) models.splice(idx, 1);
       if (def.provider === "openrouter" && requirements.tools && hint.model === "openrouter/free") {
         // An explicit hint must not resurrect the auto-router the tools
         // filter just removed — it cannot emit tool calls. Surface the
@@ -823,11 +824,13 @@ export function planBasicRoutes(
         findModelRecord(def.provider, hint.model)?.capabilities.reliableFileWriting !== true
       ) {
         // A BUILD run must not start on a hinted model that is not a proven
-        // file writer (chat-only or unknown) — drop the hint so routing
-        // starts on a proven writer, and surface the drop instead of
-        // silently swapping.
+        // file writer (chat-only or unknown) — drop the hint priority so
+        // routing starts on a proven writer, but KEEP the model in the
+        // candidate list. Surface the drop instead of silently swapping.
         droppedModelHint = opts.model;
-      } else {
+      } else if (idx >= 0) {
+        // Move hinted model to front (only when honouring the hint)
+        models.splice(idx, 1);
         models.unshift(hint.model);
       }
     }

@@ -800,6 +800,53 @@ function loopInputChars(messages: LLMMessage[]): number {
   return chars;
 }
 
+/**
+ * Compact BUILD inputs to fit within a provider-safe token budget.
+ * Preserves: tool schemas, system prompt, current user request, recent history.
+ * Trims: older conversation history first.
+ * Target: 6.5k-7k tokens to leave headroom under 8k provider limits.
+ */
+function compactBuildInputs(
+  systemPrompt: string,
+  messages: LLMMessage[],
+  toolDefs: ToolDefinition[],
+  maxInputTokens: number = 7000
+): { systemPrompt: string; messages: LLMMessage[]; compacted: boolean } {
+  const toolChars = JSON.stringify(toolDefs).length;
+  const systemChars = systemPrompt.length;
+  const baseTokens = estimateTokensForChars(toolChars + systemChars);
+  
+  // If base (tools + system) already exceeds budget, we cannot proceed safely
+  if (baseTokens >= maxInputTokens) {
+    return { systemPrompt, messages, compacted: false };
+  }
+  
+  const availableForMessages = maxInputTokens - baseTokens;
+  let messageTokens = estimateTokensForChars(loopInputChars(messages));
+  
+  if (messageTokens <= availableForMessages) {
+    return { systemPrompt, messages, compacted: false };
+  }
+  
+  // Trim older messages, keep the most recent (current request + recent history)
+  // Always keep at least the last 2 messages (current + immediate context)
+  const compacted = [...messages];
+  while (compacted.length > 2) {
+    const tokens = estimateTokensForChars(loopInputChars(compacted));
+    if (tokens <= availableForMessages) break;
+    // Remove the oldest message (index 0), but preserve system-like first message if present
+    // Actually: remove from the middle, keeping first (context) and last (current)
+    // Simpler: remove oldest non-essential (index 1, keeping index 0 as anchor)
+    if (compacted.length > 3) {
+      compacted.splice(1, 1); // Remove second-oldest, keep first as anchor
+    } else {
+      compacted.shift(); // Only 3 left, remove oldest
+    }
+  }
+  
+  return { systemPrompt, messages: compacted, compacted: true };
+}
+
 interface LoopStepMetering {
   cfg: AgentLoopConfig;
   /** 1-based loop step = the action index for this LLM call. */
@@ -1090,10 +1137,17 @@ async function runAgentLoopV2Inner(
     // The build capability guard may have switched the serving model
     // mid-run; its hint routes through planBasicRoutes on the next step.
     const requestedModel = buildGuardModelHint ?? cfg.model;
+    // Compact BUILD inputs to stay under provider token limits (e.g. Groq 8k).
+    // Target 7k to leave headroom for tool-call overhead and tokenization variance.
+    const compacted = compactBuildInputs(cfg.systemPrompt, llmMessages, toolDefs, 7000);
+    if (compacted.compacted) {
+      // Log the compaction for observability (no sensitive content)
+      console.log(`[agent-loop] Compacted BUILD inputs: ${llmMessages.length} -> ${compacted.messages.length} messages`);
+    }
     try {
       llmResponse = await callLLMWithTools(
-        cfg.systemPrompt,
-        llmMessages,
+        compacted.systemPrompt,
+        compacted.messages,
         toolDefs,
         {
           model: requestedModel,
