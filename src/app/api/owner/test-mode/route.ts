@@ -21,13 +21,12 @@ export const dynamic = "force-dynamic";
  *   { isOwner: boolean, simulation: SimulatedPlan | null, options: [...] }
  */
 export async function GET(req: NextRequest) {
-  const { userId, orgId, sessionClaims } = await auth(req);
+  const { userId, clerkId } = await auth(req);
   
   // Diagnostic logging to pinpoint auth failures
   console.log("[owner/test-mode] auth check:", {
     userId: userId ? `${userId.substring(0, 8)}...` : null,
-    orgId,
-    hasSessionClaims: !!sessionClaims,
+    clerkId: clerkId ? `${clerkId.substring(0, 8)}...` : null,
     ownerEnvSet: !!process.env.LITTLABS_VAPI_OWNER_CLERK_ID,
   });
 
