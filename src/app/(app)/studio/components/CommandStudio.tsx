@@ -743,16 +743,19 @@ function CommandStudioContent() {
   const [mobileBuildOpen, setMobileBuildOpen] = useState(false);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
 
-  // Workspace-first focus: selecting a real work surface collapses the large
-  // welcome/chat panel to the compact rail. Chat stays mounted and one click
-  // away through the rail, so this only changes emphasis, not availability.
+  // Phase 3B: Do NOT auto-collapse the conversation when switching work surfaces.
+  // The Studio Layout Contract requires conversation LEFT + preview RIGHT on desktop.
+  // Users can manually collapse via the dock handle or Esc key, but switching
+  // to preview should not hide the conversation automatically.
   const previousStageSurfaceRef = useRef<StudioStageSurface>(stageSurface);
   useEffect(() => {
     if (previousStageSurfaceRef.current === stageSurface) return;
     previousStageSurfaceRef.current = stageSurface;
-    setLittCollapsed(true);
-    setLittExpanded(false);
-    setMobileLittOpen(false);
+    // Intentionally NOT calling setLittCollapsed(true) here.
+    // Mobile still closes sheets via openMobileTool; desktop keeps both visible.
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+      setMobileLittOpen(false);
+    }
   }, [stageSurface]);
   // Mobile density redesign: opening a tool from the Tools sheet closes both
   // sheets so the chosen tool becomes the one dominant surface (this also
@@ -816,13 +819,14 @@ function CommandStudioContent() {
     maxWidth: 640,
     direction: "left",
   });
-  // Shell left-dock width — 360px default, clamped 300–500px, persisted
-  // under its own key so the legacy panel sizing is unaffected.
+  // Shell left-dock width — 360px default, clamped 320–480px per Phase 3B
+  // Studio Layout Contract, persisted under its own key so the legacy
+  // panel sizing is unaffected.
   const littDockResize = useResizableWidth({
     storageKey: "littree:studio:litt-dock-width",
     defaultWidth: 360,
-    minWidth: 300,
-    maxWidth: 500,
+    minWidth: 320,
+    maxWidth: 480,
     direction: "left",
   });
 
