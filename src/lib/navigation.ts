@@ -152,13 +152,14 @@ export function isAppNavActive(
 ): boolean {
   if (!pathname || !href) return false;
   const [path, query] = href.split("?");
-  // /dashboard is active only when there's no ?app= param (unless the href has one)
-  if (path === "/dashboard" && !query) {
-    return pathname === "/dashboard" && !searchParams.get("app");
+  // / is active only when there's no ?app= param (unless the href has one)
+  // Phase 3B: Home is now / (was /dashboard)
+  if ((path === "/" || path === "/dashboard") && !query) {
+    return (pathname === "/" || pathname === "/dashboard") && !searchParams.get("app");
   }
-  if (path === "/dashboard" && query) {
+  if ((path === "/" || path === "/dashboard") && query) {
     const hrefParams = new URLSearchParams(query);
-    return pathname === "/dashboard" &&
+    return (pathname === "/" || pathname === "/dashboard") &&
       Array.from(hrefParams.entries()).every(([k, v]) => searchParams.get(k) === v);
   }
   // /studio: a bare "/studio" href is the DEFAULT Studio surface — it must
