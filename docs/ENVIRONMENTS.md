@@ -71,4 +71,4 @@ development-only default (`NODE_ENV !== "production"`).
 | `deploy-terminal.yml` | Deploys the terminal service on `main` pushes touching `terminal-server/**`; post-deploy health check (same `TERMINAL_BASE_URL` override). |
 | `prod-clerk-auth-smoke.yml` | Yes: signs a Clerk test user in on production. **Manual only.** |
 | `final-acceptance-golden.yml` | Yes: full production journey with disposable users. **Manual only.** |
-| `cron-deploy-digest.yml` | Weekday digest. |
+| `cron-deploy-digest.yml` | Yes: authenticated `POST /api/deployments/digest` on production each weekday (09:00 UTC). Target overridable via repo variable `DIGEST_URL`. |

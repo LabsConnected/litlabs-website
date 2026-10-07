@@ -62,5 +62,5 @@ jobs:
         run: |
           sleep 30
           curl -sSf --retry 3 --retry-delay 10 \
-            "${TERMINAL_BASE_URL}/health/ready" \
+            "${TERMINAL_BASE_URL%/}/health/ready" \
             | jq -e '.readiness == "ready"'

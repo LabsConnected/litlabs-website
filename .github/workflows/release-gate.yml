@@ -35,8 +35,8 @@ jobs:
           # "is CLERK_SECRET_KEY set") — see docs/qa/production-login-recovery-20260902.md,
           # where a present-but-invalid key passed every presence check while
           # sign-in was completely broken. Surface it here so this scheduled
-          # gate catches a reverted/invalid production secret within 30
-          # minutes instead of waiting for a user report.
+          # gate catches a reverted/invalid production secret within about an
+          # hour (hourly schedule) instead of waiting for a user report.
           AUTH_STATUS=$(echo "$RESPONSE" | jq -r '.checks.auth.status // "unknown"')
           AUTH_DETAIL=$(echo "$RESPONSE" | jq -r '.checks.auth.detail // ""')
           echo "auth_status=$AUTH_STATUS" >> $GITHUB_OUTPUT
@@ -50,7 +50,7 @@ jobs:
           TERMINAL_BASE_URL: ${{ vars.TERMINAL_BASE_URL || 'https://litlabs-terminal-server-production-0be1.up.railway.app' }}
         run: |
           RESPONSE=$(curl -sSf --max-time 10 \
-            "${TERMINAL_BASE_URL}/health" \
+            "${TERMINAL_BASE_URL%/}/health" \
             || echo '{"status":"unreachable"}')
           DEPLOYED_SHA=$(echo "$RESPONSE" | jq -r '.commit // "unknown"')
           echo "deployed_sha=$DEPLOYED_SHA" >> $GITHUB_OUTPUT
