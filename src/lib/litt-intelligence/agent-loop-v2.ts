@@ -801,50 +801,67 @@ function loopInputChars(messages: LLMMessage[]): number {
 }
 
 /**
+ * Instrument token budget across all input components.
+ * Returns breakdown for observability and budget enforcement.
+ */
+function instrumentInputBudget(
+  systemPrompt: string,
+  messages: LLMMessage[],
+  toolDefs: ToolDefinition[]
+): {
+  systemTokens: number;
+  toolTokens: number;
+  messageTokens: number;
+  totalTokens: number;
+  messageCount: number;
+} {
+  const systemTokens = estimateTokensForChars(systemPrompt.length);
+  const toolTokens = estimateTokensForChars(JSON.stringify(toolDefs).length);
+  const messageTokens = estimateTokensForChars(loopInputChars(messages));
+  return {
+    systemTokens,
+    toolTokens,
+    messageTokens,
+    totalTokens: systemTokens + toolTokens + messageTokens,
+    messageCount: messages.length,
+  };
+}
+
+/**
  * Compact BUILD inputs to fit within a provider-safe token budget.
- * Preserves: tool schemas, system prompt, current user request, recent history.
- * Trims: older conversation history first.
- * Target: 6.5k-7k tokens to leave headroom under 8k provider limits.
+ * Hard requirement: for 8k Groq context, target ≤ 6k tokens.
+ * Preserves: latest user request, tool schemas, essential execution state.
+ * Trims: older history first, then redundant orchestration content.
  */
 function compactBuildInputs(
   systemPrompt: string,
   messages: LLMMessage[],
   toolDefs: ToolDefinition[],
-  maxInputTokens: number = 7000
-): { systemPrompt: string; messages: LLMMessage[]; compacted: boolean } {
-  const toolChars = JSON.stringify(toolDefs).length;
-  const systemChars = systemPrompt.length;
-  const baseTokens = estimateTokensForChars(toolChars + systemChars);
+  maxInputTokens: number = 6000
+): { systemPrompt: string; messages: LLMMessage[]; compacted: boolean; budget: ReturnType<typeof instrumentInputBudget> } {
+  const budget = instrumentInputBudget(systemPrompt, messages, toolDefs);
   
-  // If base (tools + system) already exceeds budget, we cannot proceed safely
-  if (baseTokens >= maxInputTokens) {
-    return { systemPrompt, messages, compacted: false };
+  if (budget.totalTokens <= maxInputTokens) {
+    return { systemPrompt, messages, compacted: false, budget };
   }
   
-  const availableForMessages = maxInputTokens - baseTokens;
-  const messageTokens = estimateTokensForChars(loopInputChars(messages));
-  
-  if (messageTokens <= availableForMessages) {
-    return { systemPrompt, messages, compacted: false };
-  }
-  
-  // Trim older messages, keep the most recent (current request + recent history)
-  // Always keep at least the last 2 messages (current + immediate context)
+  // Budget exceeded — must compact
+  // Strategy: preserve latest user request (last message) + tool schemas (required)
+  // Trim older messages aggressively
   const compacted = [...messages];
-  while (compacted.length > 2) {
-    const tokens = estimateTokensForChars(loopInputChars(compacted));
-    if (tokens <= availableForMessages) break;
-    // Remove the oldest message (index 0), but preserve system-like first message if present
-    // Actually: remove from the middle, keeping first (context) and last (current)
-    // Simpler: remove oldest non-essential (index 1, keeping index 0 as anchor)
-    if (compacted.length > 3) {
-      compacted.splice(1, 1); // Remove second-oldest, keep first as anchor
-    } else {
-      compacted.shift(); // Only 3 left, remove oldest
-    }
+  
+  // Keep trimming until under budget or only 1 message left (the current request)
+  while (compacted.length > 1) {
+    const currentBudget = instrumentInputBudget(systemPrompt, compacted, toolDefs);
+    if (currentBudget.totalTokens <= maxInputTokens) break;
+    // Remove oldest message (shift), preserving the latest (current request)
+    compacted.shift();
   }
   
-  return { systemPrompt, messages: compacted, compacted: true };
+  const finalBudget = instrumentInputBudget(systemPrompt, compacted, toolDefs);
+  const wasCompacted = compacted.length < messages.length;
+  
+  return { systemPrompt, messages: compacted, compacted: wasCompacted, budget: finalBudget };
 }
 
 interface LoopStepMetering {
@@ -1139,10 +1156,15 @@ async function runAgentLoopV2Inner(
     const requestedModel = buildGuardModelHint ?? cfg.model;
     // Compact BUILD inputs to stay under provider token limits (e.g. Groq 8k).
     // Target 7k to leave headroom for tool-call overhead and tokenization variance.
-    const compacted = compactBuildInputs(cfg.systemPrompt, llmMessages, toolDefs, 7000);
+    const compacted = compactBuildInputs(cfg.systemPrompt, llmMessages, toolDefs, 6000);
     if (compacted.compacted) {
       // Log the compaction for observability (no sensitive content)
-      console.log(`[agent-loop] Compacted BUILD inputs: ${llmMessages.length} -> ${compacted.messages.length} messages`);
+      const b = compacted.budget;
+      console.log(`[agent-loop] Compacted BUILD inputs: ${llmMessages.length} -> ${compacted.messages.length} messages, budget: system=${b.systemTokens} tools=${b.toolTokens} msgs=${b.messageTokens} total=${b.totalTokens}`);
+    } else if (compacted.budget.totalTokens > 6000) {
+      // Hard budget exceeded even after compaction — log warning
+      const b = compacted.budget;
+      console.warn(`[agent-loop] BUILD input budget exceeded: total=${b.totalTokens} > 6000 (system=${b.systemTokens} tools=${b.toolTokens} msgs=${b.messageTokens})`);
     }
     try {
       llmResponse = await callLLMWithTools(
