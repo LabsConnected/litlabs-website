@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { streamText, AllProvidersEmptyError } from "./llm";
+import { streamText, generateText, AllProvidersEmptyError, _resetModelCooldownsForTests } from "./llm";
 import type { ModelCategory } from "./llm";
 
 /**
@@ -11,6 +11,7 @@ import type { ModelCategory } from "./llm";
  */
 
 afterEach(() => {
+  _resetModelCooldownsForTests();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -448,22 +449,25 @@ describe("streamText — Groq → Gemini fallback chain", () => {
 
 describe("streamText — partial stream safety", () => {
   it("5. Groq partial-stream failure → no fallback, no duplicated answer", async () => {
-    // Groq streams partial content, then fails mid-stream.
-    // The router must NOT fallback to Gemini (would concatenate).
-    let groqCallCount = 0;
+    // Deliver a real chunk, then fail the stream. The error is normalized
+    // to a retryable provider failure; the partial-output guard — not an
+    // early !canFallback exit — must be what stops the chain.
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const fetchMock = vi.fn(async (url: unknown) => {
       const u = String(url);
       if (u.includes("api.groq.com")) {
-        groqCallCount++;
-        // Return a stream that emits partial content then errors
+        let reads = 0;
         const stream = new ReadableStream({
-          start(controller) {
-            controller.enqueue(
-              new TextEncoder().encode(
-                `data: ${JSON.stringify({ choices: [{ delta: { content: "partial " } }] })}\n\n`
-              )
-            );
-            // Then fail the stream
+          pull(controller) {
+            if (reads === 0) {
+              reads++;
+              controller.enqueue(
+                new TextEncoder().encode(
+                  `data: ${JSON.stringify({ choices: [{ delta: { content: "partial " } }] })}\n\n`
+                )
+              );
+              return;
+            }
             controller.error(new Error("Stream interrupted"));
           },
         });
@@ -471,25 +475,179 @@ describe("streamText — partial stream safety", () => {
           headers: { "Content-Type": "text/event-stream" },
         });
       }
-      // Gemini should NEVER be called after partial output
-      throw new Error(`Gemini must not be called after partial stream, but got ${u}`);
+      throw new Error(`Next provider must not be called after partial stream, but got ${u}`);
     });
     vi.stubGlobal("fetch", fetchMock);
 
     const chunks: string[] = [];
-    // Should throw (not fallback) because partial output was already emitted
     await expect(
       streamText("hi", (c) => chunks.push(c), {
         task: "chat",
         provider: "groq",
         category: "litt-alias",
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/Stream interrupted/);
 
-    // Partial content was emitted but no Gemini fallback occurred
-    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
-    expect(urls.some((u) => u.includes("generativelanguage"))).toBe(false);
-    // No duplication: Gemini was never called, so chunks contain only what Groq emitted
-    // (the exact content depends on stream timing; the critical guarantee is no fallback)
+    expect(chunks.join("")).toBe("partial ");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const failure = info.mock.calls.find((c) => c[0] === "[ai-route] attempt_failure");
+    expect(failure?.[1]).toMatchObject({ provider: "groq", willFallback: false });
+  });
+});
+
+describe("streamText — provider failure falls through", () => {
+  const groqSse = (text: string) =>
+    new Response(
+      `data: ${JSON.stringify({ choices: [{ delta: { content: text }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+    );
+  const geminiSse = (text: string) =>
+    new Response(
+      `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] })}\n\n`,
+      { headers: { "Content-Type": "text/event-stream" } },
+    );
+
+  function chainFetch(groq: (init?: RequestInit) => Promise<Response> | Response) {
+    const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("api.groq.com")) return groq(init);
+      if (u.includes("generativelanguage")) return geminiSse("gemini answer");
+      return groqSse("openrouter answer");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  async function streamGroqChain(onChunk: (text: string) => void, timeoutMs?: number) {
+    return streamText("hi", onChunk, {
+      task: "chat",
+      provider: "groq",
+      category: "litt-alias",
+      ...(timeoutMs ? { timeoutMs } : {}),
+    });
+  }
+
+  it("falls through to the next provider on a network error before any text", async () => {
+    const fetchMock = chainFetch(() => {
+      throw new TypeError("fetch failed");
+    });
+    const chunks: string[] = [];
+    const result = await streamGroqChain((c) => chunks.push(c));
+    expect(result.provider).toBe("gemini");
+    expect(result.failover).toContain("groq");
+    expect(chunks.join("")).toBe("gemini answer");
+    expect(fetchMock.mock.calls.map((c) => String(c[0])).some((u) => u.includes("generativelanguage"))).toBe(true);
+  });
+
+  it("falls through to the next provider on a timeout before any text", async () => {
+    chainFetch((init) => new Promise((_resolve, reject) => {
+      const rejectAbort = () => reject(new DOMException("The operation was aborted.", "AbortError"));
+      if (init?.signal?.aborted) {
+        rejectAbort();
+        return;
+      }
+      init?.signal?.addEventListener("abort", rejectAbort, { once: true });
+    }));
+    const chunks: string[] = [];
+    const result = await streamGroqChain((c) => chunks.push(c), 30);
+    expect(result.provider).toBe("gemini");
+    expect(chunks.join("")).toBe("gemini answer");
+  });
+
+  it("falls through to the next provider on HTTP 404 (missing model)", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    chainFetch(() => new Response(JSON.stringify({ error: { message: "model not found" } }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    }));
+    const chunks: string[] = [];
+    const result = await streamGroqChain((c) => chunks.push(c));
+    expect(result.provider).toBe("gemini");
+    expect(result.failover).toContain("groq");
+    expect(chunks.join("")).toBe("gemini answer");
+    const failure = info.mock.calls.find((c) => c[0] === "[ai-route] attempt_failure");
+    expect(failure?.[1]).toMatchObject({
+      provider: "groq",
+      httpStatus: 404,
+      errorType: "NOT_FOUND",
+      willFallback: true,
+    });
+  });
+
+  it("falls through when the provider returns only whitespace", async () => {
+    chainFetch(() => groqSse("  \n\t  "));
+    const chunks: string[] = [];
+    const result = await streamGroqChain((c) => chunks.push(c));
+    expect(result.provider).toBe("gemini");
+    expect(result.failover).toContain("groq");
+    expect(chunks.join("")).toContain("gemini answer");
+    expect(chunks.join("").trim()).toBe("gemini answer");
+  });
+
+  it("reports the final error only after every candidate fails", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchMock = vi.fn(async () => new Response("upstream down", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const chunks: string[] = [];
+    await expect(
+      streamGroqChain((c) => chunks.push(c)),
+    ).rejects.toThrow(/All LLM streaming providers failed\. Tried: groq, gemini, openrouter-free/);
+
+    expect(chunks).toEqual([]);
+    const hosts = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(hosts.some((u) => u.includes("api.groq.com"))).toBe(true);
+    expect(hosts.some((u) => u.includes("generativelanguage"))).toBe(true);
+    expect(hosts.some((u) => u.includes("openrouter.ai"))).toBe(true);
+    const failures = info.mock.calls.filter((c) => c[0] === "[ai-route] attempt_failure");
+    expect(failures).toHaveLength(3);
+    expect(failures.map((c) => (c[1] as { provider: string }).provider)).toEqual([
+      "groq",
+      "gemini",
+      "openrouter-free",
+    ]);
+    expect(failures.every((c) => (c[1] as { willFallback: boolean }).willFallback === true || (c[1] as { provider: string }).provider === "openrouter-free")).toBe(true);
+    expect((failures[2][1] as { willFallback: boolean }).willFallback).toBe(false);
+    const allFailed = errorSpy.mock.calls.filter((c) => c[0] === "[ai-route] all_failed");
+    expect(allFailed).toHaveLength(1);
+    expect(allFailed[0][1]).toMatchObject({ attempted: 3 });
+  });
+});
+
+describe("generateText — fallback diagnostics match the decision", () => {
+  it("logs willFallback true for a 401 and still uses the next provider", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("api.groq.com")) {
+        return new Response(JSON.stringify({ error: { message: "Invalid API key" } }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (u.includes("generativelanguage")) {
+        return new Response("unavailable", { status: 500 });
+      }
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: "from openrouter" } }],
+        model: "openrouter/free",
+      }), { headers: { "Content-Type": "application/json" } });
+    }));
+
+    const result = await generateText("hi", {
+      task: "chat",
+      provider: "groq",
+      category: "litt-alias",
+    });
+    expect(result.provider).toBe("openrouter-free");
+    expect(result.text).toBe("from openrouter");
+    expect(result.failover).toContain("groq");
+    const failure = info.mock.calls.find((c) => c[0] === "[ai-route] attempt_failure");
+    expect(failure?.[1]).toMatchObject({
+      provider: "groq",
+      httpStatus: 401,
+      errorType: "AUTH",
+      willFallback: true,
+    });
   });
 });
