@@ -435,19 +435,30 @@ function CommandStudioContent() {
   // ── Phase 3B: Primary action state derivation ──────────────────────
   // Derives the one primary action from existing execution/approval/deployment
   // state. Uses no new state machine; all handlers are existing.
+  // IMPORTANT: Do NOT infer deployment eligibility from execution completion.
+  // "Go Live" only appears when explicitly authorized via approval flow.
   const primaryActionState: PrimaryActionState = (() => {
     // Approval required takes precedence — canonical ApprovalCard is actionable
     if (pendingApproval) return "approval_required";
-    // TODO: Derive building/publishing/live from execution store and
-    // deployment projection once the preview integration is verified.
-    // For now, idle when no approval is pending.
+    // Building: conversation is busy (AI working)
+    if (conversation.busy) return "building";
+    // TODO: Derive ready_to_deploy, publishing, live, failed from deployment
+    // projection once verified in the preview. For now, idle is the safe
+    // default — never show Go Live without explicit approval state.
     return "idle";
   })();
 
   // Focus the canonical ApprovalCard (scrolls to it, no duplicate button)
   const handleFocusApproval = useCallback(() => {
-    const el = document.querySelector('[data-testid="approval-card"]');
-    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    // Select the Chat tab so the canonical ApprovalCard is visible
+    setLittActiveTab("chat");
+    // Reveal the conversation panel if collapsed
+    setLittCollapsed(false);
+    // Focus the approval card after the UI updates
+    setTimeout(() => {
+      const el = document.querySelector('[data-testid="approval-card"]');
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 100);
   }, []);
 
   // ── StudioShell — the desktop Studio destination IS the operating
@@ -2820,17 +2831,37 @@ function CommandStudioContent() {
         return <VisualCanvasBuilder />;
       case "preview":
         return (
-          <StudioPreviewPanel
-            projectId={projectId}
-            projectName={capabilities.projectName}
-            repositoryName={capabilities.repositoryName}
-            branch={capabilities.activeBranch}
-            sourceKind={capabilities.sourceKind}
-            sourceStatus={capabilities.sourceStatus}
-            versionControl={capabilities.versionControl}
-            workspaceStatus={capabilities.workspaceStatus ?? null}
-            onSelectionChange={setPreviewSelection}
-          />
+          <div className="min-h-0 min-w-0 flex-1 overflow-hidden flex flex-col">
+            {primaryActionState !== "idle" && (
+              <div
+                className="shrink-0 border-b px-4 py-2.5 flex items-center justify-between"
+                style={{
+                  borderColor: "var(--glass-border)",
+                  backgroundColor: "var(--glass-bg)",
+                }}
+                data-testid="studio-primary-action-bar"
+              >
+                <StudioPrimaryAction
+                  state={primaryActionState}
+                  onDeploy={handleDeployRequest}
+                  onFocusApproval={handleFocusApproval}
+                />
+              </div>
+            )}
+            <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+              <StudioPreviewPanel
+                projectId={projectId}
+                projectName={capabilities.projectName}
+                repositoryName={capabilities.repositoryName}
+                branch={capabilities.activeBranch}
+                sourceKind={capabilities.sourceKind}
+                sourceStatus={capabilities.sourceStatus}
+                versionControl={capabilities.versionControl}
+                workspaceStatus={capabilities.workspaceStatus ?? null}
+                onSelectionChange={setPreviewSelection}
+              />
+            </div>
+          </div>
         );
       case "browser":
         return <StudioBrowserJobsPanel projectId={projectId} conversationId={conversation.selectedConversationId} />;
