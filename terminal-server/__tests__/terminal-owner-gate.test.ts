@@ -49,10 +49,12 @@ vi.mock("../clerk-verify.js", () => ({
 // ─── Env helpers ────────────────────────────────────────────────────
 
 let savedOwnerEnv: string | undefined;
+let savedAllowedEnv: string | undefined;
 let savedAuthSecret: string | undefined;
 
 beforeEach(() => {
   savedOwnerEnv = process.env.TERMINAL_OWNER_CLERK_IDS;
+  savedAllowedEnv = process.env.TERMINAL_ALLOWED_CLERK_IDS;
   savedAuthSecret = process.env.TERMINAL_AUTH_SECRET;
   process.env.TERMINAL_AUTH_SECRET = VALID_SECRET;
 });
@@ -60,6 +62,8 @@ beforeEach(() => {
 afterEach(() => {
   if (savedOwnerEnv === undefined) delete process.env.TERMINAL_OWNER_CLERK_IDS;
   else process.env.TERMINAL_OWNER_CLERK_IDS = savedOwnerEnv;
+  if (savedAllowedEnv === undefined) delete process.env.TERMINAL_ALLOWED_CLERK_IDS;
+  else process.env.TERMINAL_ALLOWED_CLERK_IDS = savedAllowedEnv;
   if (savedAuthSecret === undefined) delete process.env.TERMINAL_AUTH_SECRET;
   else process.env.TERMINAL_AUTH_SECRET = savedAuthSecret;
   vi.clearAllMocks();
@@ -113,10 +117,11 @@ describe("isTerminalOwner", () => {
 describe("warnIfOwnerAllowlistUnset", () => {
   it("warns when the env var is unset", () => {
     delete process.env.TERMINAL_OWNER_CLERK_IDS;
+    delete process.env.TERMINAL_ALLOWED_CLERK_IDS;
     const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
     warnIfOwnerAllowlistUnset();
     expect(spy).toHaveBeenCalledTimes(1);
-    expect(spy.mock.calls[0][0]).toMatch(/TERMINAL_OWNER_CLERK_IDS is unset/);
+    expect(spy.mock.calls[0][0]).toMatch(/TERMINAL_ALLOWED_CLERK_IDS is unset/);
     spy.mockRestore();
   });
 
@@ -126,6 +131,7 @@ describe("warnIfOwnerAllowlistUnset", () => {
     warnIfOwnerAllowlistUnset();
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+    delete process.env.TERMINAL_OWNER_CLERK_IDS;
   });
 });
 
