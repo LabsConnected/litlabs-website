@@ -432,18 +432,6 @@ function CommandStudioContent() {
   const approvalRetryable = useExecutionStore((s) => s.approvalRetryable);
   const approvalExpired = useExecutionStore((s) => s.approvalExpired);
 
-  // Focus the canonical ApprovalCard (scrolls to it, no duplicate button)
-  const handleFocusApproval = useCallback(() => {
-    // Select the Chat tab so the canonical ApprovalCard is visible
-    setLittActiveTab("chat");
-    // Reveal the conversation panel if collapsed
-    setLittCollapsed(false);
-    // Focus the approval card after the UI updates
-    setTimeout(() => {
-      const el = document.querySelector('[data-testid="approval-card"]');
-      el?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 100);
-  }, []);
 
   // ── StudioShell — the desktop Studio destination IS the operating
   // shell: workspace rail + central stage + contextual inspector + the
@@ -717,6 +705,19 @@ function CommandStudioContent() {
   // Canonical LiTT active tab — single source of truth shared by the
   // desktop rail, the mobile sheet, and header/activity actions.
   const [littActiveTab, setLittActiveTab] = useState<"chat" | "live">("chat");
+
+  // Phase 3B: Focus the canonical ApprovalCard (scrolls to it, no duplicate button)
+  const handleFocusApproval = useCallback(() => {
+    // Select the Chat tab so the canonical ApprovalCard is visible
+    setLittActiveTab("chat");
+    // Reveal the conversation panel if collapsed
+    setLittCollapsed(false);
+    // Focus the approval card after the UI updates
+    setTimeout(() => {
+      const el = document.querySelector('[data-testid="approval-card"]');
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 100);
+  }, []);
 
   // Viewport tier (declared above with the canvas state) drives
   // desktop-rail vs mobile-sheet LiTT presentation — null until first
