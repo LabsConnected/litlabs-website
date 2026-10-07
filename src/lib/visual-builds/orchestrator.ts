@@ -126,6 +126,10 @@ export async function runVisualBuild(input: {
   userId: string;
   request: VisualBuildRequest;
 }): Promise<VisualBuildExecutionResult> {
+  // Fail closed BEFORE any build/mission state is written: with no terminal
+  // configured nothing below can succeed, and a half-created build would be
+  // left unfinished.
+  TERMINAL_BASE();
   const _vbStartTime = Date.now();
   const project = await getProject(input.projectId, input.userId);
   if (!project) {

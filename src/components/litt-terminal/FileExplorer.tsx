@@ -109,6 +109,10 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
     // TODO(P0-2): Route through /api/studio-projects/[projectId]/files instead
     // of the terminal-server directly, so file operations are audit-logged
     // server-side. Requires passing projectId into FileExplorer as a prop.
+    if (!wsUrl) {
+      setError("Terminal server is not configured. Set NEXT_PUBLIC_TERMINAL_HTTP_URL.");
+      return;
+    }
     const name = prompt("New file name?");
     if (!name) return;
     try {
@@ -126,6 +130,10 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
   };
 
   const deleteFile = async (path: string) => {
+    if (!wsUrl) {
+      setError("Terminal server is not configured. Set NEXT_PUBLIC_TERMINAL_HTTP_URL.");
+      return;
+    }
     if (!confirm(`Delete ${path}?`)) return;
     try {
       const res = await fetch(`${wsUrl}/files/delete`, {
