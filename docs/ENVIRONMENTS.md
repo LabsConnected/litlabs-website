@@ -8,9 +8,9 @@ need an owner to confirm against Railway / Clerk / Cloudflare.
 
 | Environment | Where | Notes |
 | --- | --- | --- |
-| Local dev | `pnpm dev` (port 3001), `pnpm terminal:dev` (terminal server, port 4001) | Client terminal URL resolves to `http://localhost:4001` unless `NEXT_PUBLIC_TERMINAL_HTTP_URL` / `NEXT_PUBLIC_TERMINAL_WS_URL` is set. It never falls back to the production terminal host. |
-| Production | Railway (`RAILWAY.md`), `https://www.litlabs.net` | Deployed from `main`. Terminal server is a separate Railway service (`litlabs-terminal-server`). |
-| Railway PR / preview deploys | **verify** | Not documented anywhere in the repo. If they exist, confirm they get their own `TERMINAL_PUBLIC_URL` and `TERMINAL_SERVER_INTERNAL_URL`. |
+| Local dev | `pnpm dev` (port 3001), `pnpm terminal:dev` (terminal server, port 4001) | Terminal URL resolves to `http://localhost:4001` unless overridden. Never falls back to a production host. |
+| Production | Railway project `litlabs-terminal-server`, environment `production`, service `web` (`RAILWAY.md`), `https://www.litlabs.net` | Deployed from `main`. Explicitly defines `NEXT_PUBLIC_TERMINAL_HTTP_URL`, `NEXT_PUBLIC_TERMINAL_WS_URL` and `TERMINAL_SERVER_INTERNAL_URL` (`TERMINAL_PUBLIC_URL` is not set; not needed). |
+| Railway PR / preview deploys | Railway projects/services such as `web-phase3b-630` + `terminal-phase3b-630` | Each must define its own terminal URLs. **Do not key logic on `RAILWAY_ENVIRONMENT_NAME`**: at least one preview project also names its environment `production`. |
 | Staging | **verify** | No staging environment is documented. See "Naming" below. |
 
 Vercel is not a hosting target (Railway is production). Remaining Vercel
@@ -30,22 +30,37 @@ and Vapi (`project-tools/registry.ts`, `vapi-tool-definitions.ts`), derived
 from a branch name. It does **not** mean the LiTTree platform itself has a
 staging environment. Do not use it to reason about platform environments.
 
-## Terminal-server URL resolution
+## Terminal-server URL resolution (fail closed)
 
-- Server code: `getTerminalServerUrl()` in `src/lib/terminal-url.ts`
-  (`TERMINAL_PUBLIC_URL` → `NEXT_PUBLIC_TERMINAL_WS_URL` → `NEXT_PUBLIC_TERMINAL_HTTP_URL` → legacy production host).
-- Server-to-server: `resolveTerminalInternalUrl()` (no hardcoded host).
+There is **no implicit production fallback**. A deployment that does not
+explicitly configure a terminal URL gets an unconfigured state, never the
+production terminal. Localhost (`http://localhost:4001`) is a
+development-only default (`NODE_ENV !== "production"`).
+
+- Server resolver: `getTerminalServerUrl()` in `src/lib/terminal-url.ts`
+  (`TERMINAL_PUBLIC_URL` -> `NEXT_PUBLIC_TERMINAL_WS_URL` -> `NEXT_PUBLIC_TERMINAL_HTTP_URL`;
+  `""` in production when none is set).
+- Server callers that make requests use `requireTerminalBaseUrl()` /
+  `terminalNotConfiguredResponse()` in `src/lib/terminal-config.ts`
+  (`TERMINAL_SERVER_INTERNAL_URL` first, then the resolver). When
+  unconfigured, the Studio project API routes (files, files/raw, assets/insert,
+  workspace-state, publish-readiness, checks, checks/run-all, checkpoints POST)
+  return `503 {"code":"terminal_not_configured"}`, and library callers
+  (workspace transport/checkpoints, mission executor, visual builds, project
+  tools) throw `TerminalNotConfiguredError` (status 503). Status/health probes
+  (`integrations/status`, `capabilities/project-terminal`) report not
+  configured / unreachable instead of probing an empty URL.
+- Server-to-server only: `resolveTerminalInternalUrl()` (unchanged).
 - Client components: `resolveClientTerminalUrl()` in `src/lib/terminal-url-client.ts`.
-  Production builds keep the legacy production fallback; other builds do not.
-- The legacy production host literal lives in `terminal-url-client.ts`
-  (`LEGACY_PROD_TERMINAL_URL`). Remaining literals (CSP in `next.config.ts`,
-  the CLI auth config, tests, docs) are tracked for a later phase.
-
-**Risk to be aware of:** a *production-mode* deployment that forgets
-`TERMINAL_PUBLIC_URL` / `NEXT_PUBLIC_TERMINAL_*` (for example a Railway
-preview build, which runs with `NODE_ENV=production`) still talks to the
-production terminal server. Removing that fallback is a behaviour change
-that needs the Railway env vars confirmed first.
+  Production builds return `""` (the UI shows "not configured") when no
+  non-localhost URL is set.
+- `NEXT_PUBLIC_*` values are inlined at **build time**. A service that sets
+  them only at runtime will see the client resolver fail closed.
+- Every environment that serves the app (production `web`, each PR/preview
+  web service) must explicitly define `NEXT_PUBLIC_TERMINAL_HTTP_URL` or
+  `NEXT_PUBLIC_TERMINAL_WS_URL` and `TERMINAL_SERVER_INTERNAL_URL`.
+- Remaining production-host literals (CSP in `next.config.ts`, the CLI auth
+  config, tests, docs) are not fallbacks and are tracked for a later phase.
 
 ## CI and production
 

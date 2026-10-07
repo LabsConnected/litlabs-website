@@ -1,18 +1,18 @@
 import "server-only";
 
-import { LEGACY_PROD_TERMINAL_URL } from "./terminal-url-client";
+import { LOCAL_TERMINAL_URL } from "./terminal-url-client";
 
 /**
  * Centralized terminal-server and voice-server URL resolution.
  *
- * This module replaces the scattered hardcoded Railway production URLs that
- * were duplicated across dozens of files (API routes, lib helpers, etc.).
- * Each function checks environment variables in priority order and falls
- * back to the legacy hardcoded production URL only as a last resort.
+ * Each function checks environment variables in priority order. There is NO
+ * implicit production fallback: when nothing is configured the result is ""
+ * (unconfigured) in production, and http://localhost:4001 in development.
+ * Server callers that need a usable URL should use requireTerminalBaseUrl()
+ * from ./terminal-config, which fails closed with an explicit 503-style error.
  *
- * Client-side components cannot import this module (it uses "server-only")
- * and should instead reference NEXT_PUBLIC_* env vars directly with the same
- * hardcoded fallback.
+ * Client-side components cannot import this module (it uses "server-only");
+ * they use resolveClientTerminalUrl() from ./terminal-url-client.
  */
 
 /**
@@ -22,7 +22,7 @@ import { LEGACY_PROD_TERMINAL_URL } from "./terminal-url-client";
  *   1. TERMINAL_PUBLIC_URL            — canonical env var (preferred)
  *   2. NEXT_PUBLIC_TERMINAL_WS_URL    — browser-side WebSocket URL (ws:// → http://)
  *   3. NEXT_PUBLIC_TERMINAL_HTTP_URL  — browser-side HTTP fallback
- *   4. Legacy hardcoded production URL
+ *   4. Development only: http://localhost:4001 (production returns "")
  */
 export function getTerminalServerUrl(): string {
   // 1. Canonical env var (server-side, preferred)
@@ -43,9 +43,8 @@ export function getTerminalServerUrl(): string {
     return process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL.replace(/\/$/, "");
   }
 
-  // 4. Legacy hardcoded production URL — must match the Railway service
-  // deploy-terminal.yml actually deploys to (litlabs-terminal-server).
-  return LEGACY_PROD_TERMINAL_URL;
+  // 4. No implicit production fallback. Localhost is development-only.
+  return process.env.NODE_ENV === "production" ? "" : LOCAL_TERMINAL_URL;
 }
 
 export type TerminalInternalUrlSource = "internal" | "public-fallback" | "none";

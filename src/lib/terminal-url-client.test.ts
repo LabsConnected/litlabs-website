@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  LEGACY_PROD_TERMINAL_URL,
-  LOCAL_TERMINAL_URL,
-  resolveClientTerminalUrl,
-} from "./terminal-url-client";
+import { LOCAL_TERMINAL_URL, resolveClientTerminalUrl } from "./terminal-url-client";
 
 describe("resolveClientTerminalUrl", () => {
   it("prefers an explicit non-localhost HTTP URL in any environment", () => {
@@ -20,20 +16,26 @@ describe("resolveClientTerminalUrl", () => {
     );
   });
 
-  it("keeps the legacy production fallback for production builds (unchanged)", () => {
-    expect(resolveClientTerminalUrl(undefined, undefined, "production")).toBe(
-      LEGACY_PROD_TERMINAL_URL,
-    );
-    expect(resolveClientTerminalUrl("http://localhost:4001", undefined, "production")).toBe(
-      LEGACY_PROD_TERMINAL_URL,
-    );
+  it("fails closed (empty) in production when nothing is configured", () => {
+    expect(resolveClientTerminalUrl(undefined, undefined, "production")).toBe("");
+    expect(resolveClientTerminalUrl("", "", "production")).toBe("");
   });
 
-  it("never falls back to the production host outside production builds", () => {
+  it("treats localhost as unconfigured in production instead of using any host", () => {
+    expect(resolveClientTerminalUrl("http://localhost:4001", undefined, "production")).toBe("");
+    expect(resolveClientTerminalUrl(undefined, "ws://localhost:4001", "production")).toBe("");
+  });
+
+  it("uses localhost only outside production", () => {
     expect(resolveClientTerminalUrl(undefined, undefined, "development")).toBe(LOCAL_TERMINAL_URL);
     expect(resolveClientTerminalUrl("http://localhost:5000", undefined, "development")).toBe(
       "http://localhost:5000",
     );
-    expect(resolveClientTerminalUrl(undefined, undefined, "test")).not.toBe(LEGACY_PROD_TERMINAL_URL);
+  });
+
+  it("never yields a railway production host without explicit config", () => {
+    for (const env of ["production", "development", "test"]) {
+      expect(resolveClientTerminalUrl(undefined, undefined, env)).not.toMatch(/railway\.app/);
+    }
   });
 });

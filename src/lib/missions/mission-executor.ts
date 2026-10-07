@@ -32,13 +32,14 @@ import {
   type MissionApproval,
   type ValidationResult,
 } from "./mission-repository";
+import { TerminalNotConfiguredError } from "@/lib/terminal-config";
 import { getTerminalServerUrl } from "@/lib/terminal-url";
 
 const TERMINAL_BASE = () => {
   const raw = process.env.TERMINAL_SERVER_INTERNAL_URL ?? "";
-  return raw && !raw.includes("localhost")
-    ? raw
-    : getTerminalServerUrl();
+  const base = raw && !raw.includes("localhost") ? raw : getTerminalServerUrl();
+  if (!base) throw new TerminalNotConfiguredError();
+  return base;
 };
 
 /**

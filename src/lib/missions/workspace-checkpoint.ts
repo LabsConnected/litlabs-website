@@ -11,7 +11,7 @@
 import "server-only";
 
 import { createCheckpoint } from "@/lib/missions/mission-repository";
-import { getTerminalServerUrl } from "@/lib/terminal-url";
+import { requireTerminalBaseUrl } from "@/lib/terminal-config";
 
 export interface WorkspaceCheckpointInput {
   projectId: string;
@@ -28,10 +28,7 @@ export interface WorkspaceCheckpointResult {
 }
 
 function terminalBase(): string {
-  return (
-    process.env.TERMINAL_SERVER_INTERNAL_URL ??
-    getTerminalServerUrl()
-  );
+  return requireTerminalBaseUrl();
 }
 
 function internalServiceKey(): string {

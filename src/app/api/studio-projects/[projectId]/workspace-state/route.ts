@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
-import { getTerminalServerUrl } from "@/lib/terminal-url";
+import { requireTerminalBaseUrl, terminalNotConfiguredResponse } from "@/lib/terminal-config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,8 +39,7 @@ const WELCOME_SCREEN_MARKER = "LITT-WELCOME-SCREEN";
 const SCAFFOLD_MANIFEST_PATH = ".litt/scaffold.json";
 const ENTRY_FILE_PATH = "index.html";
 
-const TERMINAL_BASE = () =>
-  process.env.TERMINAL_SERVER_INTERNAL_URL ?? getTerminalServerUrl();
+const TERMINAL_BASE = () => requireTerminalBaseUrl();
 
 function internalServiceKey(): string {
   return process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
@@ -150,6 +149,8 @@ export async function GET(
 ) {
   const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const terminalUnavailable = terminalNotConfiguredResponse();
+  if (terminalUnavailable) return terminalUnavailable;
 
   const { projectId } = await params;
 

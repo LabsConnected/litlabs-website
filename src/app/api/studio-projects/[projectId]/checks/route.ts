@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { getProject, verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { listCheckpoints } from "@/lib/missions/mission-repository";
 import { listPendingApprovals } from "@/lib/missions/mission-repository";
-import { getTerminalServerUrl } from "@/lib/terminal-url";
+import { requireTerminalBaseUrl, terminalNotConfiguredResponse } from "@/lib/terminal-config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,7 +53,7 @@ function parseChangedFiles(output: string): string[] {
 }
 
 async function runWorkspaceCommand(workspaceId: string, userId: string, command: string) {
-  const terminalBase = process.env.TERMINAL_SERVER_INTERNAL_URL ?? getTerminalServerUrl();
+  const terminalBase = requireTerminalBaseUrl();
   const response = await fetch(`${terminalBase}/internal/workspace/${workspaceId}/exec`, {
     method: "POST",
     headers: {
@@ -119,6 +119,8 @@ export async function GET(
 ) {
   const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const terminalUnavailable = terminalNotConfiguredResponse();
+  if (terminalUnavailable) return terminalUnavailable;
   const { projectId } = await params;
   const payload = await baseResponse(projectId, userId);
   if (!payload) return NextResponse.json({ error: "Project not found" }, { status: 404 });
@@ -131,6 +133,8 @@ export async function POST(
 ) {
   const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const terminalUnavailable = terminalNotConfiguredResponse();
+  if (terminalUnavailable) return terminalUnavailable;
   const { projectId } = await params;
   const project = await getProject(projectId, userId);
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
