@@ -1082,7 +1082,7 @@ async function runAgentLoopV2Inner(
   // For BUILD tasks, only include file-writing tools to fit within provider
   // token budgets. The full registry (7.8k tokens) exceeds Groq's 8k limit.
   // This preserves capability by selecting tools required for the current turn.
-  const isBuildRequest = cfg.taskScope === "full" || cfg.requireToolCallOnFirstStep;
+  const isBuildRequest = cfg.requireToolCallOnFirstStep === true;
   if (isBuildRequest) {
     const buildToolIds = new Set([
       "write_file", "create_file", "edit_file", "read_file", "list_files",
