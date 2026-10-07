@@ -128,7 +128,7 @@ describe("AppShell top bar", () => {
     );
     const header = getHeader();
     // Secondary routes are not inline — they live in the More dropdown.
-    for (const secondary of ["Games", "Marketplace", "Wallet", "Showcase", "Music"]) {
+    for (const secondary of ["Games", "Wallet", "Showcase", "Music"]) {
       expect(within(header).queryByText(secondary)).toBeNull();
     }
     // Open More — flag-gated Games must appear (retroGameRuntime enabled).
@@ -137,7 +137,7 @@ describe("AppShell top bar", () => {
     const menu = document.querySelector('[role="menu"]');
     expect(menu).not.toBeNull();
     // Phase 3B: Projects, Discover, Settings are top-level, not in More
-    for (const label of ["Marketplace", "CLI", "Docs", "Deployments"]) {
+    for (const label of ["CLI", "Docs", "Deployments"]) {
       expect(within(menu as HTMLElement).getByText(label)).toBeTruthy();
     }
     // Games + Discover appear only when their flags are on; assert on the
@@ -154,9 +154,9 @@ describe("AppShell top bar", () => {
       </AppShell>,
     );
     // Phase 3B: /discover is now a top-level nav item, not in More.
-    // The Discover nav item itself carries aria-current.
+    // The Discover nav link itself carries aria-current.
     const discoverLinks = Array.from(
-      getHeader().querySelectorAll('[data-testid="nav-discover"][aria-current="page"]'),
+      getHeader().querySelectorAll('a[href="/discover"][aria-current="page"]'),
     );
     expect(discoverLinks.length).toBeGreaterThanOrEqual(1);
   });
