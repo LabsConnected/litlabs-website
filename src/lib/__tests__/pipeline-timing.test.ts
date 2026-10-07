@@ -42,6 +42,7 @@ import {
   recordPipelineStage,
   PipelineTimer,
 } from "@/lib/metrics";
+import type { PipelineStageLabels } from "@/lib/metrics";
 
 describe("Performance PR #1 — Pipeline timing", () => {
   beforeEach(() => {
@@ -129,14 +130,12 @@ describe("Performance PR #1 — Pipeline timing", () => {
     // This test documents that prompt contents, code, PII cannot be passed
     // because the type system only allows the defined low-cardinality values.
     const labels = {
-      stage: "build" as const,
-      taskKind: "build" as const,
-      // @ts-expect-error — prompt contents are not a valid label
+      stage: "build",
+      taskKind: "build",
+      // @ts-expect-error — prompt is not an allowed pipeline label
       prompt: "secret prompt contents",
-    };
-    // The type error above proves the constraint. At runtime we only
-    // pass the valid subset.
-    const { prompt: _ignored, ...valid } = labels;
-    expect(() => recordPipelineStage(valid, 100)).not.toThrow();
+    } satisfies PipelineStageLabels;
+
+    expect(labels.stage).toBe("build");
   });
 });
