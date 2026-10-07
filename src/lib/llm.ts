@@ -289,14 +289,12 @@ function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
 }
 
 function rawDefaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
-  // "litt-alias" models (LiTT Balanced/Reasoning/Code) should use the full
-  // fallback chain — the apiProvider is a *preference*, not a hard pin.
-  // Without this, a single provider failure bricks the conversation.
-  if (opts.provider && opts.category !== "litt-alias") return [opts.provider];
-
-  // For litt-alias, build a chain starting with the preferred provider
-  // then falling back to the others.
-  if (opts.category === "litt-alias" && opts.provider) {
+  // A pinned provider is a *preference*, not a hard single-provider lock.
+  // Build a fallback chain starting with the preferred provider, so a
+  // single provider failure doesn't brick the request. (Previously, a
+  // non-litt-alias category with an explicit provider returned [provider]
+  // with no fallbacks — causing 429s to fail with no recovery.)
+  if (opts.provider) {
     const preferred = opts.provider;
     const all: LLMProvider[] = OPENAI_KEY
       ? ["openai", "gemini", "groq", "openrouter-free"]
@@ -881,7 +879,9 @@ export async function generateText(
         : httpStatus === 408 ? "TIMEOUT"
         : isProviderError && err.isRetryable ? "RETRYABLE"
         : "UNKNOWN";
-      const willFallback = isProviderError && err.isRetryable;
+      // willFallback is true only if the error is retryable AND there's
+      // actually another provider in the chain to try next.
+      const willFallback = isProviderError && err.isRetryable && attempted < chain.length;
 
       console.info(`[ai-route] attempt_failure`, {
         requestId: meteringRequestId,
@@ -1190,7 +1190,8 @@ export async function streamText(
       // - Non-provider errors (app bugs): do NOT fallback, throw immediately
       const isAuth = errorTypeStream === "AUTH";
       const canFallback = isProviderError && (err.isRetryable || isAuth || isMalformed);
-      const willFallbackStream = canFallback;
+      // willFallback is true only if fallback is allowed AND there's a next provider
+      const willFallbackStream = canFallback && attempted < chain.length;
 
       console.info(`[ai-route] attempt_failure`, {
         requestId,
