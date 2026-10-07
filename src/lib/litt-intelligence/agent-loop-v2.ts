@@ -838,11 +838,16 @@ function compactBuildInputs(
   messages: LLMMessage[],
   toolDefs: ToolDefinition[],
   maxInputTokens: number = 6000
-): { systemPrompt: string; messages: LLMMessage[]; compacted: boolean; budget: ReturnType<typeof instrumentInputBudget> } {
+): { systemPrompt: string; messages: LLMMessage[]; compacted: boolean; budget: ReturnType<typeof instrumentInputBudget>; exceedsFixedBudget: boolean } {
   const budget = instrumentInputBudget(systemPrompt, messages, toolDefs);
   
+  // Hard guard: if fixed components (system + tools) alone exceed budget,
+  // we cannot safely call the provider. Flag for rerouting.
+  const fixedTokens = budget.systemTokens + budget.toolTokens;
+  const exceedsFixedBudget = fixedTokens >= maxInputTokens;
+  
   if (budget.totalTokens <= maxInputTokens) {
-    return { systemPrompt, messages, compacted: false, budget };
+    return { systemPrompt, messages, compacted: false, budget, exceedsFixedBudget };
   }
   
   // Budget exceeded — must compact
@@ -861,7 +866,7 @@ function compactBuildInputs(
   const finalBudget = instrumentInputBudget(systemPrompt, compacted, toolDefs);
   const wasCompacted = compacted.length < messages.length;
   
-  return { systemPrompt, messages: compacted, compacted: wasCompacted, budget: finalBudget };
+  return { systemPrompt, messages: compacted, compacted: wasCompacted, budget: finalBudget, exceedsFixedBudget };
 }
 
 interface LoopStepMetering {
@@ -1071,7 +1076,28 @@ async function runAgentLoopV2Inner(
   );
   const { offerable: offerableToolIds, degraded: degradedToolIds } =
     filterOfferableTools(toolHealthMap);
-  const offerableTools = availableTools.filter((t) => offerableToolIds.includes(t.id));
+  let offerableTools = availableTools.filter((t) => offerableToolIds.includes(t.id));
+  
+  // ── Intent-aware tool selection for BUILD requests ──
+  // For BUILD tasks, only include file-writing tools to fit within provider
+  // token budgets. The full registry (7.8k tokens) exceeds Groq's 8k limit.
+  // This preserves capability by selecting tools required for the current turn.
+  const isBuildRequest = cfg.taskScope === "full" || cfg.requireToolCallOnFirstStep;
+  if (isBuildRequest) {
+    const buildToolIds = new Set([
+      "write_file", "create_file", "edit_file", "read_file", "list_files",
+      "apply_patch", "files_write", "files_read",
+    ]);
+    const buildTools = offerableTools.filter((t) => 
+      buildToolIds.has(t.id) || t.id.includes("file") || t.id.includes("write")
+    );
+    // Only use filtered set if it actually reduces size and preserves capability
+    if (buildTools.length > 0 && buildTools.length < offerableTools.length) {
+      console.log(`[agent-loop] BUILD tool selection: ${offerableTools.length} -> ${buildTools.length} tools`);
+      offerableTools = buildTools;
+    }
+  }
+  
   const healthNote = buildToolHealthPromptNote(toolHealthMap);
   if (healthNote) {
     cfg.systemPrompt += "\n\n" + healthNote;
