@@ -322,8 +322,8 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
       timeoutMs: DEFAULT_ATTEMPT_TIMEOUT_MS,
       credentialState: () => (envPresent("GROQ_API_KEY") ? "available" : "missing"),
       models: () => [
-        process.env.GROQ_MODEL || "openai/gpt-oss-120b",
-        "llama-3.1-8b-instant",
+        process.env.GROQ_MODEL || "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b",
       ],
     },
     {
@@ -704,7 +704,11 @@ function resolveModelHint(model: string | undefined): ModelHint {
   if (m.startsWith("@cf/")) return { kind: "route", provider: "cloudflare", model: m };
   if (m.startsWith("gemini") && !m.includes("/")) return { kind: "route", provider: "gemini", model: m };
   if (m.startsWith("google/gemini")) return { kind: "route", provider: "gemini", model: m.replace(/^google\//, "") };
-  if (/^(llama|mixtral|gemma|whisper|deepseek-r1-distill|qwen|openai\/gpt-oss)/i.test(m) && !m.includes("/")) {
+  if (/^(llama|mixtral|gemma|whisper|deepseek-r1-distill|qwen)/i.test(m) && !m.includes("/")) {
+    return { kind: "route", provider: "groq", model: m };
+  }
+  // Groq namespaced models (e.g. openai/gpt-oss-120b, openai/gpt-oss-20b) are Groq, not BYOK
+  if (/^openai\/gpt-oss/i.test(m)) {
     return { kind: "route", provider: "groq", model: m };
   }
   if (/^(mistral|codestral|pixtral|ministral|open-mistral|open-codestral)/i.test(m) && !m.includes("/")) {

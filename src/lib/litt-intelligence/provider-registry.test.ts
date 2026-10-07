@@ -268,6 +268,22 @@ describe("provider registry — model hints", () => {
     expect(or!.models).not.toContain("openai/gpt-4o");
   });
 
+  it("routes Groq namespaced models (openai/gpt-oss-*) to Groq, not BYOK", () => {
+    vi.stubEnv("GROQ_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    for (const m of ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]) {
+      const plan = planBasicRoutes(TOOL_REQ, { model: m });
+      const groq = plan.providers.find((p) => p.provider === "groq");
+      expect(groq).toBeDefined();
+      expect(groq!.models).toContain(m);
+      // Must NOT be routed to BYOK
+      const byok = plan.providers.find((p) => p.provider === "byok");
+      if (byok) {
+        expect(byok.models).not.toContain(m);
+      }
+    }
+  });
+
   it("ignores LiTT aliases and auto", () => {
     vi.stubEnv("GEMINI_API_KEY", "x");
     vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
