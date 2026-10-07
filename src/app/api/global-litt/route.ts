@@ -15,33 +15,12 @@ import { supabaseAdmin } from "@/lib/supabase";
  */
 
 export async function GET(request: NextRequest) {
-  const { clerkId } = await auth(request);
-  if (!clerkId) {
+  const { userId } = await auth(request);
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
-    // Resolve the Clerk ID to the internal users.id (UUID).
-    // studio_projects.user_id is a UUID foreign key — the Clerk ID
-    // (user_xxx) must never be used directly against it, or the lookup
-    // fails and a fresh user's project is never created.
-    const { data: userRow, error: userError } = await supabaseAdmin
-      .from("users")
-      .select("id")
-      .eq("clerk_id", clerkId)
-      .maybeSingle();
-
-    if (userError) {
-      return NextResponse.json({ error: userError.message }, { status: 500 });
-    }
-    if (!userRow?.id) {
-      return NextResponse.json(
-        { error: "User not provisioned", project: null },
-        { status: 404 }
-      );
-    }
-    const userId = userRow.id;
-
     // Try to find existing Global LiTT project
     const { data: existing, error: findError } = await supabaseAdmin
       .from("studio_projects")
@@ -57,37 +36,6 @@ export async function GET(request: NextRequest) {
 
     if (existing) {
       return NextResponse.json({ project: existing });
-    }
-
-    // Legacy: before the UUID-resolution fix, projects were created with the
-    // raw Clerk ID as user_id (text). If such a row exists, migrate it to the
-    // canonical UUID instead of creating a duplicate.
-    const { data: legacy, error: legacyError } = await supabaseAdmin
-      .from("studio_projects")
-      .select("id, name, slug, created_at, updated_at")
-      .eq("user_id", clerkId)
-      .eq("is_system", true)
-      .eq("system_type", "global_litt")
-      .maybeSingle();
-
-    if (legacyError) {
-      return NextResponse.json({ error: legacyError.message }, { status: 500 });
-    }
-
-    if (legacy) {
-      const { data: migrated, error: migrateError } = await supabaseAdmin
-        .from("studio_projects")
-        .update({ user_id: userId })
-        .eq("id", legacy.id)
-        .select("id, name, slug, created_at, updated_at")
-        .single();
-
-      if (migrateError) {
-        // Migration failed (e.g., raced with another migrator) — return the
-        // legacy row rather than failing; the next call will retry.
-        return NextResponse.json({ project: legacy });
-      }
-      return NextResponse.json({ project: migrated });
     }
 
     // Not found — create it with a normal INSERT.
