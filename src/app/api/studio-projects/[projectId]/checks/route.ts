@@ -113,14 +113,14 @@ async function baseResponse(projectId: string, userId: string) {
   };
 }
 
+// GET stays available without a terminal: baseResponse() reads the database and
+// treats a failed/unconfigured workspace command as "no changed files".
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
   const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const terminalUnavailable = terminalNotConfiguredResponse();
-  if (terminalUnavailable) return terminalUnavailable;
   const { projectId } = await params;
   const payload = await baseResponse(projectId, userId);
   if (!payload) return NextResponse.json({ error: "Project not found" }, { status: 404 });

@@ -41,8 +41,6 @@ async function postHandler(
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const terminalUnavailable = terminalNotConfiguredResponse();
-  if (terminalUnavailable) return terminalUnavailable;
 
   const { projectId, buildId } = await ctx!.params;
   const body = await request.json().catch(() => ({}));
@@ -61,6 +59,9 @@ async function postHandler(
   }
 
   if (action === "retry") {
+    // Only a retry re-runs the build through the terminal; approve is DB-only.
+    const terminalUnavailable = terminalNotConfiguredResponse();
+    if (terminalUnavailable) return terminalUnavailable;
     const build = await getVisualBuild(buildId, projectId);
     if (!build) {
       return NextResponse.json({ error: "Visual build not found" }, { status: 404 });
