@@ -586,7 +586,7 @@ describe("streamText — provider failure falls through", () => {
   it("reports the final error only after every candidate fails", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const fetchMock = vi.fn(async () => new Response("upstream down", { status: 500 }));
+    const fetchMock = vi.fn(async (_url: unknown) => new Response("upstream down", { status: 500 }));
     vi.stubGlobal("fetch", fetchMock);
 
     const chunks: string[] = [];
