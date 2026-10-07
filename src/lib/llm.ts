@@ -197,7 +197,7 @@ const GEMINI_FALLBACK_MODEL =
 
 export const DEFAULT_MODELS: Record<LLMProvider, string> = {
   gemini: GEMINI_PRIMARY_MODEL,
-  groq: "openai/gpt-oss-120b",
+  groq: "openai/gpt-oss-20b",
   "groq-whisper": "whisper-large-v3",
   openai: OPENAI_MODEL,
   "openrouter-free": "openrouter/free",
