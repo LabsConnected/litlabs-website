@@ -9,6 +9,10 @@
 //    short paths that AppShell no longer uses, but users still hit via
 //    guess, bookmark, or stale links. Each 308s to the real destination
 //    already listed in src/lib/navigation.ts.
+// 3. Phase 3A (#627): duplicate chat/assistant and builder routes
+//    consolidate into the canonical Studio experience. Global LiTT is
+//    persistent across the app (not a separate page), so chat routes
+//    redirect to /studio where both Studio and Global LiTT are available.
 
 export const CANONICAL_REDIRECTS = [
   { source: "/community", destination: "/discover", permanent: true },
@@ -18,6 +22,19 @@ export const CANONICAL_REDIRECTS = [
   { source: "/files", destination: "/library/files", permanent: true },
   { source: "/saved", destination: "/library/saved", permanent: true },
   { source: "/connections", destination: "/settings/connections", permanent: true },
+  // Phase 3A: duplicate chat/assistant surfaces → Studio (Global LiTT is persistent there)
+  { source: "/agent-chat", destination: "/studio", permanent: true },
+  { source: "/agent", destination: "/studio", permanent: true },
+  { source: "/chat", destination: "/studio", permanent: true },
+  { source: "/litt", destination: "/studio", permanent: true },
+  // Phase 3A: duplicate builder entry points → Studio
+  { source: "/ai-builder", destination: "/studio", permanent: true },
+  { source: "/builder", destination: "/studio", permanent: true },
+  { source: "/generate", destination: "/studio", permanent: true },
+  { source: "/create", destination: "/studio", permanent: true },
+  { source: "/flow", destination: "/studio", permanent: true },
+  // Phase 3A: legacy profile route → canonical handle route
+  { source: "/profile/:username", destination: "/u/:username", permanent: true },
 ] as const;
 
 export type CanonicalRedirect =
