@@ -432,22 +432,6 @@ function CommandStudioContent() {
   const approvalRetryable = useExecutionStore((s) => s.approvalRetryable);
   const approvalExpired = useExecutionStore((s) => s.approvalExpired);
 
-  // ── Phase 3B: Primary action state derivation ──────────────────────
-  // Derives the one primary action from existing execution/approval/deployment
-  // state. Uses no new state machine; all handlers are existing.
-  // IMPORTANT: Do NOT infer deployment eligibility from execution completion.
-  // "Go Live" only appears when explicitly authorized via approval flow.
-  const primaryActionState: PrimaryActionState = (() => {
-    // Approval required takes precedence — canonical ApprovalCard is actionable
-    if (pendingApproval) return "approval_required";
-    // Building: conversation is busy (AI working)
-    if (conversation.busy) return "building";
-    // TODO: Derive ready_to_deploy, publishing, live, failed from deployment
-    // projection once verified in the preview. For now, idle is the safe
-    // default — never show Go Live without explicit approval state.
-    return "idle";
-  })();
-
   // Focus the canonical ApprovalCard (scrolls to it, no duplicate button)
   const handleFocusApproval = useCallback(() => {
     // Select the Chat tab so the canonical ApprovalCard is visible
@@ -1265,6 +1249,22 @@ function CommandStudioContent() {
     // Shared capabilities — the hook must not start a second poll stack.
     capabilities,
   });
+
+  // ── Phase 3B: Primary action state derivation ──────────────────────
+  // Derives the one primary action from existing execution/approval/deployment
+  // state. Uses no new state machine; all handlers are existing.
+  // IMPORTANT: Do NOT infer deployment eligibility from execution completion.
+  // "Go Live" only appears when explicitly authorized via approval flow.
+  const primaryActionState: PrimaryActionState = (() => {
+    // Approval required takes precedence — canonical ApprovalCard is actionable
+    if (pendingApproval) return "approval_required";
+    // Building: conversation is busy (AI working)
+    if (conversation.busy) return "building";
+    // TODO: Derive ready_to_deploy, publishing, live, failed from deployment
+    // projection once verified in the preview. For now, idle is the safe
+    // default — never show Go Live without explicit approval state.
+    return "idle";
+  })();
 
   const studioTasks = useStudioTasks(capabilities.projectId);
   const refreshTasks = studioTasks.refresh;
