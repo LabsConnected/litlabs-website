@@ -63,7 +63,10 @@ export function compactBuildInputs(
   }
 
   const groups = groupMessages(messages);
-  const lastUserIndex = messages.findLastIndex((m) => m.role === "user");
+  let lastUserIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") { lastUserIndex = i; break; }
+  }
   const requestIndex = currentRequestIndex !== undefined &&
       currentRequestIndex >= 0 &&
       currentRequestIndex < messages.length &&
