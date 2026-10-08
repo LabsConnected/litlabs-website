@@ -422,7 +422,7 @@ function normalizeStreamingProviderFailure(provider: LLMProvider, err: unknown):
   const message = err.message || err.name;
   const rawStatus = (err as Error & { status?: unknown; statusCode?: unknown }).status
     ?? (err as Error & { statusCode?: unknown }).statusCode;
-  const parsed = message.match(/\[([45]\d{2})\s*\]/)
+  const parsed = message.match(/\[([45]\d{2})(?:\s+[^\]]+)?\]/)
     ?? message.match(/\b(?:HTTP|status)\s*[:=]?\s*([45]\d{2})\b/i);
   const status = typeof rawStatus === "number" && rawStatus >= 400 && rawStatus < 600
     ? rawStatus : parsed ? Number(parsed[1]) : null;
