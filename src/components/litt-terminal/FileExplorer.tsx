@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { terminalAuthHeaders } from "@/lib/terminal-client";
+import { resolveClientTerminalUrl } from "@/lib/terminal-url-client";
 import { Folder, FileCode, ChevronRight, ChevronDown, RefreshCw, Plus, Trash2 } from "lucide-react";
 
 interface FileNode {
@@ -21,10 +22,10 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Client-side — mirrors getTerminalServerUrl() from src/lib/terminal-url.ts (server-only).
-  const envUrl = process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL || process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "";
-  const wsUrl = envUrl && !envUrl.includes("localhost")
-    ? envUrl
-    : "https://litlabs-terminal-server-production-0be1.up.railway.app";
+  const wsUrl = resolveClientTerminalUrl(
+    process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL,
+    process.env.NEXT_PUBLIC_TERMINAL_WS_URL,
+  );
 
   const fetchEntries = useCallback(
     async (path: string) => {
@@ -108,6 +109,10 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
     // TODO(P0-2): Route through /api/studio-projects/[projectId]/files instead
     // of the terminal-server directly, so file operations are audit-logged
     // server-side. Requires passing projectId into FileExplorer as a prop.
+    if (!wsUrl) {
+      setError("Terminal server is not configured. Set NEXT_PUBLIC_TERMINAL_HTTP_URL.");
+      return;
+    }
     const name = prompt("New file name?");
     if (!name) return;
     try {
@@ -125,6 +130,10 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
   };
 
   const deleteFile = async (path: string) => {
+    if (!wsUrl) {
+      setError("Terminal server is not configured. Set NEXT_PUBLIC_TERMINAL_HTTP_URL.");
+      return;
+    }
     if (!confirm(`Delete ${path}?`)) return;
     try {
       const res = await fetch(`${wsUrl}/files/delete`, {

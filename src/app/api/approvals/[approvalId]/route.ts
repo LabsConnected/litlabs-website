@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { terminalNotConfiguredResponse } from "@/lib/terminal-config";
 import { getApproval } from "@/lib/missions/mission-repository";
 import { resolveMissionApproval } from "@/lib/missions/mission-executor";
 
@@ -45,6 +46,12 @@ export async function POST(
 
   if (body.decision !== "approved" && body.decision !== "denied") {
     return NextResponse.json({ error: "decision must be 'approved' or 'denied'" }, { status: 400 });
+  }
+
+  // Approving applies a patch through the terminal; denying does not need it.
+  if (body.decision === "approved") {
+    const terminalUnavailable = terminalNotConfiguredResponse();
+    if (terminalUnavailable) return terminalUnavailable;
   }
 
   // Verify ownership before resolving

@@ -56,8 +56,11 @@ jobs:
 
       - name: Health check
         if: steps.check_token.outputs.has_token == 'true'
+        env:
+          # Optional repo variable; defaults to the production terminal service.
+          TERMINAL_BASE_URL: ${{ vars.TERMINAL_BASE_URL || 'https://litlabs-terminal-server-production-0be1.up.railway.app' }}
         run: |
           sleep 30
           curl -sSf --retry 3 --retry-delay 10 \
-            https://litlabs-terminal-server-production-0be1.up.railway.app/health/ready \
+            "${TERMINAL_BASE_URL%/}/health/ready" \
             | jq -e '.readiness == "ready"'
