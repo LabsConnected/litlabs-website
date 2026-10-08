@@ -32,13 +32,14 @@ import {
   type MissionApproval,
   type ValidationResult,
 } from "./mission-repository";
+import { TerminalNotConfiguredError } from "@/lib/terminal-config";
 import { getTerminalServerUrl } from "@/lib/terminal-url";
 
 const TERMINAL_BASE = () => {
   const raw = process.env.TERMINAL_SERVER_INTERNAL_URL ?? "";
-  return raw && !raw.includes("localhost")
-    ? raw
-    : getTerminalServerUrl();
+  const base = raw && !raw.includes("localhost") ? raw : getTerminalServerUrl();
+  if (!base) throw new TerminalNotConfiguredError();
+  return base;
 };
 
 /**
@@ -64,6 +65,9 @@ export async function startMissionRun(
   userId: string,
   prompt: string,
 ): Promise<{ run: MissionRun; approval: MissionApproval | null }> {
+  // Fail closed before the run is created/marked running (see TERMINAL_BASE).
+  TERMINAL_BASE();
+
   // Verify project and workspace
   const { workspaceId } = await verifyProjectWorkspace(projectId, userId);
 
@@ -166,6 +170,11 @@ export async function resolveMissionApproval(
   validationResults: ValidationResult[];
   checkpoint: { gitSha: string; label: string } | null;
 }> {
+  // Approving writes through the terminal. Check configuration BEFORE the
+  // decision is persisted so a misconfigured deploy leaves the approval
+  // pending and retryable instead of approved-but-unapplied.
+  if (decision === "approved") TERMINAL_BASE();
+
   const approval = await resolveApproval(approvalId, userId, decision);
   if (!approval) throw new Error("Approval not found or already resolved");
 

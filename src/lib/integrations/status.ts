@@ -104,6 +104,7 @@ async function testR2Health(): Promise<boolean | null> {
 
 async function testTerminalHealth(): Promise<{ serverReachable: boolean; url: string | null }> {
   const endpoint = getTerminalServerUrl();
+  if (!endpoint) return { serverReachable: false, url: null };
   try {
     const res = await fetch(`${endpoint}/health`, {
       signal: AbortSignal.timeout(4000),

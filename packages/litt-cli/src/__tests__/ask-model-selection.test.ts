@@ -20,7 +20,7 @@ vi.mock("@litt/agent-core", async (original) => ({
 }));
 
 let fetchMock: ReturnType<typeof vi.fn>;
-const session = { installSigintHandler: () => {} } as unknown as RuntimeSession;
+const session = { installSigintHandler: () => {}, getMode: () => "act" as const } as unknown as RuntimeSession;
 
 beforeEach(() => {
   for (const provider of PROVIDERS) {

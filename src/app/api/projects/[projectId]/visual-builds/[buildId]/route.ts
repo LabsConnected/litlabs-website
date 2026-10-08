@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { terminalNotConfiguredResponse } from "@/lib/terminal-config";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { getAssetManifest, getPreviewCapture, getVisualBuild, getVisualReview, updateVisualBuild } from "@/lib/visual-builds/repository";
 import { VisualBuildRequestSchema } from "@/lib/visual-builds/types";
@@ -58,6 +59,9 @@ async function postHandler(
   }
 
   if (action === "retry") {
+    // Only a retry re-runs the build through the terminal; approve is DB-only.
+    const terminalUnavailable = terminalNotConfiguredResponse();
+    if (terminalUnavailable) return terminalUnavailable;
     const build = await getVisualBuild(buildId, projectId);
     if (!build) {
       return NextResponse.json({ error: "Visual build not found" }, { status: 404 });

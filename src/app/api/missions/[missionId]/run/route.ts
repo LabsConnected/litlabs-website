@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { terminalNotConfiguredResponse } from "@/lib/terminal-config";
 import { getMission } from "@/lib/missions/mission-repository";
 import { startMissionRun } from "@/lib/missions/mission-executor";
 
@@ -17,6 +18,8 @@ export async function POST(
 ) {
   const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const terminalUnavailable = terminalNotConfiguredResponse();
+  if (terminalUnavailable) return terminalUnavailable;
 
   const { missionId } = await params;
 

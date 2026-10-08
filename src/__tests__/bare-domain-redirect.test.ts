@@ -11,9 +11,11 @@ import { redirectNakedToWww } from "@/proxy";
 // the URL, so the header is set explicitly — matching what the function
 // reads in production.
 
-function req(path: string, host: string): NextRequest {
+function req(path: string, host: string, forwardedHost?: string): NextRequest {
+  const headers: Record<string, string> = { host };
+  if (forwardedHost) headers["x-forwarded-host"] = forwardedHost;
   return new NextRequest(new URL(path, "https://placeholder.invalid"), {
-    headers: { host },
+    headers,
   });
 }
 
@@ -63,5 +65,52 @@ describe("redirectNakedToWww", () => {
       redirectNakedToWww(req("/", "litlabs.net.evil.com")),
     ).toBeNull();
     expect(redirectNakedToWww(req("/", "wwwlitlabs.net"))).toBeNull();
+  });
+
+  // ─── Robust host handling (PR #637) ───
+  // The redirect must handle real-world header variations without
+  // creating redirect loops.
+
+  it("strips port suffix from apex host", () => {
+    const res = redirectNakedToWww(req("/sign-in", "litlabs.net:443"));
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(308);
+    expect(res!.headers.get("location")).toBe(
+      "https://www.litlabs.net/sign-in",
+    );
+  });
+
+  it("handles mixed-case apex host", () => {
+    const res = redirectNakedToWww(req("/", "LITLABS.NET"));
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(308);
+    expect(res!.headers.get("location")).toBe("https://www.litlabs.net/");
+  });
+
+  it("handles mixed-case apex host with port", () => {
+    const res = redirectNakedToWww(req("/", "LitLabs.Net:8443"));
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(308);
+  });
+
+  it("uses x-forwarded-host fallback when Host is empty", () => {
+    const res = redirectNakedToWww(req("/", "", "litlabs.net"));
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(308);
+    expect(res!.headers.get("location")).toBe("https://www.litlabs.net/");
+  });
+
+  it("canonical Host takes precedence over x-forwarded-host (no loop)", () => {
+    // Critical: if Host is already www but a proxy sets x-forwarded-host
+    // to the apex, we must NOT redirect (would loop www -> www).
+    expect(
+      redirectNakedToWww(req("/sign-in", "www.litlabs.net", "litlabs.net")),
+    ).toBeNull();
+  });
+
+  it("does not redirect subdomains even with apex forwarded-host", () => {
+    expect(
+      redirectNakedToWww(req("/", "app.litlabs.net", "litlabs.net")),
+    ).toBeNull();
   });
 });
