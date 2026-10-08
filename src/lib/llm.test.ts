@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { streamText, AllProvidersEmptyError } from "./llm";
+import { streamText, generateText, AllProvidersEmptyError } from "./llm";
 import type { ModelCategory } from "./llm";
 
 /**
@@ -515,5 +515,157 @@ describe("streamText — partial stream safety", () => {
     expect(urls.some((u) => u.includes("generativelanguage"))).toBe(false);
     // No duplication: Gemini was never called, so chunks contain only what Groq emitted
     // (the exact content depends on stream timing; the critical guarantee is no fallback)
+  });
+});
+
+describe("streamText — #632 regression: timeout/network/404/whitespace fallback", () => {
+  const groqSse = (text: string) =>
+    new Response(
+      `data: ${JSON.stringify({ choices: [{ delta: { content: text }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+      { headers: { "Content-Type": "text/event-stream" } },
+    );
+
+  it("1. Network failure triggers fallback", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("api.groq.com")) {
+        // Simulate network failure (fetch throws)
+        throw new TypeError("fetch failed");
+      }
+      if (u.includes("generativelanguage")) {
+        return new Response("unavailable", { status: 500 });
+      }
+      return groqSse("network fallback works");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const chunks: string[] = [];
+    const result = await streamText("hi", (c) => chunks.push(c), {
+      task: "chat",
+      provider: "groq",
+      category: "litt-alias",
+    });
+
+    expect(chunks.join("")).toBe("network fallback works");
+    expect(result.failover).toContain("groq");
+  });
+
+  it("2. Timeout triggers fallback", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("api.groq.com")) {
+        return new Response("Gateway Timeout", { status: 408 });
+      }
+      if (u.includes("generativelanguage")) {
+        return new Response("unavailable", { status: 500 });
+      }
+      return groqSse("timeout fallback works");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const chunks: string[] = [];
+    const result = await streamText("hi", (c) => chunks.push(c), {
+      task: "chat",
+      provider: "groq",
+      category: "litt-alias",
+    });
+
+    expect(chunks.join("")).toBe("timeout fallback works");
+    expect(result.failover).toContain("groq");
+  });
+
+  it("3. HTTP 404 triggers fallback", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("api.groq.com")) {
+        return new Response("Not Found", { status: 404 });
+      }
+      if (u.includes("generativelanguage")) {
+        return new Response("unavailable", { status: 500 });
+      }
+      return groqSse("404 fallback works");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const chunks: string[] = [];
+    const result = await streamText("hi", (c) => chunks.push(c), {
+      task: "chat",
+      provider: "groq",
+      category: "litt-alias",
+    });
+
+    expect(chunks.join("")).toBe("404 fallback works");
+    expect(result.failover).toContain("groq");
+  });
+
+  it("4. Whitespace-only output triggers fallback", async () => {
+    const whitespaceSse = () =>
+      new Response(
+        `data: ${JSON.stringify({ choices: [{ delta: { content: "   \n\t  " }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+        { headers: { "Content-Type": "text/event-stream" } },
+      );
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("api.groq.com")) return whitespaceSse();
+      if (u.includes("generativelanguage")) {
+        return new Response("unavailable", { status: 500 });
+      }
+      return groqSse("whitespace fallback works");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const chunks: string[] = [];
+    const result = await streamText("hi", (c) => chunks.push(c), {
+      task: "chat",
+      provider: "groq",
+      category: "litt-alias",
+    });
+
+    expect(chunks.join("")).toBe("whitespace fallback works");
+    expect(result.failover).toContain("groq");
+  });
+
+  it("5. Every candidate fails → final exhaustion error", async () => {
+    const fetchMock = vi.fn(async () => new Response("Service Unavailable", { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      streamText("hi", () => {}, {
+        task: "chat",
+        provider: "groq",
+        category: "litt-alias",
+      }),
+    ).rejects.toThrow(/all.*failed|exhaust/i);
+  });
+});
+
+describe("generateText — #632 regression: 401 fallback", () => {
+  it("7. generateText 401 logs willFallback:true and continues to next provider", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("api.groq.com")) {
+        return new Response(JSON.stringify({ error: { message: "Invalid API Key" } }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      // OpenRouter succeeds
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "generateText fallback works" } }],
+        }),
+        { headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await generateText("hi", {
+      task: "chat",
+      provider: "groq",
+      category: "litt-alias",
+    });
+
+    expect(result.text).toBe("generateText fallback works");
+    expect(result.failover).toContain("groq");
   });
 });

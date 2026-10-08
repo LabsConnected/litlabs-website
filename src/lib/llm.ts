@@ -370,6 +370,7 @@ class ProviderError extends Error {
   }
   get isRetryable() {
     if (this.status === null) return true; // network error
+    if (this.status === 404) return true; // model not found — try next provider
     if (this.status === 408 || this.status === 429) return true;
     if (this.status >= 500 && this.status < 600) return true;
     return false;
@@ -877,6 +878,7 @@ export async function generateText(
         : httpStatus === 429 ? "RATE_LIMIT"
         : httpStatus !== null && httpStatus >= 500 ? "PROVIDER_5XX"
         : httpStatus === 408 ? "TIMEOUT"
+        : httpStatus === 404 ? "NOT_FOUND"
         : isProviderError && err.isRetryable ? "RETRYABLE"
         : "UNKNOWN";
       // willFallback is true only if the error is retryable AND there's
@@ -1182,6 +1184,7 @@ export async function streamText(
         : httpStatusStream === 429 ? "RATE_LIMIT"
         : httpStatusStream !== null && httpStatusStream >= 500 ? "PROVIDER_5XX"
         : httpStatusStream === 408 ? "TIMEOUT"
+        : httpStatusStream === 404 ? "NOT_FOUND"
         : isProviderError && err.isRetryable ? "RETRYABLE"
         : "UNKNOWN";
       // Fallback decision:
@@ -1579,8 +1582,10 @@ async function streamViaGroq(
   if (p.opts.maxTokens) body.max_tokens = p.opts.maxTokens;
   if (p.opts.temperature !== undefined) body.temperature = p.opts.temperature;
 
-  const res = await fetchWithTimeout(
-    `${GROQ_BASE}/chat/completions`,
+  let res;
+  try {
+    res = await fetchWithTimeout(
+      `${GROQ_BASE}/chat/completions`,
     {
       method: "POST",
       headers: {
@@ -1592,6 +1597,15 @@ async function streamViaGroq(
     timeoutMs,
     p.opts.signal,
   );
+  } catch (err) {
+    // Network/transport failure — convert to ProviderError for fallback
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    throw new ProviderError(
+      provider,
+      null,
+      `Groq network error: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200),
+    );
+  }
 
   if (!res.ok || !res.body) {
     const txt = await res.text().catch(() => "");
