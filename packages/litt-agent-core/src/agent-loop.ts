@@ -44,6 +44,7 @@ import type {
   ToolEntry,
   ProjectContext,
 } from "./types.js";
+import type { InteractionMode } from "./contracts/identity.js";
 import type { ToolRegistry } from "./tools.js";
 import type { RuntimeStore } from "./state.js";
 import type { CommandExecutor } from "./command-executor.js";
@@ -122,6 +123,13 @@ export interface AgentLoopOptions {
   onToolStream?: (chunk: { stream: "stdout" | "stderr"; text: string; ts: number }) => void;
   /** Permission mode */
   mode?: "plan" | "act" | "auto";
+  /**
+   * Interaction mode for the execution identity.
+   * "headless" makes the gateway's approval provider deny approval-required
+   * actions without consulting a human (fail closed). Defaults to
+   * "interactive" to preserve existing behavior.
+   */
+  interaction?: InteractionMode;
   /**
    * Optional VerificationGate — the runtime truth boundary.
    *
@@ -1085,7 +1093,7 @@ export async function runAgentLoop(
             userId: options.userId ?? "agent-user",
             actorId: options.userId ?? "agent-user",
             trusted: false, // model-originated execution is untrusted
-            interaction: "interactive",
+            interaction: options.interaction ?? "interactive",
           },
           runId: `agent_${tcId}`,
           toolCallId: tcId,
