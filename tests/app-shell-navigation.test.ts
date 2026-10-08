@@ -66,6 +66,7 @@ describe("AppShell Navigation", () => {
       const labels = APP_NAV_MORE.map((i) => i.label);
       // Phase 3B: Projects and Discover are now top-level, not in More
       expect(labels).toEqual([
+        "Marketplace",
         "Showcase",
         "Games",
         "CLI",
