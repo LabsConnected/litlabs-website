@@ -392,3 +392,34 @@ describe("Rule 10: voiceSystem includes the LiTT pronunciation guidance", () => 
     expect(source).toContain("LiTTree LabStudios");
   });
 });
+
+// ─── Rule 11: Voice system prompt carries anti-repetition guidance ───
+
+describe("Rule 11: voiceSystem includes anti-repetition guidance", () => {
+  // The voice assistant was repeating explanations across turns, making it
+  // feel "a little stupid" (Larry, 2026-10-08). The voiceSystem prompt must
+  // instruct the model to build on earlier answers instead of restating them.
+  // Source-level assertions avoid loading the LLM dependency graph.
+
+  it("voice-runtime.ts voiceSystem contains the anti-repetition rule", async () => {
+    const fs = await import("fs");
+    const source = fs.readFileSync("src/lib/voice/voice-runtime.ts", "utf-8");
+    expect(source).toContain("Do not repeat explanations you have already given");
+    expect(source).toContain("acknowledge it briefly and build on it");
+  });
+
+  it("voice-runtime.ts voiceSystem covers follow-up questions", async () => {
+    const fs = await import("fs");
+    const source = fs.readFileSync("src/lib/voice/voice-runtime.ts", "utf-8");
+    expect(source).toContain("When the caller asks a follow-up question");
+    expect(source).toContain("answer only what is new");
+  });
+
+  it("voiceSystem keeps the pronunciation rule intact (no regression)", async () => {
+    const fs = await import("fs");
+    const source = fs.readFileSync("src/lib/voice/voice-runtime.ts", "utf-8");
+    // The #638 pronunciation fix must survive this change
+    expect(source).toContain("pronounced as one syllable");
+    expect(source).toContain("never spell it out letter by letter");
+  });
+});
