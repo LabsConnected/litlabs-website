@@ -51,7 +51,7 @@ export default function MarketingHeader() {
           showText={false}
           variant="full"
           fluid
-          className="w-[6.75rem] min-[400px]:w-[9.5rem] sm:w-[11rem]"
+          className="w-[108px] sm:w-[152px] lg:w-[176px]"
         />
 
         <nav aria-label="Primary navigation" className="hidden items-center gap-7 text-[13px] font-bold text-white/55 lg:flex">
