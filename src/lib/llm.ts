@@ -415,6 +415,27 @@ export function isEmptyProviderResponse(err: unknown): boolean {
   );
 }
 
+/** Normalize recognized provider/transport errors without retrying application bugs. */
+function normalizeStreamingProviderFailure(provider: LLMProvider, err: unknown): ProviderError | null {
+  if (err instanceof ProviderError) return err;
+  if (!(err instanceof Error)) return null;
+  const message = err.message || err.name;
+  const rawStatus = (err as Error & { status?: unknown; statusCode?: unknown }).status
+    ?? (err as Error & { statusCode?: unknown }).statusCode;
+  const parsed = message.match(/\\[([45]\\d{2})\\s*\\]/)
+    ?? message.match(/\\b(?:HTTP|status)\\s*[:=]?\\s*([45]\\d{2})\\b/i);
+  const status = typeof rawStatus === "number" && rawStatus >= 400 && rawStatus < 600
+    ? rawStatus : parsed ? Number(parsed[1]) : null;
+  if (status !== null) return new ProviderError(provider, status, "Provider stream HTTP " + status + ": " + message.slice(0, 200));
+  if (err.name === "AbortError" || err.name === "TimeoutError" || /\\b(?:timed? out|timeout)\\b/i.test(message)) {
+    return new ProviderError(provider, 408, "Provider stream timeout: " + message.slice(0, 200));
+  }
+  if (/\\b(?:fetch failed|failed to fetch|network(?: request)? (?:error|failed)|socket hang up|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN)\\b/i.test(message)) {
+    return new ProviderError(provider, null, "Provider stream network error: " + message.slice(0, 200));
+  }
+  return null;
+}
+
 async function fetchWithTimeout(
   url: string,
   init: RequestInit,
@@ -1026,9 +1047,20 @@ export async function streamText(
 
   // Accumulate streamed chunks for Braintrust logging on stream completion.
   const _chunks: string[] = [];
+  let pendingWhitespace = "";
+  let hasMeaningfulContent = false;
   const wrappedOnChunk = (text: string) => {
-    _chunks.push(text);
-    onChunk(text);
+    // Buffer leading whitespace until actual text arrives. An entirely blank
+    // provider response must not leak to the client or block fallback.
+    if (!hasMeaningfulContent && !text.trim()) {
+      pendingWhitespace += text;
+      return;
+    }
+    hasMeaningfulContent = true;
+    const delivered = pendingWhitespace + text;
+    pendingWhitespace = "";
+    _chunks.push(delivered);
+    onChunk(delivered);
   };
 
   let lastErr: unknown = null;
@@ -1067,8 +1099,10 @@ export async function streamText(
         throw new SpendGuardError(guard);
       }
     }
+    const chunksBefore = _chunks.length;
+    pendingWhitespace = "";
+    hasMeaningfulContent = false;
     try {
-      const chunksBefore = _chunks.length;
       let result: { provider: LLMProvider; model: string; latencyMs: number; failover: LLMProvider[]; finishReason?: string };
       if (provider === "gemini") {
         result = await streamViaGemini(
@@ -1176,25 +1210,27 @@ export async function streamText(
           : new DOMException("The operation was aborted.", "AbortError");
       }
       lastErr = err;
-      const isProviderError = err instanceof ProviderError;
-      const httpStatusStream = isProviderError ? err.status : null;
+      const normalized = normalizeStreamingProviderFailure(provider, err);
+      const isProviderError = normalized !== null;
+      const httpStatusStream = normalized?.status ?? null;
       const isMalformed = err instanceof EmptyProviderResponseError;
+      const hasPartialOutput = _chunks.slice(chunksBefore).some((chunk) => !!chunk.trim());
       const errorTypeStream = isMalformed ? "MALFORMED_RESPONSE"
         : httpStatusStream === 401 || httpStatusStream === 403 ? "AUTH"
         : httpStatusStream === 429 ? "RATE_LIMIT"
         : httpStatusStream !== null && httpStatusStream >= 500 ? "PROVIDER_5XX"
         : httpStatusStream === 408 ? "TIMEOUT"
         : httpStatusStream === 404 ? "NOT_FOUND"
-        : isProviderError && err.isRetryable ? "RETRYABLE"
+        : normalized?.isRetryable ? "RETRYABLE"
         : "UNKNOWN";
       // Fallback decision:
       // - AUTH: do NOT retry same provider, but ALLOW fallback to different provider
       // - RETRYABLE (429/5xx/timeout/network/malformed): allow fallback
       // - Non-provider errors (app bugs): do NOT fallback, throw immediately
       const isAuth = errorTypeStream === "AUTH";
-      const canFallback = isProviderError && (err.isRetryable || isAuth || isMalformed);
-      // willFallback is true only if fallback is allowed AND there's a next provider
-      const willFallbackStream = canFallback && attempted < chain.length;
+      const canFallback = isProviderError && (!!normalized?.isRetryable || isAuth || isMalformed);
+      // Never append fallback content after meaningful output was delivered.
+      const willFallbackStream = canFallback && !hasPartialOutput && attempted < chain.length;
 
       console.info(`[ai-route] attempt_failure`, {
         requestId,
@@ -1228,7 +1264,7 @@ export async function streamText(
         startedAt: attemptStartedAt,
       });
       // Mark model unavailable on 404 (model not found)
-      if (isProviderError && err.status === 404) {
+      if (normalized?.status === 404) {
         markModelUnavailable(provider);
       }
       // Non-provider errors (app bugs, aborts) do NOT fallback —
@@ -1244,7 +1280,7 @@ export async function streamText(
       }
       // Retryable/Auth/Malformed: check if partial output was already streamed.
       // If chunks were emitted, do NOT fallback (would duplicate/concatenate).
-      if (_chunks.length > 0) {
+      if (hasPartialOutput) {
         console.warn(`[ai-route] partial_stream_abort`, {
           requestId,
           provider,
@@ -1258,6 +1294,7 @@ export async function streamText(
         fromProvider: provider,
         reason: errorTypeStream,
       });
+      pendingWhitespace = "";
       failover.push(provider);
     }
   }
