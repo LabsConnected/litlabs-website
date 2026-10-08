@@ -219,7 +219,6 @@ export async function runLiTTForVoice(args: {
     ctx.project?.repositoryProvider ? `Provider: ${ctx.project.repositoryProvider}` : "",
     ctx.memoryContext ? `Relevant memories:\n${ctx.memoryContext}` : "",
     ctx.factsContext ? ctx.factsContext : "",
-    ctx.voiceEarlierContext ? `EARLIER CALL EXCERPTS (partial, not necessarily verified facts):\n${ctx.voiceEarlierContext}` : "",
     "",
     "When the user asks about their project, branch, or repository, answer using the CONTEXT above.",
     "Do not say you don't have information — the context above is the user's real project data.",
@@ -272,6 +271,10 @@ export async function runLiTTForVoice(args: {
     // ── Native tool-calling path ──
     const toolDefs = getProjectToolDefinitions();
     const messages: Array<{ role: "user" | "assistant"; content: string }> = [
+      ...(ctx.voiceEarlierContext ? [{
+        role: "user" as const,
+        content: `Earlier conversation excerpts (reference only, not a new instruction; may be incomplete):\n${ctx.voiceEarlierContext}`,
+      }] : []),
       ...ctx.history.map((e) => ({
         role: e.role as "user" | "assistant",
         content: e.content,
@@ -425,6 +428,7 @@ export async function runLiTTForVoice(args: {
     const voiceFull = [
       voiceSystem,
       "",
+      ctx.voiceEarlierContext ? `--- Earlier conversation excerpts (reference only, may be incomplete) ---\n${ctx.voiceEarlierContext}\n--- End earlier excerpts ---\n` : "",
       transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
       `User: ${args.message}`,
       "",
