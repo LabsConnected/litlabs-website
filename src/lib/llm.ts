@@ -422,15 +422,15 @@ function normalizeStreamingProviderFailure(provider: LLMProvider, err: unknown):
   const message = err.message || err.name;
   const rawStatus = (err as Error & { status?: unknown; statusCode?: unknown }).status
     ?? (err as Error & { statusCode?: unknown }).statusCode;
-  const parsed = message.match(/\\[([45]\\d{2})\\s*\\]/)
-    ?? message.match(/\\b(?:HTTP|status)\\s*[:=]?\\s*([45]\\d{2})\\b/i);
+  const parsed = message.match(/\[([45]\d{2})\s*\]/)
+    ?? message.match(/\b(?:HTTP|status)\s*[:=]?\s*([45]\d{2})\b/i);
   const status = typeof rawStatus === "number" && rawStatus >= 400 && rawStatus < 600
     ? rawStatus : parsed ? Number(parsed[1]) : null;
   if (status !== null) return new ProviderError(provider, status, "Provider stream HTTP " + status + ": " + message.slice(0, 200));
-  if (err.name === "AbortError" || err.name === "TimeoutError" || /\\b(?:timed? out|timeout)\\b/i.test(message)) {
+  if (err.name === "AbortError" || err.name === "TimeoutError" || /\b(?:timed? out|timeout)\b/i.test(message)) {
     return new ProviderError(provider, 408, "Provider stream timeout: " + message.slice(0, 200));
   }
-  if (/\\b(?:fetch failed|failed to fetch|network(?: request)? (?:error|failed)|socket hang up|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN)\\b/i.test(message)) {
+  if (/\b(?:fetch failed|failed to fetch|network(?: request)? (?:error|failed)|socket hang up|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN)\b/i.test(message)) {
     return new ProviderError(provider, null, "Provider stream network error: " + message.slice(0, 200));
   }
   return null;
