@@ -83,7 +83,9 @@ describe("real BUILD input compaction", () => {
       { role: "user", content: "new request" },
     ];
     const c = compactBuildInputs("sys", messages, defs, 150, 4);
-    expect(c.messages).toEqual([messages[4]]);
+    // The tool batch (assistant + results) is preserved as an indivisible group,
+    // along with the final user request. Only the oversized old message is dropped.
+    expect(c.messages).toEqual([messages[1], messages[2], messages[3], messages[4]]);
     expect(c.budget.totalTokens).toBeLessThanOrEqual(150);
   });
 
