@@ -9,17 +9,17 @@ import "server-only";
  * tool health (Part F) — don't advertise terminal.execute to a user the
  * terminal server will reject.
  *
- * Both sides read TERMINAL_OWNER_CLERK_IDS with the same default. If the
- * env var is set differently on the two services, the terminal server
- * wins (it enforces); this module is only for health reporting, never
- * for granting access.
+ * Both sides prioritize TERMINAL_ALLOWED_CLERK_IDS, falling back to the
+ * legacy TERMINAL_OWNER_CLERK_IDS and then the same owner default. If the
+ * services have different env values, the terminal server still wins; this
+ * is health reporting only and never grants shell authorization.
  */
 
 // Must match terminal-server/terminal-owner-gate.ts DEFAULT_OWNER_CLERK_ID.
 const DEFAULT_OWNER_CLERK_ID = "user_3GsAlPRx3ihYhftgAQ8Owr1uxzF";
 
 export function getTerminalOwnerIds(): string[] {
-  return (process.env.TERMINAL_OWNER_CLERK_IDS ?? DEFAULT_OWNER_CLERK_ID)
+  return (process.env.TERMINAL_ALLOWED_CLERK_IDS ?? process.env.TERMINAL_OWNER_CLERK_IDS ?? DEFAULT_OWNER_CLERK_ID)
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
