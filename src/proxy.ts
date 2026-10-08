@@ -799,14 +799,19 @@ export function redirectNakedToWww(req: NextRequest): NextResponse | null {
 
   const rawHost = req.headers.get("host") ?? "";
   // Strip port suffix and normalize case — proxies and browsers may send
-  // "litlabs.net:443" or mixed case. Also check x-forwarded-host which
-  // Cloudflare/proxies set to the original client-facing host.
+  // "litlabs.net:443" or mixed case.
   const host = rawHost.split(":")[0].toLowerCase();
-  const forwardedHost = (req.headers.get("x-forwarded-host") ?? "").split(":")[0].toLowerCase();
 
-  // Only redirect if the request is on the naked litlabs.net apex,
-  // not on www.litlabs.net or any other subdomain/host.
-  const isApex = host === "litlabs.net" || forwardedHost === "litlabs.net";
+  // Canonical host takes precedence: if Host is already www or any other
+  // non-apex host, never redirect (prevents loops when proxies set
+  // x-forwarded-host differently from the actual Host).
+  if (host !== "" && host !== "litlabs.net") return null;
+
+  // Fallback: check x-forwarded-host only when Host is empty or is the apex.
+  // This handles proxies that rewrite Host but preserve the original in
+  // x-forwarded-host.
+  const forwardedHost = (req.headers.get("x-forwarded-host") ?? "").split(":")[0].toLowerCase();
+  const isApex = host === "litlabs.net" || (host === "" && forwardedHost === "litlabs.net");
   if (!isApex) return null;
 
   const redirectUrl = new URL(req.nextUrl.pathname + req.nextUrl.search, `https://www.litlabs.net`);
