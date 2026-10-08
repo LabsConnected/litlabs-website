@@ -706,23 +706,22 @@ function CommandStudioContent() {
   // desktop rail, the mobile sheet, and header/activity actions.
   const [littActiveTab, setLittActiveTab] = useState<"chat" | "live">("chat");
 
-  // Phase 3B: Focus the canonical ApprovalCard (scrolls to it, no duplicate button)
-  const handleFocusApproval = useCallback(() => {
-    // Select the Chat tab so the canonical ApprovalCard is visible
-    setLittActiveTab("chat");
-    // Reveal the conversation panel if collapsed
-    setLittCollapsed(false);
-    // Focus the approval card after the UI updates
-    setTimeout(() => {
-      const el = document.querySelector('[data-testid="approval-card"]');
-      el?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 100);
-  }, []);
-
   // Viewport tier (declared above with the canvas state) drives
   // desktop-rail vs mobile-sheet LiTT presentation — null until first
   // client measurement (SSR-safe — see hook docs).
   const [mobileLittOpen, setMobileLittOpen] = useState(false);
+  // Phase 3B: Review Approval must reveal the actual chat container on
+  // mobile before scrolling, not just select its (otherwise hidden) tab.
+  const handleFocusApproval = useCallback(() => {
+    setLittActiveTab("chat");
+    setLittCollapsed(false);
+    if (isMobileLitt) setMobileLittOpen(true);
+    setTimeout(() => {
+      const el = document.querySelector('[data-testid="approval-card"]');
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 100);
+  }, [isMobileLitt]);
+
   // On mobile, Studio enters with the LiTT chat surface open. Session-scoped
   // for the same reason as the desktop dock: a manual close sticks for this
   // session, a fresh entry restores it. The composer is never focused
