@@ -10,6 +10,7 @@ import { ClerkAuthContextProvider } from "@/context/ClerkAuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { AuthorityJsonLd } from "@/components/seo/AuthorityJsonLd";
 import { GhlAffiliateScript, GhlAffiliateSignupTracker } from "@/components/GhlAffiliateTracker";
+import { brand } from "@/lib/design/litt-tokens";
 import {
   DEFAULT_DESCRIPTION,
   DEFAULT_OG_IMAGE,
@@ -181,7 +182,7 @@ export default function RootLayout({
           }}
           appearance={{
             variables: {
-              colorPrimary: "#a970ff",
+              colorPrimary: brand.primary.DEFAULT,
               colorBackground: "#060914",
               colorForeground: "#eef4ff",
               colorMutedForeground: "#9ba7c7",
@@ -193,12 +194,12 @@ export default function RootLayout({
               card: {
                 backgroundColor: "#090d1b",
                 border: "1px solid #29345e",
-                boxShadow: "0 24px 70px rgba(0,0,0,.55), 0 0 38px rgba(169,112,255,.12)",
+                boxShadow: "0 24px 70px rgba(0,0,0,.55), 0 0 38px rgba(168,255,47,.12)",
               },
               userButtonPopoverCard: {
                 backgroundColor: "#0b1020",
                 border: "1px solid #3b4773",
-                boxShadow: "0 24px 70px rgba(0,0,0,.68), 0 0 42px rgba(169,112,255,.18)",
+                boxShadow: "0 24px 70px rgba(0,0,0,.68), 0 0 42px rgba(168,255,47,.16)",
               },
               userButtonPopoverActionButton: {
                 color: "#eef4ff",
@@ -206,14 +207,14 @@ export default function RootLayout({
                 minHeight: "44px",
                 "&:hover": {
                   color: "#ffffff",
-                  backgroundColor: "rgba(169,112,255,0.2)",
+                  backgroundColor: "rgba(168,255,47,0.16)",
                 },
               },
               userButtonPopoverActionButtonText: {
                 color: "#eef4ff",
               },
               userButtonPopoverActionButtonIcon: {
-                color: "#c4b5fd",
+                color: brand.primary.DEFAULT,
               },
               userPreviewMainIdentifier: {
                 color: "#ffffff",
@@ -227,7 +228,8 @@ export default function RootLayout({
                 borderTop: "1px solid #29345e",
               },
               badge: {
-                backgroundColor: "#a970ff",
+                backgroundColor: brand.primary.DEFAULT,
+                color: "#04262e",
               },
             },
           }}

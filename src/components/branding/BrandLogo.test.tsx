@@ -9,10 +9,13 @@ import {
 
 describe("BrandLogo", () => {
   it("uses the supplied LiTTree LabStudios logo asset for the full mark", () => {
-    const source = readFileSync(join(process.cwd(), "src/components/branding/BrandLogo.tsx"), "utf8");
-    expect(source).toContain(BRAND_WORDMARK_SRC);
-    expect(source).toContain("BRAND_WORDMARK_FRAME");
-    expect(source).toContain("BRAND_MARK_SRC");
+    const component = readFileSync(join(process.cwd(), "src/components/branding/BrandLogo.tsx"), "utf8");
+    const assets = readFileSync(join(process.cwd(), "src/components/branding/brand-assets.ts"), "utf8");
+    expect(component).toContain("BRAND_WORDMARK_SRC");
+    expect(component).toContain("BRAND_WORDMARK_FRAME");
+    expect(component).toContain("BRAND_MARK_SRC");
+    expect(assets).toContain(BRAND_WORDMARK_SRC);
+    expect(assets).toContain("/branding/littree-crystal-mark.png");
   });
 
   it("sizes the wordmark from its opaque content, not the padded canvas", () => {

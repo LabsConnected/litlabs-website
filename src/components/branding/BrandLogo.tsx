@@ -17,6 +17,11 @@ type BrandLogoProps = {
   variant?: "mark" | "full";
   /** Above-the-fold marks preload. Footer and repeated marks should pass false. */
   priority?: boolean;
+  /**
+   * Size the frame from the link's width (aspect locked to the artwork).
+   * Used by the marketing header so one lockup fits a phone and a desktop.
+   */
+  fluid?: boolean;
 };
 
 function FramedMark({
@@ -24,17 +29,24 @@ function FramedMark({
   frame,
   size,
   priority,
+  fluid,
 }: {
   src: string;
   frame: BrandFrame;
   size: number;
   priority: boolean;
+  fluid: boolean;
 }) {
   const box = brandFrameDisplaySize(frame, size);
+  const aspect = `${frame.content.width} / ${frame.content.height}`;
   return (
     <span
       className="relative block shrink-0 overflow-hidden"
-      style={{ width: box.displayW, height: box.displayH }}
+      style={
+        fluid
+          ? { width: "100%", aspectRatio: aspect }
+          : { width: box.displayW, height: box.displayH }
+      }
     >
       <Image
         src={src}
@@ -42,13 +54,13 @@ function FramedMark({
         width={frame.width}
         height={frame.height}
         priority={priority}
-        sizes={`${Math.ceil(box.imgW)}px`}
+        sizes={fluid ? "(min-width: 640px) 176px, 152px" : `${Math.ceil(box.imgW)}px`}
         className="absolute max-w-none"
         style={{
-          width: box.imgW,
-          height: box.imgH,
-          left: box.offsetX,
-          top: box.offsetY,
+          width: fluid ? `${(frame.width / frame.content.width) * 100}%` : box.imgW,
+          height: fluid ? `${(frame.height / frame.content.height) * 100}%` : box.imgH,
+          left: fluid ? `${(-frame.content.x / frame.content.width) * 100}%` : box.offsetX,
+          top: fluid ? `${(-frame.content.y / frame.content.height) * 100}%` : box.offsetY,
           maxWidth: "none",
         }}
       />
@@ -63,12 +75,13 @@ export function BrandLogo({
   className = "",
   variant = "mark",
   priority = true,
+  fluid = false,
 }: BrandLogoProps) {
   const framed =
     variant === "full" ? (
-      <FramedMark src={BRAND_WORDMARK_SRC} frame={BRAND_WORDMARK_FRAME} size={size} priority={priority} />
+      <FramedMark src={BRAND_WORDMARK_SRC} frame={BRAND_WORDMARK_FRAME} size={size} priority={priority} fluid={fluid} />
     ) : (
-      <FramedMark src={BRAND_MARK_SRC} frame={BRAND_MARK_FRAME} size={size} priority={priority} />
+      <FramedMark src={BRAND_MARK_SRC} frame={BRAND_MARK_FRAME} size={size} priority={priority} fluid={fluid} />
     );
 
   return (

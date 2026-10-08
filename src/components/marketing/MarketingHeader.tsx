@@ -46,12 +46,13 @@ export default function MarketingHeader() {
   return (
     <header className="litt-site-header fixed inset-x-0 top-0 z-50 border-b border-white/8">
       <div className="mx-auto flex h-[68px] max-w-[1500px] items-center justify-between px-5 lg:px-8">
-        <span className="sm:hidden">
-          <BrandLogo href="/" size={34} showText={false} variant="mark" />
-        </span>
-        <span className="hidden sm:inline-flex">
-          <BrandLogo href="/" size={40} showText={false} variant="full" />
-        </span>
+        <BrandLogo
+          href="/"
+          showText={false}
+          variant="full"
+          fluid
+          className="w-[6.75rem] min-[400px]:w-[9.5rem] sm:w-[11rem]"
+        />
 
         <nav aria-label="Primary navigation" className="hidden items-center gap-7 text-[13px] font-bold text-white/55 lg:flex">
           {NAV_ITEMS.map((item) => {

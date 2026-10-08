@@ -202,7 +202,7 @@ const sections = [
 
 export default function TermsPage() {
   return (
-    <main className="min-h-screen bg-[#03050a] text-white selection:bg-[#a970ff] selection:text-white">
+    <main className="min-h-screen bg-[#03050a] text-white selection:bg-accent selection:text-on-accent">
       {/* Hero header band */}
       <section className="relative border-b border-white/10 px-5 pt-28 pb-14 lg:px-10 lg:pt-32 lg:pb-16">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_30%,rgba(168,255,47,.12),transparent_32%),radial-gradient(circle_at_82%_60%,rgba(169,112,255,.14),transparent_34%)]" />

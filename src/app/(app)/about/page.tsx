@@ -10,7 +10,7 @@ export const metadata = buildMetadata({
 
 export default function AboutPage() {
   return (
-    <main className="min-h-screen bg-[#03050a] text-white selection:bg-[#a970ff]">
+    <main className="min-h-screen bg-[#03050a] text-white selection:bg-accent selection:text-on-accent">
       {/* ── Hero Section ── */}
       <section className="relative pt-16 pb-20 border-b border-white/8">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(168,112,255,0.08),transparent_50%)]" />

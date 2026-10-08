@@ -121,7 +121,7 @@ export function CustomConsentForm() {
           type="submit"
           name="consented"
           value="true"
-          className="flex-1 rounded-lg bg-[#a970ff] px-4 py-3 font-semibold text-white"
+          className="flex-1 rounded-lg bg-accent px-4 py-3 font-semibold text-on-accent"
         >
           Allow
         </button>

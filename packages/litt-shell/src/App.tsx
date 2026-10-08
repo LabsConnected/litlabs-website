@@ -157,6 +157,8 @@ export function App() {
       <div className="litt-shell-content">
         {/* LiTT Brand */}
         <div className="litt-brand">
+          {/* Vite shell, not Next — next/image is unavailable here. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img className="litt-logo" src="/brand-mark.png" alt="" width={28} height={28} />
           <span className="litt-name">LiTT</span>
         </div>
