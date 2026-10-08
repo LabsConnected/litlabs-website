@@ -1078,26 +1078,14 @@ async function runAgentLoopV2Inner(
     filterOfferableTools(toolHealthMap);
   let offerableTools = availableTools.filter((t) => offerableToolIds.includes(t.id));
   
-  // ── Intent-aware tool selection for BUILD requests ──
-  // For BUILD tasks, only include file-writing tools to fit within provider
-  // token budgets. The full registry (7.8k tokens) exceeds Groq's 8k limit.
-  // This preserves capability by selecting tools required for the current turn.
-  const isBuildRequest = cfg.requireToolCallOnFirstStep === true;
-  if (isBuildRequest) {
-    const buildToolIds = new Set([
-      "write_file", "create_file", "edit_file", "read_file", "list_files",
-      "apply_patch", "files_write", "files_read",
-    ]);
-    const buildTools = offerableTools.filter((t) => 
-      buildToolIds.has(t.id) || t.id.includes("file") || t.id.includes("write")
-    );
-    // Only use filtered set if it actually reduces size and preserves capability
-    if (buildTools.length > 0 && buildTools.length < offerableTools.length) {
-      console.log(`[agent-loop] BUILD tool selection: ${offerableTools.length} -> ${buildTools.length} tools`);
-      offerableTools = buildTools;
-    }
-  }
-  
+  // Preserve every tool that passed capability, permission, and health gates.
+  // BUILD intent requires file edits, but it may ALSO require terminal.execute,
+  // test.run, deployment checks, or other request-specific tools in this run.
+  // Filtering by a tool name containing "file"/"write" silently removes
+  // those tools and prevents file-edit -> command workflows. Provider input
+  // budgeting must not narrow authorization or the executable tool set.
+  // Tool execution is still gated individually below by PermissionEngine.
+
   const healthNote = buildToolHealthPromptNote(toolHealthMap);
   if (healthNote) {
     cfg.systemPrompt += "\n\n" + healthNote;
