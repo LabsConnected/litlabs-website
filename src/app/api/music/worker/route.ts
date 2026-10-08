@@ -25,14 +25,18 @@ function safeEqual(a: string, b: string): boolean {
  *      (Vercel's documented mechanism — see vercel.com/docs/cron-jobs)
  *   2. Internal worker: x-worker-secret: <MUSIC_WORKER_SECRET>
  *
- * In development with NO secrets configured, the endpoint is open.
+ * FAIL-CLOSED: if neither secret is configured, ALL requests are denied.
+ * An unconfigured worker must never process jobs — a missing env var must
+ * not silently expose billable MiniMax processing to the internet.
  */
 function isAuthorized(req: NextRequest): boolean {
   const workerSecret = process.env.MUSIC_WORKER_SECRET;
   const cronSecret = process.env.CRON_SECRET;
 
-  // No secrets configured → open (development only).
-  if (!workerSecret && !cronSecret) return true;
+  // Fail closed: no secrets configured → deny everything.
+  // (Previously this returned true — a missing env var silently opened
+  // the endpoint. See security fix 2026-10-08.)
+  if (!workerSecret && !cronSecret) return false;
 
   // Check internal worker secret (x-worker-secret header).
   const providedWorker = req.headers.get("x-worker-secret");
@@ -73,7 +77,9 @@ function isAuthorized(req: NextRequest): boolean {
  *   - Manual admin call
  *
  * Security: protected by CRON_SECRET (Bearer) or MUSIC_WORKER_SECRET (x-worker-secret).
- * In development with no secret configured, the endpoint is open.
+ * FAIL-CLOSED: requests are denied unless a valid secret is presented, even
+ * when no secrets are configured (missing env vars never authorize).
+ * POST-only: GET was removed — no legitimate caller uses GET (verified 2026-10-08).
  */
 async function handler(req: NextRequest) {
   if (!isAuthorized(req)) {
@@ -91,4 +97,7 @@ async function handler(req: NextRequest) {
 }
 
 export const POST = handler;
-export const GET = handler;
+// GET removed (security fix 2026-10-08): no legitimate caller uses GET —
+// the kick endpoint calls processPendingGenerations() server-side, and there
+// is no vercel.json cron. Allowing GET made the worker trivially triggerable
+// from a browser URL bar.

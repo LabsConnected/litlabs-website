@@ -828,9 +828,12 @@ export function planBasicRoutes(
         // routing starts on a proven writer, but KEEP the model in the
         // candidate list. Surface the drop instead of silently swapping.
         droppedModelHint = opts.model;
-      } else if (idx >= 0) {
-        // Move hinted model to front (only when honouring the hint)
-        models.splice(idx, 1);
+      } else {
+        // P1 #4: Honor eligible model hints even when not in defaults.
+        // Remove duplicate if present, then add to front regardless of idx.
+        if (idx >= 0) {
+          models.splice(idx, 1);
+        }
         models.unshift(hint.model);
       }
     }
