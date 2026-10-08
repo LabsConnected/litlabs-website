@@ -828,9 +828,11 @@ export function planBasicRoutes(
         // routing starts on a proven writer, but KEEP the model in the
         // candidate list. Surface the drop instead of silently swapping.
         droppedModelHint = opts.model;
-      } else if (idx >= 0) {
-        // Move hinted model to front (only when honouring the hint)
-        models.splice(idx, 1);
+      } else {
+        // Valid explicit hints need not appear in the default model list.
+        // Remove an existing occurrence to avoid duplication, then put the
+        // eligible requested model first without changing provider cost gates.
+        if (idx >= 0) models.splice(idx, 1);
         models.unshift(hint.model);
       }
     }
@@ -860,7 +862,7 @@ export function planBasicRoutes(
 
   // Preferred route first: the provider carrying the honoured model hint
   // moves to the front, then healthy before degraded, preserving base order.
-  const hintedProvider = hint?.kind === "route" ? hint.provider : undefined;
+  const hintedProvider = hint?.kind === "route" && !droppedModelHint ? hint.provider : undefined;
   providers.sort((a, b) => {
     const aHint = a.provider === hintedProvider ? 0 : 1;
     const bHint = b.provider === hintedProvider ? 0 : 1;
