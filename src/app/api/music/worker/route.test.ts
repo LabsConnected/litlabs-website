@@ -123,7 +123,7 @@ describe("GET /api/music/worker (removed)", () => {
   it("does not export a GET handler", async () => {
     // Security fix 2026-10-08: GET was removed — no legitimate caller uses it.
     const route = await import("./route");
-    expect(route.GET).toBeUndefined();
+    expect(route).not.toHaveProperty("GET");
     expect(route.POST).toBeDefined();
   });
 
@@ -132,7 +132,7 @@ describe("GET /api/music/worker (removed)", () => {
     // itself would still reject (defense in depth via the missing export).
     vi.stubEnv("MUSIC_WORKER_SECRET", "correct-secret");
     const route = await import("./route");
-    expect(typeof route.GET).not.toBe("function");
+    expect(route).not.toHaveProperty("GET");
     vi.unstubAllEnvs();
   });
 });
