@@ -19,8 +19,8 @@
  * scratch project dir. Marker files prove whether a mutation happened.
  */
 
-import { describe, it, expect, afterEach } from "vitest";
-import { existsSync, rmSync } from "node:fs";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import {
   ExecutionGateway,
@@ -99,6 +99,10 @@ function markerName(test: string): string {
   markers.push(name);
   return name;
 }
+
+beforeEach(() => {
+  mkdirSync(SCRATCH, { recursive: true });
+});
 
 afterEach(() => {
   for (const m of markers.splice(0)) {
