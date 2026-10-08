@@ -68,6 +68,7 @@ import {
   type RequestSource,
 } from "@/lib/browser-jobs";
 import { executeBrowserJob } from "@/lib/browser-job-executor";
+import { TerminalNotConfiguredError } from "@/lib/terminal-config";
 import { getTerminalServerUrl } from "@/lib/terminal-url";
 
 // ─── Helpers ────────────────────────────────────────────────────
@@ -76,10 +77,14 @@ import { getTerminalServerUrl } from "@/lib/terminal-url";
  * Resolve the terminal server base URL.
  * Production has TERMINAL_SERVER_URL (not TERMINAL_SERVER_INTERNAL_URL).
  */
-export const TERMINAL_BASE = () =>
-  process.env.TERMINAL_SERVER_INTERNAL_URL ??
-  process.env.TERMINAL_SERVER_URL ??
-  getTerminalServerUrl();
+export const TERMINAL_BASE = () => {
+  const base =
+    process.env.TERMINAL_SERVER_INTERNAL_URL?.trim() ||
+    process.env.TERMINAL_SERVER_URL?.trim() ||
+    getTerminalServerUrl();
+  if (!base) throw new TerminalNotConfiguredError();
+  return base.replace(/\/+$/, "");
+};
 
 export function internalHeaders(): Record<string, string> {
   return {

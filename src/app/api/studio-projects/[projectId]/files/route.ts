@@ -4,7 +4,7 @@ import { verifyProjectWorkspace, getProject } from "@/lib/projects/project-repos
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { logFileOperation } from "@/lib/file-audit";
 import { ensureWorkspaceAlive, normalizeFileError, reprepareWorkspace } from "@/lib/studio/workspace-recovery";
-import { getTerminalServerUrl } from "@/lib/terminal-url";
+import { requireTerminalBaseUrl, terminalNotConfiguredResponse } from "@/lib/terminal-config";
 
 /**
  * Project-bound file operations.
@@ -16,9 +16,7 @@ import { getTerminalServerUrl } from "@/lib/terminal-url";
  * POST /api/studio-projects/[projectId]/files  { action: "read"|"write"|"delete"|"mkdir"|"rename", path, newPath?, content? }
  */
 
-const TERMINAL_BASE = () =>
-  process.env.TERMINAL_SERVER_INTERNAL_URL ??
-  getTerminalServerUrl();
+const TERMINAL_BASE = () => requireTerminalBaseUrl();
 
 /**
  * GET /api/studio-projects/[projectId]/files?path=...
@@ -31,6 +29,8 @@ export async function GET(
 ) {
   const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const terminalUnavailable = terminalNotConfiguredResponse();
+  if (terminalUnavailable) return terminalUnavailable;
 
   const { projectId } = await params;
 
@@ -133,6 +133,8 @@ export async function POST(
 ) {
   const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const terminalUnavailable = terminalNotConfiguredResponse();
+  if (terminalUnavailable) return terminalUnavailable;
 
   const { projectId } = await params;
 

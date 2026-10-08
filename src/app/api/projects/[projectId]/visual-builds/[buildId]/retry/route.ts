@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { terminalNotConfiguredResponse } from "@/lib/terminal-config";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { getVisualBuild } from "@/lib/visual-builds/repository";
 import { VisualBuildRequestSchema } from "@/lib/visual-builds/types";
@@ -13,6 +14,8 @@ async function postHandler(
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const terminalUnavailable = terminalNotConfiguredResponse();
+  if (terminalUnavailable) return terminalUnavailable;
 
   const { projectId, buildId } = await ctx!.params;
   const build = await getVisualBuild(buildId, projectId);

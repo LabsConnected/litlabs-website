@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getProject, verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { listCheckpoints, createCheckpoint } from "@/lib/missions/mission-repository";
-import { getTerminalServerUrl } from "@/lib/terminal-url";
+import { requireTerminalBaseUrl, terminalNotConfiguredResponse } from "@/lib/terminal-config";
 
 /**
  * GET /api/studio-projects/[projectId]/checkpoints
@@ -34,6 +34,8 @@ export async function POST(
 ) {
   const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const terminalUnavailable = terminalNotConfiguredResponse();
+  if (terminalUnavailable) return terminalUnavailable;
 
   const { projectId } = await params;
   let body: { label?: string; description?: string };
@@ -52,8 +54,7 @@ export async function POST(
 
     // Create a Git commit via terminal-server's exec endpoint
     const internalKey = process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
-    const terminalBase = process.env.TERMINAL_SERVER_INTERNAL_URL ??
-      getTerminalServerUrl();
+    const terminalBase = requireTerminalBaseUrl();
 
     const execInWorkspace = async (command: string, stdin?: string) => {
       const resp = await fetch(`${terminalBase}/internal/workspace/${workspaceId}/exec`, {
