@@ -1581,12 +1581,31 @@ app.post("/ws-files/rename", (req: AuthenticatedRequest, res) => {
 });
 
 io.use((socket, next) => {
+  const requestId = `pty-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
+    // Instrument the WebSocket upgrade boundary (before any auth check)
+    console.info("[pty/ws] upgrade", {
+      requestId,
+      path: socket.handshake.url,
+      host: socket.handshake.headers.host,
+      origin: socket.handshake.headers.origin,
+      userAgent: socket.handshake.headers["user-agent"]?.substring(0, 80),
+      hasCookie: Boolean(socket.handshake.headers.cookie),
+      hasAuthToken: Boolean(socket.handshake.auth?.token),
+      forwardedProto: socket.handshake.headers["x-forwarded-proto"],
+      forwardedHost: socket.handshake.headers["x-forwarded-host"],
+    });
+
     const tokenPayload = verifyTerminalToken(socket.handshake.auth?.token);
     // ─── Owner gate (P0, defense in depth) ────────────────────────
     // Rejects terminal JWTs minted for non-owners in the window
     // before this gate deployed.
     if (!isTerminalOwner(tokenPayload.sub)) {
+      console.warn("[pty/ws] rejected", {
+        requestId,
+        reason: "TERMINAL_ACCESS_DENIED",
+        userId: tokenPayload.sub?.substring(0, 12) + "...",
+      });
       next(new Error("Forbidden"));
       return;
     }
@@ -1603,14 +1622,17 @@ io.use((socket, next) => {
     if (workspaceId) {
       const ws = getWorkspace(String(workspaceId));
       if (!ws) {
+        console.warn("[pty/ws] rejected", { requestId, reason: "SESSION_LOOKUP_FAILED", workspaceId });
         next(new Error("Workspace not found"));
         return;
       }
       if (ws.userId !== socket.data.userId) {
+        console.warn("[pty/ws] rejected", { requestId, reason: "TOKEN_MISMATCH" });
         next(new Error("Forbidden"));
         return;
       }
       if (!ws.ready) {
+        console.warn("[pty/ws] rejected", { requestId, reason: "WORKSPACE_NOT_READY" });
         next(new Error("Workspace not ready"));
         return;
       }

@@ -54,7 +54,13 @@ function renderReadyPreview() {
   );
 }
 
-function postStyleProbe(payload: { tailwindDetected: boolean; styled: boolean }) {
+async function postStyleProbe(payload: { tailwindDetected: boolean; styled: boolean }) {
+  // Flush the previewUrl effect that registers the window.message listener.
+  // Without this, the style-probe message can be posted before the listener
+  // is attached (race condition).
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
   act(() => {
     window.dispatchEvent(
       new MessageEvent("message", {
@@ -74,7 +80,7 @@ describe("StudioPreviewPanel — style probe honesty", () => {
   it("flips the badge when a Tailwind-intended preview renders unstyled", async () => {
     renderReadyPreview();
     await screen.findByText("Preview ready");
-    postStyleProbe({ tailwindDetected: true, styled: false });
+    await postStyleProbe({ tailwindDetected: true, styled: false });
     await screen.findByText("Preview styling failed to apply");
     expect(screen.queryByText("Preview ready")).toBeNull();
   });
@@ -82,7 +88,7 @@ describe("StudioPreviewPanel — style probe honesty", () => {
   it("keeps 'Preview ready' when Tailwind applied", async () => {
     renderReadyPreview();
     await screen.findByText("Preview ready");
-    postStyleProbe({ tailwindDetected: true, styled: true });
+    await postStyleProbe({ tailwindDetected: true, styled: true });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
@@ -93,7 +99,7 @@ describe("StudioPreviewPanel — style probe honesty", () => {
   it("keeps 'Preview ready' for pages without Tailwind intent", async () => {
     renderReadyPreview();
     await screen.findByText("Preview ready");
-    postStyleProbe({ tailwindDetected: false, styled: true });
+    await postStyleProbe({ tailwindDetected: false, styled: true });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });

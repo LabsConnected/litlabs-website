@@ -35,6 +35,9 @@ export const CANONICAL_REDIRECTS = [
   { source: "/flow", destination: "/studio", permanent: true },
   // Phase 3A: legacy profile route → canonical handle route
   { source: "/profile/:username", destination: "/u/:username", permanent: true },
+  // Phase 3B: Marketplace merges into Discover
+  { source: "/marketplace", destination: "/discover", permanent: true },
+  { source: "/marketplace/:path*", destination: "/discover", permanent: true },
 ] as const;
 
 export type CanonicalRedirect =

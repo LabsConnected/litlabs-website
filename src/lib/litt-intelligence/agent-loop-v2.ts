@@ -800,6 +800,75 @@ function loopInputChars(messages: LLMMessage[]): number {
   return chars;
 }
 
+/**
+ * Instrument token budget across all input components.
+ * Returns breakdown for observability and budget enforcement.
+ */
+function instrumentInputBudget(
+  systemPrompt: string,
+  messages: LLMMessage[],
+  toolDefs: ToolDefinition[]
+): {
+  systemTokens: number;
+  toolTokens: number;
+  messageTokens: number;
+  totalTokens: number;
+  messageCount: number;
+} {
+  const systemTokens = estimateTokensForChars(systemPrompt.length);
+  const toolTokens = estimateTokensForChars(JSON.stringify(toolDefs).length);
+  const messageTokens = estimateTokensForChars(loopInputChars(messages));
+  return {
+    systemTokens,
+    toolTokens,
+    messageTokens,
+    totalTokens: systemTokens + toolTokens + messageTokens,
+    messageCount: messages.length,
+  };
+}
+
+/**
+ * Compact BUILD inputs to fit within a provider-safe token budget.
+ * Hard requirement: for 8k Groq context, target ≤ 6k tokens.
+ * Preserves: latest user request, tool schemas, essential execution state.
+ * Trims: older history first, then redundant orchestration content.
+ */
+function compactBuildInputs(
+  systemPrompt: string,
+  messages: LLMMessage[],
+  toolDefs: ToolDefinition[],
+  maxInputTokens: number = 6000
+): { systemPrompt: string; messages: LLMMessage[]; compacted: boolean; budget: ReturnType<typeof instrumentInputBudget>; exceedsFixedBudget: boolean } {
+  const budget = instrumentInputBudget(systemPrompt, messages, toolDefs);
+  
+  // Hard guard: if fixed components (system + tools) alone exceed budget,
+  // we cannot safely call the provider. Flag for rerouting.
+  const fixedTokens = budget.systemTokens + budget.toolTokens;
+  const exceedsFixedBudget = fixedTokens >= maxInputTokens;
+  
+  if (budget.totalTokens <= maxInputTokens) {
+    return { systemPrompt, messages, compacted: false, budget, exceedsFixedBudget };
+  }
+  
+  // Budget exceeded — must compact
+  // Strategy: preserve latest user request (last message) + tool schemas (required)
+  // Trim older messages aggressively
+  const compacted = [...messages];
+  
+  // Keep trimming until under budget or only 1 message left (the current request)
+  while (compacted.length > 1) {
+    const currentBudget = instrumentInputBudget(systemPrompt, compacted, toolDefs);
+    if (currentBudget.totalTokens <= maxInputTokens) break;
+    // Remove oldest message (shift), preserving the latest (current request)
+    compacted.shift();
+  }
+  
+  const finalBudget = instrumentInputBudget(systemPrompt, compacted, toolDefs);
+  const wasCompacted = compacted.length < messages.length;
+  
+  return { systemPrompt, messages: compacted, compacted: wasCompacted, budget: finalBudget, exceedsFixedBudget };
+}
+
 interface LoopStepMetering {
   cfg: AgentLoopConfig;
   /** 1-based loop step = the action index for this LLM call. */
@@ -1007,7 +1076,28 @@ async function runAgentLoopV2Inner(
   );
   const { offerable: offerableToolIds, degraded: degradedToolIds } =
     filterOfferableTools(toolHealthMap);
-  const offerableTools = availableTools.filter((t) => offerableToolIds.includes(t.id));
+  let offerableTools = availableTools.filter((t) => offerableToolIds.includes(t.id));
+  
+  // ── Intent-aware tool selection for BUILD requests ──
+  // For BUILD tasks, only include file-writing tools to fit within provider
+  // token budgets. The full registry (7.8k tokens) exceeds Groq's 8k limit.
+  // This preserves capability by selecting tools required for the current turn.
+  const isBuildRequest = cfg.requireToolCallOnFirstStep === true;
+  if (isBuildRequest) {
+    const buildToolIds = new Set([
+      "write_file", "create_file", "edit_file", "read_file", "list_files",
+      "apply_patch", "files_write", "files_read",
+    ]);
+    const buildTools = offerableTools.filter((t) => 
+      buildToolIds.has(t.id) || t.id.includes("file") || t.id.includes("write")
+    );
+    // Only use filtered set if it actually reduces size and preserves capability
+    if (buildTools.length > 0 && buildTools.length < offerableTools.length) {
+      console.log(`[agent-loop] BUILD tool selection: ${offerableTools.length} -> ${buildTools.length} tools`);
+      offerableTools = buildTools;
+    }
+  }
+  
   const healthNote = buildToolHealthPromptNote(toolHealthMap);
   if (healthNote) {
     cfg.systemPrompt += "\n\n" + healthNote;
@@ -1090,10 +1180,22 @@ async function runAgentLoopV2Inner(
     // The build capability guard may have switched the serving model
     // mid-run; its hint routes through planBasicRoutes on the next step.
     const requestedModel = buildGuardModelHint ?? cfg.model;
+    // Compact BUILD inputs to stay under provider token limits (e.g. Groq 8k).
+    // Target 7k to leave headroom for tool-call overhead and tokenization variance.
+    const compacted = compactBuildInputs(cfg.systemPrompt, llmMessages, toolDefs, 6000);
+    if (compacted.compacted) {
+      // Log the compaction for observability (no sensitive content)
+      const b = compacted.budget;
+      console.log(`[agent-loop] Compacted BUILD inputs: ${llmMessages.length} -> ${compacted.messages.length} messages, budget: system=${b.systemTokens} tools=${b.toolTokens} msgs=${b.messageTokens} total=${b.totalTokens}`);
+    } else if (compacted.budget.totalTokens > 6000) {
+      // Hard budget exceeded even after compaction — log warning
+      const b = compacted.budget;
+      console.warn(`[agent-loop] BUILD input budget exceeded: total=${b.totalTokens} > 6000 (system=${b.systemTokens} tools=${b.toolTokens} msgs=${b.messageTokens})`);
+    }
     try {
       llmResponse = await callLLMWithTools(
-        cfg.systemPrompt,
-        llmMessages,
+        compacted.systemPrompt,
+        compacted.messages,
         toolDefs,
         {
           model: requestedModel,

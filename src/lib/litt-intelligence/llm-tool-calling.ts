@@ -1397,6 +1397,15 @@ export async function callLLMWithTools(
     secrets: { userApiKey: options?.userApiKey, byokBaseUrl: options?.byokBaseUrl },
   };
 
+  // Request ID for tracing all attempts in this call
+  const requestId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  console.info(`[ai-route] request_start`, {
+    requestId,
+    routeCount: plan.providers.length,
+    routes: plan.providers.map((p) => `${p.provider}`).join(","),
+    requireToolCall: options?.toolChoice === "required",
+  });
+
   if (plan.providers.length === 0) {
     logRoute("no_eligible_routes", {
       excluded: plan.excluded.map((e) => `${e.provider}:${e.reason}`).join(","),
@@ -1440,6 +1449,8 @@ export async function callLLMWithTools(
       ctx.timeoutMs = attemptTimeoutMs;
       const t0 = Date.now();
       logRoute("attempt_start", {
+        requestId,
+        attempt: r + 1,
         provider: route.provider,
         model,
         costClass: route.costClass,
@@ -1540,9 +1551,19 @@ export async function callLLMWithTools(
         });
 
         logRoute("attempt_failure", {
+          requestId,
+          attempt: r + 1,
           provider: route.provider,
           model,
           class: failure.class,
+          // Explicit error classification per HTTP status
+          errorType: failure.httpStatus === 401 ? "AUTH"
+            : failure.httpStatus === 403 ? "AUTH"
+            : failure.httpStatus === 429 ? "RATE_LIMIT"
+            : failure.httpStatus && failure.httpStatus >= 500 ? "PROVIDER_5XX"
+            : failure.class === "timeout" ? "TIMEOUT"
+            : failure.class === "bad_response" ? "MALFORMED_RESPONSE"
+            : "UNKNOWN",
           httpStatus: failure.httpStatus,
           scope: failure.scope,
           latencyMs,
@@ -1605,6 +1626,25 @@ export async function callLLMWithTools(
       }
     }
   }
+
+  // Final summary: no generic "routes unavailable" — list every attempt with its root cause
+  console.error(`[ai-route] all_failed`, {
+    requestId,
+    totalAttempts: failures.length,
+    failures: failures.map((f, i) => ({
+      attempt: i + 1,
+      provider: f.provider,
+      model: f.model,
+      httpStatus: f.httpStatus,
+      errorType: f.httpStatus === 401 ? "AUTH"
+        : f.httpStatus === 403 ? "AUTH"
+        : f.httpStatus === 429 ? "RATE_LIMIT"
+        : f.httpStatus && f.httpStatus >= 500 ? "PROVIDER_5XX"
+        : f.class === "timeout" ? "TIMEOUT"
+        : "UNKNOWN",
+      message: f.message?.substring(0, 200),
+    })),
+  });
 
   throw new AllRoutesFailedError(failures, plan.excluded);
 }
