@@ -28,30 +28,6 @@ function readIcoSizes(path: string): Array<[number, number]> {
   return sizes;
 }
 
-function hexToHsv(hex: string): [number, number, number] {
-  const r = parseInt(hex.slice(1, 3), 16) / 255;
-  const g = parseInt(hex.slice(3, 5), 16) / 255;
-  const b = parseInt(hex.slice(5, 7), 16) / 255;
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const d = max - min;
-  let h = 0;
-  if (d !== 0) {
-    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
-    else if (max === g) h = ((b - r) / d + 2) / 6;
-    else h = ((r - g) / d + 4) / 6;
-  }
-  const s = max === 0 ? 0 : d / max;
-  return [h * 360, s, max];
-}
-
-/** Pink/magenta family: hue ~280°–350° with real saturation. */
-function isPinkFamily(hex: string): boolean {
-  if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return false;
-  const [h, s, v] = hexToHsv(hex);
-  return h >= 280 && h <= 350 && s > 0.25 && v > 0.2;
-}
-
 describe("LiTT-only branding: manifest + icon set", () => {
   const manifest = JSON.parse(readFileSync(join(ROOT, "public/manifest.json"), "utf8"));
 
@@ -63,11 +39,10 @@ describe("LiTT-only branding: manifest + icon set", () => {
     }
   });
 
-  it("theme_color is not pink/magenta-family", () => {
-    expect(manifest.theme_color).toMatch(/^#[0-9a-fA-F]{6}$/);
-    expect(isPinkFamily(manifest.theme_color)).toBe(false);
-    // guard: the old offending value must actually trip the detector
-    expect(isPinkFamily("#ff00a0")).toBe(true);
+  it("theme_color is the approved deep violet sampled from the logo art", () => {
+    // #660fa5: deep violet sampled from the helmet of Larry's chosen artwork
+    // (2026-10-08). Exact match — the art, not a hue family, is the source of truth.
+    expect(manifest.theme_color).toBe("#660fa5");
   });
 
   it("every manifest icon resolves to a real file with matching dimensions", () => {

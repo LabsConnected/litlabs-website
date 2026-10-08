@@ -11,7 +11,7 @@ export const DEFAULT_TITLE =
 export const DEFAULT_DESCRIPTION =
   "LitLabs by LiTT is an AI creative platform for building apps, websites, images, music, video and projects with your AI crew. Free to join with no credit card required.";
 
-export const DEFAULT_OG_IMAGE = "/og/littree-labstudios.jpg";
+export const DEFAULT_OG_IMAGE = "/og/litt-logo.jpg";
 
 export function absoluteUrl(path = "/"): string {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;

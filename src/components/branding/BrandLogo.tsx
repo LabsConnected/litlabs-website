@@ -16,9 +16,9 @@ export function BrandLogo({
   className = "",
   variant = "mark",
 }: BrandLogoProps) {
-  // Single LiTT mark everywhere: the old banner and crystal-mark
-  // assets are retired. Both variants resolve to the same icon for one
-  // consistent identity; `variant` is kept so call sites don't churn.
+  // Larry's chosen logo artwork everywhere: the neon robot mascot.
+  // Both variants resolve to the same icon for one consistent identity;
+  // `variant` is kept so call sites don't churn.
   const iconSrc = "/icon-192.png";
 
   return (
