@@ -9,7 +9,7 @@ import type { ToolDefinition } from "../llm-tool-calling";
 
 describe("compactBuildInputs tool-exchange preservation", () => {
   const toolDefs: ToolDefinition[] = [
-    { name: "test_tool", description: "A test tool", parameters: { type: "object", properties: {} } },
+    { id: "test_tool", description: "A test tool", inputSchema: {} },
   ];
 
   const userMsg = (content: string): LLMMessage => ({ role: "user", content });
