@@ -239,6 +239,47 @@ describe("provider registry — health and cooldown", () => {
 });
 
 describe("provider registry — model hints", () => {
+  it("honors explicit Groq models absent from its defaults", () => {
+    vi.stubEnv("GROQ_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const plan = planBasicRoutes(TOOL_REQ, { model: "llama-3.1-8b-instant" });
+    const groq = plan.providers.find((p) => p.provider === "groq");
+    expect(plan.providers[0]?.provider).toBe("groq");
+    expect(groq?.models[0]).toBe("llama-3.1-8b-instant");
+    expect(groq?.models.filter((m) => m === "llama-3.1-8b-instant")).toHaveLength(1);
+    expect(plan.droppedModelHint).toBeUndefined();
+  });
+
+  it("honors free OpenRouter hints absent from defaults without allowing paid slugs", () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const free = "meta-llama/llama-3.3-70b-instruct:free";
+    const plan = planBasicRoutes(TOOL_REQ, { model: free });
+    const or = plan.providers.find((p) => p.provider === "openrouter");
+    expect(or?.models[0]).toBe(free);
+    expect(plan.droppedModelHint).toBeUndefined();
+
+    const paid = planBasicRoutes(TOOL_REQ, { model: "meta-llama/llama-3.3-70b-instruct" });
+    expect(paid.droppedModelHint).toBe("meta-llama/llama-3.3-70b-instruct");
+    expect(paid.providers.find((p) => p.provider === "openrouter")?.models)
+      .not.toContain("meta-llama/llama-3.3-70b-instruct");
+  });
+
+  it("requires a user API key before honoring a user-funded model hint", () => {
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const denied = planBasicRoutes(TOOL_REQ, { model: "gpt-4o-mini" });
+    expect(denied.providers.some((p) => p.provider === "byok")).toBe(false);
+    expect(denied.droppedModelHint).toBe("gpt-4o-mini");
+
+    const allowed = planBasicRoutes(TOOL_REQ, {
+      model: "gpt-4o-mini",
+      userApiKey: "test-user-key",
+      byokProvider: "openai",
+    });
+    expect(allowed.providers.find((p) => p.provider === "byok")?.models[0]).toBe("gpt-4o-mini");
+    expect(allowed.droppedModelHint).toBeUndefined();
+  });
+
   it("honours a free OpenRouter hint by moving it first within openrouter", () => {
     vi.stubEnv("OPENROUTER_API_KEY", "x");
     vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
