@@ -63,7 +63,7 @@ const OWNER_CLERK_ID = process.env.LITTLABS_VAPI_OWNER_CLERK_ID;
 const ASSISTANT_ID =
   process.env.VAPI_ASSISTANT_ID ?? "ef18583c-3538-4025-ad9f-2114d745525e";
 const SERVER_URL =
-  process.env.VAPI_TOOL_SERVER_URL ?? "https://litlabs.net/api/vapi/tools";
+  process.env.VAPI_TOOL_SERVER_URL ?? "https://www.litlabs.net/api/vapi/tools";
 const CREDENTIAL_ID = process.env.LITTLABS_VAPI_CREDENTIAL_ID;
 const TIMEOUT_SECONDS = Number(process.env.VAPI_TOOL_TIMEOUT_SECONDS ?? 300);
 

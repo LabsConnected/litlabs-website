@@ -357,3 +357,38 @@ describe("Rule 9: Existing Vapi auth and ownership protections still pass", () =
     expect(isSafeWorkspacePath("src/components/Button.tsx")).toBe(true);
   });
 });
+
+// ─── Rule 10: Voice system prompt carries the pronunciation rule ───
+
+describe("Rule 10: voiceSystem includes the LiTT pronunciation guidance", () => {
+  // The Vapi sync script sets the assistant-level system prompt, but the
+  // model generating each spoken reply is driven by voiceSystem in
+  // voice-runtime.ts (used for every turn of /api/vapi/turn). If the
+  // pronunciation rule lives only in the sync script, the static greeting
+  // sounds right while later replies spell out "L-i-T-T". Both prompts
+  // must carry the identical rule. Source-level assertions (see Rule 6)
+  // avoid loading the LLM dependency graph.
+  const PRONUNCIATION_RULE =
+    "Your name is spelled L-i-T-T and pronounced as one syllable: 'lit' (never spell it out letter by letter).";
+
+  it("voice-runtime.ts voiceSystem contains the pronunciation rule", async () => {
+    const fs = await import("fs");
+    const source = fs.readFileSync("src/lib/voice/voice-runtime.ts", "utf-8");
+    expect(source).toContain("pronounced as one syllable");
+    expect(source).toContain("never spell it out letter by letter");
+  });
+
+  it("voice-runtime.ts and the Vapi sync script use the identical rule", async () => {
+    const fs = await import("fs");
+    const runtime = fs.readFileSync("src/lib/voice/voice-runtime.ts", "utf-8");
+    const syncScript = fs.readFileSync("scripts/sync-vapi-bridge.ts", "utf-8");
+    expect(runtime).toContain(PRONUNCIATION_RULE);
+    expect(syncScript).toContain(PRONUNCIATION_RULE);
+  });
+
+  it("voiceSystem keeps the LiTTree LabStudios studio identity", async () => {
+    const fs = await import("fs");
+    const source = fs.readFileSync("src/lib/voice/voice-runtime.ts", "utf-8");
+    expect(source).toContain("LiTTree LabStudios");
+  });
+});
