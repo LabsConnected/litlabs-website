@@ -1008,7 +1008,7 @@ async function runAgentLoopV2Inner(
   );
   const { offerable: offerableToolIds, degraded: degradedToolIds } =
     filterOfferableTools(toolHealthMap);
-  let offerableTools = availableTools.filter((t) => offerableToolIds.includes(t.id));
+  const offerableTools = availableTools.filter((t) => offerableToolIds.includes(t.id));
   
   // Preserve every tool that passed capability, permission, and health gates.
   // BUILD intent requires file edits, but it may ALSO require terminal.execute,
