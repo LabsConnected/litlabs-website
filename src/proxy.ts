@@ -797,11 +797,17 @@ function fixDevProxyHeaders(req: NextRequest): NextResponse | undefined {
 export function redirectNakedToWww(req: NextRequest): NextResponse | null {
   if (process.env.NODE_ENV === "development") return null;
 
-  const host = req.headers.get("host") ?? "";
+  const rawHost = req.headers.get("host") ?? "";
+  // Strip port suffix and normalize case — proxies and browsers may send
+  // "litlabs.net:443" or mixed case. Also check x-forwarded-host which
+  // Cloudflare/proxies set to the original client-facing host.
+  const host = rawHost.split(":")[0].toLowerCase();
+  const forwardedHost = (req.headers.get("x-forwarded-host") ?? "").split(":")[0].toLowerCase();
 
   // Only redirect if the request is on the naked litlabs.net apex,
   // not on www.litlabs.net or any other subdomain/host.
-  if (host !== "litlabs.net") return null;
+  const isApex = host === "litlabs.net" || forwardedHost === "litlabs.net";
+  if (!isApex) return null;
 
   const redirectUrl = new URL(req.nextUrl.pathname + req.nextUrl.search, `https://www.litlabs.net`);
   // Preserve the full query string on the canonical host
