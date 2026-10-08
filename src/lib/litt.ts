@@ -1,3 +1,4 @@
+import { BRAND_APP_ICON_192_SRC } from "@/components/branding/brand-assets";
 import { supabase } from "./supabase";
 
 export type NotificationType =
@@ -190,7 +191,7 @@ class LiTT {
             body: JSON.stringify({
               title: payload.title,
               body: payload.body,
-              icon: "/logo.webp",
+              icon: BRAND_APP_ICON_192_SRC,
               data: payload.data || {},
             }),
           });

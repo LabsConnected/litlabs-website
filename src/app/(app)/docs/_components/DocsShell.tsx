@@ -71,7 +71,7 @@ export default function DocsShell({
 
   return (
     <div
-      className="min-h-screen px-4 pb-16 pt-28 sm:pt-32"
+      className="min-h-screen px-5 pb-16 pt-28 sm:pt-32"
       style={{ backgroundColor: T.bgColor, color: T.textColor }}
     >
       <div className="mx-auto max-w-6xl">

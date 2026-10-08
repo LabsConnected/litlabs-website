@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import HomePageClient from "@/app/HomePageClient";
 import { JsonLd } from "@/components/seo/JsonLd";
+import { BRAND_APP_ICON_SRC } from "@/components/branding/brand-assets";
 import {
   DEFAULT_DESCRIPTION,
   SITE_NAME,
@@ -60,7 +61,7 @@ const homeSchema = {
       ],
       logo: {
         "@type": "ImageObject",
-        url: absoluteUrl("/icon-512.png"),
+        url: absoluteUrl(BRAND_APP_ICON_SRC),
         width: 512,
         height: 512,
       },

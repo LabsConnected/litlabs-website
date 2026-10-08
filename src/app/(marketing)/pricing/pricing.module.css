@@ -510,8 +510,8 @@
 
 .accent_cyan .planButton {
   border-color: transparent;
-  background: var(--cyan);
-  color: #001216;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
 }
 
 .accent_purple .planButton {
@@ -761,8 +761,8 @@
 }
 
 .primaryCta {
-  background: var(--cyan);
-  color: #001216;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
 }
 
 .secondaryCta {

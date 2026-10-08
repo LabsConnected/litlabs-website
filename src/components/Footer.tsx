@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
 import { ArrowUpRight, Sparkles } from "lucide-react";
+import { BrandLogo } from "@/components/branding/BrandLogo";
 
 const PRODUCT_LINKS = [
   { href: "/studio?tool=agents", label: "Agents" },
@@ -160,6 +161,7 @@ export default function Footer() {
         >
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-2">
+              <BrandLogo href="/" size={22} showText={false} variant="mark" priority={false} />
               <span
                 className="text-sm font-black"
                 style={{ color: C.headerColor }}

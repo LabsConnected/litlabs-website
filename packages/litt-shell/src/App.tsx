@@ -157,7 +157,7 @@ export function App() {
       <div className="litt-shell-content">
         {/* LiTT Brand */}
         <div className="litt-brand">
-          <div className="litt-logo">⚡</div>
+          <img className="litt-logo" src="/brand-mark.png" alt="" width={28} height={28} />
           <span className="litt-name">LiTT</span>
         </div>
 

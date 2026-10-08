@@ -3,7 +3,7 @@
 :root {
   --litt-bg-primary: #0a0a0a;
   --litt-bg-secondary: #1a1a1a;
-  --litt-accent: #00d4ff;
+  --litt-accent: #a8ff2f;
   --litt-text-primary: #ffffff;
   --litt-text-secondary: #a0a0a0;
   --litt-border: #2a2a2a;
@@ -71,7 +71,10 @@ body {
 }
 
 .litt-logo {
-  font-size: 28px;
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  display: block;
 }
 
 .litt-name {

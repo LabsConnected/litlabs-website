@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { BRAND_MARK_SRC } from "@/components/branding/brand-assets";
 import { useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import PageShell from "@/components/PageShell";
@@ -174,7 +175,7 @@ export default function GamesPage() {
               <span>←</span> Dashboard
             </Link>
             <div className="flex items-center gap-2">
-              <Image src="/logo-littree.svg" alt="LiTTree" width={24} height={24} className="h-6 w-6" />
+              <Image src={BRAND_MARK_SRC} alt="LiTTree" width={24} height={24} className="h-6 w-6" />
               <p className="text-xs font-black uppercase tracking-[.3em] text-[#9B4DFF]">LiTT Arcade</p>
             </div>
             <h1 className="mt-3 text-4xl font-black tracking-tight sm:text-5xl">Play instantly.</h1>
@@ -335,7 +336,7 @@ export default function GamesPage() {
 
                     {/* LiTT logo badge — top left */}
                     <div className="absolute left-2 top-2 flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-1 backdrop-blur-sm">
-                      <Image src="/logo-littree.svg" alt="" width={12} height={12} className="h-3 w-3" />
+                      <Image src={BRAND_MARK_SRC} alt="" width={12} height={12} className="h-3 w-3" />
                       <span className="text-[7px] font-black uppercase tracking-wider text-white/90">LiTT</span>
                     </div>
 
@@ -387,7 +388,7 @@ export default function GamesPage() {
 
                   {/* Branded footer strip */}
                   <div className="flex items-center gap-1.5 border-t border-[#9B4DFF]/10 bg-[#9B4DFF]/5 px-3 py-1.5">
-                    <Image src="/logo-littree.svg" alt="" width={10} height={10} className="h-2.5 w-2.5 opacity-60" />
+                    <Image src={BRAND_MARK_SRC} alt="" width={10} height={10} className="h-2.5 w-2.5 opacity-60" />
                     <span className="text-[7px] font-bold uppercase tracking-wider text-white/40">LiTTree Game Cloud</span>
                   </div>
                 </article>

@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { BRAND_MARK_SRC } from "@/components/branding/brand-assets";
 import Link from "next/link";
 import { ArrowRight, Check, Download, FileStack, GitBranch, Play, ShieldCheck, Sparkles, Undo2 } from "lucide-react";
 import { track } from "@/lib/analytics";
@@ -134,11 +135,11 @@ export function TrustSection() {
           <div className="relative min-h-[420px] overflow-hidden lg:min-h-full">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,rgba(168,255,47,.14),transparent_35%)]" />
             <Image
-              src="/logo-littree.svg"
+              src={BRAND_MARK_SRC}
               alt="LiTTree LabStudios logo"
               fill
               sizes="(max-width: 1024px) 92vw, 45vw"
-              className="object-contain object-center p-16 drop-shadow-[0_30px_80px_rgba(0,0,0,.6)] lg:p-24"
+              className="object-contain object-center p-8 drop-shadow-[0_30px_80px_rgba(0,0,0,.6)] lg:p-14"
             />
             <div className="absolute inset-x-0 bottom-0 h-1/3 bg-linear-to-t from-[#070a10] to-transparent" />
             <div className="absolute right-5 top-5 rounded-full border border-accent/22 bg-[#05070d]/70 px-3 py-2 text-[10px] font-black uppercase tracking-[0.15em] text-[#caff85] backdrop-blur-xl lg:right-8 lg:top-8">

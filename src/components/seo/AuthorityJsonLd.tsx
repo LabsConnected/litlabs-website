@@ -1,3 +1,4 @@
+import { BRAND_APP_ICON_SRC } from "@/components/branding/brand-assets";
 import { SITE_NAME, SITE_URL, absoluteUrl } from "@/lib/seo";
 import { JsonLd } from "./JsonLd";
 
@@ -8,7 +9,7 @@ export function AuthorityJsonLd() {
       "@type": "Organization",
       "name": SITE_NAME,
       "url": SITE_URL,
-      "logo": absoluteUrl("/logo.png"),
+      "logo": absoluteUrl(BRAND_APP_ICON_SRC),
       "sameAs": [
         "https://x.com/LabsConnected",
         "https://github.com/LabsConnected"

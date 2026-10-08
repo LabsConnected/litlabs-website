@@ -1,6 +1,7 @@
 "use client";
 
 import { brand, color } from "@/lib/design/litt-tokens";
+import { BrandLogo } from "@/components/branding/BrandLogo";
 import { SignUp } from "@clerk/nextjs";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -25,11 +26,14 @@ function SignUpContent() {
   return (
     <div
       className="min-h-dvh flex items-center justify-center px-4 py-8"
-      style={{ backgroundColor: "#0f0f14" }}
+      style={{ backgroundColor: "#03050a" }}
     >
       <SignupTracker />
       <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
+        <div className="mb-8 text-center">
+          <div className="mb-4 flex justify-center">
+            <BrandLogo href="/" size={36} showText={false} variant="full" />
+          </div>
           <h1
             className="text-xl font-black tracking-tight mb-1"
             style={{ color: "#e2e8f0" }}
@@ -50,7 +54,7 @@ function SignUpContent() {
 
         <div
           className="rounded-xl p-1"
-          style={{ backgroundColor: "#1a1a24", border: "1px solid #2a2a3a" }}
+          style={{ backgroundColor: color.surface.DEFAULT, border: `1px solid ${color.border.DEFAULT}` }}
         >
           <SignUp
             forceRedirectUrl={redirectUrl}
@@ -70,9 +74,9 @@ function SignUpContent() {
                   borderRadius: "8px",
                 },
                 formFieldInput: {
-                  backgroundColor: "#0f0f14",
-                  border: "1px solid #2a2a3a",
-                  color: "#e2e8f0",
+                  backgroundColor: "#03050a",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  color: color.text.primary,
                   borderRadius: "8px",
                 },
                 footerActionLink: { color: brand.primary.DEFAULT },
@@ -94,11 +98,11 @@ function SignUpContent() {
               },
               variables: {
                 colorPrimary: brand.primary.DEFAULT,
-                colorBackground: "#1a1a24",
-                colorForeground: "#e2e8f0",
-                colorMutedForeground: "#94a3b8",
-                colorInput: "#0f0f14",
-                colorInputForeground: "#e2e8f0",
+                colorBackground: color.surface.DEFAULT,
+                colorForeground: color.text.primary,
+                colorMutedForeground: color.text.secondary,
+                colorInput: "#03050a",
+                colorInputForeground: color.text.primary,
                 borderRadius: "8px",
                 fontFamily: "system-ui, -apple-system, sans-serif",
               },
@@ -145,7 +149,7 @@ export default function SignUpPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-dvh" style={{ backgroundColor: "#0f0f14" }} />
+        <div className="min-h-dvh" style={{ backgroundColor: "#03050a" }} />
       }
     >
       <SignUpContent />

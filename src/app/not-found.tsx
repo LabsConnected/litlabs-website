@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { BrandLogo } from "@/components/branding/BrandLogo";
+import { color } from "@/lib/design/litt-tokens";
 
 export const metadata: Metadata = {
   title: "404 — Page Not Found",
@@ -13,11 +15,14 @@ export default function NotFound() {
   return (
     <div
       className="min-h-dvh flex items-center justify-center px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-16"
-      style={{ backgroundColor: "#0f0f14", color: "#e2e8f0" }}
+      style={{ backgroundColor: "#03050a", color: color.text.primary }}
     >
-      <div className="max-w-md w-full rounded-xl p-8" style={{ border: "1px solid #2a2a3a", backgroundColor: "#1a1a24" }}>
+      <div className="max-w-md w-full rounded-xl p-8" style={{ border: `1px solid ${color.border.DEFAULT}`, backgroundColor: color.surface.DEFAULT }}>
         <div className="text-center mb-6">
-          <h1 className="text-3xl font-bold tracking-tight mb-2" style={{ color: "#e2e8f0" }}>
+          <div className="mb-5 flex justify-center">
+            <BrandLogo href="/" size={36} showText={false} variant="full" />
+          </div>
+          <h1 className="text-3xl font-bold tracking-tight mb-2" style={{ color: color.text.primary }}>
             404
           </h1>
           <p className="text-xs opacity-60">

@@ -53,7 +53,7 @@ export default function CliPageClient() {
           </div>
           <h1 className="text-4xl font-black leading-[1.05] tracking-[-0.03em] sm:text-5xl lg:text-6xl">
             The same LiTT brain, <br className="hidden sm:block" />
-            <span className="text-transparent bg-clip-text bg-linear-to-r from-accent to-[#a970ff]">
+            <span className="text-transparent bg-clip-text bg-linear-to-r from-accent to-[#b58cff]">
               in your terminal.
             </span>
           </h1>
@@ -83,7 +83,7 @@ export default function CliPageClient() {
 
             <div className="rounded-2xl border border-white/10 bg-[#090d1b]/70 p-6 shadow-[0_24px_70px_rgba(0,0,0,.35)]">
               <div className="mb-6 flex items-center gap-3">
-                <div className="grid h-10 w-10 place-items-center rounded-xl bg-[#a970ff]/10 text-[#a970ff]">
+                <div className="grid h-10 w-10 place-items-center rounded-xl bg-[#b58cff]/10 text-[#b58cff]">
                   <Terminal size={20} />
                 </div>
                 <h2 className="text-lg font-black">Quickstart</h2>
