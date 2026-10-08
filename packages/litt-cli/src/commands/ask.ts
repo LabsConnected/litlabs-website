@@ -38,6 +38,8 @@ import { resolveActiveProject } from "../lib/active-project.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
 import { getAuthSession } from "../lib/auth/auth-session.js";
 import { getTerminalUrl } from "../lib/auth/auth-config.js";
+import { ApprovalBridge } from "../ink/approval-bridge.js";
+import * as readline from "node:readline/promises";
 
 export async function askCommand(args: string[], session?: RuntimeSession): Promise<number> {
   const question = args.join(" ").trim();
@@ -84,6 +86,24 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   const sess = session ?? createRuntimeSession({ cwd: projectRoot, mode: "act" });
   sess.installSigintHandler();
 
+  // The effective mode comes from the session, which carries the --mode
+  // flag (index.ts builds it from dispatch). It is never hardcoded here:
+  // PLAN must reach the execution policy layer so the gateway denies
+  // mutations, and ACT must ask a real human instead of auto-approving.
+  const mode = sess.getMode();
+
+  // Genuine human approval through the existing ApprovalBridge.
+  // Interactive TTY: a prompt drives the bridge and the human decides.
+  // Non-interactive: the loop declares headless interaction and the
+  // gateway's policy layer denies approval-required actions (fail closed).
+  // The old unconditional auto-approval is removed.
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  const approvalBridge = new ApprovalBridge();
+  let closeApprovalPrompt: (() => void) | null = null;
+  if (interactive) {
+    closeApprovalPrompt = driveApprovalBridgeFromTty(approvalBridge);
+  }
+
   const store = new RuntimeStore();
   const shell = createShellExecutor(projectRoot);
   const executor = new CommandExecutor(shell, store);
@@ -94,16 +114,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     executor,
     store,
     projectId: projectRoot,
-    // litt ask is a one-shot command — the user explicitly asked for an
-    // action, so we auto-approve tool execution. This is NOT weakening
-    // the approval safety system: the gateway still enforces identity,
-    // policy, capability classification, path safety, and env filtering.
-    // The callback only decides whether to allow a pending approval —
-    // it does not bypass any other safety check.
-    onApprovalRequired: async (_request, _risk) => {
-      // Auto-approve in litt ask mode — the user asked for this action.
-      return true;
-    },
+    onApprovalRequired: (request, risk) => approvalBridge.request(request, risk),
   });
 
   try {
@@ -184,7 +195,10 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       gateway,
       cwd: projectRoot,
       userId: "cli-user",
-      mode: "act",
+      mode,
+      // Non-interactive runs declare headless interaction so the gateway's
+      // policy layer denies approval-required actions (fail closed).
+      interaction: interactive ? "interactive" : "headless",
       maxRounds: 12,
       totalTimeoutMs: Number(process.env.LITT_ASK_TIMEOUT_MS) > 0
         ? Number(process.env.LITT_ASK_TIMEOUT_MS)
@@ -256,7 +270,64 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   } catch (err) {
     fail(`Agent error: ${err instanceof Error ? err.message : String(err)}`);
     return 1;
+  } finally {
+    closeApprovalPrompt?.();
   }
+}
+
+// ─── TTY approval driver ───────────────────────────────────────────
+
+/**
+ * Drive an ApprovalBridge from a plain TTY prompt (litt ask has no Ink UI).
+ * Subscribes to pending approvals, asks the human on the terminal, and
+ * resolves the bridge with their decision. Fail closed: any prompt error
+ * denies. Prompts are serialized one at a time: parallel approvals queue
+ * behind the active prompt and are asked in order, so none is dropped,
+ * double-asked, or left hanging. Returns a cleanup function.
+ *
+ * `input`/`output` default to the process stdio; tests inject fakes.
+ */
+export function driveApprovalBridgeFromTty(
+  bridge: ApprovalBridge,
+  input: NodeJS.ReadableStream = process.stdin,
+  output: NodeJS.WritableStream = process.stdout,
+): () => void {
+  const rl = readline.createInterface({ input, output });
+  let closed = false;
+  let prompting = false;
+
+  async function promptHead(): Promise<void> {
+    if (prompting || closed) return;
+    const head = bridge.pending;
+    if (!head) return;
+    prompting = true;
+    try {
+      const answer = (
+        await rl.question(`\nApproval required: ${head.action} [risk: ${head.risk}] (y/N): `)
+      )
+        .trim()
+        .toLowerCase();
+      bridge.decide(answer === "y" || answer === "yes");
+    } catch {
+      // Fail closed: any prompt error denies.
+      bridge.decide(false);
+    } finally {
+      prompting = false;
+      // A new head may have queued while we were prompting.
+      if (!closed && bridge.pending) void promptHead();
+    }
+  }
+
+  const unsubscribe = bridge.subscribe(() => {
+    void promptHead();
+  });
+
+  return () => {
+    closed = true;
+    unsubscribe();
+    bridge.cancel();
+    rl.close();
+  };
 }
 
 // ─── Heuristic fallback (no API key) ──────────────────────────────
