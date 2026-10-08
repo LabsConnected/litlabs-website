@@ -42,7 +42,7 @@ export type NavSection = {
  *   Main: Home · Studio · Discover · Projects · Settings
  *
  * Global LiTT is a persistent header trigger, NOT a sixth nav item.
- * Marketplace merges into Discover. Assets/Agents/Missions are Studio
+ * Marketplace keeps its dedicated routes until Discover has equivalent pages. Assets/Agents/Missions are Studio
  * secondary tools (?tool=assets|agents|workflows), not top-level nav.
  * Legacy creation routes (/builder, /ai-builder, /chat, /generate, …)
  * redirect into Studio via canonical-redirects.ts.
@@ -57,9 +57,10 @@ export const APP_NAV_MAIN: NavItem[] = [
 ];
 
 /* Secondary destinations — Phase 3B: demoted from primary nav.
- * Marketplace merges into Discover (redirect in canonical-redirects.ts).
- * These remain accessible but are not primary navigation. */
+ * Marketplace remains reachable under /marketplace (including detail pages),
+ * not redirected into the unrelated Discover social feed. */
 export const APP_NAV_MORE: NavItem[] = [
+  { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
   { label: "Showcase", href: "/showcase", icon: Star },
   { label: "Games", href: "/games", icon: GamesIcon },
   { label: "CLI", href: "/cli", icon: Terminal },
@@ -76,7 +77,7 @@ export interface NavMenuSection {
 
 export const APP_NAV_MORE_SECTIONS: NavMenuSection[] = [
   { id: "build", label: "Build", items: APP_NAV_MORE.filter((item) => ["CLI", "Deployments"].includes(item.label)) },
-  { id: "explore", label: "Explore", items: APP_NAV_MORE.filter((item) => ["Showcase", "Games", "Library"].includes(item.label)) },
+  { id: "explore", label: "Explore", items: APP_NAV_MORE.filter((item) => ["Marketplace", "Showcase", "Games", "Library"].includes(item.label)) },
   { id: "learn", label: "Learn", items: APP_NAV_MORE.filter((item) => item.label === "Docs") },
 ];
 
