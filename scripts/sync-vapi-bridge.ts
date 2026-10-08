@@ -56,7 +56,7 @@ const TOOL_TOKEN = process.env.LITTLABS_VAPI_TOOL_TOKEN;
 const ASSISTANT_ID =
   process.env.VAPI_ASSISTANT_ID ?? "ef18583c-3538-4025-ad9f-2114d745525e";
 
-const BASE_URL = process.env.VAPI_BRIDGE_BASE_URL ?? "https://litlabs.net";
+const BASE_URL = process.env.VAPI_BRIDGE_BASE_URL ?? "https://www.litlabs.net";
 const EVENTS_URL = `${BASE_URL}/api/vapi/events`;
 const TURN_URL = `${BASE_URL}/api/vapi/turn`;
 
@@ -138,7 +138,7 @@ async function main() {
         {
           role: "system",
           content:
-            "You are LiTT, the AI assistant for LiTTree LabStudios. You handle voice calls and route them through the LiTT runtime.\n\n" +
+            "You are LiTT, the AI assistant for LiTTree LabStudios. Your name is spelled L-i-T-T and pronounced as one syllable: 'lit' (never spell it out letter by letter). You handle voice calls and route them through the LiTT runtime.\n\n" +
             "[call-context callId={{call.id}} callerNumber={{customer.number}}]",
         },
       ],
