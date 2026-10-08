@@ -20,13 +20,13 @@ describe("Discovery regression — canonical identity", () => {
     expect(SITE_URL).toBe("https://www.litlabs.net");
   });
 
-  it("SITE_NAME is LiTTree LabStudios", () => {
-    expect(SITE_NAME).toBe("LiTTree LabStudios");
+  it("SITE_NAME is LiTT", () => {
+    expect(SITE_NAME).toBe("LiTT");
   });
 
-  it("DEFAULT_TITLE includes LitLabs and LiTTree LabStudios", () => {
+  it("DEFAULT_TITLE includes LitLabs and LiTT", () => {
     expect(DEFAULT_TITLE).toContain("LitLabs");
-    expect(DEFAULT_TITLE).toContain("LiTTree LabStudios");
+    expect(DEFAULT_TITLE).toContain("LiTT");
   });
 
   it("DEFAULT_DESCRIPTION mentions AI creative platform", () => {
@@ -51,7 +51,7 @@ describe("Discovery regression — buildMetadata", () => {
     const og = m.openGraph as Record<string, unknown> | undefined;
     expect(og?.type).toBe("website");
     expect(og?.siteName).toBe(SITE_NAME);
-    expect(og?.title).toBe("Test | LiTTree LabStudios");
+    expect(og?.title).toBe("Test | LiTT");
     expect(og?.description).toBe("Desc");
     expect(og?.images).toHaveLength(1);
   });
@@ -60,7 +60,7 @@ describe("Discovery regression — buildMetadata", () => {
     const m = buildMetadata({ title: "Test", path: "/test" });
     const tw = m.twitter as Record<string, unknown> | undefined;
     expect(tw?.card).toBe("summary_large_image");
-    expect(tw?.title).toBe("Test | LiTTree LabStudios");
+    expect(tw?.title).toBe("Test | LiTT");
   });
 
   it("respects index=false to set robots noindex", () => {

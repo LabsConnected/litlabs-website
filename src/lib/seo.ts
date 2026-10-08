@@ -3,13 +3,13 @@ import { SITE_URL } from "@/lib/siteConfig";
 
 export { SITE_URL };
 
-export const SITE_NAME = "LiTTree LabStudios";
+export const SITE_NAME = "LiTT";
 
 export const DEFAULT_TITLE =
-  "LitLabs — LiTTree LabStudios | AI Creative Studio & Builder";
+  "LitLabs — LiTT | AI Creative Studio & Builder";
 
 export const DEFAULT_DESCRIPTION =
-  "LitLabs by LiTTree LabStudios is an AI creative platform for building apps, websites, images, music, video and projects with your AI crew. Free to join with no credit card required.";
+  "LitLabs by LiTT is an AI creative platform for building apps, websites, images, music, video and projects with your AI crew. Free to join with no credit card required.";
 
 export const DEFAULT_OG_IMAGE = "/og/littree-labstudios.jpg";
 
@@ -33,7 +33,7 @@ export function buildMetadata({
 }: BuildMetadataOptions): Metadata {
   const canonical = absoluteUrl(path);
   // Return the raw title only — the root layout's title.template adds
-  // "| LiTTree LabStudios". For the homepage default, DEFAULT_TITLE already
+  // "| LiTT". For the homepage default, DEFAULT_TITLE already
   // includes the site name and is set as an absolute title (bypassing template).
   const resolvedTitle = title ?? DEFAULT_TITLE;
   // OG/Twitter titles should be the full title (template doesn't apply to OG)

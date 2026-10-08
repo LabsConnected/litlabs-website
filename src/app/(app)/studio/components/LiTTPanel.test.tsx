@@ -182,9 +182,9 @@ describe("LiTTPanel — F1 overlay mode (slice B)", () => {
   it("renders the canonical BrandLogo mark in the header (no invented L tile)", () => {
     renderOverlay();
     const brand = screen.getByTestId("litt-panel-brand");
-    const logo = brand.querySelector('img[alt="LiTTree LabStudios Logo"]');
+    const logo = brand.querySelector('img[alt="LiTT logo"]');
     expect(logo).not.toBeNull();
-    expect(logo?.getAttribute("src")).toContain("littree-crystal-mark");
+    expect(logo?.getAttribute("src")).toContain("icon-192.png");
     // The old gradient "L" tile is gone.
     expect(brand.textContent).not.toMatch(/^L$/);
   });

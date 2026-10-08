@@ -60,7 +60,7 @@ describe("LiTTPresence", () => {
 });
 
 describe("LiTTPresence — F1 brand consolidation (slice B)", () => {
-  const BRAND_ALT = "LiTTree LabStudios Logo";
+  const BRAND_ALT = "LiTT logo";
 
   it.each([
     ["chat-avatar", "thinking", "md"],
@@ -72,7 +72,7 @@ describe("LiTTPresence — F1 brand consolidation (slice B)", () => {
     );
     const logo = container.querySelector(`img[alt="${BRAND_ALT}"]`);
     expect(logo).not.toBeNull();
-    expect(logo?.getAttribute("src")).toContain("littree-crystal-mark");
+    expect(logo?.getAttribute("src")).toContain("icon-192.png");
   });
 
   it.each([

@@ -53,7 +53,7 @@ describe("LayoutShell hybrid-public chrome (signed-out /marketplace, /discover)"
     // Header: brand link home + primary nav landmark — the way back to
     // "/" that was previously missing entirely.
     const header = screen.getByRole("banner");
-    expect(within(header).getByRole("link", { name: /LiTTree LabStudios home/i })).toBeTruthy();
+    expect(within(header).getByRole("link", { name: /LiTT home/i })).toBeTruthy();
     expect(screen.getByRole("navigation", { name: /primary navigation/i })).toBeTruthy();
 
     // Page content still renders, between header and footer.
@@ -74,7 +74,7 @@ describe("LayoutShell hybrid-public chrome (signed-out /marketplace, /discover)"
       </LayoutShell>,
     );
 
-    expect(screen.queryByRole("link", { name: /LiTTree LabStudios home/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /LiTT home/i })).toBeNull();
     expect(screen.getByTestId("hybrid-page-content")).toBeTruthy();
   });
 });
