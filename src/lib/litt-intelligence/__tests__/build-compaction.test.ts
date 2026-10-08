@@ -1,88 +1,99 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
+import { compactBuildInputs, instrumentInputBudget } from "../build-input-compaction";
+import type { LLMMessage, ToolDefinition } from "../llm-tool-calling";
 
-// Test the compaction logic in isolation
-// These tests use a payload equivalent to the failing landing-page request
+const defs: ToolDefinition[] = [
+  { id: "files.write", description: "Write a file", inputSchema: {} },
+  { id: "terminal.execute", description: "Execute an approved command", inputSchema: {} },
+  { id: "test.run", description: "Run tests", inputSchema: {} },
+];
+const assistantCall = (id: string, name: string): LLMMessage => ({
+  role: "assistant",
+  content: "",
+  tool_calls: [{ id, type: "function", function: { name, arguments: "{}" } }],
+});
+const result = (id: string, content: string): LLMMessage => ({
+  role: "tool", tool_call_id: id, content,
+});
 
-describe("BUILD input compaction", () => {
-  // Mock the estimator (4 chars per token, conservative)
-  const estimateTokens = (chars: number) => Math.max(1, Math.ceil(chars / 4));
-  
-  function createLargePayload() {
-    // Simulate the failing request: ~11k tokens
-    // System prompt: ~4k tokens (16k chars)
-    const systemPrompt = "SYSTEM: " + "x".repeat(16000);
-    // Tool defs: ~3k tokens (12k chars)
-    const toolDefs = [{ name: "tool1", description: "y".repeat(12000) }];
-    // Messages: ~6k tokens (24k chars) - conversation history + user request
-    const messages = [
-      { role: "user", content: "old history " + "a".repeat(10000) },
-      { role: "assistant", content: "old response " + "b".repeat(10000) },
-      { role: "user", content: "Build me a simple landing page with a hero, navigation, feature cards, and contact form." },
+describe("real BUILD input compaction", () => {
+  it("preserves the original user request even when the last message is a tool result", () => {
+    const request = "Edit the page and run the project's test command";
+    const messages: LLMMessage[] = [
+      { role: "user", content: "old request " + "o".repeat(3500) },
+      { role: "assistant", content: "old reply " + "r".repeat(3500) },
+      { role: "user", content: request },
+      assistantCall("write-1", "files.write"),
+      result("write-1", "file edit complete"),
+      assistantCall("test-1", "terminal.execute"),
+      result("test-1", "tests passed"),
     ];
-    return { systemPrompt, messages, toolDefs };
-  }
-
-  it("raw payload exceeds 10k tokens", () => {
-    const { systemPrompt, messages, toolDefs } = createLargePayload();
-    const systemTokens = estimateTokens(systemPrompt.length);
-    const toolTokens = estimateTokens(JSON.stringify(toolDefs).length);
-    const msgTokens = estimateTokens(messages.reduce((acc, m) => acc + (m.content?.length || 0), 0));
-    const total = systemTokens + toolTokens + msgTokens;
-    expect(total).toBeGreaterThan(10000);
+    const c = compactBuildInputs("system", messages, defs, 300, 2);
+    expect(c.compacted).toBe(true);
+    expect(c.budget.totalTokens).toBeLessThanOrEqual(300);
+    expect(c.messages).toContainEqual(messages[2]);
+    expect(c.messages.at(-1)).toEqual(messages.at(-1));
+    expect(c.messages.map((m) => m.tool_call_id).filter(Boolean)).toContain("test-1");
+    expect(c.messages.some((m) => m.tool_calls?.[0]?.id === "test-1")).toBe(true);
   });
 
-  it("compaction reduces payload to ≤ 6k tokens", () => {
-    // This test verifies the compaction logic conceptually
-    // Actual implementation is in agent-loop-v2.ts
-    const { systemPrompt, messages, toolDefs } = createLargePayload();
-    
-    // Simulate compaction: keep only the last message (current user request)
-    const compactedMessages = [messages[messages.length - 1]];
-    
-    const systemTokens = estimateTokens(systemPrompt.length);
-    const toolTokens = estimateTokens(JSON.stringify(toolDefs).length);
-    const msgTokens = estimateTokens(compactedMessages[0].content.length);
-    const total = systemTokens + toolTokens + msgTokens;
-    
-    // With aggressive compaction, should be under 6k
-    // Note: system + tools alone might exceed this in real scenarios
-    expect(compactedMessages.length).toBe(1);
-    expect(compactedMessages[0].content).toContain("landing page");
+  it("never leaves an orphan result after trimming an assistant/tool exchange", () => {
+    const messages: LLMMessage[] = [
+      { role: "user", content: "Edit and then test" },
+      assistantCall("old-write", "files.write"),
+      result("old-write", "x".repeat(5000)),
+      assistantCall("new-test", "test.run"),
+      result("new-test", "one test passed"),
+    ];
+    const c = compactBuildInputs("system", messages, defs, 170, 0);
+    expect(c.budget.totalTokens).toBeLessThanOrEqual(170);
+    expect(c.messages.some((m) => m.tool_call_id === "old-write")).toBe(false);
+    for (const message of c.messages.filter((m) => m.role === "tool")) {
+      expect(c.messages.some((m) => m.tool_calls?.some((tc) => tc.id === message.tool_call_id))).toBe(true);
+    }
+    expect(c.messages.some((m) => m.tool_call_id === "new-test")).toBe(true);
   });
 
-  it("latest user request remains intact after compaction", () => {
-    const { messages } = createLargePayload();
-    const latestRequest = "Build me a simple landing page with a hero, navigation, feature cards, and contact form.";
-    
-    // Compaction must preserve the last message
-    const compacted = [messages[messages.length - 1]];
-    expect(compacted[0].content).toBe(latestRequest);
+  it("keeps all tools and both edit and terminal calls in one non-compacted run", () => {
+    const messages: LLMMessage[] = [
+      { role: "user", content: "Edit index.tsx, then execute pnpm test" },
+      assistantCall("w1", "files.write"),
+      result("w1", "file written"),
+      assistantCall("t1", "terminal.execute"),
+      result("t1", "test passed"),
+    ];
+    const c = compactBuildInputs("system", messages, defs, 6000, 0);
+    expect(c.compacted).toBe(false);
+    expect(c.messages).toEqual(messages);
+    expect(c.budget.toolTokens).toBe(instrumentInputBudget("system", messages, defs).toolTokens);
+    expect(defs.map((t) => t.id)).toEqual(["files.write", "terminal.execute", "test.run"]);
   });
 
-  it("required tools remain available after compaction", () => {
-    const { toolDefs } = createLargePayload();
-    // Tool definitions are never removed by compaction
-    expect(toolDefs.length).toBeGreaterThan(0);
-    expect(toolDefs[0].name).toBe("tool1");
+  it("preserves complete multi-tool assistant batches", () => {
+    const batch: LLMMessage = {
+      role: "assistant", content: "",
+      tool_calls: [
+        { id: "a", type: "function", function: { name: "files.write", arguments: "{}" } },
+        { id: "b", type: "function", function: { name: "test.run", arguments: "{}" } },
+      ],
+    };
+    const messages: LLMMessage[] = [
+      { role: "user", content: "old " + "x".repeat(3000) },
+      batch, result("a", "edited"), result("b", "passed"),
+      { role: "user", content: "new request" },
+    ];
+    const c = compactBuildInputs("sys", messages, defs, 150, 4);
+    expect(c.messages).toEqual([messages[4]]);
+    expect(c.budget.totalTokens).toBeLessThanOrEqual(150);
   });
 
-  it("trivial chat request does not serialize complete tool registry", () => {
-    // A simple chat should not include all build tools
-    // This is a conceptual test - actual implementation filters by intent
-    const allTools = ["write_file", "read_file", "web_search", "browser_open", "terminal_exec"];
-    const buildTools = allTools.filter(t => t.includes("file") || t.includes("write"));
-    // Build intent should select only file-related tools
-    expect(buildTools.length).toBeLessThan(allTools.length);
-    expect(buildTools).toContain("write_file");
-  });
-
-  it("oversized fixed payloads are flagged before provider invocation", () => {
-    // If system + tools alone exceed budget, must flag for rerouting
-    const systemTokens = 5583;
-    const toolTokens = 7794;
-    const fixedTotal = systemTokens + toolTokens;
-    const budget = 6000;
-    const exceedsFixedBudget = fixedTotal >= budget;
-    expect(exceedsFixedBudget).toBe(true);
+  it("flags unshrinkable fixed budgets instead of claiming compliance", () => {
+    const system = "x".repeat(16_000);
+    const tools: ToolDefinition[] = [{ id: "huge", description: "y".repeat(12_000), inputSchema: {} }];
+    const messages: LLMMessage[] = [{ role: "user", content: "Build a page" }];
+    const c = compactBuildInputs(system, messages, tools, 6000, 0);
+    expect(c.exceedsFixedBudget).toBe(true);
+    expect(c.budget.totalTokens).toBeGreaterThan(6000);
+    expect(c.messages).toEqual(messages);
   });
 });
