@@ -16,16 +16,16 @@ describe("SEO — Brand signals for LitLabs", () => {
       expect(DEFAULT_TITLE.toLowerCase()).toContain("litlabs");
     });
 
-    it("homepage title contains LiTTree LabStudios", () => {
-      expect(DEFAULT_TITLE).toContain("LiTTree LabStudios");
+    it("homepage title contains LiTT", () => {
+      expect(DEFAULT_TITLE).toContain("LiTT");
     });
 
     it("homepage description starts with LitLabs", () => {
       expect(DEFAULT_DESCRIPTION.toLowerCase().startsWith("litlabs")).toBe(true);
     });
 
-    it("homepage description mentions LiTTree LabStudios", () => {
-      expect(DEFAULT_DESCRIPTION).toContain("LiTTree LabStudios");
+    it("homepage description mentions LiTT", () => {
+      expect(DEFAULT_DESCRIPTION).toContain("LiTT");
     });
   });
 
@@ -119,8 +119,8 @@ describe("SEO — Brand signals for LitLabs", () => {
     // We verify the schema shape by importing the page module's homeSchema
     // indirectly through the exported metadata. Since homeSchema is not
     // exported, we verify the SEO constants that feed into it.
-    it("SITE_NAME is LiTTree LabStudios", () => {
-      expect(SITE_NAME).toBe("LiTTree LabStudios");
+    it("SITE_NAME is LiTT", () => {
+      expect(SITE_NAME).toBe("LiTT");
     });
 
     it("SITE_URL falls back to the canonical https://www.litlabs.net", () => {
