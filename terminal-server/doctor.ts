@@ -15,6 +15,12 @@ import * as fs from "fs";
 import * as path from "path";
 import type { CommandContext, CommandResponse } from "./command-registry.js";
 import { getRuntimeState } from "./runtime.js";
+import { isHostExecutionPermitted } from "./isolation-policy.js";
+
+const HOST_EXEC_CLOSED: Omit<ProbeResult, "name" | "durationMs"> = {
+  status: "SKIP",
+  reason: "Host execution is disabled in production; probe skipped",
+};
 import { redactSecrets, redactEnvValues } from "./command-registry.js";
 import { resolveOllamaEndpoint } from "@litt/models";
 
@@ -125,6 +131,7 @@ async function probeFilesystem(ctx: CommandContext): Promise<Omit<ProbeResult, "
 
 /** Probe 3: Git — is this a git repo? Is git available? */
 async function probeGit(ctx: CommandContext): Promise<Omit<ProbeResult, "name" | "durationMs">> {
+  if (!isHostExecutionPermitted()) return HOST_EXEC_CLOSED;
   return new Promise((resolve) => {
     execFile("git", ["rev-parse", "--is-inside-work-tree"], { cwd: ctx.cwd, timeout: 5000 }, (err, stdout) => {
       if (err) {
@@ -147,6 +154,7 @@ async function probeGit(ctx: CommandContext): Promise<Omit<ProbeResult, "name" |
 
 /** Probe 4: Shell execution — can we run a trivial command? */
 async function probeShell(): Promise<Omit<ProbeResult, "name" | "durationMs">> {
+  if (!isHostExecutionPermitted()) return HOST_EXEC_CLOSED;
   return new Promise((resolve) => {
     const cmd = process.platform === "win32" ? "cmd" : "echo";
     const args = process.platform === "win32" ? ["/c", "echo", "ok"] : ["ok"];
@@ -244,6 +252,7 @@ async function probeNetwork(): Promise<Omit<ProbeResult, "name" | "durationMs">>
 
 /** Probe 9: Disk space — is there adequate free space in the workspace? */
 async function probeDiskSpace(ctx: CommandContext): Promise<Omit<ProbeResult, "name" | "durationMs">> {
+  if (!isHostExecutionPermitted()) return HOST_EXEC_CLOSED;
   return new Promise((resolve) => {
     if (process.platform === "win32") {
       execFile("fsutil", ["volume", "diskfree", ctx.cwd], { timeout: 5000 }, (err, stdout) => {

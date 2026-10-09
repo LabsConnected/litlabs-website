@@ -16,6 +16,7 @@
  */
 
 import { Server } from "socket.io";
+import { guardShellExecutor } from "./isolation-policy.js";
 import {
   RuntimeStore,
   createInitialState,
@@ -195,7 +196,8 @@ let canonicalExecutor: CommandExecutor | null = null;
  * All pieces share the same RuntimeStore.
  */
 function buildCanonicalStack(cwd: string): void {
-  canonicalShell = createShellExecutor(cwd);
+  // Fail closed: every process-starting method re-checks the isolation policy.
+  canonicalShell = guardShellExecutor(createShellExecutor(cwd), "canonical-shell");
   canonicalExecutor = createCommandExecutor(canonicalShell, store, null);
   canonicalTools = createDefaultRegistry();
   gateway = createExecutionGateway({

@@ -21,6 +21,7 @@ import { randomUUID } from "crypto";
 import { resolve, relative, isAbsolute } from "path";
 import { realpathSync } from "fs";
 import { createDockerSession } from "./docker-manager.js";
+import { assertHostShellPermitted } from "./isolation-policy.js";
 
 // ─── Security constants ───────────────────────────────────────────
 
@@ -456,6 +457,12 @@ export class PtySessionManager {
    * Throws if the PTY fails to spawn or limits are exceeded.
    */
   create(opts: CreateSessionOptions): PtySessionSnapshot {
+    // ─── Isolation enforcement (fail closed) ──────────────────────
+    // A host shell is never spawned in production or on Railway, no matter
+    // what the caller passed. There is no override: this is the last line
+    // of defense behind the server's connection check.
+    assertHostShellPermitted(process.env, opts.useDocker);
+
     // ─── Workspace boundary enforcement ───────────────────────────
     // Validate cwd is within allowedRoot BEFORE spawning anything.
     // This is the filesystem security boundary — no PTY may run

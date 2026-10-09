@@ -2,6 +2,7 @@ import { resolve, join } from "path";
 import { mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync } from "fs";
 import { execFileSync } from "child_process";
 import { simpleGit, type SimpleGit } from "simple-git";
+import { assertHostExecutionPermitted } from "../isolation-policy";
 import {
   buildWelcomeHtml,
   buildWelcomeNextJs,
@@ -94,6 +95,10 @@ export async function prepareWorkspace(
     : managedWorkspaceRoot(input.workspaceRoot, input.userId, input.projectId);
   const workspaceId = input.existingWorkspaceId || managedWorkspaceId(input.projectId);
 
+  // Clone/fetch and the dependency install below run host git and the
+  // repo's own package scripts. Closed in production until sandboxed.
+  assertHostExecutionPermitted("workspace.prepare(git,install)");
+
   mkdirSync(root, { recursive: true });
 
   const git: SimpleGit = simpleGit(root);
@@ -146,6 +151,7 @@ export async function prepareWorkspace(
       // devDependencies. The Railway service runs with NODE_ENV=production,
       // which causes pnpm to skip devDeps by default — this breaks Next.js
       // dev server startup (TypeScript types are in devDependencies).
+      assertHostExecutionPermitted("workspace.install");
       execFileSync(pm, ["install", "--prefer-offline"], {
         cwd: root,
         stdio: "pipe",
@@ -173,6 +179,7 @@ export async function prepareWorkspace(
                "typescript", "@types/react", "@types/node"]
             : ["add", "--save-dev", "--save-exact",
                "typescript", "@types/react", "@types/node"];
+          assertHostExecutionPermitted("workspace.install");
           execFileSync(pm, addArgs, {
             cwd: root,
             stdio: "pipe",
@@ -272,6 +279,7 @@ function hasProjectContent(root: string): boolean {
  * never rewrites existing history.
  */
 async function ensureGitRepository(root: string): Promise<{ branch: string; commitSha: string }> {
+  assertHostExecutionPermitted("workspace.git");
   const git: SimpleGit = simpleGit(root);
 
   if (!existsSync(join(root, ".git"))) {

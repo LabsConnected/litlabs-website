@@ -56,9 +56,14 @@ export const FEATURE_FLAGS: Record<FeatureFlag, FeatureFlagDefinition> = {
   },
   terminalRuntime: {
     flag: "terminalRuntime",
-    description: "Terminal runtime for Pro Builder plan",
-    enabled: true,
-    hideFromNav: false,
+    description:
+      "Public terminal access (Pro Builder plan). DISABLED until the terminal " +
+      "runs in verified container isolation. The token route enforces this " +
+      "flag; only terminal owners (TERMINAL_OWNER_CLERK_IDS) bypass it, and " +
+      "the terminal server separately refuses to start any session without " +
+      "Docker isolation in production.",
+    enabled: false,
+    hideFromNav: true,
   },
 
   // ── DISABLED for v1 — unfinished or unverified ──
