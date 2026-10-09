@@ -9,7 +9,8 @@
 import { afterEach, beforeEach, vi } from "vitest";
 
 export function trustedLocalStubs(): void {
-  vi.stubEnv("LITT_ALLOW_LOCAL_HOST_EXEC", "1");
+  vi.stubEnv("LITT_LOCAL_EXECUTION_OPT_IN", "true");
+  vi.stubEnv("LITT_ISOLATION_VERIFIED", "true");
   vi.stubEnv("LITT_RESOLVED_BIND_HOST", "127.0.0.1");
 }
 

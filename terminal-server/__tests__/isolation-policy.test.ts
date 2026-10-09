@@ -13,6 +13,7 @@ import {
   evaluateTerminalIsolation,
   assertHostShellPermitted,
   isProductionLike,
+  isLocalExecutionOptedIn,
   isUntrustedLocalRequest,
   TerminalIsolationError,
 } from "../isolation-policy";
@@ -20,7 +21,8 @@ import {
 const PROD = { NODE_ENV: "production" };
 const DEV = {
   NODE_ENV: "development",
-  LITT_ALLOW_LOCAL_HOST_EXEC: "1",
+  LITT_LOCAL_EXECUTION_OPT_IN: "true",
+  LITT_ISOLATION_VERIFIED: "true",
   LITT_RESOLVED_BIND_HOST: "127.0.0.1",
 };
 
@@ -50,10 +52,19 @@ describe("isProductionLike", () => {
     }
   });
 
-  it("requires the exact opt-in value", () => {
-    for (const v of [undefined, "", "0", "true", "yes", " 1"]) {
-      expect(isProductionLike({ ...DEV, LITT_ALLOW_LOCAL_HOST_EXEC: v }), String(v)).toBe(true);
+  it("requires BOTH opt-in keys, each exactly \"true\"", () => {
+    for (const v of [undefined, "", "0", "1", "TRUE", "yes", " true"]) {
+      expect(isProductionLike({ ...DEV, LITT_LOCAL_EXECUTION_OPT_IN: v }), `opt-in=${v}`).toBe(true);
+      expect(isProductionLike({ ...DEV, LITT_ISOLATION_VERIFIED: v }), `verified=${v}`).toBe(true);
     }
+  });
+
+  it("isLocalExecutionOptedIn needs both keys and never reads headers", () => {
+    expect(isLocalExecutionOptedIn(DEV)).toBe(true);
+    expect(isLocalExecutionOptedIn({})).toBe(false);
+    expect(isLocalExecutionOptedIn({ LITT_LOCAL_EXECUTION_OPT_IN: "true" })).toBe(false);
+    expect(isLocalExecutionOptedIn({ LITT_ISOLATION_VERIFIED: "true" })).toBe(false);
+    expect(isLocalExecutionOptedIn({ ...DEV, Host: "localhost", "X-Forwarded-For": "127.0.0.1" })).toBe(true);
   });
 
   it("requires a verified loopback bind (a reachable dev server is untrusted)", () => {

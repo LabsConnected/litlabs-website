@@ -34,37 +34,53 @@ function hasHostedMarker(env: Env): boolean {
   return [...RAILWAY_MARKERS, ...VERCEL_MARKERS].some((key) => Boolean(env[key]));
 }
 
-/** Explicit opt-in; must match terminal-server/isolation-policy.ts. */
-export const LOCAL_HOST_EXEC_OPT_IN = "LITT_ALLOW_LOCAL_HOST_EXEC";
+/**
+ * Owner-approved two-key operator opt-in (identical names in
+ * terminal-server/isolation-policy.ts). Both must be exactly "true".
+ */
+export const LOCAL_EXECUTION_OPT_IN_VAR = "LITT_LOCAL_EXECUTION_OPT_IN";
+/**
+ * Operator ATTESTATION that isolation was verified on this machine. It records
+ * a claim; it does not create isolation, and no sandbox-verification
+ * infrastructure exists yet. Must never be set in production (production-like
+ * environments ignore it). Becomes a programmatic check when real sandbox
+ * verification lands.
+ */
+export const ISOLATION_VERIFIED_VAR = "LITT_ISOLATION_VERIFIED";
+const OPT_IN_VALUE = "true";
 /** Set by scripts/dev-network.mjs from the real bind address. */
 export const RESOLVED_BIND_HOST = "LITT_RESOLVED_BIND_HOST";
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 
+export function isLocalExecutionOptedIn(env: Env = process.env): boolean {
+  return env[LOCAL_EXECUTION_OPT_IN_VAR] === OPT_IN_VALUE && env[ISOLATION_VERIFIED_VAR] === OPT_IN_VALUE;
+}
+
 /**
  * DEFAULT-DENY. Permitted only when ALL hold: NODE_ENV is exactly
- * "development" or "test"; no Railway/Vercel marker; LITT_ALLOW_LOCAL_HOST_EXEC
- * is exactly "1"; and the dev server is bound to loopback. NODE_ENV alone is
- * never enough: a remotely reachable dev server must not run commands for
- * whoever can reach it. Missing/unknown values deny.
+ * "development" or "test"; no Railway/Vercel marker; the two-key opt-in is
+ * set; and the dev server is bound to loopback. NODE_ENV alone is never
+ * enough: a remotely reachable dev server must not run commands for whoever
+ * can reach it. Missing/unknown values deny. Feature flags (TERMINAL_ENABLED,
+ * ENABLE_AGENT_COMMANDS, ENABLE_LOCAL_BUILD_API, ADMIN_*) never override.
  */
 export function isLocalDevelopment(env: Env = process.env): boolean {
   if (env.NODE_ENV !== "development" && env.NODE_ENV !== "test") return false;
   if (hasHostedMarker(env)) return false;
-  if (env[LOCAL_HOST_EXEC_OPT_IN] !== "1") return false;
+  if (!isLocalExecutionOptedIn(env)) return false;
   const bind = env[RESOLVED_BIND_HOST];
   return bind !== undefined && LOOPBACK_HOSTS.has(bind);
 }
 
 /**
- * Kept for callers/tests that ask "is this a deployed environment?". It is the
- * exact complement of isLocalDevelopment, so anything not provably local is
+ * Complement of isLocalDevelopment, so anything not provably local is
  * treated as production-like.
  */
 export function isProductionLike(env: Env = process.env): boolean {
   return !isLocalDevelopment(env);
 }
 
-/** True when child processes may run directly on this host (local dev only). */
+/** True when child processes may run directly on this host (trusted local only). */
 export function isHostExecutionPermitted(env: Env = process.env): boolean {
   return isLocalDevelopment(env);
 }
@@ -104,6 +120,43 @@ export function isUntrustedLocalRequest(headers: { get(name: string): string | n
 }
 
 export const HOST_EXECUTION_DISABLED_CODE = "HOST_EXECUTION_DISABLED" as const;
+
+/**
+ * Thrown by library-level execution boundaries (docker provider, git clone).
+ * Request handlers map it to 503 HOST_EXECUTION_DISABLED.
+ */
+export class HostExecutionDisabledError extends Error {
+  readonly code = HOST_EXECUTION_DISABLED_CODE;
+  readonly context: string;
+  readonly statusCode = 503;
+  constructor(context: string) {
+    super(
+      `Host execution is not permitted (${context}). Default-deny: execution requires a ` +
+        `trusted local environment with explicit operator opt-in, and is never permitted ` +
+        `in production. Failing closed.`,
+    );
+    this.name = "HostExecutionDisabledError";
+    this.context = context;
+  }
+}
+
+/** Throws HostExecutionDisabledError unless host execution is permitted. */
+export function assertHostExecutionPermitted(context: string, env: Env = process.env): void {
+  if (!isHostExecutionPermitted(env)) throw new HostExecutionDisabledError(context);
+}
+
+/** JSON body for a refusal; pair with status 503. */
+export function hostExecutionDisabledResponse(context: string): {
+  error: string;
+  code: typeof HOST_EXECUTION_DISABLED_CODE;
+  context: string;
+} {
+  return {
+    error: "Execution is unavailable on this deployment. No verified sandbox isolation exists.",
+    code: HOST_EXECUTION_DISABLED_CODE,
+    context,
+  };
+}
 
 /**
  * Returns a 503 Response when host execution is closed, otherwise null.

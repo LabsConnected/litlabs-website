@@ -26,13 +26,15 @@ const ENV_KEYS = [
   "TERMINAL_ALLOW_HOST_SHELL",
   "ALLOW_HOST_SHELL",
   "ALLOW_ANONYMOUS_DEV",
-  "LITT_ALLOW_LOCAL_HOST_EXEC",
+  "LITT_LOCAL_EXECUTION_OPT_IN",
+  "LITT_ISOLATION_VERIFIED",
   "LITT_RESOLVED_BIND_HOST",
 ] as const;
 
 /** A developer machine that explicitly opted in and is bound to loopback. */
 const LOCAL = {
-  LITT_ALLOW_LOCAL_HOST_EXEC: "1",
+  LITT_LOCAL_EXECUTION_OPT_IN: "true",
+  LITT_ISOLATION_VERIFIED: "true",
   LITT_RESOLVED_BIND_HOST: "127.0.0.1",
 } as const;
 

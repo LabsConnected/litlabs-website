@@ -64,8 +64,23 @@ const RAILWAY_MARKERS = [
 /** Other hosting platforms the web app / shared tooling may run on. */
 const OTHER_HOSTED_MARKERS = ["VERCEL", "VERCEL_ENV", "VERCEL_URL"] as const;
 
-/** Explicit, per-process opt-in required for ANY execution on this host. */
-export const LOCAL_HOST_EXEC_OPT_IN = "LITT_ALLOW_LOCAL_HOST_EXEC";
+/**
+ * Owner-approved two-key operator opt-in (identical names in
+ * src/lib/host-execution-guard.ts). Both must be exactly "true".
+ */
+export const LOCAL_EXECUTION_OPT_IN_VAR = "LITT_LOCAL_EXECUTION_OPT_IN";
+/**
+ * Operator ATTESTATION that isolation was verified on this machine. It records
+ * a claim; it does not create isolation, and no sandbox-verification
+ * infrastructure exists yet. Ignored in production-like environments. Becomes
+ * a programmatic check when real sandbox verification lands.
+ */
+export const ISOLATION_VERIFIED_VAR = "LITT_ISOLATION_VERIFIED";
+const OPT_IN_VALUE = "true";
+
+export function isLocalExecutionOptedIn(env: Record<string, string | undefined>): boolean {
+  return env[LOCAL_EXECUTION_OPT_IN_VAR] === OPT_IN_VALUE && env[ISOLATION_VERIFIED_VAR] === OPT_IN_VALUE;
+}
 
 /**
  * Written by the process entrypoint (never by operators) once the real
@@ -86,7 +101,8 @@ export function isLoopbackHost(host: string | undefined): boolean {
  * and is permitted only when ALL of these positively hold:
  *   1. NODE_ENV is exactly "development" or "test"
  *   2. no Railway/Vercel marker is present
- *   3. LITT_ALLOW_LOCAL_HOST_EXEC is exactly "1" (explicit opt-in)
+ *   3. the two-key opt-in: LITT_LOCAL_EXECUTION_OPT_IN=true AND
+ *      LITT_ISOLATION_VERIFIED=true (exact values; an attestation, not proof)
  *   4. the server is bound to loopback (LITT_RESOLVED_BIND_HOST)
  * Missing markers, missing NODE_ENV, a missing opt-in or an unknown bind
  * address can never make untrusted execution permissible.
@@ -94,7 +110,7 @@ export function isLoopbackHost(host: string | undefined): boolean {
 export function isTrustedLocalEnvironment(env: Record<string, string | undefined>): boolean {
   if (env.NODE_ENV !== "development" && env.NODE_ENV !== "test") return false;
   if ([...RAILWAY_MARKERS, ...OTHER_HOSTED_MARKERS].some((key) => Boolean(env[key]))) return false;
-  if (env[LOCAL_HOST_EXEC_OPT_IN] !== "1") return false;
+  if (!isLocalExecutionOptedIn(env)) return false;
   return isLoopbackHost(env[RESOLVED_BIND_HOST]);
 }
 
@@ -151,7 +167,7 @@ export function evaluateTerminalIsolation(input: TerminalIsolationInput): Termin
       reason:
         "Terminal execution is disabled: this is not a trusted local environment " +
         "(requires NODE_ENV=development|test, no hosted markers, " +
-        `${LOCAL_HOST_EXEC_OPT_IN}=1 and a loopback bind) and no verified sandbox ` +
+        `${LOCAL_EXECUTION_OPT_IN_VAR}=true, ${ISOLATION_VERIFIED_VAR}=true and a loopback bind) and no verified sandbox ` +
         "isolation exists. Failing closed unconditionally; no override is available.",
     };
   }

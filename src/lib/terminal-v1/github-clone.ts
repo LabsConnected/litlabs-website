@@ -7,7 +7,7 @@
 
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { isHostExecutionPermitted } from "@/lib/host-execution-guard";
+import { assertHostExecutionPermitted } from "@/lib/host-execution-guard";
 
 const execFileAsync = promisify(execFile);
 
@@ -76,9 +76,7 @@ export async function cloneRepository(input: CloneInput): Promise<CloneResult> {
 
   // Gate 1: host git against a user-chosen repository is host execution.
   // Closed in production-like environments until a verified sandbox exists.
-  if (!isHostExecutionPermitted()) {
-    throw new Error("Repository clone is disabled in production: host execution is closed (HOST_EXECUTION_DISABLED)");
-  }
+  assertHostExecutionPermitted("terminal-v1/github-clone");
 
   // Build the clone URL with optional token
   const protocol = githubToken ? "https" : "https";

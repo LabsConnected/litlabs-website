@@ -21,6 +21,9 @@ import { join, relative, sep } from "node:path";
 import {
   HOST_EXECUTION_DISABLED_CODE,
   hostExecutionBlockedResponse,
+  assertHostExecutionPermitted,
+  HostExecutionDisabledError,
+  hostExecutionDisabledResponse,
   isUntrustedLocalRequest,
   isHostExecutionPermitted,
   isProductionLike,
@@ -41,7 +44,8 @@ const VERCEL_MARKERS = ["VERCEL", "VERCEL_ENV", "VERCEL_URL"];
 
 const LOCAL = {
   NODE_ENV: "development",
-  LITT_ALLOW_LOCAL_HOST_EXEC: "1",
+  LITT_LOCAL_EXECUTION_OPT_IN: "true",
+  LITT_ISOLATION_VERIFIED: "true",
   LITT_RESOLVED_BIND_HOST: "127.0.0.1",
 };
 
@@ -70,10 +74,25 @@ describe("isProductionLike (web app)", () => {
     expect(isHostExecutionPermitted({ NODE_ENV: "test" })).toBe(false);
   });
 
-  it("requires the exact opt-in value", () => {
-    for (const v of [undefined, "", "0", "true", "yes", " 1", "1 "]) {
-      expect(isHostExecutionPermitted({ ...LOCAL, LITT_ALLOW_LOCAL_HOST_EXEC: v }), String(v)).toBe(false);
+  it("requires BOTH opt-in keys, each exactly \"true\"", () => {
+    for (const v of [undefined, "", "0", "1", "TRUE", "yes", " true", "true "]) {
+      expect(isHostExecutionPermitted({ ...LOCAL, LITT_LOCAL_EXECUTION_OPT_IN: v }), `opt-in=${v}`).toBe(false);
+      expect(isHostExecutionPermitted({ ...LOCAL, LITT_ISOLATION_VERIFIED: v }), `verified=${v}`).toBe(false);
     }
+  });
+
+  it("opt-in keys are ignored in production-like environments", () => {
+    expect(isHostExecutionPermitted({ ...LOCAL, NODE_ENV: "production" })).toBe(false);
+    expect(isHostExecutionPermitted({ ...LOCAL, RAILWAY_SERVICE_ID: "s" })).toBe(false);
+  });
+
+  it("throws HostExecutionDisabledError (503, HOST_EXECUTION_DISABLED) at library boundaries", () => {
+    expect(() => assertHostExecutionPermitted("x", { NODE_ENV: "production" })).toThrow(HostExecutionDisabledError);
+    expect(() => assertHostExecutionPermitted("x", LOCAL)).not.toThrow();
+    const err = new HostExecutionDisabledError("ctx");
+    expect(err.statusCode).toBe(503);
+    expect(err.code).toBe("HOST_EXECUTION_DISABLED");
+    expect(hostExecutionDisabledResponse("ctx").code).toBe("HOST_EXECUTION_DISABLED");
   });
 
   it("requires a verified loopback bind: unknown or remotely reachable binds deny", () => {
@@ -85,7 +104,7 @@ describe("isProductionLike (web app)", () => {
   it("is default-deny: missing or unrecognised NODE_ENV never permits execution", () => {
     for (const NODE_ENV of [undefined, "", "prod", "Production", "staging", "preview", " development", "dev"]) {
       const env = NODE_ENV === undefined
-        ? { LITT_ALLOW_LOCAL_HOST_EXEC: "1", LITT_RESOLVED_BIND_HOST: "127.0.0.1" }
+        ? { LITT_LOCAL_EXECUTION_OPT_IN: "true", LITT_ISOLATION_VERIFIED: "true", LITT_RESOLVED_BIND_HOST: "127.0.0.1" }
         : { ...LOCAL, NODE_ENV };
       expect(isHostExecutionPermitted(env), JSON.stringify(env)).toBe(false);
       expect(hostExecutionBlockedResponse("x", env), JSON.stringify(env)).not.toBeNull();
@@ -116,7 +135,8 @@ describe("isProductionLike (web app)", () => {
       { ...LOCAL, NODE_ENV: "test" },
       { NODE_ENV: "development" },
       { ...LOCAL, LITT_RESOLVED_BIND_HOST: "0.0.0.0" },
-      { ...LOCAL, LITT_ALLOW_LOCAL_HOST_EXEC: undefined },
+      { ...LOCAL, LITT_LOCAL_EXECUTION_OPT_IN: undefined },
+      { ...LOCAL, LITT_ISOLATION_VERIFIED: undefined },
       ...[...RAILWAY_MARKERS, ...VERCEL_MARKERS].flatMap((m) => [{ [m]: "1" }, { ...LOCAL, [m]: "1" }]),
     ];
     for (const env of envs) {
@@ -176,7 +196,7 @@ describe("hostExecutionBlockedResponse", () => {
   });
 
   it("reads process.env at call time, not at import time", () => {
-    const keys = ["NODE_ENV", "LITT_ALLOW_LOCAL_HOST_EXEC", "LITT_RESOLVED_BIND_HOST"];
+    const keys = ["NODE_ENV", "LITT_LOCAL_EXECUTION_OPT_IN", "LITT_ISOLATION_VERIFIED", "LITT_RESOLVED_BIND_HOST"];
     const e = process.env as Record<string, string | undefined>;
     const before = keys.map((k) => e[k]);
     const restore = () => keys.forEach((k, i) => (before[i] === undefined ? delete e[k] : (e[k] = before[i])));
@@ -185,7 +205,7 @@ describe("hostExecutionBlockedResponse", () => {
       expect(isHostExecutionPermitted()).toBe(false);
       Object.assign(e, LOCAL, { NODE_ENV: "test" });
       expect(isHostExecutionPermitted()).toBe(true);
-      delete e.LITT_ALLOW_LOCAL_HOST_EXEC;
+      delete e.LITT_ISOLATION_VERIFIED;
       expect(isHostExecutionPermitted()).toBe(false);
     } finally {
       restore();
@@ -207,11 +227,11 @@ const GUARDED_FILES: Record<string, RegExp[]> = {
   "src/app/api/bridge/cli/route.ts": [/hostExecutionBlockedResponse\("bridge-cli", process\.env, req\)/],
   "src/app/api/agents/execute/route.ts": [/hostExecutionBlockedResponse\("agents-execute", process\.env, req\)/],
   "src/app/api/litt/command/route.ts": [/hostExecutionBlockedResponse\("litt-command", process\.env, req\)/],
-  "src/app/api/agents/commits/route.ts": [/isHostExecutionPermitted\(\)/],
+  "src/app/api/agents/commits/route.ts": [/hostExecutionBlockedResponse\("agents-commits", process\.env, req\)/],
   "src/app/api/litt/scan/route.ts": [/isHostExecutionPermitted\(\)/],
   "src/lib/litt-intelligence/project-scanner.ts": [/isHostExecutionPermitted\(\)/],
-  "src/lib/visual-builds/capture.ts": [/isHostExecutionPermitted\(\)/],
-  "src/lib/terminal-v1/github-clone.ts": [/isHostExecutionPermitted\(\)/],
+  "src/lib/visual-builds/capture.ts": [/assertHostExecutionPermitted\("visual-builds\/capture"\)/],
+  "src/lib/terminal-v1/github-clone.ts": [/assertHostExecutionPermitted\("terminal-v1\/github-clone"\)/],
 };
 
 /**

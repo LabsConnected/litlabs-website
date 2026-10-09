@@ -77,7 +77,7 @@ describe("host-execution policy", () => {
   it("is closed in production and on Railway, open in local development", () => {
     expect(isHostExecutionPermitted({ NODE_ENV: "production" })).toBe(false);
     expect(isHostExecutionPermitted({ NODE_ENV: "development", RAILWAY_PROJECT_ID: "p" })).toBe(false);
-    const LOCAL = { LITT_ALLOW_LOCAL_HOST_EXEC: "1", LITT_RESOLVED_BIND_HOST: "127.0.0.1" };
+    const LOCAL = { LITT_LOCAL_EXECUTION_OPT_IN: "true", LITT_ISOLATION_VERIFIED: "true", LITT_RESOLVED_BIND_HOST: "127.0.0.1" };
     expect(isHostExecutionPermitted({ ...LOCAL, NODE_ENV: "development" })).toBe(true);
     expect(isHostExecutionPermitted({ ...LOCAL, NODE_ENV: "test" })).toBe(true);
     // NODE_ENV alone, a missing NODE_ENV, or a reachable bind never permit execution
@@ -146,6 +146,15 @@ describe("guardShellExecutor", () => {
     const guarded = guardShellExecutor(shell, "canonical-shell");
     await guarded.run();
     expect(shell.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks in development without the opt-in, and with only one of the two keys", () => {
+    asEnvironment("development");
+    vi.stubEnv("LITT_ISOLATION_VERIFIED", "");
+    const shell = makeShell();
+    const guarded = guardShellExecutor(shell, "canonical-shell");
+    expect(() => guarded.run()).toThrow(HostExecutionBlockedError);
+    expect(shell.run).not.toHaveBeenCalled();
   });
 
   it("checks the environment at call time, not at wrap time", () => {
