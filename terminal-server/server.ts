@@ -81,15 +81,13 @@ import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manage
 import { requireInternalServiceAuth, type AuthenticatedRequest } from "./internal-auth";
 import { mintTerminalToken, verifyTerminalToken, bearerToken } from "./auth";
 import { isTerminalOwner, warnIfOwnerAllowlistUnset } from "./terminal-owner-gate";
-import { evaluateTerminalIsolation, HostExecutionBlockedError } from "./isolation-policy";
+import {
+  assertHostExecutionPermitted,
+  evaluateTerminalIsolation,
+} from "./isolation-policy";
 import { findOnPath } from "./path-probe";
+import { respondIfHostExecBlocked, respondWithDispatch } from "./host-exec-http";
 
-/** Map a fail-closed host-execution refusal to 503; false if not that error. */
-function respondIfHostExecBlocked(err: unknown, res: Response): boolean {
-  if (!(err instanceof HostExecutionBlockedError)) return false;
-  res.status(503).json({ error: err.message, code: err.hostExecCode });
-  return true;
-}
 import { verifyClerkToken } from "./clerk-verify";
 import { resolveBindHost } from "./network-bind";
 import type { RemoteCommandRequest } from "@litt/agent-core";
@@ -473,17 +471,10 @@ app.post("/internal/command", requireInternalServiceAuth, async (req: Authentica
     args: Array.isArray(body.args) ? body.args.filter((a) => typeof a === "string") : [],
     userId: body.userId ?? req.terminalUserId ?? null,
   };
-  try {
-    const result = await dispatchCommand(normalizedReq);
-    // Unknown commands and command-level failures return HTTP 200 with
-    // ok:false so the client can display the typed error. Only server
-    // errors get HTTP 500.
-    res.json(result);
-  } catch (err) {
-    if (respondIfHostExecBlocked(err, res)) return;
-    const message = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: message });
-  }
+  // Unknown commands and command-level failures return HTTP 200 with
+  // ok:false so the client can display the typed error. A blocked execution
+  // returns 503 HOST_EXECUTION_DISABLED; only other server errors are 500.
+  await respondWithDispatch(res, () => dispatchCommand(normalizedReq));
 });
 
 // ─── User-authenticated chat endpoint ──────────────────────────────
@@ -693,14 +684,7 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
     cwd,
   };
 
-  try {
-    const result = await dispatchCommand(normalizedReq);
-    res.json(result);
-  } catch (err) {
-    if (respondIfHostExecBlocked(err, res)) return;
-    const message = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: message });
-  }
+  await respondWithDispatch(res, () => dispatchCommand(normalizedReq));
 });
 
 app.get("/health/ready", async (_req, res) => {
@@ -1024,6 +1008,9 @@ app.post("/internal/workspace/:workspaceId/exec", requireInternalServiceAuth, as
   const cmdArgs = parts.slice(1);
 
   try {
+    // Eager fail-closed check: the gateway may convert an executor refusal
+    // into a generic failed result, so refuse before it is ever consulted.
+    assertHostExecutionPermitted("workspace.exec");
     const gateway = getExecutionGateway(ws.root, "act");
     const gwResult = await gateway.execute({
       toolId: "project.run",

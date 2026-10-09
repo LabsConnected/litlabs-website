@@ -13,6 +13,7 @@ import {
   evaluateTerminalIsolation,
   assertHostShellPermitted,
   isProductionLike,
+  isolationIndependentlyVerified,
   TerminalIsolationError,
 } from "../isolation-policy";
 
@@ -59,8 +60,25 @@ describe("evaluateTerminalIsolation", () => {
     expect(v.reason).toContain("Docker daemon not reachable");
   });
 
-  it("enables terminal execution in production only with a working Docker runtime", () => {
+  it("keeps production terminal execution DISABLED even when Docker is installed, configured and reachable", () => {
     const v = evaluateTerminalIsolation({ env: PROD, useDocker: true, dockerAvailable: true });
+    expect(v.terminalExecution).toBe("disabled");
+    expect(v.mode).toBe("none");
+    expect(v.status).toBe("unsafe");
+    expect(v.reason).toMatch(/not independently verified/);
+  });
+
+  it("does the same on Railway regardless of NODE_ENV", () => {
+    const v = evaluateTerminalIsolation({
+      env: { NODE_ENV: "development", RAILWAY_ENVIRONMENT_ID: "env" },
+      useDocker: true,
+      dockerAvailable: true,
+    });
+    expect(v.terminalExecution).toBe("disabled");
+  });
+
+  it("enables Docker-backed execution in local development (behaviour preserved)", () => {
+    const v = evaluateTerminalIsolation({ env: DEV, useDocker: true, dockerAvailable: true });
     expect(v.terminalExecution).toBe("enabled");
     expect(v.mode).toBe("docker");
     expect(v.status).toBe("docker_enforced");
@@ -117,8 +135,15 @@ describe("assertHostShellPermitted", () => {
     );
   });
 
-  it("does not throw for Docker mode in production", () => {
-    expect(() => assertHostShellPermitted(PROD, true)).not.toThrow();
+  it("throws for Docker mode in production until isolation is independently verified", () => {
+    expect(() => assertHostShellPermitted(PROD, true)).toThrow(TerminalIsolationError);
+    expect(() => assertHostShellPermitted({ RAILWAY_SERVICE_ID: "s" }, true)).toThrow(
+      /not independently verified/,
+    );
+  });
+
+  it("does not throw for Docker mode in local development", () => {
+    expect(() => assertHostShellPermitted(DEV, true)).not.toThrow();
   });
 
   it("does not throw for a host shell in local development", () => {
@@ -133,5 +158,20 @@ describe("assertHostShellPermitted", () => {
     } catch (err) {
       expect((err as TerminalIsolationError).code).toBe("TERMINAL_ISOLATION_UNAVAILABLE");
     }
+  });
+});
+
+describe("isolationIndependentlyVerified", () => {
+  it("is false unconditionally and cannot be set by any environment variable", () => {
+    expect(isolationIndependentlyVerified({})).toBe(false);
+    expect(isolationIndependentlyVerified(PROD)).toBe(false);
+    expect(
+      isolationIndependentlyVerified({
+        ...PROD,
+        TERMINAL_ISOLATION_VERIFIED: "true",
+        ISOLATION_VERIFIED: "1",
+        TERMINAL_USE_DOCKER: "true",
+      }),
+    ).toBe(false);
   });
 });

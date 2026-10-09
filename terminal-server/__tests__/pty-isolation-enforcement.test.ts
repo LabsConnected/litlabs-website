@@ -118,8 +118,33 @@ describe("PtySessionManager isolation enforcement", () => {
     expect(spawnHost).not.toHaveBeenCalled();
   });
 
-  it("uses only the Docker path in production when Docker mode is on", () => {
+  it("refuses Docker mode in production too: Docker alone is not verified isolation", () => {
     setEnv({ NODE_ENV: "production" });
+    const { factory, spawnHost, spawnDocker } = makeFactory();
+    const m = createManager(factory);
+
+    expect(() => open(m, true)).toThrow(TerminalIsolationError);
+    expect(spawnDocker).not.toHaveBeenCalled();
+    expect(spawnHost).not.toHaveBeenCalled();
+    expect(m.size).toBe(0);
+  });
+
+  it("refuses Docker mode on Railway even with TERMINAL_USE_DOCKER and override variables set", () => {
+    setEnv({
+      NODE_ENV: "development",
+      RAILWAY_PROJECT_ID: "p",
+      TERMINAL_ALLOW_HOST_SHELL: "true",
+    });
+    const { factory, spawnHost, spawnDocker } = makeFactory();
+    const m = createManager(factory);
+
+    expect(() => open(m, true)).toThrow(/not independently verified/);
+    expect(spawnDocker).not.toHaveBeenCalled();
+    expect(spawnHost).not.toHaveBeenCalled();
+  });
+
+  it("uses only the Docker path in local development when Docker mode is on", () => {
+    setEnv({ NODE_ENV: "development" });
     const { factory, spawnHost, spawnDocker } = makeFactory();
     const m = createManager(factory);
 
@@ -129,8 +154,8 @@ describe("PtySessionManager isolation enforcement", () => {
     expect(spawnHost).not.toHaveBeenCalled();
   });
 
-  it("does not fall back to a host shell when the Docker spawn fails in production", () => {
-    setEnv({ NODE_ENV: "production" });
+  it("does not fall back to a host shell when the Docker spawn fails (local development)", () => {
+    setEnv({ NODE_ENV: "development" });
     const { factory, spawnHost, spawnDocker } = makeFactory();
     spawnDocker.mockImplementation(() => {
       throw new Error("docker unavailable");

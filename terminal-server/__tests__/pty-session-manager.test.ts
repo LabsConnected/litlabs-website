@@ -904,11 +904,11 @@ describe("PTY environment isolation", () => {
     for (const secret of KNOWN_SECRETS_TO_REJECT) {
       process.env[secret] = `fake-${secret}-value`;
     }
-    // Also add RAILWAY_* vars
-    process.env.RAILWAY_PROJECT_ID = "fake-project-id";
-    process.env.RAILWAY_SERVICE_ID = "fake-service-id";
-    process.env.RAILWAY_ENVIRONMENT = "production";
-    process.env.RAILWAY_STATIC_URL = "fake.railway.app";
+    // RAILWAY_* markers are NOT set on this create() path: a Railway-marked
+    // process is production-like and (correctly) may never spawn a host
+    // shell, so a host spawn cannot be observed there. Their filtering is
+    // asserted below against the same buildPtyEnv the manager calls, and
+    // the "refuses a host shell on Railway" test proves the other half.
 
     manager.create(makeOpts({ allowedRoot: tempRoot }));
 
@@ -917,11 +917,39 @@ describe("PTY environment isolation", () => {
     for (const secret of KNOWN_SECRETS_TO_REJECT) {
       expect(env).not.toHaveProperty(secret);
     }
-    // RAILWAY_* must be absent
-    expect(env).not.toHaveProperty("RAILWAY_PROJECT_ID");
-    expect(env).not.toHaveProperty("RAILWAY_SERVICE_ID");
-    expect(env).not.toHaveProperty("RAILWAY_ENVIRONMENT");
-    expect(env).not.toHaveProperty("RAILWAY_STATIC_URL");
+  });
+
+  it("RAILWAY_* variables do NOT reach the PTY environment", () => {
+    // Same function the manager uses for every host spawn, fed the full set
+    // of Railway markers the original test injected.
+    const env = buildPtyEnv(
+      {
+        PATH: "/usr/bin",
+        RAILWAY_PROJECT_ID: "fake-project-id",
+        RAILWAY_SERVICE_ID: "fake-service-id",
+        RAILWAY_ENVIRONMENT: "production",
+        RAILWAY_ENVIRONMENT_ID: "fake-env-id",
+        RAILWAY_GIT_COMMIT_SHA: "deadbeef",
+        RAILWAY_STATIC_URL: "fake.railway.app",
+      },
+      { userId: "u1", sessionId: "s1", workspaceId: "w1", projectId: "p1" },
+    );
+    for (const key of Object.keys(env)) {
+      expect(key.startsWith("RAILWAY_")).toBe(false);
+    }
+    expect(env.PATH).toBe("/usr/bin");
+  });
+
+  it("a Railway-marked process refuses to spawn any host shell (secrets cannot reach one)", () => {
+    process.env.RAILWAY_PROJECT_ID = "fake-project-id";
+    process.env.RAILWAY_SERVICE_ID = "fake-service-id";
+    process.env.RAILWAY_ENVIRONMENT = "production";
+    process.env.RAILWAY_STATIC_URL = "fake.railway.app";
+
+    expect(() => manager.create(makeOpts({ allowedRoot: tempRoot }))).toThrow(
+      /host shell is not permitted in production/,
+    );
+    expect(factory.hostSpawns).toHaveLength(0);
   });
 
   it("an arbitrary newly-added secret does NOT automatically propagate", () => {
