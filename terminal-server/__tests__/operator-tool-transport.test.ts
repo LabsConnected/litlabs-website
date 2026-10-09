@@ -21,6 +21,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { useTrustedLocalEnv } from "./helpers/trusted-local-env";
 
 // ─── Mock setup ───────────────────────────────────────────────────
 //
@@ -81,6 +82,8 @@ function toolCallChoice(functionName: string, args: Record<string, unknown>) {
 }
 
 // ─── Tests ────────────────────────────────────────────────────────
+
+useTrustedLocalEnv();
 
 describe("LiTTModelProvider tool transport", () => {
   // We import dynamically so the mock is in place before module-level

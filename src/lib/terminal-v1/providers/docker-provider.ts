@@ -1,6 +1,16 @@
 /**
  * Docker-based sandbox provider for Terminal V1.
  *
+ * GATE: Every public method that spawns a docker process calls
+ * assertHostExecutionPermitted() FIRST, at the execution boundary.
+ * Default-deny: execution is permitted only outside production-like
+ * environments AND with explicit operator opt-in (LITT_LOCAL_EXECUTION_OPT_IN)
+ * plus asserted verified isolation (LITT_ISOLATION_VERIFIED), loopback bind. Otherwise this
+ * throws HostExecutionDisabledError (503 HOST_EXECUTION_DISABLED).
+ * A TERMINAL_ENABLED feature flag is access control, NOT isolation; it is
+ * checked at the terminal-v1/token route, and this provider enforces the
+ * guard independently so no caller or flag can bypass it.
+ *
  * This provider creates isolated Docker containers for each project
  * sandbox. It fixes all issues from the legacy docker-manager.ts:
  *
@@ -15,6 +25,9 @@
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from "child_process";
 import { randomUUID } from "crypto";
 import { promisify } from "util";
+// Gate 1: fail closed in production. TERMINAL_ENABLED is a feature flag,
+// not verified isolation — enforce at the execution boundary.
+import { assertHostExecutionPermitted } from "@/lib/host-execution-guard";
 import type { SandboxProvider } from "../sandbox-provider";
 import { buildSandboxEnv, assertNoPlatformSecrets } from "../env-allowlist";
 import type {
@@ -153,6 +166,10 @@ export class DockerSandboxProvider implements SandboxProvider {
   }
 
   async create(input: CreateSandboxInput): Promise<SandboxInstance> {
+    // Gate 1: fail closed at the execution boundary. No docker spawn in
+    // production-like environments — no verified sandbox isolation exists.
+    assertHostExecutionPermitted("terminal-v1/docker-provider:create");
+
     const sandboxId = `sbx-${input.projectId.slice(0, 8)}-${randomUUID().slice(0, 8)}`;
     const containerName = `littree-${sandboxId}`;
     const volumeName = `vol-${sandboxId}`;
@@ -189,6 +206,10 @@ export class DockerSandboxProvider implements SandboxProvider {
       "--memory", `${limits.memoryMB}m`,
       "--pids-limit", String(limits.processLimit),
       "--read-only",
+      // Hardening only: this provider uses a named volume (root-owned), so
+      // dropping every capability does not break workspace writes.
+      "--cap-drop", "ALL",
+      "--security-opt", "no-new-privileges",
       "--tmpfs", "/tmp:noexec,nosuid,size=100m",
       "-v", `${volumeName}:/workspace:rw`,
       "-w", "/workspace",
@@ -266,6 +287,9 @@ export class DockerSandboxProvider implements SandboxProvider {
   }
 
   async start(sandboxId: string): Promise<void> {
+    // Gate 1: fail closed at the execution boundary.
+    assertHostExecutionPermitted("terminal-v1/docker-provider:start");
+
     const record = sandboxes.get(sandboxId);
     if (!record) throw new Error("Sandbox not found");
 
@@ -291,6 +315,9 @@ export class DockerSandboxProvider implements SandboxProvider {
   }
 
   async stop(sandboxId: string): Promise<void> {
+    // Gate 1: fail closed at the execution boundary.
+    assertHostExecutionPermitted("terminal-v1/docker-provider:stop");
+
     const record = sandboxes.get(sandboxId);
     if (!record) throw new Error("Sandbox not found");
 
@@ -310,6 +337,9 @@ export class DockerSandboxProvider implements SandboxProvider {
   }
 
   async destroy(sandboxId: string): Promise<void> {
+    // Gate 1: fail closed at the execution boundary.
+    assertHostExecutionPermitted("terminal-v1/docker-provider:destroy");
+
     const record = sandboxes.get(sandboxId);
     if (!record) throw new Error("Sandbox not found");
 
@@ -340,6 +370,9 @@ export class DockerSandboxProvider implements SandboxProvider {
     sandboxId: string,
     options: TerminalConnectOptions,
   ): Promise<TerminalTransport> {
+    // Gate 1: fail closed at the execution boundary.
+    assertHostExecutionPermitted("terminal-v1/docker-provider:connectTerminal");
+
     const record = sandboxes.get(sandboxId);
     if (!record) throw new Error("Sandbox not found");
     if (record.instance.state !== "running") throw new Error("Sandbox is not running");
@@ -420,6 +453,9 @@ export class DockerSandboxProvider implements SandboxProvider {
     sandboxId: string,
     input: ExecuteCommandInput,
   ): Promise<ExecuteCommandResult> {
+    // Gate 1: fail closed at the execution boundary.
+    assertHostExecutionPermitted("terminal-v1/docker-provider:execute");
+
     const record = sandboxes.get(sandboxId);
     if (!record) throw new Error("Sandbox not found");
     if (record.instance.state !== "running") throw new Error("Sandbox is not running");
@@ -501,6 +537,10 @@ export class DockerSandboxProvider implements SandboxProvider {
   }
 
   async health(): Promise<{ healthy: boolean; details?: Record<string, unknown> }> {
+    // Gate 1: fail closed at the execution boundary. Even a read-only
+    // `docker info` spawns a host process.
+    assertHostExecutionPermitted("terminal-v1/docker-provider:health");
+
     try {
       const { stdout } = await this.runner.exec(["info", "--format", "{{.ServerVersion}}"]);
       return {

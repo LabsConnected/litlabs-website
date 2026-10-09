@@ -28,6 +28,7 @@ import { promisify } from "util";
 import { parse as parseDotenv } from "dotenv";
 import { getWorkspace, type WorkspaceDescriptor } from "../workspace/WorkspaceManager";
 import { resolveBindHost } from "../network-bind";
+import { assertHostExecutionPermitted } from "../isolation-policy";
 
 /**
  * Environment variables that may be inherited from the terminal server.
@@ -779,6 +780,7 @@ async function installWorkspaceDependencies(
   };
 
   const resolvedExecutable = lookupExecutable(executable, childPath, process.platform === "win32") ?? executable;
+  assertHostExecutionPermitted("preview.install");
   try {
     await execFileAsync(resolvedExecutable, args, {
       cwd: root,
@@ -1072,6 +1074,11 @@ export function getPreviewLogs(workspaceId: string, lines = 100): string[] {
 export async function startPreview(input: PreviewStartInput): Promise<PreviewRuntime> {
   const { workspaceId, userId } = input;
 
+  // Preview runs workspace-defined commands (`bash -c <command>`, package
+  // lifecycle scripts) directly on the host. Closed in production until a
+  // verified sandbox exists; checked before any state is touched.
+  assertHostExecutionPermitted("preview.start");
+
   // Verify workspace ownership
   const ws = getWorkspace(workspaceId);
   if (!ws) {
@@ -1340,6 +1347,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
     pushLog(runtime, `[preview] Clerk env fingerprint: ${JSON.stringify(fingerprint)}`);
   }
 
+  assertHostExecutionPermitted("preview.spawn");
   const child = spawn(shell, shellArgs, {
     cwd: ws.root,
     env,

@@ -3,6 +3,7 @@
  * and brief network drops instead of being killed on every socket close.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useTrustedLocalEnv } from "./helpers/trusted-local-env";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -43,6 +44,8 @@ function createFactory(): PtySpawnFactory & { spawns: MockHandle[] } {
     spawnDocker: ({ onData, onExit }) => make(onData, onExit),
   };
 }
+
+useTrustedLocalEnv();
 
 describe("PtySessionManager detach / reattach", () => {
   let factory: ReturnType<typeof createFactory>;

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { trustedLocalStubs } from "./helpers/trusted-local-env";
 import { DockerSandboxProvider, type DockerCommandRunner } from "@/lib/terminal-v1/providers/docker-provider";
 import { getSandboxProvider, resetSandboxProvider } from "@/lib/terminal-v1/providers";
 import { DEFAULT_SANDBOX_LIMITS } from "@/lib/terminal-v1/types";
@@ -27,6 +28,8 @@ describe("Terminal V1 — Docker Sandbox Provider", () => {
   let provider: DockerSandboxProvider;
 
   beforeEach(() => {
+    trustedLocalStubs();
+    vi.stubEnv("NODE_ENV", "test");
     vi.stubEnv("TERMINAL_PROVIDER", "managed-sandbox");
     vi.stubEnv("TERMINAL_AUTH_SECRET", "a".repeat(64));
     vi.stubEnv("TERMINAL_SANDBOX_IMAGE", "littree-terminal-sandbox:test");

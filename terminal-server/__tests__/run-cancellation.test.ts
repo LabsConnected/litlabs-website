@@ -25,11 +25,14 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { useTrustedLocalEnv } from "./helpers/trusted-local-env";
 import { RunRegistry, getRunRegistry } from "../run-registry.js";
 import { dispatchCommand } from "../command-bridge.js";
 import { getRunRegistry as getRunRegistryFromBridge } from "../run-registry.js";
 
 // ─── RunRegistry unit tests ───────────────────────────────────────
+
+useTrustedLocalEnv();
 
 describe("RunRegistry", () => {
   let registry: RunRegistry;
