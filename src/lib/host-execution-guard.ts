@@ -12,9 +12,9 @@
  * Dependency-free on purpose: no "server-only", no Next imports, so it can be
  * unit-tested directly and cannot be bypassed by a failing import.
  *
- * Keep in sync with terminal-server/isolation-policy.ts. The web app also
- * treats Vercel as production-like. Parity is asserted in
- * tests/host-execution-guard.test.ts.
+ * Stricter than terminal-server/isolation-policy.ts: that policy is
+ * deny-on-known-production-markers; this one is allow-only-on-known-local.
+ * Anything the web guard calls local, the terminal policy also calls local.
  */
 
 type Env = Record<string, string | undefined>;
@@ -30,19 +30,33 @@ const RAILWAY_MARKERS = [
 /** Markers injected by Vercel into every deployed build/runtime. */
 const VERCEL_MARKERS = ["VERCEL", "VERCEL_ENV", "VERCEL_URL"] as const;
 
+function hasHostedMarker(env: Env): boolean {
+  return [...RAILWAY_MARKERS, ...VERCEL_MARKERS].some((key) => Boolean(env[key]));
+}
+
 /**
- * True for production AND for anything hosted on Railway or Vercel. Defaults
- * to the safe side: a mis-set or missing NODE_ENV on a hosted service is still
- * production.
+ * DEFAULT-DENY. Host execution is permitted only on a positive local signal:
+ * NODE_ENV is exactly "development" or "test" AND no Railway/Vercel marker is
+ * present. A missing, empty, misspelled or unexpected NODE_ENV (e.g. "prod",
+ * "staging") is NOT permitted. Missing markers can never open execution.
+ */
+export function isLocalDevelopment(env: Env = process.env): boolean {
+  if (env.NODE_ENV !== "development" && env.NODE_ENV !== "test") return false;
+  return !hasHostedMarker(env);
+}
+
+/**
+ * Kept for callers/tests that ask "is this a deployed environment?". It is the
+ * exact complement of isLocalDevelopment, so anything not provably local is
+ * treated as production-like.
  */
 export function isProductionLike(env: Env = process.env): boolean {
-  if (env.NODE_ENV === "production") return true;
-  return [...RAILWAY_MARKERS, ...VERCEL_MARKERS].some((key) => Boolean(env[key]));
+  return !isLocalDevelopment(env);
 }
 
 /** True when child processes may run directly on this host (local dev only). */
 export function isHostExecutionPermitted(env: Env = process.env): boolean {
-  return !isProductionLike(env);
+  return isLocalDevelopment(env);
 }
 
 export const HOST_EXECUTION_DISABLED_CODE = "HOST_EXECUTION_DISABLED" as const;

@@ -51,10 +51,17 @@ describe("isProductionLike (web app)", () => {
     },
   );
 
-  it("treats local development and test as not production", () => {
-    expect(isProductionLike({})).toBe(false);
+  it("treats only explicit development/test with no hosted marker as local", () => {
     expect(isProductionLike({ NODE_ENV: "development" })).toBe(false);
     expect(isProductionLike({ NODE_ENV: "test" })).toBe(false);
+  });
+
+  it("is default-deny: missing or unrecognised NODE_ENV never permits execution", () => {
+    for (const NODE_ENV of [undefined, "", "prod", "Production", "staging", "preview", " development", "dev"]) {
+      const env = NODE_ENV === undefined ? {} : { NODE_ENV };
+      expect(isHostExecutionPermitted(env), JSON.stringify(env)).toBe(false);
+      expect(hostExecutionBlockedResponse("x", env), JSON.stringify(env)).not.toBeNull();
+    }
   });
 
   it("is not unlocked by any override-style variable", () => {
@@ -73,24 +80,26 @@ describe("isProductionLike (web app)", () => {
     expect(hostExecutionBlockedResponse("x", env)).not.toBeNull();
   });
 
-  it("agrees with terminal-server/isolation-policy.ts on every shared marker", () => {
+  it("never permits anything terminal-server/isolation-policy.ts treats as production", () => {
     const envs: Array<Record<string, string | undefined>> = [
-      {},
       { NODE_ENV: "development" },
       { NODE_ENV: "test" },
       { NODE_ENV: "production" },
       ...RAILWAY_MARKERS.flatMap((m) => [{ [m]: "1" }, { NODE_ENV: "development", [m]: "1" }]),
     ];
     for (const env of envs) {
-      expect(isProductionLike(env), JSON.stringify(env)).toBe(terminalIsProductionLike(env));
+      // web guard may be stricter, never looser
+      if (terminalIsProductionLike(env)) {
+        expect(isProductionLike(env), JSON.stringify(env)).toBe(true);
+      }
     }
   });
 });
 
 describe("hostExecutionBlockedResponse", () => {
-  it("returns null in local development so existing behaviour is preserved", () => {
+  it("returns null in explicit local development so existing behaviour is preserved", () => {
     expect(hostExecutionBlockedResponse("bridge-cli", { NODE_ENV: "development" })).toBeNull();
-    expect(hostExecutionBlockedResponse("bridge-cli", {})).toBeNull();
+    expect(hostExecutionBlockedResponse("bridge-cli", { NODE_ENV: "test" })).toBeNull();
   });
 
   it("returns 503 HOST_EXECUTION_DISABLED naming the surface in production", async () => {
