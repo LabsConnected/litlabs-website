@@ -13,7 +13,6 @@ import {
   evaluateTerminalIsolation,
   assertHostShellPermitted,
   isProductionLike,
-  isolationIndependentlyVerified,
   TerminalIsolationError,
 } from "../isolation-policy";
 
@@ -57,7 +56,7 @@ describe("evaluateTerminalIsolation", () => {
     });
     expect(v.terminalExecution).toBe("disabled");
     expect(v.status).toBe("unsafe");
-    expect(v.reason).toContain("Docker daemon not reachable");
+    expect(v.reason).toContain("Failing closed unconditionally");
   });
 
   it("keeps production terminal execution DISABLED even when Docker is installed, configured and reachable", () => {
@@ -65,7 +64,49 @@ describe("evaluateTerminalIsolation", () => {
     expect(v.terminalExecution).toBe("disabled");
     expect(v.mode).toBe("none");
     expect(v.status).toBe("unsafe");
-    expect(v.reason).toMatch(/not independently verified/);
+    expect(v.reason).toMatch(/Failing closed unconditionally/);
+  });
+
+  it("cannot be re-enabled by TERMINAL_VERIFIED_ISOLATION in production", () => {
+    const v = evaluateTerminalIsolation({
+      env: { ...PROD, TERMINAL_VERIFIED_ISOLATION: "true" },
+      useDocker: true,
+      dockerAvailable: true,
+    });
+    expect(v.terminalExecution).toBe("disabled");
+    expect(v.mode).toBe("none");
+  });
+
+  it("cannot be re-enabled by any DOCKER_* or TERMINAL_* variable in production", () => {
+    const v = evaluateTerminalIsolation({
+      env: {
+        ...PROD,
+        TERMINAL_VERIFIED_ISOLATION: "true",
+        TERMINAL_ALLOW_EXECUTION: "true",
+        TERMINAL_ENABLE: "1",
+        DOCKER_ENABLE: "true",
+        ALLOW_DOCKER: "1",
+        TERMINAL_USE_DOCKER: "true",
+      },
+      useDocker: true,
+      dockerAvailable: true,
+    });
+    expect(v.terminalExecution).toBe("disabled");
+    expect(v.mode).toBe("none");
+  });
+
+  it("fails closed on Railway even with Docker available and override variables set", () => {
+    const v = evaluateTerminalIsolation({
+      env: {
+        RAILWAY_PROJECT_ID: "proj",
+        TERMINAL_VERIFIED_ISOLATION: "true",
+        TERMINAL_USE_DOCKER: "true",
+      },
+      useDocker: true,
+      dockerAvailable: true,
+    });
+    expect(v.terminalExecution).toBe("disabled");
+    expect(v.productionLike).toBe(true);
   });
 
   it("does the same on Railway regardless of NODE_ENV", () => {
@@ -135,11 +176,39 @@ describe("assertHostShellPermitted", () => {
     );
   });
 
-  it("throws for Docker mode in production until isolation is independently verified", () => {
+  it("throws for Docker mode in production unconditionally — no override possible", () => {
     expect(() => assertHostShellPermitted(PROD, true)).toThrow(TerminalIsolationError);
     expect(() => assertHostShellPermitted({ RAILWAY_SERVICE_ID: "s" }, true)).toThrow(
-      /not independently verified/,
+      /Failing closed unconditionally/,
     );
+  });
+
+  it("throws for Docker mode in production even with TERMINAL_VERIFIED_ISOLATION=true", () => {
+    expect(() =>
+      assertHostShellPermitted({ ...PROD, TERMINAL_VERIFIED_ISOLATION: "true" }, true),
+    ).toThrow(TerminalIsolationError);
+  });
+
+  it("throws for Docker mode in production regardless of any env var overrides", () => {
+    const overrideEnv = {
+      ...PROD,
+      TERMINAL_VERIFIED_ISOLATION: "true",
+      TERMINAL_USE_DOCKER: "true",
+      TERMINAL_ALLOW_EXECUTION: "true",
+      DOCKER_ENABLE: "true",
+      ALLOW_DOCKER: "1",
+    };
+    expect(() => assertHostShellPermitted(overrideEnv, true)).toThrow(TerminalIsolationError);
+    expect(() => assertHostShellPermitted(overrideEnv, false)).toThrow(TerminalIsolationError);
+  });
+
+  it("throws on Railway even with Docker mode and all overrides set", () => {
+    expect(() =>
+      assertHostShellPermitted(
+        { RAILWAY_SERVICE_ID: "svc", TERMINAL_VERIFIED_ISOLATION: "true" },
+        true,
+      ),
+    ).toThrow(TerminalIsolationError);
   });
 
   it("does not throw for Docker mode in local development", () => {
@@ -161,17 +230,4 @@ describe("assertHostShellPermitted", () => {
   });
 });
 
-describe("isolationIndependentlyVerified", () => {
-  it("is false unconditionally and cannot be set by any environment variable", () => {
-    expect(isolationIndependentlyVerified({})).toBe(false);
-    expect(isolationIndependentlyVerified(PROD)).toBe(false);
-    expect(
-      isolationIndependentlyVerified({
-        ...PROD,
-        TERMINAL_ISOLATION_VERIFIED: "true",
-        ISOLATION_VERIFIED: "1",
-        TERMINAL_USE_DOCKER: "true",
-      }),
-    ).toBe(false);
-  });
-});
+

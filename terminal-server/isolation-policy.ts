@@ -11,35 +11,19 @@
  *      a local development environment.
  *   2. In production — or on any Railway-hosted service — a host shell is
  *      NEVER permitted. There is deliberately no override variable.
- *   3. Outside production, terminal execution is enabled only when Docker
- *      mode is both requested (TERMINAL_USE_DOCKER=true) and the Docker
+ *   3. In production-like environments, terminal execution fails closed
+ *      UNCONDITIONALLY. Docker mode does NOT enable execution: Docker
+ *      availability is a configuration claim, not proof of isolation, and
+ *      no environment variable can override this. Verified sandbox
+ *      isolation does not exist yet; when it does, this policy will be
+ *      updated to check for it explicitly — not via an env var.
+ *   4. In local development, Docker mode is permitted when the Docker
  *      daemon, image and network are present.
- *   4. In production, Docker being installed, configured and reachable is NOT
- *      enough. Terminal execution additionally requires independently
- *      verified isolation (isolationIndependentlyVerified). No verifier
- *      exists yet, so production terminal execution is disabled — even when
- *      Docker is present.
  *
  * "docker_enforced" means the server will only start sessions inside the
  * container runtime. It is a configuration/enforcement guarantee, not proof
  * that the container image is escape-proof; that needs runtime validation.
  */
-
-/**
- * Whether container isolation has been verified independently of the
- * configuration (for example a hardened-image attestation or a canary
- * container that proves capability drops, non-root user and network policy).
- *
- * No such verification exists today, so this returns false unconditionally.
- * It deliberately reads NO environment variable and accepts no override: a
- * flag that says "trust me" is exactly the failure this module prevents.
- * When a real verifier is built, it replaces this function's body.
- */
-export function isolationIndependentlyVerified(
-  _env: Record<string, string | undefined> = process.env,
-): boolean {
-  return false;
-}
 
 export type TerminalIsolationStatus = "docker_enforced" | "dev_host_shell" | "unsafe";
 
@@ -88,18 +72,23 @@ export function isProductionLike(env: Record<string, string | undefined>): boole
 export function evaluateTerminalIsolation(input: TerminalIsolationInput): TerminalIsolationVerdict {
   const productionLike = isProductionLike(input.env);
 
+  // Production-like environments fail closed UNCONDITIONALLY. Docker mode
+  // does not enable execution: Docker availability is a configuration claim,
+  // not proof of isolation, and no environment variable can override this.
+  // Verified sandbox isolation does not exist yet.
+  if (productionLike) {
+    return {
+      terminalExecution: "disabled",
+      mode: "none",
+      status: "unsafe",
+      productionLike,
+      reason:
+        "Terminal execution is disabled in production: no verified sandbox " +
+        "isolation exists. Failing closed unconditionally; no override is available.",
+    };
+  }
+
   if (input.useDocker) {
-    if (input.dockerAvailable && productionLike && !isolationIndependentlyVerified(input.env)) {
-      return {
-        terminalExecution: "disabled",
-        mode: "none",
-        status: "unsafe",
-        productionLike,
-        reason:
-          "Docker is available but isolation is not independently verified; " +
-          "production terminal execution stays disabled",
-      };
-    }
     if (input.dockerAvailable) {
       return {
         terminalExecution: "enabled",
@@ -115,18 +104,6 @@ export function evaluateTerminalIsolation(input: TerminalIsolationInput): Termin
       status: "unsafe",
       productionLike,
       reason: `Docker mode requested but unavailable: ${input.dockerReason ?? "unknown"}`,
-    };
-  }
-
-  if (productionLike) {
-    return {
-      terminalExecution: "disabled",
-      mode: "none",
-      status: "unsafe",
-      productionLike,
-      reason:
-        "Host shell is not permitted in production; terminal disabled until " +
-        "TERMINAL_USE_DOCKER=true with a working Docker runtime",
     };
   }
 
@@ -148,26 +125,24 @@ export class TerminalIsolationError extends Error {
 }
 
 /**
- * Last-line guard for the code that actually spawns shells. In a
- * production-like environment it throws for a host shell AND for Docker mode
- * (until isolation is independently verified), regardless of what any
- * caller above decided.
+ * Last-line guard for the code that actually spawns shells. Throws when a
+ * terminal session is requested in a production-like environment, regardless
+ * of Docker mode or any environment variable.
+ *
+ * Production execution fails closed UNCONDITIONALLY. Docker availability is
+ * a configuration claim, not proof of isolation. There is deliberately no
+ * override variable — not TERMINAL_VERIFIED_ISOLATION, not TERMINAL_USE_DOCKER,
+ * not anything else. When independently verified sandbox isolation exists,
+ * this function will be updated to check for it explicitly.
  */
 export function assertHostShellPermitted(
   env: Record<string, string | undefined>,
-  useDocker: boolean,
+  _useDocker: boolean,
 ): void {
-  if (!isProductionLike(env)) return;
-  // Production-like: a host shell is never allowed, and Docker mode alone
-  // does not authorize execution without independent verification.
-  if (!useDocker) {
+  if (isProductionLike(env)) {
     throw new TerminalIsolationError(
-      "Terminal unavailable: host shell is not permitted in production",
-    );
-  }
-  if (!isolationIndependentlyVerified(env)) {
-    throw new TerminalIsolationError(
-      "Terminal unavailable: container isolation is not independently verified",
+      "Terminal unavailable: execution is disabled in production; " +
+        "no verified sandbox isolation exists. Failing closed unconditionally.",
     );
   }
 }
