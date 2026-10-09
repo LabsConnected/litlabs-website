@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { trustedLocalStubs } from "./helpers/trusted-local-env";
 import { mkdtempSync, rmSync, readdirSync, readFileSync, statSync, mkdirSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, dirname, relative, sep } from "path";
@@ -49,6 +50,7 @@ const RAILWAY_KEYS = [
 function asEnvironment(kind: "production" | "railway" | "development") {
   vi.unstubAllEnvs();
   for (const key of RAILWAY_KEYS) vi.stubEnv(key, "");
+  trustedLocalStubs();
   if (kind === "production") vi.stubEnv("NODE_ENV", "production");
   if (kind === "development") vi.stubEnv("NODE_ENV", "development");
   if (kind === "railway") {

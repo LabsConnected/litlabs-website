@@ -17,6 +17,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { useTrustedLocalEnv } from "./helpers/trusted-local-env";
 
 import {
   mkdtempSync,
@@ -80,6 +81,8 @@ async function seedGitRepo(root: string): Promise<string> {
   await git.commit("Initial commit — LiTT managed project");
   return (await git.revparse("HEAD")).trim();
 }
+
+useTrustedLocalEnv();
 
 describe("scaffold manifest lifecycle", () => {
   it("writes a manifest at creation and reads it back", () => {

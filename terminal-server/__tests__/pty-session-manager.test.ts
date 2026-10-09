@@ -34,6 +34,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useTrustedLocalEnv } from "./helpers/trusted-local-env";
 import { mkdtempSync, mkdirSync, symlinkSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -150,6 +151,8 @@ function makeOpts(overrides: Partial<{
 }
 
 // ─── Tests ────────────────────────────────────────────────────────
+
+useTrustedLocalEnv();
 
 describe("PtySessionManager", () => {
   let factory: ReturnType<typeof createMockFactory>;

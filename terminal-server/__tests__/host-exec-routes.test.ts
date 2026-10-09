@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { trustedLocalStubs } from "./helpers/trusted-local-env";
 import express from "express";
 import request from "supertest";
 import { readFileSync } from "fs";
@@ -48,6 +49,7 @@ const RAILWAY_KEYS = [
 function asEnvironment(kind: "production" | "railway" | "development") {
   vi.unstubAllEnvs();
   for (const key of RAILWAY_KEYS) vi.stubEnv(key, "");
+  trustedLocalStubs();
   vi.stubEnv("NODE_ENV", kind === "production" ? "production" : "development");
   if (kind === "railway") vi.stubEnv("RAILWAY_SERVICE_ID", "svc_1");
 }
