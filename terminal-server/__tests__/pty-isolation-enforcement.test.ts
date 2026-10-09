@@ -26,7 +26,15 @@ const ENV_KEYS = [
   "TERMINAL_ALLOW_HOST_SHELL",
   "ALLOW_HOST_SHELL",
   "ALLOW_ANONYMOUS_DEV",
+  "LITT_ALLOW_LOCAL_HOST_EXEC",
+  "LITT_RESOLVED_BIND_HOST",
 ] as const;
+
+/** A developer machine that explicitly opted in and is bound to loopback. */
+const LOCAL = {
+  LITT_ALLOW_LOCAL_HOST_EXEC: "1",
+  LITT_RESOLVED_BIND_HOST: "127.0.0.1",
+} as const;
 
 const saved: Record<string, string | undefined> = {};
 
@@ -144,7 +152,7 @@ describe("PtySessionManager isolation enforcement", () => {
   });
 
   it("uses only the Docker path in local development when Docker mode is on", () => {
-    setEnv({ NODE_ENV: "development" });
+    setEnv({ NODE_ENV: "development", ...LOCAL });
     const { factory, spawnHost, spawnDocker } = makeFactory();
     const m = createManager(factory);
 
@@ -155,7 +163,7 @@ describe("PtySessionManager isolation enforcement", () => {
   });
 
   it("does not fall back to a host shell when the Docker spawn fails (local development)", () => {
-    setEnv({ NODE_ENV: "development" });
+    setEnv({ NODE_ENV: "development", ...LOCAL });
     const { factory, spawnHost, spawnDocker } = makeFactory();
     spawnDocker.mockImplementation(() => {
       throw new Error("docker unavailable");
@@ -167,8 +175,30 @@ describe("PtySessionManager isolation enforcement", () => {
     expect(m.size).toBe(0);
   });
 
+  it("refuses every shell on NODE_ENV=development alone (no opt-in)", () => {
+    setEnv({ NODE_ENV: "development", LITT_RESOLVED_BIND_HOST: "127.0.0.1" });
+    const { factory, spawnHost, spawnDocker } = makeFactory();
+    const m = createManager(factory);
+
+    expect(() => open(m, false)).toThrow(TerminalIsolationError);
+    expect(() => open(m, true)).toThrow(TerminalIsolationError);
+    expect(spawnHost).not.toHaveBeenCalled();
+    expect(spawnDocker).not.toHaveBeenCalled();
+  });
+
+  it("refuses every shell when the dev server is bound to a reachable address", () => {
+    setEnv({ NODE_ENV: "development", ...LOCAL, LITT_RESOLVED_BIND_HOST: "0.0.0.0" });
+    const { factory, spawnHost, spawnDocker } = makeFactory();
+    const m = createManager(factory);
+
+    expect(() => open(m, false)).toThrow(TerminalIsolationError);
+    expect(() => open(m, true)).toThrow(TerminalIsolationError);
+    expect(spawnHost).not.toHaveBeenCalled();
+    expect(spawnDocker).not.toHaveBeenCalled();
+  });
+
   it("still allows a host shell in local development", () => {
-    setEnv({ NODE_ENV: "development" });
+    setEnv({ NODE_ENV: "development", ...LOCAL });
     const { factory, spawnHost } = makeFactory();
     const m = createManager(factory);
 

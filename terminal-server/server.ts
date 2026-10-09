@@ -105,6 +105,9 @@ try {
   console.error((err as Error).message);
   process.exit(1);
 }
+// Isolation policy requires a loopback bind for any host execution. Written
+// here, from the real resolved address, never read from operator input.
+process.env.LITT_RESOLVED_BIND_HOST = BIND.host;
 const ALLOWED_ORIGINS = [
   ...(process.env.TERMINAL_ALLOWED_ORIGIN || "")
     .split(",")

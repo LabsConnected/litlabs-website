@@ -38,6 +38,12 @@ const RAILWAY_MARKERS = [
 ];
 const VERCEL_MARKERS = ["VERCEL", "VERCEL_ENV", "VERCEL_URL"];
 
+const LOCAL = {
+  NODE_ENV: "development",
+  LITT_ALLOW_LOCAL_HOST_EXEC: "1",
+  LITT_RESOLVED_BIND_HOST: "127.0.0.1",
+};
+
 describe("isProductionLike (web app)", () => {
   it("treats NODE_ENV=production as production", () => {
     expect(isProductionLike({ NODE_ENV: "production" })).toBe(true);
@@ -46,19 +52,40 @@ describe("isProductionLike (web app)", () => {
   it.each([...RAILWAY_MARKERS, ...VERCEL_MARKERS])(
     "treats %s as production even when NODE_ENV says development",
     (marker) => {
-      expect(isProductionLike({ NODE_ENV: "development", [marker]: "1" })).toBe(true);
+      expect(isProductionLike({ ...LOCAL, [marker]: "1" })).toBe(true);
       expect(isProductionLike({ [marker]: "1" })).toBe(true);
     },
   );
 
-  it("treats only explicit development/test with no hosted marker as local", () => {
-    expect(isProductionLike({ NODE_ENV: "development" })).toBe(false);
-    expect(isProductionLike({ NODE_ENV: "test" })).toBe(false);
+  it("treats only explicit opted-in, loopback-bound development/test as local", () => {
+    expect(isProductionLike(LOCAL)).toBe(false);
+    expect(isProductionLike({ ...LOCAL, NODE_ENV: "test" })).toBe(false);
+    expect(isProductionLike({ ...LOCAL, LITT_RESOLVED_BIND_HOST: "::1" })).toBe(false);
+    expect(isProductionLike({ ...LOCAL, LITT_RESOLVED_BIND_HOST: "localhost" })).toBe(false);
+  });
+
+  it("NODE_ENV=development/test alone is NOT sufficient authorization", () => {
+    expect(isHostExecutionPermitted({ NODE_ENV: "development" })).toBe(false);
+    expect(isHostExecutionPermitted({ NODE_ENV: "test" })).toBe(false);
+  });
+
+  it("requires the exact opt-in value", () => {
+    for (const v of [undefined, "", "0", "true", "yes", " 1", "1 "]) {
+      expect(isHostExecutionPermitted({ ...LOCAL, LITT_ALLOW_LOCAL_HOST_EXEC: v }), String(v)).toBe(false);
+    }
+  });
+
+  it("requires a verified loopback bind: unknown or remotely reachable binds deny", () => {
+    for (const host of [undefined, "", "0.0.0.0", "::", "192.168.1.20", "100.101.102.103", "example.com", "127.0.0.1.evil.com"]) {
+      expect(isHostExecutionPermitted({ ...LOCAL, LITT_RESOLVED_BIND_HOST: host }), String(host)).toBe(false);
+    }
   });
 
   it("is default-deny: missing or unrecognised NODE_ENV never permits execution", () => {
     for (const NODE_ENV of [undefined, "", "prod", "Production", "staging", "preview", " development", "dev"]) {
-      const env = NODE_ENV === undefined ? {} : { NODE_ENV };
+      const env = NODE_ENV === undefined
+        ? { LITT_ALLOW_LOCAL_HOST_EXEC: "1", LITT_RESOLVED_BIND_HOST: "127.0.0.1" }
+        : { ...LOCAL, NODE_ENV };
       expect(isHostExecutionPermitted(env), JSON.stringify(env)).toBe(false);
       expect(hostExecutionBlockedResponse("x", env), JSON.stringify(env)).not.toBeNull();
     }
@@ -80,26 +107,28 @@ describe("isProductionLike (web app)", () => {
     expect(hostExecutionBlockedResponse("x", env)).not.toBeNull();
   });
 
-  it("never permits anything terminal-server/isolation-policy.ts treats as production", () => {
+  it("agrees with terminal-server/isolation-policy.ts on the full environment matrix", () => {
     const envs: Array<Record<string, string | undefined>> = [
-      { NODE_ENV: "development" },
-      { NODE_ENV: "test" },
       { NODE_ENV: "production" },
-      ...RAILWAY_MARKERS.flatMap((m) => [{ [m]: "1" }, { NODE_ENV: "development", [m]: "1" }]),
+      { ...LOCAL, NODE_ENV: "production" },
+      LOCAL,
+      { ...LOCAL, NODE_ENV: "test" },
+      { NODE_ENV: "development" },
+      { ...LOCAL, LITT_RESOLVED_BIND_HOST: "0.0.0.0" },
+      { ...LOCAL, LITT_ALLOW_LOCAL_HOST_EXEC: undefined },
+      ...[...RAILWAY_MARKERS, ...VERCEL_MARKERS].flatMap((m) => [{ [m]: "1" }, { ...LOCAL, [m]: "1" }]),
     ];
     for (const env of envs) {
-      // web guard may be stricter, never looser
-      if (terminalIsProductionLike(env)) {
-        expect(isProductionLike(env), JSON.stringify(env)).toBe(true);
-      }
+      expect(isProductionLike(env), JSON.stringify(env)).toBe(terminalIsProductionLike(env));
     }
   });
 });
 
 describe("hostExecutionBlockedResponse", () => {
   it("returns null in explicit local development so existing behaviour is preserved", () => {
-    expect(hostExecutionBlockedResponse("bridge-cli", { NODE_ENV: "development" })).toBeNull();
-    expect(hostExecutionBlockedResponse("bridge-cli", { NODE_ENV: "test" })).toBeNull();
+    expect(hostExecutionBlockedResponse("bridge-cli", LOCAL)).toBeNull();
+    expect(hostExecutionBlockedResponse("bridge-cli", { ...LOCAL, NODE_ENV: "test" })).toBeNull();
+    expect(hostExecutionBlockedResponse("bridge-cli", { NODE_ENV: "development" })).not.toBeNull();
   });
 
   it("returns 503 HOST_EXECUTION_DISABLED naming the surface in production", async () => {
@@ -114,14 +143,19 @@ describe("hostExecutionBlockedResponse", () => {
   });
 
   it("reads process.env at call time, not at import time", () => {
-    const before = process.env.NODE_ENV;
+    const keys = ["NODE_ENV", "LITT_ALLOW_LOCAL_HOST_EXEC", "LITT_RESOLVED_BIND_HOST"];
+    const e = process.env as Record<string, string | undefined>;
+    const before = keys.map((k) => e[k]);
+    const restore = () => keys.forEach((k, i) => (before[i] === undefined ? delete e[k] : (e[k] = before[i])));
     try {
-      (process.env as Record<string, string | undefined>).NODE_ENV = "production";
+      Object.assign(e, LOCAL, { NODE_ENV: "production" });
       expect(isHostExecutionPermitted()).toBe(false);
-      (process.env as Record<string, string | undefined>).NODE_ENV = "test";
+      Object.assign(e, LOCAL, { NODE_ENV: "test" });
       expect(isHostExecutionPermitted()).toBe(true);
+      delete e.LITT_ALLOW_LOCAL_HOST_EXEC;
+      expect(isHostExecutionPermitted()).toBe(false);
     } finally {
-      (process.env as Record<string, string | undefined>).NODE_ENV = before;
+      restore();
     }
   });
 });

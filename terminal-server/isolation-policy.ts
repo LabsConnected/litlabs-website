@@ -8,7 +8,8 @@
  * Rules
  * -----
  *   1. A host shell (node-pty directly on the server) is permitted ONLY in
- *      a local development environment.
+ *      a trusted local environment: see isTrustedLocalEnvironment (explicit
+ *      opt-in + loopback bind; NODE_ENV alone is never enough).
  *   2. In production — or on any Railway-hosted service — a host shell is
  *      NEVER permitted. There is deliberately no override variable.
  *   3. In production-like environments, terminal execution fails closed
@@ -60,13 +61,49 @@ const RAILWAY_MARKERS = [
   "RAILWAY_GIT_COMMIT_SHA",
 ] as const;
 
+/** Other hosting platforms the web app / shared tooling may run on. */
+const OTHER_HOSTED_MARKERS = ["VERCEL", "VERCEL_ENV", "VERCEL_URL"] as const;
+
+/** Explicit, per-process opt-in required for ANY execution on this host. */
+export const LOCAL_HOST_EXEC_OPT_IN = "LITT_ALLOW_LOCAL_HOST_EXEC";
+
 /**
- * True for production AND for anything hosted on Railway. Defaults to the
- * safe side: a mis-set or missing NODE_ENV on Railway is still production.
+ * Written by the process entrypoint (never by operators) once the real
+ * listening address is resolved. Host execution requires it to be loopback,
+ * so a dev server reachable over LAN/tailnet/0.0.0.0 can never run commands
+ * for whoever can reach it. Absent => unknown => denied.
+ */
+export const RESOLVED_BIND_HOST = "LITT_RESOLVED_BIND_HOST";
+
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
+
+export function isLoopbackHost(host: string | undefined): boolean {
+  return host !== undefined && LOOPBACK_HOSTS.has(host);
+}
+
+/**
+ * DEFAULT-DENY. Execution on this host is a trusted-local-developer feature
+ * and is permitted only when ALL of these positively hold:
+ *   1. NODE_ENV is exactly "development" or "test"
+ *   2. no Railway/Vercel marker is present
+ *   3. LITT_ALLOW_LOCAL_HOST_EXEC is exactly "1" (explicit opt-in)
+ *   4. the server is bound to loopback (LITT_RESOLVED_BIND_HOST)
+ * Missing markers, missing NODE_ENV, a missing opt-in or an unknown bind
+ * address can never make untrusted execution permissible.
+ */
+export function isTrustedLocalEnvironment(env: Record<string, string | undefined>): boolean {
+  if (env.NODE_ENV !== "development" && env.NODE_ENV !== "test") return false;
+  if ([...RAILWAY_MARKERS, ...OTHER_HOSTED_MARKERS].some((key) => Boolean(env[key]))) return false;
+  if (env[LOCAL_HOST_EXEC_OPT_IN] !== "1") return false;
+  return isLoopbackHost(env[RESOLVED_BIND_HOST]);
+}
+
+/**
+ * Complement of isTrustedLocalEnvironment: anything not provably a trusted
+ * local environment is treated as production-like. (Name kept for callers.)
  */
 export function isProductionLike(env: Record<string, string | undefined>): boolean {
-  if (env.NODE_ENV === "production") return true;
-  return RAILWAY_MARKERS.some((key) => Boolean(env[key]));
+  return !isTrustedLocalEnvironment(env);
 }
 
 export function evaluateTerminalIsolation(input: TerminalIsolationInput): TerminalIsolationVerdict {
@@ -83,7 +120,9 @@ export function evaluateTerminalIsolation(input: TerminalIsolationInput): Termin
       status: "unsafe",
       productionLike,
       reason:
-        "Terminal execution is disabled in production: no verified sandbox " +
+        "Terminal execution is disabled: this is not a trusted local environment " +
+        "(requires NODE_ENV=development|test, no hosted markers, " +
+        `${LOCAL_HOST_EXEC_OPT_IN}=1 and a loopback bind) and no verified sandbox ` +
         "isolation exists. Failing closed unconditionally; no override is available.",
     };
   }
@@ -112,7 +151,7 @@ export function evaluateTerminalIsolation(input: TerminalIsolationInput): Termin
     mode: "host",
     status: "dev_host_shell",
     productionLike,
-    reason: "Local development host shell; no isolation",
+    reason: "Trusted local development host shell (explicit opt-in, loopback bind); no isolation",
   };
 }
 

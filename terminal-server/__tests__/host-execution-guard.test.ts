@@ -75,8 +75,14 @@ describe("host-execution policy", () => {
   it("is closed in production and on Railway, open in local development", () => {
     expect(isHostExecutionPermitted({ NODE_ENV: "production" })).toBe(false);
     expect(isHostExecutionPermitted({ NODE_ENV: "development", RAILWAY_PROJECT_ID: "p" })).toBe(false);
-    expect(isHostExecutionPermitted({ NODE_ENV: "development" })).toBe(true);
-    expect(isHostExecutionPermitted({ NODE_ENV: "test" })).toBe(true);
+    const LOCAL = { LITT_ALLOW_LOCAL_HOST_EXEC: "1", LITT_RESOLVED_BIND_HOST: "127.0.0.1" };
+    expect(isHostExecutionPermitted({ ...LOCAL, NODE_ENV: "development" })).toBe(true);
+    expect(isHostExecutionPermitted({ ...LOCAL, NODE_ENV: "test" })).toBe(true);
+    // NODE_ENV alone, a missing NODE_ENV, or a reachable bind never permit execution
+    expect(isHostExecutionPermitted({ NODE_ENV: "development" })).toBe(false);
+    expect(isHostExecutionPermitted({ NODE_ENV: "test" })).toBe(false);
+    expect(isHostExecutionPermitted({})).toBe(false);
+    expect(isHostExecutionPermitted({ ...LOCAL, NODE_ENV: "development", LITT_RESOLVED_BIND_HOST: "0.0.0.0" })).toBe(false);
   });
 
   it("is NOT unlocked by Docker mode or any override variable (no sandbox backend exists)", () => {

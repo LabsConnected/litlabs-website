@@ -17,7 +17,11 @@ import {
 } from "../isolation-policy";
 
 const PROD = { NODE_ENV: "production" };
-const DEV = { NODE_ENV: "development" };
+const DEV = {
+  NODE_ENV: "development",
+  LITT_ALLOW_LOCAL_HOST_EXEC: "1",
+  LITT_RESOLVED_BIND_HOST: "127.0.0.1",
+};
 
 describe("isProductionLike", () => {
   it("treats NODE_ENV=production as production", () => {
@@ -31,10 +35,38 @@ describe("isProductionLike", () => {
     expect(isProductionLike({ RAILWAY_GIT_COMMIT_SHA: "288b4c03" })).toBe(true);
   });
 
-  it("treats a bare local environment as development", () => {
-    expect(isProductionLike({})).toBe(false);
+  it("treats only an opted-in, loopback-bound development/test environment as local", () => {
     expect(isProductionLike(DEV)).toBe(false);
-    expect(isProductionLike({ NODE_ENV: "test" })).toBe(false);
+    expect(isProductionLike({ ...DEV, NODE_ENV: "test" })).toBe(false);
+  });
+
+  it("is default-deny: missing markers or NODE_ENV never permit execution", () => {
+    expect(isProductionLike({})).toBe(true);
+    expect(isProductionLike({ NODE_ENV: "development" })).toBe(true);
+    expect(isProductionLike({ NODE_ENV: "test" })).toBe(true);
+    for (const NODE_ENV of [undefined, "", "prod", "staging", "Production"]) {
+      expect(isProductionLike({ ...DEV, NODE_ENV }), String(NODE_ENV)).toBe(true);
+    }
+  });
+
+  it("requires the exact opt-in value", () => {
+    for (const v of [undefined, "", "0", "true", "yes", " 1"]) {
+      expect(isProductionLike({ ...DEV, LITT_ALLOW_LOCAL_HOST_EXEC: v }), String(v)).toBe(true);
+    }
+  });
+
+  it("requires a verified loopback bind (a reachable dev server is untrusted)", () => {
+    for (const host of [undefined, "", "0.0.0.0", "::", "192.168.1.20", "100.101.102.103", "127.0.0.1.evil.com"]) {
+      expect(isProductionLike({ ...DEV, LITT_RESOLVED_BIND_HOST: host }), String(host)).toBe(true);
+    }
+    expect(isProductionLike({ ...DEV, LITT_RESOLVED_BIND_HOST: "::1" })).toBe(false);
+    expect(isProductionLike({ ...DEV, LITT_RESOLVED_BIND_HOST: "localhost" })).toBe(false);
+  });
+
+  it("treats Vercel markers as hosted", () => {
+    for (const k of ["VERCEL", "VERCEL_ENV", "VERCEL_URL"]) {
+      expect(isProductionLike({ ...DEV, [k]: "1" }), k).toBe(true);
+    }
   });
 });
 
@@ -140,12 +172,32 @@ describe("evaluateTerminalIsolation", () => {
 
   it("does not allow a host shell on Railway even when NODE_ENV says development", () => {
     const v = evaluateTerminalIsolation({
-      env: { NODE_ENV: "development", RAILWAY_SERVICE_ID: "svc" },
+      env: { ...DEV, RAILWAY_SERVICE_ID: "svc" },
       useDocker: false,
       dockerAvailable: false,
     });
     expect(v.terminalExecution).toBe("disabled");
     expect(v.status).toBe("unsafe");
+  });
+
+  it("does not allow a host shell or Docker on NODE_ENV=development alone", () => {
+    for (const useDocker of [false, true]) {
+      const v = evaluateTerminalIsolation({
+        env: { NODE_ENV: "development" },
+        useDocker,
+        dockerAvailable: true,
+      });
+      expect(v.terminalExecution, `useDocker=${useDocker}`).toBe("disabled");
+    }
+  });
+
+  it("does not allow execution when the dev server is bound to a reachable address", () => {
+    const v = evaluateTerminalIsolation({
+      env: { ...DEV, LITT_RESOLVED_BIND_HOST: "0.0.0.0" },
+      useDocker: false,
+      dockerAvailable: false,
+    });
+    expect(v.terminalExecution).toBe("disabled");
   });
 
   it("cannot be re-enabled by any environment variable in production", () => {
@@ -217,7 +269,13 @@ describe("assertHostShellPermitted", () => {
 
   it("does not throw for a host shell in local development", () => {
     expect(() => assertHostShellPermitted(DEV, false)).not.toThrow();
-    expect(() => assertHostShellPermitted({}, false)).not.toThrow();
+    expect(() => assertHostShellPermitted({}, false)).toThrow(TerminalIsolationError);
+    expect(() => assertHostShellPermitted({ NODE_ENV: "development" }, false)).toThrow(
+      TerminalIsolationError,
+    );
+    expect(() =>
+      assertHostShellPermitted({ ...DEV, LITT_RESOLVED_BIND_HOST: "0.0.0.0" }, false),
+    ).toThrow(TerminalIsolationError);
   });
 
   it("carries a stable error code for callers", () => {

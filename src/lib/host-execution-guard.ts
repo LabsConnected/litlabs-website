@@ -12,9 +12,9 @@
  * Dependency-free on purpose: no "server-only", no Next imports, so it can be
  * unit-tested directly and cannot be bypassed by a failing import.
  *
- * Stricter than terminal-server/isolation-policy.ts: that policy is
- * deny-on-known-production-markers; this one is allow-only-on-known-local.
- * Anything the web guard calls local, the terminal policy also calls local.
+ * Same rule as terminal-server/isolation-policy.ts (isTrustedLocalEnvironment):
+ * allow-only-on-positively-verified-local. Parity is asserted in
+ * tests/host-execution-guard.test.ts.
  */
 
 type Env = Record<string, string | undefined>;
@@ -34,15 +34,25 @@ function hasHostedMarker(env: Env): boolean {
   return [...RAILWAY_MARKERS, ...VERCEL_MARKERS].some((key) => Boolean(env[key]));
 }
 
+/** Explicit opt-in; must match terminal-server/isolation-policy.ts. */
+export const LOCAL_HOST_EXEC_OPT_IN = "LITT_ALLOW_LOCAL_HOST_EXEC";
+/** Set by scripts/dev-network.mjs from the real bind address. */
+export const RESOLVED_BIND_HOST = "LITT_RESOLVED_BIND_HOST";
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
+
 /**
- * DEFAULT-DENY. Host execution is permitted only on a positive local signal:
- * NODE_ENV is exactly "development" or "test" AND no Railway/Vercel marker is
- * present. A missing, empty, misspelled or unexpected NODE_ENV (e.g. "prod",
- * "staging") is NOT permitted. Missing markers can never open execution.
+ * DEFAULT-DENY. Permitted only when ALL hold: NODE_ENV is exactly
+ * "development" or "test"; no Railway/Vercel marker; LITT_ALLOW_LOCAL_HOST_EXEC
+ * is exactly "1"; and the dev server is bound to loopback. NODE_ENV alone is
+ * never enough: a remotely reachable dev server must not run commands for
+ * whoever can reach it. Missing/unknown values deny.
  */
 export function isLocalDevelopment(env: Env = process.env): boolean {
   if (env.NODE_ENV !== "development" && env.NODE_ENV !== "test") return false;
-  return !hasHostedMarker(env);
+  if (hasHostedMarker(env)) return false;
+  if (env[LOCAL_HOST_EXEC_OPT_IN] !== "1") return false;
+  const bind = env[RESOLVED_BIND_HOST];
+  return bind !== undefined && LOOPBACK_HOSTS.has(bind);
 }
 
 /**
