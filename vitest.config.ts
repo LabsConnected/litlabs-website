@@ -16,6 +16,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // Surface failing tests as GitHub annotations (readable without log access).
+    reporters: process.env.GITHUB_ACTIONS ? ["default", "github-actions"] : ["default"],
     setupFiles: ["./tests/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}", "tests/**/*.test.{ts,tsx}"],
     exclude: [
