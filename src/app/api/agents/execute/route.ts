@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { hostExecutionBlockedResponse } from "@/lib/host-execution-guard";
 import { executeCommand } from "@/lib/command-executor";
 import { logCommandExecution } from "@/lib/agent-logger";
 
@@ -51,6 +52,12 @@ async function handler(req: NextRequest): Promise<NextResponse> {
       { status: 403 },
     );
   }
+
+  // Gate 1: an allowlist (git, npm, node, npx, pnpm, ...) is not isolation —
+  // `node`/`npx` run arbitrary code. Closed in any production-like
+  // environment even for an admin with ENABLE_AGENT_COMMANDS=true.
+  const blocked = hostExecutionBlockedResponse("agents-execute");
+  if (blocked) return NextResponse.json(await blocked.json(), { status: blocked.status });
 
   // Parse body
   let body: {

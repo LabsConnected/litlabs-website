@@ -4,6 +4,7 @@ import path from "path";
 import { auth } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { isHostExecutionPermitted } from "@/lib/host-execution-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -145,6 +146,8 @@ async function getHandler(req: NextRequest) {
 
   let recentChanges: string[] = [];
   try {
+    // Gate 1: no host git in a production-like environment.
+    if (!isHostExecutionPermitted()) throw new Error("host execution disabled");
     recentChanges = execFileSync("git", ["log", "--oneline", "-5"], {
       cwd: root,
       encoding: "utf8",

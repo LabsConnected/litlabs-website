@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { isAdmin } from "@/lib/roles";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { hostExecutionBlockedResponse } from "@/lib/host-execution-guard";
 
 export const runtime = "nodejs";
 
@@ -35,6 +36,10 @@ async function handler(req: NextRequest) {
   if (!(await isAdmin())) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  // Gate 1: build/lint/test run repo scripts with the full server env on the
+  // web host. Closed in any production-like environment regardless of flags.
+  const blocked = hostExecutionBlockedResponse("litt-command");
+  if (blocked) return NextResponse.json(await blocked.json(), { status: blocked.status });
   if (process.env.ENABLE_LOCAL_BUILD_API !== "true") {
     return NextResponse.json(
       { error: "Local build checks are disabled on this deployment" },

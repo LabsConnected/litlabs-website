@@ -189,6 +189,10 @@ export class DockerSandboxProvider implements SandboxProvider {
       "--memory", `${limits.memoryMB}m`,
       "--pids-limit", String(limits.processLimit),
       "--read-only",
+      // Hardening only: this provider uses a named volume (root-owned), so
+      // dropping every capability does not break workspace writes.
+      "--cap-drop", "ALL",
+      "--security-opt", "no-new-privileges",
       "--tmpfs", "/tmp:noexec,nosuid,size=100m",
       "-v", `${volumeName}:/workspace:rw`,
       "-w", "/workspace",

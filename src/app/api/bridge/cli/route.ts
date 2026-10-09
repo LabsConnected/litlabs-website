@@ -5,6 +5,7 @@
 import { spawn, ChildProcess } from "child_process";
 import { NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
+import { hostExecutionBlockedResponse } from "@/lib/host-execution-guard";
 // Canonical execution-policy classifier (packages/litt-agent-core) — the
 // same deny/safe/risky tiers the ExecutionGateway enforces. The CLI bridge
 // spawns interactive shells that bypass the normal command pipeline, so
@@ -78,6 +79,12 @@ export async function GET(req: NextRequest) {
   if (!userId || userId !== getAdminUserId()) {
     return new Response("Unauthorized", { status: 401 });
   }
+
+  // Gate 1: admin-only is access control, not isolation. This route spawns
+  // shells on the web host with the full server env, so it is closed in any
+  // production-like environment. Checked before any process is started.
+  const blocked = hostExecutionBlockedResponse("bridge-cli");
+  if (blocked) return blocked;
 
   const { searchParams } = new URL(req.url);
   const tool = searchParams.get("tool") || "terminal";
@@ -257,6 +264,11 @@ export async function POST(req: NextRequest) {
   if (!userId || userId !== getAdminUserId()) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // Gate 1: no stdin may reach a host shell in a production-like environment,
+  // even for a session that somehow already exists.
+  const blocked = hostExecutionBlockedResponse("bridge-cli");
+  if (blocked) return blocked;
 
   try {
     const body = (await req.json()) as BridgeMessage & { sessionId: string };

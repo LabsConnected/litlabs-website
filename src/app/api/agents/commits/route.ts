@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { execSync } from "child_process";
+import { isHostExecutionPermitted } from "@/lib/host-execution-guard";
 
 const FALLBACK_COMMITS = [
   "d85ae75 feat: upgrade AgentTool (boardroom, markdown, rich cards)",
@@ -20,6 +21,9 @@ export async function GET(req: NextRequest) {
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  // Gate 1: no host process in a production-like environment (fixed command,
+  // but still a host exec reachable by any signed-in user).
+  if (!isHostExecutionPermitted()) return NextResponse.json(FALLBACK_COMMITS);
   try {
     const commits = execSync("git log --oneline -10 2>/dev/null", { timeout: 3000 })
       .toString().trim().split("\n").filter(Boolean);

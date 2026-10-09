@@ -200,7 +200,9 @@ async function getTerminalIsolationVerdict() {
   if (startupVerdict.terminalExecution === "disabled") {
     console.error(
       "[Terminal] Terminal execution is DISABLED: " + startupVerdict.reason + ". " +
-        "Workspace file and preview services are unaffected.",
+        "Workspace file and checkpoint services are unaffected; services that start host " +
+        "processes (workspace prepare, preview, git, command execution) return 503 " +
+        "HOST_EXECUTION_DISABLED in production-like environments.",
     );
   }
 }
@@ -706,8 +708,10 @@ app.get("/health/ready", async (_req, res) => {
   // Terminal SHELL safety is reported separately under `terminal`, from the
   // same verdict that gates session creation, so a "ready" service can never
   // be read as "terminal is safe". The HTTP status is unchanged on purpose:
-  // file, checkpoint and preview services share this process and must keep
-  // passing platform health checks while the terminal is disabled.
+  // file and checkpoint services share this process and must keep passing
+  // platform health checks while the terminal is disabled. Host-executing
+  // services (prepare, preview, git, exec) are closed separately and report
+  // 503 HOST_EXECUTION_DISABLED per request.
   const allReady = authConfigured && internalServiceConfigured && workspaceReady;
   const isolation = await getTerminalIsolationVerdict();
 

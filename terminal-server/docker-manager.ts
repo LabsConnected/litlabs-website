@@ -54,6 +54,13 @@ export function createDockerSession(
     "--pids-limit",
     "100",
     "--read-only",
+    // Hardening only (local-development Docker mode; production stays closed
+    // by isolation-policy). --cap-drop ALL is deliberately NOT added here: this
+    // path bind-mounts a host directory and runs as root, so dropping
+    // CAP_DAC_OVERRIDE would break writes to host-owned files until a --user
+    // mapping is designed.
+    "--security-opt",
+    "no-new-privileges",
     "--tmpfs",
     "/tmp:noexec,nosuid,size=100m",
     "-v",
