@@ -106,6 +106,35 @@ export function isProductionLike(env: Record<string, string | undefined>): boole
   return !isTrustedLocalEnvironment(env);
 }
 
+const PROXY_HEADERS = [
+  "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-forwarded-port",
+  "forwarded", "x-real-ip", "cf-connecting-ip", "cf-ray", "true-client-ip", "via",
+] as const;
+
+function hostnameOf(hostHeader: string): string {
+  const h = hostHeader.trim().toLowerCase();
+  if (h.startsWith("[")) return h.slice(1, h.indexOf("]"));
+  return h.split(":")[0];
+}
+
+/**
+ * True when a request cannot be shown to be a direct request to a loopback
+ * listener (proxy/tunnel headers present, or Host missing / not loopback).
+ * Binding to loopback does not make a request trusted: ngrok, Cloudflare
+ * Tunnel, nginx or Tailscale Funnel forward untrusted traffic to 127.0.0.1.
+ */
+export function isUntrustedLocalRequest(
+  headers: Record<string, string | string[] | undefined>,
+): boolean {
+  const get = (n: string) => {
+    const v = headers[n];
+    return Array.isArray(v) ? v[0] : v;
+  };
+  if (PROXY_HEADERS.some((h) => get(h) !== undefined)) return true;
+  const host = get("host");
+  return !host || !LOOPBACK_HOSTS.has(hostnameOf(host));
+}
+
 export function evaluateTerminalIsolation(input: TerminalIsolationInput): TerminalIsolationVerdict {
   const productionLike = isProductionLike(input.env);
 

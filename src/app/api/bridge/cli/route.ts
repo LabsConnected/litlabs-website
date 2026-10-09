@@ -83,7 +83,7 @@ export async function GET(req: NextRequest) {
   // Gate 1: admin-only is access control, not isolation. This route spawns
   // shells on the web host with the full server env, so it is closed in any
   // production-like environment. Checked before any process is started.
-  const blocked = hostExecutionBlockedResponse("bridge-cli");
+  const blocked = hostExecutionBlockedResponse("bridge-cli", process.env, req);
   if (blocked) return blocked;
 
   const { searchParams } = new URL(req.url);
@@ -267,7 +267,7 @@ export async function POST(req: NextRequest) {
 
   // Gate 1: no stdin may reach a host shell in a production-like environment,
   // even for a session that somehow already exists.
-  const blocked = hostExecutionBlockedResponse("bridge-cli");
+  const blocked = hostExecutionBlockedResponse("bridge-cli", process.env, req);
   if (blocked) return blocked;
 
   try {

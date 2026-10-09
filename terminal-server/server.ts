@@ -84,6 +84,8 @@ import { isTerminalOwner, warnIfOwnerAllowlistUnset } from "./terminal-owner-gat
 import {
   assertHostExecutionPermitted,
   evaluateTerminalIsolation,
+  isTrustedLocalEnvironment,
+  isUntrustedLocalRequest,
 } from "./isolation-policy";
 import { findOnPath } from "./path-probe";
 import { respondIfHostExecBlocked, respondWithDispatch } from "./host-exec-http";
@@ -239,6 +241,21 @@ const jsonParserLarge = express.json({ limit: "50mb" });
 app.use((req, res, next) => {
   const parser = req.path === "/ws-files/write" ? jsonParserLarge : jsonParserSmall;
   parser(req, res, next);
+});
+
+// Local host execution is a same-machine developer feature. When the process
+// is in trusted-local mode, refuse any request that arrives via a proxy/tunnel
+// or with a non-loopback Host: a loopback bind alone does not make a request
+// trusted. (In every other mode execution is already closed by policy.)
+app.use((req, res, next) => {
+  if (isTrustedLocalEnvironment(process.env) && isUntrustedLocalRequest(req.headers)) {
+    res.status(403).json({
+      error: "Local execution mode only serves direct local requests",
+      code: "HOST_EXECUTION_DISABLED",
+    });
+    return;
+  }
+  next();
 });
 
 const server = http.createServer(app);
@@ -1676,7 +1693,11 @@ io.use((socket, next) => {
 // Runs after authentication so unauthenticated callers learn nothing.
 // When terminal execution is disabled (production without a working Docker
 // runtime) the socket is refused before any workspace or PTY work happens.
-io.use((_socket, next) => {
+io.use((socket, next) => {
+  if (isTrustedLocalEnvironment(process.env) && isUntrustedLocalRequest(socket.handshake.headers)) {
+    next(new Error("Terminal unavailable: local execution serves direct local requests only"));
+    return;
+  }
   getTerminalIsolationVerdict()
     .then((verdict) => {
       if (verdict.terminalExecution !== "enabled") {

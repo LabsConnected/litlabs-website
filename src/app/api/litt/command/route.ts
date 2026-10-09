@@ -38,7 +38,7 @@ async function handler(req: NextRequest) {
   }
   // Gate 1: build/lint/test run repo scripts with the full server env on the
   // web host. Closed in any production-like environment regardless of flags.
-  const blocked = hostExecutionBlockedResponse("litt-command");
+  const blocked = hostExecutionBlockedResponse("litt-command", process.env, req);
   if (blocked) return NextResponse.json(await blocked.json(), { status: blocked.status });
   if (process.env.ENABLE_LOCAL_BUILD_API !== "true") {
     return NextResponse.json(

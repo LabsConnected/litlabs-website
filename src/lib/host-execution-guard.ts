@@ -69,6 +69,40 @@ export function isHostExecutionPermitted(env: Env = process.env): boolean {
   return isLocalDevelopment(env);
 }
 
+/** Headers a reverse proxy / tunnel / CDN adds. Any of them => not a direct local request. */
+const PROXY_HEADERS = [
+  "x-forwarded-for",
+  "x-forwarded-host",
+  "x-forwarded-proto",
+  "x-forwarded-port",
+  "forwarded",
+  "x-real-ip",
+  "cf-connecting-ip",
+  "cf-ray",
+  "true-client-ip",
+  "via",
+] as const;
+
+function hostnameOf(hostHeader: string): string {
+  const h = hostHeader.trim().toLowerCase();
+  if (h.startsWith("[")) return h.slice(1, h.indexOf("]")); // [::1]:3001
+  return h.split(":")[0];
+}
+
+/**
+ * True when a request cannot be shown to be a direct request to a loopback
+ * listener: it carries proxy/tunnel headers, or its Host is missing or not a
+ * loopback name. A loopback-bound server behind ngrok/Cloudflare/nginx/Tailscale
+ * Funnel still receives requests from untrusted parties, so those are refused.
+ * Local execution is for the developer's own browser on the same machine only.
+ */
+export function isUntrustedLocalRequest(headers: { get(name: string): string | null }): boolean {
+  if (PROXY_HEADERS.some((h) => headers.get(h) !== null)) return true;
+  const host = headers.get("host");
+  if (!host) return true;
+  return !LOOPBACK_HOSTS.has(hostnameOf(host));
+}
+
 export const HOST_EXECUTION_DISABLED_CODE = "HOST_EXECUTION_DISABLED" as const;
 
 /**
@@ -82,11 +116,13 @@ export const HOST_EXECUTION_DISABLED_CODE = "HOST_EXECUTION_DISABLED" as const;
 export function hostExecutionBlockedResponse(
   surface: string,
   env: Env = process.env,
+  req?: { headers: { get(name: string): string | null } },
 ): Response | null {
-  if (isHostExecutionPermitted(env)) return null;
+  // `req` is optional only for non-request callers; every API route passes it.
+  if (isHostExecutionPermitted(env) && !(req && isUntrustedLocalRequest(req.headers))) return null;
   return Response.json(
     {
-      error: `Host execution is disabled in production (${surface}); a verified sandbox is required`,
+      error: `Host execution is disabled (${surface}): not a trusted local request, and no verified sandbox exists`,
       code: HOST_EXECUTION_DISABLED_CODE,
     },
     { status: 503, headers: { "Cache-Control": "no-store" } },

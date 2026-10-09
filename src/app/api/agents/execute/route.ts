@@ -56,7 +56,7 @@ async function handler(req: NextRequest): Promise<NextResponse> {
   // Gate 1: an allowlist (git, npm, node, npx, pnpm, ...) is not isolation —
   // `node`/`npx` run arbitrary code. Closed in any production-like
   // environment even for an admin with ENABLE_AGENT_COMMANDS=true.
-  const blocked = hostExecutionBlockedResponse("agents-execute");
+  const blocked = hostExecutionBlockedResponse("agents-execute", process.env, req);
   if (blocked) return NextResponse.json(await blocked.json(), { status: blocked.status });
 
   // Parse body

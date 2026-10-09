@@ -21,6 +21,7 @@ import { join, relative, sep } from "node:path";
 import {
   HOST_EXECUTION_DISABLED_CODE,
   hostExecutionBlockedResponse,
+  isUntrustedLocalRequest,
   isHostExecutionPermitted,
   isProductionLike,
 } from "../src/lib/host-execution-guard";
@@ -124,6 +125,38 @@ describe("isProductionLike (web app)", () => {
   });
 });
 
+const hdrs = (o: Record<string, string>) => new Headers(o);
+
+describe("request-level trust (a loopback bind does not make a request trusted)", () => {
+  it("accepts a direct request to a loopback Host", () => {
+    for (const host of ["localhost:3001", "127.0.0.1:3001", "[::1]:3001", "localhost"]) {
+      expect(isUntrustedLocalRequest(hdrs({ host })), host).toBe(false);
+    }
+  });
+
+  it("rejects requests that carry proxy or tunnel headers", () => {
+    for (const h of ["x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "forwarded", "x-real-ip", "cf-connecting-ip", "cf-ray", "via"]) {
+      expect(isUntrustedLocalRequest(hdrs({ host: "localhost:3001", [h]: "203.0.113.9" })), h).toBe(true);
+    }
+  });
+
+  it("rejects a non-loopback or missing Host header (tunnel / DNS-rebinding shapes)", () => {
+    for (const host of ["abc123.ngrok.app", "localhost.evil.com", "127.0.0.1.evil.com", "192.168.1.5:3001", "evil.com:80"]) {
+      expect(isUntrustedLocalRequest(hdrs({ host })), host).toBe(true);
+    }
+    expect(isUntrustedLocalRequest(hdrs({}))).toBe(true);
+  });
+
+  it("hostExecutionBlockedResponse refuses a proxied request even when the environment is trusted-local", async () => {
+    const proxied = { headers: hdrs({ host: "localhost:3001", "x-forwarded-for": "198.51.100.7" }) };
+    const direct = { headers: hdrs({ host: "localhost:3001" }) };
+    const res = hostExecutionBlockedResponse("bridge-cli", LOCAL, proxied);
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(503);
+    expect(hostExecutionBlockedResponse("bridge-cli", LOCAL, direct)).toBeNull();
+  });
+});
+
 describe("hostExecutionBlockedResponse", () => {
   it("returns null in explicit local development so existing behaviour is preserved", () => {
     expect(hostExecutionBlockedResponse("bridge-cli", LOCAL)).toBeNull();
@@ -171,9 +204,9 @@ const EXEC_IMPORT_PATTERNS: RegExp[] = [
 
 /** Files that start host processes and carry their own production guard. */
 const GUARDED_FILES: Record<string, RegExp[]> = {
-  "src/app/api/bridge/cli/route.ts": [/hostExecutionBlockedResponse\("bridge-cli"\)/],
-  "src/app/api/agents/execute/route.ts": [/hostExecutionBlockedResponse\("agents-execute"\)/],
-  "src/app/api/litt/command/route.ts": [/hostExecutionBlockedResponse\("litt-command"\)/],
+  "src/app/api/bridge/cli/route.ts": [/hostExecutionBlockedResponse\("bridge-cli", process\.env, req\)/],
+  "src/app/api/agents/execute/route.ts": [/hostExecutionBlockedResponse\("agents-execute", process\.env, req\)/],
+  "src/app/api/litt/command/route.ts": [/hostExecutionBlockedResponse\("litt-command", process\.env, req\)/],
   "src/app/api/agents/commits/route.ts": [/isHostExecutionPermitted\(\)/],
   "src/app/api/litt/scan/route.ts": [/isHostExecutionPermitted\(\)/],
   "src/lib/litt-intelligence/project-scanner.ts": [/isHostExecutionPermitted\(\)/],
@@ -192,7 +225,7 @@ const REACHABLE_ONLY_VIA_GUARD: Record<
 > = {
   "src/lib/command-executor.ts": {
     viaGuard: "src/app/api/agents/execute/route.ts",
-    guardMarker: /hostExecutionBlockedResponse\("agents-execute"\)/,
+    guardMarker: /hostExecutionBlockedResponse\("agents-execute", process\.env, req\)/,
     importPattern: /["']@\/lib\/command-executor["']|["']\.\/command-executor["']/,
     importers: ["src/app/api/agents/execute/route.ts"],
   },
@@ -253,9 +286,9 @@ describe("static inventory of host-execution sites in src/", () => {
 
   it("guard calls come before any process is started in the three admin routes", () => {
     const routes: Array<[string, RegExp, RegExp]> = [
-      ["src/app/api/bridge/cli/route.ts", /hostExecutionBlockedResponse\("bridge-cli"\)/, /\bspawn\(/],
-      ["src/app/api/agents/execute/route.ts", /hostExecutionBlockedResponse\("agents-execute"\)/, /\bexecuteCommand\(/],
-      ["src/app/api/litt/command/route.ts", /hostExecutionBlockedResponse\("litt-command"\)/, /\bexecFileAsync\(command\./],
+      ["src/app/api/bridge/cli/route.ts", /hostExecutionBlockedResponse\("bridge-cli", process\.env, req\)/, /\bspawn\(/],
+      ["src/app/api/agents/execute/route.ts", /hostExecutionBlockedResponse\("agents-execute", process\.env, req\)/, /\bexecuteCommand\(/],
+      ["src/app/api/litt/command/route.ts", /hostExecutionBlockedResponse\("litt-command", process\.env, req\)/, /\bexecFileAsync\(command\./],
     ];
     for (const [rel, guard, start] of routes) {
       const text = sources.find((s) => s.rel === rel)!.text;

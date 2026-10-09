@@ -13,6 +13,7 @@ import {
   evaluateTerminalIsolation,
   assertHostShellPermitted,
   isProductionLike,
+  isUntrustedLocalRequest,
   TerminalIsolationError,
 } from "../isolation-policy";
 
@@ -214,6 +215,28 @@ describe("evaluateTerminalIsolation", () => {
     });
     expect(v.terminalExecution).toBe("disabled");
     expect(v.mode).toBe("none");
+  });
+});
+
+describe("isUntrustedLocalRequest (loopback bind does not make a request trusted)", () => {
+  it("accepts direct requests to a loopback Host", () => {
+    for (const host of ["localhost:3001", "127.0.0.1:4000", "[::1]:4000"]) {
+      expect(isUntrustedLocalRequest({ host }), host).toBe(false);
+    }
+  });
+
+  it("rejects proxy/tunnel headers and non-loopback or missing Host", () => {
+    for (const h of ["x-forwarded-for", "forwarded", "x-real-ip", "cf-connecting-ip", "via"]) {
+      expect(isUntrustedLocalRequest({ host: "localhost:3001", [h]: "203.0.113.9" }), h).toBe(true);
+    }
+    for (const host of ["abc.ngrok.app", "localhost.evil.com", "192.168.1.5:3001"]) {
+      expect(isUntrustedLocalRequest({ host }), host).toBe(true);
+    }
+    expect(isUntrustedLocalRequest({})).toBe(true);
+  });
+
+  it("treats a header array like its first value", () => {
+    expect(isUntrustedLocalRequest({ host: ["localhost:3001"], "x-forwarded-for": ["1.2.3.4"] })).toBe(true);
   });
 });
 
