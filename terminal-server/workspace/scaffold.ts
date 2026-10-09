@@ -39,6 +39,7 @@ import {
 import { dirname, join } from "path";
 import { createHash } from "crypto";
 import { simpleGit } from "simple-git";
+import { isHostExecutionPermitted } from "../isolation-policy";
 import { WELCOME_SCREEN_MARKER } from "./welcome-screen";
 
 export const SCAFFOLD_DIR_NAME = ".litt";
@@ -200,6 +201,8 @@ export function clearScaffoldManifest(root: string): void {
  * `.litt/checkpoints/<id>/`, manifest included.
  */
 export async function checkpointScaffolding(root: string): Promise<ScaffoldCheckpoint | null> {
+  // No host git where host execution is closed; the file-copy fallback is safe.
+  if (!isHostExecutionPermitted()) return checkpointScaffoldingToFiles(root);
   try {
     const git = simpleGit(root);
     await git.add("-A");

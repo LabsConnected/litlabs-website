@@ -81,7 +81,15 @@ import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manage
 import { requireInternalServiceAuth, type AuthenticatedRequest } from "./internal-auth";
 import { mintTerminalToken, verifyTerminalToken, bearerToken } from "./auth";
 import { isTerminalOwner, warnIfOwnerAllowlistUnset } from "./terminal-owner-gate";
-import { evaluateTerminalIsolation } from "./isolation-policy";
+import { evaluateTerminalIsolation, HostExecutionBlockedError } from "./isolation-policy";
+import { findOnPath } from "./path-probe";
+
+/** Map a fail-closed host-execution refusal to 503; false if not that error. */
+function respondIfHostExecBlocked(err: unknown, res: Response): boolean {
+  if (!(err instanceof HostExecutionBlockedError)) return false;
+  res.status(503).json({ error: err.message, code: err.hostExecCode });
+  return true;
+}
 import { verifyClerkToken } from "./clerk-verify";
 import { resolveBindHost } from "./network-bind";
 import type { RemoteCommandRequest } from "@litt/agent-core";
@@ -472,6 +480,7 @@ app.post("/internal/command", requireInternalServiceAuth, async (req: Authentica
     // errors get HTTP 500.
     res.json(result);
   } catch (err) {
+    if (respondIfHostExecBlocked(err, res)) return;
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: message });
   }
@@ -688,6 +697,7 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
     const result = await dispatchCommand(normalizedReq);
     res.json(result);
   } catch (err) {
+    if (respondIfHostExecBlocked(err, res)) return;
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: message });
   }
@@ -785,15 +795,15 @@ app.get("/health", async (_req, res) => {
 // Runtime diagnostic endpoint — verifies pnpm/node are available in the
 // production image. Used to confirm the Dockerfile runner stage fix.
 app.get("/health/runtime", async (_req, res) => {
-  const { execSync } = require("child_process");
-  const checks: Record<string, { ok: boolean; version?: string; error?: string }> = {};
+  // Unauthenticated endpoint: it must never start a process. Presence is
+  // checked by scanning PATH on the filesystem; node's version comes from
+  // the running process itself.
+  const checks: Record<string, { ok: boolean; version?: string; path?: string; error?: string }> = {};
   for (const bin of ["node", "pnpm", "npm", "git"]) {
-    try {
-      const version = execSync(`${bin} --version`, { timeout: 5000, encoding: "utf-8" }).trim();
-      checks[bin] = { ok: true, version };
-    } catch (e: any) {
-      checks[bin] = { ok: false, error: e?.message ?? "not found" };
-    }
+    const found = findOnPath(bin);
+    checks[bin] = found
+      ? { ok: true, path: found, ...(bin === "node" ? { version: process.version } : {}) }
+      : { ok: false, error: "not found on PATH" };
   }
   const allOk = Object.values(checks).every((c) => c.ok);
   res.status(allOk ? 200 : 503).json({
@@ -920,6 +930,7 @@ app.post("/internal/workspace/prepare", requireInternalServiceAuth, async (req: 
       ready: descriptor.ready,
     });
   } catch (err) {
+    if (respondIfHostExecBlocked(err, res)) return;
     const message = err instanceof Error ? err.message : "Workspace preparation failed";
     console.error("[Internal] Workspace prepare error:", message);
     res.status(500).json({ error: message });
@@ -1044,6 +1055,7 @@ app.post("/internal/workspace/:workspaceId/exec", requireInternalServiceAuth, as
       approved: gwResult.approved,
     });
   } catch (err) {
+    if (respondIfHostExecBlocked(err, res)) return;
     const durationMs = Date.now() - startTime;
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({
@@ -1103,6 +1115,7 @@ app.post("/internal/workspace/:workspaceId/preview/start", requireInternalServic
       startedAt: runtime.startedAt,
     });
   } catch (err) {
+    if (respondIfHostExecBlocked(err, res)) return;
     const message = err instanceof Error ? err.message : String(err);
     const errorCode = (err as { code?: string }).code ?? null;
     res.status(500).json({ error: message, errorCode });
@@ -1130,6 +1143,7 @@ app.post("/internal/workspace/:workspaceId/preview/ensure-env", requireInternalS
     const { restarted, runtime } = await ensurePreviewEnv(workspaceId, userId, projectEnv);
     res.json({ restarted, status: runtime?.status ?? "stopped" });
   } catch (err) {
+    if (respondIfHostExecBlocked(err, res)) return;
     const message = err instanceof Error ? err.message : String(err);
     const errorCode = (err as { code?: string }).code ?? null;
     res.status(500).json({ error: message, errorCode });
@@ -1236,6 +1250,7 @@ app.post("/internal/workspace/:workspaceId/preview/restart", requireInternalServ
       startedAt: runtime.startedAt,
     });
   } catch (err) {
+    if (respondIfHostExecBlocked(err, res)) return;
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: message });
   }

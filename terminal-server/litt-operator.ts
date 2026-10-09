@@ -47,6 +47,7 @@ import {
   runtimeSetPhase,
 } from "./runtime.js";
 import { streamLiTTCode, health, type LiTTEvent } from "./litt-code.js";
+import { isHostExecutionPermitted } from "./isolation-policy.js";
 import { getBillingClient, type AuthorizationDenialCode } from "./billing.js";
 
 // ─── ModelProvider adapter ────────────────────────────────────────
@@ -213,6 +214,9 @@ export interface OperatorResult {
  * has not been called).
  */
 function readGitBranch(cwd: string): string {
+  // Host git against a user-controlled repo can run repo-defined helpers
+  // (e.g. core.fsmonitor); skip it entirely where host execution is closed.
+  if (!isHostExecutionPermitted()) return "unknown";
   try {
     const { execFileSync } = require("child_process");
     const branch = execFileSync("git", ["branch", "--show-current"], {

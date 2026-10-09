@@ -19,6 +19,7 @@ import { createShellExecutor } from "@litt/agent-core";
 import type { CommandRouter, CommandResult, MissionMode } from "@litt/agent-core";
 import { getRuntimeStore, getRuntimeState, getExecutionGateway, getCanonicalShell } from "./runtime.js";
 import { getRunRegistry } from "./run-registry.js";
+import { assertHostExecutionPermitted, guardShellExecutor } from "./isolation-policy.js";
 import { runDoctor, runDoctorDeep } from "./doctor.js";
 
 // ─── Secret redaction ─────────────────────────────────────────────
@@ -148,7 +149,7 @@ function getRouter(cwd: string, userId: string | null, runId?: string): CommandR
   // Lazy import to avoid circular dependency at module load time
   const { CommandRouter } = require("@litt/agent-core");
   const store = getRuntimeStore();
-  const shell = createShellExecutor(cwd);
+  const shell = guardShellExecutor(createShellExecutor(cwd), "command-router");
   // Register the shell so /api/cancel (or a client disconnect) can kill it.
   if (runId) {
     getRunRegistry().register(runId, shell);
@@ -177,6 +178,8 @@ function execShell(
   timeoutMs: number,
   runId?: string,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  // Fail closed: no sandbox backend exists for this path.
+  assertHostExecutionPermitted("command-registry.execShell");
   return new Promise((resolve) => {
     const child = execFile(command, args, { cwd, timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
       if (runId) getRunRegistry().unregister(runId);

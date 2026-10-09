@@ -130,3 +130,62 @@ export function assertHostShellPermitted(
     );
   }
 }
+
+// ─── Non-interactive host execution ────────────────────────────────
+//
+// The interactive terminal has a Docker backend (see pty-session-manager).
+// Every OTHER execution path in terminal-server — slash-command shells, the
+// canonical ShellExecutor, workspace exec, preview dev servers, dependency
+// installs, git operations — runs a child process directly on the host and
+// has NO sandbox backend. Docker mode therefore does NOT make them safe, so
+// unlike assertHostShellPermitted() this guard ignores TERMINAL_USE_DOCKER:
+// in a production-like environment these paths are closed until a verified
+// sandbox executor exists. There is no override variable.
+
+export class HostExecutionBlockedError extends TerminalIsolationError {
+  readonly surface: string;
+  readonly hostExecCode = "HOST_EXECUTION_DISABLED" as const;
+  constructor(surface: string) {
+    super(`Host execution is disabled in production (${surface}); a verified sandbox is required`);
+    this.name = "HostExecutionBlockedError";
+    this.surface = surface;
+  }
+}
+
+/** True when child processes may run directly on this host (local dev only). */
+export function isHostExecutionPermitted(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return !isProductionLike(env);
+}
+
+/** Throws HostExecutionBlockedError in production-like environments. */
+export function assertHostExecutionPermitted(
+  surface: string,
+  env: Record<string, string | undefined> = process.env,
+): void {
+  if (!isHostExecutionPermitted(env)) throw new HostExecutionBlockedError(surface);
+}
+
+/** Methods that only stop work and never start a process stay callable. */
+const SAFE_SHELL_METHODS = new Set(["cancel", "kill", "dispose", "abort", "close"]);
+
+/**
+ * Wraps a ShellExecutor-like object so every method that could start a
+ * process re-checks the policy at call time. Used for the canonical
+ * executor and the command-router executor without touching their types.
+ */
+export function guardShellExecutor<T extends object>(shell: T, surface: string): T {
+  return new Proxy(shell, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop); // target as receiver: keeps #private/getters working
+      if (typeof value !== "function" || typeof prop !== "string" || SAFE_SHELL_METHODS.has(prop)) {
+        return value;
+      }
+      return (...args: unknown[]) => {
+        assertHostExecutionPermitted(`${surface}.${prop}`);
+        return (value as (...a: unknown[]) => unknown).apply(target, args);
+      };
+    },
+  });
+}
