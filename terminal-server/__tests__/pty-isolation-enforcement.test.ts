@@ -138,7 +138,7 @@ describe("PtySessionManager isolation enforcement", () => {
     const { factory, spawnHost, spawnDocker } = makeFactory();
     const m = createManager(factory);
 
-    expect(() => open(m, true)).toThrow(/not independently verified/);
+    expect(() => open(m, true)).toThrow(/execution is disabled in production/);
     expect(spawnDocker).not.toHaveBeenCalled();
     expect(spawnHost).not.toHaveBeenCalled();
   });

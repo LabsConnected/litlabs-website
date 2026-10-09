@@ -947,7 +947,7 @@ describe("PTY environment isolation", () => {
     process.env.RAILWAY_STATIC_URL = "fake.railway.app";
 
     expect(() => manager.create(makeOpts({ allowedRoot: tempRoot }))).toThrow(
-      /host shell is not permitted in production/,
+      /execution is disabled in production/,
     );
     expect(factory.hostSpawns).toHaveLength(0);
   });
