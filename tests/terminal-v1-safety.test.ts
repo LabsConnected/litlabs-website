@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { trustedLocalStubs } from "./helpers/trusted-local-env";
 import { getSandboxProvider, resetSandboxProvider } from "@/lib/terminal-v1/providers";
 import { DisabledProvider, FeatureDisabledError } from "@/lib/terminal-v1/providers/disabled-provider";
 
@@ -77,12 +78,24 @@ describe("Terminal V1 Safety Boundary — PR 1", () => {
     expect(provider.name).toBe("disabled");
   });
 
-  it("getSandboxProvider returns managed-sandbox provider when configured", () => {
+  it("getSandboxProvider returns managed-sandbox provider when configured (trusted local only)", () => {
+    // Gate 1: the Docker provider is selectable only in a trusted local env.
+    trustedLocalStubs();
     vi.stubEnv("TERMINAL_PROVIDER", "managed-sandbox");
     resetSandboxProvider();
     const provider = getSandboxProvider();
     // PR 2 implements the Docker-based managed-sandbox provider
     expect(provider.name).toBe("managed-sandbox");
+  });
+
+  it("getSandboxProvider stays disabled for managed-sandbox when NOT a trusted local env (Gate 1)", () => {
+    vi.stubEnv("TERMINAL_PROVIDER", "managed-sandbox");
+    resetSandboxProvider();
+    expect(getSandboxProvider().name).toBe("disabled");
+    vi.stubEnv("RAILWAY_SERVICE_ID", "svc");
+    trustedLocalStubs();
+    resetSandboxProvider();
+    expect(getSandboxProvider().name).toBe("disabled");
   });
 
   it("getSandboxProvider returns disabled for unknown provider", () => {

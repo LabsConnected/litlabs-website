@@ -19,6 +19,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { trustedLocalStubs } from "./helpers/trusted-local-env";
 import * as http from "http";
 import * as path from "path";
 import type { Request as ExpressRequest, Response as ExpressResponse, NextFunction } from "express";
@@ -156,6 +157,11 @@ async function termuxRequest(
 }
 
 // ─── Tests ────────────────────────────────────────────────────────
+
+// Drives terminal-server dispatch over a local HTTP server. Gate 1 is
+// default-deny: opt in explicitly per test file, never globally.
+beforeAll(() => trustedLocalStubs());
+afterAll(() => vi.unstubAllEnvs());
 
 describe("PHASE 7: Termux-style end-to-end HTTP protocol", () => {
   let statusSpy: ReturnType<typeof vi.spyOn> | null = null;
