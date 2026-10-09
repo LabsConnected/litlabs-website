@@ -28,6 +28,16 @@ export interface DockerSessionDeps {
  * Node throws them as uncaught exceptions and takes the whole terminal-server
  * down, so every emitter here has a handler and failure is surfaced to the
  * session as an explicit exit with a non-zero code.
+ *
+ * HARDENING STATUS (necessary but NOT sufficient: hardening alone is never
+ * proof of isolation; production stays closed by isolation-policy.ts):
+ *   done:    --read-only, --pids-limit, cpu/memory limits, no-new-privileges
+ *   missing: --cap-drop=ALL (needs a --user mapping first: root + host bind
+ *            mount needs DAC_OVERRIDE), non-root --user (image has no USER),
+ *            egress-restricted network (littree-terminal allows outbound),
+ *            env allowlist instead of {...process.env} for the docker CLI,
+ *            image pinned by digest, and a canary container-start probe
+ *            before claiming verified isolation.
  */
 export function createDockerSession(
   { userId, sessionId, workspace, onData }: DockerSessionOptions,

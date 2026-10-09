@@ -312,6 +312,11 @@ describe("static inventory of host-execution sites in src/", () => {
     }
   });
 
+  it("the terminal-v1 token route stays gated by TERMINAL_ENABLED", () => {
+    const text = sources.find((s) => s.rel === "src/app/api/terminal-v1/token/route.ts")?.text ?? "";
+    expect(text).toMatch(/isTerminalEnabled\(\)/);
+  });
+
   it("the sandbox provider factory cannot select Docker in a production-like environment", () => {
     const text = sources.find((s) => s.rel === "src/lib/terminal-v1/providers/index.ts")!.text;
     const guard = text.search(/isProductionLike\(\)/);
