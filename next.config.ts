@@ -277,7 +277,7 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: "Content-Security-Policy",
-            value: "sandbox allow-scripts; default-src 'self' data: blob:;",
+            value: "sandbox allow-scripts; default-src 'self' data: blob:; style-src 'self' 'unsafe-inline' data:; script-src 'self' 'unsafe-inline' data: blob:;",
           },
           {
             key: "X-Content-Type-Options",

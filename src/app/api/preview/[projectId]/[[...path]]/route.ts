@@ -48,8 +48,9 @@ const PREVIEW_SECURITY_HEADERS: Record<string, string> = {
   // Opaque origin: user content cannot read LiTT cookies, localStorage,
   // sessionStorage, or reach the parent frame. allow-scripts permits the
   // site's own JS to run (needed for interactive previews) without granting
-  // same-origin privileges.
-  "Content-Security-Policy": "sandbox allow-scripts; default-src 'self' data: blob:;",
+  // same-origin privileges. unsafe-inline allows Canvas-generated inline
+  // styles/scripts; the sandbox still blocks same-origin access.
+  "Content-Security-Policy": "sandbox allow-scripts; default-src 'self' data: blob:; style-src 'self' 'unsafe-inline' data:; script-src 'self' 'unsafe-inline' data: blob:;",
   "X-Content-Type-Options": "nosniff",
   // No referrer leakage to third parties embedded in user content.
   "Referrer-Policy": "no-referrer",
