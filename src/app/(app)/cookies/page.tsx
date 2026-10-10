@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { buildMetadata } from "@/lib/seo";
 import { SafeEmailText } from "@/components/SafeEmail";
+import CookiePreferencesButton from "@/components/CookiePreferencesButton";
 
 export const metadata: Metadata = buildMetadata({
   title: "Cookie Policy",
@@ -75,6 +76,7 @@ export default function CookiesPage() {
             <p className="opacity-80">
               Most browsers allow you to refuse to accept cookies and to delete cookies. The methods for doing so vary from browser to browser. Please consult your browser&apos;s help documentation for more information.
             </p>
+            <CookiePreferencesButton />
           </section>
 
           <section>
