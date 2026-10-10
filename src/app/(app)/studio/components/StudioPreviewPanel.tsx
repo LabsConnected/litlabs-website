@@ -722,8 +722,10 @@ export default function StudioPreviewPanel({
   // must not keep the green "Preview ready" dot over a dead iframe.
   // Polls lightly (30s), pauses while the tab is hidden, and surfaces a
   // truthful terminal state with a working Retry if the runtime is gone.
+  // Static projects skip this: no dev server to health-check.
   useEffect(() => {
     if (state !== "ready" || !projectId) return;
+    if (framework === "static") return;
     let cancelled = false;
     const check = async () => {
       if (cancelled || document.hidden) return;
@@ -766,7 +768,7 @@ export default function StudioPreviewPanel({
       clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [state, projectId, authHeaders, workspaceStatus]);
+  }, [state, projectId, authHeaders, workspaceStatus, framework]);
 
   // Keyboard shortcut: Cmd/Ctrl+R refreshes preview when the panel is focused.
   // This matches the universal "refresh" mental model without hijacking the
@@ -791,7 +793,7 @@ export default function StudioPreviewPanel({
     // serves files directly. Just mark as ready.
     if (framework === "static") {
       setState("ready");
-      setPreviewUrl(`/api/preview/${encodeURIComponent(projectId)}`);
+      setPreviewUrl(`/api/preview/${encodeURIComponent(projectId)}/index.html`);
       setError(null);
       setIframeFailed(false);
       return;
@@ -854,7 +856,7 @@ export default function StudioPreviewPanel({
       startInFlightRef.current = false;
       setPreviewPreparing(false);
     }
-  }, [authHeaders, projectId, setPreviewPreparing, workspaceStatus]);
+  }, [authHeaders, projectId, setPreviewPreparing, workspaceStatus, framework]);
 
   // Auto-start: when the preview is not_started (workspace/runtime never
   // provisioned or dev server not running), automatically start it. The
@@ -923,9 +925,10 @@ export default function StudioPreviewPanel({
 
   // Static projects use the static preview endpoint (no dev server).
   // Framework comes from the preview payload; "static" means HTML/CSS/JS only.
+  // Use explicit /index.html so relative assets (style.css, app.js) resolve correctly.
   const isStaticProject = framework === "static";
   const staticPreviewUrl = isStaticProject && projectId 
-    ? `/api/preview/${encodeURIComponent(projectId)}` 
+    ? `/api/preview/${encodeURIComponent(projectId)}/index.html` 
     : null;
   const effectivePreviewUrl = isStaticProject ? staticPreviewUrl : previewUrl;
   const displayUrl = effectivePreviewUrl ? `${effectivePreviewUrl}${effectivePreviewUrl.includes("?") ? "&" : "?"}studioRefresh=${frameKey}` : null;
