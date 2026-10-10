@@ -261,6 +261,35 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      // Static preview endpoint (/api/preview/[projectId]/...).
+      //
+      // Same rationale as /sites/:path* above: the global "/(.*)" rule would
+      // otherwise apply X-Frame-Options: DENY (blocking the Studio iframe)
+      // and the app CSP (stripping the route's sandbox directive).
+      //
+      // The preview route serves user-authored HTML from the workspace.
+      // It must be frameable by Studio (same origin) and sandboxed so
+      // untrusted scripts cannot access LiTT's cookies, storage, or APIs.
+      //
+      // Keep this rule AFTER the global rule — later matching rule wins.
+      {
+        source: "/api/preview/:path*",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: "sandbox allow-scripts allow-forms allow-popups",
+          },
+          {
+            key: "X-Content-Type-Options",
+            value: "nosniff",
+          },
+          // Allow framing by same origin (Studio). Do NOT use DENY here.
+          {
+            key: "X-Frame-Options",
+            value: "SAMEORIGIN",
+          },
+        ],
+      },
       // Cache fonts for 1 year
       {
         source: "/fonts/(.*)",
