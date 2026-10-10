@@ -104,7 +104,8 @@ export async function fetchWithTimeout(
 export async function prepareWorkspaceInternal(
   body:
     | ({ sourceType: "github"; userId: string; projectId: string; installationId: number; owner: string; repo: string; branch: string; githubToken?: string | null; commitSha?: string | null } & WorkspaceAdoptionHints)
-    | ({ sourceType: "managed"; userId: string; projectId: string; templateId: string } & WorkspaceAdoptionHints),
+    | ({ sourceType: "managed"; userId: string; projectId: string; templateId: string } & WorkspaceAdoptionHints)
+    | ({ sourceType: "static"; userId: string; projectId: string; templateId: string } & WorkspaceAdoptionHints),
 ): Promise<WorkspacePrepareResponse> {
   const key = INTERNAL_KEY();
   if (key.length < 32) {

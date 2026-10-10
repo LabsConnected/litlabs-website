@@ -29,7 +29,8 @@ export type DeploymentStatus =
   | "building"
   | "deploying"
   | "ready"
-  | "failed";
+  | "failed"
+  | "unpublished";
 
 /**
  * Preview lifecycle — a SEPARATE field from DeploymentStatus.
@@ -380,12 +381,13 @@ const DEPLOYMENT_TRANSITIONS: Record<DeploymentStatus, DeploymentStatus[]> = {
   not_started: ["building", "failed"],
   building: ["deploying", "failed"],
   deploying: ["ready", "failed"],
-  ready: [],
+  ready: ["unpublished"],
   failed: [],
+  unpublished: [],
 };
 
 export function isDeploymentTerminal(status: DeploymentStatus): boolean {
-  return status === "ready" || status === "failed";
+  return status === "ready" || status === "failed" || status === "unpublished";
 }
 
 /**

@@ -6,6 +6,7 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { formatSourceSummary } from "@/lib/projects/project-source";
 import { useExecutionStore } from "../stores/useExecutionStore";
 import { StudioSecretsPanel } from "./StudioSecretsPanel";
+import StudioPublishControls from "./StudioPublishControls";
 
 /**
  * Preview states — the five canonical states the UI explicitly supports.
@@ -1074,6 +1075,8 @@ export default function StudioPreviewPanel({
             {urlCopied ? <Check size={12} className="pointer-events-none" style={{ color: "#48EE38" }} /> : <Copy size={12} className="pointer-events-none" />}
           </button>
         )}
+        {/* Publish controls — static site publishing (compact toolbar mode) */}
+        {projectId && <StudioPublishControls projectId={projectId} compact />}
         {/* Project secrets — Clerk keys for the preview runtime */}
         <button
           type="button"
