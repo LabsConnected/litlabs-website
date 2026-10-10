@@ -1044,12 +1044,14 @@ export default function CanvasTool({ projectId }: CanvasToolProps) {
                   </button>
                   <button
                     onClick={() => {
-                      const win = window.open("", "_blank");
-                      if (win) {
-                        win.document.body.innerHTML = getPreviewHtml();
-                      }
+                      const html = getPreviewHtml();
+                      const blob = new Blob([html], { type: "text/html" });
+                      const url = URL.createObjectURL(blob);
+                      window.open(url, "_blank", "noopener,noreferrer");
+                      // Revoke after a delay to allow the new tab to load
+                      setTimeout(() => URL.revokeObjectURL(url), 60000);
                     }}
-                    title="Open in new tab"
+                    title="Open in new tab (isolated preview)"
                     className="p-1.5 rounded-lg hover:bg-white/5"
                     style={{ color: T.textMuted }}
                   >
