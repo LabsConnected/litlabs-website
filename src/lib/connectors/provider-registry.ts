@@ -191,14 +191,6 @@ export const PLATFORM_PROVIDERS: Record<PlatformProvider, ProviderDefinition> = 
     envVars: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
     description: "Payment processing — Stripe",
   },
-  vercel: {
-    id: "vercel",
-    label: "Vercel",
-    category: "platform",
-    capabilities: [],
-    envVars: ["VERCEL_TOKEN", "VERCEL_PROJECT_ID"],
-    description: "Deployment platform — Vercel",
-  },
   supabase: {
     id: "supabase",
     label: "Supabase",
