@@ -787,6 +787,15 @@ export default function StudioPreviewPanel({
 
   const preparePreview = useCallback(async () => {
     if (!projectId) return;
+    // Static projects: no dev server to start. The static preview endpoint
+    // serves files directly. Just mark as ready.
+    if (framework === "static") {
+      setState("ready");
+      setPreviewUrl(`/api/preview/${encodeURIComponent(projectId)}`);
+      setError(null);
+      setIframeFailed(false);
+      return;
+    }
     // Single-flight guard: only one preview start in flight at a time.
     // Mobile rerenders and rapid prop changes cannot launch duplicate runtimes.
     if (startInFlightRef.current) return;
@@ -912,7 +921,14 @@ export default function StudioPreviewPanel({
     void loadStatus(true);
   }, [loadStatus]);
 
-  const displayUrl = previewUrl ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}studioRefresh=${frameKey}` : null;
+  // Static projects use the static preview endpoint (no dev server).
+  // Framework comes from the preview payload; "static" means HTML/CSS/JS only.
+  const isStaticProject = framework === "static";
+  const staticPreviewUrl = isStaticProject && projectId 
+    ? `/api/preview/${encodeURIComponent(projectId)}` 
+    : null;
+  const effectivePreviewUrl = isStaticProject ? staticPreviewUrl : previewUrl;
+  const displayUrl = effectivePreviewUrl ? `${effectivePreviewUrl}${effectivePreviewUrl.includes("?") ? "&" : "?"}studioRefresh=${frameKey}` : null;
   const isAuthConfigError = errorCode === "preview_clerk_config_error" || errorCode === "preview_auth_config_error";
   // The v4 @import trap: a Tailwind-intended preview that renders unstyled
   // must surface honestly — never a green "Preview ready" over dead CSS.
@@ -1036,8 +1052,8 @@ export default function StudioPreviewPanel({
         >
           <RefreshCw size={12} className={`pointer-events-none ${state === "stale" ? "animate-spin" : ""}`} />
         </button>
-        {/* Restart dev server */}
-        {(isLive || state === "failed") && (
+        {/* Restart dev server — hidden for static projects (no dev server) */}
+        {(isLive || state === "failed") && !isStaticProject && (
           <button
             type="button"
             onClick={() => void preparePreview()}
@@ -1049,8 +1065,8 @@ export default function StudioPreviewPanel({
             <RotateCcw size={12} className="pointer-events-none" />
           </button>
         )}
-        {/* Stop dev server */}
-        {isLive && (
+        {/* Stop dev server — hidden for static projects (no dev server) */}
+        {isLive && !isStaticProject && (
           <button
             type="button"
             onClick={() => void stopPreview()}
