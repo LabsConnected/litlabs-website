@@ -4,13 +4,10 @@ import { guardDevHarnessRoute } from "@/lib/dev-harness";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  robots: {
-    index: false,
-    follow: false,
-  },
+  robots: { index: false, follow: false },
 };
 
-export default function RuntimeTestLayout({
+export default function RetroEmulatorTestLayout({
   children,
 }: {
   children: React.ReactNode;
