@@ -45,6 +45,6 @@ describe("Dashboard owns the canonical create experience", () => {
 
   it("removes Create from both desktop and mobile nav source", () => {
     expect(navigation).not.toContain('label: "Create", href: "/create"');
-    expect(navigation).toContain('{ label: "Home", href: "/dashboard"');
+    expect(navigation).toContain('{ label: "Home", href: "/"');
   });
 });

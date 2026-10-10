@@ -31,7 +31,7 @@ describe("useStudioModelStore", () => {
     const { useStudioModelStore } = await import("./useStudioModelStore");
     const state = useStudioModelStore.getState();
     expect(state.selectedModel.id).toBe("groq-llama-70b");
-    expect(state.selectedModel.label).toBe("Groq Llama 70B");
+    expect(state.selectedModel.label).toBe("Groq GPT-OSS 20B");
   });
 
   it("falls back to default when localStorage has invalid model ID", async () => {
@@ -61,5 +61,13 @@ describe("useStudioModelStore", () => {
     expect(categories.has("litt-alias")).toBe(true);
     expect(categories.has("byok")).toBe(true);
     expect(categories.has("advanced")).toBe(true);
+  });
+
+  it("Groq Studio model resolves to openai/gpt-oss-20b", async () => {
+    const { MODELS } = await import("./useStudioModelStore");
+    const groqModel = MODELS.find((m) => m.id === "groq-llama-70b");
+    expect(groqModel).toBeDefined();
+    expect(groqModel!.apiModel).toBe("openai/gpt-oss-20b");
+    expect(groqModel!.apiProvider).toBe("groq");
   });
 });

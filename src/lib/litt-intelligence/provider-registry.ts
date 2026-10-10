@@ -322,8 +322,8 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
       timeoutMs: DEFAULT_ATTEMPT_TIMEOUT_MS,
       credentialState: () => (envPresent("GROQ_API_KEY") ? "available" : "missing"),
       models: () => [
-        process.env.GROQ_MODEL || "openai/gpt-oss-120b",
-        "llama-3.1-8b-instant",
+        process.env.GROQ_MODEL || "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b",
       ],
     },
     {
@@ -704,7 +704,11 @@ function resolveModelHint(model: string | undefined): ModelHint {
   if (m.startsWith("@cf/")) return { kind: "route", provider: "cloudflare", model: m };
   if (m.startsWith("gemini") && !m.includes("/")) return { kind: "route", provider: "gemini", model: m };
   if (m.startsWith("google/gemini")) return { kind: "route", provider: "gemini", model: m.replace(/^google\//, "") };
-  if (/^(llama|mixtral|gemma|whisper|deepseek-r1-distill|qwen|openai\/gpt-oss)/i.test(m) && !m.includes("/")) {
+  if (/^(llama|mixtral|gemma|whisper|deepseek-r1-distill|qwen)/i.test(m) && !m.includes("/")) {
+    return { kind: "route", provider: "groq", model: m };
+  }
+  // Groq namespaced models (e.g. openai/gpt-oss-120b, openai/gpt-oss-20b) are Groq, not BYOK
+  if (/^openai\/gpt-oss/i.test(m)) {
     return { kind: "route", provider: "groq", model: m };
   }
   if (/^(mistral|codestral|pixtral|ministral|open-mistral|open-codestral)/i.test(m) && !m.includes("/")) {
@@ -807,8 +811,9 @@ export function planBasicRoutes(
     if (hint?.kind === "route" && hint.provider === def.provider) {
       // Honour the requested model first inside its provider when it is
       // eligible under the cost policy (free OR models, direct providers).
+      // NOTE: Do NOT remove the model from the candidate list when dropping
+      // the hint — it must remain available as a normal candidate.
       const idx = models.indexOf(hint.model);
-      if (idx >= 0) models.splice(idx, 1);
       if (def.provider === "openrouter" && requirements.tools && hint.model === "openrouter/free") {
         // An explicit hint must not resurrect the auto-router the tools
         // filter just removed — it cannot emit tool calls. Surface the
@@ -819,11 +824,16 @@ export function planBasicRoutes(
         findModelRecord(def.provider, hint.model)?.capabilities.reliableFileWriting !== true
       ) {
         // A BUILD run must not start on a hinted model that is not a proven
-        // file writer (chat-only or unknown) — drop the hint so routing
-        // starts on a proven writer, and surface the drop instead of
-        // silently swapping.
+        // file writer (chat-only or unknown) — drop the hint priority so
+        // routing starts on a proven writer, but KEEP the model in the
+        // candidate list. Surface the drop instead of silently swapping.
         droppedModelHint = opts.model;
       } else {
+        // P1 #4: Honor eligible model hints even when not in defaults.
+        // Remove duplicate if present, then add to front regardless of idx.
+        if (idx >= 0) {
+          models.splice(idx, 1);
+        }
         models.unshift(hint.model);
       }
     }

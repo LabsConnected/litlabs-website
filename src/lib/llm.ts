@@ -197,7 +197,7 @@ const GEMINI_FALLBACK_MODEL =
 
 export const DEFAULT_MODELS: Record<LLMProvider, string> = {
   gemini: GEMINI_PRIMARY_MODEL,
-  groq: "openai/gpt-oss-120b",
+  groq: "openai/gpt-oss-20b",
   "groq-whisper": "whisper-large-v3",
   openai: OPENAI_MODEL,
   "openrouter-free": "openrouter/free",
@@ -235,6 +235,20 @@ function isModelInCooldown(provider: string): boolean {
 
 function markModelUnavailable(provider: string): void {
   _modelCooldowns.set(provider, Date.now() + MODEL_COOLDOWN_MS);
+}
+
+/** Test-only. Cooldown is process-local and leaks across cases in one file. */
+export function _resetModelCooldownsForTests(): void {
+  _modelCooldowns.clear();
+}
+
+/** True when a later chain entry would actually be attempted (not cooled down). */
+function hasLaterProvider(chain: LLMProvider[], current: LLMProvider): boolean {
+  const start = chain.indexOf(current) + 1;
+  for (let i = start; i < chain.length; i++) {
+    if (!isModelInCooldown(chain[i])) return true;
+  }
+  return false;
 }
 
 /* ------------------------------------------------------------------ */
@@ -289,14 +303,12 @@ function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
 }
 
 function rawDefaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
-  // "litt-alias" models (LiTT Balanced/Reasoning/Code) should use the full
-  // fallback chain — the apiProvider is a *preference*, not a hard pin.
-  // Without this, a single provider failure bricks the conversation.
-  if (opts.provider && opts.category !== "litt-alias") return [opts.provider];
-
-  // For litt-alias, build a chain starting with the preferred provider
-  // then falling back to the others.
-  if (opts.category === "litt-alias" && opts.provider) {
+  // A pinned provider is a *preference*, not a hard single-provider lock.
+  // Build a fallback chain starting with the preferred provider, so a
+  // single provider failure doesn't brick the request. (Previously, a
+  // non-litt-alias category with an explicit provider returned [provider]
+  // with no fallbacks — causing 429s to fail with no recovery.)
+  if (opts.provider) {
     const preferred = opts.provider;
     const all: LLMProvider[] = OPENAI_KEY
       ? ["openai", "gemini", "groq", "openrouter-free"]
@@ -372,6 +384,7 @@ class ProviderError extends Error {
   }
   get isRetryable() {
     if (this.status === null) return true; // network error
+    if (this.status === 404) return true; // model not found — try next provider
     if (this.status === 408 || this.status === 429) return true;
     if (this.status >= 500 && this.status < 600) return true;
     return false;
@@ -416,14 +429,71 @@ export function isEmptyProviderResponse(err: unknown): boolean {
   );
 }
 
+function isAbortError(err: unknown): boolean {
+  return (
+    (typeof DOMException !== "undefined" && err instanceof DOMException && err.name === "AbortError") ||
+    (err instanceof Error && err.name === "AbortError")
+  );
+}
+
+/**
+ * Map a fetch/SDK transport failure onto a retryable ProviderError.
+ * Returns null when `err` is already a ProviderError or isn't a transport failure.
+ * Caller aborts are not handled here — callers rethrow those first.
+ */
+function transportProviderError(
+  err: unknown,
+  provider: LLMProvider,
+  timeoutMs: number,
+): ProviderError | null {
+  if (err instanceof ProviderError) return null;
+  if (isAbortError(err)) {
+    return new ProviderError(provider, 408, `timeout after ${timeoutMs}ms`);
+  }
+  if (err instanceof TypeError) {
+    return new ProviderError(provider, null, `network error: ${err.message}`.slice(0, 200));
+  }
+  return null;
+}
+
+function rethrowGeminiFailure(err: unknown, signal: AbortSignal | undefined, timeoutMs: number): never {
+  if (signal?.aborted) {
+    throw err instanceof Error
+      ? err
+      : new DOMException("The operation was aborted.", "AbortError");
+  }
+  if (err instanceof ProviderError) throw err;
+  const transport = transportProviderError(err, "gemini", timeoutMs);
+  if (transport) throw transport;
+  const msg = err instanceof Error ? err.message : String(err);
+  const statusMatch = msg.match(/\[(\d{3})\s*\]/);
+  // The SDK wraps fetch TypeErrors as its own Error ("Error fetching …: fetch failed")
+  // and uses the same prefix for HTTP failures, which carry a "[500 ]" status.
+  if (!statusMatch && /fetch failed|ECONNRESET|ECONNREFUSED|ENOTFOUND|ETIMEDOUT/i.test(msg)) {
+    const timedOut = /ETIMEDOUT|timeout/i.test(msg);
+    throw new ProviderError(
+      "gemini",
+      timedOut ? 408 : null,
+      timedOut ? `timeout after ${timeoutMs}ms` : `network error: ${msg}`.slice(0, 200),
+    );
+  }
+  const status = statusMatch ? parseInt(statusMatch[1], 10) : null;
+  throw new ProviderError("gemini", status, `Gemini SDK error: ${msg.slice(0, 200)}`);
+}
+
 async function fetchWithTimeout(
   url: string,
   init: RequestInit,
   timeoutMs: number,
+  provider: LLMProvider,
   externalSignal?: AbortSignal,
 ): Promise<Response> {
   const ctrl = new AbortController();
-  const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+  let timedOut = false;
+  const tid = setTimeout(() => {
+    timedOut = true;
+    ctrl.abort();
+  }, timeoutMs);
   // An external execution abort wins over the timeout — forward it into
   // the same controller so the fetch rejects immediately.
   const onExternalAbort = () => ctrl.abort(externalSignal?.reason);
@@ -436,6 +506,15 @@ async function fetchWithTimeout(
   }
   try {
     return await fetch(url, { ...init, signal: ctrl.signal });
+  } catch (err) {
+    // Caller cancel: leave the AbortError (or abort reason) unchanged so
+    // streamText's options.signal check stops the chain.
+    if (externalSignal?.aborted) throw err;
+    if (timedOut || isAbortError(err)) {
+      throw new ProviderError(provider, 408, `timeout after ${timeoutMs}ms`);
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    throw new ProviderError(provider, null, `network error: ${message}`.slice(0, 200));
   } finally {
     clearTimeout(tid);
     externalSignal?.removeEventListener("abort", onExternalAbort);
@@ -455,6 +534,7 @@ interface GenerateParams {
 async function generateViaGemini(
   p: GenerateParams,
   modelName: string,
+  timeoutMs: number,
 ): Promise<{ text: string; usage?: LLMUsage; model: string }> {
   const genAI = getGenAI();
   if (!genAI) throw new ProviderError("gemini", null, "GEMINI_API_KEY not set");
@@ -476,10 +556,15 @@ async function generateViaGemini(
     ? `${p.systemPrompt}\n\n${p.prompt}`
     : p.prompt;
 
-  const result = await model.generateContent({
-    contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
-    generationConfig,
-  });
+  let result;
+  try {
+    result = await model.generateContent({
+      contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
+      generationConfig,
+    });
+  } catch (err) {
+    rethrowGeminiFailure(err, p.opts.signal, timeoutMs);
+  }
   const text = result.response.text();
 
   const usageMd = result.response.usageMetadata;
@@ -532,6 +617,7 @@ async function generateViaOpenRouter(
       body: JSON.stringify(body),
     },
     timeoutMs,
+    provider,
   );
 
   if (!res.ok) {
@@ -591,6 +677,7 @@ async function generateViaGroq(
       body: JSON.stringify(body),
     },
     timeoutMs,
+    provider,
   );
 
   if (!res.ok) {
@@ -649,6 +736,7 @@ async function generateViaOpenAI(
       body: JSON.stringify(body),
     },
     timeoutMs,
+    "openai",
   );
 
   if (!res.ok) {
@@ -746,11 +834,11 @@ async function dispatchProvider(
   if (provider === "gemini") {
     // Try the configured model first, then fall back to the lite variant
     try {
-      return await generateViaGemini(p, modelName);
+      return await generateViaGemini(p, modelName, timeoutMs);
     } catch (err) {
       if (err instanceof ProviderError && modelName !== GEMINI_FALLBACK_MODEL) {
         try {
-          return await generateViaGemini(p, GEMINI_FALLBACK_MODEL);
+          return await generateViaGemini(p, GEMINI_FALLBACK_MODEL, timeoutMs);
         } catch {
           throw err; // throw original
         }
@@ -873,6 +961,30 @@ export async function generateText(
     } catch (err) {
       lastErr = err;
       const isProviderError = err instanceof ProviderError;
+      const httpStatus = isProviderError ? err.status : null;
+      // Classify the error for [ai-route] diagnostics
+      const errorType = httpStatus === 401 || httpStatus === 403 ? "AUTH"
+        : httpStatus === 429 ? "RATE_LIMIT"
+        : httpStatus !== null && httpStatus >= 500 ? "PROVIDER_5XX"
+        : httpStatus === 408 ? "TIMEOUT"
+        : httpStatus === 404 ? "NOT_FOUND"
+        : isProviderError && err.isRetryable ? "RETRYABLE"
+        : "UNKNOWN";
+      // Both branches below advance the chain. willFallback matches that:
+      // true only when a later provider will actually be attempted.
+      const willFallback = hasLaterProvider(chain, provider);
+
+      console.info(`[ai-route] attempt_failure`, {
+        requestId: meteringRequestId,
+        attempt: attempted,
+        provider,
+        httpStatus,
+        errorType,
+        willFallback,
+        latencyMs: Date.now() - t0,
+        message: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+      });
+
       recordLLMCall({
         provider,
         model: "unknown",
@@ -991,10 +1103,35 @@ export async function streamText(
   const t0 = Date.now();
   // Stable id for canonical metering: one usage_event per provider attempt.
   const meteringRequestId = newLlmRequestId();
+  // Request ID for [ai-route] diagnostics (same as metering ID for correlation)
+  const requestId = meteringRequestId;
+
+  console.info(`[ai-route] request_start`, {
+    requestId,
+    task,
+    chain: chain.join(","),
+    chainLength: chain.length,
+  });
 
   // Accumulate streamed chunks for Braintrust logging on stream completion.
   const _chunks: string[] = [];
+  // Leading whitespace is held until this attempt emits real text, so a
+  // whitespace-only failure never reaches the caller.
+  let suppressLeading = true;
+  let heldLeading = "";
   const wrappedOnChunk = (text: string) => {
+    if (suppressLeading) {
+      const combined = heldLeading + text;
+      if (!combined.trim()) {
+        heldLeading = combined;
+        return;
+      }
+      suppressLeading = false;
+      heldLeading = "";
+      _chunks.push(combined);
+      onChunk(combined);
+      return;
+    }
     _chunks.push(text);
     onChunk(text);
   };
@@ -1014,6 +1151,14 @@ export async function streamText(
     attempted++;
     const attemptStartedAt = new Date();
     const attemptIndex = attempted - 1;
+
+    console.info(`[ai-route] attempt_start`, {
+      requestId,
+      attempt: attempted,
+      provider,
+      task,
+    });
+
     // Hard spend/runaway guard — per-attempt, fail-open.
     if (options.metering) {
       const guard = await checkRunawayGuards({
@@ -1027,8 +1172,11 @@ export async function streamText(
         throw new SpendGuardError(guard);
       }
     }
+    suppressLeading = true;
+    heldLeading = "";
+    let chunksBefore = 0;
     try {
-      const chunksBefore = _chunks.length;
+      chunksBefore = _chunks.length;
       let result: { provider: LLMProvider; model: string; latencyMs: number; failover: LLMProvider[]; finishReason?: string };
       if (provider === "gemini") {
         result = await streamViaGemini(
@@ -1037,6 +1185,7 @@ export async function streamText(
           t0,
           failover,
           onReasoning,
+          timeoutMs,
         );
       } else if (provider === "openai") {
         result = await streamViaOpenAI(
@@ -1110,6 +1259,14 @@ export async function streamText(
         attemptIndex,
         startedAt: attemptStartedAt,
       });
+      console.info(`[ai-route] attempt_success`, {
+        requestId,
+        attempt: attempted,
+        provider: result.provider,
+        model: result.model,
+        latencyMs: Date.now() - t0,
+        failoverCount: failover.length,
+      });
       return {
         ...result,
         // The successful attempt is the ONE billable event for this logical
@@ -1127,8 +1284,51 @@ export async function streamText(
           ? err
           : new DOMException("The operation was aborted.", "AbortError");
       }
-      lastErr = err;
-      const isProviderError = err instanceof ProviderError;
+      let failure: unknown = err;
+      if (!(failure instanceof ProviderError)) {
+        const transport = transportProviderError(failure, provider, timeoutMs);
+        if (transport) failure = transport;
+      }
+      lastErr = failure;
+      const providerFailure = failure instanceof ProviderError ? failure : null;
+      const httpStatusStream = providerFailure ? providerFailure.status : null;
+      const isMalformed = failure instanceof EmptyProviderResponseError;
+      const errorTypeStream = isMalformed ? "MALFORMED_RESPONSE"
+        : httpStatusStream === 401 || httpStatusStream === 403 ? "AUTH"
+        : httpStatusStream === 429 ? "RATE_LIMIT"
+        : httpStatusStream !== null && httpStatusStream >= 500 ? "PROVIDER_5XX"
+        : httpStatusStream === 408 ? "TIMEOUT"
+        : httpStatusStream === 404 ? "NOT_FOUND"
+        : providerFailure?.isRetryable ? "RETRYABLE"
+        : "UNKNOWN";
+      // Fallback decision:
+      // - AUTH: do NOT retry same provider, but ALLOW fallback to different provider
+      // - RETRYABLE (429/5xx/timeout/network/404/malformed): allow fallback
+      // - Non-provider errors (app bugs): do NOT fallback, throw immediately
+      const isAuth = errorTypeStream === "AUTH";
+      const canFallback = !!providerFailure && (providerFailure.isRetryable || isAuth || isMalformed);
+      // Usable text is per attempt. Whitespace-only chunks are not usable
+      // and must not block fallback or stay prepended to the next provider.
+      const attemptText = _chunks.slice(chunksBefore).join("");
+      const hasUsableOutput = attemptText.trim().length > 0;
+      if (!hasUsableOutput) {
+        _chunks.splice(chunksBefore);
+        heldLeading = "";
+      }
+      const willFallbackStream = !hasUsableOutput && canFallback && hasLaterProvider(chain, provider);
+
+      console.info(`[ai-route] attempt_failure`, {
+        requestId,
+        attempt: attempted,
+        provider,
+        httpStatus: httpStatusStream,
+        errorType: errorTypeStream,
+        willFallback: willFallbackStream,
+        latencyMs: Date.now() - t0,
+        chunksEmitted: _chunks.length,
+        message: failure instanceof Error ? failure.message.slice(0, 200) : String(failure).slice(0, 200),
+      });
+
       recordLLMCall({
         provider,
         model: "unknown",
@@ -1145,16 +1345,39 @@ export async function streamText(
         status: "failed",
         requestId: meteringRequestId,
         attemptIndex,
-        error: err instanceof Error ? err.message.slice(0, 500) : String(err).slice(0, 500),
+        error: failure instanceof Error ? failure.message.slice(0, 500) : String(failure).slice(0, 500),
         startedAt: attemptStartedAt,
       });
       // Mark model unavailable on 404 (model not found)
-      if (isProviderError && err.status === 404) {
+      if (providerFailure?.status === 404) {
         markModelUnavailable(provider);
       }
-      if (!isProviderError || !err.isRetryable) {
-        failover.push(provider);
-        continue;
+      // Real partial answer: do not concatenate a second provider onto it.
+      if (hasUsableOutput) {
+        console.warn(`[ai-route] partial_stream_abort`, {
+          requestId,
+          provider,
+          chunksEmitted: _chunks.length,
+          message: "Primary failed after partial output — not falling back to avoid duplication",
+        });
+        throw failure;
+      }
+      // Non-provider errors (app bugs) do NOT fallback.
+      if (!canFallback) {
+        console.warn(`[ai-route] non_retryable`, {
+          requestId,
+          provider,
+          errorType: errorTypeStream,
+          message: "Not falling back for non-provider error",
+        });
+        throw failure;
+      }
+      if (willFallbackStream) {
+        console.info(`[ai-route] fallback`, {
+          requestId,
+          fromProvider: provider,
+          reason: errorTypeStream,
+        });
       }
       failover.push(provider);
     }
@@ -1162,6 +1385,15 @@ export async function streamText(
   if (attempted > 0 && emptyProviders.length === attempted) {
     throw new AllProvidersEmptyError(emptyProviders);
   }
+  // Final summary: all providers failed — log the complete failure chain
+  console.error(`[ai-route] all_failed`, {
+    requestId,
+    task,
+    attempted,
+    providersTried: [...failover].join(","),
+    lastError: lastErr instanceof Error ? lastErr.message.slice(0, 300) : String(lastErr).slice(0, 300),
+    latencyMs: Date.now() - t0,
+  });
   throw new Error(
     `All LLM streaming providers failed. Tried: ${[...failover].join(", ")}. Last error: ${lastErr instanceof Error ? lastErr.message : String(lastErr)
     }`,
@@ -1173,7 +1405,8 @@ async function streamViaGemini(
   onChunk: (text: string) => void,
   t0: number,
   failover: LLMProvider[],
-  onReasoning?: (text: string) => void,
+  onReasoning: ((text: string) => void) | undefined,
+  timeoutMs: number,
 ): Promise<{
   provider: LLMProvider;
   model: string;
@@ -1189,10 +1422,12 @@ async function streamViaGemini(
   const fullPrompt = p.systemPrompt
     ? `${p.systemPrompt}\n\n${p.prompt}`
     : p.prompt;
-  const result = await model.generateContentStream(fullPrompt, {
-    signal: p.opts.signal,
-  });
+  let result;
   let finishReason: string | undefined;
+  try {
+    result = await model.generateContentStream(fullPrompt, {
+      signal: p.opts.signal,
+    });
   for await (const chunk of result.stream) {
     if (p.opts.signal?.aborted) {
       throw new DOMException("The operation was aborted.", "AbortError");
@@ -1220,6 +1455,9 @@ async function streamViaGemini(
         // thought extraction is best-effort; ignore shape mismatches
       }
     }
+  }
+  } catch (err) {
+    rethrowGeminiFailure(err, p.opts.signal, timeoutMs);
   }
   return {
     provider: "gemini",
@@ -1273,6 +1511,7 @@ async function streamViaOpenRouter(
       body: JSON.stringify(body),
     },
     timeoutMs,
+    provider,
     p.opts.signal,
   );
 
@@ -1373,6 +1612,7 @@ async function streamViaOpenAI(
       body: JSON.stringify(body),
     },
     timeoutMs,
+    "openai",
     p.opts.signal,
   );
 
@@ -1472,6 +1712,7 @@ async function streamViaGroq(
       body: JSON.stringify(body),
     },
     timeoutMs,
+    provider,
     p.opts.signal,
   );
 

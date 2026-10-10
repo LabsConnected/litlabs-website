@@ -26,20 +26,20 @@ describe("AppShell Navigation", () => {
       expect(labels).toEqual([
         "Home",
         "Studio",
-        "Assets",
-        "Agents",
-        "Missions",
+        "Discover",
+        "Projects",
+        "Settings",
       ]);
     });
 
     it("every main item resolves to a real route", () => {
       const hrefs = APP_NAV_MAIN.map((i) => i.href);
       expect(hrefs).toEqual([
-        "/dashboard",
+        "/",
         "/studio",
-        "/studio?tool=assets",
-        "/studio?tool=agents",
-        "/studio?tool=workflows",
+        "/discover",
+        "/projects",
+        "/settings",
       ]);
     });
 
@@ -64,15 +64,14 @@ describe("AppShell Navigation", () => {
   describe("More menu", () => {
     it("carries every secondary destination", () => {
       const labels = APP_NAV_MORE.map((i) => i.label);
+      // Phase 3B: Projects and Discover are now top-level, not in More
       expect(labels).toEqual([
-        "Projects",
-        "Discover",
-        "Marketplace",
         "Showcase",
         "Games",
         "CLI",
         "Deployments",
         "Docs",
+        "Library",
       ]);
     });
 
@@ -120,12 +119,12 @@ describe("AppShell Navigation", () => {
     const search = new URLSearchParams();
 
     it("Home is active on /dashboard", () => {
-      expect(isAppNavActive("/dashboard", search, "/dashboard")).toBe(true);
+      expect(isAppNavActive("/", search, "/")).toBe(true);
     });
 
     it("Home is NOT active when ?app= is present", () => {
       const s = new URLSearchParams("app=music");
-      expect(isAppNavActive("/dashboard", s, "/dashboard")).toBe(false);
+      expect(isAppNavActive("/", s, "/")).toBe(false);
     });
 
     it("Studio is active on /studio and default surfaces", () => {
@@ -166,14 +165,14 @@ describe("AppShell Navigation", () => {
       ).toBe(false);
       // Not on /studio at all → not active
       expect(
-        isAppNavActive("/dashboard", new URLSearchParams("tool=assets"), "/studio?tool=assets"),
+        isAppNavActive("/", new URLSearchParams("tool=assets"), "/studio?tool=assets"),
       ).toBe(false);
     });
 
     it("Dashboard owns creation and /create is no longer a nav destination", () => {
       expect(APP_NAV_MAIN.some((item) => item.label === "Create")).toBe(false);
-      expect(isAppNavActive("/dashboard", search, "/dashboard")).toBe(true);
-      expect(isAppNavActive("/create", search, "/dashboard")).toBe(false);
+      expect(isAppNavActive("/", search, "/")).toBe(true);
+      expect(isAppNavActive("/create", search, "/")).toBe(false);
     });
 
     it("Settings is active on /settings and /settings/*", () => {
@@ -182,7 +181,7 @@ describe("AppShell Navigation", () => {
     });
 
     it("null pathname returns false", () => {
-      expect(isAppNavActive(null, search, "/dashboard")).toBe(false);
+      expect(isAppNavActive(null, search, "/")).toBe(false);
     });
   });
 
