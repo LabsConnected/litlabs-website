@@ -87,6 +87,19 @@ describe("Analytics module", () => {
     expect(sendBeaconSpy).not.toHaveBeenCalled();
   });
 
+  it("does not transmit queued events if consent is withdrawn before flush", async () => {
+    vi.mocked(hasConsent).mockReturnValue(true);
+    const { sendBeaconSpy } = setupSendBeacon();
+    const { track, flushAnalytics } = await import("@/lib/analytics");
+
+    track("studio_opened");
+    vi.mocked(hasConsent).mockReturnValue(false);
+    flushAnalytics();
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(sendBeaconSpy).not.toHaveBeenCalled();
+  });
+
   it("all expected funnel events are valid FunnelEvent types", async () => {
     const { track } = await import("@/lib/analytics");
     // If TypeScript compiles, these are all valid FunnelEvent values
