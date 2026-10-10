@@ -115,7 +115,7 @@ export function hasConsentRecord(): boolean {
  * });
  */
 export function gateOnConsent(
-  category: keyof CookieConsentState,
+  category: CookieCategory,
   callback: () => void,
 ): void {
   if (hasConsent(category)) {
