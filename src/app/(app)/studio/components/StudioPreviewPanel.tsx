@@ -789,12 +789,29 @@ export default function StudioPreviewPanel({
 
   const preparePreview = useCallback(async () => {
     if (!projectId) return;
-    // Static projects: no dev server to start. The static preview endpoint
-    // serves files directly. Just mark as ready.
+    // Static projects: no dev server to start. Check readiness via the
+    // status endpoint (verifies index.html exists), then mark ready.
     if (framework === "static") {
-      setState("ready");
-      setPreviewUrl(`/api/preview/${encodeURIComponent(projectId)}/index.html`);
-      setError(null);
+      try {
+        const response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/preview`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: await authHeaders(),
+          signal: AbortSignal.timeout(15000),
+        });
+        const payload = await response.json().catch(() => null) as PreviewPayload | null;
+        if (response.ok && payload && payload.runtimeStatus === "ready") {
+          setState("ready");
+          setPreviewUrl(`/api/preview/${encodeURIComponent(projectId)}/index.html`);
+          setError(null);
+        } else {
+          setState("not_started");
+          setPreviewUrl(null);
+        }
+      } catch {
+        setState("not_started");
+        setPreviewUrl(null);
+      }
       setIframeFailed(false);
       return;
     }
@@ -1187,7 +1204,10 @@ export default function StudioPreviewPanel({
                 borderRadius: deviceMode === "desktop" ? "0" : "8px",
                 boxShadow: deviceMode === "desktop" ? "none" : "0 4px 24px rgba(0,0,0,0.4)",
               }}
-              sandbox="allow-scripts allow-forms allow-modals allow-same-origin allow-popups"
+              sandbox={isStaticProject 
+                ? "allow-scripts allow-forms allow-modals allow-popups" 
+                : "allow-scripts allow-forms allow-modals allow-same-origin allow-popups"
+              }
               onLoad={handleIframeLoad}
               onError={() => setIframeFailed(true)}
               data-testid="preview-iframe"
