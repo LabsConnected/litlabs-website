@@ -55,6 +55,15 @@ describe("cookie consent preferences", () => {
     expect(hasConsent("analytics")).toBe(false);
   });
 
+  it("requires renewed consent from records created before affiliate disclosure", () => {
+    window.localStorage.setItem("cookie-consent", JSON.stringify({
+      essential: true, preferences: true, analytics: true, marketing: true,
+      timestamp: Date.now(),
+    }));
+    expect(getConsent()).toBeNull();
+    expect(hasConsent("marketing")).toBe(false);
+  });
+
   it("reopens the preference interface on demand", () => {
     const listener = vi.fn();
     window.addEventListener(COOKIE_CONSENT_OPEN_EVENT, listener);
