@@ -17,9 +17,12 @@ export interface CookieConsentState {
   analytics: boolean;
   marketing: boolean;
   timestamp: number;
+  version?: number;
 }
 
 const CONSENT_KEY = "cookie-consent";
+const CONSENT_VERSION = 2; // Explicit affiliate category was added in v2.
+
 export const COOKIE_CONSENT_OPEN_EVENT = "litt:cookie-consent-open";
 export const COOKIE_CONSENT_UPDATED_EVENT = "litt:cookie-consent-updated";
 
@@ -37,6 +40,7 @@ export function saveConsent(choices: OptionalCookieChoices): CookieConsentState 
     analytics: choices.analytics === true,
     marketing: choices.marketing === true,
     timestamp: Date.now(),
+    version: CONSENT_VERSION,
   };
   if (typeof window !== "undefined") {
     window.localStorage.setItem(CONSENT_KEY, JSON.stringify(value));
@@ -65,6 +69,7 @@ export function getConsent(): CookieConsentState | null {
       typeof candidate.preferences !== "boolean" ||
       typeof candidate.analytics !== "boolean" ||
       typeof candidate.marketing !== "boolean" ||
+      candidate.version !== CONSENT_VERSION ||
       typeof candidate.timestamp !== "number" ||
       !Number.isFinite(candidate.timestamp)
     ) return null;
@@ -74,6 +79,7 @@ export function getConsent(): CookieConsentState | null {
       analytics: candidate.analytics,
       marketing: candidate.marketing,
       timestamp: candidate.timestamp,
+      version: CONSENT_VERSION,
     };
   } catch {
     return null;
