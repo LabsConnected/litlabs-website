@@ -202,7 +202,7 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
                     >
                       {unlocked ? (
                         <Image
-                          src={meta.id === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt-mascot-avatar.png"}
+                          src={meta.id === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt-robot-avatar-96.png"}
                           alt={meta.displayName}
                           fill
                           sizes="32px"

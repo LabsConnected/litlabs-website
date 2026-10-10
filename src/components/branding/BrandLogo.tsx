@@ -19,7 +19,7 @@ export function BrandLogo({
   const iconSrc =
     variant === "full"
       ? "/branding/littree-labstudios-logo.png"
-      : "/branding/littree-crystal-mark.png";
+      : "/brand/litt-robot-96.png";
 
   return (
     <Link
