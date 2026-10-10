@@ -130,9 +130,9 @@ describe("Homepage structured data (JSON-LD)", () => {
     });
   });
 
-  it("Organization name is LiTTree LabStudios", () => {
+  it("Organization name is LiTT", () => {
     const org = (homeSchema["@graph"] as Array<Record<string, unknown>>)[0];
-    expect(org.name).toBe("LiTTree LabStudios");
+    expect(org.name).toBe("LiTT");
   });
 
   it("Organization @id is correct", () => {
@@ -152,9 +152,9 @@ describe("Homepage structured data (JSON-LD)", () => {
     expect(altNames).toContain("Lit Labs");
   });
 
-  it("WebSite name is LiTTree LabStudios", () => {
+  it("WebSite name is LiTT", () => {
     const site = (homeSchema["@graph"] as Array<Record<string, unknown>>)[1];
-    expect(site.name).toBe("LiTTree LabStudios");
+    expect(site.name).toBe("LiTT");
   });
 
   it("WebSite @id is correct", () => {

@@ -53,7 +53,7 @@ describe("LayoutShell hybrid-public chrome for /showcase", () => {
     );
 
     const header = screen.getByRole("banner");
-    expect(within(header).getByRole("link", { name: /LiTTree LabStudios home/i })).toBeTruthy();
+    expect(within(header).getByRole("link", { name: /LiTT home/i })).toBeTruthy();
     expect(screen.getByRole("navigation", { name: /primary navigation/i })).toBeTruthy();
     expect(screen.getByTestId("showcase-content")).toBeTruthy();
     expect(screen.getByRole("contentinfo")).toBeTruthy();
@@ -69,7 +69,7 @@ describe("LayoutShell hybrid-public chrome for /showcase", () => {
       </LayoutShell>,
     );
 
-    expect(screen.queryByRole("link", { name: /LiTTree LabStudios home/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /LiTT home/i })).toBeNull();
     expect(screen.getByTestId("showcase-content")).toBeTruthy();
   });
 });

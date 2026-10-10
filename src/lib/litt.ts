@@ -190,7 +190,7 @@ class LiTT {
             body: JSON.stringify({
               title: payload.title,
               body: payload.body,
-              icon: "/logo.webp",
+              icon: "/icon-192.png",
               data: payload.data || {},
             }),
           });
