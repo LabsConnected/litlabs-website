@@ -4,6 +4,8 @@ import { getProject, updateProjectRuntime } from "@/lib/projects/project-reposit
 import { ensureWorkspaceAlive, provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
 import { SecretBroker } from "@/lib/terminal-v1/secret-broker";
 import { extractClerkEnvFromSecrets } from "@/lib/preview-clerk-env";
+import { createTerminalToken } from "@/lib/terminal-auth";
+import { requireTerminalBaseUrl } from "@/lib/terminal-config";
 import {
   startPreviewInternal,
   getPreviewStatusInternal,
@@ -47,7 +49,48 @@ export async function GET(
 
   // Static projects: return ready status with static preview URL.
   // No dev-server health check needed — files are served directly.
+  // Verify index.html exists; empty workspace reports not_started.
   if (project.framework === "static") {
+    try {
+      const terminalBase = requireTerminalBaseUrl();
+      const { token } = createTerminalToken(userId, {
+        workspaceId: project.workspaceId,
+        projectId,
+      });
+      const checkResp = await fetch(`${terminalBase}/ws-files/read`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+          "X-Workspace-Id": project.workspaceId,
+        },
+        body: JSON.stringify({ path: "index.html", encoding: "utf-8" }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!checkResp.ok) {
+        // index.html doesn't exist yet — workspace is empty
+        return NextResponse.json({
+          runtimeStatus: "not_started",
+          previewUrl: null,
+          runtimeError: null,
+          framework: "static",
+          developmentCommand: null,
+          packageManager: null,
+          logs: [],
+        });
+      }
+    } catch {
+      // Terminal unavailable — report not_started rather than broken ready
+      return NextResponse.json({
+        runtimeStatus: "not_started",
+        previewUrl: null,
+        runtimeError: null,
+        framework: "static",
+        developmentCommand: null,
+        packageManager: null,
+        logs: [],
+      });
+    }
     return NextResponse.json({
       runtimeStatus: "ready",
       previewUrl: `/api/preview/${encodeURIComponent(projectId)}/index.html`,
