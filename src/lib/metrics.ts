@@ -166,6 +166,138 @@ export const apiRetryLatencySeconds = new Histogram({
   registers: [registry],
 });
 
+// ─── Describe→Live Pipeline Timing (Performance PR #1) ─────────────
+// Instrumentation only. No behavior changes.
+// Records stage durations with low-cardinality operational dimensions.
+// NEVER record: prompt contents, source code, terminal output, secrets,
+// emails/usernames, unsanitized exception bodies.
+
+export const pipelineStageDurationSeconds = new Histogram({
+  name: "litlabs_pipeline_stage_duration_seconds",
+  help: "Describe→Live pipeline stage duration in seconds",
+  labelNames: [
+    "stage",
+    "task_kind",
+    "model_role",
+    "workspace_warm",
+    "deps_required",
+    "preview_reused",
+    "status",
+    "cache_hit",
+  ] as const,
+  buckets: [0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600],
+  registers: [registry],
+});
+
+export const pipelineStageTotal = new Counter({
+  name: "litlabs_pipeline_stage_total",
+  help: "Total Describe→Live pipeline stage executions",
+  labelNames: [
+    "stage",
+    "task_kind",
+    "model_role",
+    "status",
+  ] as const,
+  registers: [registry],
+});
+
+export type PipelineStage =
+  | "request_received"
+  | "request_acknowledged"
+  | "queue_enqueued"
+  | "queue_claimed"
+  | "context"
+  | "model"
+  | "model_first_token"
+  | "tool"
+  | "workspace"
+  | "dependencies"
+  | "build"
+  | "preview"
+  | "validation"
+  | "approval_wait"
+  | "publish"
+  | "task_completed"
+  | "task_failed"
+  | "task_canceled";
+
+export type ModelRole = "fast" | "builder" | "reasoner" | "unknown";
+export type TaskKind =
+  | "chat"
+  | "build"
+  | "edit"
+  | "preview"
+  | "deploy"
+  | "unknown";
+
+export interface PipelineStageLabels {
+  stage: PipelineStage;
+  taskKind?: TaskKind;
+  modelRole?: ModelRole;
+  workspaceWarm?: boolean;
+  depsRequired?: boolean;
+  previewReused?: boolean;
+  status?: "success" | "failure" | "canceled";
+  cacheHit?: boolean;
+  retryCount?: number;
+}
+
+function normalizeLabels(l: PipelineStageLabels) {
+  return {
+    stage: l.stage,
+    task_kind: l.taskKind ?? "unknown",
+    model_role: l.modelRole ?? "unknown",
+    workspace_warm: String(l.workspaceWarm ?? false),
+    deps_required: String(l.depsRequired ?? false),
+    preview_reused: String(l.previewReused ?? false),
+    status: l.status ?? "success",
+    cache_hit: String(l.cacheHit ?? false),
+  };
+}
+
+/**
+ * Record a completed pipeline stage duration.
+ * Call this when a stage finishes. Do NOT include prompt contents,
+ * source code, or any PII in labels.
+ */
+export function recordPipelineStage(
+  labels: PipelineStageLabels,
+  durationMs: number
+): void {
+  const normalized = normalizeLabels(labels);
+  pipelineStageDurationSeconds.labels(normalized).observe(durationMs / 1000);
+  pipelineStageTotal
+    .labels({
+      stage: normalized.stage,
+      task_kind: normalized.task_kind,
+      model_role: normalized.model_role,
+      status: normalized.status,
+    })
+    .inc();
+}
+
+/**
+ * Lightweight timer for pipeline stages.
+ * Usage:
+ *   const t = new PipelineTimer({ stage: "build", taskKind: "build" });
+ *   // ... do work ...
+ *   t.end({ status: "success" });
+ */
+export class PipelineTimer {
+  private startTime: number;
+  private labels: PipelineStageLabels;
+
+  constructor(labels: PipelineStageLabels) {
+    this.labels = labels;
+    this.startTime = Date.now();
+  }
+
+  end(extra?: Partial<PipelineStageLabels>): void {
+    const durationMs = Date.now() - this.startTime;
+    recordPipelineStage({ ...this.labels, ...extra }, durationMs);
+  }
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────
 
 /**
