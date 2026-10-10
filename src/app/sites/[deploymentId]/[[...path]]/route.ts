@@ -123,7 +123,8 @@ export async function GET(
       "Referrer-Policy": "no-referrer",
       // A deployment snapshot is immutable, but keep the window short so a
       // redeploy to a new id is never served from a stale intermediary.
-      "Cache-Control": "public, max-age=60",
+      // must-revalidate ensures unpublish takes effect promptly.
+      "Cache-Control": "public, max-age=60, must-revalidate",
     },
   });
 }

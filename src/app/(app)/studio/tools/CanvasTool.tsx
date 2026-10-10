@@ -1042,21 +1042,9 @@ export default function CanvasTool({ projectId }: CanvasToolProps) {
                   >
                     <FileCode size={13} />
                   </button>
-                  <button
-                    onClick={() => {
-                      const html = getPreviewHtml();
-                      const blob = new Blob([html], { type: "text/html" });
-                      const url = URL.createObjectURL(blob);
-                      window.open(url, "_blank", "noopener,noreferrer");
-                      // Revoke after a delay to allow the new tab to load
-                      setTimeout(() => URL.revokeObjectURL(url), 60000);
-                    }}
-                    title="Open in new tab (isolated preview)"
-                    className="p-1.5 rounded-lg hover:bg-white/5"
-                    style={{ color: T.textMuted }}
-                  >
-                    <Play size={13} />
-                  </button>
+                  {/* New-tab preview removed for security: blob URLs inherit
+                      creator-origin privileges. Use the sandboxed in-page
+                      preview instead. */}
                   <button
                     onClick={startNew}
                     title="Delete all files and start fresh"
