@@ -45,6 +45,20 @@ export async function GET(
     });
   }
 
+  // Static projects: return ready status with static preview URL.
+  // No dev-server health check needed — files are served directly.
+  if (project.framework === "static") {
+    return NextResponse.json({
+      runtimeStatus: "ready",
+      previewUrl: `/api/preview/${encodeURIComponent(projectId)}/index.html`,
+      runtimeError: null,
+      framework: "static",
+      developmentCommand: null,
+      packageManager: null,
+      logs: [],
+    });
+  }
+
   try {
     const runtimeStatus = await getPreviewStatusInternal(project.workspaceId, userId);
 
