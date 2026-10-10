@@ -126,6 +126,7 @@ export async function createBlankProject(
     slug,
     source_type: "blank",
     access_mode: input.accessMode ?? "private",
+    is_system: false,
     template_id: input.templateId,
     github_installation_id: null,
     github_repository_id: null,
