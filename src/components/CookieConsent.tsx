@@ -87,7 +87,7 @@ export default function CookieConsent() {
           </h2>
           <p className="text-xs leading-relaxed opacity-80">
             Essential storage keeps sign-in and Studio working. You can choose
-            whether to allow optional preferences and usage analytics.
+            whether to allow optional preferences, usage analytics, and affiliate tracking.
           </p>
           {customizing && (
             <fieldset className="mt-4 space-y-2 rounded-xl border p-3" style={{ borderColor: T.borderColor }}>
@@ -116,15 +116,22 @@ export default function CookieConsent() {
                   onChange={(event) => setChoices((prev) => ({ ...prev, analytics: event.target.checked }))}
                 />
               </label>
-              <p className="text-[11px] leading-relaxed opacity-65">
-                No marketing trackers are currently in use.
-              </p>
+              <label className="flex min-h-11 cursor-pointer items-center justify-between gap-3 text-xs">
+                <span><strong>Affiliate tracking</strong><span className="block opacity-70">Allow our referral partner to attribute signups</span></span>
+                <input
+                  type="checkbox"
+                  className="h-5 w-5 shrink-0"
+                  style={{ accentColor: T.accentColor }}
+                  checked={choices.marketing}
+                  onChange={(event) => setChoices((prev) => ({ ...prev, marketing: event.target.checked }))}
+                />
+              </label>
             </fieldset>
           )}
           <div className="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => commit({ preferences: true, analytics: true, marketing: false })}
+              onClick={() => commit({ preferences: true, analytics: true, marketing: true })}
               className="min-h-11 flex-1 rounded-lg border px-3 py-2 text-xs font-semibold motion-safe:transition-opacity hover:opacity-85"
               style={primary}
             >
@@ -141,7 +148,7 @@ export default function CookieConsent() {
             {customizing ? (
               <button
                 type="button"
-                onClick={() => commit({ ...choices, marketing: false })}
+                onClick={() => commit(choices)}
                 className="min-h-11 w-full rounded-lg border px-3 py-2 text-xs font-semibold motion-safe:transition-opacity hover:opacity-85"
                 style={primary}
               >
