@@ -271,13 +271,27 @@ const nextConfig: NextConfig = {
       // It must be frameable by Studio (same origin) and sandboxed so
       // untrusted scripts cannot access LiTT's cookies, storage, or APIs.
       //
+      // NOTE: default-src uses EXPLICIT origins, never bare 'self'. The
+      // preview iframe sandbox omits allow-same-origin, so the document gets
+      // an opaque origin — and per the CSP spec, 'self' never matches any
+      // subresource URL from an opaque origin, which would silently block
+      // relative assets (style.css, app.js, images). Scheme+host sources
+      // match on the subresource URL alone, so relative assets load while
+      // third-party exfiltration stays blocked.
+      // KEEP IN SYNC with src/app/api/preview/[projectId]/[[...path]]/route.ts
+      // (this config header wins over the route header in production).
+      //
       // Keep this rule AFTER the global rule — later matching rule wins.
       {
         source: "/api/preview/:path*",
         headers: [
           {
             key: "Content-Security-Policy",
-            value: "sandbox allow-scripts; default-src 'self' data: blob:; style-src 'self' 'unsafe-inline' data:; script-src 'self' 'unsafe-inline' data: blob:;",
+            value:
+              "sandbox allow-scripts; " +
+              "default-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* data: blob:; " +
+              "style-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* 'unsafe-inline' data:; " +
+              "script-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* 'unsafe-inline' data: blob:;",
           },
           {
             key: "X-Content-Type-Options",

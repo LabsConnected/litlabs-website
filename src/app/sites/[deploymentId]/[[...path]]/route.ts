@@ -107,10 +107,10 @@ export async function GET(
     file.contentType.includes("text/html") &&
     typeof content === "string" &&
     !content.includes('data-litt-badge="0"') &&
-    content.includes("</body>")
+    /<\/body\s*>/i.test(content)
   ) {
     const badge = `<div id="litt-badge" style="position:fixed;bottom:12px;right:12px;z-index:2147483647;display:flex;align-items:center;gap:6px;background:rgba(10,10,18,0.85);border:1px solid rgba(139,92,246,0.4);border-radius:9999px;padding:4px 10px 4px 4px;font-family:system-ui,sans-serif;font-size:11px;color:#e4e4e7;backdrop-filter:blur(8px);box-shadow:0 2px 12px rgba(0,0,0,0.4)"><img src="/brand/litt-robot-32.png" alt="LiTT" width="20" height="20" style="border-radius:50%"/><a href="https://www.litlabs.net" target="_blank" rel="noopener" style="color:#e4e4e7;text-decoration:none">Built with LiTT</a><button onclick="this.parentElement.remove()" aria-label="Dismiss" style="background:none;border:none;color:#a1a1aa;cursor:pointer;font-size:14px;line-height:1;padding:0 2px">×</button></div>`;
-    content = content.replace("</body>", `${badge}</body>`);
+    content = content.replace(/<\/body\s*>/i, `${badge}</body>`);
   }
 
   return new NextResponse(content, {

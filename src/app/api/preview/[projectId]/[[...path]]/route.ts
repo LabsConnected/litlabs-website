@@ -50,7 +50,20 @@ const PREVIEW_SECURITY_HEADERS: Record<string, string> = {
   // site's own JS to run (needed for interactive previews) without granting
   // same-origin privileges. unsafe-inline allows Canvas-generated inline
   // styles/scripts; the sandbox still blocks same-origin access.
-  "Content-Security-Policy": "sandbox allow-scripts; default-src 'self' data: blob:; style-src 'self' 'unsafe-inline' data:; script-src 'self' 'unsafe-inline' data: blob:;",
+  //
+  // NOTE: default-src uses EXPLICIT origins, never bare 'self'. The preview
+  // iframe sandbox omits allow-same-origin, so the document gets an opaque
+  // origin — and per the CSP spec, 'self' never matches any subresource URL
+  // from an opaque origin, which would silently block relative assets
+  // (style.css, app.js, images) and render multi-file sites unstyled/broken.
+  // Scheme+host sources match on the subresource URL alone, so relative
+  // assets load while third-party exfiltration stays blocked.
+  // KEEP IN SYNC with next.config.ts /api/preview/:path* (config wins in prod).
+  "Content-Security-Policy":
+    "sandbox allow-scripts; " +
+    "default-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* data: blob:; " +
+    "style-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* 'unsafe-inline' data:; " +
+    "script-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* 'unsafe-inline' data: blob:;",
   "X-Content-Type-Options": "nosniff",
   // No referrer leakage to third parties embedded in user content.
   "Referrer-Policy": "no-referrer",

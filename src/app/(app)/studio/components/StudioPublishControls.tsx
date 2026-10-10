@@ -52,7 +52,7 @@ export default function StudioPublishControls({
     }
     setState((s) => (s === "idle" ? "loading" : s));
     try {
-      const res = await fetch(`/api/projects/${projectId}/publish`);
+      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/publish`);
       if (!res.ok) {
         // 404 = no project or not owned; treat as idle, not error.
         if (res.status === 404) {
@@ -86,7 +86,7 @@ export default function StudioPublishControls({
     setState("publishing");
     setError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/publish`, { method: "POST" });
+      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/publish`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.detail || data.error || `Publish failed (${res.status})`);
@@ -110,7 +110,7 @@ export default function StudioPublishControls({
     setState("unpublishing");
     setError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/publish`, {
+      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/publish`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ deploymentId: deployment.id }),

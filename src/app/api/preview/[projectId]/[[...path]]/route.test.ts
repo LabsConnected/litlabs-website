@@ -118,6 +118,14 @@ describe("GET /api/preview/[projectId]/[[...path]]", () => {
     const csp = res.headers.get("Content-Security-Policy") ?? "";
     // Opaque origin: user content cannot touch LiTT cookies/storage/DOM.
     expect(csp).toContain("sandbox");
+    expect(csp).not.toContain("allow-same-origin");
+    // Regression: default-src must use EXPLICIT origins, never bare 'self'.
+    // The iframe sandbox omits allow-same-origin (opaque origin), and per the
+    // CSP spec 'self' never matches subresource URLs from an opaque origin —
+    // bare 'self' would silently block relative assets (style.css, app.js,
+    // images) and render multi-file sites unstyled/broken.
+    expect(csp).toContain("https://www.litlabs.net");
+    expect(csp).not.toMatch(/default-src 'self'/);
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
     assertZeroSubprocesses();
   });

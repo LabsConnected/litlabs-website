@@ -72,6 +72,16 @@ describe("sites route — form deploymentId injection", () => {
     expect(text).not.toContain('id="litt-badge"');
   });
 
+  it("injects the badge with uppercase or spaced </body> tags", async () => {
+    const upper = "<!DOCTYPE html><html><body><p>Hello</p></BODY></html>";
+    mockRead.mockResolvedValue({ content: upper, contentType: "text/html" });
+    const res = await GET(req("/sites/dep_abc123"), {
+      params: Promise.resolve({ deploymentId: "dep_abc123" }),
+    });
+    const text = await res.text();
+    expect(text).toContain('id="litt-badge"');
+  });
+
   it("does not inject when the form already carries a deployment id", async () => {
     const filled = FORM_HTML.replace('value=""', 'value="dep_other"');
     mockRead.mockResolvedValue({ content: filled, contentType: "text/html" });
