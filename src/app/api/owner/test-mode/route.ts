@@ -21,12 +21,22 @@ export const dynamic = "force-dynamic";
  *   { isOwner: boolean, simulation: SimulatedPlan | null, options: [...] }
  */
 export async function GET(req: NextRequest) {
-  const { userId } = await auth(req);
+  const { userId, clerkId } = await auth(req);
+  
+  // Diagnostic logging to pinpoint auth failures
+  console.log("[owner/test-mode] auth check:", {
+    userId: userId ? `${userId.substring(0, 8)}...` : null,
+    clerkId: clerkId ? `${clerkId.substring(0, 8)}...` : null,
+    ownerEnvSet: !!process.env.LITTLABS_VAPI_OWNER_CLERK_ID,
+  });
+
   if (!userId) {
+    console.log("[owner/test-mode] 401: no userId");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   if (!isOwnerClerkId(userId)) {
+    console.log("[owner/test-mode] 403: isOwnerClerkId=false for userId");
     return NextResponse.json({ error: "Forbidden — owner access required" }, { status: 403 });
   }
 

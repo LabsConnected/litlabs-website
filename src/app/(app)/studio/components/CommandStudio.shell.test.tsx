@@ -493,7 +493,8 @@ describe("StudioShell — desktop operating shell", () => {
     await waitFor(() => {
       expect(screen.getByTestId("stage-surface-design")).toHaveAttribute("data-active", "true");
       expect(screen.getByTestId("visual-canvas-builder")).toBeTruthy();
-      expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
+      // Phase 3B: conversation stays visible when switching surfaces (no auto-collapse)
+      expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
     });
     // Preview stays mounted (hidden) — iframe/scroll state survives.
     const previewSurface = screen.getByTestId("stage-surface-preview");
@@ -601,7 +602,7 @@ describe("StudioShell — left chat dock", () => {
       expect(panel).toHaveAttribute("data-collapsed", "false");
     });
     expect(panel).toHaveAttribute("data-overlay", "false");
-    // 360px default width (expandedMaxWidth="500px" keeps the 26vw legacy
+    // 360px default width (expandedMaxWidth="480px" keeps the 26vw legacy
     // clamp from capping it at 1600px).
     expect(panel.style.width).toContain("360px");
     // Bottom layer is not mounted in left-dock mode.
@@ -672,18 +673,18 @@ describe("StudioShell — left chat dock", () => {
     expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
   });
 
-  it("a stored dock width is clamped to 300–500px", async () => {
+  it("a stored dock width is clamped to 320–480px", async () => {
     window.localStorage.setItem("littree:studio:litt-dock-width", "999");
     const { unmount } = await renderStudioShell();
     await waitFor(() => {
-      expect(screen.getByTestId("litt-panel").style.width).toContain("500px");
+      expect(screen.getByTestId("litt-panel").style.width).toContain("480px");
     });
     unmount();
     window.localStorage.removeItem("littree:studio:litt-dock-width");
     window.localStorage.setItem("littree:studio:litt-dock-width", "50");
     await renderStudioShell();
     await waitFor(() => {
-      expect(screen.getByTestId("litt-panel").style.width).toContain("300px");
+      expect(screen.getByTestId("litt-panel").style.width).toContain("320px");
     });
   });
 
@@ -698,7 +699,7 @@ describe("StudioShell — left chat dock", () => {
     expect(screen.getByTestId("studio-command-composer")).toBeInTheDocument();
   });
 
-  it("dragging the resize handle resizes the dock within 300–500px", async () => {
+  it("dragging the resize handle resizes the dock within 320–480px", async () => {
     await renderStudioShell();
     const handle = screen.getByTestId("litt-dock-resize");
     const panel = () => screen.getByTestId("litt-panel");
@@ -715,10 +716,10 @@ describe("StudioShell — left chat dock", () => {
     fireEvent.mouseMove(document, { clientX: 0 });
     fireEvent.mouseUp(document);
     await waitFor(() => {
-      expect(panel().style.width).toContain("300px");
+      expect(panel().style.width).toContain("320px");
     });
     await waitFor(() => {
-      expect(window.localStorage.getItem("littree:studio:litt-dock-width")).toBe("300");
+      expect(window.localStorage.getItem("littree:studio:litt-dock-width")).toBe("320");
     });
   });
 
