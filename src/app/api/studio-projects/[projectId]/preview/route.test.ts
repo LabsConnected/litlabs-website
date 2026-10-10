@@ -102,7 +102,7 @@ describe("studio-projects preview route — static guards", () => {
   });
 
   it("GET returns ready + static URL without calling dev-server status", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ content: "<html></html>" }), { status: 200 }));
+    const fetchMock = vi.fn(async (url: string | URL | Request, _opts?: RequestInit) => new Response(JSON.stringify({ content: "<html></html>" }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
     const res = await GET(
