@@ -119,6 +119,15 @@ export async function POST(
   const project = await getProject(projectId, userId);
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
+  // Static projects don't use a dev server. Reject startup attempts at the
+  // API boundary (UI checks alone aren't a security boundary).
+  if (project.framework === "static") {
+    return NextResponse.json(
+      { error: "Static projects use the static preview endpoint (/api/preview/[projectId]) and do not require a dev server." },
+      { status: 400 }
+    );
+  }
+
   // Auto-provision the workspace if it was never prepared. This is the fix
   // for the "Prepare preview" → 409 "Workspace not provisioned" loop: the
   // preview start endpoint now provisions the workspace itself so the user
