@@ -119,6 +119,13 @@ export async function GET(
     projectId,
   });
 
+  // Binary files (images, fonts) need base64 encoding to avoid corruption.
+  // Text files use utf-8.
+  const isBinary = !mimeFor(filePath).includes("charset=utf-8") && 
+                   !mimeFor(filePath).startsWith("text/") &&
+                   mimeFor(filePath) !== "application/json; charset=utf-8" &&
+                   mimeFor(filePath) !== "image/svg+xml";
+
   let resp: Response;
   try {
     resp = await fetch(`${terminalBase}/ws-files/read`, {
@@ -127,7 +134,7 @@ export async function GET(
         "Content-Type": "application/json",
         "Authorization": `Bearer ${token}`,        "X-Workspace-Id": project.workspaceId,
       },
-      body: JSON.stringify({ path: filePath, encoding: "utf-8" }),
+      body: JSON.stringify({ path: filePath, encoding: isBinary ? "base64" : "utf-8" }),
       signal: AbortSignal.timeout(15000),
     });
   } catch {
@@ -148,7 +155,12 @@ export async function GET(
     return NextResponse.json({ error: "Invalid preview response" }, { status: 502 });
   }
 
-  return new NextResponse(data.content, {
+  // Decode base64 for binary files, serve text directly for text files.
+  const body = isBinary 
+    ? new Uint8Array(Buffer.from(data.content, "base64"))
+    : data.content;
+
+  return new NextResponse(body, {
     status: 200,
     headers: {
       "Content-Type": mimeFor(filePath),
