@@ -136,7 +136,7 @@ export default function StudioPublishControls({
     } catch {
       // Clipboard unavailable — user can copy from the link directly.
     }
-  }, [deployment?.publicUrl]);
+  }, [deployment]);
 
   if (!projectId) return null;
 
