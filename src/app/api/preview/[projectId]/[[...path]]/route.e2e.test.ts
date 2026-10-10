@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { GET as previewGET } from "@/app/api/preview/[projectId]/[...path]/route";
+import { GET as previewGET } from "@/app/api/preview/[projectId]/[[...path]]/route";
 import { handleFilesWrite } from "@/lib/litt-intelligence/tool-handlers-v2";
 import type { WorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { GET } from "@/app/api/preview/[projectId]/[...path]/route";
+import { GET } from "@/app/api/preview/[projectId]/[[...path]]/route";
 
 /**
  * P0 — AI Build → Static Preview: route-level tests.
@@ -63,7 +63,7 @@ function mockTerminalFile(content: string) {
   );
 }
 
-describe("GET /api/preview/[projectId]/[...path]", () => {
+describe("GET /api/preview/[projectId]/[[...path]]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     spyOnChildProcess();
@@ -176,6 +176,45 @@ describe("GET /api/preview/[projectId]/[...path]", () => {
     const res = await GET(new Request("https://x.test/api/preview/proj-1") as unknown as import("next/server").NextRequest, makeParams("proj-1"));
     expect(res.status).toBe(409);
     expect(global.fetch).not.toHaveBeenCalled();
+    assertZeroSubprocesses();
+  });
+
+  it("serves binary PNG bytes without corruption (base64 round-trip)", async () => {
+    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]);
+    const base64Content = pngBytes.toString("base64");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, opts) => {
+        const body = JSON.parse((opts as RequestInit).body as string);
+        expect(body.encoding).toBe("base64");
+        return new Response(JSON.stringify({ content: base64Content }), { status: 200 });
+      }),
+    );
+    const res = await GET(
+      new Request("https://x.test/api/preview/proj-1/logo.png") as unknown as import("next/server").NextRequest,
+      makeParams("proj-1", ["logo.png"]),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    const buffer = Buffer.from(await res.arrayBuffer());
+    expect(buffer.equals(pngBytes)).toBe(true);
+    assertZeroSubprocesses();
+  });
+
+  it("serves root path as index.html", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, opts) => {
+        const body = JSON.parse((opts as RequestInit).body as string);
+        expect(body.path).toBe("index.html");
+        return new Response(JSON.stringify({ content: "<html></html>" }), { status: 200 });
+      }),
+    );
+    const res = await GET(
+      new Request("https://x.test/api/preview/proj-1") as unknown as import("next/server").NextRequest,
+      makeParams("proj-1", []),
+    );
+    expect(res.status).toBe(200);
     assertZeroSubprocesses();
   });
 });
