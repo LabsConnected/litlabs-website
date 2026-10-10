@@ -121,10 +121,9 @@ export async function GET(
       // Opaque origin: no access to the app's cookies or storage.
       "Content-Security-Policy": "sandbox allow-scripts allow-forms allow-popups",
       "Referrer-Policy": "no-referrer",
-      // A deployment snapshot is immutable, but keep the window short so a
-      // redeploy to a new id is never served from a stale intermediary.
-      // must-revalidate ensures unpublish takes effect promptly.
-      "Cache-Control": "public, max-age=60, must-revalidate",
+      // Unpublish must take effect immediately: no-store prevents any
+      // caching so revoked deployments stop serving on the next request.
+      "Cache-Control": "no-store",
     },
   });
 }
