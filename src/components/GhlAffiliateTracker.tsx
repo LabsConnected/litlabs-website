@@ -6,16 +6,15 @@
  * Two parts:
  *
  * 1. GhlAffiliateScript (exported as default)
- *    Visitor tracking — loads GHL `am.js` on every page and calls
- *    `affiliateManager.init()` so the `am_id` cookie is set when a
- *    visitor arrives via an affiliate referral link.
+ *    Visitor tracking — loads GHL `am.js` only with marketing consent,
+ *    then calls `affiliateManager.init()` to attribute eligible referrals.
  *    No Clerk dependency — safe to render outside ClerkProvider.
  *
  * 2. GhlAffiliateSignupTracker (named export)
  *    Signup tracking — uses Clerk's `useUser()` to detect signed-in
  *    users and calls the SERVER endpoint /api/affiliate/track-lead
  *    which enforces idempotency via the `ghl_lead_tracked` DB column.
- *    This is truly one-time per Clerk user, not per browser session.
+ *    Requests are gated by marketing consent and deduplicated per Clerk user.
  *    MUST be rendered inside <ClerkProvider>.
  *
  * Campaign: LiTTree Partner Program
@@ -61,8 +60,7 @@ declare global {
 }
 
 /**
- * Capture am_id from the URL on first load, before any redirect.
- * Called at module scope so it runs immediately on client hydration.
+ * Capture am_id only after marketing consent, before a signup redirect.
  */
 function captureAmIdFromUrl(): string | null {
   if (typeof window === "undefined") return null;
