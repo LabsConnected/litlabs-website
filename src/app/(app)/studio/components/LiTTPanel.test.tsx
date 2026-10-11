@@ -184,7 +184,7 @@ describe("LiTTPanel — F1 overlay mode (slice B)", () => {
     const brand = screen.getByTestId("litt-panel-brand");
     const logo = brand.querySelector('img[alt="LiTTree LabStudios Logo"]');
     expect(logo).not.toBeNull();
-    expect(logo?.getAttribute("src")).toContain("littree-crystal-mark");
+    expect(logo?.getAttribute("src")).toContain("litt-robot");
     // The old gradient "L" tile is gone.
     expect(brand.textContent).not.toMatch(/^L$/);
   });

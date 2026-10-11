@@ -328,7 +328,7 @@ export function CanvasStage() {
             ref={iframeRef}
             title="Canvas Preview"
             srcDoc={previewHtml}
-            sandbox="allow-same-origin allow-popups allow-forms allow-scripts"
+            sandbox="allow-popups allow-forms allow-scripts"
             style={{
               width: `${bpWidth}px`,
               maxWidth: "100%",

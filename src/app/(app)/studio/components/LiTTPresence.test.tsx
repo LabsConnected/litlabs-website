@@ -72,7 +72,7 @@ describe("LiTTPresence — F1 brand consolidation (slice B)", () => {
     );
     const logo = container.querySelector(`img[alt="${BRAND_ALT}"]`);
     expect(logo).not.toBeNull();
-    expect(logo?.getAttribute("src")).toContain("littree-crystal-mark");
+    expect(logo?.getAttribute("src")).toContain("litt-robot");
   });
 
   it.each([

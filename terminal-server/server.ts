@@ -38,6 +38,7 @@ import {
 import {
   prepareWorkspace,
   prepareManagedWorkspace,
+  prepareStaticWorkspace,
   getWorkspace,
   listWorkspaces,
   type WorkspaceDescriptor,
@@ -854,6 +855,9 @@ app.get("/internal/sessions", requireInternalServiceAuth, (req: AuthenticatedReq
  * Body for blank project:
  *   { sourceType: "blank", userId, projectId, templateId }
  *
+ * Body for static project (no Git — pure filesystem workspace):
+ *   { sourceType: "static", userId, projectId, templateId }
+ *
  * Returns: { workspaceId, userId, projectId, root, branch, commitSha, ready }
  * Idempotent: if a workspace already exists for the projectId+userId, returns it.
  */
@@ -898,6 +902,21 @@ app.post("/internal/workspace/prepare", requireInternalServiceAuth, async (req: 
         existingRoot,
         existingWorkspaceId,
       });
+    } else if (sourceType === "static") {
+      // Static workspaces skip Git entirely: no .git init, no subprocesses.
+      // Gate 1 containment blocks ALL git operations in production (hooks
+      // can execute), so static projects provision through pure filesystem
+      // operations. File read/write works normally; checkpoints/diff/restore
+      // are unavailable without a repository.
+      const templateId = String(body.templateId || "blank-static");
+      descriptor = await prepareStaticWorkspace({
+        userId,
+        projectId,
+        workspaceRoot: WORKSPACE_ROOT,
+        templateId,
+        existingRoot,
+        existingWorkspaceId,
+      });
     } else if (sourceType === "github") {
       const installationId = Number(body.installationId);
       const owner = String(body.owner || "");
@@ -924,7 +943,7 @@ app.post("/internal/workspace/prepare", requireInternalServiceAuth, async (req: 
         existingWorkspaceId,
       });
     } else {
-      res.status(400).json({ error: `sourceType must be "github", "blank", "template" or "managed"` });
+      res.status(400).json({ error: `sourceType must be "github", "blank", "template", "managed" or "static"` });
       return;
     }
 

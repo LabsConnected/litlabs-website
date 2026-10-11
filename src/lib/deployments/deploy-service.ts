@@ -564,3 +564,78 @@ export async function deployUserProject(
     return failure(record.id, err);
   }
 }
+
+export interface UnpublishRequest {
+  userId: string;
+  projectId: string;
+  deploymentId: string;
+}
+
+export interface UnpublishResult {
+  ok: boolean;
+  deploymentId: string | null;
+  message: string;
+}
+
+/**
+ * Unpublish a deployment — take a published site offline.
+ *
+ * Ownership is enforced: the caller must own the deployment's project.
+ * Only `ready` deployments can be unpublished (transition ready → unpublished).
+ * The serving route (`/sites/[deploymentId]`) only serves `ready` rows, so
+ * flipping the status immediately stops public access. Files are retained
+ * in the store for audit/history; republishing creates a new deployment.
+ *
+ * No subprocesses. No infrastructure calls. Pure database state change.
+ */
+export async function unpublishDeployment(
+  request: UnpublishRequest,
+  deps: DeployDeps,
+): Promise<UnpublishResult> {
+  const { store } = deps;
+  const userId = (request.userId ?? "").trim();
+  const projectId = (request.projectId ?? "").trim();
+  const deploymentId = (request.deploymentId ?? "").trim();
+
+  if (!userId) {
+    return { ok: false, deploymentId: null, message: "Forbidden: no authenticated user." };
+  }
+  if (!projectId || !deploymentId) {
+    return { ok: false, deploymentId: null, message: "Deployment not specified." };
+  }
+
+  let record: DeploymentRecord | null;
+  try {
+    record = await store.findById(deploymentId);
+  } catch {
+    return { ok: false, deploymentId: null, message: "Deployment lookup failed." };
+  }
+  if (!record) {
+    return { ok: false, deploymentId: null, message: "Deployment not found." };
+  }
+  if (record.userId !== userId) {
+    return { ok: false, deploymentId, message: "Forbidden: you do not own this deployment." };
+  }
+  if (record.projectId !== projectId) {
+    return { ok: false, deploymentId, message: "Forbidden: project mismatch." };
+  }
+  if (record.status !== "ready") {
+    return {
+      ok: false,
+      deploymentId,
+      message: `Only live deployments can be unpublished (current status: ${record.status}).`,
+    };
+  }
+
+  try {
+    await store.update(deploymentId, { status: "unpublished" });
+  } catch (err) {
+    return {
+      ok: false,
+      deploymentId,
+      message: `Failed to unpublish: ${err instanceof Error ? err.message : "storage error"}.`,
+    };
+  }
+
+  return { ok: true, deploymentId, message: "Deployment unpublished. The public URL no longer serves content." };
+}

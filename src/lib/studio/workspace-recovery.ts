@@ -11,7 +11,7 @@ import {
   prepareWorkspaceInternal,
 } from "@/lib/terminal-internal-client";
 import { getInstallationTokenForClone } from "@/lib/github-app";
-import { isManagedSourceType } from "@/lib/projects/project-source";
+import { isManagedSourceType, isStaticTemplateId } from "@/lib/projects/project-source";
 import type { CanonicalProject } from "@/lib/projects/types";
 
 /**
@@ -280,11 +280,16 @@ export async function provisionWorkspaceForProject(
 
     let result;
     if (isManagedSourceType(provisioningProject.sourceType)) {
+      const templateId = provisioningProject.templateId ?? "blank-static";
+      // Static-site templates (no build step) provision via the gitless
+      // "static" path — Gate 1 blocks all git operations in production.
+      // Framework templates keep the "managed" (git-backed) path.
+      const provisionSourceType = isStaticTemplateId(templateId) ? "static" : "managed";
       result = await prepareWorkspaceInternal({
-        sourceType: "managed",
+        sourceType: provisionSourceType,
         userId,
         projectId,
-        templateId: provisioningProject.templateId ?? "blank-static",
+        templateId,
         ...adoption,
       });
     } else if (
