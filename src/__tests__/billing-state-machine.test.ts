@@ -31,9 +31,11 @@ vi.mock("@/lib/rate-limiter", () => ({
 
 // Controllable Stripe mock — constructEvent is a spy we can set per-test
 const mockConstructEvent = vi.fn();
+const mockSubscriptionsRetrieve = vi.fn();
 vi.mock("stripe", () => ({
   default: vi.fn().mockImplementation(() => ({
     webhooks: { constructEvent: mockConstructEvent },
+    subscriptions: { retrieve: mockSubscriptionsRetrieve },
   })),
 }));
 
@@ -825,10 +827,13 @@ describe("invoice.paid race condition — subscription row not yet written", () 
       return 0 as any;
     }) as any);
     vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockSubscriptionsRetrieve.mockReset();
   });
 
   afterEach(() => {
     vi.mocked(console.error).mockRestore();
+    vi.mocked(console.warn).mockRestore();
     // Restore the real setTimeout without nuking shared module mocks
     (globalThis.setTimeout as any).mockRestore?.();
   });
@@ -856,8 +861,14 @@ describe("invoice.paid race condition — subscription row not yet written", () 
           if (table === "users") return { data: { id: "user_internal_123" }, error: null };
           return { data: null, error: null };
         }),
-        upsert: vi.fn(async (row: any) => ({ error: null })),
-        insert: vi.fn(async (row: any) => ({ error: null })),
+        upsert: vi.fn(async (row: any) => {
+          base.upserts.push({ table, row });
+          return { error: null };
+        }),
+        insert: vi.fn(async (row: any) => {
+          base.inserts.push({ table, row });
+          return { error: null };
+        }),
         update: vi.fn((patch: any) => {
           const builder: any = {
             eq: vi.fn(() => builder),
@@ -900,25 +911,82 @@ describe("invoice.paid race condition — subscription row not yet written", () 
     expect(grants[0].params.p_amount).toBe(7500);
   });
 
-  it("gives up after retries, logs loudly, grants nothing, still returns 200", async () => {
+  it("row never appears and Stripe fallback fails → 500 (Stripe retries; not silently dropped)", async () => {
     const { sb, rpcCalls, getSubLookups } = buildRaceSupabase(100); // never appears
     vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
     vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
     mockConstructEvent.mockReturnValue(paidEvent());
+    mockSubscriptionsRetrieve.mockRejectedValue(new Error("stripe down"));
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+
+    // NOT 200: Stripe must retry. Event is not marked processed.
+    expect(res.status).toBe(500);
+    expect(getSubLookups()).toBe(6); // all retries exhausted
+    expect(rpcCalls.filter((c) => c.fn === "grant_credits").length).toBe(0);
+  });
+
+  it("Stripe API fallback reconstructs the row and grants exactly once", async () => {
+    const { sb, rpcCalls, upserts } = buildRaceSupabase(100); // row never appears via DB
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockConstructEvent.mockReturnValue(paidEvent());
+    // Fallback: Stripe returns the subscription with clerk metadata
+    mockSubscriptionsRetrieve.mockResolvedValue({
+      id: "sub_test_123",
+      status: "active",
+      metadata: { clerk_id: "user_123", plan_id: "creator_beta" },
+      items: { data: [{ current_period_start: 1700000000, current_period_end: 1702678400 }] },
+    });
 
     const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
     const res = await webhookPOST(makeWebhookRequest("body", "sig"));
 
     expect(res.status).toBe(200);
-    expect(getSubLookups()).toBe(6); // all retries exhausted
-    expect(rpcCalls.filter((c) => c.fn === "grant_credits").length).toBe(0);
-    // Loud logging, not a silent skip
-    expect(vi.mocked(console.error)).toHaveBeenCalledWith(
-      expect.stringContaining("no subscription row for sub_test_123 after retries"),
-    );
+    // Subscription row was reconstructed via upsert
+    expect(upserts.find((u) => u.table === "subscriptions")).toBeDefined();
+    // Granted exactly once
+    const grants = rpcCalls.filter((c) => c.fn === "grant_credits");
+    expect(grants.length).toBe(1);
+    expect(grants[0].params.p_idempotency_key).toBe("invoice_grant_in_test_race");
   });
 
-  it("missing parent subscription id logs loudly and grants nothing", async () => {
+  it("grant RPC failure → 500 propagates; retry grants exactly once (idempotent)", async () => {
+    // First attempt: grant_credits throws
+    const first = buildTrackingSupabase();
+    let rpcShouldThrow = true;
+    const origRpc = first.sb.rpc as any;
+    first.sb.rpc = vi.fn(async (fnName: string, params: any) => {
+      if (fnName === "grant_credits" && rpcShouldThrow) {
+        throw new Error("db unavailable");
+      }
+      return origRpc(fnName, params);
+    });
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(first.sb as any);
+    mockConstructEvent.mockReturnValue(paidEvent());
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res1 = await webhookPOST(makeWebhookRequest("body", "sig"));
+    // Failure surfaces as 500 — Stripe will retry; event NOT marked processed
+    expect(res1.status).toBe(500);
+
+    // Retry (Stripe redelivery): grant now succeeds
+    rpcShouldThrow = false;
+    const second = buildTrackingSupabase();
+    vi.mocked(getAdminSupabase).mockReturnValue(second.sb as any);
+    // Same event id → but not marked processed (first attempt 500'd), so it processes
+    mockConstructEvent.mockReturnValue(paidEvent());
+    const res2 = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res2.status).toBe(200);
+    const grants = (second as any).rpcCalls.filter((c: any) => c.fn === "grant_credits");
+    expect(grants.length).toBe(1);
+    // Same idempotency key → the RPC layer dedups even if called twice
+    expect(grants[0].params.p_idempotency_key).toBe("invoice_grant_in_test_race");
+  });
+
+  it("missing parent subscription id → 500 (not silently dropped)", async () => {
     const { sb, rpcCalls } = buildTrackingSupabase();
     vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
     vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
@@ -932,11 +1000,9 @@ describe("invoice.paid race condition — subscription row not yet written", () 
     const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
     const res = await webhookPOST(makeWebhookRequest("body", "sig"));
 
-    expect(res.status).toBe(200);
+    // Malformed paid invoice must not be silently acknowledged
+    expect(res.status).toBe(500);
     expect(rpcCalls.filter((c) => c.fn === "grant_credits").length).toBe(0);
-    expect(vi.mocked(console.error)).toHaveBeenCalledWith(
-      expect.stringContaining("missing parent subscription id"),
-    );
   });
 });
 
