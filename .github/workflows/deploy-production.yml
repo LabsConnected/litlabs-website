@@ -24,12 +24,14 @@ on:
         required: true
         type: choice
         options:
-          - litlabs-terminal-server
-          - web
+          - terminal-server
           - litt-shell
           - cli
           - litt-models
           - voice-proxy
+          - web
+          - terminal-server-prod
+          - voice-worker
       sha:
         description: "Full commit SHA on main to deploy (40 characters)"
         required: true
@@ -53,8 +55,9 @@ jobs:
     outputs:
       sha: ${{ steps.val.outputs.sha }}
       service: ${{ steps.val.outputs.service }}
-      project: ${{ steps.val.outputs.project }}
-      r_env: ${{ steps.val.outputs.r_env }}
+      project_id: ${{ steps.val.outputs.project_id }}
+      env_id: ${{ steps.val.outputs.env_id }}
+      service_id: ${{ steps.val.outputs.service_id }}
     steps:
       - name: Validate inputs
         id: val
@@ -166,23 +169,33 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Validate Railway target
+      - name: Validate Railway target by ID
         env:
           RAILWAY_TOKEN: <redacted>
           SERVICE: ${{ needs.verify.outputs.service }}
-          PROJECT: ${{ needs.verify.outputs.project }}
-          R_ENV: ${{ needs.verify.outputs.r_env }}
+          PROJECT_ID: ${{ needs.verify.outputs.project_id }}
+          ENV_ID: ${{ needs.verify.outputs.env_id }}
+          SERVICE_ID: ${{ needs.verify.outputs.service_id }}
         run: |
           set +x
-          echo "Validating $SERVICE in project $PROJECT ($R_ENV)"
-          railway link --project "$PROJECT" --environment "$R_ENV"
-          # Verify the service exists in this project/environment
-          if ! railway service list 2>/dev/null | grep -q "^$SERVICE$"; then
-            echo "::error::Service '$SERVICE' not found in project '$PROJECT' ($R_ENV)"
+          echo "Validating target by ID:"
+          echo "  Service: $SERVICE"
+          echo "  Project ID: $PROJECT_ID"
+          echo "  Environment ID: $ENV_ID"
+          echo "  Service ID prefix: $SERVICE_ID"
+          # Link using explicit IDs (not names)
+          railway link --project "$PROJECT_ID" --environment "$ENV_ID"
+          # Verify the service ID exists in this project
+          # railway service list shows IDs; check our prefix matches
+          SERVICE_LIST=$(railway service list 2>/dev/null || echo "")
+          if ! echo "$SERVICE_LIST" | grep -q "$SERVICE_ID"; then
+            echo "::error::Service ID prefix '$SERVICE_ID' not found in project $PROJECT_ID"
+            echo "::error::Available services:"
+            echo "$SERVICE_LIST" | head -20
             echo "::error::Aborting to prevent deploying to wrong target."
             exit 1
           fi
-          echo "Target validated: $SERVICE exists in $PROJECT ($R_ENV)"
+          echo "Target validated by ID."
 
       - name: Deploy to Railway
         env:
