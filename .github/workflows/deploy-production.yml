@@ -1,0 +1,178 @@
+name: Deploy to Production (manual, CI-gated, approval-required)
+
+# CONTROLLED PRODUCTION RELEASE WORKFLOW
+#
+# This workflow NEVER runs automatically. A push to main does not deploy.
+# A person starts it from the Actions tab, picks a service and a commit
+# that is already on main, and (via the `production` environment's required
+# reviewers) approval is needed before anything is deployed.
+#
+# Gates, in order:
+#   1. The service must be in the allowed production service list.
+#   2. The commit must be an ancestor of main.
+#   3. Required CI check runs must have concluded "success" on that exact commit.
+#   4. The `production` GitHub environment must approve the run.
+#
+# NOTE: this does not control Railway's own GitHub integration. Keep Autodeploy
+# OFF on every Railway production service. See docs/DEPLOYMENT_CONTROLS.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Production service to deploy"
+        required: true
+        type: choice
+        options:
+          - litlabs-terminal-server
+          - web
+          - litt-shell
+          - cli
+          - litt-models
+          - voice-proxy
+      sha:
+        description: "Full commit SHA on main to deploy (40 characters)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  checks: read
+
+concurrency:
+  group: deploy-production-${{ inputs.service }}
+  cancel-in-progress: false
+
+env:
+  REQUIRED_CHECKS: "Build and Type Check"
+
+jobs:
+  verify:
+    name: Verify service, commit and CI
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.val.outputs.sha }}
+      service: ${{ steps.val.outputs.service }}
+    steps:
+      - name: Validate inputs
+        id: val
+        env:
+          INPUT_SHA: ${{ inputs.sha }}
+          INPUT_SERVICE: ${{ inputs.service }}
+        run: |
+          set +x
+          # Validate SHA format
+          if ! printf '%s' "$INPUT_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::sha must be a full 40-character lowercase commit SHA"
+            exit 1
+          fi
+          # Validate service is in allowed list
+          case "$INPUT_SERVICE" in
+            litlabs-terminal-server|web|litt-shell|cli|litt-models|voice-proxy)
+              ;;
+            *)
+              echo "::error::Unknown service: $INPUT_SERVICE"
+              exit 1
+              ;;
+          esac
+          echo "sha=$INPUT_SHA" >> "$GITHUB_OUTPUT"
+          echo "service=$INPUT_SERVICE" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.val.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Commit must be on main
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "${{ steps.val.outputs.sha }}" origin/main; then
+            echo "::error::Commit is not an ancestor of main. Refusing to deploy."
+            exit 1
+          fi
+
+      - name: Required CI checks must have passed on this commit
+        env:
+          GH_TOKEN: <redacted>
+          SHA: ${{ steps.val.outputs.sha }}
+        run: |
+          set +x
+          runs=$(gh api "repos/${{ github.repository }}/commits/$SHA/check-runs?per_page=100" --jq '.check_runs')
+          fail=0
+          IFS='|' read -ra NAMES <<< "$REQUIRED_CHECKS"
+          for n in "${NAMES[@]}"; do
+            concl=$(echo "$runs" | jq -r --arg n "$n" '[.[] | select(.name==$n)] | sort_by(.completed_at) | last | .conclusion // "missing"')
+            echo "$n: $concl"
+            if [ "$concl" != "success" ]; then fail=1; fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::A required CI check is not green on $SHA. Refusing to deploy."
+            exit 1
+          fi
+
+  deploy:
+    name: Deploy to production (needs approval)
+    needs: verify
+    runs-on: ubuntu-latest
+    # Configure required reviewers on this environment in GitHub:
+    # Settings -> Environments -> production
+    environment:
+      name: production
+    steps:
+      - name: Checkout verified commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+
+      - name: Check RAILWAY_TOKEN
+        env:
+          RAILWAY_TOKEN: <redacted>
+        run: |
+          set +x
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::error::RAILWAY_TOKEN is not set for the production environment."
+            echo "::error::Configure it in GitHub: Settings -> Environments -> production -> Secrets"
+            exit 1
+          fi
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway
+        env:
+          RAILWAY_TOKEN: <redacted>
+          SERVICE: ${{ needs.verify.outputs.service }}
+          SHA: ${{ needs.verify.outputs.sha }}
+        run: |
+          set +x
+          echo "Deploying $SERVICE at $SHA"
+          # Set commit metadata without triggering deploy
+          railway variable set RAILWAY_GIT_COMMIT_SHA=$SHA \
+            --service "$SERVICE" \
+            --skip-deploys
+          # Trigger the deployment
+          railway up --service "$SERVICE"
+
+      - name: Health check
+        env:
+          SERVICE: ${{ needs.verify.outputs.service }}
+        run: |
+          sleep 30
+          case "$SERVICE" in
+            litlabs-terminal-server)
+              URL="https://litlabs-terminal-server-production-0be1.up.railway.app/health/ready"
+              ;;
+            web)
+              URL="https://app.litlabs.net/api/health"
+              ;;
+            litt-shell)
+              URL="https://www.litlabs.net/api/health"
+              ;;
+            *)
+              echo "No health check URL for $SERVICE, skipping"
+              exit 0
+              ;;
+          esac
+          echo "Checking $URL"
+          curl -sSf --retry 3 --retry-delay 10 "$URL" | head -c 500
