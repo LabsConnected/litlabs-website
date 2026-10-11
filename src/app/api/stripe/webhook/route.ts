@@ -426,9 +426,10 @@ export async function POST(req: NextRequest) {
         // this handler does a single SELECT, so without a wait the lookup
         // systematically misses.
         //
-        // Timeout budget (worst case): 5 sleeps × 2s = 10s + 6 DB SELECTs
-        // (~1s) + Stripe API fallback (~2s) + grant RPC (~1s) ≈ 14s total.
-        // This stays well under Stripe's 30s webhook timeout.
+        // Timeout budget (guaranteed, not estimated): 5 sleeps × 2s = 10s
+        // + Stripe API fallback (hard 8s timeout above) + DB ops ≈ 20s max.
+        // Stays under Stripe's 30s webhook timeout even if every
+        // dependency is slow.
         let invMatch: { user_id: string; plan: string } | null = null;
         for (let attempt = 0; attempt < 6; attempt++) {
           const { data } = await sb
@@ -450,7 +451,12 @@ export async function POST(req: NextRequest) {
             `[stripe] invoice.paid ${event.id}: subscription row missing after retries, resolving via Stripe API`,
           );
           try {
-            const fullSub = await stripe.subscriptions.retrieve(invSubId);
+            // Bounded: 8s max for the Stripe API call. Combined with the
+            // 10s retry loop, the worst case stays under Stripe's 30s
+            // webhook timeout even if the API hangs.
+            const fullSub = await stripe.subscriptions.retrieve(invSubId, undefined, {
+              timeout: 8000,
+            });
             // Resolve the user from the subscription's own metadata — no guessing.
             const clerkId: string | undefined =
               typeof fullSub.metadata?.clerk_id === "string"
@@ -516,13 +522,20 @@ export async function POST(req: NextRequest) {
             `[stripe] invoice.paid ${event.id}: no subscription row for ${invSubId} after retries+fallback`,
           );
         }
-        await sb
+        // Status update is checked: a silent failure here would leave the
+        // subscription row stale. Throw → 500 → Stripe retries (idempotent).
+        const { error: statusUpdateError } = await sb
           .from("subscriptions")
           .update({
             status: "active",
             updated_at: new Date().toISOString(),
           })
           .eq("user_id", invMatch.user_id);
+        if (statusUpdateError) {
+          throw new Error(
+            `[stripe] invoice.paid ${event.id}: status update failed: ${statusUpdateError.message}`,
+          );
+        }
         // Invoice payment is the only source of subscription grants. This
         // prevents the first billing period from being granted twice.
         // If the grant throws, the error propagates → HTTP 500 → Stripe

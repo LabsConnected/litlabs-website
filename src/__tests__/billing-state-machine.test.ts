@@ -1054,6 +1054,44 @@ describe("invoice.paid race condition — subscription row not yet written", () 
     expect(grants.length).toBe(1);
   });
 
+  it("status update error → 500 (never silently leaves stale status)", async () => {
+    const { sb, rpcCalls } = buildTrackingSupabase();
+    // Make the subscriptions status update fail
+    (sb.from as any).mockImplementation((table: string) => {
+      const chainObj: any = {
+        select: () => chainObj,
+        eq: () => chainObj,
+        single: async () => {
+          if (table === "subscriptions") {
+            return { data: { user_id: "user_internal_123", plan: "creator_beta" }, error: null };
+          }
+          if (table === "users") return { data: { id: "user_internal_123" }, error: null };
+          return { data: null, error: null };
+        },
+        upsert: async (row: any) => ({ error: null }),
+        insert: async (row: any) => ({ error: null }),
+        update: (patch: any) => {
+          const builder: any = {
+            eq: () => builder,
+            then: (r: any) => r({ error: { message: "row locked" } }),
+          };
+          return builder;
+        },
+      };
+      return chainObj;
+    });
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockConstructEvent.mockReturnValue(paidEvent());
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+
+    // Status update failed → 500 before any grant → Stripe retries
+    expect(res.status).toBe(500);
+    expect(rpcCalls.filter((c) => c.fn === "grant_credits").length).toBe(0);
+  });
+
   it("missing parent subscription id → 500 (not silently dropped)", async () => {
     const { sb, rpcCalls } = buildTrackingSupabase();
     vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
