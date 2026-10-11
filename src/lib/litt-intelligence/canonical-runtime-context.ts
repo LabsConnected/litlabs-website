@@ -155,7 +155,7 @@ export async function buildCanonicalRuntimeContext(
     ctx.workspaceReady = true;
     // Gate 1: static (gitless) workspaces have file access but NO host execution.
     // Do not advertise exec capability for static workspaces.
-    const isStatic = verified.project.sourceType === "static";
+    const isStatic = verified.project.framework === "static";
     ctx.workspaceExecutionAvailable = !isStatic;
     ctx.projectName = verified.project.name;
     ctx.framework = verified.project.framework ?? null;
