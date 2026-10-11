@@ -53,6 +53,8 @@ jobs:
     outputs:
       sha: ${{ steps.val.outputs.sha }}
       service: ${{ steps.val.outputs.service }}
+      project: ${{ steps.val.outputs.project }}
+      r_env: ${{ steps.val.outputs.r_env }}
     steps:
       - name: Validate inputs
         id: val
@@ -66,15 +68,40 @@ jobs:
             echo "::error::sha must be a full 40-character lowercase commit SHA"
             exit 1
           fi
-          # Validate service is in allowed list
+          # Validate service is in allowed list and map to Railway project/environment
           case "$INPUT_SERVICE" in
-            litlabs-terminal-server|web|litt-shell|cli|litt-models|voice-proxy)
+            litlabs-terminal-server)
+              RAILWAY_PROJECT="litlabs-terminal-server"
+              RAILWAY_ENV="production"
+              ;;
+            web)
+              RAILWAY_PROJECT="litlabs-terminal-server"
+              RAILWAY_ENV="production"
+              ;;
+            litt-shell)
+              RAILWAY_PROJECT="litlabs-website"
+              RAILWAY_ENV="production"
+              ;;
+            cli)
+              RAILWAY_PROJECT="litlabs-website"
+              RAILWAY_ENV="production"
+              ;;
+            litt-models)
+              RAILWAY_PROJECT="litlabs-website"
+              RAILWAY_ENV="production"
+              ;;
+            voice-proxy)
+              RAILWAY_PROJECT="litlabs-website"
+              RAILWAY_ENV="production"
               ;;
             *)
               echo "::error::Unknown service: $INPUT_SERVICE"
               exit 1
               ;;
           esac
+          echo "project=$RAILWAY_PROJECT" >> "$GITHUB_OUTPUT"
+          echo "r_env=$RAILWAY_ENV" >> "$GITHUB_OUTPUT"
+          echo "Deploying $INPUT_SERVICE to project $RAILWAY_PROJECT ($RAILWAY_ENV)"
           echo "sha=$INPUT_SHA" >> "$GITHUB_OUTPUT"
           echo "service=$INPUT_SERVICE" >> "$GITHUB_OUTPUT"
 
@@ -143,10 +170,14 @@ jobs:
         env:
           RAILWAY_TOKEN: <redacted>
           SERVICE: ${{ needs.verify.outputs.service }}
+          PROJECT: ${{ needs.verify.outputs.project }}
+          R_ENV: ${{ needs.verify.outputs.r_env }}
           SHA: ${{ needs.verify.outputs.sha }}
         run: |
           set +x
-          echo "Deploying $SERVICE at $SHA"
+          echo "Deploying $SERVICE to project $PROJECT ($R_ENV) at $SHA"
+          # Verify we're targeting the right project
+          railway link --project "$PROJECT" --environment "$R_ENV"
           # Set commit metadata without triggering deploy
           railway variable set RAILWAY_GIT_COMMIT_SHA=$SHA \
             --service "$SERVICE" \
