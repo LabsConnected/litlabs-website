@@ -166,24 +166,43 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Deploy to Railway
+      - name: Validate Railway target
         env:
           RAILWAY_TOKEN: <redacted>
           SERVICE: ${{ needs.verify.outputs.service }}
           PROJECT: ${{ needs.verify.outputs.project }}
           R_ENV: ${{ needs.verify.outputs.r_env }}
+        run: |
+          set +x
+          echo "Validating $SERVICE in project $PROJECT ($R_ENV)"
+          railway link --project "$PROJECT" --environment "$R_ENV"
+          # Verify the service exists in this project/environment
+          if ! railway service list 2>/dev/null | grep -q "^$SERVICE$"; then
+            echo "::error::Service '$SERVICE' not found in project '$PROJECT' ($R_ENV)"
+            echo "::error::Aborting to prevent deploying to wrong target."
+            exit 1
+          fi
+          echo "Target validated: $SERVICE exists in $PROJECT ($R_ENV)"
+
+      - name: Deploy to Railway
+        env:
+          RAILWAY_TOKEN: <redacted>
+          SERVICE: ${{ needs.verify.outputs.service }}
           SHA: ${{ needs.verify.outputs.sha }}
         run: |
           set +x
-          echo "Deploying $SERVICE to project $PROJECT ($R_ENV) at $SHA"
-          # Verify we're targeting the right project
-          railway link --project "$PROJECT" --environment "$R_ENV"
+          echo "Deploying $SERVICE at $SHA"
+          echo "Build context: repository root (monorepo)"
+          echo "Railway will use the service's configured Dockerfile and build settings."
           # Set commit metadata without triggering deploy
           railway variable set RAILWAY_GIT_COMMIT_SHA=$SHA \
             --service "$SERVICE" \
             --skip-deploys
-          # Trigger the deployment
+          # Trigger the deployment (uploads current directory as build context)
           railway up --service "$SERVICE"
+          echo ""
+          echo "Deployed SHA: $SHA"
+          echo "Verify with: railway deployment list --service $SERVICE"
 
       - name: Health check
         env:
