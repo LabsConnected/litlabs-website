@@ -206,24 +206,37 @@ jobs:
           # `git grep -E`, escaped braces match a literal "{40,}" sequence, so
           # the pattern can never match a real key and the scan silently passes.
           # Test placeholders (pk_test_* in layout.tsx, test files) are allowed.
+          #
+          # On a hit, print only file:line and the rule name. The matched line
+          # is discarded by cut and is never written to the public log.
+          set +x
           EXIT=0
-          for pattern in \
-            "gsk_[A-Za-z0-9]{40,}" \
-            "sk-proj-[A-Za-z0-9]{40,}" \
-            "sk_live_clerk_[A-Za-z0-9]{30,}" \
-            "sk_live_[A-Za-z0-9]{40,}" \
-            "sk_test_[A-Za-z0-9]{40,}" \
-            "n8n_api_[A-Za-z0-9]{32,}" \
-            "[0-9a-f]{32}\.access" \
-            "(CF_CLIENT_SECRET|CF_ACCESS_CLIENT_SECRET)[[:space:]]*[=:][[:space:]]*[\'\"][0-9a-f]{64}" \
-            "eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.sbp_[A-Za-z0-9]"; do
-            HITS=$(git grep -nE "$pattern" -- ':!*.test.ts' ':!*.test.tsx' ':!tests/*' ':!**/__tests__/*' ':!docs/*' ':!*.md' ':!.github/workflows/build.yml' 2>/dev/null || true)
-            if [ -n "$HITS" ]; then
-              echo "❌ Potential secret found matching $pattern:"
-              echo "$HITS"
+          scan_rule() {
+            rule="$1"
+            pattern="$2"
+            locations="$(git grep -nE -I "$pattern" -- \
+              ':!*.test.ts' ':!*.test.tsx' ':!tests/*' ':!**/__tests__/*' \
+              ':!docs/*' ':!*.md' ':!.github/workflows/build.yml' \
+              ':!.gitleaks.toml' ':!.github/workflows/gitleaks.yml' \
+              ':!scripts/final-acceptance/redact-secrets.mjs' \
+              2>/dev/null | cut -d: -f1,2 || true)"
+            if [ -n "$locations" ]; then
+              echo "❌ Potential secret found"
+              echo "rule: ${rule}"
+              echo "locations:"
+              printf '%s\n' "$locations"
               EXIT=1
             fi
-          done
+          }
+          scan_rule "groq-api-key" "gsk_[A-Za-z0-9]{40,}"
+          scan_rule "openai-project-key" "sk-proj-[A-Za-z0-9]{40,}"
+          scan_rule "clerk-live-secret" "sk_live_clerk_[A-Za-z0-9]{30,}"
+          scan_rule "stripe-live-secret" "sk_live_[A-Za-z0-9]{40,}"
+          scan_rule "stripe-test-secret" "sk_test_[A-Za-z0-9]{40,}"
+          scan_rule "n8n-api-key" "n8n_api_[A-Za-z0-9]{32,}"
+          scan_rule "cloudflare-access-client-id" "[0-9a-f]{32}\\.access"
+          scan_rule "cloudflare-access-client-secret" "(CF_CLIENT_SECRET|CF_ACCESS_CLIENT_SECRET)[[:space:]]*[=:][[:space:]]*['\"][0-9a-f]{64}"
+          scan_rule "supabase-service-key" "eyJ[A-Za-z0-9_-]*\\.eyJ[A-Za-z0-9_-]*\\.sbp_[A-Za-z0-9]"
           if [ "$EXIT" = "1" ]; then
             echo ""
             echo "Secret scan FAILED — rotate the exposed credential and remove it from source."
