@@ -812,6 +812,135 @@ describe("Webhook event processing — state mutations", () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════
+// INVOICE.PAID RACE CONDITION (webhook arrives before subscription row)
+// ═════════════════════════════════════════════════════════════════════
+
+describe("invoice.paid race condition — subscription row not yet written", () => {
+  beforeEach(() => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_WEBHOOK_SECRET = "whsec_fake";
+    // Make the retry loop instant in tests (no real 2s sleeps)
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((cb: any) => {
+      cb();
+      return 0 as any;
+    }) as any);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.mocked(console.error).mockRestore();
+    // Restore the real setTimeout without nuking shared module mocks
+    (globalThis.setTimeout as any).mockRestore?.();
+  });
+
+  /**
+   * Builds a mock Supabase where the subscriptions lookup returns null for
+   * the first `missCount` calls, then returns the row — simulating the
+   * customer.subscription.created upsert landing mid-retry.
+   */
+  function buildRaceSupabase(missCount: number) {
+    const base = buildTrackingSupabase();
+    let subLookups = 0;
+    // Replace from() entirely: every chain's single() is stateful, because
+    // each .select()/.eq() returns a fresh chain object.
+    base.sb.from = vi.fn((table: string) => {
+      const chainObj: any = {
+        select: vi.fn(() => chainObj),
+        eq: vi.fn(() => chainObj),
+        single: vi.fn(async () => {
+          if (table === "subscriptions") {
+            subLookups++;
+            if (subLookups <= missCount) return { data: null, error: null };
+            return { data: { user_id: "user_internal_123", plan: "creator_beta" }, error: null };
+          }
+          if (table === "users") return { data: { id: "user_internal_123" }, error: null };
+          return { data: null, error: null };
+        }),
+        upsert: vi.fn(async (row: any) => ({ error: null })),
+        insert: vi.fn(async (row: any) => ({ error: null })),
+        update: vi.fn((patch: any) => {
+          const builder: any = {
+            eq: vi.fn(() => builder),
+            then: (resolve: (v: any) => void) => resolve({ error: null }),
+          };
+          return builder;
+        }),
+      };
+      return chainObj;
+    });
+    return { ...base, getSubLookups: () => subLookups };
+  }
+
+  function paidEvent() {
+    return makeStripeEvent("invoice.paid", {
+      object: {
+        id: "in_test_race",
+        parent: { subscription_details: { subscription: "sub_test_123" } },
+        lines: { data: [{ period: { end: 1702678400 } }] },
+      },
+    });
+  }
+
+  it("waits for the subscription row and grants exactly once (no duplicate)", async () => {
+    const { sb, rpcCalls, getSubLookups } = buildRaceSupabase(3);
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockConstructEvent.mockReturnValue(paidEvent());
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+
+    expect(res.status).toBe(200);
+    // Retried until the row appeared (3 misses + 1 hit)
+    expect(getSubLookups()).toBe(4);
+    // Granted exactly once — retries must not duplicate
+    const grants = rpcCalls.filter((c) => c.fn === "grant_credits");
+    expect(grants.length).toBe(1);
+    expect(grants[0].params.p_idempotency_key).toBe("invoice_grant_in_test_race");
+    expect(grants[0].params.p_amount).toBe(7500);
+  });
+
+  it("gives up after retries, logs loudly, grants nothing, still returns 200", async () => {
+    const { sb, rpcCalls, getSubLookups } = buildRaceSupabase(100); // never appears
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockConstructEvent.mockReturnValue(paidEvent());
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+
+    expect(res.status).toBe(200);
+    expect(getSubLookups()).toBe(6); // all retries exhausted
+    expect(rpcCalls.filter((c) => c.fn === "grant_credits").length).toBe(0);
+    // Loud logging, not a silent skip
+    expect(vi.mocked(console.error)).toHaveBeenCalledWith(
+      expect.stringContaining("no subscription row for sub_test_123 after retries"),
+    );
+  });
+
+  it("missing parent subscription id logs loudly and grants nothing", async () => {
+    const { sb, rpcCalls } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockConstructEvent.mockReturnValue(
+      makeStripeEvent("invoice.paid", {
+        id: "evt_noparent",
+        object: { id: "in_test_noparent", lines: { data: [] } }, // no parent
+      }),
+    );
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+
+    expect(res.status).toBe(200);
+    expect(rpcCalls.filter((c) => c.fn === "grant_credits").length).toBe(0);
+    expect(vi.mocked(console.error)).toHaveBeenCalledWith(
+      expect.stringContaining("missing parent subscription id"),
+    );
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════
 // ENTITLEMENT RESOLUTION
 // ═════════════════════════════════════════════════════════════════════
 
