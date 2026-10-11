@@ -77,6 +77,7 @@
     "babel-plugin-react-compiler": "^1.0.0",
     "braintrust": "^3.27.0",
     "dotenv": "^16.4.5",
+    "e2b": "^2.55.0",
     "express": "^4.19.2",
     "framer-motion": "^13.0.0",
     "hash-wasm": "^4.12.0",
