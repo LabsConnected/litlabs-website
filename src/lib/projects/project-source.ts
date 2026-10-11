@@ -199,3 +199,20 @@ export function formatSourceSummary(source: {
   if (source.branch) parts.push(source.branch);
   return parts.join(" · ");
 }
+
+/**
+ * Static templates provision via the gitless "static" workspace path because
+ * Gate 1 containment correctly blocks ALL git operations in production.
+ * Static sites don't need version control to be useful.
+ */
+const STATIC_TEMPLATE_IDS: ReadonlySet<string> = new Set(["blank-static", "empty-static"]);
+
+/**
+ * Whether a template ID routes to the static (gitless) workspace path.
+ * Null/undefined defaults to true because the provisioning default is
+ * "blank-static" (see workspace-recovery.ts).
+ */
+export function isStaticTemplateId(templateId: string | null | undefined): boolean {
+  if (!templateId) return true;
+  return STATIC_TEMPLATE_IDS.has(templateId);
+}
