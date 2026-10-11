@@ -365,6 +365,12 @@ export async function listProjects(userId: string): Promise<ProjectListResult> {
       .order("updated_at", { ascending: false }),
   ]);
 
+  if (studioResult.error) {
+    throw new Error(`Failed to list studio projects: ${studioResult.error.message}`);
+  }
+  if (legacyResult.error) {
+    throw new Error(`Failed to list legacy projects: ${legacyResult.error.message}`);
+  }
   const studioProjects = (studioResult.data ?? []) as StudioProjectRow[];
   const legacyProjects = (legacyResult.data ?? []) as LegacyProjectRow[];
 
