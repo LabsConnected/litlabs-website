@@ -153,10 +153,9 @@ export async function buildCanonicalRuntimeContext(
     ctx.workspaceId = verified.workspaceId;
     ctx.workspaceRoot = verified.workspaceRoot;
     ctx.workspaceReady = true;
-    // Gate 1: static (gitless) workspaces have file access but NO host execution.
-    // Do not advertise exec capability for static workspaces.
-    const isStatic = verified.project.framework === "static";
-    ctx.workspaceExecutionAvailable = !isStatic;
+    // A verified static workspace supports file tools. Shell execution is
+    // restricted separately by tool health and the terminal-server Gate 1.
+    ctx.workspaceExecutionAvailable = true;
     ctx.projectName = verified.project.name;
     ctx.framework = verified.project.framework ?? null;
     ctx.branch = verified.project.githubBranch ?? verified.project.githubDefaultBranch ?? null;
@@ -248,7 +247,7 @@ export function buildRuntimeContextBlock(ctx: CanonicalRuntimeContext): string {
     `- Project: ${ctx.projectName ?? "none"}`,
     `- Project ID: ${ctx.projectId ?? "none"}`,
     `- Workspace: ${ctx.workspaceReady ? "ready" : "not ready"}`,
-    `- Workspace execution: ${ctx.workspaceExecutionAvailable ? "available — LiTT can read, write, and execute commands in the workspace" : "not available"}`,
+    `- Workspace execution: ${ctx.workspaceExecutionAvailable ? (ctx.framework === "static" ? "file tools available; shell commands disabled" : "available — LiTT can read, write, and execute commands in the workspace") : "not available"}`,
     `- Visible terminal UI: ${ctx.terminalStatus}${ctx.terminalServerAlive ? " (server alive)" : ""}`,
     `- Repository: ${ctx.githubConnected ? ctx.repository ?? "connected" : "not connected"}`,
     `- Branch: ${ctx.branch ?? "none"}`,
@@ -317,7 +316,9 @@ export function buildRuntimeContextBlock(ctx: CanonicalRuntimeContext): string {
   }
 
   if (ctx.workspaceExecutionAvailable && !ctx.terminalConnected) {
-    lines.push("IMPORTANT: Workspace execution is available even though the visible terminal UI is disconnected. You CAN read files, write files, and run commands. Do NOT say 'terminal is not connected' — say 'I can execute workspace operations' instead.");
+    lines.push(ctx.framework === "static"
+      ? "The visible terminal UI is disconnected. File tools are available for this static workspace; shell commands are disabled. Use files.write to create index.html."
+      : "IMPORTANT: Workspace execution is available even though the visible terminal UI is disconnected. You CAN read files, write files, and run commands. Do NOT say 'terminal is not connected' — say 'I can execute workspace operations' instead.");
   } else if (!ctx.workspaceExecutionAvailable && ctx.terminalConnected) {
     lines.push("IMPORTANT: The visible terminal UI is connected but server-side workspace execution is not verified. You can see terminal output but cannot execute tools safely.");
   } else if (ctx.workspaceExecutionAvailable && ctx.terminalConnected) {

@@ -683,6 +683,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
     executionMode: canonicalCtx.executionMode,
     enableBuildFix: true,
+    isStaticWorkspace: canonicalCtx.framework === "static",
     model: typeof body.model === "string" ? body.model : undefined,
     // Authenticated user — injected server-side into user-scoped tools
     // (browser.*) at execution time; the model never supplies userId.

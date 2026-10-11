@@ -139,6 +139,8 @@ export interface AgentLoopConfig {
   model?: string;
   systemPrompt: string;
   enableBuildFix: boolean;
+  /** Static workspaces allow file tools but cannot execute shell commands. */
+  isStaticWorkspace?: boolean;
   /** Require a structured tool call on the first model turn of an execution flow. */
   requireToolCallOnFirstStep?: boolean;
   /**
@@ -1002,6 +1004,7 @@ async function runAgentLoopV2Inner(
         // reporting only. Undefined (unknown) → degraded, not unavailable.
         isTerminalOwner:
           cfg.userId != null ? isTerminalOwnerUser(cfg.userId) : undefined,
+        isStaticWorkspace: cfg.isStaticWorkspace,
       },
     },
   );
