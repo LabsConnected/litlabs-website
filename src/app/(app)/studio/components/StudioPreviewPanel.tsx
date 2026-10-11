@@ -6,6 +6,7 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { formatSourceSummary } from "@/lib/projects/project-source";
 import { useExecutionStore } from "../stores/useExecutionStore";
 import { StudioSecretsPanel } from "./StudioSecretsPanel";
+import StudioPublishControls from "./StudioPublishControls";
 
 /**
  * Preview states — the five canonical states the UI explicitly supports.
@@ -721,8 +722,10 @@ export default function StudioPreviewPanel({
   // must not keep the green "Preview ready" dot over a dead iframe.
   // Polls lightly (30s), pauses while the tab is hidden, and surfaces a
   // truthful terminal state with a working Retry if the runtime is gone.
+  // Static projects skip this: no dev server to health-check.
   useEffect(() => {
     if (state !== "ready" || !projectId) return;
+    if (framework === "static") return;
     let cancelled = false;
     const check = async () => {
       if (cancelled || document.hidden) return;
@@ -765,7 +768,7 @@ export default function StudioPreviewPanel({
       clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [state, projectId, authHeaders, workspaceStatus]);
+  }, [state, projectId, authHeaders, workspaceStatus, framework]);
 
   // Keyboard shortcut: Cmd/Ctrl+R refreshes preview when the panel is focused.
   // This matches the universal "refresh" mental model without hijacking the
@@ -786,6 +789,32 @@ export default function StudioPreviewPanel({
 
   const preparePreview = useCallback(async () => {
     if (!projectId) return;
+    // Static projects: no dev server to start. Check readiness via the
+    // status endpoint (verifies index.html exists), then mark ready.
+    if (framework === "static") {
+      try {
+        const response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/preview`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: await authHeaders(),
+          signal: AbortSignal.timeout(15000),
+        });
+        const payload = await response.json().catch(() => null) as PreviewPayload | null;
+        if (response.ok && payload && payload.runtimeStatus === "ready") {
+          setState("ready");
+          setPreviewUrl(`/api/preview/${encodeURIComponent(projectId)}/index.html`);
+          setError(null);
+        } else {
+          setState("not_started");
+          setPreviewUrl(null);
+        }
+      } catch {
+        setState("not_started");
+        setPreviewUrl(null);
+      }
+      setIframeFailed(false);
+      return;
+    }
     // Single-flight guard: only one preview start in flight at a time.
     // Mobile rerenders and rapid prop changes cannot launch duplicate runtimes.
     if (startInFlightRef.current) return;
@@ -844,7 +873,7 @@ export default function StudioPreviewPanel({
       startInFlightRef.current = false;
       setPreviewPreparing(false);
     }
-  }, [authHeaders, projectId, setPreviewPreparing, workspaceStatus]);
+  }, [authHeaders, projectId, setPreviewPreparing, workspaceStatus, framework]);
 
   // Auto-start: when the preview is not_started (workspace/runtime never
   // provisioned or dev server not running), automatically start it. The
@@ -911,7 +940,15 @@ export default function StudioPreviewPanel({
     void loadStatus(true);
   }, [loadStatus]);
 
-  const displayUrl = previewUrl ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}studioRefresh=${frameKey}` : null;
+  // Static projects use the static preview endpoint (no dev server).
+  // Framework comes from the preview payload; "static" means HTML/CSS/JS only.
+  // Use explicit /index.html so relative assets (style.css, app.js) resolve correctly.
+  const isStaticProject = framework === "static";
+  const staticPreviewUrl = isStaticProject && projectId 
+    ? `/api/preview/${encodeURIComponent(projectId)}/index.html` 
+    : null;
+  const effectivePreviewUrl = isStaticProject ? staticPreviewUrl : previewUrl;
+  const displayUrl = effectivePreviewUrl ? `${effectivePreviewUrl}${effectivePreviewUrl.includes("?") ? "&" : "?"}studioRefresh=${frameKey}` : null;
   const isAuthConfigError = errorCode === "preview_clerk_config_error" || errorCode === "preview_auth_config_error";
   // The v4 @import trap: a Tailwind-intended preview that renders unstyled
   // must surface honestly — never a green "Preview ready" over dead CSS.
@@ -1035,8 +1072,8 @@ export default function StudioPreviewPanel({
         >
           <RefreshCw size={12} className={`pointer-events-none ${state === "stale" ? "animate-spin" : ""}`} />
         </button>
-        {/* Restart dev server */}
-        {(isLive || state === "failed") && (
+        {/* Restart dev server — hidden for static projects (no dev server) */}
+        {(isLive || state === "failed") && !isStaticProject && (
           <button
             type="button"
             onClick={() => void preparePreview()}
@@ -1048,8 +1085,8 @@ export default function StudioPreviewPanel({
             <RotateCcw size={12} className="pointer-events-none" />
           </button>
         )}
-        {/* Stop dev server */}
-        {isLive && (
+        {/* Stop dev server — hidden for static projects (no dev server) */}
+        {isLive && !isStaticProject && (
           <button
             type="button"
             onClick={() => void stopPreview()}
@@ -1074,6 +1111,8 @@ export default function StudioPreviewPanel({
             {urlCopied ? <Check size={12} className="pointer-events-none" style={{ color: "#48EE38" }} /> : <Copy size={12} className="pointer-events-none" />}
           </button>
         )}
+        {/* Publish controls — static site publishing (compact toolbar mode) */}
+        {projectId && <StudioPublishControls projectId={projectId} compact />}
         {/* Project secrets — Clerk keys for the preview runtime */}
         <button
           type="button"
@@ -1165,7 +1204,10 @@ export default function StudioPreviewPanel({
                 borderRadius: deviceMode === "desktop" ? "0" : "8px",
                 boxShadow: deviceMode === "desktop" ? "none" : "0 4px 24px rgba(0,0,0,0.4)",
               }}
-              sandbox="allow-scripts allow-forms allow-modals allow-same-origin allow-popups"
+              sandbox={isStaticProject 
+                ? "allow-scripts allow-forms allow-modals allow-popups" 
+                : "allow-scripts allow-forms allow-modals allow-same-origin allow-popups"
+              }
               onLoad={handleIframeLoad}
               onError={() => setIframeFailed(true)}
               data-testid="preview-iframe"

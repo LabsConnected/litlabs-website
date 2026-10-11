@@ -78,6 +78,25 @@ export function isManagedSourceType(sourceType: ProjectSourceType | string | nul
   return MANAGED_SOURCE_TYPES.has(sourceType);
 }
 
+/**
+ * Template IDs for static sites (HTML/CSS/JS, no build step).
+ * These provision via the gitless "static" workspace path because Gate 1
+ * containment correctly blocks ALL git operations in production (git
+ * add/commit can execute hooks). Static sites don't need version control
+ * to be useful — they need a directory the AI can write files into.
+ */
+const STATIC_TEMPLATE_IDS: ReadonlySet<string> = new Set(["blank-static", "empty-static"]);
+
+/**
+ * Whether a template produces a static site that provisions without Git.
+ * Null/undefined defaults to true because the provisioning default is
+ * "blank-static" (see workspace-recovery.ts).
+ */
+export function isStaticTemplateId(templateId: string | null | undefined): boolean {
+  if (!templateId) return true;
+  return STATIC_TEMPLATE_IDS.has(templateId);
+}
+
 /** Resolve source ownership for a project. */
 export function resolveSourceKind(project: {
   sourceType: ProjectSourceType | string | null;

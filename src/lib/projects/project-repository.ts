@@ -126,6 +126,7 @@ export async function createBlankProject(
     slug,
     source_type: "blank",
     access_mode: input.accessMode ?? "private",
+    is_system: false,
     template_id: input.templateId,
     github_installation_id: null,
     github_repository_id: null,
@@ -364,6 +365,12 @@ export async function listProjects(userId: string): Promise<ProjectListResult> {
       .order("updated_at", { ascending: false }),
   ]);
 
+  if (studioResult.error) {
+    throw new Error(`Failed to list studio projects: ${studioResult.error.message}`);
+  }
+  if (legacyResult.error) {
+    throw new Error(`Failed to list legacy projects: ${legacyResult.error.message}`);
+  }
   const studioProjects = (studioResult.data ?? []) as StudioProjectRow[];
   const legacyProjects = (legacyResult.data ?? []) as LegacyProjectRow[];
 
