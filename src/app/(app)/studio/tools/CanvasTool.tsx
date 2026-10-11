@@ -1042,19 +1042,9 @@ export default function CanvasTool({ projectId }: CanvasToolProps) {
                   >
                     <FileCode size={13} />
                   </button>
-                  <button
-                    onClick={() => {
-                      const win = window.open("", "_blank");
-                      if (win) {
-                        win.document.body.innerHTML = getPreviewHtml();
-                      }
-                    }}
-                    title="Open in new tab"
-                    className="p-1.5 rounded-lg hover:bg-white/5"
-                    style={{ color: T.textMuted }}
-                  >
-                    <Play size={13} />
-                  </button>
+                  {/* New-tab preview removed for security: blob URLs inherit
+                      creator-origin privileges. Use the sandboxed in-page
+                      preview instead. */}
                   <button
                     onClick={startNew}
                     title="Delete all files and start fresh"

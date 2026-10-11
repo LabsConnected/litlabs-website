@@ -91,7 +91,7 @@ function nodeToHtml(node: CanvasNode, doc: CanvasDocument, depth = 0, ex?: Expor
   const ctx: ExportContext = ex ?? { inForm: false, sawForm: false };
 
   const styleStr = stylesToCSSString(node.styles);
-  const styleAttr = styleStr ? ` style="${styleStr}"` : "";
+  const styleAttr = styleStr ? ` style="${escapeHtml(styleStr)}"` : "";
 
   // Children inherit "inside a form"; the sawForm flag is shared
   // by reference so the document root learns which scripts to inject.

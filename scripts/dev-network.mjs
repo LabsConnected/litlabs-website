@@ -46,7 +46,7 @@ const nextBin = require.resolve("next/dist/bin/next", { paths: [process.cwd()] }
 
 const child = spawn(process.execPath, [nextBin, "dev", ...forwardedArgs, "-H", bind.host], {
   stdio: "inherit",
-  env: process.env,
+  env: { ...process.env, LITT_RESOLVED_BIND_HOST: bind.host },
 });
 
 for (const signal of ["SIGINT", "SIGTERM"]) {

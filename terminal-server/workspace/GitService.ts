@@ -1,4 +1,5 @@
 import { simpleGit, type SimpleGit } from "simple-git";
+import { assertHostExecutionPermitted } from "../isolation-policy";
 
 export interface GitStatusResult {
   branch: string;
@@ -11,6 +12,7 @@ export interface GitStatusResult {
 }
 
 export async function gitStatus(root: string): Promise<GitStatusResult> {
+  assertHostExecutionPermitted("workspace.gitStatus");
   const git: SimpleGit = simpleGit(root);
   const status = await git.status();
   const branch = status.current ?? "main";

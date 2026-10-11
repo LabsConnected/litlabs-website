@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { trustedLocalStubs } from "../../../../tests/helpers/trusted-local-env";
 
 // Hoisted mock for child_process.execFile (execute() calls it directly via
 // promisify at module load; the injectable runner only covers create/start).
@@ -89,6 +90,7 @@ describe("DockerSandboxProvider.execute policy", () => {
   const execFileCalls: Array<{ file: string; args: string[] }> = [];
 
   beforeEach(() => {
+    trustedLocalStubs();
     execFileMock.mockReset();
     execFileCalls.length = 0;
     execFileMock.mockImplementation(
@@ -108,6 +110,7 @@ describe("DockerSandboxProvider.execute policy", () => {
     for (const { provider, sandboxId } of created.splice(0)) {
       await provider.destroy(sandboxId).catch(() => undefined);
     }
+    vi.unstubAllEnvs();
   });
 
   async function makeSandbox() {

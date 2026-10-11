@@ -50,14 +50,36 @@ describe("sites route — form deploymentId injection", () => {
     expect(text).not.toContain('name="deploymentId" value=""');
   });
 
-  it("leaves HTML without a LiTT form untouched", async () => {
+  it("injects the Built with LiTT badge into HTML pages", async () => {
     const plain = "<!DOCTYPE html><html><body><p>Hello</p></body></html>";
     mockRead.mockResolvedValue({ content: plain, contentType: "text/html" });
     const res = await GET(req("/sites/dep_abc123"), {
       params: Promise.resolve({ deploymentId: "dep_abc123" }),
     });
     const text = await res.text();
-    expect(text).toBe(plain);
+    expect(text).toContain('id="litt-badge"');
+    expect(text).toContain("Built with LiTT");
+  });
+
+  it("does not inject the badge when data-litt-badge=\"0\" is present", async () => {
+    const optedOut = '<!DOCTYPE html><html><body data-litt-badge="0"><p>Hello</p></body></html>';
+    mockRead.mockResolvedValue({ content: optedOut, contentType: "text/html" });
+    const res = await GET(req("/sites/dep_abc123"), {
+      params: Promise.resolve({ deploymentId: "dep_abc123" }),
+    });
+    const text = await res.text();
+    expect(text).toBe(optedOut);
+    expect(text).not.toContain('id="litt-badge"');
+  });
+
+  it("injects the badge with uppercase or spaced </body> tags", async () => {
+    const upper = "<!DOCTYPE html><html><body><p>Hello</p></BODY></html>";
+    mockRead.mockResolvedValue({ content: upper, contentType: "text/html" });
+    const res = await GET(req("/sites/dep_abc123"), {
+      params: Promise.resolve({ deploymentId: "dep_abc123" }),
+    });
+    const text = await res.text();
+    expect(text).toContain('id="litt-badge"');
   });
 
   it("does not inject when the form already carries a deployment id", async () => {

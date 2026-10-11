@@ -363,7 +363,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
               }}
             >
               <Image
-                src="/brand/litt-mascot-avatar.png"
+                src="/brand/litt-robot-avatar-96.png"
                 alt="LiTT"
                 fill
                 sizes="32px"
@@ -597,7 +597,7 @@ export function GlobalCompanion() {
         title="LiTT — tap to chat, hold for voice"
       >
         <span className="relative h-12 w-12 overflow-hidden rounded-full">
-          <Image src="/brand/litt-mascot-avatar.png" alt="LiTT" fill sizes="48px" className="object-cover" priority />
+          <Image src="/brand/litt-robot-avatar-96.png" alt="LiTT" fill sizes="48px" className="object-cover" priority />
         </span>
       </button>
 

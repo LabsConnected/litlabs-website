@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { trustedLocalStubs } from "./helpers/trusted-local-env";
 import { scanProject, partialScan } from "@/lib/litt-intelligence/project-scanner";
 import { writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
@@ -116,10 +117,12 @@ function cleanupTestRepo() {
 
 describe("LiTT Intelligence — Project Scanner", () => {
   beforeEach(() => {
+    trustedLocalStubs();
     setupTestRepo();
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     cleanupTestRepo();
   });
 

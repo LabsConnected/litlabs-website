@@ -38,6 +38,7 @@ import {
 import {
   prepareWorkspace,
   prepareManagedWorkspace,
+  prepareStaticWorkspace,
   getWorkspace,
   listWorkspaces,
   type WorkspaceDescriptor,
@@ -81,6 +82,15 @@ import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manage
 import { requireInternalServiceAuth, type AuthenticatedRequest } from "./internal-auth";
 import { mintTerminalToken, verifyTerminalToken, bearerToken } from "./auth";
 import { isTerminalOwner, warnIfOwnerAllowlistUnset } from "./terminal-owner-gate";
+import {
+  assertHostExecutionPermitted,
+  evaluateTerminalIsolation,
+  isTrustedLocalEnvironment,
+  isUntrustedLocalRequest,
+} from "./isolation-policy";
+import { findOnPath } from "./path-probe";
+import { respondIfHostExecBlocked, respondWithDispatch } from "./host-exec-http";
+
 import { verifyClerkToken } from "./clerk-verify";
 import { resolveBindHost } from "./network-bind";
 import type { RemoteCommandRequest } from "@litt/agent-core";
@@ -98,6 +108,9 @@ try {
   console.error((err as Error).message);
   process.exit(1);
 }
+// Isolation policy requires a loopback bind for any host execution. Written
+// here, from the real resolved address, never read from operator input.
+process.env.LITT_RESOLVED_BIND_HOST = BIND.host;
 const ALLOWED_ORIGINS = [
   ...(process.env.TERMINAL_ALLOWED_ORIGIN || "")
     .split(",")
@@ -167,13 +180,37 @@ async function probeDockerAvailability(): Promise<{ value: boolean; reason: stri
   return { value: true, reason: "ok" };
 }
 
-if (process.env.NODE_ENV === "production" && !USE_DOCKER) {
-  console.warn(
-    "[Terminal] WARNING: Running in production without Docker isolation (TERMINAL_USE_DOCKER=false). " +
-      "PTY sessions will run directly on the host with no container isolation. " +
-      "This is acceptable for Railway deployments but less secure than Docker mode. " +
-      "Set TERMINAL_USE_DOCKER=true and provide a Docker daemon for full isolation.",
-  );
+/**
+ * Current terminal isolation verdict. Terminal sessions are created only
+ * when `terminalExecution === "enabled"`; /health reports the same verdict
+ * so monitoring sees exactly what the enforcement layer sees.
+ */
+async function getTerminalIsolationVerdict() {
+  const probe = await probeDockerAvailability();
+  return evaluateTerminalIsolation({
+    env: process.env,
+    useDocker: USE_DOCKER,
+    dockerAvailable: probe.value,
+    dockerReason: probe.reason,
+  });
+}
+
+{
+  const startupVerdict = evaluateTerminalIsolation({
+    env: process.env,
+    useDocker: USE_DOCKER,
+    // Startup cannot await the probe; a Docker-mode server is re-checked on
+    // every connection and every health request.
+    dockerAvailable: USE_DOCKER,
+  });
+  if (startupVerdict.terminalExecution === "disabled") {
+    console.error(
+      "[Terminal] Terminal execution is DISABLED: " + startupVerdict.reason + ". " +
+        "Workspace file and checkpoint services are unaffected; services that start host " +
+        "processes (workspace prepare, preview, git, command execution) return 503 " +
+        "HOST_EXECUTION_DISABLED in production-like environments.",
+    );
+  }
 }
 
 // Enforce workspace-root durability. Managed source on ephemeral
@@ -205,6 +242,21 @@ const jsonParserLarge = express.json({ limit: "50mb" });
 app.use((req, res, next) => {
   const parser = req.path === "/ws-files/write" ? jsonParserLarge : jsonParserSmall;
   parser(req, res, next);
+});
+
+// Local host execution is a same-machine developer feature. When the process
+// is in trusted-local mode, refuse any request that arrives via a proxy/tunnel
+// or with a non-loopback Host: a loopback bind alone does not make a request
+// trusted. (In every other mode execution is already closed by policy.)
+app.use((req, res, next) => {
+  if (isTrustedLocalEnvironment(process.env) && isUntrustedLocalRequest(req.headers)) {
+    res.status(403).json({
+      error: "Local execution mode only serves direct local requests",
+      code: "HOST_EXECUTION_DISABLED",
+    });
+    return;
+  }
+  next();
 });
 
 const server = http.createServer(app);
@@ -442,16 +494,10 @@ app.post("/internal/command", requireInternalServiceAuth, async (req: Authentica
     args: Array.isArray(body.args) ? body.args.filter((a) => typeof a === "string") : [],
     userId: body.userId ?? req.terminalUserId ?? null,
   };
-  try {
-    const result = await dispatchCommand(normalizedReq);
-    // Unknown commands and command-level failures return HTTP 200 with
-    // ok:false so the client can display the typed error. Only server
-    // errors get HTTP 500.
-    res.json(result);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: message });
-  }
+  // Unknown commands and command-level failures return HTTP 200 with
+  // ok:false so the client can display the typed error. A blocked execution
+  // returns 503 HOST_EXECUTION_DISABLED; only other server errors are 500.
+  await respondWithDispatch(res, () => dispatchCommand(normalizedReq));
 });
 
 // ─── User-authenticated chat endpoint ──────────────────────────────
@@ -661,13 +707,7 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
     cwd,
   };
 
-  try {
-    const result = await dispatchCommand(normalizedReq);
-    res.json(result);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: message });
-  }
+  await respondWithDispatch(res, () => dispatchCommand(normalizedReq));
 });
 
 app.get("/health/ready", async (_req, res) => {
@@ -685,14 +725,25 @@ app.get("/health/ready", async (_req, res) => {
     dockerReason: dockerProbe.reason,
   };
 
-  // Docker readiness is reported but does NOT block the overall readiness
-  // in development (host PTY mode). In production, Docker mode is required
-  // by the startup guard, so if the probe fails the health check will
-  // correctly report docker: false.
+  // `readiness` describes the service (auth, internal key, workspace root).
+  // Terminal SHELL safety is reported separately under `terminal`, from the
+  // same verdict that gates session creation, so a "ready" service can never
+  // be read as "terminal is safe". The HTTP status is unchanged on purpose:
+  // file and checkpoint services share this process and must keep passing
+  // platform health checks while the terminal is disabled. Host-executing
+  // services (prepare, preview, git, exec) are closed separately and report
+  // 503 HOST_EXECUTION_DISABLED per request.
   const allReady = authConfigured && internalServiceConfigured && workspaceReady;
+  const isolation = await getTerminalIsolationVerdict();
 
   res.status(allReady ? 200 : 503).json({
     service: "terminal-server",
+    terminal: {
+      execution: isolation.terminalExecution,
+      isolation: isolation.status,
+      mode: isolation.mode,
+      reason: isolation.reason,
+    },
     readiness: allReady ? "ready" : "not_ready",
     timestamp: new Date().toISOString(),
     commit: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 8) ?? "dev",
@@ -716,9 +767,16 @@ app.get("/health", async (_req, res) => {
   const workspaceReady = workspaceRoot.length > 0;
   const dockerProbe = await probeDockerAvailability();
   const allReady = authConfigured && internalServiceConfigured && workspaceReady;
+  const isolation = await getTerminalIsolationVerdict();
 
   res.status(allReady ? 200 : 503).json({
     service: "terminal-server",
+    terminal: {
+      execution: isolation.terminalExecution,
+      isolation: isolation.status,
+      mode: isolation.mode,
+      reason: isolation.reason,
+    },
     status: allReady ? "ok" : "degraded",
     uptime: process.uptime(),
     activeSessions: ptyManager.size,
@@ -746,15 +804,15 @@ app.get("/health", async (_req, res) => {
 // Runtime diagnostic endpoint — verifies pnpm/node are available in the
 // production image. Used to confirm the Dockerfile runner stage fix.
 app.get("/health/runtime", async (_req, res) => {
-  const { execSync } = require("child_process");
-  const checks: Record<string, { ok: boolean; version?: string; error?: string }> = {};
+  // Unauthenticated endpoint: it must never start a process. Presence is
+  // checked by scanning PATH on the filesystem; node's version comes from
+  // the running process itself.
+  const checks: Record<string, { ok: boolean; version?: string; path?: string; error?: string }> = {};
   for (const bin of ["node", "pnpm", "npm", "git"]) {
-    try {
-      const version = execSync(`${bin} --version`, { timeout: 5000, encoding: "utf-8" }).trim();
-      checks[bin] = { ok: true, version };
-    } catch (e: any) {
-      checks[bin] = { ok: false, error: e?.message ?? "not found" };
-    }
+    const found = findOnPath(bin);
+    checks[bin] = found
+      ? { ok: true, path: found, ...(bin === "node" ? { version: process.version } : {}) }
+      : { ok: false, error: "not found on PATH" };
   }
   const allOk = Object.values(checks).every((c) => c.ok);
   res.status(allOk ? 200 : 503).json({
@@ -796,6 +854,9 @@ app.get("/internal/sessions", requireInternalServiceAuth, (req: AuthenticatedReq
  *
  * Body for blank project:
  *   { sourceType: "blank", userId, projectId, templateId }
+ *
+ * Body for static project (no Git — pure filesystem workspace):
+ *   { sourceType: "static", userId, projectId, templateId }
  *
  * Returns: { workspaceId, userId, projectId, root, branch, commitSha, ready }
  * Idempotent: if a workspace already exists for the projectId+userId, returns it.
@@ -841,6 +902,21 @@ app.post("/internal/workspace/prepare", requireInternalServiceAuth, async (req: 
         existingRoot,
         existingWorkspaceId,
       });
+    } else if (sourceType === "static") {
+      // Static workspaces skip Git entirely: no .git init, no subprocesses.
+      // Gate 1 containment blocks ALL git operations in production (hooks
+      // can execute), so static projects provision through pure filesystem
+      // operations. File read/write works normally; checkpoints/diff/restore
+      // are unavailable without a repository.
+      const templateId = String(body.templateId || "blank-static");
+      descriptor = await prepareStaticWorkspace({
+        userId,
+        projectId,
+        workspaceRoot: WORKSPACE_ROOT,
+        templateId,
+        existingRoot,
+        existingWorkspaceId,
+      });
     } else if (sourceType === "github") {
       const installationId = Number(body.installationId);
       const owner = String(body.owner || "");
@@ -867,7 +943,7 @@ app.post("/internal/workspace/prepare", requireInternalServiceAuth, async (req: 
         existingWorkspaceId,
       });
     } else {
-      res.status(400).json({ error: `sourceType must be "github", "blank", "template" or "managed"` });
+      res.status(400).json({ error: `sourceType must be "github", "blank", "template", "managed" or "static"` });
       return;
     }
 
@@ -881,6 +957,7 @@ app.post("/internal/workspace/prepare", requireInternalServiceAuth, async (req: 
       ready: descriptor.ready,
     });
   } catch (err) {
+    if (respondIfHostExecBlocked(err, res)) return;
     const message = err instanceof Error ? err.message : "Workspace preparation failed";
     console.error("[Internal] Workspace prepare error:", message);
     res.status(500).json({ error: message });
@@ -974,6 +1051,9 @@ app.post("/internal/workspace/:workspaceId/exec", requireInternalServiceAuth, as
   const cmdArgs = parts.slice(1);
 
   try {
+    // Eager fail-closed check: the gateway may convert an executor refusal
+    // into a generic failed result, so refuse before it is ever consulted.
+    assertHostExecutionPermitted("workspace.exec");
     const gateway = getExecutionGateway(ws.root, "act");
     const gwResult = await gateway.execute({
       toolId: "project.run",
@@ -1005,6 +1085,7 @@ app.post("/internal/workspace/:workspaceId/exec", requireInternalServiceAuth, as
       approved: gwResult.approved,
     });
   } catch (err) {
+    if (respondIfHostExecBlocked(err, res)) return;
     const durationMs = Date.now() - startTime;
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({
@@ -1064,6 +1145,7 @@ app.post("/internal/workspace/:workspaceId/preview/start", requireInternalServic
       startedAt: runtime.startedAt,
     });
   } catch (err) {
+    if (respondIfHostExecBlocked(err, res)) return;
     const message = err instanceof Error ? err.message : String(err);
     const errorCode = (err as { code?: string }).code ?? null;
     res.status(500).json({ error: message, errorCode });
@@ -1091,6 +1173,7 @@ app.post("/internal/workspace/:workspaceId/preview/ensure-env", requireInternalS
     const { restarted, runtime } = await ensurePreviewEnv(workspaceId, userId, projectEnv);
     res.json({ restarted, status: runtime?.status ?? "stopped" });
   } catch (err) {
+    if (respondIfHostExecBlocked(err, res)) return;
     const message = err instanceof Error ? err.message : String(err);
     const errorCode = (err as { code?: string }).code ?? null;
     res.status(500).json({ error: message, errorCode });
@@ -1197,6 +1280,7 @@ app.post("/internal/workspace/:workspaceId/preview/restart", requireInternalServ
       startedAt: runtime.startedAt,
     });
   } catch (err) {
+    if (respondIfHostExecBlocked(err, res)) return;
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: message });
   }
@@ -1622,6 +1706,27 @@ io.use((socket, next) => {
   } catch {
     next(new Error("Unauthorized"));
   }
+});
+
+// ─── Isolation gate (fail closed) ─────────────────────────────────
+// Runs after authentication so unauthenticated callers learn nothing.
+// When terminal execution is disabled (production without a working Docker
+// runtime) the socket is refused before any workspace or PTY work happens.
+io.use((socket, next) => {
+  if (isTrustedLocalEnvironment(process.env) && isUntrustedLocalRequest(socket.handshake.headers)) {
+    next(new Error("Terminal unavailable: local execution serves direct local requests only"));
+    return;
+  }
+  getTerminalIsolationVerdict()
+    .then((verdict) => {
+      if (verdict.terminalExecution !== "enabled") {
+        console.error("[Terminal] Connection refused:", verdict.reason);
+        next(new Error("Terminal unavailable: isolation not verified"));
+        return;
+      }
+      next();
+    })
+    .catch(() => next(new Error("Terminal unavailable: isolation check failed")));
 });
 
 io.on("connection", (socket) => {

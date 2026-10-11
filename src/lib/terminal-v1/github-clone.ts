@@ -7,6 +7,7 @@
 
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { assertHostExecutionPermitted } from "@/lib/host-execution-guard";
 
 const execFileAsync = promisify(execFile);
 
@@ -73,6 +74,10 @@ export async function cloneRepository(input: CloneInput): Promise<CloneResult> {
   // Reject option-injection / path-traversal inputs before touching git.
   validateCloneInput(input);
 
+  // Gate 1: host git against a user-chosen repository is host execution.
+  // Closed in production-like environments until a verified sandbox exists.
+  assertHostExecutionPermitted("terminal-v1/github-clone");
+
   // Build the clone URL with optional token
   const protocol = githubToken ? "https" : "https";
   const authPart = githubToken ? `${githubToken}@` : "";
@@ -93,9 +98,11 @@ export async function cloneRepository(input: CloneInput): Promise<CloneResult> {
       maxBuffer: 2 * 1024 * 1024,
     });
   } catch (err) {
-    throw new Error(
-      `Failed to clone ${owner}/${repo}:${branch}: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    // execFile's error message embeds the full command line, which includes
+    // the installation token in the clone URL. Never let it escape.
+    let detail = err instanceof Error ? err.message : String(err);
+    if (githubToken) detail = detail.split(githubToken).join("***");
+    throw new Error(`Failed to clone ${owner}/${repo}:${branch}: ${detail}`);
   }
 
   // Get the commit SHA

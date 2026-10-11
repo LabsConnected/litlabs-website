@@ -7,6 +7,7 @@ import path from "path";
 import { setTimeout as delay } from "timers/promises";
 import WebSocket from "ws";
 import type { PreviewViewport } from "./types";
+import { assertHostExecutionPermitted } from "@/lib/host-execution-guard";
 
 export interface BrowserCaptureInput {
   url: string;
@@ -324,6 +325,9 @@ function resolveLayoutShiftValue(params: unknown): Array<{ value: number; hadRec
 }
 
 export async function capturePreviewWithChrome(input: BrowserCaptureInput): Promise<BrowserCaptureResult> {
+  // Gate 1: never launch a browser on the host in a production-like
+  // environment (it would render untrusted preview content on the web host).
+  assertHostExecutionPermitted("visual-builds/capture");
   // SSRF hardening: validate the URL before spawning the browser.
   const safeUrl = await validateCaptureUrl(input.url);
 

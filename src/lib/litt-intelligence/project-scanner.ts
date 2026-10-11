@@ -23,6 +23,7 @@
 import { readFileSync, existsSync, readdirSync, statSync } from "fs";
 import { join, relative, extname, basename } from "path";
 import { execSync } from "child_process";
+import { isHostExecutionPermitted } from "@/lib/host-execution-guard";
 import type {
   ProjectIntelligenceSnapshot,
   VerifiedCapability,
@@ -100,6 +101,9 @@ function safeReadFile(filePath: string): string | null {
 }
 
 function safeExec(cmd: string, cwd: string): string | null {
+  // Gate 1: no host process in a production-like environment; callers already
+  // treat null as "unknown".
+  if (!isHostExecutionPermitted()) return null;
   try {
     return execSync(cmd, { cwd, encoding: "utf-8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] }).trim();
   } catch {

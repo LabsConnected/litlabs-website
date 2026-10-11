@@ -2,6 +2,7 @@ import { resolve, join } from "path";
 import { mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync } from "fs";
 import { execFileSync } from "child_process";
 import { simpleGit, type SimpleGit } from "simple-git";
+import { assertHostExecutionPermitted } from "../isolation-policy";
 import {
   buildWelcomeHtml,
   buildWelcomeNextJs,
@@ -94,6 +95,10 @@ export async function prepareWorkspace(
     : managedWorkspaceRoot(input.workspaceRoot, input.userId, input.projectId);
   const workspaceId = input.existingWorkspaceId || managedWorkspaceId(input.projectId);
 
+  // Clone/fetch and the dependency install below run host git and the
+  // repo's own package scripts. Closed in production until sandboxed.
+  assertHostExecutionPermitted("workspace.prepare(git,install)");
+
   mkdirSync(root, { recursive: true });
 
   const git: SimpleGit = simpleGit(root);
@@ -146,6 +151,7 @@ export async function prepareWorkspace(
       // devDependencies. The Railway service runs with NODE_ENV=production,
       // which causes pnpm to skip devDeps by default — this breaks Next.js
       // dev server startup (TypeScript types are in devDependencies).
+      assertHostExecutionPermitted("workspace.install");
       execFileSync(pm, ["install", "--prefer-offline"], {
         cwd: root,
         stdio: "pipe",
@@ -173,6 +179,7 @@ export async function prepareWorkspace(
                "typescript", "@types/react", "@types/node"]
             : ["add", "--save-dev", "--save-exact",
                "typescript", "@types/react", "@types/node"];
+          assertHostExecutionPermitted("workspace.install");
           execFileSync(pm, addArgs, {
             cwd: root,
             stdio: "pipe",
@@ -272,6 +279,7 @@ function hasProjectContent(root: string): boolean {
  * never rewrites existing history.
  */
 async function ensureGitRepository(root: string): Promise<{ branch: string; commitSha: string }> {
+  assertHostExecutionPermitted("workspace.git");
   const git: SimpleGit = simpleGit(root);
 
   if (!existsSync(join(root, ".git"))) {
@@ -388,6 +396,82 @@ export async function prepareBlankWorkspace(input: {
   existingWorkspaceId?: string | null;
 }): Promise<WorkspaceDescriptor> {
   return prepareManagedWorkspace(input);
+}
+
+/**
+ * Sentinel commit SHA for static workspaces. These workspaces have no Git
+ * repository by design — Git operations (even `init`/`add`/`commit`) can
+ * execute hooks and filters, so they stay behind the host-execution guard.
+ * This value marks the descriptor as gitless; it is not a real SHA.
+ */
+export const STATIC_WORKSPACE_COMMIT_SHA = "static-no-git";
+
+/**
+ * Prepare a STATIC workspace — file storage without Git.
+ *
+ * Unlike `prepareManagedWorkspace`, this NEVER initializes a Git repository
+ * and NEVER spawns any subprocess. The workspace directory is created,
+ * template files are written with pure filesystem operations, and the
+ * descriptor is registered. File read/write via /ws-files works normally.
+ *
+ * This exists because Gate 1 containment correctly blocks ALL Git operations
+ * in production (git add/commit can run hooks), which would otherwise make
+ * it impossible for any new user to get a working workspace. Static projects
+ * (HTML/CSS/JS sites with no build step) don't need version control to be
+ * useful — they need a directory the AI can write files into.
+ *
+ * Checkpoints, diff, and restore are unavailable for static workspaces
+ * (they require Git). The descriptor's branch/commitSha carry sentinel
+ * values so downstream code that reads them doesn't break.
+ *
+ * Idempotent and adoption-first, same as managed: existing content is
+ * preserved, never deleted or overwritten.
+ */
+export async function prepareStaticWorkspace(input: {
+  userId: string;
+  projectId: string;
+  workspaceRoot: string;
+  templateId: string;
+  /** Existing root from studio_projects, adopted when it still exists. */
+  existingRoot?: string | null;
+  /** Existing id from studio_projects, reused so the DB stays valid. */
+  existingWorkspaceId?: string | null;
+}): Promise<WorkspaceDescriptor> {
+  const canonicalRoot = managedWorkspaceRoot(input.workspaceRoot, input.userId, input.projectId);
+
+  // Same legacy-adoption logic as managed: keep using an existing
+  // directory rather than stranding the user's files.
+  const legacyRoot = input.existingRoot && existsSync(input.existingRoot) && hasProjectContent(input.existingRoot)
+    ? input.existingRoot
+    : null;
+
+  const root = legacyRoot ?? canonicalRoot;
+  const adopting = existsSync(root) && hasProjectContent(root);
+
+  mkdirSync(root, { recursive: true });
+
+  if (!adopting) {
+    writeTemplateFiles(root, input.templateId);
+  }
+
+  // NO git. No ensureGitRepository(), no subprocesses, no hooks.
+  // Pure filesystem operations only.
+
+  const workspaceId = input.existingWorkspaceId || managedWorkspaceId(input.projectId);
+
+  const descriptor: WorkspaceDescriptor = {
+    workspaceId,
+    userId: input.userId,
+    projectId: input.projectId,
+    root,
+    branch: DEFAULT_BRANCH,
+    commitSha: STATIC_WORKSPACE_COMMIT_SHA,
+    ready: true,
+  };
+
+  workspaces.set(workspaceId, descriptor);
+  persistWorkspaces();
+  return descriptor;
 }
 
 /** Write initial template files for blank projects. Exported for tests. */

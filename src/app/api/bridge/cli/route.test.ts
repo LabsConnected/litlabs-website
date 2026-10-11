@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { trustedLocalStubs } from "../../../../../tests/helpers/trusted-local-env";
 import { NextRequest } from "next/server";
 import { EventEmitter } from "events";
 
@@ -49,6 +50,7 @@ function makeFakeProc() {
 
 describe("bridge/cli execution policy", () => {
   beforeEach(() => {
+    trustedLocalStubs();
     vi.stubEnv("ADMIN_CLERK_ID", "");
     vi.stubEnv("ADMIN_USER_ID", ADMIN_ID);
     spawnMock.mockReset();
@@ -74,6 +76,7 @@ describe("bridge/cli execution policy", () => {
     const res = await GET(
       new NextRequest("http://localhost/api/bridge/cli?tool=terminal", {
         method: "GET",
+        headers: { host: "localhost:3001" },
       }),
     );
     expect(res.status).toBe(200);
@@ -93,7 +96,7 @@ describe("bridge/cli execution policy", () => {
     return POST(
       new NextRequest("http://localhost/api/bridge/cli", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", host: "localhost:3001" },
         body: JSON.stringify({ sessionId, type: "input", input }),
       }),
     );
@@ -104,6 +107,7 @@ describe("bridge/cli execution policy", () => {
     const res = await GET(
       new NextRequest("http://localhost/api/bridge/cli?tool=terminal", {
         method: "GET",
+        headers: { host: "localhost:3001" },
       }),
     );
     expect(res.status).toBe(401);
@@ -166,6 +170,7 @@ describe("bridge/cli execution policy", () => {
     await GET(
       new NextRequest("http://localhost/api/bridge/cli?tool=gemini", {
         method: "GET",
+        headers: { host: "localhost:3001" },
       }),
     );
     const options = spawnMock.mock.calls[0][2] as {

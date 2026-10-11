@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { useTrustedLocalEnv } from "./helpers/trusted-local-env";
 import express from "express";
 import request from "supertest";
 import { mkdtempSync, rmSync } from "fs";
@@ -53,6 +54,8 @@ function createTestApp(ptyManager: PtySessionManager): express.Application {
 }
 
 // ─── Tests ────────────────────────────────────────────────────────
+
+useTrustedLocalEnv();
 
 describe("GET /internal/sessions HTTP integration", () => {
   let app: express.Application;

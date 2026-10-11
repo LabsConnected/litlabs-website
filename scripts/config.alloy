@@ -105,9 +105,11 @@ prometheus.relabel "integrations_windows_exporter" {
 // environment via sys.env() — never hardcoded. The running Windows Alloy
 // service must have METRICS_BEARER_TOKEN set, matching the web app's env var.
 //
-// Production target: www.litlabs.net:443 over HTTPS.
-// (For local dev against localhost:3000, override the target and remove
-// the authorization block in a local copy — never commit dev overrides.)
+// Production target: www.litlabs.net:443 over HTTPS (direct, no redirects).
+// (For local dev: override __address__ to localhost:3000, set scheme to http,
+// and set METRICS_BEARER_TOKEN to match the app's local env var — do NOT
+// remove the authorization block, as /metrics now requires auth. Never
+// commit dev overrides.)
 discovery.relabel "litlabs_app" {
   targets = [{
     "__address__" = "www.litlabs.net:443",

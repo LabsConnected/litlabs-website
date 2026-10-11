@@ -24,6 +24,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { trustedLocalStubs } from "./helpers/trusted-local-env";
 import * as path from "path";
 import {
   dispatchCommand,
@@ -82,6 +83,12 @@ function makeRequest(partial: Partial<RemoteCommandRequest> & { command: string 
 }
 
 // ─── Shared protocol schema ───────────────────────────────────────
+
+// These tests drive terminal-server dispatchCommand, which starts real
+// (injected/local) processes. Gate 1 is default-deny: opt in explicitly, per
+// test file, never globally.
+beforeEach(() => trustedLocalStubs());
+afterEach(() => vi.unstubAllEnvs());
 
 describe("Remote protocol: shared schema", () => {
   it("successResponse produces a single-level ToolResult (not triple-nested)", () => {
