@@ -53,6 +53,12 @@ export interface TerminalHealthContext {
   isTerminalOwner?: boolean;
   /** Whether the terminal server was reachable on last check. */
   terminalServerReachable?: boolean;
+  /**
+   * Whether the workspace is static (gitless).
+   * Static workspaces have file access but NO host execution (Gate 1).
+   * When true, terminal.execute must report unavailable.
+   */
+  isStaticWorkspace?: boolean;
 }
 
 /**
@@ -66,6 +72,18 @@ export function resolveTerminalHealth(ctx: TerminalHealthContext): ToolHealthRep
       health: "unavailable",
       reason: "no_authenticated_user",
       detail: "Terminal requires an authenticated user.",
+    };
+  }
+  // Gate 1: static (gitless) workspaces never have host execution.
+  // Report unavailable truthfully so the agent selects file tools instead.
+  if (ctx.isStaticWorkspace === true) {
+    return {
+      toolId: "terminal.execute",
+      health: "unavailable",
+      reason: "static_workspace_no_exec",
+      detail:
+        "This is a static (gitless) workspace. Host execution is disabled by Gate 1. " +
+        "Use files.write, files.read, and files.list instead of terminal.execute.",
     };
   }
   if (ctx.isTerminalOwner === false) {
