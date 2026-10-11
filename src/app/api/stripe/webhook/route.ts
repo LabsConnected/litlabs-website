@@ -88,7 +88,13 @@ async function grantSubscriptionCredits(
       p_reference_type: "subscription",
       p_expires_at: expiresAt ?? undefined,
     });
-  } catch (_err) {
+  } catch (err) {
+    // Log instead of swallowing: a failed grant is a billing bug, and the
+    // event is already marked processed, so silence makes it permanent.
+    console.error(
+      `[stripe] grantSubscriptionCredits failed for user ${userId} plan ${planId}:`,
+      err,
+    );
   }
 }
 
@@ -401,11 +407,23 @@ export async function POST(req: NextRequest) {
         const inv = event.data.object as Stripe.Invoice;
         const invSubId = inv.parent?.subscription_details?.subscription;
         if (invSubId && typeof invSubId === "string") {
-          const { data: invMatch } = await sb
-            .from("subscriptions")
-            .select("user_id, plan")
-            .eq("stripe_subscription_id", invSubId)
-            .single();
+          // The customer.subscription.created event is usually still in flight
+          // when invoice.paid arrives: it performs a multi-query upsert while
+          // this handler does a single SELECT, so without a wait the lookup
+          // systematically misses and the grant is silently skipped.
+          let invMatch: { user_id: string; plan: string } | null = null;
+          for (let attempt = 0; attempt < 6; attempt++) {
+            const { data } = await sb
+              .from("subscriptions")
+              .select("user_id, plan")
+              .eq("stripe_subscription_id", invSubId)
+              .single();
+            if (data) {
+              invMatch = data;
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+          }
           if (invMatch) {
             await sb
               .from("subscriptions")
@@ -425,7 +443,15 @@ export async function POST(req: NextRequest) {
               `invoice_grant_${inv.id}`,
               periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
             );
+          } else {
+            console.error(
+              `[stripe] invoice.paid ${event.id}: no subscription row for ${invSubId} after retries; grant skipped`,
+            );
           }
+        } else {
+          console.error(
+            `[stripe] invoice.paid ${event.id}: missing parent subscription id`,
+          );
         }
         break;
       }
