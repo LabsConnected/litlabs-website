@@ -233,7 +233,7 @@ interface CachedProbe {
 let _geminiCache: CachedProbe | null = null;
 let _openrouterCache: CachedProbe | null = null;
 
-const GEMINI_MODEL = process.env.GEMINI_PRIMARY_MODEL || "gemini-3.6-flash";
+const GEMINI_MODEL = process.env.GEMINI_PRIMARY_MODEL || "gemini-flash-latest";
 
 /**
  * Probe Gemini with a tiny 1-token generation request.
@@ -305,7 +305,7 @@ export async function probeGemini(): Promise<Omit<AiProviderHealth, "label" | "c
 export async function probeOpenRouter(): Promise<Omit<AiProviderHealth, "label" | "category" | "action">> {
   const key = process.env.OPENROUTER_API_KEY || "";
   const now = new Date().toISOString();
-  const probeModel = "openai/gpt-oss-20b:free";
+  const probeModel = "qwen/qwen3.8-27b:free"; // catalog-verified free model (Sep 2026)
 
   if (!key) {
     return { id: "openrouter", state: "missing", detail: "API key required", model: "openrouter/free", latencyMs: null, lastChecked: now };

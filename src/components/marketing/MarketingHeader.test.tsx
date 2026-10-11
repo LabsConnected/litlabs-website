@@ -20,7 +20,7 @@ import MarketingHeader from "./MarketingHeader";
 // Studio · Capabilities · Pricing · Docs. Labels and hrefs must match.
 const EXPECTED_ORDER = ["Studio", "Capabilities", "Pricing", "Docs"];
 
-const EXPECTED_HREFS = ["/studio", "/#what-we-do", "/pricing", "/docs"];
+const EXPECTED_HREFS = ["/studio", "/capabilities", "/pricing", "/docs"];
 
 describe("MarketingHeader nav order (audit round 2)", () => {
   it("renders the desktop nav with exactly the four required items", () => {

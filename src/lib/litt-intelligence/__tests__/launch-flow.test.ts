@@ -1,13 +1,28 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { runLaunchFlow, type LaunchFlowOptions } from "@/lib/litt-intelligence/launch-flow";
 import { registerInternalTools, toolRegistry } from "@/lib/litt-intelligence/tool-registry";
 import type { WorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import type { AgentLoopResult } from "@/lib/litt-intelligence/agent-loop-v2";
 import type { BuildFixLoopResult } from "@/lib/litt-intelligence/build-fix-loop";
 import { recordActionEventActivity } from "@/lib/action-runtime";
+import { _resetProviderHealthForTests } from "@/lib/litt-intelligence/provider-registry";
 
 vi.mock("@/lib/action-runtime", () => ({
   recordActionEventActivity: vi.fn(() => Promise.resolve({})),
+}));
+
+// The real runAgentLoopV2 path (exercised by the paid-fallback tests below)
+// fire-and-forgets metering events; keep them hermetic so the test never
+// touches the network or DB. Existing tests in this file inject a fake
+// runAgentLoop and never trigger metering, so this mock is inert for them.
+vi.mock("@/lib/metering", () => ({
+  emitUsageEvent: vi.fn(() => Promise.resolve({ usageEventId: null, skipped: "test" })),
+  emitLlmMetering: vi.fn(() => Promise.resolve({ usageEventId: null, skipped: "test" })),
+  getMeteringContext: vi.fn(() => undefined),
+  runWithMeteringContext: vi.fn((_ctx: unknown, fn: () => unknown) => fn()),
+  resolveMeteringUserUuid: vi.fn(() => Promise.resolve(null)),
+  _clearMeteringUserCache: vi.fn(),
+  METERING_FEATURES: ["agent-chat", "browser", "studio", "launch"],
 }));
 
 // ─── Mocks ──────────────────────────────────────────────────────────
@@ -228,6 +243,86 @@ describe("Launch Flow: no-mutation reprompt", () => {
     await runLaunchFlow(options);
 
     expect(runAgentLoop).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─── Tests: reprompt continues the recovery conversation ─────────────
+// Regression for the 2026-09-28 acceptance failure: a rejected apply_patch
+// builds a recovery (validation error + exact re-read file content) in the
+// loop's messages, but the bounded reprompt used to start a FRESH loop and
+// deterministically discard it — the weakest fallback models started blind,
+// produced no tool calls, and the run died. The reprompt must continue the
+// SAME conversation.
+
+describe("Launch Flow: reprompt continues the recovery conversation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    toolRegistry.clear();
+    registerInternalTools();
+  });
+
+  it("re-seeds the previous loop's messages when the first attempt's patch was rejected", async () => {
+    const recoveryContent = "CURRENT FILE CONTENT (index.html):\n<html>recovered</html>";
+    const runAgentLoop = vi.fn()
+      .mockResolvedValueOnce(successAgentResult({
+        toolCalls: [{ toolId: "apply_patch", success: false, summary: "search text not found in file", mutating: false }],
+        finalMessages: [
+          { role: "user", content: "Build a simple site" },
+          { role: "user", content: `validation failed\n\nSAFE PATCH RECOVERY ATTEMPT 1\n\n${recoveryContent}` },
+        ],
+      }))
+      .mockResolvedValueOnce(successAgentResult({
+        toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
+      }));
+    const options = makeOptions({ requiresExecution: true, runAgentLoop });
+
+    await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    // The second attempt continues the SAME conversation — the recovery
+    // context (re-read file content) survives instead of starting blind.
+    const secondConfig = runAgentLoop.mock.calls[1][2];
+    expect(secondConfig.initialMessages).toBeDefined();
+    expect(JSON.stringify(secondConfig.initialMessages)).toContain("CURRENT FILE CONTENT");
+    // The reprompt text describes the rejected patch — it must not claim
+    // the model merely "announced changes".
+    const repromptMessage = String(runAgentLoop.mock.calls[1][0]);
+    expect(repromptMessage).not.toContain("announced changes");
+    expect(repromptMessage).toContain("rejected");
+  });
+
+  it("keeps the generic reprompt text and no seeded messages when no patch was rejected", async () => {
+    const runAgentLoop = vi.fn()
+      .mockResolvedValueOnce(successAgentResult({
+        toolCalls: [{ toolId: "files.list", success: true, summary: "listed", mutating: false }],
+      }))
+      .mockResolvedValueOnce(successAgentResult({
+        toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }],
+      }));
+    const options = makeOptions({ requiresExecution: true, runAgentLoop });
+
+    await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    expect(String(runAgentLoop.mock.calls[1][0])).toContain("did not write any project files");
+    // No recovery context existed — nothing to seed, and the first loop's
+    // mock result carried no finalMessages.
+    expect(runAgentLoop.mock.calls[1][2].initialMessages).toBeUndefined();
+  });
+
+  it("reprompts at most once even when the continued attempt also fails", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(successAgentResult({
+      toolCalls: [{ toolId: "apply_patch", success: false, summary: "rejected again", mutating: false }],
+      finalMessages: [{ role: "user", content: "Build a simple site" }],
+    }));
+    const options = makeOptions({ requiresExecution: true, runAgentLoop });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("TOOL_EXECUTION_UNAVAILABLE");
+    expect(result.finalText).toContain("no available model produced a file-writing tool call after two attempts");
   });
 });
 
@@ -879,5 +974,335 @@ describe("Launch Flow: artifact gate rejects the blank welcome screen", () => {
     const check = await verifyProjectArtifacts(createMockTransport());
     expect(check.ok).toBe(false);
     expect(check.error).toContain("No runnable website entry file");
+  });
+});
+
+describe("Launch Flow: artifact gate honors workspace-change evidence (#551)", () => {
+  // The #551 acceptance failure: an approved edit to index.html (adding a
+  // comment) legitimately leaves the LITT-WELCOME-SCREEN marker in place.
+  // The resumed run's own workspace diff proves files changed — the marker
+  // gate must not report "no real project files were created" for it.
+  const MARKER_EDIT =
+    "<!-- PR551-acceptance-edit-marker -->\n<!-- LITT-WELCOME-SCREEN: blank-state of the LiTT builder. Not a project, not project content. -->\n<html><body>Welcome to LiTT</body></html>";
+
+  function markerEditTransport(): WorkspaceTransport {
+    return createMockTransport({
+      listFiles: vi.fn().mockResolvedValue({
+        entries: [{ name: "index.html", type: "file" }],
+      }),
+      readFile: vi.fn().mockResolvedValue({ content: MARKER_EDIT, size: 256 }),
+    });
+  }
+
+  it("passes a marker-bearing entry when workspace evidence shows the run changed files", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      workspaceChange: { status: "changed", files: ["index.html"] },
+    });
+    expect(check.ok).toBe(true);
+  });
+
+  it("still fails the same workspace without evidence — launch stalls stay caught", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport());
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("blank starter screen");
+  });
+
+  it("still fails when evidence says the workspace is unchanged", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      workspaceChange: { status: "unchanged", files: [] },
+    });
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("blank starter screen");
+  });
+
+  it("still fails when evidence is unknown — an unverifiable workspace keeps the strict gate", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      workspaceChange: { status: "unknown", files: [] },
+    });
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("blank starter screen");
+  });
+
+  it("still fails when no entry file exists at all, even with changed evidence", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(createMockTransport(), {
+      workspaceChange: { status: "changed", files: ["other.txt"] },
+    });
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("No runnable website entry file");
+  });
+});
+
+// ─── Tests: honest loop failure propagation ─────────────────────────
+
+describe("Launch Flow: honest loop failure", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    toolRegistry.clear();
+    registerInternalTools();
+  });
+
+  it("reports the run as failed — never completed — when the loop fails honestly", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(
+      successAgentResult({
+        failedHonestly:
+          "I couldn't apply the requested file change: I asked for approval in words " +
+          "instead of emitting the file tool call, so no approval card was created " +
+          "and no files were changed. Nothing was modified — please try again.",
+        toolCalls: [],
+      }),
+    );
+    const options = makeOptions({ requiresExecution: true, runAgentLoop });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(false);
+    expect(result.status).toBe("failed");
+    expect(result.finalText).toContain("no approval card was created");
+    expect(result.error).toBe("HONEST_LOOP_FAILURE");
+    expect(result.agentLoopResult?.failedHonestly).toBeDefined();
+  });
+});
+
+describe("Launch Flow: artifact gate mutation-aware marker skip (#551b2)", () => {
+  // #551 acceptance re-run #3: an approved additive edit to index.html
+  // legitimately keeps the LITT-WELCOME-SCREEN marker. The resumed run's
+  // own tool-call log (a successful file mutation) is passed as defense
+  // in depth for when the workspace diff could not run ("unknown").
+  const MARKER_EDIT =
+    "<!-- PR551-acceptance-edit-marker -->\n<!-- LITT-WELCOME-SCREEN: blank-state of the LiTT builder. Not a project, not project content. -->\n<html><body>Welcome to LiTT</body></html>";
+
+  function markerEditTransport(): WorkspaceTransport {
+    return createMockTransport({
+      listFiles: vi.fn().mockResolvedValue({
+        entries: [{ name: "index.html", type: "file" }],
+      }),
+      readFile: vi.fn().mockResolvedValue({ content: MARKER_EDIT, size: 256 }),
+    });
+  }
+
+  it("passes a marker-bearing entry when the run's tool log shows a successful mutation and the diff is unknown", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      workspaceChange: { status: "unknown", files: [] },
+      hadSuccessfulMutation: true,
+    });
+    expect(check.ok).toBe(true);
+  });
+
+  it("passes a marker-bearing entry when the run's tool log shows a successful mutation and no evidence exists", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      hadSuccessfulMutation: true,
+    });
+    expect(check.ok).toBe(true);
+  });
+
+  it("still fails when the diff affirmatively proves the workspace untouched — a lying tool must not pass", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      workspaceChange: { status: "unchanged", files: [] },
+      hadSuccessfulMutation: true,
+    });
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("blank starter screen");
+  });
+
+  it("still fails without a successful mutation — launch stalls stay caught", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const check = await verifyProjectArtifacts(markerEditTransport(), {
+      workspaceChange: { status: "unknown", files: [] },
+      hadSuccessfulMutation: false,
+    });
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("blank starter screen");
+  });
+
+  it("threads hadSuccessfulMutation through ensureProjectPreviewReady", async () => {
+    const { ensureProjectPreviewReady } = await import("@/lib/litt-intelligence/launch-flow");
+    const transport = createMockTransport({
+      listFiles: vi.fn().mockResolvedValue({
+        entries: [{ name: "index.html", type: "file" }],
+      }),
+      readFile: vi.fn().mockResolvedValue({ content: MARKER_EDIT, size: 256 }),
+      startPreview: vi.fn().mockResolvedValue({ status: "ready" }),
+      getPreviewStatus: vi.fn().mockResolvedValue({ status: "ready" }),
+    });
+    const result = await ensureProjectPreviewReady(
+      transport as any,
+      { workspaceChange: { status: "unknown", files: [] }, hadSuccessfulMutation: true },
+      undefined,
+      undefined,
+    );
+    expect(result.ok).toBe(true);
+  });
+});
+
+// ─── Tests: entitled paid fallback through the REAL runLaunchFlow path ───
+
+/**
+ * P0 regression: the V1 streamText lane routes through defaultChain and never
+ * calls planBasicRoutes, so PR #610's V2 wiring never fired there — an
+ * entitled user whose pinned provider was filtered out (GEMINI_DISABLED) got
+ * an empty provider chain and failed with zero attempts.
+ *
+ * These tests exercise the REAL runLaunchFlow (no injected runAgentLoop):
+ * runLaunchFlow → runAgentLoopV2 → callLLMWithTools → planBasicRoutes.
+ * Only the network boundary (fetch) is mocked. First OpenAI call returns a
+ * native tool call to files.write; the second returns final text so the loop
+ * terminates. files.write runs in executionMode "auto" so the
+ * auto-approve-safe mutation policy executes it without an approval pause.
+ */
+describe("Launch Flow: entitled paid fallback (real runLaunchFlow path)", () => {
+  const OPENAI_HOST = "api.openai.com";
+
+  function openAiToolCallResponse() {
+    return new Response(
+      JSON.stringify({
+        id: "chatcmpl-test-1",
+        object: "chat.completion",
+        created: 1,
+        model: "gpt-4o",
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [
+                {
+                  id: "call_1",
+                  type: "function",
+                  function: {
+                    // Wire naming per buildToolIdReverseMap: files.write → files_write
+                    name: "files_write",
+                    arguments: JSON.stringify({
+                      projectId: "proj-test",
+                      path: "hello.txt",
+                      content: "hello world",
+                    }),
+                  },
+                },
+              ],
+            },
+            finish_reason: "tool_calls",
+          },
+        ],
+        usage: { prompt_tokens: 50, completion_tokens: 10, total_tokens: 60 },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  function openAiFinalResponse() {
+    return new Response(
+      JSON.stringify({
+        id: "chatcmpl-test-2",
+        object: "chat.completion",
+        created: 2,
+        model: "gpt-4o",
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: "Done — hello.txt is written." },
+            finish_reason: "stop",
+          },
+        ],
+        usage: { prompt_tokens: 60, completion_tokens: 8, total_tokens: 68 },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  function stubFetchForPaidFallback() {
+    let openAiCalls = 0;
+    const fetchMock = vi.fn(async (url: unknown, _init?: RequestInit) => {
+      const u = String(url);
+      if (!u.includes(OPENAI_HOST)) {
+        // Every free provider is down for this test.
+        return new Response("upstream error", { status: 500 });
+      }
+      openAiCalls++;
+      return openAiCalls === 1 ? openAiToolCallResponse() : openAiFinalResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  function makeRealLoopOptions(overrides: Partial<LaunchFlowOptions> = {}) {
+    const transport = createMockTransport();
+    const options: LaunchFlowOptions = {
+      userMessage: "Write hello.txt",
+      projectId: "proj-test",
+      userId: "user-test",
+      transport,
+      systemPrompt: "",
+      enableBuildFix: false,
+      enableDeploy: false,
+      // files.write is auto-approve-safe in AUTO mode — in "act" the loop
+      // would pause for approval and the tool would never execute.
+      executionMode: "auto",
+      buildPreviewUrl: () => "https://preview.litlabs.net/preview/ws-test",
+      allowLittPaidProviders: true,
+      ...overrides,
+    };
+    return { options, transport };
+  }
+
+  beforeEach(() => {
+    toolRegistry.clear();
+    registerInternalTools();
+    _resetProviderHealthForTests();
+    vi.stubEnv("GEMINI_DISABLED", "true");
+    vi.stubEnv("OPENAI_API_KEY", "test-openai-key");
+    vi.stubEnv("GROQ_API_KEY", "");
+    vi.stubEnv("OPENROUTER_API_KEY", "");
+    vi.stubEnv("GEMINI_API_KEY", "");
+    vi.stubEnv("GOOGLE_API_KEY", "");
+    vi.stubEnv("MISTRAL_API_KEY", "");
+    vi.stubEnv("CLOUDFLARE_API_TOKEN", "");
+    // Keep the plan deterministic: only the managed OpenAI route survives.
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "true");
+    vi.stubEnv("OPENAI_MODEL", "gpt-4o");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("reaches the paid fallback through the genuine path and executes the tool call", async () => {
+    const fetchMock = stubFetchForPaidFallback();
+    const { options, transport } = makeRealLoopOptions();
+
+    const result = await runLaunchFlow(options);
+
+    // (1) Paid fallback attempted through the genuine orchestration path
+    // (runLaunchFlow → runAgentLoopV2 → callLLMWithTools → planBasicRoutes),
+    // not a direct router call.
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes(OPENAI_HOST))).toBe(true);
+    // (2) The OpenAI-returned tool call really executed against the transport.
+    expect(transport.writeFile).toHaveBeenCalled();
+    expect(transport.writeFile).toHaveBeenCalledWith("hello.txt", "hello world");
+    expect(result.status).toBe("preview_ready");
+  });
+
+  it("unentitled → no paid route attempted; run reports model failure (negative control)", async () => {
+    const fetchMock = stubFetchForPaidFallback();
+    const { options, transport } = makeRealLoopOptions({ allowLittPaidProviders: false });
+
+    const result = await runLaunchFlow(options);
+
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes(OPENAI_HOST))).toBe(false);
+    expect(transport.writeFile).not.toHaveBeenCalled();
+    expect(result.status).toBe("failed");
+    expect(result.error).toBeTruthy();
   });
 });

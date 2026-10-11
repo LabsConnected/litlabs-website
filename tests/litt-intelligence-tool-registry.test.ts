@@ -34,14 +34,19 @@ describe("LiTT Intelligence — Tool Registry", () => {
   it("listEnabled returns only enabled tools", () => {
     const enabled = toolRegistry.listEnabled();
     expect(enabled.every((t) => t.enabled)).toBe(true);
-    expect(enabled.some((t) => t.id === "terminal.execute")).toBe(false);
+    // terminal.execute is now governed by the terminal command policy
+    // (safe/risky/deny), not quarantined — so it IS in the enabled list.
+    expect(enabled.some((t) => t.id === "terminal.execute")).toBe(true);
   });
 
-  it("terminal.execute is disabled by default", () => {
+  it("terminal.execute is governed by the command policy, not quarantined", () => {
     const tool = toolRegistry.get("terminal.execute");
     expect(tool).toBeDefined();
-    expect(tool!.enabled).toBe(false);
-    expect(tool!.approvalPolicy.neverAllow).toBe(true);
+    expect(tool!.enabled).toBe(true);
+    expect(tool!.approvalPolicy.neverAllow).toBe(false);
+    // Registry backstop: the permission engine decides per command, but any
+    // execution still requires explicit approval to have been granted.
+    expect(tool!.approvalPolicy.requireExplicitForMutations).toBe(true);
   });
 
   it("deploy.execute requires the LITT_ENABLE_INFRA_DEPLOY opt-in", () => {

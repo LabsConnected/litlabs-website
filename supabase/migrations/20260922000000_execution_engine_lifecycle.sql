@@ -24,6 +24,11 @@ CREATE INDEX IF NOT EXISTS mission_runs_lease_idx
   ON public.mission_runs (status, lease_expires_at)
   WHERE status IN ('queued', 'preparing', 'running', 'waiting_approval');
 
+-- DEPRECATED (2026-09-29): public.litt_execution_runs has zero callers.
+-- Execution state is persisted via action_runs (action-runtime run-store) and
+-- mission_runs (missions repository). This table is retained for historical
+-- data only; do not write new code against it. A future cleanup migration may
+-- drop it once data retention is confirmed.
 CREATE TABLE IF NOT EXISTS public.litt_execution_runs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id text NOT NULL,

@@ -40,6 +40,7 @@ import {
   type NavMenuSection,
 } from "@/lib/navigation";
 import { BrandLogo } from "@/components/branding/BrandLogo";
+import GlobalLittEntry from "@/components/litt/GlobalLittEntry";
 
 /* ─── Identity Dock ────────────────────────────────────────────────── */
 
@@ -408,7 +409,7 @@ function TopBar() {
   const searchParams = useSearchParams();
   const { resolvedColors: T } = useTheme();
   const { isSignedIn } = useClerkAuth();
-  const { balance, isLoading: walletLoading, isError: walletError } = useWallet();
+  const { balance, displayBalance, isLoading: walletLoading, isError: walletError } = useWallet();
   const littHealth = useLittHealth();
 
   // Studio manages its own mobile chrome (header, bottom nav, composer),
@@ -496,7 +497,7 @@ function TopBar() {
             ) : walletError ? (
               <>-- <span style={{ color: T.accentColor }}>LiTTBits</span></>
             ) : (
-              <>{balance.toLocaleString()} <span style={{ color: T.accentColor }}>LiTTBits</span></>
+              <>{displayBalance ?? balance.toLocaleString()} <span style={{ color: T.accentColor }}>LiTTBits</span></>
             )}
           </span>
         )}
@@ -546,6 +547,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <Suspense fallback={<div className="h-14 shrink-0" />}>
         <TopBar />
       </Suspense>
+      <Suspense fallback={null}><GlobalLittEntry /></Suspense>
 
       {/* Main content */}
       <main

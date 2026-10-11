@@ -134,7 +134,7 @@ describe("Marketplace state distinctions", () => {
       }),
     );
 
-    const mod = await import("@/app/(app)/marketplace/page");
+    const mod = await import("@/app/(app)/marketplace/MarketplaceClient");
     await act(async () => {
       render(React.createElement(mod.default));
     });
@@ -155,7 +155,7 @@ describe("Marketplace state distinctions", () => {
     vi.useRealTimers();
   });
 
-  it("times out and shows a retry action when auth never reports isLoaded", async () => {
+  it("renders the public catalog even when auth never reports isLoaded", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const useClerkAuthMock = vi.mocked((await import("@/hooks/useClerkAuth")).useClerkAuth);
     useClerkAuthMock.mockReturnValue({
@@ -168,21 +168,13 @@ describe("Marketplace state distinctions", () => {
     });
     mockFetchItems([SAMPLE_ITEM]);
 
-    const mod = await import("@/app/(app)/marketplace/page");
+    const mod = await import("@/app/(app)/marketplace/MarketplaceClient");
     await act(async () => {
       render(React.createElement(mod.default));
     });
 
-    expect(screen.getByText("Loading marketplace...")).toBeTruthy();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(10000);
-    });
-
-    expect(
-      screen.getByText("Marketplace is taking longer than expected to load."),
-    ).toBeTruthy();
-    expect(screen.getByText("Retry")).toBeTruthy();
+    expect(screen.getByText("Test Tool")).toBeTruthy();
+    expect(screen.queryByText("Loading marketplace...")).toBeNull();
 
     vi.useRealTimers();
     // vi.clearAllMocks() (afterEach) resets call history but not a
@@ -209,7 +201,7 @@ describe("Marketplace state distinctions", () => {
     const rafSpy = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 0);
     mockFetchItems([SAMPLE_ITEM]);
 
-    const mod = await import("@/app/(app)/marketplace/page");
+    const mod = await import("@/app/(app)/marketplace/MarketplaceClient");
     await act(async () => {
       render(React.createElement(mod.default));
     });
@@ -240,7 +232,7 @@ describe("Marketplace state distinctions", () => {
       }),
     );
 
-    const mod = await import("@/app/(app)/marketplace/page");
+    const mod = await import("@/app/(app)/marketplace/MarketplaceClient");
     await act(async () => {
       render(React.createElement(mod.default));
     });
@@ -271,7 +263,7 @@ describe("Marketplace state distinctions", () => {
   it("shows an empty message when the API returns zero items", async () => {
     mockFetchItems([]);
 
-    const mod = await import("@/app/(app)/marketplace/page");
+    const mod = await import("@/app/(app)/marketplace/MarketplaceClient");
     await act(async () => {
       render(React.createElement(mod.default));
     });
@@ -287,7 +279,7 @@ describe("Marketplace state distinctions", () => {
   it("shows an error message with Retry when the API fails", async () => {
     mockFetchItems([], { ok: false, status: 500 });
 
-    const mod = await import("@/app/(app)/marketplace/page");
+    const mod = await import("@/app/(app)/marketplace/MarketplaceClient");
     await act(async () => {
       render(React.createElement(mod.default));
     });
@@ -304,7 +296,7 @@ describe("Marketplace state distinctions", () => {
   it("renders items when the API returns data", async () => {
     mockFetchItems([SAMPLE_ITEM]);
 
-    const mod = await import("@/app/(app)/marketplace/page");
+    const mod = await import("@/app/(app)/marketplace/MarketplaceClient");
     await act(async () => {
       render(React.createElement(mod.default));
     });

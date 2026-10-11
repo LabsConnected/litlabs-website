@@ -549,15 +549,21 @@ describe("CommandStudio — canvas-first 2-zone layout", () => {
     const { user } = await renderCommandStudio();
     await settle();
 
+    // Studio enters with the LiTT chat surface open; closing it reaches the
+    // canvas view this test toggles from. Chat is never unmounted.
+    const mount = screen.getByTestId("litt-mobile-sheet-mount");
+    expect(mount.style.display).toBe("");
+    expect(screen.getByTestId("studio-command-composer")).toBeTruthy();
+    await user.click(screen.getByTestId("litt-mobile-sheet-close"));
+    await settle();
+
     // The segmented switcher is the primary fast path on the canvas view.
     expect(screen.getByTestId("mobile-surface-switcher")).toBeTruthy();
     expect(screen.getByTestId("mobile-switch-chat")).toBeTruthy();
     expect(screen.getByTestId("mobile-switch-canvas")).toBeTruthy();
 
     // Chat surface is mounted but hidden — never unmounted while switching.
-    const mount = screen.getByTestId("litt-mobile-sheet-mount");
     expect(mount.style.display).toBe("none");
-    expect(screen.getByTestId("studio-command-composer")).toBeTruthy();
 
     // Tap Chat — the sheet becomes visible; the composer instance is the
     // same one (state, drafts, and SSE connections survive).
@@ -952,8 +958,10 @@ describe("CommandStudio — mission panels live in the Activity dock", () => {
 
     // Ordering: Workspace/Model header → mission cards → activity feed.
     // (StudioActivityTimeline renders null when it has no entries, so the
-    // always-present feed empty-state marks the feed position instead.)
-    const feedEmpty = within(activity).getByText("No conversation activity yet.");
+    // always-present feed empty-state marks the feed position instead.
+    // Item 5a: the feed is the run's persisted action_events — with no run
+    // attached, the honest state is "No task run yet".)
+    const feedEmpty = within(activity).getByText(/No task run yet/);
     expect(
       cards.compareDocumentPosition(feedEmpty) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();

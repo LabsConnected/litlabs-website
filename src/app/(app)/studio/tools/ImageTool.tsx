@@ -38,7 +38,7 @@ import {
   Copy,
   Eraser,
 } from "lucide-react";
-import { MediaProviderId, ProviderSelection } from "@/lib/media";
+import { ProviderSelection } from "@/lib/media";
 import { GENERATION_PRESETS } from "@/lib/visual-packs/generation-presets";
 import { DEFAULT_MASCOT_DESCRIPTION } from "@/lib/visual-packs/types";
 import GenerationHistoryCard from "../components/GenerationHistoryCard";
@@ -93,7 +93,9 @@ type Generation = {
 
 /* ─── Constants ───────────────────────────────────────────────────────── */
 
-const STORAGE_KEY = "litlabs-generate-history";
+const HISTORY_KEY = "litlabs-generate-history";
+const historyStorageKey = (projectId: string | null) =>
+  projectId ? `${HISTORY_KEY}:${projectId}` : HISTORY_KEY;
 const MAX_HISTORY = 20;
 
 const PROMPT_PRESETS = [
@@ -275,7 +277,7 @@ const PROVIDER_OPTIONS = [
     id: "auto-free" as const,
     label: "Auto Best (Free)",
     tag: "AUTO",
-    desc: "Cloudflare → Alibaba → Pollinations",
+    desc: "OpenAI GPT Image → configured providers",
     cost: 0,
     ready: true,
   },
@@ -283,7 +285,7 @@ const PROVIDER_OPTIONS = [
     id: "auto-quality" as const,
     label: "Auto Best (Quality)",
     tag: "AUTO",
-    desc: "Gemini → FAL → Recraft",
+    desc: "OpenAI GPT Image → FAL → Recraft",
     cost: 1,
     ready: true,
   },
@@ -305,9 +307,9 @@ const PROVIDER_OPTIONS = [
   },
   {
     id: "pollinations" as const,
-    label: "Pollinations",
-    tag: "FREE",
-    desc: "FLUX · No key needed",
+    label: "Pollinations (Experimental)",
+    tag: "MANUAL",
+    desc: "Explicit free fallback · never automatic",
     cost: 0,
     ready: true,
   },
@@ -337,9 +339,9 @@ const PROVIDER_OPTIONS = [
   },
   {
     id: "openai" as const,
-    label: "DALL-E 3",
+    label: "OpenAI GPT Image",
     tag: "OpenAI",
-    desc: "OPENAI_API_KEY",
+    desc: "Flare generation · Sunburst edits",
     cost: 5,
     ready: false,
   },
@@ -359,7 +361,7 @@ const LITT_QUICK_ACTIONS = [
   { label: "Change Background", promptSuffix: ", with a new background: lush tropical garden, soft bokeh, natural lighting" },
   { label: "Fix Hands", promptSuffix: ", correct hand anatomy, detailed fingers, natural pose" },
   { label: "Remove Object", promptSuffix: ", remove distracting objects, clean composition, minimalist background" },
-  { label: "Upscale 4K", promptSuffix: ", 4k upscale, ultra high resolution, enhanced details, crisp edges" },
+  { label: "Enhance details", promptSuffix: ", 4k upscale, ultra high resolution, enhanced details, crisp edges" },
   { label: "Create Variations", promptSuffix: ", alternative composition, different angle, same subject and mood" },
   { label: "Add Text", promptSuffix: ", with elegant typography overlay, bold sans-serif title text" },
 ];
@@ -458,7 +460,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
   }, [prompt]);
 
   /* ── Provider / format state ── */
-  const [providerId, setProviderId] = useState<ProviderSelection>("auto-free");
+  const [providerId, setProviderId] = useState<ProviderSelection>("openai");
   const [aspectRatio, setAspectRatio] = useState<
     "1:1" | "4:5" | "3:2" | "16:9" | "9:16"
   >("1:1");
@@ -544,7 +546,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
   const [history, setHistory] = useState<Generation[]>(() => {
     if (typeof window === "undefined") return [];
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(historyStorageKey(projectId));
       return raw ? JSON.parse(raw) : [];
     } catch {
       return [];
@@ -669,7 +671,7 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
       name: "Default",
       prompt: "",
       negativePrompt: "",
-      providerId: "pollinations",
+      providerId: "openai",
       aspectRatio: "1:1",
       imageSize: "1K",
       seed: 0,
@@ -707,17 +709,17 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
   useEffect(() => {
     try {
       if (history.length === 0) {
-        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(historyStorageKey(projectId));
         return;
       }
       localStorage.setItem(
-        STORAGE_KEY,
+        historyStorageKey(projectId),
         JSON.stringify(history.slice(0, MAX_HISTORY)),
       );
     } catch {
       // Storage unavailable — history remains in memory.
     }
-  }, [history]);
+  }, [history, projectId]);
 
   useEffect(() => {
     try {
@@ -950,9 +952,9 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
 
   const handleClearHistory = useCallback(() => {
     setHistory([]);
-    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(historyStorageKey(projectId));
     addLog("info", "History cleared");
-  }, [addLog]);
+  }, [addLog, projectId]);
 
   /**
    * Remove a single generation from history by id.
@@ -1072,6 +1074,8 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
           guidanceScale,
           inferenceSteps,
           sampler,
+          projectId,
+          operation: referenceImage ? "edit" : "generate",
         };
 
         // Handle auto modes vs manual provider selection
@@ -1196,6 +1200,8 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
     sampler,
     strength,
     refreshWallet,
+    projectId,
+    setActiveAssetId,
   ]);
 
   const handleSaveToGallery = useCallback(
@@ -3690,11 +3696,11 @@ export default function ImageTool({ initialPrompt }: { initialPrompt?: string | 
                                 border: "1px solid rgba(255,255,255,.12)",
                                 color: "rgba(255,255,255,.8)",
                               }}
-                              aria-label={"Upscale"}
-                              title={"Upscale"}
+                              aria-label={"Enhance details"}
+                              title={"Enhance details"}
                             >
                               <Maximize2 size={10} className="pointer-events-none" />
-                              <span className="hidden sm:inline">{"Upscale"}</span>
+                              <span className="hidden sm:inline">{"Enhance details"}</span>
                             </button>
                             <button
                               key={"Remove BG"}

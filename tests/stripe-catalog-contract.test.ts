@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PLANS } from "@/config/plans";
 import {
   PRODUCT_IDENTITY,
-  PLAN_CONTRACTS,
   VERIFIED_STRIPE_PLANS,
   VERIFIED_PREMIUM_AGENTS,
   LEGACY_STRIPE_PRODUCTS,
@@ -50,13 +49,10 @@ describe("Stripe catalog — verified plan products", () => {
 describe("Founder entitlement contract", () => {
   it("Founder has 0 monthly credits (no recurring LiTTBit grant)", () => {
     expect(PLANS.founder.monthlyCredits).toBe(0);
-    expect(PLAN_CONTRACTS.founder.credits).toBe(0);
-    expect(PLAN_CONTRACTS.founder.creditGrantFrequency).toBe("none");
   });
 
   it("Founder has no standard/future price", () => {
     expect(PLANS.founder.standardPriceCents).toBeNull();
-    expect(PLAN_CONTRACTS.founder.standardPriceCents).toBeNull();
   });
 
   it("Founder has no six-month expiration in features", () => {
@@ -87,7 +83,6 @@ describe("Founder entitlement contract", () => {
 
   it("Founder checkout is retired", () => {
     expect(PLANS.founder.enabled).toBe(false);
-    expect(PLAN_CONTRACTS.founder.checkoutEnabled).toBe(false);
   });
 
   it("Founder plan rank equals Creator Beta (Creator-level access)", () => {
@@ -98,20 +93,17 @@ describe("Founder entitlement contract", () => {
 
   it("Founder has activeProjectLimit of 5 (same as Creator)", () => {
     expect(PLANS.founder.activeProjectLimit).toBe(5);
-    expect(PLAN_CONTRACTS.founder.activeProjectLimit).toBe(5);
   });
 });
 
 describe("Creator Beta entitlement contract", () => {
-  it("grants 6,000 LiTTBits per billing cycle", () => {
-    expect(PLANS.creator_beta.monthlyCredits).toBe(6000);
-    expect(PLAN_CONTRACTS.creator_beta.credits).toBe(6000);
-    expect(PLAN_CONTRACTS.creator_beta.creditGrantFrequency).toBe("per_billing_cycle");
+  it("grants 7,500 LiTTBits per billing cycle", () => {
+    expect(PLANS.creator_beta.monthlyCredits).toBe(7500);
+    expect(PLANS.creator_beta.billingType).toBe("subscription");
   });
 
   it("standard future price is null (no tiered pricing)", () => {
     expect(PLANS.creator_beta.standardPriceCents).toBeNull();
-    expect(PLAN_CONTRACTS.creator_beta.standardPriceCents).toBeNull();
   });
 
   it("has 5 active project limit", () => {
@@ -120,20 +112,17 @@ describe("Creator Beta entitlement contract", () => {
 
   it("checkout is enabled", () => {
     expect(PLANS.creator_beta.enabled).toBe(true);
-    expect(PLAN_CONTRACTS.creator_beta.checkoutEnabled).toBe(true);
   });
 });
 
 describe("Pro Builder Beta entitlement contract", () => {
-  it("grants 20,000 LiTTBits per billing cycle", () => {
-    expect(PLANS.pro_builder_beta.monthlyCredits).toBe(20000);
-    expect(PLAN_CONTRACTS.pro_builder_beta.credits).toBe(20000);
-    expect(PLAN_CONTRACTS.pro_builder_beta.creditGrantFrequency).toBe("per_billing_cycle");
+  it("grants 18,000 LiTTBits per billing cycle", () => {
+    expect(PLANS.pro_builder_beta.monthlyCredits).toBe(18000);
+    expect(PLANS.pro_builder_beta.billingType).toBe("subscription");
   });
 
   it("standard future price is null (no tiered pricing)", () => {
     expect(PLANS.pro_builder_beta.standardPriceCents).toBeNull();
-    expect(PLAN_CONTRACTS.pro_builder_beta.standardPriceCents).toBeNull();
   });
 
   it("has 25 active project limit", () => {
@@ -142,7 +131,6 @@ describe("Pro Builder Beta entitlement contract", () => {
 
   it("checkout is enabled", () => {
     expect(PLANS.pro_builder_beta.enabled).toBe(true);
-    expect(PLAN_CONTRACTS.pro_builder_beta.checkoutEnabled).toBe(true);
   });
 });
 

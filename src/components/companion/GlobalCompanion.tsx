@@ -25,6 +25,7 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useProfile } from "@/context/ProfileContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { useGlobalLitt } from "@/components/global-litt/GlobalLittProvider";
 import { useVoiceSession } from "@/app/(app)/studio/context/VoiceSessionContext";
 import { VoiceSessionProvider } from "@/app/(app)/studio/context/VoiceSessionContext";
 import { AGENT_META, type ChatMessage } from "@/app/(app)/studio/stores/useStudioAgentStore";
@@ -145,6 +146,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const { profile } = useProfile();
   const { isSignedIn } = useClerkAuth();
+  const { projectId: globalLittProjectId } = useGlobalLitt();
   const {
     voiceState,
     voiceInputState,
@@ -272,6 +274,8 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
           },
           // Page context so LiTT knows where the user is
           pageContext,
+          // Global LiTT project ID for conversation persistence
+          globalLittProjectId,
         }),
       });
 
@@ -297,7 +301,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
     } finally {
       setBusy(false);
     }
-  }, [activeAgentId, busy, isSignedIn, messages, profile, voiceTransportConnected, voiceInputState, pageContext, voiceHealth]);
+  }, [activeAgentId, busy, isSignedIn, messages, profile, voiceTransportConnected, voiceInputState, pageContext, voiceHealth, globalLittProjectId]);
 
   // Keep handleSendRef in sync so the voice transcript callback always calls the latest
   useEffect(() => {
@@ -359,7 +363,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
               }}
             >
               <Image
-                src="/brand/litt-mascot-avatar.png"
+                src="/brand/litt-robot-avatar-96.png"
                 alt="LiTT"
                 fill
                 sizes="32px"
@@ -593,7 +597,7 @@ export function GlobalCompanion() {
         title="LiTT — tap to chat, hold for voice"
       >
         <span className="relative h-12 w-12 overflow-hidden rounded-full">
-          <Image src="/brand/litt-mascot-avatar.png" alt="LiTT" fill sizes="48px" className="object-cover" priority />
+          <Image src="/brand/litt-robot-avatar-96.png" alt="LiTT" fill sizes="48px" className="object-cover" priority />
         </span>
       </button>
 

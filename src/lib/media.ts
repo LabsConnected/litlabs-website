@@ -77,8 +77,8 @@ export const MEDIA_PROVIDERS: MediaProvider[] = [
   },
   {
     id: "pollinations",
-    label: "Pollinations (Free)",
-    description: "No API key. Flux + SDXL image generation. Default for agents.",
+    label: "Pollinations (Experimental)",
+    description: "Experimental manual-only fallback. Never selected automatically.",
     supportedFormats: ["image"],
     cost: () => 0, // free!
     requiresKey: false,
@@ -117,8 +117,8 @@ export const MEDIA_PROVIDERS: MediaProvider[] = [
   },
   {
     id: "openai",
-    label: "OpenAI (DALL-E 3)",
-    description: "DALL-E 3 for photorealistic images. Needs OPENAI_API_KEY.",
+    label: "OpenAI GPT Image",
+    description: "GPT Image 2.5: Flare for new images, Sunburst for edits and references.",
     supportedFormats: ["image"],
     cost: () => 5,
     requiresKey: true,
@@ -178,12 +178,16 @@ export const WIRED_PROVIDERS: MediaProvider[] = MEDIA_PROVIDERS.filter(
 export const getProvider = (id: MediaProviderId) =>
   MEDIA_PROVIDERS.find(p => p.id === id);
 
-/** Resolve a "default" provider for a given format (prefer configured API keys over free services). */
+/** Resolve the canonical provider for a given format. */
 export const defaultProviderFor = (format: MediaFormat): MediaProviderId => {
   const candidates = MEDIA_PROVIDERS.filter(p =>
     p.supportedFormats.includes(format)
   );
   if (format === "image") {
+    if (process.env.OPENAI_API_KEY) {
+      const openai = candidates.find((p) => p.id === "openai");
+      if (openai) return openai.id;
+    }
     // Prefer Cloudflare Workers AI (free) if configured
     if (process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_AI_API_TOKEN) {
       const cf = candidates.find(p => p.id === "cloudflare");
@@ -204,12 +208,8 @@ export const defaultProviderFor = (format: MediaFormat): MediaProviderId => {
       const fal = candidates.find(p => p.id === "fal");
       if (fal) return fal.id;
     }
-    // Last resort: Pollinations (free, no key, but unreliable)
-    const free = candidates.find(p => p.id === "pollinations");
-    if (free) return free.id;
   }
-  // Fall back to free provider
-  const free = candidates.find(p => p.free);
-  if (free) return free.id;
+  // No image provider is silently substituted. The caller receives a
+  // configuration error instead of an unrelated account-global fallback.
   return "huggingface";
 };

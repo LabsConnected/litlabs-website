@@ -18,7 +18,7 @@
 
 import { describe, it, expect } from "vitest";
 import { PLANS } from "@/config/plans";
-import { PLAN_CONTRACTS, VERIFIED_STRIPE_PLANS } from "@/config/product-truth";
+import { VERIFIED_STRIPE_PLANS } from "@/config/product-truth";
 
 /**
  * The canonical expected Stripe catalog.
@@ -55,11 +55,6 @@ describe("Stripe catalog normalization — single source of truth", () => {
       );
     });
 
-    it("PLAN_CONTRACTS.priceCents matches expected Stripe price", () => {
-      expect(PLAN_CONTRACTS.creator_beta.priceCents).toBe(
-        EXPECTED_STRIPE_CATALOG.creator_beta.priceCents,
-      );
-    });
 
     it("VERIFIED_STRIPE_PLANS.priceCents matches expected Stripe price", () => {
       expect(VERIFIED_STRIPE_PLANS.creator_beta.priceCents).toBe(
@@ -86,11 +81,6 @@ describe("Stripe catalog normalization — single source of truth", () => {
       );
     });
 
-    it("PLAN_CONTRACTS.priceCents matches expected Stripe price", () => {
-      expect(PLAN_CONTRACTS.pro_builder_beta.priceCents).toBe(
-        EXPECTED_STRIPE_CATALOG.pro_builder_beta.priceCents,
-      );
-    });
 
     it("VERIFIED_STRIPE_PLANS.priceCents matches expected Stripe price", () => {
       expect(VERIFIED_STRIPE_PLANS.pro_builder_beta.priceCents).toBe(
@@ -117,11 +107,6 @@ describe("Stripe catalog normalization — single source of truth", () => {
       );
     });
 
-    it("PLAN_CONTRACTS.priceCents matches expected Stripe price", () => {
-      expect(PLAN_CONTRACTS.founder.priceCents).toBe(
-        EXPECTED_STRIPE_CATALOG.founder.priceCents,
-      );
-    });
 
     it("VERIFIED_STRIPE_PLANS.priceCents matches expected Stripe price", () => {
       expect(VERIFIED_STRIPE_PLANS.founder.priceCents).toBe(
@@ -144,9 +129,8 @@ describe("Stripe catalog normalization — single source of truth", () => {
   });
 
   describe("Cross-source consistency", () => {
-    it("PLANS = PLAN_CONTRACTS = VERIFIED_STRIPE_PLANS for all plans", () => {
+    it("PLANS = VERIFIED_STRIPE_PLANS for all plans", () => {
       for (const planId of ["creator_beta", "pro_builder_beta", "founder"] as const) {
-        expect(PLANS[planId].monthlyPriceCents).toBe(PLAN_CONTRACTS[planId].priceCents);
         expect(PLANS[planId].monthlyPriceCents).toBe(VERIFIED_STRIPE_PLANS[planId].priceCents);
       }
     });
@@ -154,8 +138,6 @@ describe("Stripe catalog normalization — single source of truth", () => {
     it("no standardPriceCents (no tiered pricing)", () => {
       expect(PLANS.creator_beta.standardPriceCents).toBeNull();
       expect(PLANS.pro_builder_beta.standardPriceCents).toBeNull();
-      expect(PLAN_CONTRACTS.creator_beta.standardPriceCents).toBeNull();
-      expect(PLAN_CONTRACTS.pro_builder_beta.standardPriceCents).toBeNull();
     });
   });
 

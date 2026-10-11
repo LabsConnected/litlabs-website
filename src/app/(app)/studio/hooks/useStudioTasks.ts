@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { StudioTask, UpdateStudioTaskInput } from "@/lib/studio/task-types";
+import { dedupeTasksByConversation, type StudioTask, type UpdateStudioTaskInput } from "@/lib/studio/task-types";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 
 export function useStudioTasks(projectId: string | null) {
@@ -35,7 +35,10 @@ export function useStudioTasks(projectId: string | null) {
       });
       if (!res.ok) return;
       const data = await res.json() as { tasks?: StudioTask[]; closedTasks?: StudioTask[] };
-      const next = Array.isArray(data.tasks) ? data.tasks : [];
+      // Server dedupes too, but a raced double-adoption can land two rows
+      // for one conversation between POSTs — dedupe client-side so the bar
+      // never renders transient duplicate tabs (newest-first wins).
+      const next = dedupeTasksByConversation(Array.isArray(data.tasks) ? data.tasks : []);
       setTasks(next);
       setClosedTasks(Array.isArray(data.closedTasks) ? data.closedTasks : []);
       setActiveTaskId((current) => current && next.some((task) => task.id === current)
@@ -72,27 +75,47 @@ export function useStudioTasks(projectId: string | null) {
     if (!res.ok) return null;
     const data = await res.json() as { task?: StudioTask };
     if (!data.task) return null;
-    setTasks((current) => [data.task!, ...current.filter((task) => task.id !== data.task!.id)]);
+    // Dedupe by conversation as well as task id: a raced double-adoption
+    // POST can return a second row for the same conversation, and the bar
+    // must never show it as a duplicate "Current work" tab.
+    setTasks((current) => dedupeTasksByConversation([data.task!, ...current.filter((task) => task.id !== data.task!.id)]));
     setActiveTaskId(data.task.id);
     return data.task;
   }, [headers, projectId]);
 
-  const activateTask = useCallback(async (taskId: string, surface = "studio") => {
+  /**
+   * Canonical surface write path — the ONLY client mutation of
+   * `lastOpenedSurface` (Phase 3: single-writer invariant).
+   *
+   * Idempotent: when the cached task already records `surface`, no PATCH
+   * is issued. This is what breaks the old PATCH oscillation — a second
+   * writer (or a re-rendered effect) that agrees with the stored value
+   * becomes a silent no-op instead of a competing write.
+   */
+  const persistSurface = useCallback(async (taskId: string, surface: string) => {
     const task = tasks.find((item) => item.id === taskId);
     if (!task) return null;
-    setActiveTaskId(task.id);
+    if (task.lastOpenedSurface === surface) return task;
     const res = await fetch(`/api/studio/tasks/${encodeURIComponent(task.id)}`, {
       method: "PATCH",
       credentials: "include",
       headers: await headers(true),
       body: JSON.stringify({ lastOpenedSurface: surface }),
     });
-    if (res.ok) {
-      const data = await res.json() as { task?: StudioTask };
-      if (data.task) setTasks((current) => current.map((item) => item.id === task.id ? data.task! : item));
-    }
-    return task;
+    if (!res.ok) return null;
+    const data = await res.json() as { task?: StudioTask };
+    if (data.task) setTasks((current) => current.map((item) => item.id === task.id ? data.task! : item));
+    return data.task ?? null;
   }, [headers, tasks]);
+
+  const activateTask = useCallback(async (taskId: string, surface = "studio") => {
+    const task = tasks.find((item) => item.id === taskId);
+    if (!task) return null;
+    setActiveTaskId(task.id);
+    // Surface persistence goes through the single canonical path —
+    // activateTask never PATCHes lastOpenedSurface directly.
+    return persistSurface(task.id, surface);
+  }, [persistSurface, tasks]);
 
   const closeTask = useCallback(async (taskId: string) => {
     const res = await fetch(`/api/studio/tasks/${encodeURIComponent(taskId)}`, {
@@ -109,8 +132,12 @@ export function useStudioTasks(projectId: string | null) {
     return true;
   }, [headers, tasks]);
 
-  /** Generic PATCH — e.g. bind a provisioned conversationId to the task. */
-  const updateTask = useCallback(async (taskId: string, patch: UpdateStudioTaskInput) => {
+  /**
+   * Generic PATCH for non-surface fields (title, conversation binding…).
+   * Surface writes are forbidden here by type — `lastOpenedSurface` has
+   * exactly one write path: persistSurface (Phase 3 single-writer rule).
+   */
+  const updateTask = useCallback(async (taskId: string, patch: Omit<UpdateStudioTaskInput, "lastOpenedSurface">) => {
     const res = await fetch(`/api/studio/tasks/${encodeURIComponent(taskId)}`, {
       method: "PATCH",
       credentials: "include",
@@ -133,7 +160,7 @@ export function useStudioTasks(projectId: string | null) {
     if (!res.ok) return null;
     const data = await res.json() as { task?: StudioTask };
     if (data.task) {
-      setTasks((current) => [data.task!, ...current.filter((task) => task.id !== taskId)]);
+      setTasks((current) => dedupeTasksByConversation([data.task!, ...current.filter((task) => task.id !== taskId)]));
       setClosedTasks((current) => current.filter((task) => task.id !== taskId));
       setActiveTaskId(taskId);
     }
@@ -167,6 +194,7 @@ export function useStudioTasks(projectId: string | null) {
     createTask,
     renameTask,
     activateTask,
+    persistSurface,
     closeTask,
     reopenTask,
     updateTask,

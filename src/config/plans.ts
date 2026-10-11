@@ -1,3 +1,8 @@
+import {
+  PLAN_ENTITLEMENTS,
+  getPlanCreditAllowance,
+} from "./plan-entitlements";
+
 export type PlanId =
   | "starter"
   | "creator_beta"
@@ -33,12 +38,12 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     monthlyPriceCents: 0,
     standardPriceCents: 0,
     default_price: 0,
-    monthlyCredits: 500,
-    activeProjectLimit: 1,
+    monthlyCredits: getPlanCreditAllowance("starter"),
+    activeProjectLimit: PLAN_ENTITLEMENTS.starter.activeProjectLimit,
     features: [
       "LiTT agent",
       "1 active project",
-      "500 AI credits (one-time)",
+      "1,500 LiTTBits (one-time)",
       "Standard AI routing",
       "Code generation",
       "Image generation",
@@ -58,13 +63,13 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     standardPriceCents: null,
     default_price: 1500,
     stripePriceIdEnv: "STRIPE_PRICE_CREATOR_BETA",
-    monthlyCredits: 6000,
-    activeProjectLimit: 5,
+    monthlyCredits: getPlanCreditAllowance("creator_beta"),
+    activeProjectLimit: PLAN_ENTITLEMENTS.creator_beta.activeProjectLimit,
     features: [
       "LiTT agent",
       "Research, writing & marketing skills",
       "5 active projects",
-      "6,000 AI credits per billing cycle",
+      "7,500 LiTTBits per billing cycle",
       "Private projects",
       "GitHub connection",
       "Project downloads",
@@ -84,14 +89,14 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     standardPriceCents: null,
     default_price: 3900,
     stripePriceIdEnv: "STRIPE_PRICE_PRO_BUILDER_BETA",
-    monthlyCredits: 20000,
-    activeProjectLimit: 25,
+    monthlyCredits: getPlanCreditAllowance("pro_builder_beta"),
+    activeProjectLimit: PLAN_ENTITLEMENTS.pro_builder_beta.activeProjectLimit,
     features: [
       "LiTT agent",
       "Coding & analytics skills",
       "Everything in Creator Beta",
       "25 active projects",
-      "20,000 AI credits per billing cycle",
+      "18,000 LiTTBits per billing cycle",
       "Terminal runtime",
       "Advanced coding models",
       "Diff review and approval",
@@ -127,7 +132,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     standardPriceCents: null,
     default_price: 14900,
     monthlyCredits: 0,
-    activeProjectLimit: 5,
+    activeProjectLimit: PLAN_ENTITLEMENTS.founder.activeProjectLimit,
     features: [
       "Permanent Creator-level access",
       "Founder badge",

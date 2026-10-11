@@ -1,7 +1,7 @@
 /**
  * Starter credit grant regression tests.
  *
- * Canonical policy: Starter receives 500 LiTTBits ONCE at account creation,
+ * Canonical policy: Starter receives 1,500 LiTTBits ONCE at account creation,
  * not monthly. The idempotency key must be user-scoped (no period) so
  * repeated calls to getCreditBalances() do not grant additional credits.
  *
@@ -45,9 +45,10 @@ vi.mock("@/lib/supabase", () => ({
           })),
         };
       }
-      // credit_ledger table — supports two query shapes:
+      // credit_ledger table — supports three query shapes:
       // 1. Starter pre-check: .eq("user_id").eq("idempotency_key").limit(1).maybeSingle()
       // 2. Daily claim: .eq("user_id").eq("category").like("idempotency_key").order().limit(1).maybeSingle()
+      // 3. Top-up pre-check: .eq("user_id").in("idempotency_key", [...]).limit(2) [awaited directly]
       if (table === "credit_ledger") {
         const maybeSingleFn = vi.fn(async () => ({
           data: mockLedgerRows.length > 0 ? mockLedgerRows[0] : null,
@@ -60,10 +61,21 @@ vi.mock("@/lib/supabase", () => ({
           limit: limitFn,
           like: likeFn,
         }));
+        const inFn = vi.fn((_col: string, vals: string[]) => ({
+          limit: vi.fn(async () => ({
+            data: mockLedgerRows.filter((r) =>
+              vals.includes(
+                (r as Record<string, unknown>).idempotency_key as string,
+              ),
+            ),
+            error: null,
+          })),
+        }));
         return {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               eq: secondEqFn,
+              in: inFn,
             })),
           })),
         };
@@ -108,22 +120,22 @@ describe("Starter credit grant — one-time only", () => {
     mockSubData = null;
   });
 
-  it("new Starter receives 500 once", async () => {
-    setupBalances(500, 0, 0);
+  it("new Starter receives 1,500 once", async () => {
+    setupBalances(1500, 0, 0);
 
     await getCreditBalances("clerk_new_user");
 
     // grant_credits should have been called with user-scoped key (no period)
     expect(mockRpc).toHaveBeenCalledWith("grant_credits", expect.objectContaining({
-      p_amount: 500,
-      p_idempotency_key: "starter:user-uuid-123",
+      p_amount: 1500,
+      p_idempotency_key: "starter:v1:user-uuid-123",
     }));
   });
 
   it("refreshing wallet does not grant more (ledger pre-check)", async () => {
-    setupBalances(500, 0, 0);
-    // Simulate that the grant already exists in the ledger
-    mockLedgerRows = [{ id: "ledger-1" }];
+    setupBalances(1500, 0, 0);
+    // Simulate that the v1 grant already exists in the ledger
+    mockLedgerRows = [{ id: "ledger-1", idempotency_key: "starter:v1:user-uuid-123" }];
 
     await getCreditBalances("clerk_existing_user");
 
@@ -143,7 +155,7 @@ describe("Starter credit grant — one-time only", () => {
     expect(grantCall).toBeDefined();
     const key = (grantCall![1] as Record<string, unknown>).p_idempotency_key as string;
     // Must NOT contain a YYYY-MM suffix
-    expect(key).toBe("starter:user-uuid-123");
+    expect(key).toBe("starter:v1:user-uuid-123");
     expect(key).not.toMatch(/\d{4}-\d{2}$/);
   });
 

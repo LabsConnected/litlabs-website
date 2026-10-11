@@ -5,7 +5,7 @@
 # This image is the controlled environment for all user sandboxes.
 # No platform secrets, no daemon processes, no privileged access.
 
-FROM node:22-book-slim
+FROM node:22-bookworm-slim
 
 # ─── Base packages ───────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \

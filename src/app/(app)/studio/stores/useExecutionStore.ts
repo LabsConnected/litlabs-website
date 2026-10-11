@@ -18,11 +18,17 @@ import type { ActionRunDisplayState } from "../components/ActionRunStatusPanel";
 export type ExecutionPhase =
   | "idle"
   | "planning"
+  | "researching" // Station Control bridge (§9): research work
+  | "creating" // Station Control bridge (§9): image/video/music/audio generation
   | "inspecting"
   | "editing"
+  | "browsing" // Station Control bridge (§9): browser station activity
+  | "running" // Station Control bridge (§9): terminal commands
   | "testing"
   | "verifying"
-  | "done"
+  | "deploying" // Station Control bridge (§9): deploy station activity
+  | "done" // Contract §9 calls this "complete" (renamed from done) —
+           // kept as "done" per bridge spec: additive only, no renames.
   | "failed"
   | "cancelled"
   | "awaiting_approval"
@@ -169,7 +175,10 @@ interface ExecutionStore {
    * the dead pausedRunId (which would 409). Set by failApproval({expired}).
    */
   approvalExpired: boolean;
+  /** Pre-run baseline — the Revert target. */
   checkpoint: { label: string; gitSha: string } | null;
+  /** Post-run checkpoint — what Accept keeps. */
+  afterCheckpoint: { label: string; gitSha: string } | null;
   /** Tool calls in the current run */
   toolCalls: Array<{ toolId: string; success?: boolean; summary: string }>;
   /** Changes summary, classified by the actual mutation operation. */
@@ -214,12 +223,34 @@ interface ExecutionStore {
   /** Approval POST accepted (202) — card shows the run executing. */
   approvalAccepted: () => void;
   /**
-   * Approval POST failed (non-2xx) or the resumed run failed — keep the
-   * card mounted with the backend error and a Retry affordance. Never
-   * silently clears, never auto re-requests.
+   * Approval POST failed (non-2xx) or the resumed run failed. Converges the
+   * gate to the failed state:
+   * - When the decision was recorded and the run failed afterwards
+   *   (`decisionRecorded: true`, not expired), the gate is dead — the
+   *   Approve/Reject pair must not stay actionable, so pendingApproval is
+   *   cleared and phase becomes "failed" (never "awaiting_approval"). The
+   *   failure itself is already on the transcript; recovery is a new
+   *   request, not a replay of the identical frozen run.
+   * - When the decision never landed server-side (`decisionRecorded:
+   *   false`) or the gate expired, the gate is still actionable — the card
+   *   stays mounted with the error and its retry/re-request affordance.
+   * Never silently clears, never auto re-requests.
    */
-  failApproval: (error: string, retryable?: boolean, opts?: { expired?: boolean }) => void;
+  failApproval: (
+    error: string,
+    retryable?: boolean,
+    opts?: { expired?: boolean; decisionRecorded?: boolean },
+  ) => void;
   setCheckpoint: (checkpoint: { label: string; gitSha: string } | null) => void;
+  setAfterCheckpoint: (checkpoint: { label: string; gitSha: string } | null) => void;
+  /**
+   * Restore persisted run checkpoints (after a refresh) WITHOUT emitting
+   * activity events and without overwriting live-run values.
+   */
+  hydrateCheckpoints: (pair: {
+    before: { label: string; gitSha: string } | null;
+    after: { label: string; gitSha: string } | null;
+  }) => void;
   collapseEvent: (id: string) => void;
   collapseLowLevel: () => void;
   clearEvents: () => void;
@@ -331,6 +362,19 @@ function mapPhase(phase: string, step: number): ExecutionPhase {
       return "done";
     case "cancelled":
       return "cancelled";
+    // Station Control bridge (§9): the new first-class phases pass through
+    // when the agent loop / SSE feed names them directly, instead of
+    // falling into the "editing" default and misreporting the run.
+    case "researching":
+      return "researching";
+    case "creating":
+      return "creating";
+    case "browsing":
+      return "browsing";
+    case "running":
+      return "running";
+    case "deploying":
+      return "deploying";
     default:
       return "editing";
   }
@@ -436,6 +480,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   approvalRetryable: true,
   approvalExpired: false,
   checkpoint: null,
+  afterCheckpoint: null,
   toolCalls: [],
   changesSummary: null,
   previewPreparing: false,
@@ -456,6 +501,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       approvalRetryable: true,
       approvalExpired: false,
       checkpoint: null,
+      afterCheckpoint: null,
       toolCalls: [],
       changesSummary: null,
     });
@@ -475,7 +521,9 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     const paused = state.pendingApproval != null && reason !== "cancelled" && reason !== "failed";
     set({
       isRunning: false,
-      phase: reason === "cancelled" ? "cancelled" : paused ? "awaiting_approval" : "done",
+      // A failed run is failed — never "done". (Reporting a failed run as
+      // Complete is the same dishonesty class as a fake success.)
+      phase: reason === "cancelled" ? "cancelled" : reason === "failed" ? "failed" : paused ? "awaiting_approval" : "done",
       events: updatedEvents,
       pendingApproval: paused ? state.pendingApproval : null,
       approvalPhase: paused ? state.approvalPhase : "idle",
@@ -621,12 +669,22 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   },
 
   failApproval: (error, retryable = true, opts) => {
+    const expired = opts?.expired === true;
+    // A gate whose decision never landed server-side (or that expired into
+    // "request again") is still actionable — keep it mounted. A gate whose
+    // decision was recorded and whose run then failed is dead: clearing
+    // pendingApproval drops the operator bar's Approve/Reject buttons and
+    // unmounts the card, and phase "failed" replaces the "Waiting for
+    // approval" label. Replaying the identical frozen run cannot succeed,
+    // so no retry affordance is offered for it.
+    const gateActionable = expired || opts?.decisionRecorded !== true;
     set({
       approvalPhase: "failed",
       approvalError: error,
       approvalRetryable: retryable,
-      approvalExpired: opts?.expired === true,
-      phase: "awaiting_approval",
+      approvalExpired: expired,
+      pendingApproval: gateActionable ? get().pendingApproval : null,
+      phase: gateActionable ? "awaiting_approval" : "failed",
     });
     get().addEvent({
       type: "approval_resolved",
@@ -635,6 +693,27 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       success: false,
     });
     mirrorTaskPhase(get, set);
+  },
+
+  setAfterCheckpoint: (afterCheckpoint) => {
+    set({ afterCheckpoint });
+    if (afterCheckpoint) {
+      get().addEvent({
+        type: "checkpoint",
+        summary: `Saved: ${afterCheckpoint.label}`,
+        label: afterCheckpoint.label,
+        gitSha: afterCheckpoint.gitSha,
+      });
+    }
+  },
+
+  hydrateCheckpoints: ({ before, after }) => {
+    const cur = get();
+    if (cur.isRunning) return;
+    set({
+      checkpoint: cur.checkpoint ?? before,
+      afterCheckpoint: cur.afterCheckpoint ?? after,
+    });
   },
 
   setCheckpoint: (checkpoint) => {
@@ -726,6 +805,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       approvalRetryable: true,
       approvalExpired: false,
       checkpoint: null,
+      afterCheckpoint: null,
       toolCalls: [],
       changesSummary: null,
       previewPreparing: false,
@@ -753,6 +833,8 @@ export function feedSSEEventToExecutionStore(
     conversationId?: string;
     label?: string;
     gitSha?: string;
+    /** checkpoint events: "after" = post-run checkpoint (not the baseline). */
+    kind?: "before" | "after";
     check?: string;
     passed?: boolean;
     errorCount?: number;
@@ -805,6 +887,21 @@ export function feedSSEEventToExecutionStore(
   const addEvent: typeof s.addEvent = (event) =>
     s.addEvent({ taskId: streamTaskId, ...event });
 
+  // Post-terminal guard: once the task's run has reached a terminal phase
+  // (done/failed/cancelled), late or duplicated progress events for that
+  // task must not resurrect it — no phase flips back to a working state
+  // and no phantom tool/feed entries. A new send calls startRun
+  // (phase -> "planning") before its stream opens, so any non-terminal
+  // event arriving while the task is terminal is by definition stale.
+  // Terminal events themselves stay idempotent (a duplicated `finished`
+  // must not be dropped).
+  const taskPhase = streamTaskId ? s.phaseForTask(streamTaskId) : s.phase;
+  const isTerminalPhase = taskPhase === "done" || taskPhase === "failed" || taskPhase === "cancelled";
+  const isTerminalEvent = evt.type === "finished" || evt.type === "cancelled";
+  if (isTerminalPhase && !isTerminalEvent) {
+    return;
+  }
+
   switch (evt.type) {
     case "tool_execution":
       if (evt.success === undefined) {
@@ -840,7 +937,13 @@ export function feedSSEEventToExecutionStore(
       break;
 
     case "checkpoint":
-      s.setCheckpoint({ label: evt.label ?? "", gitSha: evt.gitSha ?? "" });
+      if (evt.kind === "after") {
+        // Post-run checkpoint — must NOT replace the pre-run baseline,
+        // or Revert would "restore" the state it is meant to undo.
+        s.setAfterCheckpoint({ label: evt.label ?? "", gitSha: evt.gitSha ?? "" });
+      } else {
+        s.setCheckpoint({ label: evt.label ?? "", gitSha: evt.gitSha ?? "" });
+      }
       break;
 
     case "build_start":

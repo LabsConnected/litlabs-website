@@ -261,6 +261,49 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      // Static preview endpoint (/api/preview/[projectId]/...).
+      //
+      // Same rationale as /sites/:path* above: the global "/(.*)" rule would
+      // otherwise apply X-Frame-Options: DENY (blocking the Studio iframe)
+      // and the app CSP (stripping the route's sandbox directive).
+      //
+      // The preview route serves user-authored HTML from the workspace.
+      // It must be frameable by Studio (same origin) and sandboxed so
+      // untrusted scripts cannot access LiTT's cookies, storage, or APIs.
+      //
+      // NOTE: default-src uses EXPLICIT origins, never bare 'self'. The
+      // preview iframe sandbox omits allow-same-origin, so the document gets
+      // an opaque origin — and per the CSP spec, 'self' never matches any
+      // subresource URL from an opaque origin, which would silently block
+      // relative assets (style.css, app.js, images). Scheme+host sources
+      // match on the subresource URL alone, so relative assets load while
+      // third-party exfiltration stays blocked.
+      // KEEP IN SYNC with src/app/api/preview/[projectId]/[[...path]]/route.ts
+      // (this config header wins over the route header in production).
+      //
+      // Keep this rule AFTER the global rule — later matching rule wins.
+      {
+        source: "/api/preview/:path*",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value:
+              "sandbox allow-scripts; " +
+              "default-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* data: blob:; " +
+              "style-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* 'unsafe-inline' data:; " +
+              "script-src https://www.litlabs.net https://litlabs.net https://*.up.railway.app http://localhost:* 'unsafe-inline' data: blob:;",
+          },
+          {
+            key: "X-Content-Type-Options",
+            value: "nosniff",
+          },
+          // Allow framing by same origin (Studio). Do NOT use DENY here.
+          {
+            key: "X-Frame-Options",
+            value: "SAMEORIGIN",
+          },
+        ],
+      },
       // Cache fonts for 1 year
       {
         source: "/fonts/(.*)",
@@ -388,7 +431,6 @@ const nextConfig: NextConfig = {
         permanent: false,
       },
       { source: "/agent", destination: "/studio?tool=workflows", permanent: false },
-      { source: "/agents", destination: "/studio?tool=workflows", permanent: false },
       {
         source: "/agent-chat",
         destination: "/studio?tool=agents",
@@ -404,10 +446,6 @@ const nextConfig: NextConfig = {
       // is the one true route for the community surface. The aliases 308 so
       // external links and future forks can never silently duplicate it.
       ...CANONICAL_REDIRECTS,
-      // Larry's site audit (2026-09-22, issue #469): /capabilities was a 404.
-      // The nav "Capabilities" label points at the /#what-we-do homepage
-      // section, so direct visitors/guessers land there instead of a dead end.
-      { source: "/capabilities", destination: "/#what-we-do", permanent: true },
     ];
   },
 

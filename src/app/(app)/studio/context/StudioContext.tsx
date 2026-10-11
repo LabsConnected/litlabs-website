@@ -45,6 +45,7 @@ import {
   type ReactNode,
 } from "react";
 import type { WorkspaceStage, CreatorKind } from "@/app/(app)/studio/lib/studio-destinations";
+import { registerWorkspaceNavigator } from "@/app/(app)/studio/lib/follow-navigation";
 
 // ─── Contract types ──────────────────────────────────────────────
 
@@ -234,6 +235,16 @@ export function StudioContextProvider({
       onWorkspaceModeChange?.(mode);
     },
     [onWorkspaceModeChange],
+  );
+
+  // Station Control bridge (§2.2 follow mode): hand the shell's existing
+  // setWorkspaceMode to the follow-aware navigator. Registration is the
+  // only bridge — all switching still goes through this existing setter.
+  // Headless/voice contexts never render this provider, so navigation
+  // stays a presentation no-op there (§19.2).
+  useEffect(
+    () => registerWorkspaceNavigator(setWorkspaceMode),
+    [setWorkspaceMode],
   );
 
   // Public: setCreator delegates to existing routing.

@@ -51,7 +51,9 @@ vi.mock("next/image", () => ({
 
 function seedHistory() {
   localStorage.setItem(
-    "litlabs-generate-history",
+    studioCtx.projectId
+      ? `litlabs-generate-history:${studioCtx.projectId}`
+      : "litlabs-generate-history",
     JSON.stringify([
       {
         id: "gen-1",
@@ -211,6 +213,7 @@ describe("ImageTool 'Use in Project'", () => {
 
   it("with no project open: honest error, no API call, preview stays open", async () => {
     studioCtx.projectId = null;
+    seedHistory();
 
     const button = openPreview();
     fireEvent.click(button);
@@ -229,7 +232,7 @@ describe("ImageTool 'Use in Project'", () => {
   it("non-https image URL is rejected honestly without calling the API", async () => {
     localStorage.clear();
     localStorage.setItem(
-      "litlabs-generate-history",
+      `litlabs-generate-history:${PROJECT_ID}`,
       JSON.stringify([
         {
           id: "gen-2",
@@ -261,7 +264,7 @@ describe("ImageTool 'Use in Project'", () => {
   it("data:image/* fileUrl — the free-provider shape — saves via assets/insert", async () => {
     const dataUrl = `data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, 0xff]).toString("base64")}`;
     localStorage.setItem(
-      "litlabs-generate-history",
+      `litlabs-generate-history:${PROJECT_ID}`,
       JSON.stringify([
         {
           id: "gen-data-1",

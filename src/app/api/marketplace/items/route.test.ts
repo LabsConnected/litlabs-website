@@ -45,7 +45,7 @@ function mockSupabaseItems(data: unknown[] | null, error: unknown = null) {
   const chain = (name: string) => {
     query[name] = vi.fn(() => query);
   };
-  for (const name of ["select", "order", "eq", "contains"]) chain(name);
+  for (const name of ["select", "order", "eq", "contains", "abortSignal"]) chain(name);
   // The route awaits the query builder directly, so make it thenable.
   query.then = (resolve: (v: unknown) => void) => resolve({ data, error });
   vi.mocked(supabaseAdmin.from).mockReturnValue(query as never);

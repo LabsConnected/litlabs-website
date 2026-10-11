@@ -6,6 +6,7 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { formatSourceSummary } from "@/lib/projects/project-source";
 import { useExecutionStore } from "../stores/useExecutionStore";
 import { StudioSecretsPanel } from "./StudioSecretsPanel";
+import StudioPublishControls from "./StudioPublishControls";
 
 /**
  * Preview states — the five canonical states the UI explicitly supports.
@@ -71,7 +72,22 @@ const STATUS_DOT_COLOR: Record<PreviewState, string> = {
  * single honest "Preparing preview…" state instead of inventing stages.
  */
 type StartPhase = "provision" | "devserver" | null;
-const START_STAGES = ["Provision", "Dev server", "Health check"] as const;
+
+/**
+ * Workspace content truth, as reported by /api/studio-projects/[id]/workspace-state.
+ * Tri-state on purpose — "unknown" is a real, blocking state:
+ *   unknown     — the lookup is in flight (or was never run). Auto-start is
+ *                 BLOCKED. A `state !== "not_started"`-only check treats the
+ *                 pre-load `null` as permission to start, which fires a
+ *                 preview for an untouched project before we know the truth.
+ *   has_content — the project carries real user/build output; normal
+ *                 auto-start is allowed.
+ *   no_content  — brand-new/untouched workspace, or the lookup failed. Auto-start
+ *                 stays blocked (fail-safe: never boot a preview that would only
+ *                 serve the starter welcome screen or a default page).
+ */
+type WorkspaceTruth = "unknown" | "has_content" | "no_content";
+const START_STAGES = ["Provision", "Dev server"] as const;
 
 function deriveStartPhase(state: PreviewState, workspaceStatus: string | null, runtimeStatusRaw: string | null): StartPhase {
   if (state !== "starting" && state !== "restarting") return null;
@@ -254,6 +270,9 @@ export default function StudioPreviewPanel({
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [startPhase, setStartPhase] = useState<StartPhase>(null);
+  // Content truth gates auto-start. Starts as "unknown" (blocking) so the
+  // very first render can never auto-start on an unresolved truth.
+  const [workspaceTruth, setWorkspaceTruth] = useState<WorkspaceTruth>("unknown");
   // Project secrets editor (Clerk keys for the preview runtime). Toggled
   // from the toolbar; auto-opened from the auth-config error CTA.
   const [secretsOpen, setSecretsOpen] = useState(false);
@@ -521,6 +540,46 @@ export default function StudioPreviewPanel({
     void loadStatus();
   }, [loadStatus]);
 
+  // Workspace content truth. Re-read on project change and on refreshKey so a
+  // first build/edit unblocks auto-start. Fails safe: any error, non-OK
+  // response, or unreadable payload leaves truth at "no_content", which keeps
+  // auto-start blocked rather than booting a default/welcome preview.
+  useEffect(() => {
+    if (!projectId) {
+      setWorkspaceTruth("no_content");
+      return;
+    }
+    let cancelled = false;
+    setWorkspaceTruth("unknown");
+    (async () => {
+      try {
+        const res = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace-state`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: await authHeaders(),
+          signal: AbortSignal.timeout(8000),
+        });
+        if (cancelled) return;
+        if (!res.ok) {
+          setWorkspaceTruth("no_content");
+          return;
+        }
+        const payload = await res.json().catch(() => null) as { scaffolded?: unknown; touched?: unknown } | null;
+        if (cancelled || !payload) {
+          setWorkspaceTruth("no_content");
+          return;
+        }
+        // Same signal CommandStudio uses: a second git commit or a consumed
+        // scaffold manifest both mean real content exists.
+        const hasContent = payload.touched === true || payload.scaffolded === false;
+        setWorkspaceTruth(hasContent ? "has_content" : "no_content");
+      } catch {
+        if (!cancelled) setWorkspaceTruth("no_content");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [projectId, refreshKey, authHeaders]);
+
   // Refresh when refreshKey prop changes (used by CodeWorkspace split view
   // and the permanent preview column's workspaceRevision prop)
   useEffect(() => {
@@ -663,8 +722,10 @@ export default function StudioPreviewPanel({
   // must not keep the green "Preview ready" dot over a dead iframe.
   // Polls lightly (30s), pauses while the tab is hidden, and surfaces a
   // truthful terminal state with a working Retry if the runtime is gone.
+  // Static projects skip this: no dev server to health-check.
   useEffect(() => {
     if (state !== "ready" || !projectId) return;
+    if (framework === "static") return;
     let cancelled = false;
     const check = async () => {
       if (cancelled || document.hidden) return;
@@ -707,7 +768,7 @@ export default function StudioPreviewPanel({
       clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [state, projectId, authHeaders, workspaceStatus]);
+  }, [state, projectId, authHeaders, workspaceStatus, framework]);
 
   // Keyboard shortcut: Cmd/Ctrl+R refreshes preview when the panel is focused.
   // This matches the universal "refresh" mental model without hijacking the
@@ -728,6 +789,32 @@ export default function StudioPreviewPanel({
 
   const preparePreview = useCallback(async () => {
     if (!projectId) return;
+    // Static projects: no dev server to start. Check readiness via the
+    // status endpoint (verifies index.html exists), then mark ready.
+    if (framework === "static") {
+      try {
+        const response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/preview`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: await authHeaders(),
+          signal: AbortSignal.timeout(15000),
+        });
+        const payload = await response.json().catch(() => null) as PreviewPayload | null;
+        if (response.ok && payload && payload.runtimeStatus === "ready") {
+          setState("ready");
+          setPreviewUrl(`/api/preview/${encodeURIComponent(projectId)}/index.html`);
+          setError(null);
+        } else {
+          setState("not_started");
+          setPreviewUrl(null);
+        }
+      } catch {
+        setState("not_started");
+        setPreviewUrl(null);
+      }
+      setIframeFailed(false);
+      return;
+    }
     // Single-flight guard: only one preview start in flight at a time.
     // Mobile rerenders and rapid prop changes cannot launch duplicate runtimes.
     if (startInFlightRef.current) return;
@@ -786,7 +873,7 @@ export default function StudioPreviewPanel({
       startInFlightRef.current = false;
       setPreviewPreparing(false);
     }
-  }, [authHeaders, projectId, setPreviewPreparing, workspaceStatus]);
+  }, [authHeaders, projectId, setPreviewPreparing, workspaceStatus, framework]);
 
   // Auto-start: when the preview is not_started (workspace/runtime never
   // provisioned or dev server not running), automatically start it. The
@@ -796,14 +883,20 @@ export default function StudioPreviewPanel({
   // and autoStartedForRef (prevents re-triggering for the same project after
   // the first attempt, regardless of outcome). A ready preview does not
   // restart — auto-start only fires for the not_started state.
+  //
+  // workspaceTruth is a hard gate: not_started alone is NOT sufficient. Until
+  // the workspace-state lookup resolves ("unknown") or reports no content, we
+  // must not start a preview — otherwise the first render races the lookup and
+  // boots a dev server for an untouched project.
   useEffect(() => {
     if (state !== "not_started") return;
     if (!projectId) return;
+    if (workspaceTruth !== "has_content") return;
     if (autoStartedForRef.current === projectId) return;
     if (startInFlightRef.current) return;
     autoStartedForRef.current = projectId;
     void preparePreview();
-  }, [state, projectId, preparePreview]);
+  }, [state, projectId, preparePreview, workspaceTruth]);
 
   const handleCopyUrl = useCallback(async () => {
     if (!previewUrl) return;
@@ -847,13 +940,24 @@ export default function StudioPreviewPanel({
     void loadStatus(true);
   }, [loadStatus]);
 
-  const displayUrl = previewUrl ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}studioRefresh=${frameKey}` : null;
+  // Static projects use the static preview endpoint (no dev server).
+  // Framework comes from the preview payload; "static" means HTML/CSS/JS only.
+  // Use explicit /index.html so relative assets (style.css, app.js) resolve correctly.
+  const isStaticProject = framework === "static";
+  const staticPreviewUrl = isStaticProject && projectId 
+    ? `/api/preview/${encodeURIComponent(projectId)}/index.html` 
+    : null;
+  const effectivePreviewUrl = isStaticProject ? staticPreviewUrl : previewUrl;
+  const displayUrl = effectivePreviewUrl ? `${effectivePreviewUrl}${effectivePreviewUrl.includes("?") ? "&" : "?"}studioRefresh=${frameKey}` : null;
   const isAuthConfigError = errorCode === "preview_clerk_config_error" || errorCode === "preview_auth_config_error";
   // The v4 @import trap: a Tailwind-intended preview that renders unstyled
   // must surface honestly — never a green "Preview ready" over dead CSS.
   const stylingFailed = state === "ready" && styleProbe?.tailwindDetected === true && styleProbe.styled === false;
-  const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (iframeFailed ? "Preview failed to load" : stylingFailed ? "Preview styling failed to apply" : "Preview ready") : state === "stale" ? "Preview may be stale" : state === "not_started" ? "Preview not started" : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : "Preview failed to start") : "Preview runtime unreachable";
-  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "not_started" ? "Preparing your preview automatically…" : state === "unreachable" ? (error ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (error ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : error ?? "The dev server failed to start. Try restarting it.") : error ?? "The preview surface reports only real project runtime state.";
+  // An untouched project has nothing to preview yet — say so honestly instead
+  // of an indefinite "Preparing your preview automatically…".
+  const awaitingFirstContent = state === "not_started" && workspaceTruth === "no_content";
+  const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (iframeFailed ? "Preview failed to load" : stylingFailed ? "Preview styling failed to apply" : "Preview ready") : state === "stale" ? "Preview may be stale" : state === "not_started" ? (awaitingFirstContent ? "No preview yet" : "Preview not started") : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : "Preview failed to start") : "Preview runtime unreachable";
+  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "not_started" ? (awaitingFirstContent ? "Build something in this project and the preview will start automatically." : "Preparing your preview automatically…") : state === "unreachable" ? (error ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (error ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : error ?? "The dev server failed to start. Try restarting it.") : error ?? "The preview surface reports only real project runtime state.";
   const dotColor = stylingFailed ? STATUS_DOT_COLOR.stale : STATUS_DOT_COLOR[state];
   const isLive = state === "ready" || state === "stale";
   const sourceSummary = formatSourceSummary({
@@ -968,8 +1072,8 @@ export default function StudioPreviewPanel({
         >
           <RefreshCw size={12} className={`pointer-events-none ${state === "stale" ? "animate-spin" : ""}`} />
         </button>
-        {/* Restart dev server */}
-        {(isLive || state === "failed") && (
+        {/* Restart dev server — hidden for static projects (no dev server) */}
+        {(isLive || state === "failed") && !isStaticProject && (
           <button
             type="button"
             onClick={() => void preparePreview()}
@@ -981,8 +1085,8 @@ export default function StudioPreviewPanel({
             <RotateCcw size={12} className="pointer-events-none" />
           </button>
         )}
-        {/* Stop dev server */}
-        {isLive && (
+        {/* Stop dev server — hidden for static projects (no dev server) */}
+        {isLive && !isStaticProject && (
           <button
             type="button"
             onClick={() => void stopPreview()}
@@ -1007,6 +1111,8 @@ export default function StudioPreviewPanel({
             {urlCopied ? <Check size={12} className="pointer-events-none" style={{ color: "#48EE38" }} /> : <Copy size={12} className="pointer-events-none" />}
           </button>
         )}
+        {/* Publish controls — static site publishing (compact toolbar mode) */}
+        {projectId && <StudioPublishControls projectId={projectId} compact />}
         {/* Project secrets — Clerk keys for the preview runtime */}
         <button
           type="button"
@@ -1098,29 +1204,73 @@ export default function StudioPreviewPanel({
                 borderRadius: deviceMode === "desktop" ? "0" : "8px",
                 boxShadow: deviceMode === "desktop" ? "none" : "0 4px 24px rgba(0,0,0,0.4)",
               }}
-              sandbox="allow-scripts allow-forms allow-modals allow-same-origin allow-popups"
+              sandbox={isStaticProject 
+                ? "allow-scripts allow-forms allow-modals allow-popups" 
+                : "allow-scripts allow-forms allow-modals allow-same-origin allow-popups"
+              }
               onLoad={handleIframeLoad}
               onError={() => setIframeFailed(true)}
               data-testid="preview-iframe"
             />
           </div>
         ) : (
-          <div className="flex min-h-[200px] flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
+          <div
+            className="flex min-h-[280px] flex-1 flex-col items-center justify-center gap-4 px-6 text-center"
+            style={{
+              backgroundImage: "radial-gradient(ellipse 60% 50% at 50% 40%, rgba(168,255,47,0.04), transparent)",
+            }}
+          >
             <div
-              className="grid h-10 w-10 place-items-center rounded-xl"
+              className="grid h-12 w-12 place-items-center rounded-2xl"
               style={{
-                backgroundColor: state === "failed" ? "rgba(239,68,68,0.08)" : "rgba(114,242,56,0.08)",
+                backgroundColor: state === "failed" ? "rgba(239,68,68,0.1)" : "color-mix(in srgb, var(--color-accent) 10%, transparent)",
                 color: state === "failed" ? "#EF4444" : "var(--litt-primary)",
+                border: `1px solid ${state === "failed" ? "rgba(239,68,68,0.2)" : "color-mix(in srgb, var(--color-accent) 20%, transparent)"}`,
+                boxShadow: state === "failed" ? "0 0 24px rgba(239,68,68,0.1)" : "0 0 24px rgba(168,255,47,0.08)",
               }}
             >
               {state === "loading" || state === "starting" || state === "restarting" ? (
-                <Loader2 size={18} className="animate-spin" />
+                <Loader2 size={20} className="animate-spin" />
               ) : (
-                <Eye size={18} />
+                <Eye size={20} />
               )}
             </div>
-            <div className="text-[11px] font-bold" style={{ color: "var(--text-primary)" }}>{label}</div>
-            <div className="max-w-[220px] text-[10px] leading-4" style={{ color: "var(--text-muted)" }}>{detail}</div>
+            <div>
+              <div className="text-sm font-extrabold tracking-tight" style={{ color: "var(--text-primary)" }}>{label}</div>
+              <div className="mx-auto mt-1.5 max-w-[280px] text-xs leading-5" style={{ color: "var(--text-muted)" }}>{detail}</div>
+            </div>
+            {/* Staged loading — show honest progress while the preview starts. */}
+            {(state === "starting" || state === "restarting") && startPhase && (
+              <div className="flex items-center gap-2" data-testid="preview-start-stages" aria-label="Preview startup progress">
+                {START_STAGES.map((stageName) => {
+                  const stageKey = stageName === "Provision" ? "provision" : "devserver";
+                  const isCurrent = startPhase === stageKey || (startPhase === "devserver" && stageKey === "provision");
+                  const isDone = startPhase === "devserver" && stageKey === "provision";
+                  return (
+                    <div key={stageName} className="flex items-center gap-1.5">
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${isCurrent && !isDone ? "animate-pulse" : ""}`}
+                        style={{
+                          backgroundColor: isDone
+                            ? "var(--litt-primary)"
+                            : isCurrent
+                              ? "#e3b341"
+                              : "var(--text-muted)",
+                          opacity: isDone || isCurrent ? 1 : 0.4,
+                        }}
+                        aria-hidden
+                      />
+                      <span
+                        className="text-[10px] font-bold"
+                        style={{ color: isDone || isCurrent ? "var(--text-primary)" : "var(--text-muted)" }}
+                      >
+                        {stageName}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             {/* Retry button for unreachable/failed states. not_started is
                 handled by auto-start — no manual button needed. */}
             {["unreachable", "failed"].includes(state) && (
@@ -1129,11 +1279,15 @@ export default function StudioPreviewPanel({
                   type="button"
                   onClick={() => void preparePreview()}
                   disabled={!projectId || state === "starting" || state === "restarting"}
-                  className="flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-[10px] font-bold disabled:opacity-40"
-                  style={{ backgroundColor: "var(--litt-primary)", color: "#000" }}
+                  className="flex min-h-10 items-center gap-2 rounded-xl px-4 text-xs font-extrabold transition-all hover:-translate-y-0.5 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
+                  style={{
+                    backgroundColor: "var(--litt-primary)",
+                    color: "#000",
+                    boxShadow: "0 8px 24px rgba(168,255,47,0.2)",
+                  }}
                   data-testid="preview-prepare"
                 >
-                  <RotateCcw size={11} className="pointer-events-none" />
+                  <RotateCcw size={12} className="pointer-events-none" />
                   {state === "failed" ? "Restart preview" : "Retry"}
                 </button>
                 {/* Auth-config failure → the fix is the project's Clerk keys.

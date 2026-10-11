@@ -101,6 +101,27 @@ describe("DemoStudio", () => {
     expect(screen.getByTestId("demo-remaining")).toHaveTextContent("4 of 5 demo messages left");
   });
 
+  it("offers starter prompts before the first message; tapping one sends it", async () => {
+    const user = userEvent.setup();
+    render(<DemoStudio maxMessages={5} disabled={false} killSwitch={false} />);
+
+    const prompts = screen.getByTestId("demo-starter-prompts");
+    const chips = within(prompts).getAllByTestId("demo-starter-prompt");
+    expect(chips.length).toBeGreaterThanOrEqual(3);
+
+    await user.click(chips[0]);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body.message).toBe(chips[0].textContent);
+
+    // Prompts disappear once the visitor engages.
+    await waitFor(() =>
+      expect(screen.queryByTestId("demo-starter-prompts")).not.toBeInTheDocument(),
+    );
+  });
+
   it("persists the transcript to localStorage and restores it on remount", async () => {
     const user = userEvent.setup();
     const { unmount } = render(

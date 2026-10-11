@@ -158,14 +158,28 @@ export default function Footer() {
           className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-6"
           style={{ borderTop: `1px solid ${C.borderColor}15` }}
         >
-          <div className="flex items-center gap-2">
-            <span
-              className="text-sm font-black"
-              style={{ color: C.headerColor }}
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <span
+                className="text-sm font-black"
+                style={{ color: C.headerColor }}
+              >
+                LiTTree LabStudios™
+              </span>
+              <span className="text-xs opacity-60">© 2026 · LiTT™</span>
+            </div>
+            <address
+              className="text-xs opacity-50 not-italic"
+              style={{ color: C.textColor }}
             >
-              LiTTree LabStudios™
-            </span>
-            <span className="text-xs opacity-60">© 2026 · LiTT™</span>
+              17082 Ontario Dr, Spring Lake, MI 49456 ·{" "}
+              <a
+                href="tel:+12314285411"
+                className="underline! underline-offset-2 hover:opacity-100"
+              >
+                (231) 428-5411
+              </a>
+            </address>
           </div>
           <div className="flex items-center gap-1.5 text-xs opacity-60">
             <span

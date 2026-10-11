@@ -85,7 +85,7 @@ const COST_CATALOG: ModelCostEntry[] = [
   },
   {
     provider: "gemini",
-    model: "gemini-2.5-flash-lite",
+    model: "gemini-2.5-flash",
     promptCostPer1M: 0.0375,
     completionCostPer1M: 0.15,
     billingClass: "free",
@@ -103,6 +103,19 @@ const COST_CATALOG: ModelCostEntry[] = [
   },
 
   // ── OpenRouter (free models — provider cost is $0) ──────────────
+  // NOTE: entries are keyed by the REAL route provider ("openrouter") +
+  // the exact providerModelId. The legacy pseudo-provider keys below
+  // ("openrouter-qwen" etc.) predate the canonical model registry and no
+  // longer match what callers pass — they are kept for history, not
+  // matched. New registry free models get an entry keyed here.
+  {
+    provider: "openrouter",
+    model: "qwen/qwen3.8-27b:free",
+    promptCostPer1M: 0,
+    completionCostPer1M: 0,
+    billingClass: "free",
+    baseBitsPer1K: 0.5,
+  },
   {
     provider: "openrouter-free",
     model: "openrouter/free",
@@ -177,6 +190,19 @@ const COST_CATALOG: ModelCostEntry[] = [
     billingClass: "byok",
     baseBitsPer1K: 0,
   },
+
+  // ── Managed OpenAI (P1) ─────────────────────────────────────────
+  // Platform-managed credential (OPENAI_API_KEY). NOT BYOK.
+  // Pricing from OpenAI public pricing (gpt-4o).
+  // billingClass "premium" — real provider cost, real LiTTBits charge.
+  {
+    provider: "openai",
+    model: "gpt-4o",
+    promptCostPer1M: 2.50,
+    completionCostPer1M: 10.00,
+    billingClass: "premium",
+    baseBitsPer1K: 5,
+  },
 ];
 
 // ── LiTT Alias → billing class mapping ─────────────────────────────────
@@ -201,12 +227,19 @@ const MARGIN_TARGET = parseFloat(process.env.LLM_COST_MARGIN_TARGET || "0.50");
  * Look up a model in the cost catalog by provider + model name.
  * Falls back to a provider-level default, then a generic default.
  */
-function lookupCostEntry(provider: string, model: string): ModelCostEntry {
-  // Exact match
+function lookupCostEntry(provider: string, model: string, isByok: boolean = false): ModelCostEntry {
+  // Exact match — prefer non-BYOK for managed, BYOK for user-funded
   const exact = COST_CATALOG.find(
-    (e) => e.provider === provider && e.model === model,
+    (e) => e.provider === provider && e.model === model &&
+      (isByok ? e.billingClass === "byok" : e.billingClass !== "byok"),
   );
   if (exact) return exact;
+
+  // Fallback to any exact provider+model match
+  const anyExact = COST_CATALOG.find(
+    (e) => e.provider === provider && e.model === model,
+  );
+  if (anyExact) return anyExact;
 
   // Provider-level fallback (first entry for that provider)
   const providerFallback = COST_CATALOG.find((e) => e.provider === provider);
@@ -239,7 +272,7 @@ function lookupCostEntry(provider: string, model: string): ModelCostEntry {
  *   providerCostMicros = 0
  */
 export function calculateLlmCost(input: CostEngineInput): CostCalculation {
-  const entry = lookupCostEntry(input.provider, input.model);
+  const entry = lookupCostEntry(input.provider, input.model, input.isByok);
   const totalTokens = input.promptTokens + input.completionTokens;
 
   // BYOK: no model inference charge

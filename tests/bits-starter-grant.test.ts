@@ -2,8 +2,8 @@
  * BITS starter grant and wallet behavior regression tests.
  *
  * Verifies:
- * 1. The Clerk webhook grants 500 starter BITS on user.created (not just lazily).
- * 2. The starter grant is idempotent (idempotency_key = "starter:{userId}").
+ * 1. The Clerk webhook grants 1,500 starter BITS on user.created (not just lazily).
+ * 2. The starter grant is idempotent (idempotency_key = "starter:v1:{userId}").
  * 3. The wallet-ledger replayed flag is correct for debits.
  * 4. The owner exemption does not leak to non-owners.
  * 5. Daily bonus is disabled by default.
@@ -22,17 +22,20 @@ describe("BITS starter grant", () => {
     const content = readFileSync(WEBHOOK_PATH, "utf-8");
     // The webhook must call grant_credits for new users
     expect(content).toContain("grant_credits");
-    expect(content).toContain("starter:");
-    expect(content).toContain("500");
+    // Grant amount comes from the canonical plan config (1,500), not a literal
+    expect(content).toContain("PLAN_ENTITLEMENTS.starter.oneTimeGrantBits");
+    expect(content).toContain("STARTER_GRANT_KEY_PREFIX");
     // Must only grant for new users (isNew check)
     expect(content).toContain("isNew");
     // Must only grant on user.created (not user.updated)
     expect(content).toContain('eventType === "user.created"');
   });
 
-  it("starter grant uses idempotency key starter:{userId}", () => {
+  it("starter grant uses idempotency key starter:v1:{userId}", () => {
     const content = readFileSync(WEBHOOK_PATH, "utf-8");
-    expect(content).toMatch(/starter:\$\{.*\.id\}/);
+    // Key is built from the canonical prefix + user id (user-scoped, no period)
+    expect(content).toContain("STARTER_GRANT_KEY_PREFIX");
+    expect(content).toMatch(/STARTER_GRANT_KEY_PREFIX\}\$\{.*\.id\}/);
   });
 
   it("starter grant pre-checks for existing grant before RPC call", () => {

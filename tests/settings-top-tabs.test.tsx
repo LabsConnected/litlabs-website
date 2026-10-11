@@ -10,7 +10,7 @@
  *   - No <aside> sidebar renders on the settings page at any viewport
  *   - The sticky section-tab strip renders with every section
  *   - The active section tab is marked with aria-current
- *   - Locked sections keep the unlock-on-click behavior
+ *   - All sections are directly accessible (no mode locks)
  *   - Strip search filters the tabs
  *   - Clicking a tab switches the active section
  */
@@ -27,6 +27,7 @@ import {
 vi.mock("next/navigation", () => ({
   usePathname: () => "/settings",
   useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
 }));
 
 vi.mock("@/context/ThemeContext", () => ({
@@ -63,7 +64,7 @@ vi.mock("@/app/(app)/studio/hooks/useConnectionSummary", () => ({
 }));
 
 vi.mock("@/app/(app)/studio/stores/useStudioModelStore", () => ({
-  useStudioModelStore: () => ({ selectedModel: null }),
+  useStudioModelStore: () => ({ selectedModel: null, providerHealth: {} }),
   MODELS: [],
 }));
 
@@ -82,10 +83,8 @@ describe("SettingsPage top-bar conversion", () => {
     cleanup();
     localStorage.clear();
     useSettingsStore.setState({
-      controlMode: "standard",
       activeSection: "overview",
       searchQuery: "",
-      hasUnsavedChanges: false,
     });
   });
 
@@ -118,31 +117,20 @@ describe("SettingsPage top-bar conversion", () => {
     expect(current!.textContent).toContain("Overview");
   });
 
-  it("keeps the locked-section unlock behavior (click switches control mode)", () => {
+  it("makes every section directly accessible — no mode locks", () => {
+    // PR-E (launch truthfulness): control modes were removed. Every tab
+    // opens its section directly; no tab carries a lock/unlock label.
     render(<SettingsPage />);
-    // "AI & Models" requires pro mode; in standard mode its tab offers
-    // to switch modes instead of opening the section. The locked label
-    // names the (free) mode explicitly so locks are never mistaken for
-    // a paywall (settings audit, 2026-09-26).
-    const lockedTab = getTabButtons().find((b) =>
-      b
-        .getAttribute("aria-label")
-        ?.includes("locked. Activate Pro mode (free) to unlock"),
-    );
-    expect(lockedTab).toBeDefined();
-    expect(lockedTab!.textContent).toContain("AI & Models");
-
-    fireEvent.click(lockedTab!);
-    expect(useSettingsStore.getState().controlMode).toBe("pro");
-
-    // After unlocking, the tab becomes a regular section tab.
-    const unlockedTab = getTabButtons().find((b) =>
-      b.textContent?.includes("AI & Models"),
-    );
-    expect(unlockedTab).not.toBeNull();
-    expect(unlockedTab!.getAttribute("aria-label") ?? "").not.toContain(
-      "unlock",
-    );
+    const tabs = getTabButtons();
+    expect(tabs.length).toBe(SETTINGS_SECTIONS.length);
+    for (const tab of tabs) {
+      expect(tab.getAttribute("aria-label") ?? "").not.toContain("unlock");
+      expect(tab.getAttribute("aria-label") ?? "").not.toContain("locked");
+    }
+    const aiModelsTab = tabs.find((b) => b.textContent?.includes("AI & Models"));
+    expect(aiModelsTab).not.toBeNull();
+    fireEvent.click(aiModelsTab!);
+    expect(useSettingsStore.getState().activeSection).toBe("ai-models");
   });
 
   it("filters tabs through the strip search", () => {
@@ -224,12 +212,14 @@ describe("SettingsPage top-bar conversion", () => {
     expect(within(screen.getByTestId("mobile-settings-content")).getByRole("radio", { name: "Builder workspace profile" }).getAttribute("aria-checked")).toBe("true");
   });
 
-  it("reserves the mobile safe area for floating assistance and save actions", () => {
-    useSettingsStore.setState({ hasUnsavedChanges: true });
+  it("renders no floating save bar — settings persist without a global save model", () => {
+    // PR-E: the global SaveBar was dead code (setUnsaved(true) was never
+    // called); every settings surface persists its own changes. No
+    // "Save changes" / "Saved to account" / "Discard" UI may exist.
     render(<SettingsPage />);
-
-    const saveBar = screen.getByText("Save changes").parentElement as HTMLElement;
-    expect(saveBar.className).toContain("env(safe-area-inset-bottom)");
+    expect(screen.queryByText("Save changes")).toBeNull();
+    expect(screen.queryByText("Saved to account")).toBeNull();
+    expect(screen.queryByText("Discard")).toBeNull();
     expect(screen.getByTestId("mobile-settings-content").className).toContain("safe-area-inset-bottom");
   });
 });

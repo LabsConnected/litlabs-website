@@ -8,28 +8,43 @@
  * - Native structured tool calling only. No text-parsed fake tool calls.
  * - Loop detection: cancel after 3 identical tool calls with no
  *   intervening workspace mutation or materially different result.
- * - Checkpoints before meaningful mutation batches.
+ * - Checkpoint before every meaningful mutation (per-mutation rollback points).
  * - Hard limits: max steps, max runtime, max output, max retries.
  * - Terminal server's isBlockedCommand() remains authoritative security.
  */
 
 import "server-only";
 
+import { randomUUID } from "crypto";
+import { postRunCheckpointLabel } from "@/lib/studio/checkpoint-pairs";
+import { emitUsageEvent, getMeteringContext } from "@/lib/metering";
+import { calculateLlmCost } from "@/lib/llm-cost-engine";
 import type { WorkspaceTransport } from "./workspace-transport";
 import { ProgressEmitter, type ProgressEvent } from "./progress-events";
 import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from "./permission-engine";
 import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, AllRoutesFailedError, AgentBudgetExhaustedError, type ToolDefinition, type ToolCallResult, type LLMMessage } from "./llm-tool-calling";
+// Re-exported so launch-flow can seed a continued loop's messages.
+export type { LLMMessage };
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { buildPatchRecoveryMessage, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
 import { computeWorkspaceChange } from "./workspace-change-producer";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
+import { recordModelFailure } from "./provider-registry";
+import {
+  FILE_WRITE_TOOL_IDS,
+  NO_BUILD_CAPABLE_MODEL,
+  findModelRecord,
+  getModelConfigSource,
+  recordHealthOutcome,
+  selectBuildModel,
+} from "./model-registry";
 import { toolRegistry } from "./tool-registry";
 import type { ActionExecutionContext } from "@/lib/action-runtime";
 import { resolveAvailableCapabilities } from "./capabilities";
 import type { LiTTToolDefinition } from "./types";
 import {
-  QUALITY_LOOP_PROMPT_SECTION,
+  buildQualityLoopPrompt,
   buildRedesignPrompt,
   finalizeQualityLoop,
   harvestStageMarkers,
@@ -37,6 +52,7 @@ import {
   noteBuildFix,
   noteDeployment,
   noteToolResult,
+  noteMutationReadBack,
   runQualityInspection,
   snapshotQualityLoopSession,
   startQualityLoopSession,
@@ -44,7 +60,73 @@ import {
   type QualityFinale,
   type QualityLoopSession,
   type QualityLoopSnapshot,
+  formatQualityVerdictBlock,
 } from "./quality-loop-flow";
+// LiTT Tool Orchestrator (fix/litt-tool-orchestrator): goal → capability
+// planning, tool health, reference-match workflow, run observability.
+import { planCapabilities, buildCapabilityPlanPrompt } from "./capability-planner";
+import {
+  resolveToolHealth,
+  filterOfferableTools,
+  buildToolHealthPromptNote,
+} from "./tool-health";
+import {
+  isReferenceMatchRequest,
+  extractReferenceUrls,
+  REFERENCE_MATCH_WORKFLOW,
+} from "./reference-match";
+import {
+  startRunObservability,
+  recordToolsOffered,
+  recordToolCall as recordObsToolCall,
+  recordApproval as recordObsApproval,
+  recordFallback as recordObsFallback,
+  recordVerificationEvidence,
+  finishRunObservability,
+  friendlyActivityLabel,
+} from "./run-observability";
+import { isTerminalOwnerUser } from "@/lib/terminal-owner";
+
+/**
+ * Apply the Tool Orchestrator prompts to a loop config (Parts A, B, H).
+ * Idempotent per config object — safe to call on both the initial run
+ * and the approval-resume path (which rebuilds cfg from the original
+ * config and would otherwise lose the orchestration prompts).
+ *
+ * Returns the computed capability plan for observability wiring.
+ */
+function applyOrchestratorPrompts(
+  cfg: { systemPrompt: string },
+  userMessage: string,
+): import("./capability-planner").CapabilityPlan {
+  const capabilityPlan = planCapabilities(userMessage);
+  cfg.systemPrompt += "\n\n" + buildCapabilityPlanPrompt(capabilityPlan);
+
+  if (capabilityPlan.isReferenceMatch || isReferenceMatchRequest(userMessage)) {
+    const refUrls = extractReferenceUrls(userMessage);
+    cfg.systemPrompt +=
+      "\n\n" + REFERENCE_MATCH_WORKFLOW +
+      (refUrls.length > 0
+        ? `\nReference URL(s) supplied: ${refUrls.join(", ")}`
+        : `\nNo reference URL detected in the message — ask the user for the reference link or screenshot before implementing.`);
+  }
+  return capabilityPlan;
+}
+
+// Station Control Bridge (chunk E): importing the barrel registers every
+// station action into the station registry (module side effects); the
+// explicit call below advertises them into the tool registry. No import
+// cycle: station-control imports tool-registry, which never imports this
+// module.
+import { registerAllStationActions } from "@/lib/station-control";
+import { setStationEventSink, summarizeStationEvent } from "@/lib/station-control/loop-events";
+
+/**
+ * Advertise station actions as agent tools, once at module scope.
+ * Idempotent — on an id collision the EXISTING tool keeps its definition,
+ * so the stabilized registry is never clobbered by the bridge.
+ */
+registerAllStationActions();
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -59,6 +141,24 @@ export interface AgentLoopConfig {
   enableBuildFix: boolean;
   /** Require a structured tool call on the first model turn of an execution flow. */
   requireToolCallOnFirstStep?: boolean;
+  /**
+   * Early bounded capability guard (BUILD runs): the loop tracks consecutive
+   * steps in which the model emitted tool calls but ZERO file-writing calls
+   * (files.write / apply_patch / edit). After maxStepsWithoutFileWrite such
+   * steps the serving model is ruled incompatible for this run and the loop
+   * switches to the next registry build model; when the chain is exhausted
+   * the run fails with NO_BUILD_CAPABLE_MODEL. Default 3; 0 disables.
+   */
+  buildCapabilityGuard?: {
+    maxStepsWithoutFileWrite?: number;
+  };
+  /**
+   * Messages to seed the conversation with before the user message.
+   * Used by the launch flow's bounded reprompt to CONTINUE an existing
+   * loop (preserving a patch-recovery message and the re-read file
+   * content) instead of starting a blind fresh loop.
+   */
+  initialMessages?: LLMMessage[];
   evalMetadata?: LLMCallMetadata;
   /** Upstream/client AbortSignal propagated to all provider calls. */
   signal?: AbortSignal;
@@ -74,8 +174,23 @@ export interface AgentLoopConfig {
    * must never supply it itself.
    */
   conversationId?: string;
+  /**
+   * Browser session this loop invocation is driving (when the loop IS the
+   * browser agent). Used for per-action metering idempotency keys
+   * (`metering:browser:{sessionId}:{actionIndex}`); the action index is the
+   * 1-based loop step. Unset for non-browser runs.
+   */
+  browserSessionId?: string;
   /** Parent ActionRun owning this work; injected server-side. */
   actionRunId?: string;
+  /**
+   * Item 5a — optional durable event sink for the Activity truth.
+   * When set, every ProgressEvent emitted through this run's
+   * `localProgress` is also offered to the hook. The loop invokes it in
+   * emit order on a per-run promise chain; failures are logged and
+   * swallowed — persistence can NEVER break the run.
+   */
+  persistEvent?: (event: ProgressEvent) => Promise<void>;
   /**
    * Canonical execution context for the entire run. Prefer this over the
    * legacy actionRunId field: it carries tenant, conversation, and project
@@ -100,6 +215,12 @@ export interface AgentLoopConfig {
     /** Server-persisted evidence restored after an approval pause. */
     state?: QualityLoopSnapshot;
   };
+  /**
+   * P1: Server-derived entitlement for managed paid providers.
+   * NEVER from client input. When true, LITT_PAID routes (managed
+   * OpenAI) are eligible as last-resort fallback in v2 routing.
+   */
+  allowLittPaidProviders?: boolean;
 }
 
 export const DEFAULT_LOOP_CONFIG: AgentLoopConfig = {
@@ -149,6 +270,13 @@ export interface AgentLoopResult {
   buildFixResult?: BuildFixLoopResult;
   checkpoint?: { checkpointId: string; label: string; gitSha: string };
   /**
+   * Post-run checkpoint: created once the run's changes landed (workspace
+   * status "changed"). Paired with `checkpoint` (the pre-run baseline) so
+   * the Studio can Accept (keep this) or Revert (restore the baseline),
+   * and both survive a refresh (they are persisted checkpoint rows).
+   */
+  afterCheckpoint?: { checkpointId: string; label: string; gitSha: string };
+  /**
    * What the run actually did to the workspace, compared against the
    * pre-mutation checkpoint. Undefined when no mutation was ever reached.
    * A "unknown" status means the comparison failed — never that the
@@ -164,6 +292,15 @@ export interface AgentLoopResult {
    *  Only set when the loop produced a purpose-written failure message
    *  (all routes exhausted / budget exhausted). */
   modelFailureText?: string;
+  /**
+   * Set when the loop ended in an honest failure that must be reported as
+   * FAILED, never completed — e.g. the model kept asking for approval in
+   * prose instead of emitting the gated tool call, so no approval card was
+   * ever created and no mutations happened. Carries the user-facing
+   * truthful message. Distinct from `cancelled` (user/system stop) and
+   * `modelFailed` (provider outage).
+   */
+  failedHonestly?: string;
   /** Set when the loop paused because ACT mode requires approval for a mutation */
   pendingApproval?: PendingApproval;
   /**
@@ -178,6 +315,19 @@ export interface AgentLoopResult {
   };
   /** Canonical quality ledger snapshot, including evidence not yet filed. */
   qualityLoopState?: QualityLoopSnapshot;
+  /**
+   * The conversation messages at loop end (copy). Lets a caller continue
+   * the SAME conversation for a bounded reprompt — e.g. the launch flow
+   * re-seeds these so a rejected patch's recovery context (validation
+   * error + re-read file content) survives the second attempt.
+   */
+  finalMessages?: LLMMessage[];
+  /**
+   * Run observability record (Part J): goal, capability plan, tools
+   * offered/called, failures, fallbacks, approvals, verification
+   * evidence. Internal diagnostics — not user-facing.
+   */
+  runObservability?: import("./run-observability").RunObservability;
 }
 
 // ─── Loop detection ───────────────────────────────────────────────
@@ -251,18 +401,80 @@ export function announcesMoreWork(text: string): boolean {
   return CONTINUATION_MARKERS.some((re) => re.test(text));
 }
 
+/**
+ * A zero-tool-call reply that asks for approval in PROSE ("please confirm
+ * and give approval to apply the change") instead of emitting the
+ * approval-gated tool call never pauses the loop — the pause only happens
+ * on a real tool call whose permission check yields `requiresApproval`.
+ * Accepting the prose as final settles the run "Complete" with zero
+ * mutations and no approval card ever created: a silent fake-complete.
+ * These markers route the prose approval-ask to the bounded-nudge path
+ * instead, so the model is told to emit the real tool call.
+ */
+const APPROVAL_ASK_MARKERS: RegExp[] = [
+  /please confirm/i,
+  /give approval/i,
+  /need your approval/i,
+  /confirm.*proceed/i,
+];
+
+/**
+ * Present-continuous work claims ("I'm adding…", "I'm updating…") with
+ * zero tool calls: the work is announced as happening right now, but
+ * nothing was executed. Same fake-complete hole as the prose
+ * approval-ask — none of the CONTINUATION_MARKERS match present
+ * continuous tense.
+ */
+const PROSE_WORK_CLAIM_MARKERS: RegExp[] = [
+  /i['’]m\s+(adding|updating|writing|creating|applying|editing|modifying)\b/i,
+];
+
+export function asksForApprovalInProse(text: string): boolean {
+  return APPROVAL_ASK_MARKERS.some((re) => re.test(text));
+}
+
+export function claimsOngoingWork(text: string): boolean {
+  return PROSE_WORK_CLAIM_MARKERS.some((re) => re.test(text));
+}
+
 type ZeroCallResolution =
   | { action: "final" }
   | { action: "nudge"; nudgeMessage: string }
-  | { action: "stall" };
+  | { action: "stall" }
+  /** The model kept up a behavior that can never succeed (e.g. asking for
+      approval in prose instead of emitting the gated tool call). The run
+      must end FAILED with a truthful message — never "Complete". */
+  | { action: "fail"; failureMessage: string };
 
 /**
  * Decide what a zero-tool-call model reply means. Plain prose is the
  * final answer. Prose that announces more work gets bounded nudges to
  * emit the promised tool calls; when the nudges are exhausted the run
- * must fail honestly rather than claim completion.
+ * must fail honestly rather than claim completion. Prose that asks for
+ * approval (or claims work is happening) without emitting the tool call
+ * gets a targeted nudge to emit the call; on exhaustion the run fails
+ * honestly — no approval card was ever created, so completing would lie.
  */
 export function resolveZeroToolCalls(text: string, nudgesUsed: number): ZeroCallResolution {
+  // The prose approval-ask is the most specific signal and is checked
+  // first: the model wants to perform a gated mutation but never emitted
+  // the tool call, so no approval card exists.
+  if (asksForApprovalInProse(text) || claimsOngoingWork(text)) {
+    if (nudgesUsed < MAX_CONTINUATION_NUDGES) {
+      return {
+        action: "nudge",
+        nudgeMessage:
+          "Prose approval requests don't create approval cards — no approval was recorded and no files were changed. " +
+          "Emit the file tool call (e.g. `files.write`) now; the approval gate will pause the run and surface the approval card for the user.",
+      };
+    }
+    return {
+      action: "fail",
+      failureMessage:
+        "I couldn't apply the requested file change: I asked for approval in words instead of emitting the file tool call, " +
+        "so no approval card was created and no files were changed. Nothing was modified — please try again.",
+    };
+  }
   if (!announcesMoreWork(text)) return { action: "final" };
   if (nudgesUsed < MAX_CONTINUATION_NUDGES) {
     return {
@@ -372,6 +584,67 @@ async function pauseReasonFor(
 // ─── Quality loop hooks ───────────────────────────────────────────
 
 /**
+ * Every run whose changes actually landed gets a durable post-run
+ * checkpoint (a git commit + project_checkpoints row) — the user never has
+ * to remember to create one. Never throws; a failure just means no
+ * after-checkpoint (the pre-run baseline still exists for Revert).
+ */
+async function createAfterRunCheckpoint(
+  transport: WorkspaceTransport,
+  workspaceChange: WorkspaceChangeEvidence | undefined,
+  request: string | null,
+  localProgress: ProgressEmitter,
+): Promise<{ checkpointId: string; label: string; gitSha: string } | undefined> {
+  if (workspaceChange?.status !== "changed") return undefined;
+  try {
+    const after = await transport.createCheckpointBeforeMutation(postRunCheckpointLabel(request));
+    if (!after) return undefined;
+    localProgress.emit({ type: "checkpoint", label: after.label, gitSha: after.gitSha, kind: "after" });
+    return after;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * After a successful file mutation, re-read the file from the workspace and
+ * record INSPECT evidence (targeted-edit verification). For writes, the
+ * read-back must equal the written content; for search/replace patches,
+ * every replacement must be present. Unified-diff patches can only be
+ * confirmed readable. Never throws — verification failures are recorded
+ * honestly, never as passes.
+ */
+async function verifyMutationReadBack(
+  session: QualityLoopSession,
+  transport: WorkspaceTransport,
+  toolId: string,
+  inputs: Record<string, unknown> | undefined,
+  mutated: boolean,
+): Promise<void> {
+  if (!mutated || !inputs) return;
+  if (toolId !== "files.write" && toolId !== "files.patch" && toolId !== "apply_patch") return;
+  const path = typeof inputs.path === "string" ? inputs.path : null;
+  if (!path) return;
+  let content: string;
+  try {
+    content = (await transport.readFile(path)).content;
+  } catch {
+    noteMutationReadBack(session, { path, readable: false, contentMatches: false });
+    return;
+  }
+  let contentMatches: boolean | null = null;
+  if (toolId === "files.write" && typeof inputs.content === "string") {
+    contentMatches = content === inputs.content;
+  } else if (toolId === "apply_patch" && Array.isArray(inputs.patches)) {
+    const replaces = (inputs.patches as Array<{ replace?: unknown }>)
+      .map((p) => (typeof p?.replace === "string" ? p.replace : null))
+      .filter((r): r is string => r !== null && r.length > 0);
+    contentMatches = replaces.length > 0 ? replaces.every((r) => content.includes(r)) : null;
+  }
+  noteMutationReadBack(session, { path, readable: true, contentMatches });
+}
+
+/**
  * Quality-gate hook at the point the agent produces its final answer.
  * Harvests any final QUALITY stage markers, then runs the visual
  * inspection once. Returns true when a below-threshold critique demands
@@ -466,7 +739,164 @@ async function finalizeQualityGatedRun(
 
 // ─── Agent Loop ───────────────────────────────────────────────────
 
+/**
+ * Item 5a — wire the optional `persistEvent` hook into a run's progress
+ * stream. Events flow through a per-run promise chain so they persist in
+ * emit order; each failure is logged and the chain continues. The loop
+ * itself never awaits persistence — it can only observe.
+ */
+function attachEventPersistence(
+  emitter: ProgressEmitter,
+  persistEvent: AgentLoopConfig["persistEvent"],
+): void {
+  if (!persistEvent) return;
+  let tail: Promise<void> = Promise.resolve();
+  emitter.on((event) => {
+    tail = tail
+      .then(() => persistEvent(event))
+      .catch((err) => {
+        // Persistence failure must NEVER break the run.
+        console.error("[agent-loop] persistEvent failed; continuing run", {
+          errorClass: err instanceof Error ? err.message : "unknown",
+        });
+      });
+  });
+}
+
+// ─── Canonical metering (P0) ─────────────────────────────────────
+//
+// Every LLM call the loop makes is one metered provider attempt: one
+// usage_events row + one cost_events row via the canonical emitter.
+//
+// P0 invariant (Larry): per logical user action there are N cost_events
+// (one per provider attempt — retries/failovers count) but exactly ONE
+// billable usage_event. Here one loop step = one logical action: a
+// successful step emits billable=true; a failed step emits billable=false
+// with the provider cost still recorded.
+//
+// callLLMWithTools does not expose real token usage, so input/output
+// tokens are chars/4 ESTIMATES — clearly labeled, never presented as
+// measured. Provider cost comes from calculateLlmCost (0 for free models).
+// The $1/1K-bit conversion behind retail bits is a PRICING MODEL, not fact.
+//
+// Emission is fire-and-forget: metering must never break or slow the run.
+
+/** Rough token estimate when the provider call exposes no usage. */
+const ESTIMATED_CHARS_PER_TOKEN = 4;
+
+function estimateTokensForChars(chars: number): number {
+  return Math.max(1, Math.ceil(Math.max(0, chars) / ESTIMATED_CHARS_PER_TOKEN));
+}
+
+function loopInputChars(messages: LLMMessage[]): number {
+  let chars = 0;
+  for (const m of messages) {
+    chars += m.content?.length ?? 0;
+    // Tool-call argument payloads are model input too.
+    if (m.tool_calls) {
+      for (const tc of m.tool_calls) chars += tc.function?.arguments?.length ?? 0;
+    }
+  }
+  return chars;
+}
+
+interface LoopStepMetering {
+  cfg: AgentLoopConfig;
+  /** 1-based loop step = the action index for this LLM call. */
+  stepIndex: number;
+  /** Stable id for this loop invocation (idempotency grain). */
+  meteringRunId: string;
+  provider: string;
+  model: string;
+  inputChars: number;
+  outputChars: number;
+  status: "success" | "failed";
+  error?: string;
+}
+
+/**
+ * Emit one canonical metering event for a loop step's LLM call.
+ * Identity/feature come from the ambient metering context (routes set it
+ * at the request boundary); falls back to the loop config's userId (a
+ * Clerk id in the standard auth path). No-ops when no identity resolves.
+ */
+function emitLoopStepMetering(input: LoopStepMetering): void {
+  try {
+    const ctx = getMeteringContext();
+    const userId = ctx?.userId ?? null;
+    // cfg.userId is the Clerk id in the standard auth path — pass it as
+    // clerkId so the emitter resolves it to users.id (cached lookup).
+    const clerkId = ctx?.clerkId ?? input.cfg.userId ?? null;
+    if (!userId && !clerkId) return;
+
+    const feature = ctx?.feature ?? "agent-chat";
+    // Browser-agent steps report under the "browser" capability so browser
+    // cost reconciles separately from studio-chat LLM cost.
+    const capability = feature === "browser-agent" ? "browser" : "llm";
+
+    // ESTIMATES — callLLMWithTools exposes no token usage. Labeled as
+    // estimates here and stored as plain token counts downstream.
+    const inputTokens = estimateTokensForChars(input.inputChars);
+    const outputTokens = estimateTokensForChars(input.outputChars);
+    const { providerCostMicros } = calculateLlmCost({
+      provider: input.provider,
+      model: input.model,
+      promptTokens: inputTokens,
+      completionTokens: outputTokens,
+      isByok: false,
+    });
+
+    const idempotencyKey =
+      feature === "browser-agent" && input.cfg.browserSessionId
+        ? `metering:browser:${input.cfg.browserSessionId}:${input.stepIndex}`
+        : `metering:llm:${input.meteringRunId}:${input.stepIndex}`;
+
+    // Fire-and-forget: the emitter is best-effort and never throws, but the
+    // loop must not even wait on it.
+    void emitUsageEvent({
+      userId: userId ?? undefined,
+      clerkId: clerkId ?? undefined,
+      runId: ctx?.runId ?? undefined,
+      projectId: ctx?.projectId ?? undefined,
+      feature,
+      capability,
+      provider: input.provider,
+      model: input.model,
+      inputTokens,
+      outputTokens,
+      providerCostMicros,
+      status: input.status,
+      // P0 invariant: exactly one billable event per logical action —
+      // failed attempts are recorded billable=false, cost still captured.
+      billable: input.status === "success",
+      error: input.error,
+      idempotencyKey,
+      // The logical action IS this LLM call: failover retries inside
+      // callLLMWithTools are invisible here, so one event per step keeps
+      // per-original_request_id billable counts at <= 1.
+      originalRequestId: idempotencyKey,
+    }).catch(() => {});
+  } catch {
+    // Metering must never break the run — swallow everything.
+  }
+}
+
 export async function runAgentLoopV2(
+  userMessage: string,
+  transport: WorkspaceTransport,
+  config: Partial<AgentLoopConfig> = {},
+  progress?: ProgressEmitter,
+): Promise<AgentLoopResult> {
+  try {
+    return await runAgentLoopV2Inner(userMessage, transport, config, progress);
+  } finally {
+    // Station Control Bridge (chunk E): always release this run's event
+    // sink, even when the run throws.
+    setStationEventSink(transport, null);
+  }
+}
+
+async function runAgentLoopV2Inner(
   userMessage: string,
   transport: WorkspaceTransport,
   config: Partial<AgentLoopConfig> = {},
@@ -474,6 +904,14 @@ export async function runAgentLoopV2(
 ): Promise<AgentLoopResult> {
   const cfg = { ...DEFAULT_LOOP_CONFIG, ...config };
   const startTime = Date.now();
+
+  // Canonical metering: stable per-invocation id so per-step events are
+  // idempotent across replays. Prefers the ambient metering context's run
+  // id (set by the route to the agent-billing run) so settleRun can link
+  // the ledger debit to the already-emitted billable attempt events
+  // instead of creating a duplicate billable event (P0 invariant).
+  const meteringRunId =
+    getMeteringContext()?.runId ?? cfg.qualityLoop?.runId ?? randomUUID();
 
   // Quality loop (opt-in): create the evidence session and teach the agent
   // the stage contract. All hooks below degrade gracefully — the gate
@@ -487,8 +925,24 @@ export async function runAgentLoopV2(
       userRequest: cfg.qualityLoop.userRequest ?? userMessage,
       snapshot: cfg.qualityLoop.state,
     });
-    cfg.systemPrompt += QUALITY_LOOP_PROMPT_SECTION;
+    cfg.systemPrompt += buildQualityLoopPrompt(qualitySession.taskScope);
   }
+
+  // ── LiTT Tool Orchestrator: goal → capability planning (Parts A, B, H) ──
+  // Classify what this goal needs BEFORE substantive execution. The plan
+  // is internal machine-readable state; its prompt rendering tells the
+  // model which of its real capabilities materially improve THIS goal.
+  // Reference-match requests ("make mine look like this") trigger the
+  // reference workflow instead of a generic build.
+  const capabilityPlan = applyOrchestratorPrompts(cfg, userMessage);
+
+  // ── Run observability (Part J) ──
+  const runObs = startRunObservability({
+    runId: meteringRunId,
+    goal: userMessage.slice(0, 500),
+    agentMode: cfg.executionMode,
+    capabilityPlan,
+  });
 
   const events: ProgressEvent[] = [];
   const toolCallRecords: ToolCallRecord[] = [];
@@ -504,6 +958,17 @@ export async function runAgentLoopV2(
   const localProgress = new ProgressEmitter((event) => {
     events.push(event);
     progress?.emit(event);
+  });
+  // Item 5a — persist loop events to the run's durable action_events log.
+  attachEventPersistence(localProgress, cfg.persistEvent);
+
+  // Station Control Bridge (chunk E): route station action execution events
+  // (action_started / action_completed / action_failed / approval_required)
+  // into this run's Activity stream. Keyed by this run's transport instance
+  // — not a module global — so concurrent runs in one process cannot
+  // cross-wire events. Cleared in the exported wrapper's finally above.
+  setStationEventSink(transport, (event) => {
+    localProgress.emit({ type: "status", summary: summarizeStationEvent(event) });
   });
 
   const permissionEngine = new PermissionEngine();
@@ -521,10 +986,57 @@ export async function runAgentLoopV2(
     return permissionEngine.check(permInfo, {}, cfg.executionMode, availableCapabilities).allowed;
   });
 
-  const toolDefs = availableTools.map(toToolDefinition);
+  // ── Tool health (Part F) ──
+  // Don't advertise tools that cannot execute. The terminal owner gate
+  // (terminal-server) returns Forbidden for non-owners by design — for
+  // those users terminal.execute resolves UNAVAILABLE here, so the model
+  // never sees it and can't burn steps retrying a guaranteed failure.
+  // This is truthful capability reporting, not an auth bypass: the
+  // terminal server remains the authoritative enforcer.
+  const toolHealthMap = resolveToolHealth(
+    availableTools.map((t) => t.id),
+    {
+      terminal: {
+        userId: cfg.userId,
+        // Mirror of terminal-server/terminal-owner-gate.ts for health
+        // reporting only. Undefined (unknown) → degraded, not unavailable.
+        isTerminalOwner:
+          cfg.userId != null ? isTerminalOwnerUser(cfg.userId) : undefined,
+      },
+    },
+  );
+  const { offerable: offerableToolIds, degraded: degradedToolIds } =
+    filterOfferableTools(toolHealthMap);
+  const offerableTools = availableTools.filter((t) => offerableToolIds.includes(t.id));
+  const healthNote = buildToolHealthPromptNote(toolHealthMap);
+  if (healthNote) {
+    cfg.systemPrompt += "\n\n" + healthNote;
+  }
 
-  // Conversation messages for the LLM
+  // ── Observability: record what the model was offered (Part J) ──
+  recordToolsOffered(
+    runObs,
+    offerableTools.map((t) => t.id),
+    [...toolHealthMap.values()],
+  );
+  if (degradedToolIds.length > 0) {
+    for (const id of degradedToolIds) {
+      recordObsFallback(runObs, {
+        fromToolId: id,
+        toAlternative: "safe alternative or honest report",
+        reason: "tool degraded at offer time",
+      });
+    }
+  }
+
+  const toolDefs = offerableTools.map(toToolDefinition);
+
+  // Conversation messages for the LLM. A reprompt continues the SAME
+  // conversation: seeded messages (e.g. a patch-recovery message with the
+  // re-read file content) come first so the model regenerates against
+  // real context instead of starting blind.
   const llmMessages: LLMMessage[] = [
+    ...(cfg.initialMessages ?? []),
     { role: "user", content: userMessage },
   ];
 
@@ -534,12 +1046,26 @@ export async function runAgentLoopV2(
   let cancelReason: string | undefined;
   let modelFailed: string | undefined;
   let modelFailureText: string | undefined;
+  let failedHonestly: string | undefined;
   let checkpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
   const toolCallLog: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }> = [];
   let completedDeployment: CompletedDeployment | null = null;
   // Bounded recovery when the model announces more work but emits no tool
   // calls (the silent mid-build stall) — see resolveZeroToolCalls.
   let continuationNudges = 0;
+
+  // Early bounded capability guard (BUILD runs only, via
+  // cfg.buildCapabilityGuard): consecutive steps where the model emitted
+  // tool calls but ZERO file-writing calls. Fires within ~3 steps instead
+  // of burning the whole run budget on a model that can read but not write.
+  const buildGuardMaxSteps = cfg.buildCapabilityGuard?.maxStepsWithoutFileWrite ?? 0;
+  let buildGuardZeroWriteSteps = 0;
+  const buildGuardWindowModels = new Set<string>(); // canonicalIds ("" = unmapped)
+  let buildGuardWindowProvider = "";
+  let buildGuardWindowModel = "";
+  const buildGuardExcluded = new Set<string>();
+  const buildGuardTried: Array<{ canonicalId: string; reason: string }> = [];
+  let buildGuardModelHint: string | undefined;
 
   // Check if any mutations have been requested (for checkpoint logic)
   let mutationBatchPending = false;
@@ -561,19 +1087,28 @@ export async function runAgentLoopV2(
     // Call LLM with tools (with automatic fallback)
     let llmResponse;
     const llmStartTime = Date.now();
+    // The build capability guard may have switched the serving model
+    // mid-run; its hint routes through planBasicRoutes on the next step.
+    const requestedModel = buildGuardModelHint ?? cfg.model;
     try {
       llmResponse = await callLLMWithTools(
         cfg.systemPrompt,
         llmMessages,
         toolDefs,
         {
-          model: cfg.model,
+          model: requestedModel,
           temperature: 0.15,
           maxTokens: 4096,
           toolChoice: cfg.requireToolCallOnFirstStep && stepsUsed === 1 ? "required" : "auto",
           evalMetadata: cfg.evalMetadata,
           deadlineMs: startTime + cfg.maxRuntimeMs,
           signal: cfg.signal,
+          // Preventive BUILD guard: when the run is capability-guarded, the
+          // initial routing starts on a proven file writer instead of a
+          // chat-only model that the 3-step guard would rule out anyway.
+          requireReliableFileWriting: cfg.buildCapabilityGuard != null,
+          // P1: Server-derived paid-provider entitlement (never from client).
+          allowLittPaidProviders: cfg.allowLittPaidProviders,
         },
       );
       const llmDurationMs = Date.now() - llmStartTime;
@@ -583,19 +1118,53 @@ export async function runAgentLoopV2(
       // Emit model routing event so LiTT Live shows which provider/model was actually used.
       // latencyMs records how long the model call took, so a slow step can be
       // attributed to the model call vs tool execution (tool_result has durationMs).
+      // canonicalId + configSource record the SELECTED model in run evidence
+      // (no secrets) — the registry is the source of truth for the mapping.
+      const routedRecord = findModelRecord(llmResponse.provider ?? "unknown", llmResponse.model);
       localProgress.emit({
         type: "model_routing",
         model: llmResponse.model,
         provider: llmResponse.provider ?? "unknown",
-        fallbackFrom: cfg.model && llmResponse.model !== cfg.model ? cfg.model : undefined,
+        fallbackFrom: requestedModel && llmResponse.model !== requestedModel ? requestedModel : undefined,
         latencyMs: llmDurationMs,
+        canonicalId: routedRecord?.canonicalId,
+        configSource: routedRecord ? getModelConfigSource(routedRecord.canonicalId) : undefined,
+      });
+      // Canonical metering (P0): one usage+cost event per step's LLM call.
+      // provider/model are from the ACTUAL call; token counts are chars/4
+      // estimates (callLLMWithTools exposes no usage) — see helper.
+      emitLoopStepMetering({
+        cfg,
+        stepIndex: stepsUsed,
+        meteringRunId,
+        provider: llmResponse.provider ?? "unknown",
+        model: llmResponse.model,
+        inputChars: loopInputChars(llmMessages),
+        outputChars: llmResponse.text?.length ?? 0,
+        status: "success",
       });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
+      // Canonical metering (P0): failed attempts are recorded billable=false
+      // with the cost still captured — never a second billable event.
+      emitLoopStepMetering({
+        cfg,
+        stepIndex: stepsUsed,
+        meteringRunId,
+        provider: "unknown",
+        model: requestedModel ?? "unknown",
+        inputChars: loopInputChars(llmMessages),
+        outputChars: 0,
+        status: "failed",
+        error: errMsg.slice(0, 500),
+      });
       // Emit model failure event with sanitized error (no secrets)
+      // NOTE: Use "all-routes" not cfg.model — cfg.model is the user's hint
+      // (e.g. "gemini-2.5-flash") which may have been excluded by config
+      // (e.g. GEMINI_DISABLED). Reporting the hint as "failed" is misleading.
       localProgress.emit({
         type: "model_failed",
-        model: cfg.model ?? "default",
+        model: "all-routes",
         category: "all_fallbacks_exhausted",
         message: errMsg.slice(0, 200),
       });
@@ -662,6 +1231,19 @@ export async function runAgentLoopV2(
         });
         break;
       }
+      if (resolution.action === "fail") {
+        // Honest failure, not a cancellation: the model kept asking for
+        // approval in prose (or claiming work was happening) instead of
+        // emitting the gated tool call, so no approval card was ever
+        // created and nothing was mutated. Report FAILED, never Complete.
+        failedHonestly = resolution.failureMessage;
+        finalText = resolution.failureMessage;
+        localProgress.emit({
+          type: "status",
+          summary: "Stopping: the model asked for approval in prose instead of emitting the tool call — no approval card was created.",
+        });
+        break;
+      }
       finalText = llmResponse.text;
       // Emit a reasoning summary so LiTT Live shows the final reasoning step
       if (llmResponse.text) {
@@ -689,6 +1271,8 @@ export async function runAgentLoopV2(
 
     // Process each tool call
     let batchHasMutation = false;
+    // Snapshot for the build capability guard: which log entries this step added.
+    const toolCallLogLenBeforeBatch = toolCallLog.length;
 
     for (const toolCall of llmResponse.toolCalls) {
       const toolDef = availableTools.find((t) => t.id === toolCall.toolId);
@@ -813,14 +1397,16 @@ export async function runAgentLoopV2(
         }
       }
 
-      // Create the pre-mutation checkpoint BEFORE the approval gate, so the
-      // resumed-after-approval run diffs the workspace truthfully instead of
-      // reporting "unknown". Safe when the user rejects: this only snapshots
-      // pre-mutation state and never writes workspace files.
-      if (!toolDef.readOnly && !mutationBatchPending && !checkpoint) {
+      // Create a pre-mutation checkpoint BEFORE the approval gate, ahead of
+      // EVERY mutating tool call — each mutation gets its own rollback
+      // point, so the resumed-after-approval run diffs the workspace
+      // truthfully instead of reporting "unknown". Safe when the user
+      // rejects: this only snapshots pre-mutation state and never writes
+      // workspace files. Read-only tools never checkpoint.
+      if (!toolDef.readOnly) {
         localProgress.emit({ type: "phase", phase: "execute", step: stepsUsed });
         checkpoint = await transport.createCheckpointBeforeMutation(
-          `Pre-agent-loop: ${userMessage.slice(0, 80)}`,
+          `Pre-mutation: ${toolCall.toolId} (step ${stepsUsed})`,
         ) ?? undefined;
         if (checkpoint) {
           localProgress.emit({
@@ -875,6 +1461,8 @@ export async function runAgentLoopV2(
             cancelled: false,
             events,
             checkpoint: checkpoint ?? undefined,
+            // Observability (Part J): the run pauses here awaiting approval.
+            runObservability: finishRunObservability(runObs, "awaiting_approval"),
             pendingApproval: {
               toolId: toolCall.toolId,
               toolCallId: toolCall.toolCallId,
@@ -886,6 +1474,7 @@ export async function runAgentLoopV2(
               stepsUsedAtPause: stepsUsed,
               hadInterveningMutationAtPause: hasInterveningMutation,
             },
+            finalMessages: [...llmMessages],
           };
         }
 
@@ -987,7 +1576,26 @@ export async function runAgentLoopV2(
       // Log the call
       const summary = summarizeToolResult(toolCall.toolId, result.result);
       toolCallLog.push({ toolId: toolCall.toolId, success: result.success, summary, mutating: !toolDef.readOnly });
-      completedDeployment = readDeploymentOutcome(toolCall.toolId, result.result) ?? completedDeployment;
+      // Observability (Part J): record the tool call for the run record.
+      recordObsToolCall(runObs, {
+        toolId: toolCall.toolId,
+        success: result.success,
+        summary: summary.slice(0, 200),
+        mutating: !toolDef.readOnly,
+        latencyMs: toolDuration,
+        errorClass: result.success ? undefined : "tool_error",
+      });
+      // Friendly Activity label for the UI (Part J).
+      localProgress.emit({
+        type: "status",
+        summary: friendlyActivityLabel(toolCall.toolId),
+      });
+      const deploymentOutcome = readDeploymentOutcome(toolCall.toolId, result.result);
+      if (deploymentOutcome) {
+        // Verification evidence (Part J): a deployment produced a live URL.
+        recordVerificationEvidence(runObs, "deployment", deploymentOutcome.publicUrl);
+      }
+      completedDeployment = deploymentOutcome ?? completedDeployment;
       if (qualitySession) {
         noteToolResult(
           qualitySession,
@@ -995,6 +1603,7 @@ export async function runAgentLoopV2(
           { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
           transport.workspaceId,
         );
+        await verifyMutationReadBack(qualitySession, transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly);
       }
 
       localProgress.emit({
@@ -1019,6 +1628,88 @@ export async function runAgentLoopV2(
 
     if (cancelled) break;
 
+    // Early bounded capability guard (BUILD runs only): a model that keeps
+    // emitting tool calls but never file-writing calls is ruled out within
+    // ~buildGuardMaxSteps steps instead of burning the run budget. The
+    // cohere/north-mini-code incident (45 minutes, zero files) is exactly
+    // what this prevents. Zero-tool-call steps never reach here — they go
+    // through the resolveZeroToolCalls stall handling above.
+    if (buildGuardMaxSteps > 0) {
+      const stepCalls = toolCallLog.slice(toolCallLogLenBeforeBatch);
+      const fileWrites = stepCalls.filter((c) => FILE_WRITE_TOOL_IDS.has(c.toolId)).length;
+      if (fileWrites > 0) {
+        buildGuardZeroWriteSteps = 0;
+        buildGuardWindowModels.clear();
+      } else {
+        buildGuardZeroWriteSteps++;
+        const serving = findModelRecord(llmResponse.provider ?? "unknown", llmResponse.model);
+        buildGuardWindowModels.add(serving?.canonicalId ?? "");
+        buildGuardWindowProvider = llmResponse.provider ?? "unknown";
+        buildGuardWindowModel = llmResponse.model;
+      }
+
+      if (buildGuardZeroWriteSteps >= buildGuardMaxSteps) {
+        const distinctModels = [...buildGuardWindowModels].filter((id) => id !== "");
+        const reason = `${buildGuardZeroWriteSteps} consecutive steps with tool calls but zero file-writing calls`;
+        let excludedCanonicalId: string | undefined;
+        if (distinctModels.length === 1) {
+          // The whole window was served by one registry model: rule it out
+          // for this run. The registry records the failure (learns), and a
+          // 10-minute model cooldown keeps the per-step router off it for
+          // the rest of this run's budget.
+          excludedCanonicalId = distinctModels[0];
+          buildGuardExcluded.add(excludedCanonicalId);
+          recordHealthOutcome(excludedCanonicalId, false, "no_file_write_calls");
+          recordModelFailure(buildGuardWindowProvider, buildGuardWindowModel);
+          buildGuardTried.push({ canonicalId: excludedCanonicalId, reason });
+        } else {
+          buildGuardTried.push({
+            canonicalId: distinctModels.length === 0 ? "unmapped" : distinctModels.join("+"),
+            reason: `${reason} (serving model changed mid-window)`,
+          });
+        }
+        localProgress.emit({
+          type: "build_model_incompatible",
+          canonicalId: excludedCanonicalId ?? "unmapped",
+          provider: buildGuardWindowProvider,
+          stepsObserved: buildGuardZeroWriteSteps,
+          zeroWriteSteps: buildGuardZeroWriteSteps,
+          reason: "no_file_write_calls_in_window",
+        });
+
+        // P1: entitlement-aware. The guard must never switch an unentitled run
+        // onto a LITT_PAID registry model that planBasicRoutes would refuse to
+        // route to — that combination ends the run with NO_BUILD_CAPABLE_MODEL.
+        const next = selectBuildModel(buildGuardExcluded, {
+          allowLittPaidProviders: cfg.allowLittPaidProviders,
+        });
+        if (!next) {
+          const listing = buildGuardTried.map((t) => `- ${t.canonicalId}: ${t.reason}`).join("\n");
+          modelFailed = NO_BUILD_CAPABLE_MODEL;
+          modelFailureText =
+            `No build-capable model is available. Models tried:\n${listing}\n` +
+            `No model produced a file-writing tool call within the bounded window, so the run stops instead of burning the budget.`;
+          finalText =
+            "I couldn't complete this build: none of the available models produced file-writing tool calls. " +
+            "Your project and everything completed so far are preserved — try again later or pick a different model.";
+          localProgress.emit({
+            type: "status",
+            summary: "Stopping: no build-capable model produced file-writing tool calls.",
+          });
+          break;
+        }
+        // Continue the SAME conversation on the next eligible build model —
+        // the hint routes through planBasicRoutes on the following step.
+        buildGuardModelHint = next.providerModelId;
+        localProgress.emit({
+          type: "status",
+          summary: `Switching build model to ${next.canonicalId} — the previous model produced no file writes in ${buildGuardZeroWriteSteps} steps.`,
+        });
+        buildGuardZeroWriteSteps = 0;
+        buildGuardWindowModels.clear();
+      }
+    }
+
     // Reset mutation flag after batch
     if (!batchHasMutation) {
       mutationBatchPending = false;
@@ -1039,7 +1730,7 @@ export async function runAgentLoopV2(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg)),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg), cfg.allowLittPaidProviders),
     });
   }
 
@@ -1071,7 +1762,7 @@ export async function runAgentLoopV2(
   });
   const gatedFinalText =
     qualityFinale && !qualityFinale.verdict.ok
-      ? `${effectiveFinalText}\n\nQuality check — ${qualityFinale.verdict.reason.charAt(0).toLowerCase()}${qualityFinale.verdict.reason.slice(1)}`
+      ? `${effectiveFinalText}${formatQualityVerdictBlock(qualityFinale)}`
       : effectiveFinalText;
 
   // What did this run actually do to the files?
@@ -1093,6 +1784,7 @@ export async function runAgentLoopV2(
   if (workspaceChange) {
     localProgress.emit({ type: "workspace_change", ...workspaceChange });
   }
+  const afterCheckpoint = await createAfterRunCheckpoint(transport, workspaceChange, userMessage, localProgress);
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
     ...(cancelled
@@ -1111,12 +1803,14 @@ export async function runAgentLoopV2(
     toolCalls: toolCallLog,
     buildFixResult,
     checkpoint,
+    afterCheckpoint,
     workspaceChange,
     cancelled,
     cancelReason,
     events,
     modelFailed,
     modelFailureText,
+    failedHonestly,
     qualityLoop: qualityFinale
       ? {
           verdict: qualityFinale.verdict,
@@ -1125,6 +1819,12 @@ export async function runAgentLoopV2(
         }
       : undefined,
     qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
+    finalMessages: [...llmMessages],
+    // Observability (Part J): the complete run record.
+    runObservability: finishRunObservability(
+      runObs,
+      cancelled ? "cancelled" : modelFailed || failedHonestly ? "failed" : "completed",
+    ),
   };
 }
 
@@ -1483,11 +2183,15 @@ export async function executeDeferredToolCalls(
       break;
     }
 
-    // Checkpoint before first mutation
-    if (!toolDef.readOnly && !state.mutationBatchPending && !state.checkpoint) {
+    // Checkpoint before EVERY mutation in the deferred batch (the same
+    // per-mutation guarantee as the initial loop): the resumed run keeps
+    // producing a rollback point for each mutation across the pause
+    // boundary, so the workspace always diffs truthfully. Read-only tools
+    // never checkpoint.
+    if (!toolDef.readOnly) {
       ctx.localProgress.emit({ type: "phase", phase: "execute", step: ctx.stepsUsed });
       state.checkpoint = await ctx.transport.createCheckpointBeforeMutation(
-        `Pre-agent-loop resume (deferred batch)`,
+        `Pre-mutation resume (deferred batch): ${toolCall.toolId}`,
       ) ?? undefined;
       if (state.checkpoint) {
         ctx.localProgress.emit({
@@ -1496,8 +2200,6 @@ export async function executeDeferredToolCalls(
           gitSha: state.checkpoint.gitSha,
         });
       }
-      state.mutationBatchPending = true;
-      state.batchHasMutation = true;
     }
 
     ctx.localProgress.emit({ type: "tool_start", toolId: toolCall.toolId, summary: `${toolCall.toolId} (deferred)` });
@@ -1538,6 +2240,7 @@ export async function executeDeferredToolCalls(
         { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
         ctx.transport.workspaceId,
       );
+      await verifyMutationReadBack(ctx.qualitySession, ctx.transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly);
     }
 
     ctx.localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: result.success, summary, durationMs: 0 });
@@ -1575,8 +2278,27 @@ export async function resumeAgentLoopV2(
   transport: WorkspaceTransport,
   progress?: ProgressEmitter,
 ): Promise<AgentLoopResult> {
+  try {
+    return await resumeAgentLoopV2Inner(resume, transport, progress);
+  } finally {
+    // Station Control Bridge (chunk E): always release this run's event
+    // sink, even when the run throws.
+    setStationEventSink(transport, null);
+  }
+}
+
+async function resumeAgentLoopV2Inner(
+  resume: ResumeInput,
+  transport: WorkspaceTransport,
+  progress?: ProgressEmitter,
+): Promise<AgentLoopResult> {
   const cfg = { ...DEFAULT_LOOP_CONFIG, ...resume.config };
   const startTime = Date.now();
+
+  // Canonical metering (P0): same per-step emission as the fresh loop —
+  // stable per-resume id so resumed steps stay idempotent.
+  const meteringRunId =
+    getMeteringContext()?.runId ?? cfg.qualityLoop?.runId ?? randomUUID();
 
   // Quality loop (opt-in): restore the server-persisted evidence session from
   // before the approval pause. The paused messages are still re-harvested for
@@ -1590,8 +2312,31 @@ export async function resumeAgentLoopV2(
       userRequest: cfg.qualityLoop.userRequest ?? "",
       snapshot: cfg.qualityLoop.state,
     });
-    cfg.systemPrompt += QUALITY_LOOP_PROMPT_SECTION;
+    cfg.systemPrompt += buildQualityLoopPrompt(qualitySession.taskScope);
   }
+
+  // ── LiTT Tool Orchestrator on resume (Parts A, B, H, D) ──
+  // The resume rebuilds cfg from the original config, losing the initial
+  // run's orchestration prompts. Re-apply deterministically from the
+  // original user message (first user-role message in the paused
+  // conversation) so the resumed run keeps the same capability plan and
+  // reference-match workflow — tool-chain continuity across the approval
+  // pause.
+  const resumeUserMessage =
+    resume.pausedMessages.find((m) => m.role === "user")?.content ?? "";
+  const resumeCapabilityPlan =
+    applyOrchestratorPrompts(cfg, resumeUserMessage);
+
+  // ── Run observability on resume (Part J, D) ──
+  // The approval pause breaks the original run's observability record
+  // (not yet persisted across pauses); start a continuation record linked
+  // by runId so the resumed segment's tool use is still captured.
+  const resumeRunObs = startRunObservability({
+    runId: `${meteringRunId}:resume`,
+    goal: resumeUserMessage.slice(0, 500),
+    agentMode: cfg.executionMode,
+    capabilityPlan: resumeCapabilityPlan,
+  });
 
   const events: ProgressEvent[] = [];
   const toolCallRecords: ToolCallRecord[] = [];
@@ -1601,6 +2346,16 @@ export async function resumeAgentLoopV2(
   const localProgress = new ProgressEmitter((event) => {
     events.push(event);
     progress?.emit(event);
+  });
+  // Item 5a — persist resumed-loop events to the run's durable
+  // action_events log (same hook as the initial run).
+  attachEventPersistence(localProgress, cfg.persistEvent);
+
+  // Station Control Bridge (chunk E): route station action execution events
+  // into this resumed run's Activity stream. Same transport-keyed sink as
+  // runAgentLoopV2Inner; cleared in the exported wrapper's finally above.
+  setStationEventSink(transport, (event) => {
+    localProgress.emit({ type: "status", summary: summarizeStationEvent(event) });
   });
 
   const permissionEngine = new PermissionEngine();
@@ -1618,7 +2373,29 @@ export async function resumeAgentLoopV2(
     return permissionEngine.check(permInfo, {}, cfg.executionMode, availableCapabilities).allowed;
   });
 
-  const toolDefs = availableTools.map(toToolDefinition);
+  // ── Tool health on resume (Part F) ──
+  // Same truthful filtering as the initial run: don't re-advertise tools
+  // that cannot execute (e.g. terminal for non-owners).
+  const resumeToolHealthMap = resolveToolHealth(
+    availableTools.map((t) => t.id),
+    {
+      terminal: {
+        userId: cfg.userId,
+        isTerminalOwner:
+          cfg.userId != null ? isTerminalOwnerUser(cfg.userId) : undefined,
+      },
+    },
+  );
+  const { offerable: resumeOfferableIds } = filterOfferableTools(resumeToolHealthMap);
+  const resumeOfferableTools = availableTools.filter((t) =>
+    resumeOfferableIds.includes(t.id),
+  );
+  const resumeHealthNote = buildToolHealthPromptNote(resumeToolHealthMap);
+  if (resumeHealthNote) {
+    cfg.systemPrompt += "\n\n" + resumeHealthNote;
+  }
+
+  const toolDefs = resumeOfferableTools.map(toToolDefinition);
 
   // Resume from paused messages — these are server-verified, not client-supplied
   const llmMessages: LLMMessage[] = [
@@ -1635,9 +2412,13 @@ export async function resumeAgentLoopV2(
   let cancelReason: string | undefined;
   let modelFailed: string | undefined;
   let modelFailureText: string | undefined;
+  let failedHonestly: string | undefined;
   let checkpoint = resume.existingCheckpoint;
   const toolCallLog: Array<{ toolId: string; success: boolean; summary: string; mutating: boolean }> = [];
   let completedDeployment: CompletedDeployment | null = null;
+  // NOTE: checkpoints are now created before EVERY mutation, so this flag no
+  // longer gates anything. It is retained only because it is part of the
+  // DeferredToolBatchState shape threaded through pause/resume records.
   let mutationBatchPending = false;
   let batchHasMutation = false;
   // Bounded recovery when the model announces more work but emits no tool
@@ -1724,7 +2505,29 @@ export async function resumeAgentLoopV2(
     // tool as mutating rather than silently crediting a read-only step.
     const resumedReadOnly = availableTools.find((t) => t.id === resume.toolId)?.readOnly ?? false;
     toolCallLog.push({ toolId: resume.toolId, success: result.success, summary, mutating: !resumedReadOnly });
+    // Observability (Part J): record the approved tool execution.
+    recordObsToolCall(resumeRunObs, {
+      toolId: resume.toolId,
+      success: result.success,
+      summary: summary.slice(0, 200),
+      mutating: !resumedReadOnly,
+      errorClass: result.success ? undefined : "tool_error",
+    });
+    recordObsApproval(resumeRunObs, resume.toolId, "granted");
     completedDeployment = readDeploymentOutcome(resume.toolId, result.result) ?? completedDeployment;
+    // Acceptance 2026-09-28: the APPROVED tool — the actual edit in an
+    // approval-gated run — was never fed to the quality ledger, so a
+    // successful edit still reported "build (pending)". Record it like
+    // any other executed tool.
+    if (qualitySession) {
+      noteToolResult(
+        qualitySession,
+        resume.toolId,
+        { success: result.success, result: result.result, mutating: !resumedReadOnly, summary },
+        transport.workspaceId,
+      );
+      await verifyMutationReadBack(qualitySession, transport, resume.toolId, resume.inputs, result.success && !resumedReadOnly);
+    }
 
     localProgress.emit({
       type: "tool_result",
@@ -1741,7 +2544,6 @@ export async function resumeAgentLoopV2(
     // be cached as executed work or weaken loop detection.
     if (toolDef && !toolDef.readOnly && result.success) {
       hasInterveningMutation = true;
-      mutationBatchPending = true;
     }
   } else {
     // Rejected — inject rejection as tool result
@@ -1855,16 +2657,46 @@ export async function resumeAgentLoopV2(
           evalMetadata: cfg.evalMetadata,
           deadlineMs: startTime + cfg.maxRuntimeMs,
           signal: cfg.signal,
+          // Same preventive BUILD guard as the main loop: a resumed BUILD
+          // run starts on a proven file writer.
+          requireReliableFileWriting: cfg.buildCapabilityGuard != null,
+          // P1: Server-derived paid-provider entitlement (never from client).
+          allowLittPaidProviders: cfg.allowLittPaidProviders,
         },
       );
       if (llmResponse.responseShape && llmResponse.provider) {
         localProgress.emit({ type: "model_response", provider: llmResponse.provider, model: llmResponse.model, ...llmResponse.responseShape, finishReason: llmResponse.finishReason });
       }
+      // Canonical metering (P0): one usage+cost event per resumed step's
+      // LLM call. provider/model are from the ACTUAL call; token counts
+      // are chars/4 estimates — see emitLoopStepMetering.
+      emitLoopStepMetering({
+        cfg,
+        stepIndex: stepsUsed,
+        meteringRunId,
+        provider: llmResponse.provider ?? "unknown",
+        model: llmResponse.model,
+        inputChars: loopInputChars(llmMessages),
+        outputChars: llmResponse.text?.length ?? 0,
+        status: "success",
+      });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
+      // Canonical metering (P0): failed attempts billable=false, cost kept.
+      emitLoopStepMetering({
+        cfg,
+        stepIndex: stepsUsed,
+        meteringRunId,
+        provider: "unknown",
+        model: cfg.model ?? "unknown",
+        inputChars: loopInputChars(llmMessages),
+        outputChars: 0,
+        status: "failed",
+        error: errMsg.slice(0, 500),
+      });
       localProgress.emit({
         type: "model_failed",
-        model: cfg.model ?? "default",
+        model: "all-routes",
         category: "all_fallbacks_exhausted",
         message: errMsg.slice(0, 200),
       });
@@ -1926,6 +2758,19 @@ export async function resumeAgentLoopV2(
         localProgress.emit({
           type: "status",
           summary: "Stopping: the model announced more work but produced no tool calls.",
+        });
+        break;
+      }
+      if (resolution.action === "fail") {
+        // Honest failure, not a cancellation: the model kept asking for
+        // approval in prose (or claiming work was happening) instead of
+        // emitting the gated tool call, so no approval card was ever
+        // created and nothing was mutated. Report FAILED, never Complete.
+        failedHonestly = resolution.failureMessage;
+        finalText = resolution.failureMessage;
+        localProgress.emit({
+          type: "status",
+          summary: "Stopping: the model asked for approval in prose instead of emitting the tool call — no approval card was created.",
         });
         break;
       }
@@ -2000,16 +2845,16 @@ export async function resumeAgentLoopV2(
         continue;
       }
 
-      // Create the pre-mutation checkpoint BEFORE the approval gate (same
-      // guarantee as the initial loop): a nested approval pause carries the
-      // checkpoint so the next resume diffs truthfully instead of "unknown".
-      if (!toolDef.readOnly && !mutationBatchPending && !checkpoint) {
-        checkpoint = await transport.createCheckpointBeforeMutation(`Pre-agent-loop resume`) ?? undefined;
+      // Create the pre-mutation checkpoint BEFORE the approval gate, ahead of
+      // EVERY mutating tool call (same per-mutation guarantee as the initial
+      // loop): a nested approval pause carries the latest checkpoint so the
+      // next resume diffs truthfully instead of "unknown". Read-only tools
+      // never checkpoint.
+      if (!toolDef.readOnly) {
+        checkpoint = await transport.createCheckpointBeforeMutation(`Pre-mutation resume: ${toolCall.toolId} (step ${stepsUsed})`) ?? undefined;
         if (checkpoint) {
           localProgress.emit({ type: "checkpoint", label: checkpoint.label, gitSha: checkpoint.gitSha });
         }
-        mutationBatchPending = true;
-        batchHasMutation = true;
       }
 
       if (permResult.requiresApproval) {
@@ -2118,6 +2963,7 @@ export async function resumeAgentLoopV2(
           { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
           transport.workspaceId,
         );
+        await verifyMutationReadBack(qualitySession, transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly);
       }
 
       localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: result.success, summary, durationMs: 0 });
@@ -2141,7 +2987,7 @@ export async function resumeAgentLoopV2(
   if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
-      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg)),
+      onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg), cfg.allowLittPaidProviders),
     });
   }
 
@@ -2166,7 +3012,7 @@ export async function resumeAgentLoopV2(
   });
   const gatedFinalText =
     qualityFinale && !qualityFinale.verdict.ok
-      ? `${effectiveFinalText}\n\nQuality check — ${qualityFinale.verdict.reason.charAt(0).toLowerCase()}${qualityFinale.verdict.reason.slice(1)}`
+      ? `${effectiveFinalText}${formatQualityVerdictBlock(qualityFinale)}`
       : effectiveFinalText;
 
   // What did this run actually do to the files?
@@ -2188,6 +3034,12 @@ export async function resumeAgentLoopV2(
   if (workspaceChange) {
     localProgress.emit({ type: "workspace_change", ...workspaceChange });
   }
+  const afterCheckpoint = await createAfterRunCheckpoint(
+    transport,
+    workspaceChange,
+    cfg.qualityLoop?.userRequest ?? null,
+    localProgress,
+  );
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
     ...(cancelled
@@ -2206,12 +3058,14 @@ export async function resumeAgentLoopV2(
     toolCalls: toolCallLog,
     buildFixResult,
     checkpoint,
+    afterCheckpoint,
     workspaceChange,
     cancelled,
     cancelReason,
     events,
     modelFailed,
     modelFailureText,
+    failedHonestly,
     qualityLoop: qualityFinale
       ? {
           verdict: qualityFinale.verdict,
@@ -2220,6 +3074,12 @@ export async function resumeAgentLoopV2(
         }
       : undefined,
     qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
+    finalMessages: [...llmMessages],
+    // Observability (Part J): the resumed segment's run record.
+    runObservability: finishRunObservability(
+      resumeRunObs,
+      cancelled ? "cancelled" : modelFailed || failedHonestly ? "failed" : "completed",
+    ),
   };
 }
 
@@ -2242,6 +3102,8 @@ export function createAutonomousRepairCallback(
   // closed as "incapable" — the same unified-gate guarantee as the main loop.
   availableCapabilities: string[] = resolveAvailableCapabilities({ transport }),
   actionContext?: ActionExecutionContext,
+  // P1: Server-derived paid-provider entitlement (never from client).
+  allowLittPaidProviders?: boolean,
 ): (attempt: number, errors: string) => Promise<boolean> {
   const permissionEngine = new PermissionEngine();
   return async (attempt: number, errors: string) => {
@@ -2261,6 +3123,8 @@ export function createAutonomousRepairCallback(
           maxTokens: 4096,
           deadlineMs,
           signal,
+          // P1: Server-derived paid-provider entitlement (never from client).
+          allowLittPaidProviders,
         });
 
         if (response.toolCalls.length === 0) {

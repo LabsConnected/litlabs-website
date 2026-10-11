@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
-import { getTerminalServerUrl } from "@/lib/terminal-url";
+import { requireTerminalBaseUrl, terminalNotConfiguredResponse } from "@/lib/terminal-config";
 import { isSafeArtifactPath } from "@/lib/deployments/user-deployment";
 import {
   checkPublishReadiness,
@@ -25,8 +25,7 @@ import {
  * Read-only: it never changes deploy-service.ts or any deployment state.
  */
 
-const TERMINAL_BASE = () =>
-  process.env.TERMINAL_SERVER_INTERNAL_URL ?? getTerminalServerUrl();
+const TERMINAL_BASE = () => requireTerminalBaseUrl();
 
 // Bounds so a huge workspace can't turn a readiness check into a crawl.
 const MAX_DIRS = 60;
@@ -74,6 +73,8 @@ export async function GET(
 ) {
   const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const terminalUnavailable = terminalNotConfiguredResponse();
+  if (terminalUnavailable) return terminalUnavailable;
 
   const { projectId } = await params;
 

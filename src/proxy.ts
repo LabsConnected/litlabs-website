@@ -797,11 +797,22 @@ function fixDevProxyHeaders(req: NextRequest): NextResponse | undefined {
 export function redirectNakedToWww(req: NextRequest): NextResponse | null {
   if (process.env.NODE_ENV === "development") return null;
 
-  const host = req.headers.get("host") ?? "";
+  const rawHost = req.headers.get("host") ?? "";
+  // Strip port suffix and normalize case — proxies and browsers may send
+  // "litlabs.net:443" or mixed case.
+  const host = rawHost.split(":")[0].toLowerCase();
 
-  // Only redirect if the request is on the naked litlabs.net apex,
-  // not on www.litlabs.net or any other subdomain/host.
-  if (host !== "litlabs.net") return null;
+  // Canonical host takes precedence: if Host is already www or any other
+  // non-apex host, never redirect (prevents loops when proxies set
+  // x-forwarded-host differently from the actual Host).
+  if (host !== "" && host !== "litlabs.net") return null;
+
+  // Fallback: check x-forwarded-host only when Host is empty or is the apex.
+  // This handles proxies that rewrite Host but preserve the original in
+  // x-forwarded-host.
+  const forwardedHost = (req.headers.get("x-forwarded-host") ?? "").split(":")[0].toLowerCase();
+  const isApex = host === "litlabs.net" || (host === "" && forwardedHost === "litlabs.net");
+  if (!isApex) return null;
 
   const redirectUrl = new URL(req.nextUrl.pathname + req.nextUrl.search, `https://www.litlabs.net`);
   // Preserve the full query string on the canonical host
@@ -843,6 +854,25 @@ export function redirectLegacyProfileToU(req: NextRequest): NextResponse | null 
 const middleware = (req: NextRequest, ...rest: never[]): Promise<NextResponse> => {
   const nakedRedirect = redirectNakedToWww(req);
   if (nakedRedirect) return Promise.resolve(nakedRedirect);
+
+  // Break broken OAuth state cycles: if the sign-in/sign-up page has a
+  // stale `sign_in_force_redirect` or `sign_in_fallback_redirect` param from
+  // a failed OAuth attempt, the Clerk SDK fails to initialize. Strip the
+  // param and redirect to a clean URL so the user gets a fresh form.
+  const pathname = req.nextUrl.pathname;
+  const hasBrokenParam = req.nextUrl.searchParams.has("sign_in_force_redirect") ||
+    req.nextUrl.searchParams.has("sign_in_fallback_redirect");
+  if ((pathname === "/sign-in" || pathname === "/sign-up") && hasBrokenParam) {
+    const cleanUrl = new URL(pathname, req.url);
+    // Preserve redirect_url if present (legitimate post-sign-in destination)
+    const redirectUrl = req.nextUrl.searchParams.get("redirect_url");
+    if (redirectUrl) cleanUrl.searchParams.set("redirect_url", redirectUrl);
+    // Force no-cache so browsers don't serve a stale cached error page
+    const res = NextResponse.redirect(cleanUrl, 302);
+    res.headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
+    res.headers.set("Pragma", "no-cache");
+    return Promise.resolve(res);
+  }
 
   // Legacy /profile/<username> -> /u/<username>. Runs before auth so
   // signed-out visitors reach the public profile (see redirectLegacyProfileToU).

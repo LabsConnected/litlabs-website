@@ -29,7 +29,7 @@ export async function getProfileStats(
       sb.from("follows").select("id", { count: "exact", head: true }).eq("followee_id", dbUserId),
       sb.from("follows").select("id", { count: "exact", head: true }).eq("follower_id", dbUserId),
       sb.from("posts").select("id", { count: "exact", head: true }).eq("user_id", dbUserId),
-      sb.from("studio_projects").select("id", { count: "exact", head: true }).eq("user_id", clerkId),
+      sb.from("studio_projects").select("id", { count: "exact", head: true }).eq("user_id", clerkId).eq("is_system", false),
     ]);
     if (followers.error || following.error || posts.error || projects.error) {
       return null;

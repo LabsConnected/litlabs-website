@@ -49,6 +49,7 @@ describe("resolveCurrentProject", () => {
       {
         id: "studio-1",
         user_id: "user-1",
+        is_system: false,
         name: "My Studio Project",
         github_full_name: "owner/repo",
         github_owner: "owner",
@@ -77,6 +78,7 @@ describe("resolveCurrentProject", () => {
       {
         id: "legacy-1",
         user_id: "user-1",
+        is_system: false,
         repository: "my-repo",
         repository_full_name: "owner/my-repo",
         owner: "owner",
@@ -104,6 +106,7 @@ describe("resolveCurrentProject", () => {
       {
         id: "legacy-2",
         user_id: "user-1",
+        is_system: false,
         repository: "repo",
         repository_full_name: "owner/repo",
         owner: "owner",
@@ -127,6 +130,7 @@ describe("resolveCurrentProject", () => {
       {
         id: "studio-explicit",
         user_id: "user-1",
+        is_system: false,
         name: "Explicit Project",
         github_full_name: null,
         github_owner: null,
@@ -154,6 +158,7 @@ describe("resolveCurrentProject", () => {
       {
         id: "latest-project",
         user_id: "user-1",
+        is_system: false,
         name: "Latest Project",
         github_full_name: "owner/latest",
         github_owner: "owner",
@@ -189,6 +194,7 @@ describe("resolveCurrentProject", () => {
       {
         id: "blank-1",
         user_id: "user-1",
+        is_system: false,
         name: "Blank Project",
         github_full_name: null,
         github_owner: null,
@@ -207,4 +213,15 @@ describe("resolveCurrentProject", () => {
     expect(result!.sourceType).toBe("blank");
     expect(result!.repositoryFullName).toBeNull();
   });
+});
+
+
+it("excludes a newer system project from latest and explicit normal resolution", async () => {
+  mockSupabase.__setTableResult("studio_projects", [
+    { id: "system", user_id: "user-1", name: "Global", is_system: true, updated_at: "2026-10-04" },
+    { id: "normal", user_id: "user-1", name: "Normal", is_system: false, updated_at: "2026-10-01" },
+  ]);
+  mockSupabase.__setTableResult("projects", []);
+  expect((await resolveCurrentProject({ userId: "user-1" }))?.projectId).toBe("normal");
+  expect(await resolveCurrentProject({ userId: "user-1", explicitProjectId: "system" })).toBeNull();
 });

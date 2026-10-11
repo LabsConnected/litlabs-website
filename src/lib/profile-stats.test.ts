@@ -25,8 +25,16 @@ describe("getProfileStats", () => {
   it("returns real counts from the four tables", async () => {
     const counts = [3, 7, 12, 2];
     let i = 0;
+    // Mock supports chained .eq() calls (for studio_projects which filters by user_id AND is_system)
+    const makeChainable = () => {
+      const chainable: any = {
+        eq: () => chainable,
+        then: (resolve: any) => resolve({ count: counts[i++], error: null }),
+      };
+      return chainable;
+    };
     mockClient.from.mockImplementation(() => ({
-      select: () => ({ eq: () => Promise.resolve({ count: counts[i++], error: null }) }),
+      select: () => makeChainable(),
     }));
 
     const stats = await getProfileStats("db-user-1", "clerk-user-1");
@@ -39,12 +47,16 @@ describe("getProfileStats", () => {
   it("scopes follows to the db user id and projects to the clerk id", async () => {
     const eqCalls: Array<[string, string]> = [];
     mockClient.from.mockImplementation(() => ({
-      select: () => ({
-        eq: (col: string, val: string) => {
-          eqCalls.push([col, val]);
-          return Promise.resolve({ count: 0, error: null });
-        },
-      }),
+      select: () => {
+        const chainable: any = {
+          eq: (col: string, val: string) => {
+            eqCalls.push([col, val]);
+            return chainable;
+          },
+          then: (resolve: any) => resolve({ count: 0, error: null }),
+        };
+        return chainable;
+      },
     }));
 
     await getProfileStats("db-user-9", "clerk-user-9");
@@ -52,17 +64,22 @@ describe("getProfileStats", () => {
     expect(eqCalls).toContainEqual(["follower_id", "db-user-9"]);
     expect(eqCalls).toContainEqual(["user_id", "db-user-9"]); // posts
     expect(eqCalls).toContainEqual(["user_id", "clerk-user-9"]); // studio_projects
+    expect(eqCalls).toContainEqual(["is_system", false]); // studio_projects system filter
   });
 
   it("returns null (fail-soft) when any count query errors", async () => {
     let i = 0;
     mockClient.from.mockImplementation(() => ({
-      select: () => ({
-        eq: () =>
-          Promise.resolve(
-            i++ === 2 ? { count: null, error: { message: "boom" } } : { count: 1, error: null },
-          ),
-      }),
+      select: () => {
+        const chainable: any = {
+          eq: () => chainable,
+          then: (resolve: any) =>
+            resolve(
+              i++ === 2 ? { count: null, error: { message: "boom" } } : { count: 1, error: null },
+            ),
+        };
+        return chainable;
+      },
     }));
 
     await expect(getProfileStats("db-user-1", "clerk-user-1")).resolves.toBeNull();

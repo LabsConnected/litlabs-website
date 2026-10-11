@@ -32,17 +32,21 @@ import "server-only";
 import {
   MAX_DESIGN_PASSES,
   QUALITY_STAGES,
+  REQUIRED_STAGES_BY_SCOPE,
   STAGE_REQUIREMENTS,
+  classifyTaskScope,
   createQualityLoop,
   currentStage,
   declareSuccess,
   passStage,
   recordEvidence,
   skipStage,
+  skipStageOutOfScope,
   summarizeLoop,
   type EvidenceSource,
   type QualityLoopState,
   type QualityStage,
+  type QualityTaskScope,
   type StageEvidence,
   type SuccessVerdict,
 } from "./quality-loop";
@@ -61,6 +65,12 @@ export interface QualityLoopSession {
   state: QualityLoopState;
   /** The user's original request — judge context + brief fallback. */
   userRequest: string;
+  /**
+   * System-determined task scope (trivial | standard | full): which stages
+   * apply to this run. Set at session start from the user's request; never
+   * agent-declared. Survives approval-pause via the snapshot.
+   */
+  taskScope: QualityTaskScope;
   /** Set once the preview reaches ready. */
   previewUrl?: string;
   /** Set once a deployment completes. */
@@ -73,6 +83,8 @@ export interface QualityLoopSession {
   critiqueFailed: boolean;
   /** Machine observations not yet filed into the stage machine. */
   observations: QualityLoopObservation[];
+  /** True once any mutating tool succeeded — gates read-back evidence. */
+  mutationSeen?: boolean;
 }
 
 export interface QualityLoopObservation {
@@ -88,12 +100,15 @@ export interface QualityLoopObservation {
 export interface QualityLoopSnapshot {
   state: QualityLoopState;
   userRequest: string;
+  /** System-determined task scope; absent in pre-scope snapshots. */
+  taskScope?: QualityTaskScope;
   previewUrl?: string;
   deployedUrl?: string;
   inspectionRan: boolean;
   inspectionNote?: string;
   critiqueFailed: boolean;
   observations: QualityLoopObservation[];
+  mutationSeen?: boolean;
 }
 
 export function snapshotQualityLoopSession(session: QualityLoopSession): QualityLoopSnapshot {
@@ -101,7 +116,11 @@ export function snapshotQualityLoopSession(session: QualityLoopSession): Quality
 }
 
 export function restoreQualityLoopSession(snapshot: QualityLoopSnapshot): QualityLoopSession {
-  return JSON.parse(JSON.stringify(snapshot)) as QualityLoopSession;
+  const session = JSON.parse(JSON.stringify(snapshot)) as QualityLoopSession;
+  // Snapshots predating task scopes carry no scope: classify deterministically
+  // from the stored request. The scope is system-computed either way.
+  if (!session.taskScope) session.taskScope = classifyTaskScope(session.userRequest ?? "");
+  return session;
 }
 
 export function startQualityLoopSession(opts: {
@@ -116,20 +135,36 @@ export function startQualityLoopSession(opts: {
     opts.snapshot.state.projectId === opts.projectId &&
     opts.snapshot.state.userId === opts.userId
   ) {
+    // A resume never loosens the gate — the snapshot carries its scope.
     return restoreQualityLoopSession(opts.snapshot);
   }
 
-  return {
+  const session: QualityLoopSession = {
     state: createQualityLoop({
       runId: opts.runId,
       projectId: opts.projectId,
       userId: opts.userId,
     }),
     userRequest: opts.userRequest,
+    // System-determined from the request — never agent-declared.
+    taskScope: classifyTaskScope(opts.userRequest),
     inspectionRan: false,
     critiqueFailed: false,
     observations: [],
+    mutationSeen: false,
   };
+
+  // UNDERSTAND for targeted work is established by the request itself:
+  // the system records it instead of demanding a written brief. A full
+  // build still needs the agent's structured brief (audience, goals…).
+  if (session.taskScope !== "full" && opts.userRequest.trim()) {
+    fileObservation(session, "understand", {
+      summary: `Request captured (${session.taskScope} task): ${opts.userRequest.trim().slice(0, 300)}`,
+      by: "system",
+      detail: { taskScope: session.taskScope },
+    });
+  }
+  return session;
 }
 
 /**
@@ -179,16 +214,35 @@ function hasMachineEvidence(
  * Whether a stage with evidence may be passed. Deploy/verify additionally
  * require at least one non-agent evidence record — agent self-report
  * alone leaves the stage open and the gate holds.
+ *
+ * Trivial-scope exception: for a trivial task the build IS the mutation,
+ * so a system-recorded successful mutation is machine evidence for BUILD.
+ * There is no "runnable entry artifact" to inspect for a one-line edit,
+ * and demanding one would stall every trivial task forever. The agent's
+ * word alone still never suffices (by !== "agent" is required).
  */
-function stagePassable(state: QualityLoopState, stage: QualityStage): boolean {
+function stagePassable(
+  state: QualityLoopState,
+  stage: QualityStage,
+  taskScope: QualityTaskScope = "full",
+): boolean {
   const s = state.stages[stage];
   if (s.evidence.length === 0) return false;
   if (blockedReason(state, stage)) return false;
+  if (taskScope === "trivial" && stage === "build") {
+    return s.evidence.some((e) => e.by !== "agent");
+  }
   if (MACHINE_EVIDENCE_STAGES.has(stage)) {
+    // Targeted work (trivial/standard scope) is verified at the scale of the
+    // change: a successful mutation is the build, and reading the changed
+    // file back is an inspection. A full build keeps the strict proofs.
+    const targeted = taskScope !== "full";
     const predicates: Partial<Record<QualityStage, (detail: Record<string, unknown> | undefined) => boolean>> = {
-      build: (detail) => detail?.artifactVerified === true,
+      build: (detail) => detail?.artifactVerified === true || (targeted && detail?.mutationVerified === true),
       run: (detail) => detail?.reachable === true,
-      inspect: (detail) => detail?.browserInspected === true && detail?.styleHealthy === true && detail?.consoleClean === true,
+      inspect: (detail) =>
+        (detail?.browserInspected === true && detail?.styleHealthy === true && detail?.consoleClean === true) ||
+        (targeted && detail?.readBackVerified === true),
       critique: (detail) => detail?.visualVerified === true && detail?.passed === true && detail?.consoleClean === true,
       test: (detail) => detail?.executedChecks === true && detail?.passed === true,
       deploy: (detail) => detail?.deploymentVerified === true,
@@ -348,6 +402,7 @@ function blockedReason(state: QualityLoopState, stage: QualityStage): string | n
 
 function reconcile(session: QualityLoopSession): void {
   const state = session.state;
+  const required = new Set<QualityStage>(REQUIRED_STAGES_BY_SCOPE[session.taskScope]);
   let progressed = true;
   while (progressed) {
     progressed = false;
@@ -365,9 +420,15 @@ function reconcile(session: QualityLoopSession): void {
           state.stages[st].evidence.length > 0 ||
           session.observations.some((o) => o.stage === st),
       );
+      // Stages outside the task's scope never block: skip them with a
+      // recorded reason once later-stage work proves the run moved on.
+      // Deploy/verify keep their own rules (they bind to the deploy
+      // request, not to the task scope).
+      const scopeSkippable =
+        c !== "deploy" && c !== "verify" && !required.has(c);
       if (
         s.evidence.length > 0 &&
-        stagePassable(state, c) &&
+        stagePassable(state, c, session.taskScope) &&
         laterHasEvidence &&
         (s.status === "pending" || s.status === "active")
       ) {
@@ -380,15 +441,25 @@ function reconcile(session: QualityLoopSession): void {
       } else if (
         s.evidence.length === 0 &&
         laterHasEvidence &&
-        IMPLICATION_SKIPPABLE.has(c) &&
+        (IMPLICATION_SKIPPABLE.has(c) || scopeSkippable) &&
         (s.status === "pending" || s.status === "active")
       ) {
         try {
-          skipStage(
-            state,
-            c,
-            "No evidence recorded; advanced by implication from later-stage work.",
-          );
+          if (IMPLICATION_SKIPPABLE.has(c)) {
+            skipStage(
+              state,
+              c,
+              "No evidence recorded; advanced by implication from later-stage work.",
+            );
+          } else {
+            // Reachable only when scopeSkippable (see the branch condition).
+            skipStageOutOfScope(
+              state,
+              c,
+              session.taskScope,
+              `Stage does not apply to the ${session.taskScope} task scope (system-determined).`,
+            );
+          }
           progressed = true;
         } catch {
           // Leave open.
@@ -419,10 +490,12 @@ export function noteToolResult(
 ): void {
   try {
     if (tool.success && tool.mutating) {
+      session.mutationSeen = true;
       fileObservation(session, "build", {
         summary: `Mutating tool "${toolId}" succeeded: ${tool.summary.slice(0, 300)}`,
         artifacts: [toolId],
         by: "system",
+        detail: { mutationVerified: true },
       });
       if (session.critiqueFailed) {
         fileObservation(session, "fix", {
@@ -437,6 +510,23 @@ export function noteToolResult(
       tool.result && typeof tool.result === "object"
         ? (tool.result as Record<string, unknown>)
         : null;
+
+    // Check tools executed through the workspace are TEST evidence the
+    // moment they run — no need to wait for the post-run build-fix loop.
+    if (CHECK_TOOL_IDS.has(toolId)) {
+      const exitCode = typeof payload?.exitCode === "number" ? payload.exitCode : null;
+      const passed = tool.success && payload?.success !== false && (exitCode === null || exitCode === 0);
+      fileObservation(session, "test", {
+        summary: passed
+          ? `Check "${toolId}" executed and passed.`
+          : `Check "${toolId}" executed and failed${exitCode !== null ? ` (exit ${exitCode})` : ""}.`,
+        artifacts: [`${toolId}:${passed ? "pass" : "fail"}`],
+        by: "system",
+        detail: passed
+          ? { passed: true, executedChecks: true }
+          : { passed: false, executedChecks: true, reason: `${toolId} failed` },
+      });
+    }
     const previewReady =
       tool.success &&
       ((toolId === "preview.status" && payload?.status === "ready") ||
@@ -447,6 +537,43 @@ export function noteToolResult(
     }
   } catch {
     // Evidence recording must never break the run.
+  }
+}
+
+/** Workspace check tools whose results are TEST evidence. */
+const CHECK_TOOL_IDS: ReadonlySet<string> = new Set([
+  "test.run",
+  "build.run",
+  "typecheck.run",
+  "lint.run",
+]);
+
+/**
+ * Record that a file changed by this run was read back from the workspace
+ * and holds what the run wrote — INSPECT evidence at the scale of a
+ * targeted edit. Only counts after a successful mutation, and only when
+ * the caller actually re-read the file from the workspace.
+ */
+export function noteMutationReadBack(
+  session: QualityLoopSession,
+  check: { path: string; readable: boolean; contentMatches: boolean | null },
+): void {
+  try {
+    if (!session.mutationSeen) return;
+    const ok = check.readable && check.contentMatches !== false;
+    fileObservation(session, "inspect", {
+      summary: ok
+        ? `Changed file read back from the workspace: ${check.path}` +
+          (check.contentMatches === true ? " (content matches the edit)." : ".")
+        : `Read-back of ${check.path} did not confirm the edit.`,
+      artifacts: [check.path],
+      by: "system",
+      detail: ok
+        ? { readBackVerified: true, contentMatches: check.contentMatches }
+        : { readBackVerified: false, passed: false, reason: `Read-back of ${check.path} did not confirm the edit` },
+    });
+  } catch {
+    // Never break the run.
   }
 }
 
@@ -734,15 +861,18 @@ export interface QualityFinale {
 
 /**
  * Close out the loop and decide whether success may be declared.
- * The hard product rule lives here: every non-skippable stage must have
- * passed with evidence (deploy/verify bind to deployRequested), no stage
- * may have failed, and the verdict says so explicitly.
+ * The hard product rule lives here: every stage required by the task's
+ * scope must have passed with evidence (deploy/verify bind to
+ * deployRequested), no stage may have failed, and the verdict says so
+ * explicitly. Stages outside the task's scope are skipped with a recorded
+ * reason — they never block completion.
  */
 export function finalizeQualityLoop(
   session: QualityLoopSession,
   opts: { deployRequested: boolean },
 ): QualityFinale {
   const state = session.state;
+  const required = new Set<QualityStage>(REQUIRED_STAGES_BY_SCOPE[session.taskScope]);
 
   // Final sweep: file what became due, then pass or skip whatever is still
   // open, in order. Observations must be filed as the current stage moves
@@ -753,8 +883,12 @@ export function finalizeQualityLoop(
     const c = currentStage(state);
     if (!c) break;
     const s = state.stages[c];
+    // Stages outside the task's scope never block: skip with a recorded
+    // reason. Deploy/verify keep their own rules (deploy request, not scope).
+    const scopeSkippable =
+      c !== "deploy" && c !== "verify" && !required.has(c);
     try {
-      if (stagePassable(state, c)) {
+      if (stagePassable(state, c, session.taskScope)) {
         passStage(state, c);
       } else if (s.evidence.length === 0 && STAGE_REQUIREMENTS[c].skippable) {
         const reason =
@@ -762,6 +896,13 @@ export function finalizeQualityLoop(
             ? session.inspectionNote
             : "Stage produced no evidence during the run.";
         skipStage(state, c, reason);
+      } else if (s.evidence.length === 0 && scopeSkippable) {
+        skipStageOutOfScope(
+          state,
+          c,
+          session.taskScope,
+          `Stage does not apply to the ${session.taskScope} task scope (system-determined).`,
+        );
       } else {
         // Either no evidence on a required stage (gate holds), or the
         // latest evidence reports failure (gate holds harder).
@@ -772,7 +913,10 @@ export function finalizeQualityLoop(
     }
   }
 
-  const rawVerdict = declareSuccess(state, { deployRequested: opts.deployRequested });
+  const rawVerdict = declareSuccess(state, {
+    deployRequested: opts.deployRequested,
+    taskScope: session.taskScope,
+  });
   // Surface blocking failure reasons honestly: the verdict names the
   // stages, and the reason names why they are stuck.
   const blocked = QUALITY_STAGES.flatMap((stage) => {
@@ -789,6 +933,43 @@ export function finalizeQualityLoop(
     designPasses: state.designPasses,
     unfiledObservations: session.observations.length,
   };
+}
+
+// ─── Verdict text block ───────────────────────────────────────────
+
+/**
+ * Format the appended quality verdict as a compact collapsed markdown
+ * checklist (one line per stage, ✓/✗/○). The leading "Quality check — "
+ * marker line is part of the contract: the approval-resume path strips
+ * the whole trailing block via {@link stripQualityVerdictSuffix}, and the
+ * chat renderer collapses the ```quality-checklist fenced block.
+ * Format-only: the verdict content (reason + per-stage statuses) is
+ * unchanged.
+ */
+export function formatQualityVerdictBlock(finale: QualityFinale): string {
+  const reason = finale.verdict.reason;
+  const lowered = reason.charAt(0).toLowerCase() + reason.slice(1);
+  const lines = finale.stages.map((s) => {
+    const mark =
+      s.status === "passed" ? "✓" : s.status === "failed" ? "✗" : "○";
+    return `${mark} ${s.stage} — ${s.status}`;
+  });
+  return (
+    `\n\nQuality check — ${lowered}\n` +
+    "```quality-checklist\n" +
+    lines.join("\n") +
+    "\n```"
+  );
+}
+
+/** Matcher for the trailing verdict block appended by
+ * {@link formatQualityVerdictBlock}. Removes the marker line and
+ * everything after it; ordinary model output is never touched. */
+const QUALITY_VERDICT_SUFFIX_RE = /\n\nQuality check — [\s\S]*$/i;
+
+/** Remove a stale machine-gate verdict suffix from resumed final text. */
+export function stripQualityVerdictSuffix(text: string): string {
+  return text.replace(QUALITY_VERDICT_SUFFIX_RE, "");
 }
 
 // ─── Agent prompt section ─────────────────────────────────────────
@@ -826,3 +1007,40 @@ export const QUALITY_LOOP_PROMPT_SECTION = [
   "declared. Your closing summary must report what each stage established — never claim",
   "a result (a deletion, a deployment, a passing check) that did not actually happen.",
 ].join("\n");
+
+/**
+ * Scope-specific guidance appended to the quality prompt. The scope is
+ * system-determined from the user's request and is stated to the agent as
+ * a fact, not a negotiation: it tells the agent which stages apply so it
+ * neither performs rituals the task does not need (a preview for a typo
+ * fix) nor skips stages the task does need.
+ */
+const TASK_SCOPE_PROMPT: Record<QualityTaskScope, string[]> = {
+  trivial: [
+    "",
+    "Task scope for this run: TRIVIAL (determined by the system from the request).",
+    "This is a single small text/content change. Only the BUILD stage applies: make the",
+    "change with tools. The successful mutation is the evidence. Do not start previews,",
+    "run design passes, or execute test suites for a one-line edit, and do not emit",
+    "QUALITY markers for stages that do not apply.",
+  ],
+  standard: [
+    "",
+    "Task scope for this run: STANDARD (determined by the system from the request).",
+    "Required stages: understand, plan, build, test. Declare each with a QUALITY marker as",
+    "you complete it; run the checks and fix failures yourself. The other stages (design,",
+    "run, inspect, critique, polish) are recorded if you do them but do not block completion.",
+  ],
+  full: [
+    "",
+    "Task scope for this run: FULL (determined by the system from the request).",
+    "This is a product build: work every stage in order and declare each one. The visual",
+    "judge will score your preview; a below-threshold score means another design pass.",
+    "Deploy only if the user asked to ship.",
+  ],
+};
+
+/** The quality-loop prompt section tailored to the run's task scope. */
+export function buildQualityLoopPrompt(taskScope: QualityTaskScope): string {
+  return [QUALITY_LOOP_PROMPT_SECTION, ...TASK_SCOPE_PROMPT[taskScope]].join("\n");
+}

@@ -7,6 +7,7 @@
 
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { assertHostExecutionPermitted } from "@/lib/host-execution-guard";
 
 const execFileAsync = promisify(execFile);
 
@@ -24,6 +25,43 @@ export interface CloneResult {
   branch: string;
 }
 
+// ─── Input validation (git option-injection hardening) ──────────────
+// All clone inputs are passed to `git` as argv entries (no shell), but a
+// value starting with `-` (or containing `..`/path tricks) could still be
+// parsed as a git option or escape the intended repo path. Reject anything
+// outside the strict allowlists below with a clear error.
+
+const OWNER_REPO_PATTERN = /^[A-Za-z0-9_.-]+$/;
+const BRANCH_PATTERN = /^[A-Za-z0-9._/-]+$/;
+const COMMIT_SHA_PATTERN = /^[0-9a-fA-F]{4,64}$/;
+
+/**
+ * Validate clone inputs before any git invocation.
+ * Throws a descriptive Error when an input is outside the allowlist.
+ */
+export function validateCloneInput(input: CloneInput): void {
+  const { owner, repo, branch, targetPath, commitSha } = input;
+
+  if (!owner || !repo || !branch) {
+    throw new Error("owner, repo, and branch are required for clone");
+  }
+  if (!OWNER_REPO_PATTERN.test(owner)) {
+    throw new Error(`Invalid repository owner: ${JSON.stringify(owner)}`);
+  }
+  if (!OWNER_REPO_PATTERN.test(repo)) {
+    throw new Error(`Invalid repository name: ${JSON.stringify(repo)}`);
+  }
+  if (!BRANCH_PATTERN.test(branch) || branch.startsWith("-")) {
+    throw new Error(`Invalid branch name: ${JSON.stringify(branch)}`);
+  }
+  if (!targetPath || targetPath.startsWith("-")) {
+    throw new Error(`Invalid target path: ${JSON.stringify(targetPath)}`);
+  }
+  if (commitSha && !COMMIT_SHA_PATTERN.test(commitSha)) {
+    throw new Error(`Invalid commit SHA: ${JSON.stringify(commitSha)}`);
+  }
+}
+
 /**
  * Clone a GitHub repository into the target path.
  *
@@ -33,9 +71,12 @@ export interface CloneResult {
 export async function cloneRepository(input: CloneInput): Promise<CloneResult> {
   const { owner, repo, branch, githubToken, targetPath, commitSha } = input;
 
-  if (!owner || !repo || !branch) {
-    throw new Error("owner, repo, and branch are required for clone");
-  }
+  // Reject option-injection / path-traversal inputs before touching git.
+  validateCloneInput(input);
+
+  // Gate 1: host git against a user-chosen repository is host execution.
+  // Closed in production-like environments until a verified sandbox exists.
+  assertHostExecutionPermitted("terminal-v1/github-clone");
 
   // Build the clone URL with optional token
   const protocol = githubToken ? "https" : "https";
@@ -57,9 +98,11 @@ export async function cloneRepository(input: CloneInput): Promise<CloneResult> {
       maxBuffer: 2 * 1024 * 1024,
     });
   } catch (err) {
-    throw new Error(
-      `Failed to clone ${owner}/${repo}:${branch}: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    // execFile's error message embeds the full command line, which includes
+    // the installation token in the clone URL. Never let it escape.
+    let detail = err instanceof Error ? err.message : String(err);
+    if (githubToken) detail = detail.split(githubToken).join("***");
+    throw new Error(`Failed to clone ${owner}/${repo}:${branch}: ${detail}`);
   }
 
   // Get the commit SHA

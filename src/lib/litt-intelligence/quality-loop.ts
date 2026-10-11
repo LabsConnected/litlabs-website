@@ -122,6 +122,73 @@ export const STAGE_REQUIREMENTS: Record<QualityStage, StageRequirement> = {
   },
 };
 
+// ─── Task scope ────────────────────────────────────────────────────
+
+/**
+ * How much of the quality pipeline a task requires.
+ *
+ * The scope is determined by the SYSTEM from the user's request
+ * (classifyTaskScope) — never by the agent. A narrower scope means fewer
+ * stages apply, but the stages that remain still demand real evidence.
+ * Scope can narrow which stages apply; it can never fabricate evidence
+ * for the stages that remain, and it never excuses a failed stage.
+ */
+export type QualityTaskScope = "trivial" | "standard" | "full";
+
+/**
+ * Stages that must pass with recorded evidence for each task scope.
+ * Deploy/verify bind to the deploy request instead (see declareSuccess)
+ * and are deliberately not listed here.
+ */
+export const REQUIRED_STAGES_BY_SCOPE: Record<QualityTaskScope, readonly QualityStage[]> = {
+  // A single text/content mutation with no behavioral change (typo fix,
+  // HTML comment, copy tweak). The work IS the mutation: only the build
+  // stage applies, proven by the machine-recorded mutation — not by the
+  // agent's word, and not by an artifact inspection that cannot exist
+  // for a one-line edit.
+  trivial: ["build"],
+  // Bug fixes, small features, multi-file changes. Understand the problem,
+  // plan the change, make it, prove the checks pass.
+  standard: ["understand", "plan", "build", "test"],
+  // A new product surface. The complete pipeline, as originally designed.
+  full: ["understand", "plan", "design", "build", "run", "inspect", "critique", "test"],
+};
+
+/**
+ * Request patterns that ask for a whole product surface. Checked BEFORE
+ * the trivial patterns: "build me a website and fix a typo" is a full
+ * build, not a typo fix.
+ */
+const FULL_SCOPE_PATTERNS: RegExp[] = [
+  /\b(build|create|generate|make|design|redesign|rebuild|scaffold|develop|launch)\b[\s\S]{0,60}\b(website|web\s?site|webapp|web\s?app|app|application|landing\s?page|home\s?page|product|platform|dashboard|store|shop|portfolio|blog|site)\b/i,
+  /\bnew\b[\s\S]{0,30}\b(website|web\s?site|app|page|product|platform|site)\b/i,
+  /\bfrom scratch\b/i,
+  /\bredesign\b/i,
+];
+
+/** Request patterns for a single tiny text/content tweak. */
+const TRIVIAL_SCOPE_PATTERNS: RegExp[] = [
+  /\btypos?\b/i,
+  /\bhtml comment\b/i,
+  /\b(spelling|grammar|punctuation)\b/i,
+  /\b(change|update|edit|fix|tweak|adjust|modify)\b[\s\S]{0,40}\b(text|copy|wording|headline|title|heading|label|button text|link text)\b/i,
+  /\brename\b/i,
+];
+
+/**
+ * Deterministically classify a task's scope from the user's request.
+ * Conservative by design: unknown requests are "standard", and anything
+ * that smells like a product build is "full". The agent cannot change
+ * its scope mid-run — the scope lives on the session, not in the prompt.
+ */
+export function classifyTaskScope(userRequest: string): QualityTaskScope {
+  const req = userRequest.trim();
+  if (!req) return "standard";
+  if (FULL_SCOPE_PATTERNS.some((p) => p.test(req))) return "full";
+  if (TRIVIAL_SCOPE_PATTERNS.some((p) => p.test(req))) return "trivial";
+  return "standard";
+}
+
 // ─── Evidence ─────────────────────────────────────────────────────
 
 /** Who recorded a piece of evidence. */
@@ -312,6 +379,41 @@ export function skipStage(state: QualityLoopState, stage: QualityStage, reason: 
   touch(state);
 }
 
+/**
+ * Skip the current stage because it does not apply to the task's scope
+ * (e.g. UNDERSTAND for a trivial typo fix). Unlike skipStage, this is not
+ * limited to statically-skippable stages — but it REFUSES to skip a stage
+ * the scope requires, so scope can never excuse required work. The skip
+ * is recorded with an explicit reason and stays visible in the ledger.
+ */
+export function skipStageOutOfScope(
+  state: QualityLoopState,
+  stage: QualityStage,
+  taskScope: QualityTaskScope,
+  reason: string,
+): void {
+  const current = currentStage(state);
+  if (current !== stage) {
+    throw new StageGateError(
+      stage,
+      `Cannot skip stage "${stage}" while stage "${current ?? "none"}" is current.`,
+    );
+  }
+  if (REQUIRED_STAGES_BY_SCOPE[taskScope].includes(stage)) {
+    throw new StageGateError(
+      stage,
+      `Stage "${stage}" is required for ${taskScope}-scope tasks and cannot be skipped as out of scope.`,
+    );
+  }
+  if (!reason.trim()) {
+    throw new StageGateError(stage, `Skipping stage "${stage}" requires an explicit reason.`);
+  }
+  const s = state.stages[stage];
+  s.status = "skipped";
+  s.skipReason = reason;
+  touch(state);
+}
+
 /** Mark the current stage failed with a reason. A failed stage ends the loop. */
 export function failStage(state: QualityLoopState, stage: QualityStage, reason: string): void {
   const current = currentStage(state);
@@ -338,19 +440,27 @@ export interface SuccessVerdict {
 }
 
 /**
- * The hard product rule: success may be declared only when every
- * non-skippable stage has passed with evidence AND no stage has failed.
- * Deploy/verify are required only when a deployment was requested —
+ * The hard product rule: success may be declared only when every stage
+ * required by the task's scope has passed with evidence AND no stage has
+ * failed. Deploy/verify are required only when a deployment was requested —
  * otherwise they may remain pending (e.g. paused for user approval).
  * When a deployment WAS requested, deploy/verify must have passed with
  * evidence: skipping shipment is not an option.
  *
+ * The task scope (trivial | standard | full) is system-determined from the
+ * user's request. A narrower scope means fewer stages apply — but the
+ * stages that remain still demand real evidence, and a failed stage always
+ * blocks regardless of scope. Scope can never be used to bypass the gate.
+ *
  * @param deployRequested — true when the run was asked to ship/publish.
+ * @param taskScope — which stages apply; defaults to "full" (previous behavior).
  */
 export function declareSuccess(
   state: QualityLoopState,
-  opts: { deployRequested: boolean },
+  opts: { deployRequested: boolean; taskScope?: QualityTaskScope },
 ): SuccessVerdict {
+  const taskScope: QualityTaskScope = opts.taskScope ?? "full";
+  const required = new Set<QualityStage>(REQUIRED_STAGES_BY_SCOPE[taskScope]);
   const missing: QualityStage[] = [];
 
   for (const stage of QUALITY_STAGES) {
@@ -367,8 +477,8 @@ export function declareSuccess(
       if (s.status !== "passed") missing.push(stage);
       continue;
     }
-    const req = STAGE_REQUIREMENTS[stage];
-    if (req.skippable) continue;
+    // Stages outside the task's scope never block completion.
+    if (!required.has(stage)) continue;
     if (s.status !== "passed") missing.push(stage);
   }
 
@@ -376,7 +486,7 @@ export function declareSuccess(
     return {
       ok: true,
       missing: [],
-      reason: "All required quality-loop stages passed with recorded evidence.",
+      reason: `All required quality-loop stages passed with recorded evidence (task scope: ${taskScope}).`,
     };
   }
 
@@ -384,7 +494,7 @@ export function declareSuccess(
     ok: false,
     missing,
     reason:
-      `Cannot declare success: ${missing.length} required stage(s) lack evidence: ` +
+      `Cannot declare success (task scope: ${taskScope}): ${missing.length} required stage(s) lack evidence: ` +
       missing.map((s) => `"${s}" (${state.stages[s].status})`).join(", ") +
       ".",
   };

@@ -2,6 +2,10 @@
 
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
+import {
+  formatBits,
+  getPlanCreditAllowance,
+} from "@/config/plan-entitlements";
 
 const FAQS = [
   {
@@ -37,7 +41,7 @@ const FAQS = [
   {
     question: "Is LiTT free?",
     answer:
-      "Yes. The Starter plan is free forever with 500 AI credits and 1 active project—no credit card required. Paid plans unlock more projects, credits, and advanced features. See pricing for details.",
+      `Yes. The Starter plan is free forever with ${formatBits(getPlanCreditAllowance("starter"))} AI credits and 1 active project—no credit card required. Paid plans unlock more projects, credits, and advanced features. See pricing for details.`,
   },
   {
     question: "What can LiTT build?",

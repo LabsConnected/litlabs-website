@@ -21,6 +21,7 @@ import { randomUUID } from "crypto";
 import { resolve, relative, isAbsolute } from "path";
 import { realpathSync } from "fs";
 import { createDockerSession } from "./docker-manager.js";
+import { assertHostShellPermitted } from "./isolation-policy.js";
 
 // ─── Security constants ───────────────────────────────────────────
 
@@ -335,6 +336,14 @@ interface PtySession {
   bpWarnPending: boolean;
   /** Whether a setImmediate flush retry is already scheduled. */
   flushScheduled: boolean;
+
+  // ─── Detach / resume (session survives navigation + refresh) ───
+  /** Exit callback — swappable so a resumed socket receives the exit notice. */
+  emitExit: CreateSessionOptions["onExit"];
+  /** When the owning transport went away; null while attached. */
+  detachedAt: number | null;
+  /** Kills the session if nobody resumes it within the grace window. */
+  detachTimer: ReturnType<typeof setTimeout> | null;
 }
 
 /** Public session snapshot — safe to send to clients (no ptyProcess handle). */
@@ -448,6 +457,12 @@ export class PtySessionManager {
    * Throws if the PTY fails to spawn or limits are exceeded.
    */
   create(opts: CreateSessionOptions): PtySessionSnapshot {
+    // ─── Isolation enforcement (fail closed) ──────────────────────
+    // A host shell is never spawned in production or on Railway, no matter
+    // what the caller passed. There is no override: this is the last line
+    // of defense behind the server's connection check.
+    assertHostShellPermitted(process.env, opts.useDocker);
+
     // ─── Workspace boundary enforcement ───────────────────────────
     // Validate cwd is within allowedRoot BEFORE spawning anything.
     // This is the filesystem security boundary — no PTY may run
@@ -513,7 +528,7 @@ export class PtySessionManager {
       // Fast path: transport is writable and nothing is pending → direct emit.
       if (writable && session.pendingOutput.length === 0) {
         session.totalOutputDelivered += chunkBytes;
-        opts.onData(data);
+        session.emitData(data);
         return;
       }
 
@@ -581,6 +596,9 @@ export class PtySessionManager {
       lastBpWarnAt: 0,
       bpWarnPending: false,
       flushScheduled: false,
+      emitExit: opts.onExit,
+      detachedAt: null,
+      detachTimer: null,
     };
 
     this.sessions.set(sessionId, session);
@@ -596,8 +614,9 @@ export class PtySessionManager {
           cwd: safeCwd,
           onData: wrappedOnData,
           onExit: ({ exitCode, signal }) => {
+            const current = this.sessions.get(sessionId);
             this.markExited(sessionId, exitCode);
-            opts.onExit({ sessionId, exitCode, signal });
+            (current?.emitExit ?? opts.onExit)({ sessionId, exitCode, signal });
           },
         });
       } else {
@@ -612,8 +631,9 @@ export class PtySessionManager {
           }),
           onData: wrappedOnData,
           onExit: ({ exitCode, signal }) => {
+            const current = this.sessions.get(sessionId);
             this.markExited(sessionId, exitCode);
-            opts.onExit({ sessionId, exitCode, signal });
+            (current?.emitExit ?? opts.onExit)({ sessionId, exitCode, signal });
           },
         });
       }
@@ -636,6 +656,84 @@ export class PtySessionManager {
     }, this.limits.absoluteLifetimeMs);
 
     return this.toSnapshot(session);
+  }
+
+  // ─── Detach / resume ────────────────────────────────────────────
+
+  /**
+   * Detach a session from its transport without killing the shell.
+   *
+   * A browser refresh, an in-app navigation, or a brief network drop all
+   * close the socket. Killing the PTY on every close is what made the
+   * Studio terminal lose its session (and its running command) whenever
+   * the page moved. Instead the session is parked: output buffers up to
+   * the normal backpressure cap and is replayed on resume, and the shell
+   * is killed only if nobody resumes it within `graceMs`.
+   *
+   * Ownership is enforced — returns false for an unknown session or a
+   * different user. An already-exited session is killed immediately.
+   */
+  detach(sessionId: string, userId: string, graceMs: number): boolean {
+    const session = this.assertOwner(sessionId, userId);
+    if (!session) return false;
+    if (session.exited) {
+      this.killInternal(sessionId, "detached_after_exit");
+      return true;
+    }
+    session.detachedAt = Date.now();
+    session.isTransportWritable = () => false;
+    session.emitData = () => {};
+    session.emitExit = () => {};
+    session.notifyBpWarning = null;
+    if (session.detachTimer) clearTimeout(session.detachTimer);
+    session.detachTimer = setTimeout(() => {
+      this.killInternal(sessionId, `detached_grace_expired (${Math.round(graceMs / 1000)}s)`);
+    }, graceMs);
+    if (session.detachTimer.unref) session.detachTimer.unref();
+    return true;
+  }
+
+  /**
+   * Re-attach a parked session to a new transport.
+   *
+   * Only the owning user may resume, only while the session is detached
+   * and still alive, and only from the same workspace scope — knowing a
+   * sessionId never grants access. Returns null when any check fails so
+   * the caller falls back to creating a fresh session.
+   */
+  reattach(
+    sessionId: string,
+    userId: string,
+    scope: { workspaceId: string | null },
+    callbacks: {
+      onData: (data: string) => void;
+      onExit: CreateSessionOptions["onExit"];
+      isTransportWritable?: () => boolean;
+      onBackpressureWarning?: CreateSessionOptions["onBackpressureWarning"];
+    },
+  ): PtySessionSnapshot | null {
+    const session = this.assertOwner(sessionId, userId);
+    if (!session || session.exited || session.detachedAt === null) return null;
+    if ((session.workspaceId ?? null) !== (scope.workspaceId ?? null)) return null;
+
+    if (session.detachTimer) clearTimeout(session.detachTimer);
+    session.detachTimer = null;
+    session.detachedAt = null;
+    session.emitData = callbacks.onData;
+    session.emitExit = callbacks.onExit;
+    session.isTransportWritable = callbacks.isTransportWritable ?? null;
+    session.notifyBpWarning = callbacks.onBackpressureWarning ?? null;
+    session.lastActivityAt = Date.now();
+    this.resetIdleTimer(sessionId);
+    // Replay whatever the shell printed while nobody was listening.
+    this.flushPending(session);
+    return this.toSnapshot(session);
+  }
+
+  /** True while a session is parked waiting for a resume. */
+  isDetached(sessionId: string, userId: string): boolean {
+    const session = this.assertOwner(sessionId, userId);
+    return !!session && session.detachedAt !== null;
   }
 
   // ─── Session ownership ──────────────────────────────────────────
@@ -982,6 +1080,10 @@ export class PtySessionManager {
     if (session.lifetimeTimer) {
       clearTimeout(session.lifetimeTimer);
       session.lifetimeTimer = null;
+    }
+    if (session.detachTimer) {
+      clearTimeout(session.detachTimer);
+      session.detachTimer = null;
     }
   }
 

@@ -6,21 +6,17 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useCapabilities } from "@/app/(app)/studio/hooks/useCapabilities";
 import { Boxes, ExternalLink, FolderGit2, RefreshCw, Rocket, ShieldCheck, Terminal, Waypoints } from "lucide-react";
 import type { CapabilityStatus } from "@/lib/capabilities/types";
+import { resolveClientTerminalUrl } from "@/lib/terminal-url-client";
 
 type CheckState = "checking" | "ready" | "warning" | "offline";
 
 // Client-side terminal URL resolution — mirrors getTerminalServerUrl() from
 // src/lib/terminal-url.ts (server-only). Uses NEXT_PUBLIC env vars directly.
-const terminalUrl = () => {
-  const explicit = process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL;
-  const ws = process.env.NEXT_PUBLIC_TERMINAL_WS_URL;
-  const raw = explicit
-    ? explicit.replace(/\/$/, "")
-    : ws?.replace(/^wss:/, "https:").replace(/^ws:/, "http:").replace(/\/$/, "") || "";
-  return raw && !raw.includes("localhost")
-    ? raw
-    : "https://litlabs-terminal-server-production-0be1.up.railway.app";
-};
+const terminalUrl = () =>
+  resolveClientTerminalUrl(
+    process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL,
+    process.env.NEXT_PUBLIC_TERMINAL_WS_URL,
+  );
 
 export default function SystemTopologyPanel({ compact = false, terminalHttpUrl }: { compact?: boolean; terminalHttpUrl?: string }) {
   const router = useRouter();
@@ -90,7 +86,7 @@ export default function SystemTopologyPanel({ compact = false, terminalHttpUrl }
   const items: Array<{ label: string; value: string; state: CheckState; icon: typeof Terminal; action?: () => void; actionLabel?: string }> = [
     { label: "Frontend", value: "Connected", state: "ready", icon: Waypoints },
     { label: "Auth", value: !isLoaded ? "Checking" : isSignedIn ? "Verified" : "Missing", state: !isLoaded ? "checking" : isSignedIn ? "ready" : "warning", icon: ShieldCheck, action: !isSignedIn ? () => router.push("/sign-in") : undefined, actionLabel: !isSignedIn ? "Sign in" : undefined },
-    { label: "Terminal", value: gateway === "ready" ? "Online" : gateway === "warning" ? "Docker required" : gateway === "checking" ? "Checking" : endpoint ? "Offline" : "Not configured", state: gateway, icon: Terminal, action: () => router.push("/studio?tool=terminal"), actionLabel: "Open terminal" },
+    { label: "Terminal", value: !endpoint ? "Not configured" : gateway === "ready" ? "Online" : gateway === "warning" ? "Docker required" : gateway === "checking" ? "Checking" : endpoint ? "Offline" : "Not configured", state: gateway, icon: Terminal, action: () => router.push("/studio?tool=terminal"), actionLabel: "Open terminal" },
     { label: "Docker", value: checking ? "Checking" : terminalHealth?.checks?.docker ? "Ready" : "Not configured", state: checking ? "checking" : terminalHealth?.checks?.docker ? "ready" : "warning", icon: Boxes, action: () => router.push("/settings#workspace"), actionLabel: "Configure runtime" },
     { label: "Workspace", value: capMap.get("runtime.sandbox")?.status === "ready" ? "Loaded" : "No project loaded", state: capToCheckState(capMap.get("runtime.sandbox")?.status ?? "not_configured"), icon: FolderGit2, action: () => router.push("/studio?tool=plugins"), actionLabel: "Start a project" },
     { label: "Preview", value: capMap.get("runtime.sandbox")?.status === "running" ? "Running" : "No server running", state: capToCheckState(capMap.get("runtime.sandbox")?.status ?? "not_configured"), icon: Rocket, action: () => router.push("/studio?tool=terminal"), actionLabel: "Start preview" },

@@ -5,3 +5,4 @@ export * from "./safe-errors";
 export * from "./run-store";
 export * from "./browser-adapter";
 export * from "./tool-runtime";
+export * from "./progress-event-persistence";

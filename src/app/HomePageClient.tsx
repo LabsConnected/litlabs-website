@@ -142,7 +142,7 @@ function SectionHeading({
   );
 }
 
-function CapabilityGrid() {
+export function CapabilityGrid() {
   return (
     <section id="what-we-do" className="litt-section relative overflow-hidden border-t border-white/8">
       <div className="litt-grid-fade pointer-events-none absolute inset-0 opacity-40" />

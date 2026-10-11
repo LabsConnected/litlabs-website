@@ -34,6 +34,13 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { SITE_URL } from "@/lib/siteConfig";
 import { logLLMCall, type LLMCallMetadata } from "@/lib/evals/braintrust";
 import { recordLLMCall } from "@/lib/metrics";
+import {
+  emitLlmMetering,
+  getMeteringContext,
+  type MeteringContext,
+  type MeteringStatus,
+} from "@/lib/metering";
+import { checkRunawayGuards, SpendGuardError } from "@/lib/spend-guards";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -130,6 +137,16 @@ export interface LLMOptions {
    * not a provider failure).
    */
   signal?: AbortSignal;
+  /**
+   * Canonical metering context for this call. When set, the user action
+   * emits one usage_events row, and each provider attempt (success or
+   * failure) emits one cost_events row via the metering emitter. Routes
+   * set this at the request boundary: `{ userId | clerkId, projectId?,
+   * feature }`. When absent, the ambient AsyncLocalStorage context (if
+   * any) is used; when neither exists the attempt is still executed but
+   * no metering row is emitted.
+   */
+  metering?: MeteringContext;
 }
 
 export interface LLMUsage {
@@ -146,6 +163,18 @@ export interface LLMResult {
   latencyMs: number;
   /** Providers that were tried before the successful one (in order). */
   failover: LLMProvider[];
+  /**
+   * Canonical metering linkage. requestId ties all attempt events
+   * (original_request_id); billableIdempotencyKey is the idempotency key of
+   * the ONE billable attempt event for this logical action. Charge paths
+   * (chargeLlmUsage → recordChargeEvidence) must reuse this key instead of
+   * creating a second billable usage_event — retry/failover cost is LiTT's
+   * margin hit, never a second customer charge.
+   */
+  metering: {
+    requestId: string;
+    billableIdempotencyKey: string | null;
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -162,9 +191,9 @@ const OPENAI_BASE = "https://api.openai.com/v1";
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
 
 const GEMINI_PRIMARY_MODEL =
-  process.env.GEMINI_PRIMARY_MODEL || "gemini-3.6-flash";
+  process.env.GEMINI_PRIMARY_MODEL || "gemini-flash-latest";
 const GEMINI_FALLBACK_MODEL =
-  process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash-lite";
+  process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash";
 
 export const DEFAULT_MODELS: Record<LLMProvider, string> = {
   gemini: GEMINI_PRIMARY_MODEL,
@@ -236,13 +265,27 @@ function markModelUnavailable(provider: string): void {
  */
 function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
   const chain = rawDefaultChain(task, opts);
-  if (opts.allowLittPaidProviders) return chain;
 
-  const included = chain.filter((p) => !isLittPaidProvider(p));
+  // P1 launch: Gemini billing is depleted (HTTP 402). Until credits are
+  // restored, explicitly skip Gemini — do not rely on health checks or
+  // wait for it to fail first. Set GEMINI_DISABLED=true in production.
+  const geminiDisabled = process.env.GEMINI_DISABLED === "true";
+  const withoutGemini = geminiDisabled ? chain.filter((p) => p !== "gemini") : chain;
+
+  if (opts.allowLittPaidProviders) {
+    if (withoutGemini.length > 0) return withoutGemini;
+    // The pinned provider was filtered out (e.g. GEMINI_DISABLED): the pin
+    // cannot be honored, so drop it and route through the full entitled
+    // chain (incl. LITT_PAID) instead of failing with zero attempts.
+    const unpinned = rawDefaultChain(task, { ...opts, provider: undefined });
+    return geminiDisabled ? unpinned.filter((p) => p !== "gemini") : unpinned;
+  }
+
+  const included = withoutGemini.filter((p) => !isLittPaidProvider(p));
   if (included.length > 0) return included;
 
   // Every candidate was litt_paid (e.g. a forged provider: "openai").
-  return INCLUDED_FALLBACK_CHAIN.filter((p) => !isLittPaidProvider(p));
+  return INCLUDED_FALLBACK_CHAIN.filter((p) => !isLittPaidProvider(p) && (!geminiDisabled || p !== "gemini"));
 }
 
 function rawDefaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
@@ -629,6 +672,69 @@ async function generateViaOpenAI(
   return { text, usage, model: data.model ?? modelName };
 }
 
+/* ------------------------------------------------------------------ */
+/*  Canonical metering — 1 usage_event per user action, N cost_events     */
+/*  (one per provider attempt). Failed attempts emit cost_events only.   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Emit a canonical metering event for one provider attempt. Best-effort:
+ * never throws, never blocks the provider flow.
+ *
+ * Identity resolution: explicit options.metering > ambient ALS context.
+ * When neither provides a user, the attempt runs unmetered (logged).
+ */
+function meterLlmAttempt(args: {
+  options: LLMOptions;
+  provider: LLMProvider;
+  model: string;
+  status: MeteringStatus;
+  promptTokens?: number;
+  completionTokens?: number;
+  /** Stable request id for this generateText/streamText call. */
+  requestId: string;
+  /** 0-based attempt index within the failover chain. */
+  attemptIndex: number;
+  error?: string;
+  startedAt: Date;
+}): void {
+  const meteringCtx = args.options.metering ?? getMeteringContext();
+  if (!meteringCtx && !args.options.metering) {
+    // No metering context — run unmetered (CLI, evals, background jobs
+    // that haven't opted in). This is deliberate, not a gap: callers that
+    // spend LiTT's money must pass metering context.
+    return;
+  }
+  const promptTokens = args.promptTokens ?? 0;
+  const completionTokens = args.completionTokens ?? 0;
+  // Fire-and-forget: metering must never block or fail the LLM call.
+  void emitLlmMetering({
+    ...(meteringCtx ?? {}),
+    provider: args.provider,
+    model: args.model,
+    inputTokens: promptTokens,
+    outputTokens: completionTokens,
+    status: args.status,
+    // Failed LLM API calls are not billed by providers (4xx/5xx = $0),
+    // but the attempt is still recorded for retry-waste analysis.
+    billable: args.status === "success",
+    error: args.error,
+    isByok: !!args.options.userApiKey,
+    idempotencyKey: `metering:llm:${args.requestId}`,
+    retrySequence: args.attemptIndex,
+    originalRequestId: args.requestId,
+    startedAt: args.startedAt,
+    finishedAt: new Date(),
+  }).catch(() => {
+    // emitLlmMetering already swallows internally; belt-and-braces.
+  });
+}
+
+/** Stable per-call request id for metering idempotency. */
+function newLlmRequestId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 async function dispatchProvider(
   provider: LLMProvider,
   p: GenerateParams,
@@ -676,6 +782,8 @@ export async function generateText(
   const failover: LLMProvider[] = [];
   const emptyProviders: LLMProvider[] = [];
   const t0 = Date.now();
+  // Stable id for canonical metering: one usage_event per provider attempt.
+  const meteringRequestId = newLlmRequestId();
 
   let lastErr: unknown = null;
   let attempted = 0;
@@ -686,6 +794,22 @@ export async function generateText(
       continue;
     }
     attempted++;
+    const attemptStartedAt = new Date();
+    const attemptIndex = attempted - 1;
+    // Hard spend/runaway guard — per-attempt, fail-open. Kills retry storms
+    // before they burn the user's allowance or LiTT's margin.
+    if (options.metering) {
+      const guard = await checkRunawayGuards({
+        userId: options.metering.userId,
+        clerkId: options.metering.clerkId,
+        feature: String(options.metering.feature ?? "unknown"),
+        originalRequestId: meteringRequestId,
+        isByok: !!options.userApiKey,
+      });
+      if (!guard.allowed) {
+        throw new SpendGuardError(guard);
+      }
+    }
     try {
       const r = await dispatchProvider(
         provider,
@@ -705,6 +829,12 @@ export async function generateText(
         usage: r.usage,
         latencyMs: Date.now() - t0,
         failover,
+        // The successful attempt is the ONE billable event for this logical
+        // action. Charge paths must reuse its idempotency key.
+        metering: {
+          requestId: meteringRequestId,
+          billableIdempotencyKey: `metering:llm:${meteringRequestId}`,
+        },
       };
       logLLMCall({
         prompt,
@@ -727,6 +857,18 @@ export async function generateText(
         completionTokens: r.usage?.completion,
         failoverFrom: failover.length > 0 ? failover : undefined,
       });
+      // Canonical metering: one event per successful provider attempt.
+      meterLlmAttempt({
+        options,
+        provider,
+        model: r.model,
+        status: "success",
+        promptTokens: r.usage?.prompt,
+        completionTokens: r.usage?.completion,
+        requestId: meteringRequestId,
+        attemptIndex,
+        startedAt: attemptStartedAt,
+      });
       return result;
     } catch (err) {
       lastErr = err;
@@ -738,6 +880,19 @@ export async function generateText(
         status: "error",
         latencyMs: Date.now() - t0,
         failoverFrom: failover.length > 0 ? failover : undefined,
+      });
+      // Canonical metering: failed attempts are recorded too (billable=false;
+      // LLM API 4xx/5xx failures are not provider-billed, but the attempt
+      // is visible for retry-waste analysis).
+      meterLlmAttempt({
+        options,
+        provider,
+        model: "unknown",
+        status: "failed",
+        requestId: meteringRequestId,
+        attemptIndex,
+        error: err instanceof Error ? err.message.slice(0, 500) : String(err).slice(0, 500),
+        startedAt: attemptStartedAt,
       });
       // Mark model unavailable on 404 (model not found)
       if (isProviderError && err.status === 404) {
@@ -818,6 +973,15 @@ export async function streamText(
   failover: LLMProvider[];
   /** Provider-reported finish reason, when the stream carried one. */
   finishReason?: string;
+  /**
+   * Canonical metering linkage — same contract as LLMResult.metering:
+   * requestId ties all attempt events; billableIdempotencyKey is the ONE
+   * billable attempt event for this logical action.
+   */
+  metering: {
+    requestId: string;
+    billableIdempotencyKey: string | null;
+  };
 }> {
   const task = options.task ?? "chat";
   const timeoutMs = options.timeoutMs ?? 60_000;
@@ -825,6 +989,8 @@ export async function streamText(
   const failover: LLMProvider[] = [];
   const emptyProviders: LLMProvider[] = [];
   const t0 = Date.now();
+  // Stable id for canonical metering: one usage_event per provider attempt.
+  const meteringRequestId = newLlmRequestId();
 
   // Accumulate streamed chunks for Braintrust logging on stream completion.
   const _chunks: string[] = [];
@@ -846,6 +1012,21 @@ export async function streamText(
       continue;
     }
     attempted++;
+    const attemptStartedAt = new Date();
+    const attemptIndex = attempted - 1;
+    // Hard spend/runaway guard — per-attempt, fail-open.
+    if (options.metering) {
+      const guard = await checkRunawayGuards({
+        userId: options.metering.userId,
+        clerkId: options.metering.clerkId,
+        feature: String(options.metering.feature ?? "unknown"),
+        originalRequestId: meteringRequestId,
+        isByok: !!options.userApiKey,
+      });
+      if (!guard.allowed) {
+        throw new SpendGuardError(guard);
+      }
+    }
     try {
       const chunksBefore = _chunks.length;
       let result: { provider: LLMProvider; model: string; latencyMs: number; failover: LLMProvider[]; finishReason?: string };
@@ -914,7 +1095,30 @@ export async function streamText(
         latencyMs: result.latencyMs,
         failoverFrom: result.failover.length > 0 ? result.failover : undefined,
       });
-      return result;
+      // Canonical metering: streams don't report token usage, so estimate
+      // with the same chars/4 heuristic the billing path uses. Estimates are
+      // labeled by the heuristic — actuals preferred when available.
+      const streamedText = _chunks.join("");
+      meterLlmAttempt({
+        options,
+        provider: result.provider,
+        model: result.model,
+        status: "success",
+        promptTokens: Math.ceil(((systemPrompt ?? "") + prompt).length / 4),
+        completionTokens: Math.ceil(streamedText.length / 4),
+        requestId: meteringRequestId,
+        attemptIndex,
+        startedAt: attemptStartedAt,
+      });
+      return {
+        ...result,
+        // The successful attempt is the ONE billable event for this logical
+        // action. Charge paths must reuse its idempotency key.
+        metering: {
+          requestId: meteringRequestId,
+          billableIdempotencyKey: `metering:llm:${meteringRequestId}`,
+        },
+      };
     } catch (err) {
       // An explicit caller abort is not a provider failure — surface it
       // immediately instead of failing over to the next provider.
@@ -932,6 +1136,17 @@ export async function streamText(
         status: "error",
         latencyMs: Date.now() - t0,
         failoverFrom: failover.length > 0 ? failover : undefined,
+      });
+      // Canonical metering: failed stream attempts are recorded too.
+      meterLlmAttempt({
+        options,
+        provider,
+        model: "unknown",
+        status: "failed",
+        requestId: meteringRequestId,
+        attemptIndex,
+        error: err instanceof Error ? err.message.slice(0, 500) : String(err).slice(0, 500),
+        startedAt: attemptStartedAt,
       });
       // Mark model unavailable on 404 (model not found)
       if (isProviderError && err.status === 404) {

@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { verifyProjectWorkspace, updateProjectWorkspace } from "@/lib/projects/project-repository";
 import { getWorkspaceInternal } from "@/lib/terminal-internal-client";
+import { isFeatureEnabled } from "@/config/feature-flags";
+import { isTerminalOwnerUser } from "@/lib/terminal-owner";
 
 export const runtime = "nodejs";
 
@@ -20,6 +22,16 @@ export async function GET(request: NextRequest) {
   const { userId } = await auth(request);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Public terminal access is off until container isolation is verified.
+  // Checked before any workspace lookup or token minting. Terminal owners
+  // bypass the flag (the terminal server still enforces isolation itself).
+  if (!isFeatureEnabled("terminalRuntime") && !isTerminalOwnerUser(userId)) {
+    return NextResponse.json(
+      { code: "TERMINAL_DISABLED", error: "The terminal is not available yet." },
+      { status: 403, headers: { "Cache-Control": "no-store" } },
+    );
   }
 
   const projectId = request.nextUrl.searchParams.get("projectId");

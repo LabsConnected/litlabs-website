@@ -96,11 +96,11 @@ export function EmptyCanvasGreeter() {
               style={{
                 width: 48,
                 height: 48,
-                backgroundColor: "var(--glass-purple-soft)",
-                border: "1px solid var(--glass-border-purple)",
+                backgroundColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)",
+                border: "1px solid color-mix(in srgb, var(--color-accent) 30%, transparent)",
               }}
             >
-              <Sparkles size={24} style={{ color: "var(--glass-purple)" }} />
+              <Sparkles size={24} style={{ color: "var(--litt-primary)" }} />
             </div>
             <h2 className="text-xl font-bold" style={{ color: "var(--text-primary)" }}>
               What are we building?
@@ -144,7 +144,7 @@ export function EmptyCanvasGreeter() {
                     backgroundColor: "rgba(255,255,255,0.02)",
                   }}
                 >
-                  <Icon size={20} style={{ color: "var(--glass-purple)" }} />
+                  <Icon size={20} style={{ color: "var(--litt-primary)" }} />
                   <span className="text-[11px] font-bold" style={{ color: "var(--glass-text-2)" }}>
                     {cat.label}
                   </span>
@@ -176,7 +176,7 @@ export function EmptyCanvasGreeter() {
                     backgroundColor: "rgba(255,255,255,0.02)",
                   }}
                 >
-                  <Icon size={14} style={{ color: "var(--glass-purple)" }} />
+                  <Icon size={14} style={{ color: "var(--litt-primary)" }} />
                   <span className="text-[12px] font-medium" style={{ color: "var(--glass-text-2)" }}>
                     {qb.label}
                   </span>
@@ -227,9 +227,9 @@ export function EmptyCanvasGreeter() {
             >
               <div
                 className="flex items-center justify-center rounded-lg"
-                style={{ width: 36, height: 36, backgroundColor: "var(--glass-purple-soft)" }}
+                style={{ width: 36, height: 36, backgroundColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)" }}
               >
-                <Sparkles size={16} style={{ color: "var(--glass-purple)" }} />
+                <Sparkles size={16} style={{ color: "var(--litt-primary)" }} />
               </div>
               <div className="flex flex-col gap-0.5 flex-1">
                 <span className="text-[13px] font-bold" style={{ color: "var(--glass-text-1)" }}>
@@ -250,7 +250,7 @@ export function EmptyCanvasGreeter() {
             setRightPanelTab("litt");
           }}
           className="flex items-center gap-1.5 text-[11px] font-bold transition hover:opacity-70"
-          style={{ color: "var(--glass-purple)" }}
+          style={{ color: "var(--litt-primary)" }}
         >
           <Zap size={12} />
           Describe it instead →

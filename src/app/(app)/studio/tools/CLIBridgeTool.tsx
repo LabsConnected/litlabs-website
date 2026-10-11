@@ -158,7 +158,12 @@ export default function CLIBridgeTool({
       };
 
       es.onerror = () => {
-        setError("Connection failed. Make sure you're authorized.");
+        // EventSource cannot read the HTTP status. A 503
+        // EXECUTION_ISOLATION_UNAVAILABLE (Gate 1 fail-closed) and a 401
+        // both surface here. Mention both possibilities honestly.
+        setError(
+          "Connection failed. Either you're not authorized, or terminal execution is unavailable on this deployment (no verified sandbox isolation).",
+        );
         setIsConnected(false);
         setIsConnecting(false);
         addLine("error", "❌ Connection error");

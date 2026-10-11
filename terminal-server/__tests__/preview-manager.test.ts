@@ -18,6 +18,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { useTrustedLocalEnv } from "./helpers/trusted-local-env";
 import { delimiter as PATH_DELIMITER, dirname, join } from "path";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "fs";
 import { tmpdir } from "os";
@@ -73,6 +74,8 @@ import {
   probeHealth,
   resolvePackageManager,
 } from "../preview/PreviewManager";
+
+useTrustedLocalEnv();
 
 describe("PreviewManager — process diagnostics", () => {
   it("preserves complete recent stderr lines instead of truncating the fatal error", () => {

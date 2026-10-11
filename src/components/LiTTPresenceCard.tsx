@@ -17,7 +17,7 @@ export function LiTTPresenceCard({
     <div className="mb-3 flex items-center gap-2.5 rounded-xl border border-white/8 bg-black/30 p-2.5">
       <div className="relative shrink-0">
         <Image
-          src="/brand/litt-mascot-avatar.png"
+          src="/brand/litt-robot-avatar-96.png"
           alt="LiTT"
           width={36}
           height={36}

@@ -68,6 +68,7 @@ import {
   type RequestSource,
 } from "@/lib/browser-jobs";
 import { executeBrowserJob } from "@/lib/browser-job-executor";
+import { TerminalNotConfiguredError } from "@/lib/terminal-config";
 import { getTerminalServerUrl } from "@/lib/terminal-url";
 
 // ─── Helpers ────────────────────────────────────────────────────
@@ -76,10 +77,14 @@ import { getTerminalServerUrl } from "@/lib/terminal-url";
  * Resolve the terminal server base URL.
  * Production has TERMINAL_SERVER_URL (not TERMINAL_SERVER_INTERNAL_URL).
  */
-export const TERMINAL_BASE = () =>
-  process.env.TERMINAL_SERVER_INTERNAL_URL ??
-  process.env.TERMINAL_SERVER_URL ??
-  getTerminalServerUrl();
+export const TERMINAL_BASE = () => {
+  const base =
+    process.env.TERMINAL_SERVER_INTERNAL_URL?.trim() ||
+    process.env.TERMINAL_SERVER_URL?.trim() ||
+    getTerminalServerUrl();
+  if (!base) throw new TerminalNotConfiguredError();
+  return base.replace(/\/+$/, "");
+};
 
 export function internalHeaders(): Record<string, string> {
   return {
@@ -732,6 +737,19 @@ export const toolBrowserStartJob: ToolHandler = async (userId, args) => {
     return fail("Invalid requested_by. Valid: vapi, studio, cron, admin.");
   }
 
+  // Carry the active runtime scope into the queued record so Studio can
+  // render only the current project's browser history. Existing job-type
+  // parameters remain untouched.
+  const scopedParams = {
+    ...params,
+    ...(typeof args.project_id === "string" && typeof params.projectId !== "string" && typeof params.project_id !== "string"
+      ? { projectId: args.project_id }
+      : {}),
+    ...(typeof args.conversation_id === "string" && typeof params.conversationId !== "string" && typeof params.conversation_id !== "string"
+      ? { conversationId: args.conversation_id }
+      : {}),
+  };
+
   try {
     const { job, created } = await createJob({
       userId,
@@ -740,7 +758,7 @@ export const toolBrowserStartJob: ToolHandler = async (userId, args) => {
       riskLevel: riskLevelRaw as RiskLevel | undefined,
       requestedBy: requestedByRaw as RequestSource,
       idempotencyKey,
-      params,
+      params: scopedParams,
     });
 
     if (created && job.status === "queued") {

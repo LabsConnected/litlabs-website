@@ -120,6 +120,37 @@ export interface CreateJobInput {
   params: Record<string, unknown>;
 }
 
+export interface BrowserJobScope {
+  projectId?: string | null;
+  conversationId?: string | null;
+}
+
+function scopedParam(params: Record<string, unknown>, camel: string, snake: string): string | null {
+  const value = params[camel] ?? params[snake];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/**
+ * Browser jobs are stored in a user-owned queue, but Studio renders them in
+ * a project/conversation surface. An unbound legacy job is not safe to show
+ * in a project because it has no evidence that it belongs there.
+ */
+export function browserJobBelongsToScope(job: BrowserJob, scope: BrowserJobScope): boolean {
+  if (!scope.projectId) return false;
+  const projectId = scopedParam(job.params, "projectId", "project_id");
+  if (projectId !== scope.projectId) return false;
+  if (!scope.conversationId) return true;
+  const conversationId = scopedParam(job.params, "conversationId", "conversation_id");
+  return conversationId === null || conversationId === scope.conversationId;
+}
+
+export function filterBrowserJobsForScope(
+  jobs: readonly BrowserJob[],
+  scope: BrowserJobScope,
+): BrowserJob[] {
+  return jobs.filter((job) => browserJobBelongsToScope(job, scope));
+}
+
 export interface CreateJobResult {
   job: BrowserJob;
   created: boolean; // false if returned existing (idempotency hit)
@@ -283,7 +314,7 @@ export async function getJob(jobId: string, userId: string): Promise<BrowserJob 
  */
 export async function listJobs(
   userId: string,
-  options: { status?: JobStatus; limit?: number } = {},
+  options: { status?: JobStatus; limit?: number; projectId?: string; conversationId?: string } = {},
 ): Promise<BrowserJob[]> {
   const admin = getSupabaseAdmin();
   if (!admin) return [];
@@ -293,7 +324,9 @@ export async function listJobs(
     .select("*")
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
-    .limit(options.limit ?? 20);
+    // Fetch a wider user-owned window before applying JSON scope filters so a
+    // current project's job is not hidden behind older projects' history.
+    .limit(options.projectId ? Math.max(options.limit ?? 20, 100) : (options.limit ?? 20));
 
   if (options.status) {
     query = query.eq("status", options.status);
@@ -301,7 +334,12 @@ export async function listJobs(
 
   const { data, error } = await query;
   if (error || !data) return [];
-  return data.map((row) => rowToJob(row as Record<string, unknown>));
+  const jobs = data.map((row) => rowToJob(row as Record<string, unknown>));
+  if (!options.projectId) return jobs;
+  return filterBrowserJobsForScope(jobs, {
+    projectId: options.projectId,
+    conversationId: options.conversationId,
+  }).slice(0, options.limit ?? 20);
 }
 
 /**

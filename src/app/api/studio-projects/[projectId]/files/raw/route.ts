@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
-import { getTerminalServerUrl } from "@/lib/terminal-url";
+import { requireTerminalBaseUrl, terminalNotConfiguredResponse } from "@/lib/terminal-config";
 
 /**
  * GET /api/studio-projects/[projectId]/files/raw?path=...
@@ -10,9 +10,7 @@ import { getTerminalServerUrl } from "@/lib/terminal-url";
  * Streams a binary/media file from the workspace with auth and path traversal protection.
  * Returns the file with appropriate Content-Type and Content-Disposition headers.
  */
-const TERMINAL_BASE = () =>
-  process.env.TERMINAL_SERVER_INTERNAL_URL ??
-  getTerminalServerUrl();
+const TERMINAL_BASE = () => requireTerminalBaseUrl();
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
@@ -58,6 +56,8 @@ export async function GET(
 ) {
   const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const terminalUnavailable = terminalNotConfiguredResponse();
+  if (terminalUnavailable) return terminalUnavailable;
 
   const { projectId } = await params;
   const filePath = request.nextUrl.searchParams.get("path");

@@ -19,6 +19,11 @@ import { createShellExecutor } from "@litt/agent-core";
 import type { CommandRouter, CommandResult, MissionMode } from "@litt/agent-core";
 import { getRuntimeStore, getRuntimeState, getExecutionGateway, getCanonicalShell } from "./runtime.js";
 import { getRunRegistry } from "./run-registry.js";
+import {
+  assertHostExecutionPermitted,
+  guardShellExecutor,
+  HostExecutionBlockedError,
+} from "./isolation-policy.js";
 import { runDoctor, runDoctorDeep } from "./doctor.js";
 
 // ─── Secret redaction ─────────────────────────────────────────────
@@ -147,8 +152,11 @@ export interface CommandSpec {
 function getRouter(cwd: string, userId: string | null, runId?: string): CommandRouter {
   // Lazy import to avoid circular dependency at module load time
   const { CommandRouter } = require("@litt/agent-core");
+  // Eager fail-closed check: CommandRouter may swallow executor errors into a
+  // failed result, so refuse BEFORE any router method can be invoked.
+  assertHostExecutionPermitted("command-router");
   const store = getRuntimeStore();
-  const shell = createShellExecutor(cwd);
+  const shell = guardShellExecutor(createShellExecutor(cwd), "command-router");
   // Register the shell so /api/cancel (or a client disconnect) can kill it.
   if (runId) {
     getRunRegistry().register(runId, shell);
@@ -177,6 +185,8 @@ function execShell(
   timeoutMs: number,
   runId?: string,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  // Fail closed: no sandbox backend exists for this path.
+  assertHostExecutionPermitted("command-registry.execShell");
   return new Promise((resolve) => {
     const child = execFile(command, args, { cwd, timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
       if (runId) getRunRegistry().unregister(runId);
@@ -469,6 +479,10 @@ async function handleDo(args: string[], ctx: CommandContext): Promise<CommandRes
   }
   const command = args[0];
   const cmdArgs = args.slice(1);
+
+  // Eager fail-closed check, before the gateway can turn a refusal into a
+  // generic failed result.
+  assertHostExecutionPermitted("command-registry.do");
 
   const gateway = getExecutionGateway(ctx.cwd, ctx.mode ?? "act");
   // Register the canonical shell so a cancel can kill whatever /do starts.
@@ -824,6 +838,9 @@ export async function dispatchRegistry(
     }
     return response;
   } catch (err) {
+    // A fail-closed refusal must reach the transport layer (HTTP 503), not be
+    // flattened into an HTTP 200 `ok:false` response.
+    if (err instanceof HostExecutionBlockedError) throw err;
     return {
       kind: "error",
       ok: false,

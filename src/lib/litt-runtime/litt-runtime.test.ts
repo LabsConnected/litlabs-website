@@ -126,9 +126,9 @@ describe("provider-router", () => {
     expect(resolveGeminiVisionModel({ message: "hi", requestedModel: "gemini-2.5-pro" })).toBe("gemini-2.5-pro");
   });
 
-  it("resolveGeminiVisionModel falls back to flash for non-gemini models", () => {
-    expect(resolveGeminiVisionModel({ message: "hi", requestedModel: "gpt-4o" })).toBe("gemini-3.6-flash");
-    expect(resolveGeminiVisionModel({ message: "hi" })).toBe("gemini-3.6-flash");
+  it("resolveGeminiVisionModel falls back to the registry vision model for non-gemini models", () => {
+    expect(resolveGeminiVisionModel({ message: "hi", requestedModel: "gpt-4o" })).toBe("gemini-flash-latest");
+    expect(resolveGeminiVisionModel({ message: "hi" })).toBe("gemini-flash-latest");
   });
 });
 

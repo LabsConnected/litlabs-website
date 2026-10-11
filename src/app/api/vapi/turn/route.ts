@@ -4,6 +4,7 @@ import { rateLimit } from "@/lib/rate-limiter";
 import { getVoiceSession, startVoiceSession } from "@/lib/voice/voice-session-service";
 import { runLiTTForVoice } from "@/lib/voice/voice-runtime";
 import { insertMessage } from "@/lib/studio/conversation-service";
+import { emitLlmMetering } from "@/lib/metering";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -149,12 +150,62 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Route through the LiTT Runtime
-  const result = await runLiTTForVoice({
-    userId: session.userId,
-    projectId: session.projectId,
-    conversationId: session.conversationId,
-    message: userContent,
+  // Route through the LiTT Runtime.
+  //
+  // Canonical metering: runLiTTForVoice runs on callLLMWithTools, a
+  // provider layer that does NOT go through llm.ts's generateText, so it
+  // never emits metering itself. We record one usage_event per voice turn
+  // here.
+  //
+  // PRODUCT DECISION (documented): Voice turns are FREE to users today
+  // (billable=false, chargedBits=0). LiTT absorbs the provider cost.
+  // The runtime does not surface token counts per turn, so the event
+  // records the turn's provider/model and that spend occurred (tokens 0,
+  // cost 0). If the runtime surfaces token counts in the future, pass
+  // them through inputTokens/outputTokens for accurate cost_events.
+  // Cost visibility is maintained even though no charge occurs.
+  const meteringRequestId = crypto.randomUUID();
+  const meteringStartedAt = new Date();
+  let result: Awaited<ReturnType<typeof runLiTTForVoice>>;
+  try {
+    result = await runLiTTForVoice({
+      userId: session.userId,
+      projectId: session.projectId,
+      conversationId: session.conversationId,
+      message: userContent,
+    });
+  } catch (turnErr: unknown) {
+    void emitLlmMetering({
+      clerkId: session.userId ?? undefined,
+      projectId: session.projectId ?? undefined,
+      feature: "vapi",
+      provider: "unknown",
+      model: "unknown",
+      status: "failed",
+      error: String(turnErr instanceof Error ? turnErr.message : turnErr).slice(0, 500),
+      chargedBits: 0,
+      billable: false,
+      idempotencyKey: `metering:vapi:${meteringRequestId}:0`,
+      startedAt: meteringStartedAt,
+      finishedAt: new Date(),
+    });
+    return NextResponse.json({ text: "I encountered an error. Please try again." }, { status: 500 });
+  }
+
+  void emitLlmMetering({
+    clerkId: session.userId ?? undefined,
+    projectId: session.projectId ?? undefined,
+    feature: "vapi",
+    provider: result.body.provider ?? "unknown",
+    model: result.body.model ?? "unknown",
+    // PRODUCT DECISION: voice turns are free to users (billable=false).
+    // Cost is tracked for visibility; LiTT absorbs it.
+    status: result.status === 200 ? "success" : "failed",
+    billable: false,
+    chargedBits: 0,
+    idempotencyKey: `metering:vapi:${meteringRequestId}:0`,
+    startedAt: meteringStartedAt,
+    finishedAt: new Date(),
   });
 
   if (result.status !== 200) {

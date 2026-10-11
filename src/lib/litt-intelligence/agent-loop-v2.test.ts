@@ -7,6 +7,7 @@ vi.mock("./llm-tool-calling", async (importOriginal) => ({
 }));
 
 import { runAgentLoopV2, resumeAgentLoopV2, announcesMoreWork, resolveZeroToolCalls, type ResumeInput } from "./agent-loop-v2";
+import type { ProgressEvent } from "./progress-events";
 import { callLLMWithTools, AgentBudgetExhaustedError } from "./llm-tool-calling";
 import { toolRegistry } from "./tool-registry";
 
@@ -789,5 +790,490 @@ describe("runAgentLoopV2 — mid-build stall recovery", () => {
     expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(1);
     expect(result.finalText).toBe("Done — the site is complete.");
     expect(result.cancelled).toBe(false);
+  });
+});
+
+describe("runAgentLoopV2 — prose approval-ask stall guard", () => {
+  // The exact #551 failure: the model asked for approval in prose instead
+  // of emitting the approval-gated files.write tool call, and the run
+  // settled "Complete" with zero mutations.
+  const APPROVAL_ASK =
+    "I'm ready to update index.html by adding <!-- marker --> as the very first line of the file. " +
+    "Since this requires modifying workspace files, please confirm and give approval to apply the change.";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("routes a prose approval-ask to the nudge path, not final", () => {
+    const r = resolveZeroToolCalls(APPROVAL_ASK, 0);
+    expect(r.action).toBe("nudge");
+    if (r.action === "nudge") {
+      expect(r.nudgeMessage).toContain("files.write");
+      expect(r.nudgeMessage).toContain("don't create approval cards");
+    }
+  });
+
+  it("routes present-continuous work claims to the nudge path", () => {
+    expect(
+      resolveZeroToolCalls("Thanks for the approval. I'm adding the comment as the first line.", 0).action,
+    ).toBe("nudge");
+    expect(resolveZeroToolCalls("I'm updating the header styles now.", 0).action).toBe("nudge");
+  });
+
+  it("fails honestly — never completes — when nudges are exhausted", () => {
+    const r = resolveZeroToolCalls(APPROVAL_ASK, 2);
+    expect(r.action).toBe("fail");
+    if (r.action === "fail") {
+      expect(r.failureMessage).toContain("no approval card was created");
+      expect(r.failureMessage).toContain("no files were changed");
+    }
+  });
+
+  it("still treats plain prose as final", () => {
+    expect(resolveZeroToolCalls("Done — the site is complete.", 0).action).toBe("final");
+    expect(resolveZeroToolCalls("Which file should I update?", 0).action).toBe("final");
+  });
+
+  it("fails the run honestly when the model keeps asking for approval in prose", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: APPROVAL_ASK,
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test-model",
+    });
+
+    const result = await runAgentLoopV2(
+      "Add an HTML comment as the first line of index.html",
+      fakeTransport,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+        maxSteps: 10,
+      },
+    );
+
+    // 1 initial + 2 nudges, then honest failure — never "completed".
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(3);
+    expect(result.cancelled).toBe(false);
+    expect(result.failedHonestly).toContain("no approval card was created");
+    expect(result.finalText).toBe(result.failedHonestly);
+
+    // The nudge told the model exactly what to do: emit the tool call.
+    const secondCallMessages = vi.mocked(callLLMWithTools).mock.calls[1][1] as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(
+      secondCallMessages.some((m) => m.role === "user" && m.content.includes("files.write")),
+    ).toBe(true);
+  });
+});
+
+describe("runAgentLoopV2 — persistEvent hook (item 5a)", () => {
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "Done.",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "test-model",
+    });
+  });
+
+  it("offers loop events to persistEvent in emit order", async () => {
+    const seen: ProgressEvent[] = [];
+    const result = await runAgentLoopV2(
+      "build a tiny landing page",
+      fakeTransport,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+        persistEvent: async (event) => {
+          seen.push(event);
+        },
+      },
+    );
+
+    expect(result.cancelled).toBe(false);
+    // The persistence chain drains asynchronously after the loop returns —
+    // wait for the final event rather than assuming it already landed.
+    const deadline = Date.now() + 10_000;
+    while (!seen.some((e) => e.type === "finished") && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    // The hook is offered the loop's full event stream in emit order.
+    // (Filtering stream noise is the mapping layer's job — see
+    // progress-event-persistence.test.ts.)
+    expect(seen.map((e) => e.type)).toEqual(result.events.map((e) => e.type));
+  });
+
+  it("a rejecting persistEvent never breaks the run", async () => {
+    const errors: unknown[] = [];
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      errors.push(args);
+    });
+    try {
+      const result = await runAgentLoopV2(
+        "build a tiny landing page",
+        fakeTransport,
+        {
+          model: "test-model",
+          systemPrompt: "You are LiTT.",
+          executionMode: "act",
+          enableBuildFix: false,
+          persistEvent: async () => {
+            throw new Error("db down");
+          },
+        },
+      );
+      expect(result.cancelled).toBe(false);
+      expect(result.events.some((e) => e.type === "finished")).toBe(true);
+      // The failure was logged, not thrown.
+      expect(errors.length).toBeGreaterThan(0);
+    } finally {
+      consoleSpy.mockRestore();
+    }
+  });
+
+  it("is optional — the loop behaves identically without it", async () => {
+    const result = await runAgentLoopV2(
+      "build a tiny landing page",
+      fakeTransport,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+      },
+    );
+    expect(result.cancelled).toBe(false);
+    expect(result.events.some((e) => e.type === "finished")).toBe(true);
+  });
+});
+
+describe("runAgentLoopV2 — build capability guard", () => {
+  const transportWithRead = {
+    workspaceId: "ws-test",
+    userId: "u-test",
+    workspaceRoot: "/tmp/test",
+    projectId: "p-test",
+    readFile: vi.fn(async () => ({ content: "hello", size: 5 })),
+    createCheckpointBeforeMutation: vi.fn(async () => null),
+  } as unknown as WorkspaceTransport;
+
+  beforeEach(async () => {
+    vi.mocked(callLLMWithTools).mockReset();
+    // Reset registry learning so the guard test starts from seed state.
+    const { _resetModelRegistryForTests } = await import("./model-registry");
+    const { _resetProviderHealthForTests } = await import("./provider-registry");
+    _resetModelRegistryForTests();
+    _resetProviderHealthForTests();
+  });
+
+  function readOnlyStep(model: string, provider: string, n: number) {
+    return {
+      text: "",
+      toolCalls: [{
+        toolCallId: `tc-read-${n}`,
+        toolId: "files.read",
+        inputs: { projectId: "p-test", path: "index.html" },
+      }],
+      finishReason: "tool_calls",
+      model,
+      provider,
+    };
+  }
+
+  it("rules out a read-only model after 3 zero-write steps and switches the build model", async () => {
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(readOnlyStep("cohere/north-mini-code:free", "openrouter", 1))
+      .mockResolvedValueOnce(readOnlyStep("cohere/north-mini-code:free", "openrouter", 2))
+      .mockResolvedValueOnce(readOnlyStep("cohere/north-mini-code:free", "openrouter", 3))
+      .mockResolvedValueOnce({
+        text: "Done — wrote the files.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "gemini-flash-latest",
+        provider: "gemini",
+      });
+
+    const result = await runAgentLoopV2(
+      "build a tiny landing page",
+      transportWithRead,
+      {
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+        maxSteps: 10,
+        buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
+      },
+    );
+
+    // Guard fired: structured evidence event naming the incompatible model.
+    const incompatible = result.events.filter((e) => e.type === "build_model_incompatible");
+    expect(incompatible).toHaveLength(1);
+    expect(incompatible[0]).toMatchObject({
+      canonicalId: "openrouter-north-mini-code",
+      provider: "openrouter",
+      stepsObserved: 3,
+      zeroWriteSteps: 3,
+      reason: "no_file_write_calls_in_window",
+    });
+
+    // The 4th step was routed to the next eligible registry build model.
+    const fourthCall = vi.mocked(callLLMWithTools).mock.calls[3];
+    expect(fourthCall[3]).toMatchObject({ model: "gemini-flash-latest" });
+
+    // The run continued the same conversation instead of failing.
+    expect(result.finalText).toContain("Done — wrote the files.");
+    expect(result.modelFailed).toBeUndefined();
+  });
+
+  it("fails with NO_BUILD_CAPABLE_MODEL when the build-model chain is exhausted", async () => {
+    // The mock honors the model hint: whatever the guard switches to, that
+    // model serves the next window — still read-only. The guard walks the
+    // whole registry build chain until nothing remains.
+    // Vary the read path per step: the loop's repeated-tool-call circuit
+    // breaker cancels identical calls with no intervening mutation.
+    let stepNo = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async (_systemPrompt, _messages, _tools, opts) => {
+      const hinted = (opts as { model?: string } | undefined)?.model;
+      const model = hinted ?? "cohere/north-mini-code:free";
+      const provider = model.startsWith("gemini") ? "gemini" : "openrouter";
+      stepNo += 1;
+      return {
+        text: "",
+        toolCalls: [{ toolCallId: `tc-step-${stepNo}`, toolId: "files.read", inputs: { projectId: "p-test", path: `file-${stepNo}.html` } }],
+        finishReason: "tool_calls",
+        model,
+        provider,
+      };
+    });
+
+    const result = await runAgentLoopV2(
+      "build a tiny landing page",
+      transportWithRead,
+      {
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+        maxSteps: 40,
+        buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
+      },
+    );
+
+    expect(result.modelFailed).toBe("NO_BUILD_CAPABLE_MODEL");
+    expect(result.modelFailureText).toContain("No build-capable model is available");
+    // Chain: north-mini-code → gemini-flash → gemini-2.5-flash →
+    // gemma-4-31b → exhausted. 4 windows × 3 steps = 12 calls, bounded
+    // far below maxSteps. (qwen3.8-27b:free is tool-capable but not
+    // run-proven as a file writer, so it never enters the build chain.)
+    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBe(12);
+  });
+
+  it("resets the window when the model finally writes", async () => {
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(readOnlyStep("gemini-flash-latest", "gemini", 1))
+      .mockResolvedValueOnce(readOnlyStep("gemini-flash-latest", "gemini", 2))
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{
+          toolCallId: "tc-write-1",
+          toolId: "files.write",
+          inputs: { projectId: "p-test", path: "index.html", content: "<h1>hi</h1>" },
+        }],
+        finishReason: "tool_calls",
+        model: "gemini-flash-latest",
+        provider: "gemini",
+      })
+      .mockResolvedValueOnce({
+        text: "Done.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "gemini-flash-latest",
+        provider: "gemini",
+      });
+
+    const writeFile = vi.fn(async () => undefined);
+    const transport = {
+      ...transportWithRead,
+      writeFile,
+    } as unknown as WorkspaceTransport;
+
+    const result = await runAgentLoopV2(
+      "build a tiny landing page",
+      transport,
+      {
+        systemPrompt: "You are LiTT.",
+        executionMode: "auto",
+        enableBuildFix: false,
+        maxSteps: 10,
+        buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
+      },
+    );
+
+    // Two read-only steps then a write: guard never fired, no model switch.
+    expect(result.events.some((e) => e.type === "build_model_incompatible")).toBe(false);
+    expect(writeFile).toHaveBeenCalled();
+    expect(result.finalText).toBe("Done.");
+  });
+
+  it("the switched build model writes files — guard triggers, next model writes, files land", async () => {
+    const writeFile = vi.fn(async () => undefined);
+    const transport = {
+      ...transportWithRead,
+      writeFile,
+    } as unknown as WorkspaceTransport;
+
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(readOnlyStep("cohere/north-mini-code:free", "openrouter", 1))
+      .mockResolvedValueOnce(readOnlyStep("cohere/north-mini-code:free", "openrouter", 2))
+      .mockResolvedValueOnce(readOnlyStep("cohere/north-mini-code:free", "openrouter", 3))
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{
+          toolCallId: "tc-write-1",
+          toolId: "files.write",
+          inputs: { projectId: "p-test", path: "index.html", content: "<h1>hi</h1>" },
+        }],
+        finishReason: "tool_calls",
+        model: "gemini-flash-latest",
+        provider: "gemini",
+      })
+      .mockResolvedValue({
+        text: "Done.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "gemini-flash-latest",
+        provider: "gemini",
+      });
+
+    const result = await runAgentLoopV2(
+      "build a tiny landing page",
+      transport,
+      {
+        systemPrompt: "You are LiTT.",
+        executionMode: "auto",
+        enableBuildFix: false,
+        maxSteps: 10,
+        buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
+      },
+    );
+
+    // The guard fired on the read-only model and switched the build model.
+    const incompatible = result.events.filter((e) => e.type === "build_model_incompatible");
+    expect(incompatible).toHaveLength(1);
+    expect(incompatible[0]).toMatchObject({ canonicalId: "openrouter-north-mini-code" });
+    const fourthCall = vi.mocked(callLLMWithTools).mock.calls[3];
+    expect(fourthCall[3]).toMatchObject({ model: "gemini-flash-latest" });
+
+    // The switched model emitted a file write and it actually executed.
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    expect(writeFile).toHaveBeenCalledWith("index.html", "<h1>hi</h1>");
+    expect(result.toolCalls.some((t) => t.toolId === "files.write" && t.success)).toBe(true);
+    expect(result.modelFailed).toBeUndefined();
+    expect(result.finalText).toBe("Done.");
+  });
+
+  it("NO_BUILD_CAPABLE_MODEL carries per-model evidence for every model tried", async () => {
+    // Same hint-honoring mock as the exhaustion test: whatever model the
+    // guard switches to serves the next window, still read-only.
+    let stepNo = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async (_systemPrompt, _messages, _tools, opts) => {
+      const hinted = (opts as { model?: string } | undefined)?.model;
+      const model = hinted ?? "cohere/north-mini-code:free";
+      const provider = model.startsWith("gemini") ? "gemini" : "openrouter";
+      stepNo += 1;
+      return {
+        text: "",
+        toolCalls: [{ toolCallId: `tc-ev-${stepNo}`, toolId: "files.read", inputs: { projectId: "p-test", path: `ev-${stepNo}.html` } }],
+        finishReason: "tool_calls",
+        model,
+        provider,
+      };
+    });
+
+    const result = await runAgentLoopV2(
+      "build a tiny landing page",
+      transportWithRead,
+      {
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+        maxSteps: 40,
+        buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
+      },
+    );
+
+    expect(result.modelFailed).toBe("NO_BUILD_CAPABLE_MODEL");
+    // Per-model evidence: every ruled-out model named with its reason —
+    // the failure text must not be a bare "no models available".
+    for (const id of [
+      "openrouter-north-mini-code",
+      "gemini-flash",
+      "gemini-2.5-flash",
+      "openrouter-gemma-4-31b",
+    ]) {
+      expect(result.modelFailureText).toContain(id);
+    }
+    expect(result.modelFailureText).toContain("zero file-writing calls");
+    // Structured events back the text: one per ruled-out window.
+    const incompatible = result.events.filter((e) => e.type === "build_model_incompatible");
+    expect(incompatible.length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe("runAgentLoopV2 — model routing evidence", () => {
+  beforeEach(async () => {
+    vi.mocked(callLLMWithTools).mockReset();
+    vi.unstubAllEnvs();
+    const { _resetModelRegistryForTests } = await import("./model-registry");
+    const { _resetProviderHealthForTests } = await import("./provider-registry");
+    _resetModelRegistryForTests();
+    _resetProviderHealthForTests();
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "Done.",
+      toolCalls: [],
+      finishReason: "stop",
+      model: "gemini-flash-latest",
+      provider: "gemini",
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("emits model_routing with canonicalId + provider and no secret material", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "sk-fake-gemini-secret-abc123");
+
+    const result = await runAgentLoopV2(
+      "say hi",
+      fakeTransport,
+      {
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+        maxSteps: 5,
+      },
+    );
+
+    const routing = result.events.filter((e) => e.type === "model_routing");
+    expect(routing).toHaveLength(1);
+    expect(routing[0]).toMatchObject({
+      provider: "gemini",
+      model: "gemini-flash-latest",
+      canonicalId: "gemini-flash",
+      configSource: "registry",
+    });
+    expect(typeof (routing[0] as { latencyMs?: unknown }).latencyMs).toBe("number");
+    // No secrets in the run evidence payload.
+    const payload = JSON.stringify(routing[0]);
+    expect(payload).not.toContain("sk-fake-gemini-secret-abc123");
   });
 });

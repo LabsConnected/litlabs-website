@@ -23,14 +23,17 @@ async function handler(req: NextRequest) {
     workspaceId: null,
     lastVerifiedAt: new Date().toISOString(),
     error: null,
+    // Explicit on every response: the Studio derives "idle" (server up, no
+    // PTY attached) vs "unavailable" (server down) from this field. It was
+    // previously never set, so a healthy server always read as unavailable.
+    serverReachable: false,
   };
 
-  // getTerminalServerUrl() always resolves to SOMETHING — it falls back to a
-  // legacy hardcoded Railway URL when no env var is set, so `endpoint` alone
-  // can never prove real configuration exists. Only an explicit env var
-  // counts as "configured"; report not_configured truthfully otherwise
-  // instead of silently probing a guessed URL and misreporting a config gap
-  // as a network error.
+  // There is no implicit production fallback: `endpoint` is "" when nothing is
+  // configured in production, and the development-only localhost default
+  // otherwise. Only an explicit env var counts as "configured"; report
+  // not_configured truthfully instead of probing a default URL and
+  // misreporting a config gap as a network error.
   const explicitlyConfigured = !!(
     process.env.TERMINAL_PUBLIC_URL ||
     process.env.NEXT_PUBLIC_TERMINAL_WS_URL ||
@@ -87,6 +90,7 @@ async function handler(req: NextRequest) {
       ...baseCapability,
       status: "unavailable",
       terminalStatus: "disconnected",
+      serverReachable: true,
       lastVerifiedAt: new Date().toISOString(),
     });
   } catch {

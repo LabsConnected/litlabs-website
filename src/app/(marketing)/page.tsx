@@ -8,6 +8,10 @@ import {
   absoluteUrl,
   buildMetadata,
 } from "@/lib/seo";
+import {
+  formatBits,
+  getPlanCreditAllowance,
+} from "@/config/plan-entitlements";
 
 // ISR — revalidate every 60s so CDN picks up new deploys without manual purge.
 export const revalidate = 60;
@@ -20,7 +24,7 @@ export const metadata: Metadata = {
     path: "/",
     index: true,
   }),
-  title: { absolute: "LiTT — AI Project Operator & Creative Workspace | LiTTree LabStudios" },
+  title: { absolute: "LiTT — AI Project Operator & Creative Workspace | LiTTree LabStudios · litlabs.net" },
 };
 
 const homeSchema = {
@@ -40,6 +44,15 @@ const homeSchema = {
         "litlabs.net",
       ],
       url: SITE_URL,
+      telephone: "+1-231-428-5411",
+      address: {
+        "@type": "PostalAddress",
+        streetAddress: "17082 Ontario Dr",
+        addressLocality: "Spring Lake",
+        addressRegion: "MI",
+        postalCode: "49456",
+        addressCountry: "US",
+      },
       sameAs: [
         "https://github.com/LabsConnected",
         "https://www.youtube.com/@LiTTreeLabStudios",
@@ -92,7 +105,7 @@ const homeSchema = {
           priceCurrency: "USD",
           url: absoluteUrl("/pricing"),
           description:
-            "Free forever. 500 AI credits (one-time), 1 active project.",
+            `Free forever. ${formatBits(getPlanCreditAllowance("starter"))} LiTTBits (one-time), 1 active project.`,
         },
         {
           "@type": "Offer",
@@ -101,7 +114,7 @@ const homeSchema = {
           priceCurrency: "USD",
           url: absoluteUrl("/pricing"),
           description:
-            "Beta pricing. Research, write, and market with AI agents. 6,000 AI credits monthly, 5 active projects.",
+            `Beta pricing. Research, write, and market with AI agents. ${formatBits(getPlanCreditAllowance("creator_beta"))} AI credits monthly, 5 active projects.`,
         },
         {
           "@type": "Offer",
@@ -110,7 +123,7 @@ const homeSchema = {
           priceCurrency: "USD",
           url: absoluteUrl("/pricing"),
           description:
-            "Beta pricing. Build, debug, and deploy with full AI tooling. 20,000 AI credits monthly, 25 active projects.",
+            `Beta pricing. Build, debug, and deploy with full AI tooling. ${formatBits(getPlanCreditAllowance("pro_builder_beta"))} AI credits monthly, 25 active projects.`,
         },
       ],
     },

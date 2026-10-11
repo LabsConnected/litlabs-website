@@ -5,6 +5,7 @@ import { createTerminalToken } from "@/lib/terminal-auth";
 import { logFileOperation } from "@/lib/file-audit";
 import { visualBuildsTotal, visualBuildDurationSeconds } from "@/lib/metrics";
 import { capturePreviewWithChrome } from "./capture";
+import { TerminalNotConfiguredError } from "@/lib/terminal-config";
 import { getTerminalServerUrl } from "@/lib/terminal-url";
 import { buildAssetQuery, createImageGenerationProvider, createStockAssetProvider } from "./providers";
 import { assetInspectionIsValid, DEFAULT_VISUAL_ASSET_ALLOWLIST, inspectAsset, inspectAssetBuffer } from "./security";
@@ -36,9 +37,9 @@ import { type AssetManifest, type PreviewCapture, type ProjectAsset, type Visual
 const APP_BASE_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 const TERMINAL_BASE = () => {
   const raw = process.env.TERMINAL_SERVER_INTERNAL_URL ?? "";
-  return raw && !raw.includes("localhost")
-    ? raw
-    : getTerminalServerUrl();
+  const base = raw && !raw.includes("localhost") ? raw : getTerminalServerUrl();
+  if (!base) throw new TerminalNotConfiguredError();
+  return base;
 };
 
 interface VisualBuildExecutionResult {
@@ -125,6 +126,10 @@ export async function runVisualBuild(input: {
   userId: string;
   request: VisualBuildRequest;
 }): Promise<VisualBuildExecutionResult> {
+  // Fail closed BEFORE any build/mission state is written: with no terminal
+  // configured nothing below can succeed, and a half-created build would be
+  // left unfinished.
+  TERMINAL_BASE();
   const _vbStartTime = Date.now();
   const project = await getProject(input.projectId, input.userId);
   if (!project) {

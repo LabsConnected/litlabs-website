@@ -18,7 +18,7 @@ import { createTerminalToken } from "@/lib/terminal-auth";
 import { isCanonicalBase64 } from "@/lib/deployments/user-deployment";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createWorkspaceCheckpoint } from "@/lib/missions/workspace-checkpoint";
-import { getTerminalServerUrl } from "@/lib/terminal-url";
+import { requireTerminalBaseUrl } from "@/lib/terminal-config";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -133,6 +133,16 @@ export interface WorkspaceTransport {
    * approval replays instead of double-executing.
    */
   readonly operationId?: string;
+  /**
+   * Result of the honest reachability probe run at transport creation: a
+   * cheap /ws-files listFiles that proves the terminal server actually
+   * serves file operations for this project (the DB row check in
+   * verifyProjectWorkspace only proves the workspace was provisioned).
+   * False when the probe failed or timed out — callers must surface
+   * "file operations are failing" into the model's runtime context
+   * instead of claiming writes work.
+   */
+  readonly fileOpsReachable: boolean;
 
   // File operations
   listFiles(path: string): Promise<{ entries: Array<{ name: string; type: string }> }>;
@@ -176,10 +186,7 @@ export interface WorkspaceTransport {
 // ─── Helpers ──────────────────────────────────────────────────────
 
 function terminalBase(): string {
-  return (
-    process.env.TERMINAL_SERVER_INTERNAL_URL ??
-    getTerminalServerUrl()
-  );
+  return requireTerminalBaseUrl();
 }
 
 function internalServiceKey(): string {
@@ -200,13 +207,23 @@ export async function createWorkspaceTransport(
   const verified = await verifyProjectWorkspace(projectId, userId);
   const { workspaceId, workspaceRoot } = verified;
 
-  return new WorkspaceTransportImpl(
+  const transport = new WorkspaceTransportImpl(
     projectId,
     userId,
     workspaceId,
     workspaceRoot,
     opts?.operationId,
   );
+
+  // Honest reachability: verifyProjectWorkspace() only checks the DB row —
+  // it cannot prove the terminal server actually serves /ws-files for this
+  // project (a dead per-project transport still reports "workspace ready").
+  // Probe once; a failure is recorded on the transport so callers can tell
+  // the model "file operations are failing" instead of claiming
+  // "Write permission: allowed".
+  transport.fileOpsReachable = await transport.probeReachable(REACHABILITY_PROBE_TIMEOUT_MS);
+
+  return transport;
 }
 
 // ─── Implementation ───────────────────────────────────────────────
@@ -221,6 +238,13 @@ export async function createWorkspaceTransport(
  */
 const FILE_OP_TIMEOUT_MS = 30_000;
 const BINARY_WRITE_TIMEOUT_MS = 120_000;
+/**
+ * How long the reachability probe may take. Shorter than
+ * FILE_OP_TIMEOUT_MS: the probe runs at transport creation (every chat
+ * turn with a project), so a dead terminal server must fail fast rather
+ * than stall the request for 30s.
+ */
+const REACHABILITY_PROBE_TIMEOUT_MS = 10_000;
 
 class WorkspaceTransportImpl implements WorkspaceTransport {
   constructor(
@@ -230,6 +254,29 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
     public readonly workspaceRoot: string,
     public readonly operationId?: string,
   ) {}
+
+  /** Set by createWorkspaceTransport() from the reachability probe. */
+  public fileOpsReachable = true;
+
+  /**
+   * Cheap reachability probe for /ws-files. Returns true when the terminal
+   * server answers a root listing for this project, false on any failure
+   * or timeout. Never throws — an unhealthy transport is a fact to
+   * report, not an exception to propagate.
+   */
+  async probeReachable(timeoutMs: number): Promise<boolean> {
+    try {
+      const resp = await fetch(
+        `${terminalBase()}/ws-files?path=${encodeURIComponent(".")}`,
+        { headers: this.wsFileHeaders, signal: AbortSignal.timeout(timeoutMs) },
+      );
+      if (!resp.ok) return false;
+      await resp.json().catch(() => null);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   private get token(): string {
     return createTerminalToken(this.userId, {

@@ -1,6 +1,7 @@
 // @vitest-environment node
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { streamText, AllProvidersEmptyError } from "./llm";
+import type { ModelCategory } from "./llm";
 
 /**
  * Provider-level abort coverage — proves an explicit execution abort
@@ -209,5 +210,103 @@ describe("streamText — empty provider responses", () => {
     expect(err).toBeInstanceOf(AllProvidersEmptyError);
     expect(err.providers).toEqual(["groq"]);
     expect(err.message).toMatch(/empty responses/i);
+  });
+});
+
+/**
+ * P0 regression: entitled empty-provider-chain fallback.
+ *
+ * When the Studio model picker pins `provider: "gemini"` (category != "auto")
+ * and GEMINI_DISABLED=true filters gemini out, the entitled-user branch of
+ * defaultChain previously returned an EMPTY chain — zero provider attempts,
+ * so the managed OpenAI fallback never fired. The fix drops the unhonorable
+ * pin and routes through the full entitled chain (incl. LITT_PAID).
+ *
+ * These tests drive the PUBLIC generateText so the real defaultChain →
+ * provider dispatch all execute; only the network boundary (fetch) is
+ * mocked. llm.ts reads OPENAI_API_KEY once at module load, so the module
+ * is re-imported under the stubbed env.
+ */
+describe("generateText — entitled pinned-provider-filtered-out fallback", () => {
+  const OPENAI_HOST = "api.openai.com";
+
+  function stubProviderFetch() {
+    const fetchMock = vi.fn(async (url: unknown, _init?: RequestInit) => {
+      if (String(url).includes(OPENAI_HOST)) {
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl-test-1",
+            object: "chat.completion",
+            created: 1,
+            model: "gpt-4o",
+            choices: [
+              {
+                index: 0,
+                message: { role: "assistant", content: "hello world" },
+                finish_reason: "stop",
+              },
+            ],
+            usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      // Every free provider is down for this test.
+      return new Response("upstream error", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  async function loadLlmUnderTestEnv() {
+    vi.resetModules();
+    return await import("./llm");
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("GEMINI_DISABLED", "true");
+    vi.stubEnv("OPENAI_API_KEY", "test-openai-key");
+    vi.stubEnv("GROQ_API_KEY", "");
+    vi.stubEnv("OPENROUTER_API_KEY", "");
+    vi.stubEnv("GEMINI_API_KEY", "");
+    vi.stubEnv("GOOGLE_API_KEY", "");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("entitled + pin filtered out → managed OpenAI is attempted (not zero attempts)", async () => {
+    const fetchMock = stubProviderFetch();
+    const { generateText } = await loadLlmUnderTestEnv();
+
+    const result = await generateText("hello", {
+      task: "chat",
+      provider: "gemini", // Studio picker pin (persisted gemini-2.5-flash)
+      category: "advanced" as ModelCategory, // non-"auto", so the pin passes through (route casts body.category the same way)
+      allowLittPaidProviders: true, // owner / premium entitlement
+    });
+
+    expect(result.provider).toBe("openai");
+    expect(result.text).toBe("hello world");
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes(OPENAI_HOST))).toBe(true);
+  });
+
+  it("unentitled → paid route is never attempted (negative control)", async () => {
+    const fetchMock = stubProviderFetch();
+    const { generateText } = await loadLlmUnderTestEnv();
+
+    await expect(
+      generateText("hello", {
+        task: "chat",
+        provider: "gemini",
+        category: "advanced" as ModelCategory,
+        allowLittPaidProviders: false,
+      }),
+    ).rejects.toThrow(/All LLM providers failed/);
+
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes(OPENAI_HOST))).toBe(false);
   });
 });

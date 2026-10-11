@@ -47,6 +47,7 @@ import {
   type ProviderFailure,
   type RouteRequirements,
 } from "./provider-registry";
+import { recordModelAttemptOutcome } from "./model-registry";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -456,6 +457,49 @@ function parseImageDataUrl(dataUrl: string): { mimeType: string; data: string } 
   return { mimeType: match[1], data: match[2] };
 }
 
+/**
+ * Strip JSON-Schema keywords the Gemini API rejects in function declarations.
+ *
+ * The app passes tool input schemas (which may originate from MCP servers,
+ * zod conversions, or hand-written definitions) straight through to
+ * generativelanguage.googleapis.com. Google 400s the whole request on
+ * keywords outside its Schema subset — observed in production 2026-09-30:
+ * `Invalid JSON payload received. Unknown name "propertyNames" ...
+ * Unknown name "additionalProperties" ...` on gemini-2.5-flash.
+ *
+ * This recursively removes the known-offending metadata keywords while
+ * preserving the validation semantics Gemini does understand (type,
+ * properties, required, items, enum, description, etc.). Removing
+ * `additionalProperties`/`propertyNames` cannot break a call Google would
+ * otherwise accept — it only drops constraints Google ignores anyway.
+ */
+const GEMINI_UNSUPPORTED_SCHEMA_KEYS = new Set([
+  "additionalProperties",
+  "propertyNames",
+  "patternProperties",
+  "unevaluatedProperties",
+  "unevaluatedItems",
+  "$schema",
+  "$id",
+  "$defs",
+  "definitions",
+]);
+
+export function sanitizeSchemaForGemini(node: unknown): unknown {
+  if (Array.isArray(node)) {
+    return node.map(sanitizeSchemaForGemini);
+  }
+  if (node === null || typeof node !== "object") {
+    return node;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    if (GEMINI_UNSUPPORTED_SCHEMA_KEYS.has(key)) continue;
+    out[key] = sanitizeSchemaForGemini(value);
+  }
+  return out;
+}
+
 function toGeminiFunctionDeclarations(tools: ToolDefinition[]): GeminiFunctionDeclaration[] {
   return tools.map((tool) => {
     const schema = tool.inputSchema as Record<string, unknown>;
@@ -464,7 +508,7 @@ function toGeminiFunctionDeclarations(tools: ToolDefinition[]): GeminiFunctionDe
       description: tool.description,
       parameters: {
         type: SchemaType.OBJECT,
-        properties: (schema?.properties ?? {}) as Record<string, unknown>,
+        properties: sanitizeSchemaForGemini(schema?.properties ?? {}) as Record<string, unknown>,
         required: ((schema?.required ?? []) as string[]),
       },
     } as GeminiFunctionDeclaration;
@@ -921,6 +965,19 @@ function compatEndpointFor(
       const baseUrl = secrets.byokBaseUrl?.replace(/\/+$/, "") || OPENAI_BASE;
       return { baseUrl, headers: { Authorization: `Bearer ${key}` } };
     }
+    case "openai": {
+      // P1: Managed OpenAI — platform credential, NOT user BYOK.
+      // Only reachable when allowLittPaidProviders=true (server-derived).
+      const key = process.env.OPENAI_API_KEY ?? "";
+      if (!key) {
+        throw new ProviderAttemptError("openai", route.models[0] ?? "unknown", {
+          class: "auth_invalid",
+          scope: "provider",
+          message: "OPENAI_API_KEY not set",
+        });
+      }
+      return { baseUrl: OPENAI_BASE, headers: { Authorization: `Bearer ${key}` } };
+    }
     default:
       throw new ProviderAttemptError(route.provider, route.models[0] ?? "unknown", {
         class: "bad_response",
@@ -1286,12 +1343,25 @@ export async function callLLMWithTools(
      * and honor LLMMessage.images as image input.
      */
     requireVision?: boolean;
+    /**
+     * BUILD runs only: the initial model selection must start on a proven
+     * file writer (registry reliableFileWriting). The 3-step demotion
+     * guard (buildCapabilityGuard) stays as the mid-run safety net.
+     */
+    requireReliableFileWriting?: boolean;
+    /**
+     * P1: Server-derived entitlement for managed paid providers.
+     * NEVER from client input. When true, LITT_PAID routes (managed
+     * OpenAI) are eligible as last-resort fallback.
+     */
+    allowLittPaidProviders?: boolean;
   },
 ): Promise<LLMToolCallResponse> {
   const requirements: RouteRequirements = {
     tools: tools.length > 0,
     coding: tools.length > 0,
     vision: options?.requireVision === true,
+    reliableFileWriting: options?.requireReliableFileWriting === true,
   };
 
   const plan = planBasicRoutes(requirements, {
@@ -1300,6 +1370,7 @@ export async function callLLMWithTools(
     byokProvider: options?.byokProvider,
     byokModel: options?.byokModel,
     byokBaseUrl: options?.byokBaseUrl,
+    allowLittPaidProviders: options?.allowLittPaidProviders,
   });
 
   if (plan.droppedModelHint) {
@@ -1406,6 +1477,8 @@ export async function callLLMWithTools(
         }
 
         recordProviderSuccess(route.provider);
+        // Registry learns too: this exact model just completed a call.
+        recordModelAttemptOutcome(route.provider, model, true, "");
         const latencyMs = Date.now() - t0;
         logRoute("attempt_success", {
           provider: route.provider,
@@ -1474,10 +1547,19 @@ export async function callLLMWithTools(
           scope: failure.scope,
           latencyMs,
           retryAfterMs: failure.retryAfterMs,
+          // Include the sanitized upstream error message (already redacted
+          // by sanitizeBody) so the actual provider rejection reason is
+          // visible in deployment logs instead of being swallowed.
+          message: failure.message,
           remainingBudgetMs: options?.deadlineMs
             ? Math.max(0, options.deadlineMs - Date.now())
             : undefined,
         });
+        // Log the error on its own line — Railway truncates long log lines,
+        // which hid the actual Google error body on 2026-09-30.
+        if (failure.message) {
+          console.log(`[provider-router] attempt_error_detail provider=${route.provider} model=${model} error=${failure.message}`);
+        }
         logLLMCall({
           prompt: promptLog,
           systemPrompt,
@@ -1491,6 +1573,8 @@ export async function callLLMWithTools(
 
         if (failure.scope === "provider") {
           recordProviderFailure(route.provider, failure);
+          // Registry learns the outcome for this exact model as well.
+          recordModelAttemptOutcome(route.provider, model, false, failure.class);
           logRoute("fallback", {
             from: route.provider,
             to: nextProvider ?? "none",
@@ -1517,6 +1601,7 @@ export async function callLLMWithTools(
 
         // Model-scope failure — cool the model, try the provider's next model.
         recordModelFailure(route.provider, model);
+        recordModelAttemptOutcome(route.provider, model, false, failure.class);
       }
     }
   }

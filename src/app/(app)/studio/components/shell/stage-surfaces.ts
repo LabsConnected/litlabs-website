@@ -55,8 +55,9 @@ export const STAGE_SURFACE_META: Record<
 };
 
 /** Primary workspace rail order (top → bottom). */
+// "plan" is not a center station: Mission / Checkpoints / Next actions live
+// in the inspector's Plan tab (see station-url.ts).
 export const PRIMARY_SURFACES: StudioStageSurface[] = [
-  "plan",
   "design",
   "preview",
   "browser",
@@ -80,9 +81,9 @@ const PERSISTED_SURFACE_MAP: Record<string, StudioStageSurface> = {
   code: "code",
   files: "files",
   media: "images",
-  work: "plan",
+  work: "preview",
   canvas: "design",
-  plan: "plan",
+  plan: "preview",
   browser: "browser",
   images: "images",
   assets: "assets",
@@ -98,11 +99,39 @@ export function resolveStageSurface(stored: string | null | undefined): StudioSt
   return PERSISTED_SURFACE_MAP[stored] ?? "preview";
 }
 
+/**
+ * Phase 3 — single-writer surface persistence decision.
+ *
+ * `lastOpenedSurface` has exactly one authoritative write path
+ * (`useStudioTasks.persistSurface`). This pure helper decides WHAT that
+ * path should write, or returns null when the stored value is already in
+ * sync (no PATCH). Centralizing the guard here — instead of spreading
+ * competing guards across UI effects — is what makes PATCH oscillation
+ * impossible by construction.
+ *
+ * Canonical value: the shell's center stage surface when the shell owns
+ * the workspace; the encoded workspace surface (`destination/mode`) in
+ * legacy (non-shell) mode.
+ */
+export function canonicalSurfaceToPersist(args: {
+  shellActive: boolean;
+  stageSurface: StudioStageSurface;
+  currentSurface: string;
+  storedSurface: string | null | undefined;
+}): string | null {
+  const canonical = args.shellActive ? args.stageSurface : args.currentSurface;
+  if (args.storedSurface === canonical) return null;
+  // Shell mode: a stored legacy/encoded value that already resolves to the
+  // visible stage is in sync — rewriting it would only churn the server.
+  if (args.shellActive && resolveStageSurface(args.storedSurface) === args.stageSurface) return null;
+  return canonical;
+}
+
 /** Legacy studioMode → rail surface. NOTE: mode "files" is the visual
     builder canvas (design), not the file tree. */
 export function modeToStageSurface(mode: string | null | undefined): StudioStageSurface | null {
   switch (mode) {
-    case "work": return "plan";
+    case "work": return "preview";
     case "files": return "design";
     case "code": return "code";
     case "preview": return "preview";

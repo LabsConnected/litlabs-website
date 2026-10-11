@@ -10,8 +10,35 @@ vi.mock("@/hooks/useClerkAuth", () => ({
   useClerkAuth: () => ({ getToken: mockGetToken }),
 }));
 
-function mockFetch(impl: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>) {
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => impl(input as RequestInfo, init));
+type WorkspaceStatePayload = { scaffolded?: boolean; touched?: boolean; starterContent?: boolean };
+
+/** Legacy tests keep working: the project already carries real content. */
+const DEFAULT_WORKSPACE_STATE: WorkspaceStatePayload = { scaffolded: false, touched: true, starterContent: false };
+
+/**
+ * Routes /workspace-state to a workspace-truth payload and everything else
+ * (the /preview GET/POST/DELETE calls) to the caller's implementation, so a
+ * test can control content truth independently of preview runtime state.
+ * Pass a Promise as `workspaceState` to model a deliberately delayed resolve.
+ */
+function mockFetch(
+  impl: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>,
+  workspaceState: WorkspaceStatePayload | Response | Promise<Response> = DEFAULT_WORKSPACE_STATE,
+) {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    if (String(input).includes("/workspace-state")) {
+      if (workspaceState instanceof Promise) return workspaceState;
+      if (workspaceState instanceof Response) return workspaceState;
+      return jsonResponse(workspaceState);
+    }
+    return impl(input as RequestInfo, init);
+  });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => { resolve = r; });
+  return { promise, resolve };
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -338,6 +365,113 @@ describe("StudioPreviewPanel", () => {
       expect(btn, testid).toBeTruthy();
       expect(btn!.className).toContain("shrink-0");
     }
+  });
+
+  describe("workspace content truth gate (preview must not auto-start early)", () => {
+    it("does not auto-start while workspace truth is still unresolved", async () => {
+      let postCount = 0;
+      mockFetch((_input, init) => {
+        if (init?.method === "POST") {
+          postCount++;
+          return jsonResponse({ runtimeStatus: "starting", previewUrl: null, runtimeError: null });
+        }
+        return jsonResponse({ runtimeStatus: "not_started", previewUrl: null, runtimeError: null });
+      }, deferred<Response>().promise);
+
+      render(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName={null} branch={null} workspaceStatus="not_prepared" />);
+
+      // Workspace truth has NOT resolved. The preview GET says not_started,
+      // which is the auto-start trigger — so a POST here is the race.
+      await waitFor(() => {
+        expect(screen.getByText("Preview not started")).toBeTruthy();
+      });
+      await new Promise((r) => setTimeout(r, 150));
+      expect(postCount).toBe(0);
+    });
+
+    it("does not auto-start for an untouched workspace, and shows the empty state", async () => {
+      let postCount = 0;
+      mockFetch((_input, init) => {
+        if (init?.method === "POST") {
+          postCount++;
+          return jsonResponse({ runtimeStatus: "starting", previewUrl: null, runtimeError: null });
+        }
+        return jsonResponse({ runtimeStatus: "not_started", previewUrl: null, runtimeError: null });
+      }, { scaffolded: true, touched: false, starterContent: true });
+
+      render(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName={null} branch={null} workspaceStatus="not_prepared" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("No preview yet")).toBeTruthy();
+      });
+      await new Promise((r) => setTimeout(r, 150));
+      expect(postCount).toBe(0);
+      expect(screen.queryByTitle("Demo preview")).toBeNull();
+    });
+
+    it("auto-starts once workspace truth resolves as content-bearing", async () => {
+      let postCount = 0;
+      mockFetch((_input, init) => {
+        if (init?.method === "POST") {
+          postCount++;
+          return jsonResponse({ runtimeStatus: "starting", previewUrl: null, runtimeError: null });
+        }
+        return jsonResponse({ runtimeStatus: "not_started", previewUrl: null, runtimeError: null });
+      }, { scaffolded: false, touched: true, starterContent: false });
+
+      render(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName={null} branch={null} workspaceStatus="not_prepared" />);
+
+      await waitFor(() => expect(postCount).toBe(1), { timeout: 3000 });
+      await new Promise((r) => setTimeout(r, 200));
+      expect(postCount).toBe(1);
+    });
+
+    it("does not duplicate the start when workspace truth resolves late and refreshes", async () => {
+      const gate = deferred<Response>();
+      let postCount = 0;
+      const fetchMock = mockFetch((_input, init) => {
+        if (init?.method === "POST") {
+          postCount++;
+          return jsonResponse({ runtimeStatus: "starting", previewUrl: null, runtimeError: null });
+        }
+        return jsonResponse({ runtimeStatus: "not_started", previewUrl: null, runtimeError: null });
+      }, gate.promise);
+
+      const { rerender } = render(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName={null} branch={null} workspaceStatus="not_prepared" />);
+
+      await waitFor(() => expect(screen.getByText("Preview not started")).toBeTruthy());
+      expect(postCount).toBe(0);
+
+      // Content truth lands AFTER the not_started status is already on screen.
+      gate.resolve(jsonResponse({ scaffolded: false, touched: true, starterContent: false }));
+
+      await waitFor(() => expect(postCount).toBe(1), { timeout: 3000 });
+
+      // A refresh (status re-fetch) must not launch a second runtime.
+      fetchMock.mockClear();
+      rerender(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName={null} branch={null} workspaceStatus="not_prepared" refreshKey={1} />);
+      await new Promise((r) => setTimeout(r, 250));
+      expect(postCount).toBe(1);
+    });
+
+    it("fails safe when the workspace-state lookup errors — no auto-start", async () => {
+      let postCount = 0;
+      mockFetch((_input, init) => {
+        if (init?.method === "POST") {
+          postCount++;
+          return jsonResponse({ runtimeStatus: "starting", previewUrl: null, runtimeError: null });
+        }
+        return jsonResponse({ runtimeStatus: "not_started", previewUrl: null, runtimeError: null });
+      }, jsonResponse({ error: "boom", scaffolded: false, touched: false, starterContent: false }, 500));
+
+      render(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName={null} branch={null} workspaceStatus="not_prepared" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("No preview yet")).toBeTruthy();
+      });
+      await new Promise((r) => setTimeout(r, 150));
+      expect(postCount).toBe(0);
+    });
   });
 
   describe("welcome-screen bridge (litt-welcome postMessage)", () => {

@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { useTrustedLocalEnv } from "./helpers/trusted-local-env";
 
 // Each prepare runs real `git init` + commit, which takes ~2s on Windows.
 const GIT_TIMEOUT_MS = 30_000;
@@ -41,6 +42,8 @@ afterEach(() => {
     // Windows can hold a git handle briefly; the temp dir is disposable.
   }
 });
+
+useTrustedLocalEnv();
 
 describe("durable managed source", { timeout: GIT_TIMEOUT_MS }, () => {
   it("provisions Git-backed source with a main branch and no GitHub", async () => {

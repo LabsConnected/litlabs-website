@@ -485,3 +485,4 @@ describe("MobileCommandNav — shared work surfaces", () => {
     await waitFor(() => expect(screen.getByTestId("litt-mobile-tab-live")).toHaveAttribute("aria-pressed", "true"));
   });
 });
+

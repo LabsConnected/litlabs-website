@@ -18,7 +18,8 @@ import "server-only";
 
 import { randomUUID } from "crypto";
 import type { WorkspaceTransport } from "./workspace-transport";
-import { runAgentLoopV2, type AgentLoopResult, type AgentLoopConfig, DEFAULT_LOOP_CONFIG } from "./agent-loop-v2";
+import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
+import { runAgentLoopV2, type AgentLoopResult, type AgentLoopConfig, type LLMMessage, DEFAULT_LOOP_CONFIG } from "./agent-loop-v2";
 import { toolRegistry } from "./tool-registry";
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import type { BuildFixLoopResult } from "./build-fix-loop";
@@ -87,6 +88,18 @@ export interface LaunchFlowOptions {
   actionContext?: ActionExecutionContext;
   /** Conversation scope for trusted context/user-scoped tools. */
   conversationId?: string;
+  /**
+   * Item 5a — optional durable event sink for the Activity truth.
+   * Forwarded into every agent-loop pass this flow starts so the run's
+   * ProgressEvents persist to the run's action_events log.
+   */
+  persistEvent?: AgentLoopConfig["persistEvent"];
+  /**
+   * P1: Server-derived entitlement for managed paid providers.
+   * NEVER from client input. Forwarded to agent-loop so v2 routing
+   * can include LITT_PAID routes (managed OpenAI) as last resort.
+   */
+  allowLittPaidProviders?: boolean;
   /** Injected for tests. */
   runAgentLoop?: (
     userMessage: string,
@@ -314,9 +327,29 @@ const WELCOME_SCREEN_MARKER = "LITT-WELCOME-SCREEN";
  * Verify that a website build produced a real entry artifact in the bound
  * workspace. This deliberately asks the workspace transport rather than
  * trusting tool-call metadata or the model's final prose.
+ *
+ * The welcome-screen marker gate detects builds that stalled before
+ * replacing the starter — it is only meaningful for launch-type runs. When
+ * the caller supplies workspace-change evidence with status "changed", the
+ * run provably modified files, so a remaining marker is a legitimate edit
+ * to the starter (not a replacement of it): failing here would report "no
+ * real project files were created" for a run that provably created them — a
+ * false failure as dishonest as a fake success. Absent or "unknown"
+ * evidence keeps the strict gate: an unverifiable workspace must not loosen
+ * the launch check.
+ *
+ * Defense in depth (hadSuccessfulMutation): approval-resume callers pass
+ * whether the resumed run's own tool-call log shows a successful file
+ * mutation. When it does and the workspace diff did not affirmatively
+ * prove the workspace untouched ("unchanged"), the marker rejection is
+ * skipped — an additive edit to the starter legitimately keeps the marker.
+ * Tool success alone is deliberately NOT enough: "unchanged" keeps the
+ * strict gate so a tool that lied (or wrote to the wrong workspace) still
+ * fails honestly instead of passing as a fake success.
  */
 export async function verifyProjectArtifacts(
   transport: Pick<WorkspaceTransport, "listFiles" | "readFile">,
+  options?: { workspaceChange?: WorkspaceChangeEvidence | null; hadSuccessfulMutation?: boolean },
 ): Promise<ProjectArtifactCheck> {
   const files: string[] = [];
   const queue: Array<{ path: string; depth: number }> = [{ path: ".", depth: 0 }];
@@ -366,6 +399,17 @@ export async function verifyProjectArtifacts(
   // pass this gate — read each candidate and reject the ones that still
   // carry the welcome-screen marker. An unreadable file keeps the old
   // filename-only signal so exotic transports do not newly fail.
+  //
+  // Scoping: the marker rejection is skipped when workspace-change evidence
+  // proves the run modified files, or when the run's own tool-call log
+  // shows a successful file mutation and the diff did not affirmatively
+  // prove the workspace untouched (see the doc comment above). The
+  // entry-file-exists check above still applies in every scope.
+  const workspaceChanged = options?.workspaceChange?.status === "changed";
+  const provenUntouched = options?.workspaceChange?.status === "unchanged";
+  const hadSuccessfulMutation = options?.hadSuccessfulMutation === true;
+  const skipMarkerRejection =
+    workspaceChanged || (hadSuccessfulMutation && !provenUntouched);
   let realEntryFound = false;
   let welcomeOnly = false;
   for (const entry of entryFiles) {
@@ -381,7 +425,7 @@ export async function verifyProjectArtifacts(
     }
     welcomeOnly = true;
   }
-  if (!realEntryFound && welcomeOnly) {
+  if (!realEntryFound && welcomeOnly && !skipMarkerRejection) {
     return {
       ok: false,
       files,
@@ -397,16 +441,35 @@ export async function verifyProjectArtifacts(
  * After an approved mutation, prove the artifact is on disk and bring up a
  * real preview. Used by approval-resume handling so the resumed path has the
  * same physical-artifact gate as the initial launch path.
+ *
+ * `options.workspaceChange` scopes the welcome-screen marker gate (see
+ * verifyProjectArtifacts): approval-resume callers pass the resumed run's
+ * own workspace-change evidence so a legitimate edit to the starter cannot
+ * fail the run with "no real project files were created".
  */
 export async function ensureProjectPreviewReady(
   transport: WorkspaceTransport,
-  options: { maxWaitMs?: number; pollIntervalMs?: number } = {},
+  options: {
+    maxWaitMs?: number;
+    pollIntervalMs?: number;
+    workspaceChange?: WorkspaceChangeEvidence | null;
+    /**
+     * The resumed run's own tool-call log shows a successful file
+     * mutation. Threads into verifyProjectArtifacts so an approved
+     * additive edit to the starter (marker legitimately kept) is not
+     * failed by the welcome-screen gate.
+     */
+    hadSuccessfulMutation?: boolean;
+  } = {},
   progress: ProgressEmitter = new ProgressEmitter(),
   actionContext?: ActionExecutionContext,
 ): Promise<{ ok: boolean; files: string[]; error?: string }> {
   let artifacts: ProjectArtifactCheck = { ok: false, files: [] };
   for (let attempt = 0; attempt < 3; attempt++) {
-    artifacts = await verifyProjectArtifacts(transport);
+    artifacts = await verifyProjectArtifacts(transport, {
+      workspaceChange: options.workspaceChange ?? null,
+      hadSuccessfulMutation: options.hadSuccessfulMutation,
+    });
     if (artifacts.ok) break;
     if (attempt < 2) await sleep(250);
   }
@@ -492,7 +555,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
     emitStep(progress, steps, "Planning and generating the project...");
     progress.emit({ type: "phase", phase: "call_llm", step: 1 });
 
-    const runPhase1 = (message: string, qualityState = options.qualityLoop?.state) =>
+    const runPhase1 = (message: string, qualityState = options.qualityLoop?.state, initialMessages?: LLMMessage[]) =>
       (options.runAgentLoop ?? runAgentLoopV2)(
         message,
         transport,
@@ -502,7 +565,19 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           executionMode: options.executionMode ?? "act",
           enableBuildFix: options.enableBuildFix ?? true,
           requireToolCallOnFirstStep: options.requiresExecution === true,
+          // Early bounded capability guard: a BUILD run that goes 3
+          // consecutive steps with tool calls but zero file-writing calls
+          // rules that model out for this run and switches to the next
+          // registry build model — instead of burning the whole budget on
+          // a model that can read but never writes.
+          buildCapabilityGuard:
+            options.requiresExecution === true ? { maxStepsWithoutFileWrite: 3 } : undefined,
           evalMetadata: options.evalMetadata,
+          // A bounded reprompt continues the SAME conversation: pass the
+          // previous loop's messages so a patch-recovery (validation error
+          // + re-read file content) survives the second attempt instead of
+          // starting a blind fresh loop.
+          initialMessages,
           // Always bounded by the global launch budget — a reprompt must not
           // restart the clock.
           maxRuntimeMs: Math.max(0, startTime + DEFAULT_LOOP_CONFIG.maxRuntimeMs - Date.now()),
@@ -518,12 +593,17 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           userId: options.userId,
           conversationId: actionContext?.conversationId ?? options.conversationId,
           actionContext,
+          // Item 5a — persist this pass's loop events to the run's
+          // action_events log (the Activity truth).
+          persistEvent: options.persistEvent,
           // Quality loop: gate the main build phase when the caller opted in.
           // (The repair phase below runs without it — it is a bounded
           // sub-task of the already-gated build, not a new build.)
           qualityLoop: options.qualityLoop
             ? { ...options.qualityLoop, state: qualityState }
             : undefined,
+          // P1: Server-derived paid-provider entitlement (never from client).
+          allowLittPaidProviders: options.allowLittPaidProviders,
         },
         progress,
       );
@@ -627,6 +707,20 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
     // cancellation is reported as "cancelled", not a model failure.
     checkSignal(signal);
 
+    // An honest loop failure (e.g. the model kept asking for approval in
+    // prose instead of emitting the gated tool call, so no approval card
+    // was ever created) is terminal: the run must be reported as failed,
+    // never completed. Short-circuit before the pause/preview logic below.
+    if (agentResult.failedHonestly) {
+      return baseResult({
+        status: "failed",
+        finalText: agentResult.failedHonestly,
+        error: "HONEST_LOOP_FAILURE",
+        repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
+        runtimeRepairAttempts,
+      });
+    }
+
     // A pause for a sensitive action (e.g. project.deploy) is not a failure:
     // the build output already exists in the workspace, so still bring the
     // preview up while the approval is pending — the user can review the
@@ -640,17 +734,28 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
       // always means a weak model closed its turn after announcing writes it
       // never made. Issue exactly one bounded reprompt, then continue — the
       // second result flows through the same guards.
+      //
+      // The reprompt CONTINUES the same conversation (the previous loop's
+      // messages are re-seeded): when the first attempt's apply_patch was
+      // rejected, the loop already holds the validation error and the
+      // exact re-read file content. Starting a fresh loop would discard
+      // that recovery and hand a blind model to the weakest providers —
+      // the recovery would be defeated by construction.
       if (options.requiresExecution && !hasAppliedMutation(agentResult)) {
         emitStep(
           progress,
           steps,
           "No project files were changed — re-prompting the agent to apply the request...",
         );
-        agentResult = await runPhase1(
-          `Your previous reply announced changes but did not write any project files. ` +
-          `Apply the original request now: ${options.userMessage}\n\n` +
-          `Write or modify the project files with the file tools (files.write / apply_patch), then stop.`,
+        const repromptHadRejectedPatch = agentResult.toolCalls.some(
+          (c) => c.toolId === "apply_patch" && !c.success,
         );
+        const repromptText = repromptHadRejectedPatch
+          ? `Your previous file-writing patch was rejected — the validation error and the exact CURRENT FILE CONTENT are in the conversation above. Do not repeat the rejected patch. Regenerate now: copy the search text exactly from CURRENT FILE CONTENT, or use files.write with the complete literal contents of the file. Apply the original request: ${options.userMessage}\n\nWrite or modify the project files with the file tools (files.write / apply_patch), then stop.`
+          : `Your previous reply announced changes but did not write any project files. ` +
+            `Apply the original request now: ${options.userMessage}\n\n` +
+            `Write or modify the project files with the file tools (files.write / apply_patch), then stop.`;
+        agentResult = await runPhase1(repromptText, undefined, agentResult.finalMessages);
         lastAgentLoopResult = agentResult;
         checkSignal(signal);
         pausedApproval = agentResult.pendingApproval;
@@ -761,6 +866,10 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           userId: options.userId,
           conversationId: actionContext?.conversationId ?? options.conversationId,
           actionContext,
+          // Item 5a — the repair pass is part of the same run's story.
+          persistEvent: options.persistEvent,
+          // P1: Server-derived paid-provider entitlement (never from client).
+          allowLittPaidProviders: options.allowLittPaidProviders,
         },
         progress,
       );

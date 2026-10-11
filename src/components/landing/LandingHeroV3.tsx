@@ -58,7 +58,7 @@ export function LandingHeroV3() {
             </span>
             LiTT is online
             <span className="h-3 w-px bg-white/15" />
-            Missions active
+            Example activity
           </div>
 
           <h1 className="litt-hero-reveal litt-hero-step-2 mt-7 max-w-[820px] text-[clamp(3.4rem,7.3vw,7.4rem)] font-black leading-[0.86] tracking-[-0.075em] text-white">
@@ -115,8 +115,8 @@ export function LandingHeroV3() {
                 <span className="h-2.5 w-2.5 rounded-full bg-accent/75" />
               </div>
               <div className="flex items-center gap-2 font-mono text-[9px] font-bold uppercase tracking-[0.16em] text-white/40 sm:text-[10px]">
-                Studio / Mission control
-                <span className="rounded-full border border-accent/25 bg-accent/8 px-2 py-0.5 text-accent">Live</span>
+                Studio / Recorded preview
+                <span className="rounded-full border border-accent/25 bg-accent/8 px-2 py-0.5 text-accent">Example</span>
               </div>
             </div>
 
@@ -136,7 +136,7 @@ export function LandingHeroV3() {
 
               <div className="absolute left-3 top-3 w-[47%] rounded-xl border border-white/12 bg-[#050810]/84 p-3 shadow-2xl backdrop-blur-xl sm:left-5 sm:top-5 sm:w-[42%] sm:p-4">
                 <div className="flex items-center justify-between">
-                  <span className="font-mono text-[9px] font-black uppercase tracking-[0.16em] text-white/42">Current mission</span>
+                  <span className="font-mono text-[9px] font-black uppercase tracking-[0.16em] text-white/42">Example mission</span>
                   <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-accent-glow" />
                 </div>
                 <p className="mt-2 text-xs font-black text-white sm:text-sm">Build the launch experience.</p>
@@ -183,9 +183,9 @@ export function LandingHeroV3() {
                 </div>
                 <div className="litt-terminal-lines grid gap-1 px-3 py-3 font-mono text-[9px] sm:grid-cols-2 sm:text-[10px]">
                   <div className="text-white/55"><span className="text-[#65f4ff]">$</span> litt run mission</div>
-                  <div className="text-accent">✓ workspace loaded</div>
-                  <div className="text-accent">✓ components generated</div>
-                  <div className="text-accent">✓ verification passed</div>
+                  <div className="text-accent">✓ Recorded Studio preview</div>
+                  <div className="text-accent">✓ Example components generated</div>
+                  <div className="text-accent">✓ Example verification passed</div>
                 </div>
               </div>
             </div>

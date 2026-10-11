@@ -2,8 +2,6 @@
 
 import type { ReactNode } from "react";
 
-export type SaveStatus = "idle" | "saving" | "saved" | "error";
-
 export function SettingsCard({
   title,
   description,
@@ -114,37 +112,6 @@ export function SettingsInput({
         className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none focus:border-accent/40"
       />
     </label>
-  );
-}
-
-export function SaveBar({
-  status,
-  onSave,
-  onDiscard,
-  hasChanges,
-}: {
-  status: SaveStatus;
-  onSave: () => void;
-  onDiscard: () => void;
-  hasChanges: boolean;
-}) {
-  if (!hasChanges && status === "idle") return null;
-  return (
-    <div className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] left-1/2 z-50 flex max-w-[calc(100vw-1.5rem)] -translate-x-1/2 items-center gap-3 rounded-xl border border-white/10 bg-black/90 px-4 py-2.5 shadow-2xl backdrop-blur-xl">
-      {status === "saving" && <span className="text-xs text-white/60">Saving…</span>}
-      {status === "saved" && <span className="text-xs text-green-400">Saved to account</span>}
-      {status === "error" && <span className="text-xs text-red-400">Save failed — try again</span>}
-      {status === "idle" && (
-        <>
-          <button onClick={onDiscard} className="rounded-lg px-3 py-1.5 text-xs font-bold text-white/65 hover:bg-white/8 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70">
-            Discard
-          </button>
-          <button onClick={onSave} className="rounded-lg bg-accent px-4 py-1.5 text-xs font-black text-on-accent hover:bg-accent-strong">
-            Save changes
-          </button>
-        </>
-      )}
-    </div>
   );
 }
 

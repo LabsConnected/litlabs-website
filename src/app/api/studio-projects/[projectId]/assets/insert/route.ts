@@ -4,7 +4,7 @@ import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { logFileOperation } from "@/lib/file-audit";
 import { ensureWorkspaceAlive, normalizeFileError } from "@/lib/studio/workspace-recovery";
-import { getTerminalServerUrl } from "@/lib/terminal-url";
+import { requireTerminalBaseUrl, terminalNotConfiguredResponse } from "@/lib/terminal-config";
 
 /**
  * POST /api/studio-projects/[projectId]/assets/insert
@@ -33,9 +33,7 @@ import { getTerminalServerUrl } from "@/lib/terminal-url";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const TERMINAL_BASE = () =>
-  process.env.TERMINAL_SERVER_INTERNAL_URL ??
-  getTerminalServerUrl();
+const TERMINAL_BASE = () => requireTerminalBaseUrl();
 
 const MAX_ASSET_SIZE = 50 * 1024 * 1024; // 50 MB
 
@@ -96,6 +94,8 @@ export async function POST(
 ) {
   const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const terminalUnavailable = terminalNotConfiguredResponse();
+  if (terminalUnavailable) return terminalUnavailable;
 
   const { projectId } = await params;
 

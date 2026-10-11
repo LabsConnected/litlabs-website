@@ -19,7 +19,8 @@
  * server-side runtime/protocol/gateway contract.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { trustedLocalStubs } from "./helpers/trusted-local-env";
 import * as path from "path";
 import * as fs from "fs";
 import {
@@ -59,6 +60,11 @@ function makeRequest(partial: Partial<RemoteCommandRequest> & { command: string 
 }
 
 // ─── Canonical runtime singleton ──────────────────────────────────
+
+// Drives terminal-server dispatch, which can start local processes. Gate 1 is
+// default-deny: opt in explicitly per test file, never globally.
+beforeEach(() => trustedLocalStubs());
+afterEach(() => vi.unstubAllEnvs());
 
 describe("Regression: canonical runtime singleton", () => {
   it("getRuntimeStore always returns the same instance", () => {

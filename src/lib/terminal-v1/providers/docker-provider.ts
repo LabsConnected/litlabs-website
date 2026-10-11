@@ -1,6 +1,16 @@
 /**
  * Docker-based sandbox provider for Terminal V1.
  *
+ * GATE: Every public method that spawns a docker process calls
+ * assertHostExecutionPermitted() FIRST, at the execution boundary.
+ * Default-deny: execution is permitted only outside production-like
+ * environments AND with explicit operator opt-in (LITT_LOCAL_EXECUTION_OPT_IN)
+ * plus asserted verified isolation (LITT_ISOLATION_VERIFIED), loopback bind. Otherwise this
+ * throws HostExecutionDisabledError (503 HOST_EXECUTION_DISABLED).
+ * A TERMINAL_ENABLED feature flag is access control, NOT isolation; it is
+ * checked at the terminal-v1/token route, and this provider enforces the
+ * guard independently so no caller or flag can bypass it.
+ *
  * This provider creates isolated Docker containers for each project
  * sandbox. It fixes all issues from the legacy docker-manager.ts:
  *
@@ -15,6 +25,9 @@
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from "child_process";
 import { randomUUID } from "crypto";
 import { promisify } from "util";
+// Gate 1: fail closed in production. TERMINAL_ENABLED is a feature flag,
+// not verified isolation — enforce at the execution boundary.
+import { assertHostExecutionPermitted } from "@/lib/host-execution-guard";
 import type { SandboxProvider } from "../sandbox-provider";
 import { buildSandboxEnv, assertNoPlatformSecrets } from "../env-allowlist";
 import type {
@@ -28,6 +41,11 @@ import type {
   PreviewEndpoint,
 } from "../types";
 import { DEFAULT_SANDBOX_LIMITS } from "../types";
+// Canonical execution-policy classifier (packages/litt-agent-core) — the
+// same deny/safe/risky tiers the ExecutionGateway enforces. `execute()`
+// used to run `docker exec … bash -c "<user command>"`, which bypassed the
+// policy entirely and allowed shell-string injection.
+import { classifyCommand } from "@litt/agent-core";
 
 const execFileAsync = promisify(execFile);
 
@@ -67,6 +85,70 @@ interface SandboxRecord {
 
 const sandboxes = new Map<string, SandboxRecord>();
 
+/**
+ * Split a command line into argv tokens, honoring single/double quotes and
+ * backslash escapes.
+ *
+ * Used to execute commands WITHOUT a shell: `;`, `&&`, `|`, `$()`,
+ * backticks, and globs become literal argv entries instead of being
+ * interpreted (shell-string injection). Throws on unterminated quotes.
+ */
+export function tokenizeCommandLine(input: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+  let hasToken = false;
+
+  for (const ch of input) {
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      hasToken = true;
+      continue;
+    }
+    if (ch === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (ch === quote) {
+        quote = null;
+      } else {
+        current += ch;
+        hasToken = true;
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      hasToken = true;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (hasToken) {
+        tokens.push(current);
+        current = "";
+        hasToken = false;
+      }
+      continue;
+    }
+    current += ch;
+    hasToken = true;
+  }
+
+  if (quote) {
+    throw new Error("Unterminated quote in command");
+  }
+  if (escaped) {
+    throw new Error("Trailing escape in command");
+  }
+  if (hasToken) {
+    tokens.push(current);
+  }
+  return tokens;
+}
+
 async function ensureNetwork(runner: DockerCommandRunner): Promise<void> {
   try {
     await runner.exec(["network", "inspect", SANDBOX_NETWORK()]);
@@ -84,6 +166,10 @@ export class DockerSandboxProvider implements SandboxProvider {
   }
 
   async create(input: CreateSandboxInput): Promise<SandboxInstance> {
+    // Gate 1: fail closed at the execution boundary. No docker spawn in
+    // production-like environments — no verified sandbox isolation exists.
+    assertHostExecutionPermitted("terminal-v1/docker-provider:create");
+
     const sandboxId = `sbx-${input.projectId.slice(0, 8)}-${randomUUID().slice(0, 8)}`;
     const containerName = `littree-${sandboxId}`;
     const volumeName = `vol-${sandboxId}`;
@@ -120,6 +206,10 @@ export class DockerSandboxProvider implements SandboxProvider {
       "--memory", `${limits.memoryMB}m`,
       "--pids-limit", String(limits.processLimit),
       "--read-only",
+      // Hardening only: this provider uses a named volume (root-owned), so
+      // dropping every capability does not break workspace writes.
+      "--cap-drop", "ALL",
+      "--security-opt", "no-new-privileges",
       "--tmpfs", "/tmp:noexec,nosuid,size=100m",
       "-v", `${volumeName}:/workspace:rw`,
       "-w", "/workspace",
@@ -197,6 +287,9 @@ export class DockerSandboxProvider implements SandboxProvider {
   }
 
   async start(sandboxId: string): Promise<void> {
+    // Gate 1: fail closed at the execution boundary.
+    assertHostExecutionPermitted("terminal-v1/docker-provider:start");
+
     const record = sandboxes.get(sandboxId);
     if (!record) throw new Error("Sandbox not found");
 
@@ -222,6 +315,9 @@ export class DockerSandboxProvider implements SandboxProvider {
   }
 
   async stop(sandboxId: string): Promise<void> {
+    // Gate 1: fail closed at the execution boundary.
+    assertHostExecutionPermitted("terminal-v1/docker-provider:stop");
+
     const record = sandboxes.get(sandboxId);
     if (!record) throw new Error("Sandbox not found");
 
@@ -241,6 +337,9 @@ export class DockerSandboxProvider implements SandboxProvider {
   }
 
   async destroy(sandboxId: string): Promise<void> {
+    // Gate 1: fail closed at the execution boundary.
+    assertHostExecutionPermitted("terminal-v1/docker-provider:destroy");
+
     const record = sandboxes.get(sandboxId);
     if (!record) throw new Error("Sandbox not found");
 
@@ -271,6 +370,9 @@ export class DockerSandboxProvider implements SandboxProvider {
     sandboxId: string,
     options: TerminalConnectOptions,
   ): Promise<TerminalTransport> {
+    // Gate 1: fail closed at the execution boundary.
+    assertHostExecutionPermitted("terminal-v1/docker-provider:connectTerminal");
+
     const record = sandboxes.get(sandboxId);
     if (!record) throw new Error("Sandbox not found");
     if (record.instance.state !== "running") throw new Error("Sandbox is not running");
@@ -351,6 +453,9 @@ export class DockerSandboxProvider implements SandboxProvider {
     sandboxId: string,
     input: ExecuteCommandInput,
   ): Promise<ExecuteCommandResult> {
+    // Gate 1: fail closed at the execution boundary.
+    assertHostExecutionPermitted("terminal-v1/docker-provider:execute");
+
     const record = sandboxes.get(sandboxId);
     if (!record) throw new Error("Sandbox not found");
     if (record.instance.state !== "running") throw new Error("Sandbox is not running");
@@ -358,10 +463,27 @@ export class DockerSandboxProvider implements SandboxProvider {
     const startTime = Date.now();
     const timeout = input.timeoutMs ?? 120_000;
 
+    // Parameterize: tokenize the command line and exec argv directly with NO
+    // shell. Shell metacharacters (;, &&, |, $(), backticks) are passed as
+    // literal arguments, neutralizing shell-string injection.
+    const argv = tokenizeCommandLine(input.command);
+    if (argv.length === 0) {
+      throw new Error("Empty command");
+    }
+    const [command, ...args] = argv;
+
+    // Execution-policy enforcement: classify through the canonical
+    // ExecutionGateway tiers. Policy-denied ("dangerous") commands never
+    // reach the container.
+    const policy = classifyCommand(command, args);
+    if (policy.level === "dangerous") {
+      throw new Error(`Command denied by execution policy: ${policy.reason}`);
+    }
+
     try {
       const { stdout, stderr } = await execFileAsync(
         "docker",
-        ["exec", record.containerName, "bash", "-c", input.command],
+        ["exec", record.containerName, ...argv],
         {
           timeout,
           maxBuffer: 2 * 1024 * 1024,
@@ -415,6 +537,10 @@ export class DockerSandboxProvider implements SandboxProvider {
   }
 
   async health(): Promise<{ healthy: boolean; details?: Record<string, unknown> }> {
+    // Gate 1: fail closed at the execution boundary. Even a read-only
+    // `docker info` spawns a host process.
+    assertHostExecutionPermitted("terminal-v1/docker-provider:health");
+
     try {
       const { stdout } = await this.runner.exec(["info", "--format", "{{.ServerVersion}}"]);
       return {

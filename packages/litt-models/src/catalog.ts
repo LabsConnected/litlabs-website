@@ -19,6 +19,14 @@
  *   model just because another model fills the same routing role. The router
  *   (router.ts) decides which model is preferred for a given task — that is
  *   routing logic, not catalog logic.
+ *
+ * Relationship to the web runtime's canonical model registry
+ * (src/lib/litt-intelligence/model-registry.ts): that registry — not this
+ * file — is the routing authority for the Studio agent (capability-gated
+ * BUILD selection, per-model health, env-override validation). This package
+ * catalog stays the CLI's display/pricing/discovery catalog; the two must
+ * not drift on the IDs the runtime actually sends (prefer self-healing
+ * aliases like "gemini-flash-latest" over versioned slugs that rot).
  */
 
 import type { ModelDefinition } from "./types";
@@ -241,7 +249,10 @@ const GOOGLE_MODELS: ModelDefinition[] = [
     canonicalId: "gemini-3.6-flash",
     displayName: "Gemini 3.6 Flash",
     provider: "google",
-    providerModelId: "gemini-3.6-flash",
+    // Alias, not the versioned slug: "gemini-3.6-flash" returns
+    // model_unavailable on the direct Google API (Sep 2026); the alias
+    // self-heals as Google rotates versions.
+    providerModelId: "gemini-flash-latest",
     openRouterModelId: "google/gemini-3.6-flash",
     capabilities: { ...FULL_CHAT, audio: true, longContext: true },
     speed: "fast",

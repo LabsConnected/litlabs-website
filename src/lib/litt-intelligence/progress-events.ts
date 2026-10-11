@@ -16,7 +16,7 @@ export type ProgressEvent =
   | { type: "tool_start"; toolId: string; summary: string }
   | { type: "tool_result"; toolId: string; success: boolean; summary: string; durationMs: number }
   | { type: "approval_required"; toolId: string; reason: string }
-  | { type: "checkpoint"; label: string; gitSha: string }
+  | { type: "checkpoint"; label: string; gitSha: string; kind?: "before" | "after" }
   | { type: "build_start"; check: string }
   | { type: "build_result"; check: string; passed: boolean; errorCount?: number; diagnostics?: StructuredDiagnostic[] }
   | { type: "workspace_change"; status: "changed" | "unchanged" | "unknown"; files?: string[]; diff?: string; additions?: number; deletions?: number; checkpointSha?: string; unknownReason?: string }
@@ -30,7 +30,8 @@ export type ProgressEvent =
   | { type: "deploy_verify"; url: string; success: boolean; detail?: string }
   | { type: "finished"; totalSteps: number; totalDurationMs: number; success?: boolean }
   | { type: "cancelled"; reason: string }
-  | { type: "model_routing"; model: string; provider: string; fallbackFrom?: string; category?: string; latencyMs?: number }
+  | { type: "model_routing"; model: string; provider: string; fallbackFrom?: string; category?: string; latencyMs?: number; canonicalId?: string; configSource?: "code-default" | "env-override" | "registry" }
+  | { type: "build_model_incompatible"; canonicalId: string; provider: string; stepsObserved: number; zeroWriteSteps: number; reason: string }
   | { type: "step_timing"; step: number; stepDurationMs: number; elapsedMs: number }
   | { type: "model_response"; provider: string; model: string; finishReason: string; contentType: string; contentLength: number; messageKeys: string[]; toolCalls: Array<{ name: string; idPresent: boolean; argumentsJsonValid: boolean; argumentKeys: string[]; argumentLength: number }> }
   | { type: "model_failed"; model: string; category: string; message: string }

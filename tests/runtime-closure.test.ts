@@ -6,7 +6,8 @@
  * The command count is whatever the registry actually contains.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { trustedLocalStubs } from "./helpers/trusted-local-env";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -34,6 +35,11 @@ function makeCtx(): CommandContext {
 }
 
 // ─── Registry integrity ───────────────────────────────────────────
+
+// Drives terminal-server dispatch, which can start local processes. Gate 1 is
+// default-deny: opt in explicitly per test file, never globally.
+beforeEach(() => trustedLocalStubs());
+afterEach(() => vi.unstubAllEnvs());
 
 describe("Command Registry Integrity", () => {
   it("has no duplicate commands or alias collisions", () => {

@@ -16,6 +16,8 @@ import type * as React from "react";
 
 vi.mock("next/navigation", () => ({
   usePathname: vi.fn(() => "/marketplace"),
+  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
 }));
 
 let mockIsSignedIn = false;

@@ -116,133 +116,6 @@ export type PlanId = "starter" | "creator_beta" | "pro_builder_beta" | "founder"
 export type BillingType = "free" | "subscription" | "one_time";
 export type CreditCategory = "starter" | "monthly" | "purchased" | "promotional";
 
-export interface PlanContract {
-  id: PlanId;
-  name: string;
-  description: string;
-  billingType: BillingType;
-  /** Price in cents. null for free or unavailable plans. */
-  priceCents: number | null;
-  /** Future non-beta price in cents. null if N/A. */
-  standardPriceCents: number | null;
-  /** Environment variable name for the Stripe Price ID (server-side only). */
-  stripePriceIdEnv?: string;
-  /** LiTTBits granted. For subscriptions, granted after successful billing. */
-  credits: number;
-  /** Whether credits are granted once or per billing cycle. */
-  creditGrantFrequency: "once" | "per_billing_cycle" | "none";
-  /** Active project limit. */
-  activeProjectLimit: number;
-  /** Whether this plan is currently purchasable. */
-  checkoutEnabled: boolean;
-  /** Whether this is a beta plan. */
-  beta: boolean;
-  /** Feature list for display. */
-  features: string[];
-}
-
-export const PLAN_CONTRACTS: Record<PlanId, PlanContract> = {
-  starter: {
-    id: "starter",
-    name: "Starter",
-    description: "Try LiTT and complete small projects",
-    billingType: "free",
-    priceCents: 0,
-    standardPriceCents: 0,
-    credits: 500,
-    creditGrantFrequency: "once",
-    activeProjectLimit: 1,
-    checkoutEnabled: true,
-    beta: false,
-    features: [
-      "LiTT",
-      "1 active project",
-      "500 starter AI credits (one-time)",
-      "Free AI routing",
-      "Basic code generation",
-      "Basic image generation",
-      "Public previews",
-      "Free Marketplace tools",
-      "Community support",
-    ],
-  },
-  creator_beta: {
-    id: "creator_beta",
-    name: "Creator Beta",
-    description: "Research, write, and market with LiTT",
-    billingType: "subscription",
-    priceCents: 1500,
-    standardPriceCents: null,
-    stripePriceIdEnv: "STRIPE_PRICE_CREATOR_BETA",
-    credits: 6000,
-    creditGrantFrequency: "per_billing_cycle",
-    activeProjectLimit: 5,
-    checkoutEnabled: true,
-    beta: true,
-    features: [
-      "LiTT",
-      "Research, writing & marketing skills",
-      "5 active projects",
-      "6,000 AI credits per billing cycle",
-      "Private projects",
-      "GitHub connection",
-      "Project downloads",
-      "Images and audio",
-      "Voice mode",
-      "Basic deployment",
-    ],
-  },
-  pro_builder_beta: {
-    id: "pro_builder_beta",
-    name: "Pro Builder Beta",
-    description: "Build, debug, and analyze with LiTT",
-    billingType: "subscription",
-    priceCents: 3900,
-    standardPriceCents: null,
-    stripePriceIdEnv: "STRIPE_PRICE_PRO_BUILDER_BETA",
-    credits: 20000,
-    creditGrantFrequency: "per_billing_cycle",
-    activeProjectLimit: 25,
-    checkoutEnabled: true,
-    beta: true,
-    features: [
-      "LiTT",
-      "Coding & analytics skills",
-      "Everything in Creator Beta",
-      "25 active projects",
-      "20,000 AI credits per billing cycle",
-      "Terminal runtime",
-      "Advanced coding models",
-      "Diff and approval",
-      "Production deployment",
-      "Supabase integration",
-      "Larger uploads",
-      "Priority generation",
-    ],
-  },
-  founder: {
-    id: "founder",
-    name: "Founding Member",
-    description: "Permanent Creator-level access — $149 one-time",
-    billingType: "one_time",
-    priceCents: 14900,
-    standardPriceCents: null,
-    // Retired from sale — no stripePriceIdEnv, so no purchase path can resolve.
-    // Existing Founding Members keep their entitlements.
-    credits: 0,
-    creditGrantFrequency: "none",
-    activeProjectLimit: 5,
-    checkoutEnabled: false,
-    beta: true,
-    features: [
-      "Permanent Creator-level access",
-      "Founder badge",
-    ],
-  },
-};
-
-export const PLAN_LIST = Object.values(PLAN_CONTRACTS);
-
 export const PLAN_RANK: Record<PlanId, number> = {
   starter: 0,
   creator_beta: 1,
@@ -250,23 +123,8 @@ export const PLAN_RANK: Record<PlanId, number> = {
   pro_builder_beta: 2,
 };
 
-export function getPlanById(id: string): PlanContract | null {
-  return PLAN_CONTRACTS[id as PlanId] ?? null;
-}
-
 export function hasPlanAccess(userPlan: PlanId, requiredPlan: PlanId): boolean {
   return PLAN_RANK[userPlan] >= PLAN_RANK[requiredPlan];
-}
-
-/**
- * Returns the Stripe Price ID from the environment variable, or null if
- * not configured. This is server-side only.
- */
-export function getStripePriceId(plan: PlanContract): string | null {
-  if (!plan.stripePriceIdEnv) return null;
-  const priceId = process.env[plan.stripePriceIdEnv];
-  if (!priceId || priceId.length < 5) return null;
-  return priceId;
 }
 
 export function formatPrice(cents: number | null): string {
@@ -410,7 +268,7 @@ export const POLICY_STATUSES = {
  * The founder entry is retained deliberately: the $149 price object still
  * exists and still backs historical purchases, so it must not be deleted.
  * What changed is that LiTT no longer offers it — PLANS.founder has no
- * stripePriceIdEnv and PLAN_CONTRACTS.founder.checkoutEnabled is false, so
+ * stripePriceIdEnv and the retired founder plan is false, so
  * nothing can resolve a new checkout against it.
  */
 export const VERIFIED_STRIPE_PLANS = {

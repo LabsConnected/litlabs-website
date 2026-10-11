@@ -79,8 +79,15 @@ describe("PermissionEngine", () => {
         isMutation: true,
         enabled: true,
       };
-      const result = engine.check(sensitiveTool, { command: "rm -rf /" }, "auto");
+      // Risky (mutation) commands still require approval in AUTO.
+      const result = engine.check(sensitiveTool, { command: "git push" }, "auto");
+      expect(result.allowed).toBe(true);
       expect(result.requiresApproval).toBe(true);
+      // Deny-classified commands are refused outright — they never reach
+      // approval at all.
+      const denied = engine.check(sensitiveTool, { command: "rm -rf /" }, "auto");
+      expect(denied.allowed).toBe(false);
+      expect(denied.requiresApproval).toBe(false);
     });
 
     it("project.deploy ALWAYS requires human approval, even in AUTO", () => {

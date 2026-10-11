@@ -623,7 +623,7 @@ export default function CommandComposer({
             style={{ backgroundColor: `${agentAccent}20`, color: agentAccent }}
           >
             <Image
-              src="/brand/litt-mascot-avatar.png"
+              src="/brand/litt-robot-avatar-96.png"
               alt={agentMeta.displayName}
               fill
               sizes="20px"
@@ -1190,7 +1190,7 @@ function UnifiedSelectorPopover({
               >
                 {unlocked ? (
                   <Image
-                    src="/brand/litt-mascot-avatar.png"
+                    src="/brand/litt-robot-avatar-96.png"
                     alt={meta.displayName}
                     fill
                     sizes="28px"

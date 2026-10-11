@@ -62,6 +62,9 @@ export const ACTION_EVENT_TYPES = [
   "run.completed",
   "run.failed",
   "run.cancelled",
+  // INV-010 lineage: emitted on a fresh run minted as a retry, pointing at
+  // the failed attempt it supersedes (payload.causation_action_run_id).
+  "run.retry_of",
   "agent.started",
   "agent.status",
   "agent.completed",

@@ -58,6 +58,7 @@ export async function resolveProject(
     .select("id, user_id, name, github_full_name, github_owner, github_repo, github_default_branch, github_branch, framework, scan_status, scan_summary")
     .eq("id", projectId)
     .eq("user_id", clerkUserId)
+    .eq("is_system", false)
     .single() as { data: ProjectRecord | null; error: unknown };
 
   if (studioProject) {

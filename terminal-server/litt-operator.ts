@@ -47,6 +47,7 @@ import {
   runtimeSetPhase,
 } from "./runtime.js";
 import { streamLiTTCode, health, type LiTTEvent } from "./litt-code.js";
+import { isHostExecutionPermitted } from "./isolation-policy.js";
 import { getBillingClient, type AuthorizationDenialCode } from "./billing.js";
 
 // ─── ModelProvider adapter ────────────────────────────────────────
@@ -212,7 +213,19 @@ export interface OperatorResult {
  * RuntimeStore's `state.project` has not been set yet (i.e. /status
  * has not been called).
  */
+export const EXECUTION_DISABLED_NOTICE_FOR_MODEL =
+  "IMPORTANT: Command execution is DISABLED in this environment (HOST_EXECUTION_DISABLED). " +
+  "Shell, git, build and test tools will fail. Do not claim to have run, installed, built or " +
+  "tested anything; tell the user plainly that execution is unavailable.";
+
+export const EXECUTION_DISABLED_NOTICE_FOR_USER =
+  "[Execution is disabled in this environment (HOST_EXECUTION_DISABLED): any command, build or " +
+  "test actions above did not run.]";
+
 function readGitBranch(cwd: string): string {
+  // Host git against a user-controlled repo can run repo-defined helpers
+  // (e.g. core.fsmonitor); skip it entirely where host execution is closed.
+  if (!isHostExecutionPermitted()) return "unknown";
   try {
     const { execFileSync } = require("child_process");
     const branch = execFileSync("git", ["branch", "--show-current"], {
@@ -425,7 +438,13 @@ export async function runLiTTOperator(ctx: OperatorContext): Promise<OperatorRes
 
   runtimeSetPhase("thinking");
 
-  const systemPrompt = buildOperatorSystemPrompt(ctx.cwd, mode);
+  // Host execution is closed in production until a verified sandbox exists.
+  // Tell the model so it cannot claim to have run commands, and (below)
+  // append a deterministic notice if it still attempted tool calls.
+  const execClosed = !isHostExecutionPermitted();
+  const systemPrompt =
+    buildOperatorSystemPrompt(ctx.cwd, mode) +
+    (execClosed ? "\n\n" + EXECUTION_DISABLED_NOTICE_FOR_MODEL : "");
 
   const options: AgentLoopOptions = {
     model,
@@ -477,8 +496,13 @@ export async function runLiTTOperator(ctx: OperatorContext): Promise<OperatorRes
       }
     }
 
+    const content =
+      execClosed && result.toolCalls.length > 0
+        ? `${result.content}\n\n${EXECUTION_DISABLED_NOTICE_FOR_USER}`
+        : result.content;
+
     return {
-      content: result.content,
+      content,
       runId,
       toolCalls: result.toolCalls,
       rounds: result.rounds,

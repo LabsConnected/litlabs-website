@@ -3,8 +3,9 @@ name: Release Gate
 on:
   workflow_dispatch:
   schedule:
-    # Every 30 minutes — verify deployed SHAs match source
-    - cron: "*/30 * * * *"
+    # Hourly — verify deployed SHAs match source and Clerk auth is healthy.
+    # (Was every 30 minutes; production-only monitor, never runs per-PR.)
+    - cron: "17 * * * *"
 
 permissions:
   contents: read
@@ -49,9 +50,12 @@ jobs:
 
       - name: Check terminal-server health endpoint
         id: terminal
+        env:
+          # Optional repo variable; defaults to the production terminal service.
+          TERMINAL_BASE_URL: ${{ vars.TERMINAL_BASE_URL || 'https://litlabs-terminal-server-production-0be1.up.railway.app' }}
         run: |
           RESPONSE=$(curl -sSf --max-time 10 \
-            "https://litlabs-terminal-server-production-0be1.up.railway.app/health" \
+            "${TERMINAL_BASE_URL%/}/health" \
             || echo '{"status":"unreachable"}')
           DEPLOYED_SHA=$(echo "$RESPONSE" | jq -r '.commit // "unknown"')
           echo "deployed_sha=$DEPLOYED_SHA" >> $GITHUB_OUTPUT

@@ -163,9 +163,7 @@ export function RecentWork({ projects, loading, onOpenTerminal }: RecentWorkProp
           {sorted.map((project) => {
             const status = STATUS_CONFIG[project.status];
             const isPinned = pinned.has(project.id);
-            const studioHref = project.repository
-              ? `/studio?project=${encodeURIComponent(project.id)}`
-              : "/studio";
+            const studioHref = `/studio?project=${encodeURIComponent(project.id)}`;
             const updatedAgo = timeAgo(project.updatedAt);
 
             return (

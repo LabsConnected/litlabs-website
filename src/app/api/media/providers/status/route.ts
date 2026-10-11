@@ -62,6 +62,7 @@ export async function GET(req: Request) {
     {
       id: "openai",
       configured: !!process.env.OPENAI_API_KEY,
+      model: "gpt-image-2.5-flare / gpt-image-2.5-sunburst",
     },
     {
       id: "recraft",
@@ -69,7 +70,7 @@ export async function GET(req: Request) {
     },
     {
       id: "pollinations",
-      configured: true, // always available, no key needed
+      configured: true, // explicit experimental manual use only
     },
     {
       id: "huggingface",

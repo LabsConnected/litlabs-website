@@ -42,6 +42,14 @@ export interface LlmBillingInput {
    * available so simulating a customer tier exercises real billing.
    */
   simulation?: SimulatedPlan | null;
+  /**
+   * Idempotency key of the billable usage_events row for this logical action
+   * (from llm.ts `result.metering.billableIdempotencyKey`). When provided,
+   * recordChargeEvidence reuses that row instead of creating a second
+   * billable usage_event — the P0 no-double-billing invariant for
+   * retry/failover chains.
+   */
+  meteringBillableKey?: string | null;
 }
 
 export interface LlmBillingResult {
@@ -247,7 +255,8 @@ export async function chargeLlmUsage(
 
   // Canonical pricing evidence — stamps the ledger row with the pricing
   // version + provider cost and writes the usage/rating evidence chain.
-  // Best-effort; never blocks the billing result.
+  // Best-effort; never blocks the billing result. Reuses the billable
+  // attempt's usage_event (P0: no second billable event on retry/failover).
   if (!replayed) {
     await recordChargeEvidence(admin, {
       userId: user.id,
@@ -266,6 +275,7 @@ export async function chargeLlmUsage(
         completionTokens: input.completionTokens,
         isByok: input.isByok,
       },
+      existingUsageEventKey: input.meteringBillableKey ?? null,
     });
   }
 

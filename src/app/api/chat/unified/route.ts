@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { resolveAgentEntitlement, chargeAgentRun } from "@/lib/agent-entitlements";
 import { chargeLlmUsage } from "@/lib/llm-billing";
+import { SpendGuardError } from "@/lib/spend-guards";
 import { randomUUID } from "crypto";
 
 export const runtime = "nodejs";
@@ -178,7 +179,14 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null, cl
   if (!stream) {
     const r = await generateText(
       prompt,
-      { task: "chat", provider: modelCategory ? undefined : llmProvider, category: modelCategory, maxTokens: 2048 },
+      {
+        task: "chat",
+        provider: modelCategory ? undefined : llmProvider,
+        category: modelCategory,
+        maxTokens: 2048,
+        // Canonical metering: per-attempt usage_events + cost_events.
+        ...(clerkId ? { metering: { clerkId, feature: "chat-unified" as const } } : {}),
+      },
       undefined,
     );
     await logConversation(agent, userId, message, r.text);
@@ -198,6 +206,9 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null, cl
           isByok: false,
           littAliasId: modelCategory === "litt-alias" ? llmProvider : undefined,
           callId,
+          // P0: reuse the billable attempt's usage_event — retries/failovers
+          // must not create a second billable event.
+          meteringBillableKey: r.metering.billableIdempotencyKey,
         });
         billingInfo = {
           charged: billing.debited ? billing.cost.retailLiTTBits : 0,
@@ -232,7 +243,14 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null, cl
               encoder.encode(`data: ${JSON.stringify({ text: chunk })}\n\n`),
             );
           },
-          { task: "chat", provider: modelCategory ? undefined : llmProvider, category: modelCategory, maxTokens: 2048 },
+          {
+            task: "chat",
+            provider: modelCategory ? undefined : llmProvider,
+            category: modelCategory,
+            maxTokens: 2048,
+            // Canonical metering: per-attempt usage_events + cost_events.
+            ...(clerkId ? { metering: { clerkId, feature: "chat-unified" as const } } : {}),
+          },
         );
         controller.enqueue(
           encoder.encode(
@@ -257,6 +275,9 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null, cl
               isByok: false,
               littAliasId: modelCategory === "litt-alias" ? llmProvider : undefined,
               callId,
+              // P0: reuse the billable attempt's usage_event — retries/failovers
+              // must not create a second billable event.
+              meteringBillableKey: r.metering.billableIdempotencyKey,
             });
           } catch {
             // Billing failure must never break the stream
@@ -402,6 +423,14 @@ async function handler(req: NextRequest) {
         return await handleLLMChat(body, userId, clerkId);
     }
   } catch (err) {
+    // Hard spend guard tripped — 429, not 500. The user's allowance is
+    // intact; this is the runaway backstop firing.
+    if (err instanceof SpendGuardError) {
+      return NextResponse.json(
+        { error: "Spend limit reached", reason: err.result.reason, detail: err.result.detail },
+        { status: 429 },
+      );
+    }
     return NextResponse.json(
       { error: "Internal server error", detail: err instanceof Error ? err.message : String(err) },
       { status: 500 },

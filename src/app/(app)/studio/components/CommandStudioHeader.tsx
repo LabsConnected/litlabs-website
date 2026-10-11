@@ -1,10 +1,12 @@
 "use client";
 
+import { HEALTH_LEVEL_COLOR, terminalHealthOf } from "@/lib/studio/terminal-health";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useWallet } from "@/context/WalletContext";
 import StudioProjectPicker from "./StudioProjectPicker";
+import GlobalLittStudioEntry from "@/components/global-litt/GlobalLittStudioEntry";
 import {
   useStudioModelStore,
   type ProviderHealth,
@@ -177,11 +179,18 @@ export default function CommandStudioHeader({
   const hasAi = modelHealth === "available" || modelHealth === "degraded";
   const providerCount = hasAi ? 1 : 0;
 
-  const runtimeReady = runtime.phase === "ready" && runtime.executionAvailable;
+  // "ready" already implies executionAvailable (workspace mounted AND
+  // terminal server reachable) — the canonical hook derives them together,
+  // so no second condition can disagree.
+  const runtimeReady = runtime.phase === "ready";
   const statusLabel = runtimeLoading || runtime.phase === "resolving"
     ? "Runtime status checking"
     : runtime.phase === "idle" || !runtime.projectId
       ? "No project selected"
+      : runtime.phase === "terminal_unreachable"
+        // Canonical terminal wording — same label the operator bar and
+        // Mission hints render (lib/studio/terminal-health.ts).
+        ? terminalHealthOf(capabilities).label
       : runtime.phase !== "ready"
         ? runtimePhaseLabel(runtime.phase)
         : modelHealth === undefined
@@ -197,10 +206,8 @@ export default function CommandStudioHeader({
       ? "#e3b341"
       : runtime.phase === "error" || runtime.phase === "unauthenticated" || modelHealth === "unavailable"
         ? "#ef4444"
-        : runtime.phase === "terminal_disconnected"
-          // Neutral, ready-adjacent: the workspace is ready and builds run
-          // server-side — only the visible terminal PTY is unattached.
-          ? "#9ca3af"
+        : runtime.phase === "terminal_unreachable"
+          ? HEALTH_LEVEL_COLOR[terminalHealthOf(capabilities).level]
           : "#e3b341";
 
   // Status pill: approval gates and agent work take precedence over the
@@ -257,6 +264,9 @@ export default function CommandStudioHeader({
         onDeleteProject={(projectId) => onDeleteProjectAction?.(projectId)}
         onProjectRenamed={(projectId, name) => onProjectRenamedAction?.(projectId, name)}
       />
+
+      {/* Global LiTT — persistent operator, separate from ordinary projects */}
+      <GlobalLittStudioEntry />
 
       {/* Agent-status pill — truthful: working / approval needed / ambient runtime.
           Clicking opens the full workspace-status popover. */}
