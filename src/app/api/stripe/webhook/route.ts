@@ -78,7 +78,9 @@ async function grantSubscriptionCredits(
   const plan = PLANS[planId];
   if (!plan || plan.monthlyCredits <= 0) return;
   try {
-    await sb.rpc("grant_credits", {
+    // Supabase rpc() returns { data, error } — it does NOT throw on a
+    // database error. Both must be treated as failures.
+    const { error: rpcError } = await sb.rpc("grant_credits", {
       p_user_id: userId,
       p_amount: plan.monthlyCredits,
       p_category: "subscription_grant",
@@ -88,6 +90,9 @@ async function grantSubscriptionCredits(
       p_reference_type: "subscription",
       p_expires_at: expiresAt ?? undefined,
     });
+    if (rpcError) {
+      throw new Error(`grant_credits RPC error: ${rpcError.message}`);
+    }
   } catch (err) {
     // Log AND propagate: a failed grant must surface as HTTP 500 so Stripe
     // retries. The per-invoice idempotency key makes retries safe (the RPC
@@ -420,6 +425,10 @@ export async function POST(req: NextRequest) {
         // when invoice.paid arrives: it performs a multi-query upsert while
         // this handler does a single SELECT, so without a wait the lookup
         // systematically misses.
+        //
+        // Timeout budget (worst case): 5 sleeps × 2s = 10s + 6 DB SELECTs
+        // (~1s) + Stripe API fallback (~2s) + grant RPC (~1s) ≈ 14s total.
+        // This stays well under Stripe's 30s webhook timeout.
         let invMatch: { user_id: string; plan: string } | null = null;
         for (let attempt = 0; attempt < 6; attempt++) {
           const { data } = await sb
@@ -456,30 +465,39 @@ export async function POST(req: NextRequest) {
               if (u) {
                 const planId: PlanId =
                   (fullSub.metadata?.plan_id as PlanId) || "creator_beta";
-                await sb.from("subscriptions").upsert(
-                  {
-                    user_id: u.id,
-                    stripe_customer_id:
-                      typeof inv.customer === "string"
-                        ? inv.customer
-                        : inv.customer?.id ?? null,
-                    stripe_subscription_id: invSubId,
-                    plan: planId,
-                    status: fullSub.status,
-                    current_period_start: fullSub.items?.data?.[0]?.current_period_start
-                      ? new Date(
-                          fullSub.items.data[0].current_period_start * 1000,
-                        ).toISOString()
-                      : null,
-                    current_period_end: fullSub.items?.data?.[0]?.current_period_end
-                      ? new Date(
-                          fullSub.items.data[0].current_period_end * 1000,
-                        ).toISOString()
-                      : null,
-                    updated_at: new Date().toISOString(),
-                  },
-                  { onConflict: "stripe_subscription_id", ignoreDuplicates: false },
-                );
+                const { error: fallbackUpsertError } = await sb
+                  .from("subscriptions")
+                  .upsert(
+                    {
+                      user_id: u.id,
+                      stripe_customer_id:
+                        typeof inv.customer === "string"
+                          ? inv.customer
+                          : inv.customer?.id ?? null,
+                      stripe_subscription_id: invSubId,
+                      plan: planId,
+                      status: fullSub.status,
+                      current_period_start: fullSub.items?.data?.[0]?.current_period_start
+                        ? new Date(
+                            fullSub.items.data[0].current_period_start * 1000,
+                          ).toISOString()
+                        : null,
+                      current_period_end: fullSub.items?.data?.[0]?.current_period_end
+                        ? new Date(
+                            fullSub.items.data[0].current_period_end * 1000,
+                          ).toISOString()
+                        : null,
+                      updated_at: new Date().toISOString(),
+                    },
+                    { onConflict: "stripe_subscription_id", ignoreDuplicates: false },
+                  );
+                if (fallbackUpsertError) {
+                  // Do NOT proceed to grant: the row wasn't reconstructed.
+                  // Throw so Stripe retries (recoverable, not silently dropped).
+                  throw new Error(
+                    `[stripe] invoice.paid ${event.id}: fallback upsert failed: ${fallbackUpsertError.message}`,
+                  );
+                }
                 invMatch = { user_id: u.id, plan: planId };
               }
             }

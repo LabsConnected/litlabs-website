@@ -986,6 +986,74 @@ describe("invoice.paid race condition — subscription row not yet written", () 
     expect(grants[0].params.p_idempotency_key).toBe("invoice_grant_in_test_race");
   });
 
+  it("fallback upsert error → 500 (never grants on a failed reconstruction)", async () => {
+    const { sb, rpcCalls } = buildRaceSupabase(100); // row never appears via DB
+    // Make the fallback upsert fail
+    (sb.from as any).mockImplementation((table: string) => {
+      const chainObj: any = {
+        select: () => chainObj,
+        eq: () => chainObj,
+        single: async () => {
+          if (table === "users") return { data: { id: "user_internal_123" }, error: null };
+          return { data: null, error: null };
+        },
+        upsert: async () => ({ error: { message: "permission denied" } }),
+        insert: async () => ({ error: null }),
+        update: (patch: any) => {
+          const builder: any = { eq: () => builder, then: (r: any) => r({ error: null }) };
+          return builder;
+        },
+      };
+      return chainObj;
+    });
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockConstructEvent.mockReturnValue(paidEvent());
+    mockSubscriptionsRetrieve.mockResolvedValue({
+      id: "sub_test_123",
+      status: "active",
+      metadata: { clerk_id: "user_123", plan_id: "creator_beta" },
+      items: { data: [] },
+    });
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+
+    // Upsert failed → no grant attempted → 500 so Stripe retries
+    expect(res.status).toBe(500);
+    expect(rpcCalls.filter((c) => c.fn === "grant_credits").length).toBe(0);
+  });
+
+  it("grant_credits { error } (no throw) → 500; retry succeeds once", async () => {
+    // RPC returns { error } instead of throwing — must still surface as 500
+    const first = buildTrackingSupabase();
+    let rpcShouldFail = true;
+    const origRpc = first.sb.rpc as any;
+    first.sb.rpc = vi.fn(async (fnName: string, params: any) => {
+      if (fnName === "grant_credits" && rpcShouldFail) {
+        return { data: null, error: { message: "duplicate key" } };
+      }
+      return origRpc(fnName, params);
+    });
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(first.sb as any);
+    mockConstructEvent.mockReturnValue(paidEvent());
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res1 = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res1.status).toBe(500);
+
+    // Retry succeeds
+    rpcShouldFail = false;
+    const second = buildTrackingSupabase();
+    vi.mocked(getAdminSupabase).mockReturnValue(second.sb as any);
+    mockConstructEvent.mockReturnValue(paidEvent());
+    const res2 = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res2.status).toBe(200);
+    const grants = (second as any).rpcCalls.filter((c: any) => c.fn === "grant_credits");
+    expect(grants.length).toBe(1);
+  });
+
   it("missing parent subscription id → 500 (not silently dropped)", async () => {
     const { sb, rpcCalls } = buildTrackingSupabase();
     vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
