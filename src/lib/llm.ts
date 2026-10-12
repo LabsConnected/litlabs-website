@@ -200,7 +200,7 @@ export const DEFAULT_MODELS: Record<LLMProvider, string> = {
   groq: "openai/gpt-oss-120b",
   "groq-whisper": "whisper-large-v3",
   openai: OPENAI_MODEL,
-  "openrouter-free": "openrouter/free",
+  "openrouter-free": "meta-llama/llama-3.3-70b-instruct:free",
   "openrouter-qwen": "nvidia/nemotron-3-super-120b-a12b:free",
   "openrouter-deepseek": "nvidia/nemotron-3-ultra-550b-a55b:free",
   "openrouter-mistral": "nex-agi/nex-n2.5-pro:free",
