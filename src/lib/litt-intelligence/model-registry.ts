@@ -183,7 +183,7 @@ function seedRecords(): Map<string, ModelRecord> {
     {
       provider: "openrouter",
       canonicalId: "openrouter-gemma-4-31b",
-      providerModelId: "google/gemma-4-31b-it:free",
+      providerModelId: "openai/gpt-oss-120b:free",
       enabled: true,
       capabilities: {
         text: true,
