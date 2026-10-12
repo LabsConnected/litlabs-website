@@ -33,7 +33,7 @@ export async function complete(
 async function completeOpenRouter(
   options: CompletionOptions,
 ): Promise<CompletionResult> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = (process.env.OPENROUTER_API_KEY ?? "").trim();
   if (!apiKey) {
     throw new Error("Missing OPENROUTER_API_KEY");
   }

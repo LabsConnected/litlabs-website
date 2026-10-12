@@ -898,7 +898,7 @@ function compatEndpointFor(
 ): { baseUrl: string; headers: Record<string, string> } {
   switch (route.provider) {
     case "openrouter": {
-      const key = process.env.OPENROUTER_API_KEY ?? "";
+      const key = (process.env.OPENROUTER_API_KEY ?? "").trim();
       if (!key) {
         throw new ProviderAttemptError("openrouter", route.models[0] ?? "unknown", {
           class: "auth_invalid",

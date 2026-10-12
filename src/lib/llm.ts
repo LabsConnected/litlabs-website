@@ -181,12 +181,12 @@ export interface LLMResult {
 /*  Env + provider config                                              */
 /* ------------------------------------------------------------------ */
 const GEMINI_KEY =
-  process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
-const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
+  (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+const OPENROUTER_KEY = (process.env.OPENROUTER_API_KEY || "").trim();
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
-const GROQ_KEY = process.env.GROQ_API_KEY || "";
+const GROQ_KEY = (process.env.GROQ_API_KEY || "").trim();
 const GROQ_BASE = "https://api.groq.com/openai/v1";
-const OPENAI_KEY = process.env.OPENAI_API_KEY || "";
+const OPENAI_KEY = (process.env.OPENAI_API_KEY || "").trim();
 const OPENAI_BASE = "https://api.openai.com/v1";
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
 
