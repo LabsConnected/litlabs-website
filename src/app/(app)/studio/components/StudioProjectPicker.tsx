@@ -280,7 +280,7 @@ function ProjectPickerMenu({
     : 8;
   return (
     <div
-      className="fixed z-[200] max-h-[min(60vh,320px)] w-[min(90vw,256px)] overflow-y-auto rounded-xl border p-1.5 shadow-2xl"
+      className="fixed z-[200] flex max-h-[min(60vh,320px)] w-[min(90vw,256px)] flex-col overflow-hidden rounded-xl border shadow-2xl"
       style={{
         left,
         top,
@@ -291,6 +291,11 @@ function ProjectPickerMenu({
       aria-label="Projects"
       data-testid="project-picker-menu"
     >
+      {/* Only the project list scrolls. The New project action lives in a
+          pinned footer below (Gate B, 2026-10-13): rendered at the end of
+          the scrollable list, it fell below the fold once a user had more
+          than ~7 projects, making creation unreachable in the menu. */}
+      <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
       {loading ? (
         <div className="px-2.5 py-3 text-[12px]" style={{ color: "var(--text-muted)" }}>Loading projects…</div>
       ) : error ? (
@@ -377,9 +382,12 @@ function ProjectPickerMenu({
           )
         ))
       )}
+      </div>
       {onCreateProject && !loading && !error && (
-        <>
-          <div className="mx-1 my-1 h-px" style={{ backgroundColor: "var(--studio-border)" }} />
+        <div
+          className="shrink-0 border-t p-1.5"
+          style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-elevated)" }}
+        >
           <button
             type="button"
             onClick={onCreateProject}
@@ -389,7 +397,7 @@ function ProjectPickerMenu({
             <Plus size={13} className="shrink-0" />
             <span className="text-[12px] font-bold">New project</span>
           </button>
-        </>
+        </div>
       )}
     </div>
   );

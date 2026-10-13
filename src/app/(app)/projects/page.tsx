@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import PageShell from "@/components/PageShell";
 import { useTheme } from "@/context/ThemeContext";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 import {
   ArrowRight,
   AlertTriangle,
@@ -11,6 +13,7 @@ import {
   GitPullRequest,
   Loader2,
   Play,
+  Plus,
   RefreshCw,
   Search,
   Sparkles,
@@ -177,6 +180,57 @@ export default function ProjectsPage() {
     );
   }, [exitSelectMode, fetchProjects]);
 
+  // Project creation (Gate B, 2026-10-13): this page had no create control
+  // at all — creation existed only at the bottom of the Studio project
+  // dropdown, unreachable once the list outgrew the menu. This mirrors
+  // Studio's own create call (POST /api/studio-projects, sourceType
+  // "blank") and opens the new project in Studio, exactly as creating it
+  // there does. Existing projects are never modified by this flow.
+  const router = useRouter();
+  const { getToken } = useClerkAuth();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createName, setCreateName] = useState("");
+  const [createTemplate, setCreateTemplate] = useState<"blank-static" | "empty-static">("blank-static");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const openCreate = useCallback(() => {
+    setCreateName("");
+    setCreateTemplate("blank-static");
+    setCreateError(null);
+    setCreateOpen(true);
+  }, []);
+
+  const submitCreate = useCallback(async () => {
+    const name = createName.trim();
+    if (!name || creating) return;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const token = await getToken?.();
+      const res = await fetch("/api/studio-projects", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ sourceType: "blank", name, templateId: createTemplate }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data as { error?: string })?.error || `Failed to create project (${res.status})`);
+      }
+      const project = (data as { project?: { id?: string } }).project;
+      if (!project?.id) throw new Error("Project was created but its id is missing.");
+      recordLastOpenedProject(project.id);
+      router.push(`/studio?project=${encodeURIComponent(project.id)}`);
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Failed to create project.");
+      setCreating(false);
+    }
+  }, [createName, createTemplate, creating, getToken, router]);
+
   return (
     <PageShell
       title="Projects"
@@ -211,10 +265,18 @@ export default function ProjectsPage() {
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row lg:flex-col">
-              <Link
-                href="/studio"
+              <button
+                type="button"
+                onClick={openCreate}
                 className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-black"
                 style={{ backgroundColor: T.accentColor, color: T.bgColor }}
+              >
+                <Plus size={16} /> New project
+              </button>
+              <Link
+                href="/studio"
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-5 py-3 text-sm font-bold"
+                style={{ borderColor: `${T.borderColor}55`, color: T.textColor }}
               >
                 <Play size={16} /> Start in Studio
               </Link>
@@ -463,6 +525,93 @@ export default function ProjectsPage() {
           )}
         </section>
       </div>
+
+      {createOpen && (
+        <div
+          className="fixed inset-0 z-[200] flex items-end justify-center bg-black/70 p-4 sm:items-center"
+          onClick={() => { if (!creating) setCreateOpen(false); }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-project-title"
+            className="w-full max-w-md rounded-3xl border p-6"
+            style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}55` }}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => { if (e.key === "Escape" && !creating) setCreateOpen(false); }}
+          >
+            <h2 id="create-project-title" className="text-base font-black" style={{ color: T.headerColor }}>
+              New project
+            </h2>
+            <label
+              className="mt-4 block text-[10px] font-black uppercase tracking-[0.18em]"
+              style={{ color: T.textMuted }}
+              htmlFor="create-project-name"
+            >
+              Project name
+            </label>
+            <input
+              id="create-project-name"
+              autoFocus
+              value={createName}
+              onChange={(e) => setCreateName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void submitCreate(); }}
+              placeholder="My new site"
+              className="mt-2 h-11 w-full rounded-xl border bg-black/20 px-3 text-sm outline-none"
+              style={{ borderColor: `${T.borderColor}55`, color: T.textColor }}
+            />
+            <div className="mt-4 grid gap-2" role="radiogroup" aria-label="Template">
+              {(
+                [
+                  ["blank-static", "Blank Static Site", "A single index.html with minimal CSS. No build step."],
+                  ["empty-static", "Empty Static Site", "An empty workspace — LiTT creates the files from your request."],
+                ] as const
+              ).map(([id, label, desc]) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="radio"
+                  aria-checked={createTemplate === id}
+                  onClick={() => setCreateTemplate(id)}
+                  className="rounded-xl border p-3 text-left"
+                  style={{
+                    borderColor: createTemplate === id ? T.accentColor : `${T.borderColor}55`,
+                    backgroundColor: createTemplate === id ? `${T.accentColor}12` : "transparent",
+                  }}
+                >
+                  <span className="block text-sm font-black" style={{ color: T.textColor }}>{label}</span>
+                  <span className="mt-0.5 block text-[11px] leading-relaxed" style={{ color: T.textMuted }}>{desc}</span>
+                </button>
+              ))}
+            </div>
+            {createError && (
+              <div className="mt-3 rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-200" role="alert">
+                {createError}
+              </div>
+            )}
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                disabled={creating}
+                onClick={() => setCreateOpen(false)}
+                className="min-h-11 flex-1 rounded-xl border px-4 font-bold disabled:opacity-50"
+                style={{ borderColor: `${T.borderColor}55`, color: T.textColor }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={creating || !createName.trim()}
+                onClick={() => void submitCreate()}
+                className="min-h-11 flex-1 rounded-xl px-4 font-black disabled:opacity-50"
+                style={{ backgroundColor: T.accentColor, color: T.bgColor }}
+              >
+                {creating ? "Creating…" : "Create project"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirmTargets && (
         <div
