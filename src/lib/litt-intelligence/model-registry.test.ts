@@ -108,6 +108,9 @@ describe("model registry — eligibility", () => {
       "gemini-flash",
       "gemini-2.5-flash",
       "openrouter-qwen3.8-27b",
+      "openrouter-nemotron-3-super",
+      "openrouter-laguna-s-2.1",
+      "openrouter-nemotron-3-ultra",
       "openrouter-gemma-4-31b",
     ]);
     expect(none).toBeNull();
@@ -128,6 +131,9 @@ describe("model registry — eligibility", () => {
       "gemini-flash",
       "gemini-2.5-flash",
       "openrouter-qwen3.8-27b",
+      "openrouter-nemotron-3-super",
+      "openrouter-laguna-s-2.1",
+      "openrouter-nemotron-3-ultra",
       "openrouter-gemma-4-31b",
     ]);
     expect(none).toBeNull();
