@@ -183,7 +183,7 @@ function seedRecords(): Map<string, ModelRecord> {
     {
       provider: "openrouter",
       canonicalId: "openrouter-gemma-4-31b",
-      providerModelId: "openai/gpt-oss-120b:free",
+      providerModelId: "google/gemma-4-31b-it:free",
       enabled: true,
       capabilities: {
         text: true,
@@ -191,9 +191,8 @@ function seedRecords(): Map<string, ModelRecord> {
         toolCalling: true,
         reliableFileWriting: true,
         vision: false,
-        // Conservative seed estimate (unverified) — informational only;
-        // no routing decision filters on contextWindow today.
-        contextWindow: 131_072,
+        // Verified from the OpenRouter catalog (Oct 2026).
+        contextWindow: 262_144,
       },
       priority: 40,
       healthState: "unknown",
