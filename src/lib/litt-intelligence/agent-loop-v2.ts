@@ -377,6 +377,60 @@ function detectRepeatedCalls(
   return identical.length >= 3;
 }
 
+/**
+ * Rebuild the repeated-call ledger from a paused run's message history.
+ *
+ * Approval pauses split one logical run into many loop invocations, and
+ * the ledger used to restart empty on every resume — so
+ * detectRepeatedCalls could never fire across a pause, and a model
+ * retrying a failing approval-gated tool re-entered the gate on every
+ * resume (Gate B, 2026-10-13: preview.launch was approved seven times
+ * in one run). The history carries every executed call (assistant
+ * tool_calls) and its outcome (tool results) — everything the detector
+ * consults is the tool id + inputs hash. A gated call that never
+ * executed has no tool result in the history and is correctly absent:
+ * it has not happened yet.
+ *
+ * Wire names in history have dots replaced with underscores
+ * (buildAssistantToolCallMessage); map them back through the registry
+ * so seeded ids match the live ToolCall.toolId values. resultHash is
+ * not reconstructed (the detector does not consult it) and is left
+ * empty rather than fabricating a value.
+ */
+export function seedToolCallRecordsFromHistory(
+  messages: LLMMessage[],
+): ToolCallRecord[] {
+  const wireNameToToolId = new Map<string, string>();
+  for (const tool of toolRegistry.listEnabled()) {
+    wireNameToToolId.set(tool.id.replace(/\./g, "_"), tool.id);
+  }
+  const executedCallIds = new Set<string>();
+  for (const m of messages) {
+    if (m.role === "tool" && m.tool_call_id) executedCallIds.add(m.tool_call_id);
+  }
+  const records: ToolCallRecord[] = [];
+  let step = 0;
+  for (const m of messages) {
+    if (m.role !== "assistant" || !m.tool_calls) continue;
+    for (const call of m.tool_calls) {
+      if (!executedCallIds.has(call.id)) continue;
+      let inputs: Record<string, unknown> = {};
+      try {
+        inputs = JSON.parse(call.function.arguments || "{}") as Record<string, unknown>;
+      } catch {
+        inputs = {};
+      }
+      records.push({
+        toolId: wireNameToToolId.get(call.function.name) ?? call.function.name,
+        inputsHash: hashInputs(inputs),
+        resultHash: "",
+        step: step++,
+      });
+    }
+  }
+  return records;
+}
+
 // ─── Mid-build stall recovery ─────────────────────────────────────
 
 /**
@@ -2342,7 +2396,12 @@ async function resumeAgentLoopV2Inner(
   });
 
   const events: ProgressEvent[] = [];
-  const toolCallRecords: ToolCallRecord[] = [];
+  // Seed the repeated-call ledger from the paused history: without this,
+  // loop detection restarts blind on every resume and a failing gated
+  // tool can re-enter the approval gate indefinitely.
+  const toolCallRecords: ToolCallRecord[] = seedToolCallRecordsFromHistory(
+    resume.pausedMessages,
+  );
   let hasInterveningMutation = resume.hadInterveningMutation;
   const executedMutations = new Map<string, ToolCallResult>();
 
@@ -2386,6 +2445,10 @@ async function resumeAgentLoopV2Inner(
         userId: cfg.userId,
         isTerminalOwner:
           cfg.userId != null ? isTerminalOwnerUser(cfg.userId) : undefined,
+        // Mirror the initial run's static gating: without this, a resumed
+        // static run re-advertises tools that cannot execute there
+        // (terminal.execute, preview dev-server tools).
+        isStaticWorkspace: cfg.isStaticWorkspace,
       },
     },
   );

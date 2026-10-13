@@ -152,6 +152,43 @@ const APPROVAL_GATED_TOOLS = new Set([
 ]);
 
 /**
+ * Preview dev-server tools. preview.start spawns a dev-server process on
+ * the terminal server — host execution. Static (gitless) workspaces have
+ * no host execution (Gate 1) and no dev server: the Studio preview is
+ * served directly from the static files. Advertising these tools in a
+ * static workspace guarantees a failed call — and because they are
+ * mutating, every model retry re-enters the approval gate, which looped
+ * a Gate B run across seven approval pauses (2026-10-13). Report
+ * UNAVAILABLE truthfully, exactly like terminal.execute. The station
+ * delegates preview.launch / preview.reload wrap preview.start, so they
+ * share its health.
+ */
+const PREVIEW_DEV_SERVER_TOOLS = new Set([
+  "preview.start",
+  "preview.launch",
+  "preview.reload",
+]);
+
+export function resolvePreviewDevServerHealth(
+  toolId: string,
+  ctx: TerminalHealthContext,
+): ToolHealthReport | null {
+  if (!PREVIEW_DEV_SERVER_TOOLS.has(toolId)) return null;
+  if (ctx.isStaticWorkspace === true) {
+    return {
+      toolId,
+      health: "unavailable",
+      reason: "static_workspace_no_dev_server",
+      detail:
+        "This is a static (gitless) workspace: there is no dev server to launch. " +
+        "The Studio preview renders the static files directly. " +
+        "Write the files with files.write; do not attempt preview launch tools.",
+    };
+  }
+  return null;
+}
+
+/**
  * Resolve health for a set of tool IDs.
  */
 export function resolveToolHealth(
@@ -167,6 +204,11 @@ export function resolveToolHealth(
     }
     if (toolId === "terminal.execute") {
       out.set(toolId, resolveTerminalHealth(ctx.terminal ?? {}));
+      continue;
+    }
+    const previewReport = resolvePreviewDevServerHealth(toolId, ctx.terminal ?? {});
+    if (previewReport) {
+      out.set(toolId, previewReport);
       continue;
     }
     if (APPROVAL_GATED_TOOLS.has(toolId)) {

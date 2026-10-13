@@ -32,7 +32,7 @@ import {
   snapshotQualityLoopSession,
   stripQualityVerdictSuffix,
 } from "@/lib/litt-intelligence/quality-loop-flow";
-import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
+import { getProject, verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { getCheckpoint } from "@/lib/missions/mission-repository";
 import {
   getAwaitingApprovalAssistantMessage,
@@ -630,12 +630,23 @@ export async function POST(
     }
   }
 
+  // Static-workspace truth for the resumed run's tool-health filtering.
+  // The initial run gets this from its canonical context; the resume must
+  // re-derive it or the resumed loop re-advertises tools that cannot
+  // execute in a static workspace (terminal, preview dev server). A
+  // failed lookup falls back to undefined (pre-fix behavior), never to a
+  // guessed value.
+  const resumeProject = resolved.projectId
+    ? await getProject(resolved.projectId, userId).catch(() => null)
+    : null;
+
   const resumeConfig: Partial<AgentLoopConfig> = {
     systemPrompt: resolved.systemPrompt,
     executionMode: resolved.executionMode,
     enableBuildFix: true,
     signal: abortController.signal,
     userId,
+    isStaticWorkspace: resumeProject?.framework === "static" ? true : undefined,
     // Item 5a — persist the resumed loop's ProgressEvents to the parent
     // run's action_events log, the same Activity truth as the initial run.
     // resumeAgentLoopV2Inner spreads resume.config into cfg, so the hook
