@@ -32,6 +32,7 @@ import {
   noteBuildFix,
   noteDeployment,
   notePreviewReady,
+  noteStaticArtifactCheck,
   noteToolResult,
   restoreQualityLoopSession,
   runQualityInspection,
@@ -855,5 +856,69 @@ describe("AUTO-mode quality gating", () => {
     expect(s.state.designPasses).toBe(1);
     expect(s.critiqueFailed).toBe(true);
     expect(s.state.stages.critique.evidence[0].by).toBe("judge");
+  });
+});
+
+describe("static-lane gate (Gate B regression, 2026-10-13)", () => {
+  // The exact Gate B acceptance prompt. On staging this run wrote a real
+  // index.html and rendered it, yet finalized FAILED: PLAN had no evidence
+  // (the marker format is never taught to the model) which blocked BUILD
+  // evidence from filing, and TEST demanded command checks that Gate 1
+  // forbids in static workspaces. The agent rewrote its file 26 times
+  // chasing the gate until the output budget killed the run.
+  function makeStaticSession(): QualityLoopSession {
+    return startQualityLoopSession({
+      runId: "run-static",
+      projectId: "proj-static",
+      userId: "user-1",
+      userRequest: "Build a Hello Gate 3 webpage with HTML, CSS, and JavaScript",
+    });
+  }
+
+  function recordStaticWrite(s: QualityLoopSession): void {
+    noteToolResult(
+      s,
+      "files.write",
+      { success: true, result: { path: "index.html" }, mutating: true, summary: "Wrote index.html" },
+      "ws-static",
+    );
+  }
+
+  it("classifies the Gate B build prompt as standard scope", () => {
+    expect(makeStaticSession().taskScope).toBe("standard");
+  });
+
+  it("passes the gate for a verified static build (system plan + mutation + read-back check)", () => {
+    const s = makeStaticSession();
+    recordStaticWrite(s);
+    noteStaticArtifactCheck(s, { path: "index.html", contentMatches: true });
+    const finale = finalizeQualityLoop(s, { deployRequested: false });
+    expect(finale.verdict.ok).toBe(true);
+    expect(finale.verdict.missing).toHaveLength(0);
+    expect(s.state.stages.plan.status).toBe("passed");
+    expect(s.state.stages.build.status).toBe("passed");
+    expect(s.state.stages.test.status).toBe("passed");
+  });
+
+  it("records no TEST evidence when the read-back does not match", () => {
+    const s = makeStaticSession();
+    recordStaticWrite(s);
+    noteStaticArtifactCheck(s, { path: "index.html", contentMatches: false });
+    const finale = finalizeQualityLoop(s, { deployRequested: false });
+    expect(finale.verdict.ok).toBe(false);
+    expect(finale.verdict.missing).toContain("test");
+  });
+
+  it("records no TEST evidence before any mutation happened", () => {
+    const s = makeStaticSession();
+    noteStaticArtifactCheck(s, { path: "index.html", contentMatches: true });
+    expect(s.state.stages.test.evidence).toHaveLength(0);
+  });
+
+  it("does not auto-file PLAN evidence for full-scope builds", () => {
+    const s = makeSession(); // "Build a dog grooming site" — full scope
+    expect(s.taskScope).toBe("full");
+    expect(s.state.stages.plan.evidence).toHaveLength(0);
+    expect(s.observations.some((o) => o.stage === "plan")).toBe(false);
   });
 });

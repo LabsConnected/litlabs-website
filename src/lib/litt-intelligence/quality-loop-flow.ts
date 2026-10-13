@@ -163,6 +163,20 @@ export function startQualityLoopSession(opts: {
       by: "system",
       detail: { taskScope: session.taskScope },
     });
+    // PLAN for targeted work is likewise the system's own: every run is
+    // scope-classified and capability-planned before the agent executes,
+    // and that plan governs the run. Demanding agent marker prose instead
+    // deadlocked the gate — the marker format exists only in the
+    // harvester; no prompt ever taught it, so PLAN could never file and
+    // every later stage's evidence stayed stuck behind it (Gate B,
+    // 2026-10-13: a completed static build reported plan/build/test
+    // pending and the agent rewrote its file 26 times until the output
+    // budget killed the run). A full build still needs the agent's plan.
+    fileObservation(session, "plan", {
+      summary: `System run plan (${session.taskScope} task): capability-planned execution for: ${opts.userRequest.trim().slice(0, 300)}`,
+      by: "system",
+      detail: { taskScope: session.taskScope, systemPlanned: true },
+    });
   }
   return session;
 }
@@ -571,6 +585,35 @@ export function noteMutationReadBack(
       detail: ok
         ? { readBackVerified: true, contentMatches: check.contentMatches }
         : { readBackVerified: false, passed: false, reason: `Read-back of ${check.path} did not confirm the edit` },
+    });
+  } catch {
+    // Never break the run.
+  }
+}
+
+/**
+ * Record the static-lane artifact check as TEST evidence. The command
+ * checks (test.run / build.run / typecheck.run / lint.run) execute on the
+ * host and are Gate-1 blocked in static workspaces, so the check that can
+ * actually run there is the read-back verification the loop already
+ * performs: the written file is re-read from the workspace and its bytes
+ * compared against what the run wrote. Only a verified match is recorded —
+ * a mismatch files nothing here (the failed read-back is already recorded
+ * honestly by noteMutationReadBack), so TEST can never be satisfied by an
+ * unverified write. Callers gate this on the workspace being static.
+ */
+export function noteStaticArtifactCheck(
+  session: QualityLoopSession,
+  check: { path: string; contentMatches: boolean | null },
+): void {
+  try {
+    if (!session.mutationSeen) return;
+    if (check.contentMatches !== true) return;
+    fileObservation(session, "test", {
+      summary: `Static artifact check passed: ${check.path} was read back from the workspace and its content matches the written file.`,
+      artifacts: [check.path],
+      by: "system",
+      detail: { passed: true, executedChecks: true, via: "static-readback" },
     });
   } catch {
     // Never break the run.

@@ -53,6 +53,7 @@ import {
   noteDeployment,
   noteToolResult,
   noteMutationReadBack,
+  noteStaticArtifactCheck,
   runQualityInspection,
   snapshotQualityLoopSession,
   startQualityLoopSession,
@@ -676,6 +677,7 @@ async function verifyMutationReadBack(
   toolId: string,
   inputs: Record<string, unknown> | undefined,
   mutated: boolean,
+  isStaticWorkspace?: boolean,
 ): Promise<void> {
   if (!mutated || !inputs) return;
   if (toolId !== "files.write" && toolId !== "files.patch" && toolId !== "apply_patch") return;
@@ -698,6 +700,11 @@ async function verifyMutationReadBack(
     contentMatches = replaces.length > 0 ? replaces.every((r) => content.includes(r)) : null;
   }
   noteMutationReadBack(session, { path, readable: true, contentMatches });
+  // Static workspaces cannot run the command checks (Gate 1): the verified
+  // read-back IS the executed check there, and it is the only one recorded.
+  if (isStaticWorkspace && toolId === "files.write") {
+    noteStaticArtifactCheck(session, { path, contentMatches });
+  }
 }
 
 /**
@@ -1660,7 +1667,7 @@ async function runAgentLoopV2Inner(
           { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
           transport.workspaceId,
         );
-        await verifyMutationReadBack(qualitySession, transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly);
+        await verifyMutationReadBack(qualitySession, transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly, cfg.isStaticWorkspace);
       }
 
       localProgress.emit({
@@ -2075,6 +2082,8 @@ export interface DeferredToolBatchContext {
   conversationId?: string;
   /** Parent ActionRun for server-side ActionExecutionContext propagation. */
   actionRunId?: string;
+  /** Static workspace (no host execution) — gates static read-back TEST evidence. */
+  isStaticWorkspace?: boolean;
   /** Full trusted context propagated to ToolRegistry.execute. */
   actionContext?: ActionExecutionContext;
 }
@@ -2297,7 +2306,7 @@ export async function executeDeferredToolCalls(
         { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
         ctx.transport.workspaceId,
       );
-      await verifyMutationReadBack(ctx.qualitySession, ctx.transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly);
+      await verifyMutationReadBack(ctx.qualitySession, ctx.transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly, ctx.isStaticWorkspace);
     }
 
     ctx.localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: result.success, summary, durationMs: 0 });
@@ -2592,7 +2601,7 @@ async function resumeAgentLoopV2Inner(
         { success: result.success, result: result.result, mutating: !resumedReadOnly, summary },
         transport.workspaceId,
       );
-      await verifyMutationReadBack(qualitySession, transport, resume.toolId, resume.inputs, result.success && !resumedReadOnly);
+      await verifyMutationReadBack(qualitySession, transport, resume.toolId, resume.inputs, result.success && !resumedReadOnly, cfg.isStaticWorkspace);
     }
 
     localProgress.emit({
@@ -2675,6 +2684,7 @@ async function resumeAgentLoopV2Inner(
       conversationId: cfg.conversationId,
       actionRunId: cfg.actionRunId,
       actionContext: actionContextFrom(cfg),
+      isStaticWorkspace: cfg.isStaticWorkspace,
     });
     hasInterveningMutation = deferredState.hasInterveningMutation;
     cancelled = deferredState.cancelled;
@@ -3029,7 +3039,7 @@ async function resumeAgentLoopV2Inner(
           { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
           transport.workspaceId,
         );
-        await verifyMutationReadBack(qualitySession, transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly);
+        await verifyMutationReadBack(qualitySession, transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly, cfg.isStaticWorkspace);
       }
 
       localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: result.success, summary, durationMs: 0 });
