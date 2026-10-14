@@ -383,16 +383,85 @@ async function post() {
   die(`unknown --kind ${kind || "(missing)"}`);
 }
 
+async function createPackCharge() {
+  const clerk = arg("--clerk");
+  const amount = Number(arg("--amount") || "1000");
+  const coins = arg("--coins") || "4000";
+  if (!clerk || !Number.isFinite(amount) || amount < 1) {
+    die("create-pack-charge requires --clerk and --amount");
+  }
+  const customer = await stripe.customers.create({
+    email: `${clerk}@example.com`,
+    metadata: { clerk_id: clerk, e2e: "stripe-webhook" },
+  });
+  if (customer.livemode) die("refusing a live-mode customer");
+  const paymentMethod = await stripe.paymentMethods.create({
+    type: "card",
+    card: { token: "tok_visa" },
+  });
+  await stripe.paymentMethods.attach(paymentMethod.id, { customer: customer.id });
+  const intent = await stripe.paymentIntents.create({
+    amount,
+    currency: "usd",
+    customer: customer.id,
+    payment_method: paymentMethod.id,
+    confirm: true,
+    off_session: true,
+    metadata: {
+      clerk_id: clerk,
+      product_type: "credit_pack",
+      coin_amount: String(coins),
+    },
+  });
+  if (intent.livemode) die("refusing a live-mode payment");
+  if (intent.status !== "succeeded") {
+    die(`payment intent ${intent.id} status ${intent.status}`);
+  }
+  const chargeId =
+    typeof intent.latest_charge === "string"
+      ? intent.latest_charge
+      : intent.latest_charge?.id || "";
+  if (!chargeId) die("payment intent has no charge");
+  emit("CUSTOMER", customer.id);
+  emit("PAYMENT_INTENT", intent.id);
+  emit("CHARGE", chargeId);
+}
+
+async function refundPart() {
+  const charge = arg("--charge");
+  const amount = Number(arg("--amount") || "");
+  if (!charge || !Number.isFinite(amount) || amount < 1) {
+    die("refund-part requires --charge and --amount");
+  }
+  const refund = await stripe.refunds.create({ charge, amount });
+  if (refund.livemode) die("refusing a live-mode refund");
+  emit("REFUND", refund.id);
+  emit("CHARGE", charge);
+  const event = await findEvent(
+    "charge.refunded",
+    (candidate) => {
+      const object = candidate.data?.object;
+      if (!object || object.id !== charge) return false;
+      const ids = (object.refunds?.data || []).map((item) => item.id);
+      return ids.includes(refund.id);
+    },
+    45000,
+  );
+  emit("REFUND_EVENT", event?.id || "");
+}
+
 const command = process.argv[2] || "";
 const commands = {
   "ensure-prices": ensurePrices,
   subscribe,
   cancel,
   post,
+  "create-pack-charge": createPackCharge,
+  "refund-part": refundPart,
 };
 
 if (!commands[command]) {
-  die("usage: ensure-prices | subscribe | cancel | post");
+  die("usage: ensure-prices | subscribe | cancel | post | create-pack-charge | refund-part");
 }
 
 commands[command]().catch((err) => {

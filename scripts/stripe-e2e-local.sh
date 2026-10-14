@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# Run the eight Stripe webhook scenarios against local Supabase in test mode.
+# Run the Stripe webhook scenarios against local Supabase in test mode.
+# Scenarios 1-8 are the original billing flows. Scenario 9 covers partial
+# refunds (one idempotency key per refund id, plus a replay). Scenario 10
+# resends an older invoice.paid after cancellation and checks the status
+# stays canceled. A missing admin database client cannot be exercised here
+# without dropping the local database; that case is a unit test.
 #
 # Prerequisites on the machine where you run this (not CI):
 #   Docker, the Supabase CLI, the Stripe CLI, psql, Node 22, pnpm install
@@ -48,7 +53,9 @@ PRO_CLERK="${RUN_ID}_pro"
 FAIL_CLERK="${RUN_ID}_fail"
 CANCEL_CLERK="${RUN_ID}_cancel"
 GRANTFAIL_CLERK="${RUN_ID}_grantfail"
+REFUND_CLERK="${RUN_ID}_refund"
 MISSING_CLERK="${RUN_ID}_missing"
+CANCEL_PAID_EVENT=""
 
 declare -a RESULTS=()
 
@@ -139,7 +146,7 @@ load_supabase_env() {
 
 insert_users() {
   local clerk email
-  for clerk in "$CREATOR_CLERK" "$PRO_CLERK" "$FAIL_CLERK" "$CANCEL_CLERK" "$GRANTFAIL_CLERK"; do
+  for clerk in "$CREATOR_CLERK" "$PRO_CLERK" "$FAIL_CLERK" "$CANCEL_CLERK" "$GRANTFAIL_CLERK" "$REFUND_CLERK"; do
     assert_safe_id "$clerk"
     email="${clerk}@example.com"
     psql_q -v clerk="$clerk" -v email="$email" <<'SQL'
@@ -261,6 +268,10 @@ clear_kv() {
   HTTP_STATUS=""
   EVENT_ID=""
   STATUS=""
+  CHARGE=""
+  REFUND=""
+  REFUND_EVENT=""
+  PAYMENT_INTENT=""
 }
 
 run_driver() {
@@ -288,6 +299,10 @@ run_driver() {
       CREATOR_PRICE) CREATOR_PRICE="$val" ;;
       PRO_PRICE) PRO_PRICE="$val" ;;
       STATUS) STATUS="$val" ;;
+      CHARGE) CHARGE="$val" ;;
+      REFUND) REFUND="$val" ;;
+      REFUND_EVENT) REFUND_EVENT="$val" ;;
+      PAYMENT_INTENT) PAYMENT_INTENT="$val" ;;
     esac
   done <"$out"
 }
@@ -647,6 +662,7 @@ scenario_cancel() {
   fi
   show_user "cancellation" "$CANCEL_CLERK"
   show_events "$deleted"
+  CANCEL_PAID_EVENT="$paid"
   local status
   status="$(sub_field "$CANCEL_CLERK" status)"
   if [[ "$http" == "200" && "$status" == "canceled" ]]; then
@@ -781,6 +797,109 @@ END;
 $$;
 SQL
   GRANT_BROKEN=1
+}
+
+debit_keys() {
+  local clerk="$1"
+  assert_safe_id "$clerk"
+  psql_q -tA -v clerk="$clerk" <<'SQL'
+SELECT cl.amount || ' ' || cl.idempotency_key
+FROM public.credit_ledger cl
+JOIN public.users u ON u.id = cl.user_id
+WHERE u.clerk_id = :'clerk' AND cl.direction = 'debit'
+ORDER BY cl.idempotency_key;
+SQL
+}
+
+scenario_partial_refunds() {
+  say "scenario 9: partial refunds debit per refund id, and a replay does not debit again"
+  assert_safe_id "$REFUND_CLERK"
+  psql_q -v clerk="$REFUND_CLERK" <<'SQL'
+INSERT INTO public.credit_ledger (
+  user_id, amount, direction, category, balance_bucket, description, idempotency_key
+)
+SELECT u.id, 4000, 'credit', 'purchase', 'purchased',
+       'e2e refund balance', 'e2e_refund_seed_' || u.clerk_id
+FROM public.users u
+WHERE u.clerk_id = :'clerk'
+ON CONFLICT (idempotency_key) DO NOTHING;
+SQL
+  if ! run_driver create-pack-charge --clerk "$REFUND_CLERK" --amount 1000 --coins 4000; then
+    record "9" "FAIL" "driver" "credit-pack charge was not created"
+    return 0
+  fi
+  local charge="$CHARGE"
+  if ! run_driver refund-part --charge "$charge" --amount 250; then
+    record "9" "FAIL" "driver" "first partial refund failed"
+    return 0
+  fi
+  local refund_a="$REFUND" event_a="$REFUND_EVENT" http_a="missing"
+  if [[ -n "$event_a" ]]; then
+    http_a="$(wait_new_http "$event_a" 0 90)"
+    print_listen_lines "$event_a"
+  fi
+  if ! run_driver refund-part --charge "$charge" --amount 500; then
+    record "9" "FAIL" "driver" "second partial refund failed"
+    return 0
+  fi
+  local refund_b="$REFUND" event_b="$REFUND_EVENT" http_b="missing"
+  if [[ -n "$event_b" ]]; then
+    http_b="$(wait_new_http "$event_b" 0 90)"
+    print_listen_lines "$event_b"
+  fi
+  local baseline replay_http="n/a"
+  if [[ -n "$event_a" ]]; then
+    baseline="$(hit_count "$event_a")"
+    resend_event "$event_a" || true
+    replay_http="$(wait_new_http "$event_a" "$baseline" 60)"
+  fi
+  show_user "partial refunds" "$REFUND_CLERK"
+  echo "----- debit keys -----"
+  debit_keys "$REFUND_CLERK"
+  assert_safe_id "$refund_a"
+  assert_safe_id "$refund_b"
+  local debits key_a key_b
+  debits="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${REFUND_CLERK}' AND cl.direction = 'debit';")"
+  key_a="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${REFUND_CLERK}' AND cl.idempotency_key LIKE 'refund_${refund_a}:%';")"
+  key_b="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${REFUND_CLERK}' AND cl.idempotency_key LIKE 'refund_${refund_b}:%';")"
+  if [[ "$http_a" == "200" && "$http_b" == "200" && "$replay_http" == "200" && "$debits" == "2" && "$key_a" == "1" && "$key_b" == "1" ]]; then
+    record "9" "PASS" "a=${http_a} b=${http_b} replay=${replay_http}" "debits=${debits} keys=${refund_a},${refund_b}"
+  else
+    record "9" "FAIL" "a=${http_a} b=${http_b} replay=${replay_http}" "debits=${debits} key_a=${key_a} key_b=${key_b}"
+  fi
+}
+
+scenario_late_invoice() {
+  say "scenario 10: a delayed invoice.paid does not reactivate a canceled subscription"
+  if [[ -z "$CANCEL_PAID_EVENT" ]]; then
+    record "10" "FAIL" "n/a" "scenario 5 did not record an invoice.paid event"
+    return 0
+  fi
+  assert_safe_id "$CANCEL_PAID_EVENT"
+  local before
+  before="$(ledger_count "$CANCEL_CLERK")"
+  psql_q -v event="$CANCEL_PAID_EVENT" <<'SQL'
+DELETE FROM public.stripe_events WHERE stripe_event_id = :'event';
+SQL
+  local still
+  still="$(sql_value "SELECT COUNT(*) FROM public.stripe_events WHERE stripe_event_id = '${CANCEL_PAID_EVENT}';")"
+  echo "stripe_events rows before resend=${still}"
+  local baseline http
+  baseline="$(hit_count "$CANCEL_PAID_EVENT")"
+  resend_event "$CANCEL_PAID_EVENT" || true
+  http="$(wait_new_http "$CANCEL_PAID_EVENT" "$baseline" 70)"
+  print_listen_lines "$CANCEL_PAID_EVENT"
+  app_notes "$CANCEL_PAID_EVENT"
+  show_user "late invoice.paid" "$CANCEL_CLERK"
+  show_events "$CANCEL_PAID_EVENT"
+  local after status
+  after="$(ledger_count "$CANCEL_CLERK")"
+  status="$(sub_field "$CANCEL_CLERK" status)"
+  if [[ "$still" == "0" && "$http" == "200" && "$status" == "canceled" && "$before" == "$after" ]]; then
+    record "10" "PASS" "$http" "status=${status} ledger_rows=${after}"
+  else
+    record "10" "FAIL" "$http" "status=${status} before=${before} after=${after} event_cleared=${still}"
+  fi
 }
 
 scenario_failed_grants() {
@@ -920,6 +1039,8 @@ main() {
   scenario_cancel
   scenario_signatures
   scenario_race
+  scenario_partial_refunds
+  scenario_late_invoice
   scenario_failed_grants
 
   print_summary

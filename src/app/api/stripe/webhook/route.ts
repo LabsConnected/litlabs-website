@@ -141,18 +141,101 @@ function requireSubscriptionGrantPlan(
 }
 
 /**
- * Agent purchase and agent refund RPCs insert stripe_events themselves.
- * Pre-claiming those events makes the RPC see a conflict and skip the
- * fulfillment. Every other event is claimed here, before side effects.
+ * Statuses a late invoice.paid must not overwrite with "active".
+ * `refunded` is local-only (plan refunds); the others match Stripe.
  */
-function eventClaimsItself(event: Stripe.Event): boolean {
+const TERMINAL_SUBSCRIPTION_STATUSES = new Set([
+  "canceled",
+  "past_due",
+  "unpaid",
+  "incomplete_expired",
+  "refunded",
+]);
+
+/** Live Stripe statuses that mean "do not mark this subscription active". */
+const LIVE_NON_ACTIVE_STATUSES = new Set([
+  "canceled",
+  "past_due",
+  "unpaid",
+  "incomplete",
+  "incomplete_expired",
+  "paused",
+]);
+
+function eventCreatedMs(event: Stripe.Event): number {
+  return typeof event.created === "number" && event.created > 0
+    ? event.created * 1000
+    : Date.now();
+}
+
+function eventTimestamp(event: Stripe.Event): string {
+  return new Date(eventCreatedMs(event)).toISOString();
+}
+
+/**
+ * The refund this charge.refunded delivery is about.
+ * Use the event payload, not a live refund list: a later partial refund
+ * must not be attributed to an older event. Newest `created` in the
+ * payload is the refund Stripe had just applied when it emitted the event.
+ */
+function specificRefund(
+  charge: Stripe.Charge,
+): { id: string; amount: number } | null {
+  const refunds = charge.refunds?.data ?? [];
+  if (refunds.length === 0) return null;
+  const latest = refunds.reduce((best, refund) =>
+    (refund.created ?? 0) >= (best.created ?? 0) ? refund : best,
+  );
+  if (!latest.id || typeof latest.amount !== "number" || latest.amount <= 0) {
+    return null;
+  }
+  return { id: latest.id, amount: latest.amount };
+}
+
+function proratedRefundDebit(
+  refundAmount: number,
+  chargeAmount: number,
+  credits: number,
+): number {
+  if (chargeAmount <= 0 || refundAmount <= 0 || credits <= 0) return 0;
+  return Math.round((refundAmount / chargeAmount) * credits);
+}
+
+/**
+ * Agent purchase and agent-refund RPCs insert stripe_events themselves.
+ * Pre-claiming those events makes the RPC see a conflict and skip the
+ * fulfillment. Credit-pack and plan refunds do not have that RPC, so they
+ * use the webhook claim. A charge.refunded with no agent metadata still
+ * counts as an agent refund when a marketplace order owns the payment.
+ */
+async function eventClaimsItself(
+  sb: AdminClient | null,
+  event: Stripe.Event,
+): Promise<boolean> {
   if (event.type === "checkout.session.completed") {
     const meta =
       (event.data.object as Stripe.Checkout.Session).metadata || {};
     return meta.product_type === "agent";
   }
-  if (event.type === "charge.refunded") return true;
-  return false;
+  if (event.type !== "charge.refunded") return false;
+  const charge = event.data.object as Stripe.Charge;
+  if (charge.metadata?.product_type === "agent") return true;
+  const paymentIntentId =
+    typeof charge.payment_intent === "string"
+      ? charge.payment_intent
+      : charge.payment_intent?.id;
+  if (!sb || !paymentIntentId) return false;
+  const { data, error } = await sb
+    .from("marketplace_orders")
+    .select("id")
+    .eq("stripe_payment_intent_id", paymentIntentId)
+    .maybeSingle();
+  if (error) {
+    throw new Error(
+      `[stripe] charge.refunded ${charge.id}: agent-order lookup failed: ${error.message}`,
+    );
+  }
+  return !!data;
 }
 
 async function isEventProcessed(sb: AdminClient, eventId: string): Promise<boolean> {
@@ -379,10 +462,11 @@ export async function POST(req: NextRequest) {
   }
 
   const sb = isAdminSupabaseConfigured() ? getAdminSupabase() : null;
-  const selfClaim = eventClaimsItself(event);
+  let selfClaim = false;
   let ownedClaim = false;
 
   try {
+    selfClaim = await eventClaimsItself(sb, event);
     if (sb && !selfClaim) {
       const claim = await claimStripeEvent(sb, event.id, event.type);
       if (claim === "duplicate") {
@@ -688,7 +772,7 @@ export async function POST(req: NextRequest) {
           .from("subscriptions")
           .update({
             status: "canceled",
-            updated_at: new Date().toISOString(),
+            updated_at: eventTimestamp(event),
           })
           .eq("user_id", delMatch.user_id);
         if (cancelError) {
@@ -700,7 +784,11 @@ export async function POST(req: NextRequest) {
       }
 
       case "invoice.paid": {
-        if (!sb) break;
+        if (!sb) {
+          throw new Error(
+            `[stripe] invoice.paid ${event.id}: admin supabase is not configured`,
+          );
+        }
         const inv = event.data.object as Stripe.Invoice;
         const invSubId = inv.parent?.subscription_details?.subscription;
         if (typeof invSubId !== "string" || !invSubId) {
@@ -719,11 +807,16 @@ export async function POST(req: NextRequest) {
         // + Stripe API fallback (hard 8s timeout above) + DB ops ≈ 20s max.
         // Stays under Stripe's 30s webhook timeout even if every
         // dependency is slow.
-        let invMatch: { user_id: string; plan: string } | null = null;
+        let invMatch: {
+          user_id: string;
+          plan: string;
+          status?: string | null;
+          updated_at?: string | null;
+        } | null = null;
         for (let attempt = 0; attempt < 6; attempt++) {
           const { data, error: lookupError } = await sb
             .from("subscriptions")
-            .select("user_id, plan")
+            .select("user_id, plan, status, updated_at")
             .eq("stripe_subscription_id", invSubId)
             .single();
           if (lookupError && !isMissingRow(lookupError)) {
@@ -808,7 +901,12 @@ export async function POST(req: NextRequest) {
                     `[stripe] invoice.paid ${event.id}: fallback upsert failed: ${fallbackUpsertError.message}`,
                   );
                 }
-                invMatch = { user_id: u.id, plan: planId };
+                invMatch = {
+                  user_id: u.id,
+                  plan: planId,
+                  status: fullSub.status,
+                  updated_at: eventTimestamp(event),
+                };
               }
             }
           } catch (fallbackErr) {
@@ -826,18 +924,51 @@ export async function POST(req: NextRequest) {
             `[stripe] invoice.paid ${event.id}: no subscription row for ${invSubId} after retries+fallback`,
           );
         }
-        // Status update is checked: a silent failure here would leave the
-        // subscription row stale. Throw → 500 → Stripe retries (idempotent).
-        const { error: statusUpdateError } = await sb
-          .from("subscriptions")
-          .update({
-            status: "active",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("user_id", invMatch.user_id);
-        if (statusUpdateError) {
+        // A late invoice.paid must not revive a newer canceled or past_due
+        // row. Compare this event's created time with the timestamp stored
+        // by the newer status write, and re-read the subscription from
+        // Stripe so a canceled/past_due object is never forced to active.
+        // A failed re-read is 500: guessing "active" is the bug.
+        const storedMs = invMatch.updated_at
+          ? Date.parse(invMatch.updated_at)
+          : Number.NaN;
+        const newerTerminalStatus =
+          !!invMatch.status &&
+          TERMINAL_SUBSCRIPTION_STATUSES.has(invMatch.status) &&
+          Number.isFinite(storedMs) &&
+          storedMs > eventCreatedMs(event);
+        let liveStatus = "";
+        try {
+          const liveSub = await stripe.subscriptions.retrieve(
+            invSubId,
+            undefined,
+            { timeout: 8000 },
+          );
+          liveStatus = liveSub.status ?? "";
+        } catch (statusErr) {
+          const message =
+            statusErr instanceof Error ? statusErr.message : "unknown error";
           throw new Error(
-            `[stripe] invoice.paid ${event.id}: status update failed: ${statusUpdateError.message}`,
+            `[stripe] invoice.paid ${event.id}: subscription status re-read failed: ${message}`,
+          );
+        }
+        const liveBlocksActive = LIVE_NON_ACTIVE_STATUSES.has(liveStatus);
+        if (!newerTerminalStatus && !liveBlocksActive) {
+          const { error: statusUpdateError } = await sb
+            .from("subscriptions")
+            .update({
+              status: "active",
+              updated_at: eventTimestamp(event),
+            })
+            .eq("user_id", invMatch.user_id);
+          if (statusUpdateError) {
+            throw new Error(
+              `[stripe] invoice.paid ${event.id}: status update failed: ${statusUpdateError.message}`,
+            );
+          }
+        } else {
+          console.warn(
+            `[stripe] invoice.paid ${event.id}: leaving status ${invMatch.status ?? "unknown"} (live ${liveStatus || "unknown"})`,
           );
         }
         // Invoice payment is the only source of subscription grants. This
@@ -893,7 +1024,7 @@ export async function POST(req: NextRequest) {
           .from("subscriptions")
           .update({
             status: "past_due",
-            updated_at: new Date().toISOString(),
+            updated_at: eventTimestamp(event),
           })
           .eq("user_id", failMatch.user_id);
         if (pastDueError) {
@@ -905,7 +1036,11 @@ export async function POST(req: NextRequest) {
       }
 
       case "charge.refunded": {
-        if (!sb) break;
+        if (!sb) {
+          throw new Error(
+            `[stripe] charge.refunded ${event.id}: admin supabase is not configured`,
+          );
+        }
         const charge = event.data.object as Stripe.Charge;
         const refundMeta = charge.metadata || {};
         const refundProductType = refundMeta.product_type;
@@ -993,8 +1128,16 @@ export async function POST(req: NextRequest) {
             // a prorated amount of the monthly credit grant based on the
             // fraction of the charge that was refunded.
             if (plan.billingType === "subscription" && plan.monthlyCredits > 0 && charge.amount > 0) {
-              const debitBits = Math.round(
-                (charge.amount_refunded / charge.amount) * plan.monthlyCredits,
+              const refund = specificRefund(charge);
+              if (!refund) {
+                throw new Error(
+                  `[stripe] charge.refunded ${charge.id}: missing refund id; refusing a charge-level idempotency key`,
+                );
+              }
+              const debitBits = proratedRefundDebit(
+                refund.amount,
+                charge.amount,
+                plan.monthlyCredits,
               );
               if (debitBits > 0) {
                 await debitCreditsOrThrow(
@@ -1003,10 +1146,10 @@ export async function POST(req: NextRequest) {
                     p_user_id: refundUser.id,
                     p_amount: debitBits,
                     p_category: "refund",
-                    p_description: `Refund for charge ${charge.id}`,
-                    p_idempotency_key: `refund_${charge.id}`,
+                    p_description: `Refund ${refund.id} for charge ${charge.id}`,
+                    p_idempotency_key: `refund_${refund.id}`,
                   },
-                  `plan refund ${charge.id}`,
+                  `plan refund ${refund.id}`,
                 );
               }
             }
@@ -1034,8 +1177,16 @@ export async function POST(req: NextRequest) {
             ? parseInt(refundMeta.coin_amount, 10)
             : NaN;
           if (coinAmount > 0 && charge.amount > 0) {
-            const debitBits = Math.round(
-              (charge.amount_refunded / charge.amount) * coinAmount,
+            const refund = specificRefund(charge);
+            if (!refund) {
+              throw new Error(
+                `[stripe] charge.refunded ${charge.id}: missing refund id; refusing a charge-level idempotency key`,
+              );
+            }
+            const debitBits = proratedRefundDebit(
+              refund.amount,
+              charge.amount,
+              coinAmount,
             );
             if (debitBits > 0) {
               await debitCreditsOrThrow(
@@ -1044,10 +1195,10 @@ export async function POST(req: NextRequest) {
                   p_user_id: refundUser.id,
                   p_amount: debitBits,
                   p_category: "refund",
-                  p_description: `Refund for charge ${charge.id}`,
-                  p_idempotency_key: `refund_${charge.id}`,
+                  p_description: `Refund ${refund.id} for charge ${charge.id}`,
+                  p_idempotency_key: `refund_${refund.id}`,
                 },
-                `credit pack refund ${charge.id}`,
+                `credit pack refund ${refund.id}`,
               );
             }
           }

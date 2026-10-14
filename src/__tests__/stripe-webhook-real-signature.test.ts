@@ -130,7 +130,7 @@ beforeEach(() => {
   process.env.STRIPE_SECRET_KEY = "sk_test_dummy_not_real";
   process.env.STRIPE_WEBHOOK_SECRET = SECRET;
   retrieveMock.mockReset();
-  retrieveMock.mockRejectedValue(new Error("Stripe network disabled in unit tests"));
+  retrieveMock.mockResolvedValue({ status: "active" });
   vi.mocked(isAdminSupabaseConfigured).mockReset();
   vi.mocked(getAdminSupabase).mockReset();
 });
@@ -149,7 +149,7 @@ describe("signature", () => {
     const r = await POST(signed(invoicePaid()));
     expect(r.status).toBe(200);
     expect(total(db.ledger)).toBe(7500);
-    expect(retrieveMock).not.toHaveBeenCalled();
+    expect(retrieveMock).toHaveBeenCalledTimes(1);
   });
 });
 describe("plan amounts", () => {
@@ -246,10 +246,11 @@ describe("race retry budget", () => {
     expect(r.status).toBe(200);
     expect(db.subLookups).toBe(4);
     expect(total(db.ledger)).toBe(7500);
-    expect(retrieveMock).not.toHaveBeenCalled();
+    expect(retrieveMock).toHaveBeenCalledTimes(1);
   });
   it("row never appears -> 6 lookups, exactly 5 x 2s sleeps (10s), then 500", async () => {
     vi.useFakeTimers();
+    retrieveMock.mockRejectedValue(new Error("Stripe network disabled in unit tests"));
     const { db } = fakeDb({});
     const spy = vi.spyOn(globalThis, "setTimeout");
     const p = POST(signed(invoicePaid()));
