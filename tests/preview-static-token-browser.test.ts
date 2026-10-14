@@ -158,6 +158,76 @@ it("runs async scripts (no ordering contract) and resolves module-graph imports 
   await context.close();
 }, 20000);
 
+it("confines the bearer to the minted asset manifest (the Codex 9da01ed0 P1)", async () => {
+  files = {
+    "index.html": '<!doctype html><html><head><script type="module" src="main.js"></script></head><body><h1>Manifest</h1><a id="to-page2" href="page2.html">Page 2</a></body></html>',
+    "main.js": 'import "./dep.js"; window.__mainRan = true;',
+    "dep.js": 'document.querySelector("h1").dataset.dep = "loaded";',
+    "page2.html": '<!doctype html><html><head><script src="page2.js"></script></head><body><h1>Page 2</h1></body></html>',
+    "page2.js": 'document.querySelector("h1").dataset.p2 = "yes";',
+    "secret.txt": "WORKSPACE-SECRET-MARKER",
+    "QUALITY_LOG.md": "# quality-log-marker",
+    "other.js": "window.__otherRan = true;",
+  };
+  const { context, frame, pageErrors } = await openPreview();
+  // Positive control: the module closure inside the manifest loads and runs.
+  expect(await frame.locator("h1").getAttribute("data-dep")).toBe("loaded");
+
+  // The preview document itself — untrusted code holding the real bearer in
+  // its own script URLs — tries to read workspace files outside the
+  // manifest. Every attempt must be refused; only manifest assets load.
+  const attacks = await frame.evaluate(async () => {
+    const src = document.querySelector('script[src*="/t/"]')!.getAttribute("src")!;
+    const base = src.slice(0, src.lastIndexOf("/") + 1);
+    const probe = async (path: string) => {
+      try {
+        const response = await fetch(base + path);
+        return { status: response.status, body: await response.text() };
+      } catch {
+        // A response without CORS approval (e.g. the tokenless 401 the
+        // traversal probe resolves to) surfaces as a rejected fetch —
+        // status 0 here still proves nothing was readable.
+        return { status: 0, body: "" };
+      }
+    };
+    return {
+      allowed: await probe("main.js"),
+      secret: await probe("secret.txt"),
+      log: await probe("QUALITY_LOG.md"),
+      unreferenced: await probe("other.js"),
+      traversal: await probe("../secret.txt"),
+      tokenBase: base,
+    };
+  });
+  expect(attacks.allowed.status).toBe(200);
+  expect(attacks.secret.status).toBe(403);
+  expect(attacks.secret.body).not.toContain("WORKSPACE-SECRET-MARKER");
+  expect(attacks.log.status).toBe(403);
+  expect(attacks.log.body).not.toContain("quality-log-marker");
+  expect(attacks.unreferenced.status).toBe(403);
+  expect(attacks.traversal.status).not.toBe(200);
+  expect(attacks.traversal.body).not.toContain("WORKSPACE-SECRET-MARKER");
+
+  // CORS narrowing: a foreign origin reading a token-mode response gets
+  // ACAO for the opaque origin only ("null"), never "*" and never its own
+  // origin reflected back.
+  const foreign = await realFetch(new URL(`${attacks.tokenBase}main.js`, origin), {
+    headers: { Origin: "https://evil.example" },
+  });
+  expect(foreign.headers.get("access-control-allow-origin")).toBe("null");
+
+  // NOTE: in-frame navigation to the linked page2 document is covered
+  // deterministically at route level (session mint → token-mode GET of
+  // page2.html and page2.js, in route.test.ts): the fixture harness's
+  // navigation path intermittently trips a Next/vitest AsyncLocalStorage
+  // invariant in this environment (the same failure Codex's independent
+  // harness hit), which would make this suite report infrastructure noise
+  // instead of product signal. The browser-level facts — the closure
+  // executes, the bearer is confined, CORS is narrowed — are proven above.
+  expect(pageErrors).toEqual([]);
+  await context.close();
+}, 20000);
+
 it("rejects unauthorized asset requests: no token, tampered token, wrong-project token", async () => {
   files = { "app.js": 'window.__ok = true;' };
   const bare = await realFetch(`${origin}/api/preview/owned-project/app.js`);

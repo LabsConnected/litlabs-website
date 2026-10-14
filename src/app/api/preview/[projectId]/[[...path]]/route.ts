@@ -4,6 +4,7 @@ import { getProject } from "@/lib/projects/project-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { requireTerminalBaseUrl } from "@/lib/terminal-config";
 import { prepareStaticPreviewDocument } from "@/lib/projects/static-preview-document";
+import { collectPreviewAssetManifest } from "@/lib/projects/preview-asset-manifest";
 import { createPreviewToken, verifyPreviewToken } from "@/lib/projects/preview-token";
 
 /**
@@ -20,6 +21,15 @@ import { createPreviewToken, verifyPreviewToken } from "@/lib/projects/preview-t
  *   still enforced server-side on every request. Session-authenticated
  *   requests behave exactly as before; the token reading applies only when
  *   no session exists.
+ * - MANIFEST SCOPE (security correction after Codex's FAIL on 9da01ed0):
+ *   the token also carries a signed asset manifest — the entry document,
+ *   its scripts, their import closure, and linked HTML documents, computed
+ *   server-side at mint time (preview-asset-manifest.ts). A token-mode
+ *   request for ANY path outside the manifest is refused (403) before any
+ *   workspace read happens, so the bearer — visible to the untrusted
+ *   preview document by construction — can never read arbitrary workspace
+ *   files (logs, notes, unreferenced sources). A token without a manifest
+ *   authorizes nothing.
  * - Path traversal rejected (no `..`, no absolute paths, no empty segments
  *   except the implicit directory → index.html mapping).
  * - Content-Security-Policy `sandbox` puts user content in an opaque origin:
@@ -119,6 +129,7 @@ export async function GET(
   let userId: string | null = null;
   let presentedToken: string | null = null;
   let tokenWorkspaceId: string | null = null;
+  let tokenAssets: string[] | null = null;
   const { userId: sessionUserId } = await auth(_req);
   if (sessionUserId) {
     userId = sessionUserId;
@@ -131,6 +142,7 @@ export async function GET(
       userId = claims.userId;
       presentedToken = segments[1];
       tokenWorkspaceId = claims.workspaceId;
+      tokenAssets = claims.assets;
     } catch {
       return NextResponse.json({ error: "Invalid or expired preview token" }, { status: 401 });
     }
@@ -159,6 +171,27 @@ export async function GET(
 
   // Directory or empty path → index.html (static-site convention).
   const filePath = fileSegments.length === 0 ? "index.html" : fileSegments.join("/");
+
+  // Manifest enforcement (token mode only): the capability authorizes
+  // exactly the signed asset set computed when it was minted — nothing
+  // else in the workspace. Refused BEFORE any workspace read, so a leaked
+  // or script-visible bearer cannot probe file existence either.
+  if (tokenAssets !== null && !tokenAssets.includes(filePath)) {
+    return NextResponse.json(
+      { error: "Preview token is not scoped to this asset" },
+      {
+        status: 403,
+        // Same CORS/cache posture as token-mode success responses, so the
+        // preview document observes a deterministic refusal rather than a
+        // network error.
+        headers: {
+          "Access-Control-Allow-Origin": "null",
+          "Vary": "Origin",
+          "Cache-Control": "no-store",
+        },
+      },
+    );
+  }
 
   let terminalBase: string;
   try {
@@ -213,30 +246,47 @@ export async function GET(
     ? new Uint8Array(Buffer.from(data.content, "base64"))
     : data.content;
 
+  // Shared owner-authorized text reader (stylesheets at transform time,
+  // manifest closure at mint time). Session/token identity was resolved
+  // above; the terminal token below carries the same binding server-side.
+  const readWorkspaceText = async (path: string): Promise<string | null> => {
+    const asset = await fetch(`${terminalBase}/ws-files/read`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}`, "X-Workspace-Id": project.workspaceId! },
+      body: JSON.stringify({ path, encoding: "utf-8" }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!asset.ok) return null;
+    const payload = await asset.json() as { content?: unknown };
+    return typeof payload.content === "string" ? payload.content : null;
+  };
+
+  let mintedTokenHtml = false;
   if (typeof body === "string" && mimeFor(filePath).startsWith("text/html")) {
     // Scripts stay external (native execution semantics) and load through a
     // token-authorized URL prefix; stylesheets are embedded by the transform.
-    // A document that itself arrived under a token re-uses that token; a
-    // session-authenticated document gets a freshly minted one.
-    const previewToken = presentedToken ?? createPreviewToken(userId, {
-      projectId,
-      workspaceId: project.workspaceId,
-    }).token;
+    // A document that itself arrived under a token re-uses that token (its
+    // signed manifest already covers this document and its closure — the
+    // crawl follows linked documents at mint time). A session-authenticated
+    // document gets a freshly minted token whose manifest is computed from
+    // the ORIGINAL document, before any URL rewriting.
+    let previewToken: string;
+    if (presentedToken) {
+      previewToken = presentedToken;
+    } else {
+      const manifest = await collectPreviewAssetManifest(filePath, body, readWorkspaceText);
+      previewToken = createPreviewToken(userId, {
+        projectId,
+        workspaceId: project.workspaceId,
+        assets: manifest,
+      }).token;
+      mintedTokenHtml = true;
+    }
     const assetBase = `/api/preview/${encodeURIComponent(projectId)}/t/${previewToken}/`;
-    body = await prepareStaticPreviewDocument(body, filePath, {
+    body = (await prepareStaticPreviewDocument(body, filePath, {
       assetBase,
-      readStylesheet: async (path) => {
-        const asset = await fetch(`${terminalBase}/ws-files/read`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}`, "X-Workspace-Id": project.workspaceId! },
-          body: JSON.stringify({ path, encoding: "utf-8" }),
-          signal: AbortSignal.timeout(15000),
-        });
-        if (!asset.ok) return null;
-        const payload = await asset.json() as { content?: unknown };
-        return typeof payload.content === "string" ? payload.content : null;
-      },
-    });
+      readStylesheet: readWorkspaceText,
+    })).html;
   }
 
   return new NextResponse(body, {
@@ -245,13 +295,26 @@ export async function GET(
       "Content-Type": mimeFor(filePath),
       ...PREVIEW_SECURITY_HEADERS,
       // Module scripts are fetched in CORS mode; from the opaque-origin
-      // iframe the Origin is "null", so token-authorized asset responses
-      // must opt into CORS explicitly. This is safe under the route's auth
-      // model: authorization is the capability token (or the session),
-      // never the origin, and no credential headers are ever echoed —
-      // Access-Control-Allow-Credentials stays unset, so a cross-origin
-      // page cannot read session-authenticated responses.
-      ...(presentedToken ? { "Access-Control-Allow-Origin": "*" } : {}),
+      // iframe the Origin is the serialized string "null". Token-mode
+      // responses therefore allow exactly that origin — NOT "*": a normal
+      // cross-origin page (which sends its real Origin) gets no readable
+      // response even if it somehow obtains a token URL, and no credential
+      // headers are ever echoed (Access-Control-Allow-Credentials stays
+      // unset, so session-authenticated responses are never readable
+      // cross-origin either). Authorization remains the token's signed
+      // manifest, never the origin; this only narrows who may READ a
+      // token-authorized asset response. Token-bearing responses are
+      // no-store so neither the token-embedding document nor the assets
+      // it authorizes persist in any cache.
+      ...(presentedToken
+        ? {
+            "Access-Control-Allow-Origin": "null",
+            "Vary": "Origin",
+            "Cache-Control": "no-store",
+          }
+        : mintedTokenHtml
+          ? { "Cache-Control": "no-store" }
+          : {}),
     },
   });
 }

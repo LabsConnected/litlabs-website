@@ -16,6 +16,17 @@ import { createHmac, timingSafeEqual } from "crypto";
  * so a preview token can never verify as a terminal token (or vice versa)
  * even though both token families share the same payload shape and the same
  * base secret. The audience claim is also checked on verify.
+ *
+ * ASSET MANIFEST (security correction after Codex's FAIL on 9da01ed0): the
+ * token also carries `ast`, the signed list of workspace paths this
+ * capability may read — the entry document, the scripts it references,
+ * their module/dynamic-import closure, and HTML documents linked from it,
+ * computed server-side when the token is minted (see
+ * preview-asset-manifest.ts). The preview route refuses any token-mode
+ * request for a path outside the manifest, so the bearer — which is
+ * necessarily visible to the untrusted preview document — can never be
+ * used to read arbitrary workspace files (logs, notes, unreferenced
+ * sources). A token minted without a manifest authorizes NOTHING.
  */
 
 const TOKEN_AUDIENCE = "littree-preview";
@@ -31,6 +42,7 @@ type PreviewTokenPayload = {
   exp: number;
   pid: string; // projectId (required: preview tokens are always project-bound)
   wid: string; // workspaceId (required)
+  ast: string[]; // asset manifest: exact workspace paths this token may read
 };
 
 function getPreviewSigningKey(): Buffer {
@@ -47,7 +59,7 @@ function sign(encodedPayload: string, key: Buffer): string {
 
 export function createPreviewToken(
   userId: string,
-  options: { projectId: string; workspaceId: string },
+  options: { projectId: string; workspaceId: string; assets?: string[] },
   ttlSeconds: number = TOKEN_TTL_SECONDS,
 ): CreatedPreviewToken {
   const now = Math.floor(Date.now() / 1000);
@@ -58,6 +70,9 @@ export function createPreviewToken(
     exp: now + ttlSeconds,
     pid: options.projectId,
     wid: options.workspaceId,
+    // Normalized inside the signature: deduplicated and sorted, so the
+    // manifest the route enforces is exactly the manifest that was signed.
+    ast: [...new Set(options.assets ?? [])].sort(),
   };
   const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const created = { expiresAt: payload.exp * 1000 } as CreatedPreviewToken;
@@ -69,6 +84,7 @@ export function verifyPreviewToken(token: string): {
   userId: string;
   projectId: string;
   workspaceId: string;
+  assets: string[];
   expiresAt: number;
 } {
   const [encodedPayload, signature] = token.split(".");
@@ -110,6 +126,12 @@ export function verifyPreviewToken(token: string): {
     userId: payload.sub,
     projectId: payload.pid,
     workspaceId: payload.wid,
+    // Fail closed: a token whose manifest is missing or malformed (e.g.
+    // minted before manifests existed) authorizes no asset reads at all.
+    assets:
+      Array.isArray(payload.ast) && payload.ast.every((entry) => typeof entry === "string")
+        ? payload.ast
+        : [],
     expiresAt: payload.exp * 1000,
   };
 }

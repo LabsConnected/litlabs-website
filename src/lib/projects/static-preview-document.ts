@@ -11,6 +11,46 @@ function assetPath(reference: string, entryPath: string, extension: RegExp): str
   } catch { return null; }
 }
 
+/** Script `type` values whose `src` the preview loads as a workspace script. */
+const SCRIPT_TYPES: Array<string | undefined> = [undefined, "", "text/javascript", "application/javascript", "module"];
+
+export type PreviewScriptAsset = { path: string; module: boolean };
+
+/**
+ * Scan a static HTML document for the workspace references the preview
+ * asset manifest must authorize: its scripts (with module flags) and the
+ * same-workspace HTML documents it links to (in-frame navigation targets).
+ * Uses exactly the transform's resolution and validation rules, so the
+ * manifest can never drift from what the transform rewrites. Exposed for
+ * preview-asset-manifest.ts; the transform itself walks the same rules
+ * while rewriting.
+ */
+export function scanPreviewDocument(
+  html: string,
+  documentPath: string,
+): { scripts: PreviewScriptAsset[]; linkedDocuments: string[] } {
+  const document = parse(html);
+  const scripts: PreviewScriptAsset[] = [];
+  const linkedDocuments: string[] = [];
+  const visit = (node: DefaultTreeAdapterTypes.Node): void => {
+    if (!("childNodes" in node)) return;
+    for (const child of node.childNodes) {
+      if (!("tagName" in child)) continue;
+      const attr = (name: string) => child.attrs.find((attribute) => attribute.name === name);
+      if (child.tagName === "script" && attr("src") && SCRIPT_TYPES.includes(attr("type")?.value)) {
+        const path = assetPath(attr("src")!.value, documentPath, /\.(?:js|mjs)$/i);
+        if (path) scripts.push({ path, module: attr("type")?.value === "module" });
+      } else if (child.tagName === "a" && attr("href")) {
+        const path = assetPath(attr("href")!.value, documentPath, /\.html?$/i);
+        if (path) linkedDocuments.push(path);
+      }
+      visit(child);
+    }
+  };
+  visit(document);
+  return { scripts, linkedDocuments };
+}
+
 /**
  * Prepare an owner's static HTML document for the sandboxed preview iframe.
  *
@@ -47,10 +87,11 @@ export async function prepareStaticPreviewDocument(
     /** Reads a same-workspace stylesheet during the authenticated request. */
     readStylesheet: (path: string) => Promise<string | null>;
   },
-): Promise<string> {
+): Promise<{ html: string; scriptAssets: PreviewScriptAsset[] }> {
   const document = parse(html);
   let changed = false;
   let stylesheetCount = 0;
+  const scriptAssets: PreviewScriptAsset[] = [];
   const cache = new Map<string, string | null>();
   const visit = async (node: DefaultTreeAdapterTypes.Node): Promise<void> => {
     if (!("childNodes" in node)) return;
@@ -58,7 +99,7 @@ export async function prepareStaticPreviewDocument(
       if (!("tagName" in child)) continue;
       const attr = (name: string) => child.attrs.find((attribute) => attribute.name === name);
       const stylesheet = child.tagName === "link" && attr("rel")?.value.toLowerCase() === "stylesheet" && attr("disabled") === undefined;
-      const script = child.tagName === "script" && attr("src") && [undefined, "", "text/javascript", "application/javascript", "module"].includes(attr("type")?.value);
+      const script = child.tagName === "script" && attr("src") && SCRIPT_TYPES.includes(attr("type")?.value);
       if (stylesheet) {
         const path = assetPath(attr("href")!.value, entryPath, /\.css$/i);
         if (path && stylesheetCount < 16) {
@@ -80,6 +121,7 @@ export async function prepareStaticPreviewDocument(
           // browser fetches it through the token-authorized preview route
           // and executes it with exactly the semantics the author declared.
           attr("src")!.value = `${options.assetBase}${path}`;
+          scriptAssets.push({ path, module: attr("type")?.value === "module" });
           changed = true;
         }
       }
@@ -87,5 +129,5 @@ export async function prepareStaticPreviewDocument(
     }
   };
   await visit(document);
-  return changed ? serialize(document) : html;
+  return { html: changed ? serialize(document) : html, scriptAssets };
 }
