@@ -525,3 +525,38 @@ describe("GHL Affiliate Tracking — API endpoint", () => {
     expect(url).not.toContain("am_id");
   });
 });
+
+// ─── Log redaction tests ────────────────────────────────────────────────────
+
+describe("GHL Affiliate Tracking — log redaction", () => {
+  it("does not log Clerk IDs, affiliate IDs, or upstream error bodies", async () => {
+    const clerkId = "user_sensitive_clerk_identifier";
+    const amId = "affiliate_sensitive_identifier";
+    const upstreamSecret = "upstream-private-error-content";
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    try {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(upstreamSecret, { status: 500 })),
+      );
+      const { submitGhlLead } = await import("@/lib/ghl-affiliate");
+      await submitGhlLead({
+        clerkId,
+        email: "test@example.com",
+        amId,
+      });
+
+      const logs = JSON.stringify([...warnSpy.mock.calls, ...infoSpy.mock.calls]);
+      expect(logs).not.toContain(clerkId);
+      expect(logs).not.toContain(amId);
+      expect(logs).not.toContain(upstreamSecret);
+      expect(logs).toContain('"status":500');
+      expect(logs).toContain('"attributed":true');
+    } finally {
+      warnSpy.mockRestore();
+      infoSpy.mockRestore();
+    }
+  });
+});
