@@ -159,6 +159,9 @@ start_listen() {
     --forward-to "$WEBHOOK_URL"
   )
   help="$(stripe listen --help 2>&1 || true)"
+  if grep -q -- '--all-snapshot' <<<"$help"; then
+    listen_args+=(--all-snapshot)
+  fi
   if grep -q -- '--api-version' <<<"$help"; then
     listen_args+=(--api-version "2025-08-27.basil")
   elif grep -q -- '--latest' <<<"$help"; then
@@ -257,8 +260,6 @@ clear_kv() {
   DELETED_EVENT=""
   HTTP_STATUS=""
   EVENT_ID=""
-  CREATOR_PRICE=""
-  PRO_PRICE=""
   STATUS=""
 }
 
@@ -317,7 +318,7 @@ for line in text.splitlines():
     if "-->" in line and event_id in line:
         pending = True
         continue
-    if "<--" in line and (event_id in line or pending):
+    if "<--" in line and event_id in line:
         match = re.search(r"\[(\d{3})\]", line)
         if match:
             count += 1
