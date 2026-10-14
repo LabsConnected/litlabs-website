@@ -533,19 +533,13 @@ describe("GHL Affiliate Tracking — log redaction", () => {
     const clerkId = "user_sensitive_clerk_identifier";
     const amId = "affiliate_sensitive_identifier";
     const upstreamSecret = "upstream-private-error-content";
-    const failureCancel = vi.fn().mockResolvedValue(undefined);
+    const failureResponse = new Response(upstreamSecret, { status: 500 });
+    const failureCancel = vi.spyOn(failureResponse.body!, "cancel").mockResolvedValue(undefined);
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
 
     try {
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(async () => ({
-          ok: false,
-          status: 500,
-          body: { cancel: failureCancel },
-        }) as unknown as Response),
-      );
+      vi.stubGlobal("fetch", vi.fn(async () => failureResponse));
       const { submitGhlLead } = await import("@/lib/ghl-affiliate");
       await submitGhlLead({
         clerkId,
