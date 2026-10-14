@@ -57,6 +57,8 @@ export interface LaunchFlowOptions {
    */
   requiresExecution?: boolean;
   enableBuildFix?: boolean;
+  /** Canonical framework fact, supplied by the authenticated caller. */
+  isStaticWorkspace?: boolean;
   enableDeploy?: boolean;
   /**
    * Require a real website entry artifact before this flow can report a
@@ -460,6 +462,8 @@ export async function ensureProjectPreviewReady(
      * failed by the welcome-screen gate.
      */
     hadSuccessfulMutation?: boolean;
+    /** Server-derived static workspace: preview is served by the file route. */
+    isStaticWorkspace?: boolean;
   } = {},
   progress: ProgressEmitter = new ProgressEmitter(),
   actionContext?: ActionExecutionContext,
@@ -474,6 +478,23 @@ export async function ensureProjectPreviewReady(
     if (attempt < 2) await sleep(250);
   }
   if (!artifacts.ok) return artifacts;
+
+  if (options.isStaticWorkspace) {
+    // The static preview route serves root index.html. A framework entry or
+    // filename alone cannot prove that route has readable content to serve.
+    try {
+      if (!artifacts.files.includes("index.html")) {
+        return { ok: false, files: artifacts.files, error: "Static preview requires root index.html." };
+      }
+      const { content } = await transport.readFile("index.html");
+      if (!content.trim()) {
+        return { ok: false, files: artifacts.files, error: "Static preview index.html is empty." };
+      }
+      return { ok: true, files: artifacts.files };
+    } catch {
+      return { ok: false, files: artifacts.files, error: "Static preview index.html could not be read." };
+    }
+  }
 
   try {
     const status = await startAndWaitForPreview(
@@ -513,6 +534,25 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
   const steps: string[] = [];
   let runtimeRepairAttempts = 0;
   const maxRuntimeRepairAttempts = options.maxRuntimeRepairAttempts ?? 2;
+  const previewUrlForProject = () => options.isStaticWorkspace
+    ? `/api/preview/${encodeURIComponent(options.projectId)}/`
+    : (options.buildPreviewUrl ?? buildPreviewProxyUrl)(transport.workspaceId);
+  let staticPreviewError: string | undefined;
+  const preparePreview = async (pollIntervalMs: number): Promise<"ready" | "failed" | "timeout"> => {
+    if (!options.isStaticWorkspace) {
+      return startAndWaitForPreview(transport, {
+        maxWaitMs: options.maxPreviewWaitMs ?? 120_000, pollIntervalMs, signal,
+      }, progress, actionContext);
+    }
+    const result = await ensureProjectPreviewReady(transport, { isStaticWorkspace: true }, progress, actionContext);
+    staticPreviewError = result.error;
+    if (result.ok && lastAgentLoopResult?.qualityLoopState) {
+      const session = restoreQualityLoopSession(lastAgentLoopResult.qualityLoopState);
+      noteBuildArtifacts(session, result.files);
+      lastAgentLoopResult.qualityLoopState = snapshotQualityLoopSession(session);
+    }
+    return result.ok ? "ready" : "failed";
+  };
   // Tenant/project identity is reconstructed from authenticated launch-flow
   // options, never trusted from a forwarded object. The actionRunId itself is
   // the only value taken from the orchestrator's context.
@@ -564,6 +604,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           model: options.model,
           executionMode: options.executionMode ?? "act",
           enableBuildFix: options.enableBuildFix ?? true,
+          isStaticWorkspace: options.isStaticWorkspace,
           requireToolCallOnFirstStep: options.requiresExecution === true,
           // Early bounded capability guard: a BUILD run that goes 3
           // consecutive steps with tool calls but zero file-writing calls
@@ -622,18 +663,9 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
             emitStep(progress, steps, "Starting live preview...");
             progress.emit({ type: "phase", phase: "preview", step: r.stepsUsed + 1 });
             progress.emit({ type: "preview_start" });
-            void startAndWaitForPreview(
-              transport,
-              {
-                maxWaitMs: options.maxPreviewWaitMs ?? 120_000,
-                pollIntervalMs: 1_000,
-                signal,
-              },
-              progress,
-              actionContext,
-            ).then((previewStatus) => {
+            void preparePreview(1_000).then((previewStatus) => {
               if (previewStatus === "ready") {
-                const previewUrl = (options.buildPreviewUrl ?? buildPreviewProxyUrl)(transport.workspaceId);
+                const previewUrl = previewUrlForProject();
                 progress.emit({ type: "preview_result", success: true, previewUrl });
               } else {
                 progress.emit({ type: "preview_result", success: false, error: `Preview did not become ready (status: ${previewStatus})` });
@@ -820,16 +852,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
     progress.emit({ type: "phase", phase: "preview", step: agentResult.stepsUsed + 1 });
     progress.emit({ type: "preview_start" });
 
-    let previewStatus = await startAndWaitForPreview(
-      transport,
-      {
-        maxWaitMs: options.maxPreviewWaitMs ?? 120_000,
-        pollIntervalMs: options.previewPollIntervalMs ?? 2_000,
-        signal,
-      },
-      progress,
-      actionContext,
-    );
+    let previewStatus = await preparePreview(options.previewPollIntervalMs ?? 2_000);
 
     // Runtime repair loop
     while (previewStatus !== "ready" && runtimeRepairAttempts < maxRuntimeRepairAttempts) {
@@ -845,7 +868,9 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
         `Preview runtime failed — repair attempt ${runtimeRepairAttempts}/${maxRuntimeRepairAttempts}...`,
       );
 
-      const status = await transport.getPreviewStatus().catch(() => ({ status: "failed" as const, error: "unknown" }));
+      const status = options.isStaticWorkspace
+        ? { status: "failed", error: staticPreviewError }
+        : await transport.getPreviewStatus().catch(() => ({ status: "failed" as const, error: "unknown" }));
       const runtimeError = (status as { error?: string | null }).error ?? "Preview server did not become ready";
 
       const repairMessage = `The preview server failed to start with this error:\n${runtimeError}\n\nInspect the project files, fix the root cause, and stop once you are done. I will re-start the preview and verify it.`;
@@ -858,6 +883,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           model: options.model,
           executionMode: options.executionMode ?? "act",
           enableBuildFix: true,
+          isStaticWorkspace: options.isStaticWorkspace,
           maxSteps: options.runtimeRepairBudgetSteps ?? 8,
           // Repair must not restart the global agent runtime budget.
           maxRuntimeMs: Math.max(0, startTime + DEFAULT_LOOP_CONFIG.maxRuntimeMs - Date.now()),
@@ -924,20 +950,13 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
       emitStep(progress, steps, "Re-starting preview after repair...");
       progress.emit({ type: "preview_start" });
 
-      previewStatus = await startAndWaitForPreview(
-        transport,
-        {
-          maxWaitMs: options.maxPreviewWaitMs ?? 120_000,
-          pollIntervalMs: options.previewPollIntervalMs ?? 2_000,
-          signal,
-        },
-        progress,
-        actionContext,
-      );
+      previewStatus = await preparePreview(options.previewPollIntervalMs ?? 2_000);
     }
 
     if (previewStatus !== "ready") {
-      const status = await transport.getPreviewStatus().catch(() => ({ status: "failed" as const, error: "unknown" }));
+      const status = options.isStaticWorkspace
+        ? { status: "failed", error: staticPreviewError }
+        : await transport.getPreviewStatus().catch(() => ({ status: "failed" as const, error: "unknown" }));
       const error = (status as { error?: string | null }).error ?? `Preview did not become ready (status: ${previewStatus})`;
       progress.emit({ type: "preview_result", success: false, error });
       // A pending approval outranks a preview failure — the build completed
@@ -959,7 +978,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
       });
     }
 
-    const previewUrl = (options.buildPreviewUrl ?? buildPreviewProxyUrl)(transport.workspaceId);
+    const previewUrl = previewUrlForProject();
     progress.emit({ type: "preview_result", success: true, previewUrl });
 
     let qualitySession = agentResult.qualityLoopState
@@ -1001,16 +1020,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
         if (repairResult.pendingApproval || repairResult.cancelled || repairResult.modelFailed) break;
         qualitySession.inspectionRan = false;
         progress.emit({ type: "preview_start" });
-        const repairedPreview = await startAndWaitForPreview(
-          transport,
-          {
-            maxWaitMs: options.maxPreviewWaitMs ?? 120_000,
-            pollIntervalMs: options.previewPollIntervalMs ?? 2_000,
-            signal,
-          },
-          progress,
-          actionContext,
-        );
+        const repairedPreview = await preparePreview(options.previewPollIntervalMs ?? 2_000);
         if (repairedPreview !== "ready") break;
         notePreviewReady(qualitySession, previewUrl);
         inspection = await runQualityInspection(qualitySession);

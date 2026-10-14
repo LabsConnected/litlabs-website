@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { getProject } from "@/lib/projects/project-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { requireTerminalBaseUrl } from "@/lib/terminal-config";
+import { inlineStaticPreviewTextAssets } from "@/lib/projects/static-preview-document";
 
 /**
  * Static preview: serves HTML/CSS/JS/image files from a project's workspace
@@ -93,7 +94,7 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ projectId: string; path?: string[] }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(_req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -170,9 +171,23 @@ export async function GET(
   }
 
   // Decode base64 for binary files, serve text directly for text files.
-  const body = isBinary 
+  let body = isBinary
     ? new Uint8Array(Buffer.from(data.content, "base64"))
     : data.content;
+
+  if (typeof body === "string" && mimeFor(filePath).startsWith("text/html")) {
+    body = await inlineStaticPreviewTextAssets(body, filePath, async (path) => {
+      const asset = await fetch(`${terminalBase}/ws-files/read`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}`, "X-Workspace-Id": project.workspaceId! },
+        body: JSON.stringify({ path, encoding: "utf-8" }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!asset.ok) return null;
+      const payload = await asset.json() as { content?: unknown };
+      return typeof payload.content === "string" ? payload.content : null;
+    });
+  }
 
   return new NextResponse(body, {
     status: 200,

@@ -166,6 +166,8 @@ export function syncStationActionsToToolRegistry(): void {
       const stationSink = getStationEventSink(transport);
       const ctx = buildStationContext({
         transport,
+        // Project scope comes from the authenticated run, never model args.
+        projectId: execCtx?.actionContext?.projectId,
         actionContext: execCtx?.actionContext
           ? {
               userId: execCtx.actionContext.userId,

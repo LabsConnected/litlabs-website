@@ -413,6 +413,26 @@ describe("finalizeQualityLoop", () => {
 });
 
 describe("runQualityInspection", () => {
+  it("can inspect after an early call had no preview URL", async () => {
+    const session = makeSession();
+    expect((await runQualityInspection(session)).ran).toBe(false);
+    expect(session.inspectionRan).toBe(false);
+    session.previewUrl = "https://preview.test/ws-1";
+    mockRunJudge.mockResolvedValue({ status: "unavailable", reason: "capture unavailable" });
+    expect((await runQualityInspection(session)).ran).toBe(false);
+    expect(mockRunJudge).toHaveBeenCalledTimes(1);
+    expect((await runQualityInspection(session)).ran).toBe(false);
+    expect(mockRunJudge).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves a failed style inspection across a cached second call", async () => {
+    const session = await sessionAtInspection();
+    mockRunJudge.mockResolvedValue({ status: "unavailable", browserInspected: true, styleHealthy: false, reason: "CSS did not apply" });
+    const first = await runQualityInspection(session);
+    const cached = await runQualityInspection(session);
+    expect(cached).toEqual(first);
+    expect(cached.needsRedesign).toBe(true);
+  });
   it("blocks on a machine-detected style failure even when the page was reached", async () => {
     const s = await sessionAtInspection();
     mockRunJudge.mockResolvedValue({

@@ -7,7 +7,7 @@
  * rebuilds the ledger from the paused run's messages.
  */
 import { describe, it, expect } from "vitest";
-import { seedToolCallRecordsFromHistory } from "../agent-loop-v2";
+import { seedToolCallRecordsFromHistory, hasSuccessfulFileWriteInHistory } from "../agent-loop-v2";
 import type { LLMMessage } from "../llm-tool-calling";
 
 function assistantCall(id: string, wireName: string, args: Record<string, unknown>): LLMMessage {
@@ -25,6 +25,13 @@ function toolResult(id: string, content: string): LLMMessage {
 }
 
 describe("seedToolCallRecordsFromHistory", () => {
+  it("credits only a successful structured file result", () => {
+    const call = assistantCall("write-1", "files_write", { path: "index.html", content: "<html/>" });
+    expect(hasSuccessfulFileWriteInHistory([call, toolResult("write-1", '{"success":true}')])).toBe(true);
+    expect(hasSuccessfulFileWriteInHistory([call, toolResult("write-1", 'Error: denied')])).toBe(false);
+    expect(hasSuccessfulFileWriteInHistory([call, toolResult("write-1", '{"success":false}')])).toBe(false);
+    expect(hasSuccessfulFileWriteInHistory([call, { role: "assistant", content: "Done, wrote index.html" }])).toBe(false);
+  });
   it("rebuilds records for executed calls with registry tool ids", () => {
     const history: LLMMessage[] = [
       { role: "user", content: "Build a Hello Gate 3 webpage" },

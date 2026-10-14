@@ -432,6 +432,22 @@ export function seedToolCallRecordsFromHistory(
   return records;
 }
 
+const FILE_GENERATION_TOOL_IDS = new Set([...FILE_WRITE_TOOL_IDS, "code.writeFile", "code.refactor", "files.patch"]);
+export function isFileWritingTool(toolId: string): boolean { return FILE_GENERATION_TOOL_IDS.has(toolId); }
+
+/** Server-persisted tool results, not assistant completion claims. */
+export function hasSuccessfulFileWriteInHistory(messages: LLMMessage[]): boolean {
+  const writeIds = new Set(messages.flatMap((message) =>
+    message.role === "assistant" ? (message.tool_calls ?? [])
+      .filter((call) => [...FILE_GENERATION_TOOL_IDS].some((id) => id.replace(/\./g, "_") === call.function.name))
+      .map((call) => call.id) : [],
+  ));
+  return messages.some((message) => {
+    if (message.role !== "tool" || !message.tool_call_id || !writeIds.has(message.tool_call_id)) return false;
+    try { return JSON.parse(message.content)?.success === true; } catch { return false; }
+  });
+}
+
 // ─── Mid-build stall recovery ─────────────────────────────────────
 
 /**
@@ -680,6 +696,8 @@ async function verifyMutationReadBack(
   isStaticWorkspace?: boolean,
 ): Promise<void> {
   if (!mutated || !inputs) return;
+  if (toolId === "code.writeFile") toolId = "files.write";
+  if (toolId === "code.refactor") toolId = "apply_patch";
   if (toolId !== "files.write" && toolId !== "files.patch" && toolId !== "apply_patch") return;
   const path = typeof inputs.path === "string" ? inputs.path : null;
   if (!path) return;
@@ -702,7 +720,7 @@ async function verifyMutationReadBack(
   noteMutationReadBack(session, { path, readable: true, contentMatches });
   // Static workspaces cannot run the command checks (Gate 1): the verified
   // read-back IS the executed check there, and it is the only one recorded.
-  if (isStaticWorkspace && toolId === "files.write") {
+  if (isStaticWorkspace) {
     noteStaticArtifactCheck(session, { path, contentMatches });
   }
 }
@@ -1339,7 +1357,7 @@ async function runAgentLoopV2Inner(
     const toolCallLogLenBeforeBatch = toolCallLog.length;
 
     for (const toolCall of llmResponse.toolCalls) {
-      const toolDef = availableTools.find((t) => t.id === toolCall.toolId);
+      const toolDef = offerableTools.find((t) => t.id === toolCall.toolId);
 
       if (!toolDef) {
         const result: ToolCallResult = {
@@ -1700,7 +1718,7 @@ async function runAgentLoopV2Inner(
     // through the resolveZeroToolCalls stall handling above.
     if (buildGuardMaxSteps > 0) {
       const stepCalls = toolCallLog.slice(toolCallLogLenBeforeBatch);
-      const fileWrites = stepCalls.filter((c) => FILE_WRITE_TOOL_IDS.has(c.toolId)).length;
+      const fileWrites = stepCalls.filter((c) => isFileWritingTool(c.toolId)).length;
       if (fileWrites > 0) {
         buildGuardZeroWriteSteps = 0;
         buildGuardWindowModels.clear();
@@ -1789,9 +1807,16 @@ async function runAgentLoopV2Inner(
     });
   }
 
+  if (cfg.buildCapabilityGuard && !cancelled && !modelFailed && !failedHonestly &&
+      !toolCallLog.some((call) => call.success && isFileWritingTool(call.toolId)) &&
+      !hasSuccessfulFileWriteInHistory(cfg.initialMessages ?? [])) {
+    failedHonestly = "The build produced no successful file-writing operation, so it is not complete.";
+    finalText = failedHonestly;
+  }
+
   // Run build-fix loop if mutations were made and enabled
   let buildFixResult: BuildFixLoopResult | undefined;
-  if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
+  if (cfg.enableBuildFix && !cfg.isStaticWorkspace && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
       onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg), cfg.allowLittPaidProviders),
@@ -2519,6 +2544,9 @@ async function resumeAgentLoopV2Inner(
         success: false,
         error: "Cancelled by user",
       };
+    } else if (resumeToolHealthMap.get(resume.toolId)?.health === "unavailable") {
+      result = { toolCallId: resume.toolCallId, toolId: resume.toolId, result: null, success: false,
+        error: resumeToolHealthMap.get(resume.toolId)?.detail ?? "The approved tool is no longer available in this workspace." };
     } else try {
       const execResult = await toolRegistry.execute(resume.toolId, withUserScopeForBrowserTools(resume.toolId, resume.inputs, cfg.userId ?? actionContextFrom(cfg)?.userId, cfg.conversationId ?? actionContextFrom(cfg)?.conversationId), {
         hasApproval: true,
@@ -2666,7 +2694,7 @@ async function resumeAgentLoopV2Inner(
       completedDeployment,
     };
     const deferredResult = await executeDeferredToolCalls(resume.deferredToolCalls, {
-      availableTools,
+      availableTools: resumeOfferableTools,
       executionMode: cfg.executionMode,
       transport,
       llmMessages,
@@ -2708,6 +2736,7 @@ async function resumeAgentLoopV2Inner(
   }
 
   // Continue the loop
+  let resumeZeroWriteSteps = 0;
   while (stepsUsed < cfg.maxSteps && !cancelled) {
     const elapsed = Date.now() - startTime;
     if (elapsed > cfg.maxRuntimeMs) {
@@ -2860,9 +2889,10 @@ async function resumeAgentLoopV2Inner(
     }
 
     let batchHasMutation = false;
+    const logBeforeBatch = toolCallLog.length;
 
     for (const toolCall of llmResponse.toolCalls) {
-      const toolDef = availableTools.find((t) => t.id === toolCall.toolId);
+      const toolDef = resumeOfferableTools.find((t) => t.id === toolCall.toolId);
 
       if (!toolDef) {
         const result: ToolCallResult = {
@@ -3055,12 +3085,30 @@ async function resumeAgentLoopV2Inner(
     }
 
     if (cancelled) break;
+    if (cfg.buildCapabilityGuard) {
+      const wroteFile = toolCallLog.slice(logBeforeBatch).some((call) => call.success && isFileWritingTool(call.toolId));
+      resumeZeroWriteSteps = wroteFile ? 0 : resumeZeroWriteSteps + 1;
+      if ((cfg.buildCapabilityGuard.maxStepsWithoutFileWrite ?? 3) > 0 &&
+          resumeZeroWriteSteps >= (cfg.buildCapabilityGuard.maxStepsWithoutFileWrite ?? 3)) {
+        failedHonestly = `The resumed build made no successful file writes in ${resumeZeroWriteSteps} steps; stopping to preserve the remaining budget.`;
+        finalText = failedHonestly;
+        localProgress.emit({ type: "status", summary: failedHonestly });
+        break;
+      }
+    }
     if (!batchHasMutation) mutationBatchPending = false;
+  }
+
+  if (cfg.buildCapabilityGuard && !cancelled && !modelFailed && !failedHonestly &&
+      !toolCallLog.some((call) => call.success && isFileWritingTool(call.toolId)) &&
+      !hasSuccessfulFileWriteInHistory(resume.pausedMessages)) {
+    failedHonestly = "The build produced no successful file-writing operation, so it is not complete.";
+    finalText = failedHonestly;
   }
 
   // Run build-fix loop with autonomous repair
   let buildFixResult: BuildFixLoopResult | undefined;
-  if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
+  if (cfg.enableBuildFix && !cfg.isStaticWorkspace && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
       onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg), cfg.allowLittPaidProviders),

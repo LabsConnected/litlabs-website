@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveTerminalHealth } from "../tool-health";
+import { resolveTerminalHealth, resolveToolHealth } from "../tool-health";
 
 /**
  * Gate B regression: static (gitless) workspaces must not advertise
@@ -7,6 +7,12 @@ import { resolveTerminalHealth } from "../tool-health";
  * not terminal.execute, for static workspaces.
  */
 describe("static workspace tool routing", () => {
+  it("hides shell-backed discovery, search, Git and check delegates", () => {
+    const ids = ["project.scan", "package.info", "search_code", "code.search", "git.status", "checks.build", "typecheck.run", "files.list", "files.read", "files.write"];
+    const health = resolveToolHealth(ids, { terminal: { userId: "owner", isStaticWorkspace: true } });
+    for (const id of ids.slice(0, 7)) expect(health.get(id)?.health).toBe("unavailable");
+    for (const id of ids.slice(7)) expect(health.get(id)?.health).not.toBe("unavailable");
+  });
   it("reports terminal.execute as unavailable for static workspaces", () => {
     const report = resolveTerminalHealth({
       userId: "user_123",
