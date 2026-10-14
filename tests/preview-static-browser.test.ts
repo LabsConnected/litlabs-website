@@ -22,6 +22,10 @@ let server: Server;
 let browser: Browser;
 let origin: string;
 beforeAll(async () => {
+  // The route mints preview tokens with the real preview-token module,
+  // which signs with TERMINAL_AUTH_SECRET (the route has always required
+  // this secret — the terminal token is only mocked in this fixture).
+  vi.stubEnv("TERMINAL_AUTH_SECRET", "browser-fixture-secret-with-32-plus-chars");
   vi.stubGlobal("fetch", vi.fn(async (_url, options) => {
     const { path } = JSON.parse(String(options?.body));
     return new Response(JSON.stringify({ content: files[path] }), { status: files[path] ? 200 : 404 });
@@ -53,6 +57,7 @@ afterAll(async () => {
   await browser?.close();
   if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 it("loads CSS and classic JS in an authenticated opaque-origin preview", async () => {

@@ -27,6 +27,7 @@ vi.mock("@/lib/terminal-config", () => ({
 
 import { auth } from "@/lib/auth";
 import { getProject } from "@/lib/projects/project-repository";
+import { createPreviewToken, verifyPreviewToken } from "@/lib/projects/preview-token";
 
 const authMock = vi.mocked(auth);
 const getProjectMock = vi.mocked(getProject);
@@ -67,6 +68,10 @@ describe("GET /api/preview/[projectId]/[[...path]]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     spyOnChildProcess();
+    // The real preview-token module signs with TERMINAL_AUTH_SECRET; the
+    // route has always required this secret (createTerminalToken throws
+    // without it), so the suite provides one.
+    vi.stubEnv("TERMINAL_AUTH_SECRET", "route-test-secret-with-at-least-32-chars");
     authMock.mockResolvedValue({ userId: "user-1" } as never);
     getProjectMock.mockResolvedValue({
       id: "proj-1",
@@ -80,6 +85,7 @@ describe("GET /api/preview/[projectId]/[[...path]]", () => {
     for (const spy of childProcessSpies) spy.mockRestore();
     childProcessSpies.length = 0;
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
@@ -224,5 +230,92 @@ describe("GET /api/preview/[projectId]/[[...path]]", () => {
     );
     expect(res.status).toBe(200);
     assertZeroSubprocesses();
+  });
+
+  describe("capability token (opaque-origin asset requests)", () => {
+    // The preview-token module is intentionally NOT mocked: these tests
+    // exercise the real HMAC signing/verification end to end at route level.
+    beforeEach(() => {
+      vi.stubEnv("TERMINAL_AUTH_SECRET", "route-test-secret-with-at-least-32-chars");
+      authMock.mockResolvedValue({ userId: null } as never);
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    function tokenFor(overrides: { userId?: string; projectId?: string; workspaceId?: string; ttl?: number } = {}) {
+      return createPreviewToken(overrides.userId ?? "user-1", {
+        projectId: overrides.projectId ?? "proj-1",
+        workspaceId: overrides.workspaceId ?? "ws-1",
+      }, overrides.ttl ?? 300).token;
+    }
+
+    it("serves an asset to a valid scoped token without a session", async () => {
+      mockTerminalFile("window.ok = true;");
+      const res = await GET(
+        new Request("https://x.test/api/preview/proj-1/t/x/app.js") as unknown as import("next/server").NextRequest,
+        makeParams("proj-1", ["t", tokenFor(), "app.js"]),
+      );
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe("window.ok = true;");
+      assertZeroSubprocesses();
+    });
+
+    it("rejects a token scoped to a different project", async () => {
+      const res = await GET(
+        new Request("https://x.test/api/preview/proj-1/t/x/app.js") as unknown as import("next/server").NextRequest,
+        makeParams("proj-1", ["t", tokenFor({ projectId: "proj-2" }), "app.js"]),
+      );
+      expect(res.status).toBe(403);
+    });
+
+    it("rejects a token scoped to a different workspace", async () => {
+      const res = await GET(
+        new Request("https://x.test/api/preview/proj-1/t/x/app.js") as unknown as import("next/server").NextRequest,
+        makeParams("proj-1", ["t", tokenFor({ workspaceId: "ws-2" }), "app.js"]),
+      );
+      expect(res.status).toBe(403);
+    });
+
+    it("rejects a malformed token and an expired token", async () => {
+      const malformed = await GET(
+        new Request("https://x.test/api/preview/proj-1/t/x/app.js") as unknown as import("next/server").NextRequest,
+        makeParams("proj-1", ["t", "garbage.token", "app.js"]),
+      );
+      expect(malformed.status).toBe(401);
+      const expired = await GET(
+        new Request("https://x.test/api/preview/proj-1/t/x/app.js") as unknown as import("next/server").NextRequest,
+        makeParams("proj-1", ["t", tokenFor({ ttl: -5 }), "app.js"]),
+      );
+      expect(expired.status).toBe(401);
+    });
+
+    it("session HTML rewrites script URLs under a freshly minted token prefix", async () => {
+      authMock.mockResolvedValue({ userId: "user-1" } as never);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url, opts) => {
+          const body = JSON.parse((opts as RequestInit).body as string);
+          const content = body.path === "style.css"
+            ? "body { color: rgb(1, 2, 3); }"
+            : '<html><head><link rel="stylesheet" href="style.css"><script defer src="app.js"></script></head><body></body></html>';
+          return new Response(JSON.stringify({ content }), { status: 200 });
+        }),
+      );
+      const res = await GET(
+        new Request("https://x.test/api/preview/proj-1/index.html") as unknown as import("next/server").NextRequest,
+        makeParams("proj-1", ["index.html"]),
+      );
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      // Stylesheet embedded; script stays external under /t/<token>/ and the
+      // token actually verifies against the route's own scope rules.
+      expect(html).toContain("body { color: rgb(1, 2, 3); }");
+      const match = html.match(/src="\/api\/preview\/proj-1\/t\/([^/]+)\/app\.js"/);
+      expect(match).not.toBeNull();
+      expect(verifyPreviewToken(match![1])).toMatchObject({ userId: "user-1", projectId: "proj-1", workspaceId: "ws-1" });
+      assertZeroSubprocesses();
+    });
   });
 });

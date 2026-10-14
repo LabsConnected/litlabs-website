@@ -3,7 +3,8 @@ import { auth } from "@/lib/auth";
 import { getProject } from "@/lib/projects/project-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { requireTerminalBaseUrl } from "@/lib/terminal-config";
-import { inlineStaticPreviewTextAssets } from "@/lib/projects/static-preview-document";
+import { prepareStaticPreviewDocument } from "@/lib/projects/static-preview-document";
+import { createPreviewToken, verifyPreviewToken } from "@/lib/projects/preview-token";
 
 /**
  * Static preview: serves HTML/CSS/JS/image files from a project's workspace
@@ -11,6 +12,14 @@ import { inlineStaticPreviewTextAssets } from "@/lib/projects/static-preview-doc
  *
  * Security model:
  * - Clerk auth required; project ownership enforced via getProject().
+ * - Asset subrequests from the opaque-origin iframe cannot carry the
+ *   session cookie, so the authenticated HTML response mints a short-lived
+ *   capability token bound to (user, project, workspace) and embeds it in
+ *   the asset URL path (`/t/<token>/...`). A request without a session is
+ *   authorized only by such a token, and ownership + workspace binding are
+ *   still enforced server-side on every request. Session-authenticated
+ *   requests behave exactly as before; the token reading applies only when
+ *   no session exists.
  * - Path traversal rejected (no `..`, no absolute paths, no empty segments
  *   except the implicit directory → index.html mapping).
  * - Content-Security-Policy `sandbox` puts user content in an opaque origin:
@@ -94,14 +103,40 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ projectId: string; path?: string[] }> },
 ) {
-  const { userId } = await auth(_req);
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const { projectId, path: pathSegments } = await params;
   if (!projectId) {
     return NextResponse.json({ error: "projectId is required" }, { status: 400 });
+  }
+
+  const segments = pathSegments ?? [];
+
+  // Identity resolution. A session always wins and keeps its exact legacy
+  // semantics (the segments are then a plain file path). Only a request
+  // WITHOUT a session may present a capability token, in the path prefix
+  // `t/<token>`; this is the shape subresource requests from the
+  // opaque-origin preview iframe arrive in, because they cannot carry the
+  // session cookie.
+  let userId: string | null = null;
+  let presentedToken: string | null = null;
+  let tokenWorkspaceId: string | null = null;
+  const { userId: sessionUserId } = await auth(_req);
+  if (sessionUserId) {
+    userId = sessionUserId;
+  } else if (segments[0] === "t" && segments[1]) {
+    try {
+      const claims = verifyPreviewToken(segments[1]);
+      if (claims.projectId !== projectId) {
+        return NextResponse.json({ error: "Preview token is not scoped to this project" }, { status: 403 });
+      }
+      userId = claims.userId;
+      presentedToken = segments[1];
+      tokenWorkspaceId = claims.workspaceId;
+    } catch {
+      return NextResponse.json({ error: "Invalid or expired preview token" }, { status: 401 });
+    }
+  }
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   // Ownership enforced here: getProject returns null unless this user owns it.
@@ -112,15 +147,18 @@ export async function GET(
   if (!project.workspaceId) {
     return NextResponse.json({ error: "Workspace not provisioned" }, { status: 409 });
   }
+  if (tokenWorkspaceId !== null && tokenWorkspaceId !== project.workspaceId) {
+    return NextResponse.json({ error: "Preview token is not scoped to this workspace" }, { status: 403 });
+  }
 
-  const segments = pathSegments ?? [];
-  const pathError = validatePreviewPath(segments);
+  const fileSegments = presentedToken ? segments.slice(2) : segments;
+  const pathError = validatePreviewPath(fileSegments);
   if (pathError) {
     return NextResponse.json({ error: pathError }, { status: 400 });
   }
 
   // Directory or empty path → index.html (static-site convention).
-  const filePath = segments.length === 0 ? "index.html" : segments.join("/");
+  const filePath = fileSegments.length === 0 ? "index.html" : fileSegments.join("/");
 
   let terminalBase: string;
   try {
@@ -176,16 +214,28 @@ export async function GET(
     : data.content;
 
   if (typeof body === "string" && mimeFor(filePath).startsWith("text/html")) {
-    body = await inlineStaticPreviewTextAssets(body, filePath, async (path) => {
-      const asset = await fetch(`${terminalBase}/ws-files/read`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}`, "X-Workspace-Id": project.workspaceId! },
-        body: JSON.stringify({ path, encoding: "utf-8" }),
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!asset.ok) return null;
-      const payload = await asset.json() as { content?: unknown };
-      return typeof payload.content === "string" ? payload.content : null;
+    // Scripts stay external (native execution semantics) and load through a
+    // token-authorized URL prefix; stylesheets are embedded by the transform.
+    // A document that itself arrived under a token re-uses that token; a
+    // session-authenticated document gets a freshly minted one.
+    const previewToken = presentedToken ?? createPreviewToken(userId, {
+      projectId,
+      workspaceId: project.workspaceId,
+    }).token;
+    const assetBase = `/api/preview/${encodeURIComponent(projectId)}/t/${previewToken}/`;
+    body = await prepareStaticPreviewDocument(body, filePath, {
+      assetBase,
+      readStylesheet: async (path) => {
+        const asset = await fetch(`${terminalBase}/ws-files/read`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}`, "X-Workspace-Id": project.workspaceId! },
+          body: JSON.stringify({ path, encoding: "utf-8" }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!asset.ok) return null;
+        const payload = await asset.json() as { content?: unknown };
+        return typeof payload.content === "string" ? payload.content : null;
+      },
     });
   }
 
@@ -194,6 +244,14 @@ export async function GET(
     headers: {
       "Content-Type": mimeFor(filePath),
       ...PREVIEW_SECURITY_HEADERS,
+      // Module scripts are fetched in CORS mode; from the opaque-origin
+      // iframe the Origin is "null", so token-authorized asset responses
+      // must opt into CORS explicitly. This is safe under the route's auth
+      // model: authorization is the capability token (or the session),
+      // never the origin, and no credential headers are ever echoed —
+      // Access-Control-Allow-Credentials stays unset, so a cross-origin
+      // page cannot read session-authenticated responses.
+      ...(presentedToken ? { "Access-Control-Allow-Origin": "*" } : {}),
     },
   });
 }
