@@ -45,7 +45,7 @@ import { randomUUID } from "crypto";
 import { Sandbox } from "e2b";
 import type { SandboxProvider } from "../sandbox-provider";
 import { buildSandboxEnv, assertNoPlatformSecrets } from "../env-allowlist";
-import { tokenizeCommandLine } from "./docker-provider";
+import { tokenizeCommandLine } from "./command-line";
 import type {
   CreateSandboxInput,
   SandboxInstance,

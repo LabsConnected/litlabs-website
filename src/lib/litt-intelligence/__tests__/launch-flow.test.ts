@@ -8,6 +8,37 @@ import { recordActionEventActivity } from "@/lib/action-runtime";
 import { _resetProviderHealthForTests } from "@/lib/litt-intelligence/provider-registry";
 
 describe("static approval preview", () => {
+  it("preserves static mode through a launch reprompt and verifies the file preview", async () => {
+    const transport = createMockTransport({
+      listFiles: vi.fn().mockResolvedValue({ entries: [{ name: "index.html", type: "file" }] }),
+      readFile: vi.fn().mockResolvedValue({ content: "<html>Built site</html>", size: 24 }),
+    });
+    const runAgentLoop = vi.fn()
+      .mockResolvedValueOnce(successAgentResult({ toolCalls: [] }))
+      .mockResolvedValueOnce(successAgentResult({ toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true }] }));
+    const result = await runLaunchFlow(makeOptions({ transport, runAgentLoop, isStaticWorkspace: true, requiresExecution: true }));
+    expect(result.success).toBe(true);
+    expect(result.previewUrl).toBe("/api/preview/proj-test/");
+    expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    for (const call of runAgentLoop.mock.calls) expect(call[2].isStaticWorkspace).toBe(true);
+    expect(transport.startPreview).not.toHaveBeenCalled();
+    expect(transport.getPreviewStatus).not.toHaveBeenCalled();
+    expect(transport.exec).not.toHaveBeenCalled();
+  });
+
+  it("repairs a missing static entry through file tools without a dev server", async () => {
+    const transport = createMockTransport({
+      listFiles: vi.fn().mockResolvedValue({ entries: [{ name: "index.html", type: "file" }] }),
+      readFile: vi.fn().mockResolvedValueOnce({ content: "", size: 0 }).mockResolvedValueOnce({ content: "", size: 0 }).mockResolvedValue({ content: "<html>Repaired site</html>", size: 28 }),
+    });
+    const runAgentLoop = vi.fn().mockResolvedValue(successAgentResult());
+    const result = await runLaunchFlow(makeOptions({ transport, runAgentLoop, isStaticWorkspace: true }));
+    expect(result.success).toBe(true);
+    expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    expect(runAgentLoop.mock.calls[1][2].isStaticWorkspace).toBe(true);
+    expect(transport.startPreview).not.toHaveBeenCalled();
+    expect(transport.getPreviewStatus).not.toHaveBeenCalled();
+  });
   it("verifies index.html without starting or polling a dev server", async () => {
     const { ensureProjectPreviewReady } = await import("@/lib/litt-intelligence/launch-flow");
     const transport = createMockTransport({

@@ -18,8 +18,7 @@ import {
 } from "@/lib/litt-intelligence/paused-run-store";
 import { ProgressEmitter } from "@/lib/litt-intelligence/progress-events";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
-import { resumeAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
-import { FILE_WRITE_TOOL_IDS } from "@/lib/litt-intelligence/model-registry";
+import { resumeAgentLoopV2, isFileWritingTool, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
 import { resolveAvailableCapabilities } from "@/lib/litt-intelligence/capabilities";
 import { ensureProjectPreviewReady } from "@/lib/litt-intelligence/launch-flow";
 import { buildPreviewProxyUrl } from "@/lib/terminal-internal-client";
@@ -53,6 +52,7 @@ import {
 import { makePersistProgressEvent } from "@/lib/action-runtime/progress-event-persistence";
 import { isTerminalActionRunStatus } from "@/lib/action-runtime/state-machine";
 import type { MessageStatus } from "@/lib/studio/types";
+import { attachActionRunToConversationTask, settleConversationTask } from "@/lib/studio/task-service";
 
 /**
  * Write a resumed run's outcome back onto the conversation transcript.
@@ -201,6 +201,16 @@ async function settleResumedRunOutcome(opts: {
       executionToken,
       status === "failed" ? "failed" : "completed",
     );
+  }
+  if (written) {
+    await settleConversationTask(
+      userId, record.conversationId,
+      status === "waiting_for_user" ? "waiting_approval" : status === "completed" ? "completed" : status === "cancelled" ? "cancelled" : "failed",
+      status === "completed" && runResult?.qualityLoop?.verdict.ok === true,
+      record.actionRunId,
+    ).catch((error) => studioLog("approval:task_settle_failed", {
+      ...ids, errorClass: error instanceof Error ? error.message : "unknown",
+    }));
   }
   return true;
 }
@@ -543,6 +553,14 @@ export async function POST(
     }
   }
 
+  if (resolved.actionRunId) {
+    await attachActionRunToConversationTask(userId, conversationId, resolved.actionRunId)
+      .catch((error) => studioLog("approval:task_attach_failed", {
+        conversationId, actionRunId: resolved.actionRunId ?? undefined,
+        errorClass: error instanceof Error ? error.message : "unknown",
+      }));
+  }
+
   // 7. Start the resumed execution DETACHED from this HTTP request.
   // Railway's long-running Node process keeps this promise alive after
   // the response is sent. The result is persisted to the DB so the client
@@ -662,7 +680,7 @@ export async function POST(
     // a BUILD run. Resume with the guard enabled so a model that stops
     // writing files gets ruled out within 3 steps instead of burning the
     // run budget — the same protection the main loop gets via launch-flow.
-    buildCapabilityGuard: FILE_WRITE_TOOL_IDS.has(resolved.toolId)
+    buildCapabilityGuard: isFileWritingTool(resolved.toolId)
       ? { maxStepsWithoutFileWrite: 3 }
       : undefined,
     // Quality loop: resume with a fresh evidence session so the resumed
@@ -862,6 +880,11 @@ export async function POST(
         }
       }
 
+      const terminalFailure = result.failedHonestly ||
+        (!result.pendingApproval && qualityLoop && !qualityLoop.verdict.ok
+          ? "The build did not pass its quality checks; it is not complete."
+          : undefined);
+
       // Reflect the final outcome on the transcript BEFORE marking the run
       // completed — a poller that sees "completed" can then loadMessages
       // and get the real persisted result. An honest loop failure is
@@ -875,10 +898,10 @@ export async function POST(
           ? "cancelled"
           : result.pendingApproval
             ? "awaiting_approval"
-            : result.failedHonestly
+            : terminalFailure
               ? "failed"
               : "completed",
-        content: (result.failedHonestly || finalText) || undefined,
+        content: (terminalFailure || finalText) || undefined,
       });
 
       const runResult: RunResult = {
@@ -990,7 +1013,7 @@ export async function POST(
       // Terminal outcome: one atomic write of status + outcome event
       // carrying the RunResult. An honest loop failure is reported as
       // failed, never completed.
-      const honestFailure = result.failedHonestly;
+      const honestFailure = terminalFailure;
       await settleResumedRunOutcome({
         record: resolved,
         userId,

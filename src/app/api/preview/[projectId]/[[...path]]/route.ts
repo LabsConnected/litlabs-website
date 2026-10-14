@@ -93,7 +93,7 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ projectId: string; path?: string[] }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(_req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

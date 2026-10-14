@@ -77,6 +77,7 @@ export interface QualityLoopSession {
   deployedUrl?: string;
   /** True once the post-answer visual inspection has run. */
   inspectionRan: boolean;
+  inspectionResult?: InspectionResult;
   /** Why INSPECT/CRITIQUE were skipped, when they were. */
   inspectionNote?: string;
   /** True after a below-threshold critique — next mutations count as fixes. */
@@ -105,6 +106,7 @@ export interface QualityLoopSnapshot {
   previewUrl?: string;
   deployedUrl?: string;
   inspectionRan: boolean;
+  inspectionResult?: InspectionResult;
   inspectionNote?: string;
   critiqueFailed: boolean;
   observations: QualityLoopObservation[];
@@ -751,9 +753,8 @@ export async function runQualityInspection(
   },
 ): Promise<InspectionResult> {
   if (session.inspectionRan) {
-    return { ran: true, needsRedesign: false, fixes: [], reason: "Inspection already ran for this run." };
+    return session.inspectionResult ?? { ran: false, needsRedesign: false, fixes: [], reason: "No persisted visual inspection result is available." };
   }
-  session.inspectionRan = true;
 
   const url = session.previewUrl;
   if (!url) {
@@ -761,6 +762,12 @@ export async function runQualityInspection(
       "No preview URL was available, so the visual inspection could not run. No score was fabricated.";
     return { ran: false, needsRedesign: false, fixes: [], reason: session.inspectionNote };
   }
+
+  session.inspectionRan = true;
+  const remember = (result: InspectionResult): InspectionResult => {
+    session.inspectionResult = result;
+    return result;
+  };
 
   let outcome: JudgeOutcome;
   try {
@@ -799,17 +806,17 @@ export async function runQualityInspection(
       },
     });
     session.critiqueFailed = true;
-    return {
+    return remember({
       ran: true,
       needsRedesign: true,
       fixes: ["Inspect the preview CSS/Tailwind setup and repair the styling root cause before reloading the preview."],
       reason,
-    };
+    });
   }
 
   if (outcome.status === "unavailable" || !outcome.scorecard || !outcome.verdict) {
     session.inspectionNote = outcome.reason ?? "Verification unavailable: visual inspection could not run.";
-    return { ran: false, needsRedesign: false, fixes: [], reason: session.inspectionNote };
+    return remember({ ran: false, needsRedesign: false, fixes: [], reason: session.inspectionNote });
   }
 
   const card = outcome.scorecard;
@@ -845,13 +852,13 @@ export async function runQualityInspection(
     session.critiqueFailed = true;
     if (session.state.designPasses < MAX_DESIGN_PASSES) {
       session.state.designPasses += 1;
-      return {
+      return remember({
         ran: true,
         needsRedesign: true,
         fixes: card.prioritizedFixes,
         reason: verdict.reason,
         score: card.overall,
-      };
+      });
     }
     fileObservation(session, "fix", {
       summary:
@@ -860,13 +867,13 @@ export async function runQualityInspection(
       artifacts: [url],
       by: "system",
     });
-    return {
+    return remember({
       ran: true,
       needsRedesign: false,
       fixes: card.prioritizedFixes,
       reason: `${verdict.reason} (automatic design passes exhausted)`,
       score: card.overall,
-    };
+    });
   }
 
   session.critiqueFailed = false;
@@ -875,7 +882,7 @@ export async function runQualityInspection(
     artifacts: [url],
     by: "judge",
   });
-  return { ran: true, needsRedesign: false, fixes: [], reason: verdict.reason, score: card.overall };
+  return remember({ ran: true, needsRedesign: false, fixes: [], reason: verdict.reason, score: card.overall });
 }
 
 /** The follow-up prompt injected when the judge demands another design pass. */

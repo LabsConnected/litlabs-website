@@ -97,6 +97,10 @@ vi.mock("@/lib/studio/conversation-service", () => ({
 vi.mock("@/lib/studio/logger", () => ({
   studioLog: vi.fn(),
 }));
+vi.mock("@/lib/studio/task-service", () => ({
+  attachActionRunToConversationTask: vi.fn(() => Promise.resolve()),
+  settleConversationTask: vi.fn(() => Promise.resolve()),
+}));
 
 vi.mock("@/lib/litt-intelligence/quality-loop-flow", async (importOriginal) => ({
   ...(await importOriginal() as Record<string, unknown>),

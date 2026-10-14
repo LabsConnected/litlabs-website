@@ -53,6 +53,7 @@ vi.mock("@/lib/litt-intelligence/workspace-transport", () => ({
 
 vi.mock("@/lib/litt-intelligence/agent-loop-v2", () => ({
   resumeAgentLoopV2: vi.fn(),
+  isFileWritingTool: (id: string) => ["files.write", "apply_patch", "edit", "code.writeFile", "code.refactor", "files.patch"].includes(id),
 }));
 
 vi.mock("@/lib/projects/project-repository", () => ({
@@ -73,6 +74,10 @@ vi.mock("@/lib/studio/conversation-service", () => ({
 vi.mock("@/lib/studio/logger", () => ({
   studioLog: vi.fn(),
 }));
+vi.mock("@/lib/studio/task-service", () => ({
+  attachActionRunToConversationTask: vi.fn(() => Promise.resolve()),
+  settleConversationTask: vi.fn(() => Promise.resolve()),
+}));
 
 vi.mock("@/lib/action-runtime", () => ({
   getActionRun: vi.fn(),
@@ -82,6 +87,7 @@ vi.mock("@/lib/action-runtime", () => ({
 }));
 
 import { auth } from "@/lib/auth";
+import { attachActionRunToConversationTask, settleConversationTask } from "@/lib/studio/task-service";
 import { POST } from "./route";
 import {
   getPausedRun,
@@ -176,6 +182,42 @@ const awaitingMessage = {
 // ── Tests ──
 
 describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
+  it("refuses an expired approval without creating an executor", async () => {
+    vi.mocked(getPausedRun).mockResolvedValue({ ...pendingRun, status: "expired" } as never);
+    const response = await POST(makeRequest("approved"), routeParams);
+    expect(response.status).toBe(409);
+    expect(markRunProcessing).not.toHaveBeenCalled();
+    expect(resumeAgentLoopV2).not.toHaveBeenCalled();
+  });
+  it("rejects approval for a changed workspace before executing", async () => {
+    vi.mocked(verifyProjectWorkspace).mockResolvedValue({ workspaceId: "different-workspace" } as never);
+    const response = await POST(makeRequest("approved"), routeParams);
+    expect(response.status).toBe(409);
+    expect(markRunProcessing).not.toHaveBeenCalled();
+    expect(resumeAgentLoopV2).not.toHaveBeenCalled();
+  });
+
+  it("ignores client replacements for the frozen operation", async () => {
+    vi.mocked(resumeAgentLoopV2).mockResolvedValue({ finalText: "Done", stepsUsed: 1, toolCalls: [], cancelled: false } as never);
+    const request = new NextRequest(`http://localhost/api/studio/conversations/${CONV_ID}/approvals/${PAUSED_ID}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision: "approved", toolId: "terminal.execute", inputs: { command: "unapproved" }, operationId: "forged" }),
+    });
+    expect((await POST(request, routeParams)).status).toBe(202);
+    await vi.waitFor(() => expect(resumeAgentLoopV2).toHaveBeenCalled());
+    expect(vi.mocked(resumeAgentLoopV2).mock.calls[0][0]).toMatchObject({ toolId: pendingRun.toolId, inputs: pendingRun.inputs });
+    await vi.waitFor(() => expect(settleCall("completed")).not.toBeNull());
+  });
+  it("does not mark a failed quality verdict completed", async () => {
+    vi.mocked(resumeAgentLoopV2).mockResolvedValue({
+      finalText: "Done.", stepsUsed: 3, toolCalls: [], cancelled: false,
+      qualityLoop: { verdict: { ok: false, reasons: ["test evidence missing"] }, stages: [], designPasses: 0 },
+    } as never);
+    expect((await POST(makeRequest("approved"), routeParams)).status).toBe(202);
+    await vi.waitFor(() => expect(settleCall("failed")).not.toBeNull());
+    expect(settleCall("completed")).toBeNull();
+    expect(settleConversationTask).toHaveBeenCalledWith("user_123", CONV_ID, "failed", false, "run-parent-1");
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" } as any);
@@ -233,6 +275,8 @@ describe("POST /approvals/[pausedRunId] — transcript writeback", () => {
       conversationId: CONV_ID,
       projectId: "proj-123",
     });
+    expect(attachActionRunToConversationTask).toHaveBeenCalledWith("user_123", CONV_ID, "run-parent-1");
+    expect(settleConversationTask).toHaveBeenCalledWith("user_123", CONV_ID, "completed", false, "run-parent-1");
     const completed = settleCall("completed");
     expect(completed).not.toBeNull();
     expect(completed!.args).toMatchObject({

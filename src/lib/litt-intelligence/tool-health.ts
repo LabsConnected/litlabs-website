@@ -169,6 +169,13 @@ const PREVIEW_DEV_SERVER_TOOLS = new Set([
   "preview.reload",
 ]);
 
+// These handlers also use workspace.exec, including package discovery and
+// ripgrep/Git probes. Static workspaces use file-list/read-back evidence.
+const STATIC_EXEC_TOOLS = new Set([
+  "project.scan", "project.health", "package.info", "search_code", "code.search",
+  "build.run", "test.run", "typecheck.run", "lint.run",
+]);
+
 export function resolvePreviewDevServerHealth(
   toolId: string,
   ctx: TerminalHealthContext,
@@ -200,6 +207,14 @@ export function resolveToolHealth(
     const override = ctx.overrides?.[toolId];
     if (override) {
       out.set(toolId, override);
+      continue;
+    }
+    if (ctx.terminal?.isStaticWorkspace &&
+        (STATIC_EXEC_TOOLS.has(toolId) || toolId.startsWith("checks.") || toolId.startsWith("git."))) {
+      out.set(toolId, {
+        toolId, health: "unavailable", reason: "static_workspace_no_exec",
+        detail: "This tool requires host execution. Inspect static files with files.list and files.read; verify writes by read-back.",
+      });
       continue;
     }
     if (toolId === "terminal.execute") {
