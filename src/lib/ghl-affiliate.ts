@@ -267,6 +267,7 @@ export async function submitGhlLead(params: {
       return { success: false, error: `GHL returned ${response.status}` };
     }
 
+    await response.body?.cancel().catch(() => undefined);
     console.info("[ghl] trackLead OK", { attributed: Boolean(amId) });
     return { success: true };
   } catch (err) {

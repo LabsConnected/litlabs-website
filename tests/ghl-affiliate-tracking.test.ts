@@ -574,8 +574,24 @@ describe("GHL Affiliate Tracking — log redaction", () => {
         }),
       );
       const { submitGhlLead, trackLeadIdempotent } = await import("@/lib/ghl-affiliate");
-      const failed = await submitGhlLead({ clerkId, email: "test@example.com" });
+      const failed = await submitGhlLead({
+        clerkId,
+        email: "test@example.com",
+        amId: "affiliate_network_identifier",
+      });
       expect(failed.error).toBe("GHL request failed");
+
+      const cancel = vi.fn().mockResolvedValue(undefined);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({ ok: true, status: 200, body: { cancel } }) as unknown as Response),
+      );
+      await submitGhlLead({
+        clerkId,
+        email: "test@example.com",
+        amId: "affiliate_success_identifier",
+      });
+      expect(cancel).toHaveBeenCalledOnce();
 
       mockGetSupabaseAdmin.mockReturnValue(
         createAtomicSupabaseMock({ initialState: "tracked" }),
@@ -584,7 +600,10 @@ describe("GHL Affiliate Tracking — log redaction", () => {
 
       const logs = JSON.stringify([...warnSpy.mock.calls, ...infoSpy.mock.calls]);
       expect(logs).not.toContain(clerkId);
+      expect(logs).not.toContain("affiliate_network_identifier");
+      expect(logs).not.toContain("affiliate_success_identifier");
       expect(logs).not.toContain(upstreamSecret);
+      expect(logs).toContain('"attributed":true');
     } finally {
       warnSpy.mockRestore();
       infoSpy.mockRestore();
