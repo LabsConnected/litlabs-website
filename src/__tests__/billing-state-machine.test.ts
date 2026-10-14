@@ -32,10 +32,12 @@ vi.mock("@/lib/rate-limiter", () => ({
 // Controllable Stripe mock — constructEvent is a spy we can set per-test
 const mockConstructEvent = vi.fn();
 const mockSubscriptionsRetrieve = vi.fn();
+const mockRefundsList = vi.fn();
 vi.mock("stripe", () => ({
   default: vi.fn().mockImplementation(() => ({
     webhooks: { constructEvent: mockConstructEvent },
     subscriptions: { retrieve: mockSubscriptionsRetrieve },
+    refunds: { list: mockRefundsList },
   })),
 }));
 
@@ -98,6 +100,16 @@ function makeStripeEvent(type: string, overrides: any = {}) {
   };
 }
 
+/** Basil charge payloads omit refunds. The handler loads them from the API. */
+function mockSucceededRefunds(
+  refunds: { id: string; amount: number; created: number }[],
+) {
+  mockRefundsList.mockResolvedValue({
+    data: refunds.map((refund) => ({ ...refund, status: "succeeded" })),
+    has_more: false,
+  });
+}
+
 /**
  * Builds a mock Supabase admin that tracks all RPC calls and table mutations.
  */
@@ -109,15 +121,16 @@ function buildTrackingSupabase(
   const upserts: { table: string; row: any; onConflict?: string }[] = [];
   const updates: { table: string; patch: any; matches: any[] }[] = [];
   const inserts: { table: string; row: any }[] = [];
+  const debitedKeys = new Set<string>();
 
-  const chain = (table: string) => ({
-    select: vi.fn(() => chain(table)),
-    eq: vi.fn(() => chain(table)),
-    in: vi.fn(() => chain(table)),
-    limit: vi.fn(() => chain(table)),
-    order: vi.fn(() => chain(table)),
-    like: vi.fn(() => chain(table)),
-    gte: vi.fn(() => chain(table)),
+  const chain = (table: string, likePattern = "") => ({
+    select: vi.fn(() => chain(table, likePattern)),
+    eq: vi.fn(() => chain(table, likePattern)),
+    in: vi.fn(() => chain(table, likePattern)),
+    limit: vi.fn(() => chain(table, likePattern)),
+    order: vi.fn(() => chain(table, likePattern)),
+    like: vi.fn((_col: string, pattern: string) => chain(table, pattern)),
+    gte: vi.fn(() => chain(table, likePattern)),
     single: vi.fn(async () => {
       if (table === "users") return { data: { id: "user_internal_123" }, error: null };
       if (table === "stripe_events" && existingEvent)
@@ -134,6 +147,14 @@ function buildTrackingSupabase(
       return { data: null, error: null };
     }),
     maybeSingle: vi.fn(async () => {
+      if (table === "credit_ledger") {
+        const prefix = likePattern.endsWith("%") ? likePattern.slice(0, -1) : likePattern;
+        const key = prefix.endsWith(":") ? prefix.slice(0, -1) : prefix;
+        return {
+          data: debitedKeys.has(key) ? { id: "ledger_refund" } : null,
+          error: null,
+        };
+      }
       if (table === "marketplace_orders" && opts.marketplaceOrder) {
         return { data: { id: "order_1", status: "paid" }, error: null };
       }
@@ -195,6 +216,9 @@ function buildTrackingSupabase(
     from: vi.fn((table: string) => chain(table)),
     rpc: vi.fn(async (fnName: string, params: any) => {
       rpcCalls.push({ fn: fnName, params });
+      if (fnName === "debit_credits" && typeof params?.p_idempotency_key === "string") {
+        debitedKeys.add(params.p_idempotency_key);
+      }
       return { data: { success: true, remaining: 100 }, error: null };
     }),
   };
@@ -210,6 +234,8 @@ beforeEach(() => {
   vi.mocked(getAdminSupabase).mockReturnValue(null as any);
   mockConstructEvent.mockReset();
   mockSubscriptionsRetrieve.mockResolvedValue({ status: "active" });
+  mockRefundsList.mockReset();
+  mockRefundsList.mockResolvedValue({ data: [], has_more: false });
 });
 
 afterEach(() => {
@@ -791,6 +817,7 @@ describe("Webhook event processing — state mutations", () => {
     const { sb, rpcCalls } = buildTrackingSupabase();
     vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
     vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockSucceededRefunds([{ id: "re_creditpack", amount: 1000, created: 1700000001 }]);
 
     mockConstructEvent.mockReturnValue(makeStripeEvent("charge.refunded", {
       object: {
@@ -804,7 +831,6 @@ describe("Webhook event processing — state mutations", () => {
           clerk_id: "clerk_123",
           coin_amount: "4000",
         },
-        refunds: { data: [{ id: "re_creditpack", amount: 1000, created: 1700000001 }] },
       },
     }));
 
@@ -823,6 +849,7 @@ describe("Webhook event processing — state mutations", () => {
     const { sb, rpcCalls, updates } = buildTrackingSupabase();
     vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
     vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockSucceededRefunds([{ id: "re_creator", amount: 750, created: 1700000001 }]);
 
     mockConstructEvent.mockReturnValue(makeStripeEvent("charge.refunded", {
       object: {
@@ -836,7 +863,6 @@ describe("Webhook event processing — state mutations", () => {
           clerk_id: "clerk_123",
           plan_id: "creator_beta",
         },
-        refunds: { data: [{ id: "re_creator", amount: 750, created: 1700000001 }] },
       },
     }));
 
@@ -857,6 +883,7 @@ describe("Webhook event processing — state mutations", () => {
     const { sb, rpcCalls, inserts } = buildTrackingSupabase();
     vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
     vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockSucceededRefunds([{ id: "re_pack_claim", amount: 1000, created: 1700000001 }]);
 
     mockConstructEvent.mockReturnValue(makeStripeEvent("charge.refunded", {
       id: "evt_pack_claim",
@@ -866,7 +893,6 @@ describe("Webhook event processing — state mutations", () => {
         amount_refunded: 1000,
         payment_intent: "pi_pack_claim",
         metadata: { product_type: "credit_pack", clerk_id: "clerk_123", coin_amount: "4000" },
-        refunds: { data: [{ id: "re_pack_claim", amount: 1000, created: 1700000001 }] },
       },
     }));
 
@@ -901,6 +927,7 @@ describe("Webhook event processing — state mutations", () => {
     expect(replayed.status).toBe(200);
     expect((await replayed.json()).replayed).toBe(true);
     expect(replay.rpcCalls.filter((c) => c.fn === "debit_credits")).toHaveLength(0);
+    expect(mockRefundsList).not.toHaveBeenCalled();
 
     const inflight = buildTrackingSupabase(true, { eventResult: "processing" });
     vi.mocked(getAdminSupabase).mockReturnValue(inflight.sb as any);
@@ -950,40 +977,69 @@ describe("Webhook event processing — state mutations", () => {
     expect(byOrder.inserts.some((row) => row.row.result === "processing")).toBe(false);
   });
 
-  it("two partial refunds debit each refund id, not the cumulative charge total", async () => {
+  it("basil charge.refunded with no refunds list debits the API refund id", async () => {
+    const { sb, rpcCalls } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockSucceededRefunds([{ id: "re_basil", amount: 1000, created: 1700000001 }]);
+    const charge = {
+      id: "ch_basil",
+      amount: 1000,
+      amount_refunded: 1000,
+      payment_intent: "pi_basil",
+      metadata: { product_type: "credit_pack", clerk_id: "clerk_123", coin_amount: "4000" },
+    };
+    expect(charge).not.toHaveProperty("refunds");
+    mockConstructEvent.mockReturnValue(makeStripeEvent("charge.refunded", {
+      id: "evt_basil",
+      object: charge,
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(200);
+    expect(mockRefundsList).toHaveBeenCalledWith(
+      expect.objectContaining({ charge: "ch_basil" }),
+    );
+    const debits = rpcCalls.filter((c) => c.fn === "debit_credits");
+    expect(debits).toHaveLength(1);
+    expect(debits[0].params.p_idempotency_key).toBe("refund_re_basil");
+    expect(debits[0].params.p_amount).toBe(4000);
+  });
+
+  it("two partial refunds on a basil charge debit each refund id once", async () => {
     const { sb, rpcCalls } = buildTrackingSupabase();
     vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
     vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
     const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    // The live list already contains both refunds. The event snapshot's
+    // amount_refunded selects which of them belong to this delivery.
+    mockSucceededRefunds([
+      { id: "re_partial_b", amount: 500, created: 200 },
+      { id: "re_partial_a", amount: 250, created: 100 },
+    ]);
+    const basilCharge = {
+      id: "ch_partial",
+      amount: 1000,
+      payment_intent: "pi_partial",
+      metadata: { product_type: "credit_pack", clerk_id: "clerk_123", coin_amount: "4000" },
+    };
 
     mockConstructEvent.mockReturnValue(makeStripeEvent("charge.refunded", {
       id: "evt_partial_a",
-      object: {
-        id: "ch_partial",
-        amount: 1000,
-        amount_refunded: 250,
-        payment_intent: "pi_partial",
-        metadata: { product_type: "credit_pack", clerk_id: "clerk_123", coin_amount: "4000" },
-        refunds: { data: [{ id: "re_partial_a", amount: 250, created: 100 }] },
-      },
+      object: { ...basilCharge, amount_refunded: 250 },
     }));
     expect((await webhookPOST(makeWebhookRequest("body", "sig"))).status).toBe(200);
 
     mockConstructEvent.mockReturnValue(makeStripeEvent("charge.refunded", {
       id: "evt_partial_b",
-      object: {
-        id: "ch_partial",
-        amount: 1000,
-        amount_refunded: 750,
-        payment_intent: "pi_partial",
-        metadata: { product_type: "credit_pack", clerk_id: "clerk_123", coin_amount: "4000" },
-        refunds: {
-          data: [
-            { id: "re_partial_b", amount: 500, created: 200 },
-            { id: "re_partial_a", amount: 250, created: 100 },
-          ],
-        },
-      },
+      object: { ...basilCharge, amount_refunded: 750 },
+    }));
+    expect((await webhookPOST(makeWebhookRequest("body", "sig"))).status).toBe(200);
+
+    // Replaying the first event must not debit either refund again.
+    mockConstructEvent.mockReturnValue(makeStripeEvent("charge.refunded", {
+      id: "evt_partial_a_replay",
+      object: { ...basilCharge, amount_refunded: 250 },
     }));
     expect((await webhookPOST(makeWebhookRequest("body", "sig"))).status).toBe(200);
 
@@ -993,6 +1049,75 @@ describe("Webhook event processing — state mutations", () => {
       "refund_re_partial_b",
     ]);
     expect(debits.map((c) => c.params.p_amount)).toEqual([1000, 2000]);
+  });
+
+  it("a later basil refund event debits every not-yet-debited refund in its snapshot", async () => {
+    const { sb, rpcCalls } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockSucceededRefunds([
+      { id: "re_partial_a", amount: 250, created: 100 },
+      { id: "re_partial_b", amount: 500, created: 200 },
+    ]);
+    mockConstructEvent.mockReturnValue(makeStripeEvent("charge.refunded", {
+      id: "evt_partial_both",
+      object: {
+        id: "ch_partial_both",
+        amount: 1000,
+        amount_refunded: 750,
+        payment_intent: "pi_partial_both",
+        metadata: { product_type: "credit_pack", clerk_id: "clerk_123", coin_amount: "4000" },
+      },
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    expect((await webhookPOST(makeWebhookRequest("body", "sig"))).status).toBe(200);
+    const debits = rpcCalls.filter((c) => c.fn === "debit_credits");
+    expect(debits.map((c) => [c.params.p_idempotency_key, c.params.p_amount])).toEqual([
+      ["refund_re_partial_a", 1000],
+      ["refund_re_partial_b", 2000],
+    ]);
+  });
+
+  it("basil charge.refunded returns 500 when the refund list does not match amount_refunded", async () => {
+    const { sb, rpcCalls } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockSucceededRefunds([{ id: "re_short", amount: 250, created: 100 }]);
+    mockConstructEvent.mockReturnValue(makeStripeEvent("charge.refunded", {
+      id: "evt_short",
+      object: {
+        id: "ch_short",
+        amount: 1000,
+        amount_refunded: 750,
+        payment_intent: "pi_short",
+        metadata: { product_type: "credit_pack", clerk_id: "clerk_123", coin_amount: "4000" },
+      },
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(500);
+    expect(rpcCalls.filter((c) => c.fn === "debit_credits")).toHaveLength(0);
+  });
+
+  it("basil charge.refunded returns 500 when the refund list call fails", async () => {
+    const { sb, rpcCalls } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockRefundsList.mockRejectedValue(new Error("stripe down"));
+    mockConstructEvent.mockReturnValue(makeStripeEvent("charge.refunded", {
+      id: "evt_list_down",
+      object: {
+        id: "ch_list_down",
+        amount: 1000,
+        amount_refunded: 1000,
+        payment_intent: "pi_list_down",
+        metadata: { product_type: "credit_pack", clerk_id: "clerk_123", coin_amount: "4000" },
+      },
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(500);
+    expect(rpcCalls.filter((c) => c.fn === "debit_credits")).toHaveLength(0);
   });
 
   it("invoice.paid does not revive a newer canceled or past_due subscription", async () => {
@@ -1258,6 +1383,7 @@ describe("Webhook event processing — state mutations", () => {
     (sb as any).rpc = vi.fn(async () => ({ data: null, error: { message: "debit failed" } }));
     vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
     vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockSucceededRefunds([{ id: "re_refund_fail", amount: 1000, created: 1700000001 }]);
 
     mockConstructEvent.mockReturnValue(makeStripeEvent("charge.refunded", {
       id: "evt_refund_fail",
@@ -1268,7 +1394,6 @@ describe("Webhook event processing — state mutations", () => {
         currency: "usd",
         payment_intent: "pi_refund_fail",
         metadata: { product_type: "credit_pack", clerk_id: "clerk_123", coin_amount: "4000" },
-        refunds: { data: [{ id: "re_refund_fail", amount: 1000, created: 1700000001 }] },
       },
     }));
 

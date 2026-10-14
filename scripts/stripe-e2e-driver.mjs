@@ -435,19 +435,28 @@ async function refundPart() {
   }
   const refund = await stripe.refunds.create({ charge, amount });
   if (refund.livemode) die("refusing a live-mode refund");
+  // Basil charge objects omit refunds.data. Match the charge.refunded
+  // snapshot by the cumulative amount_refunded after this refund.
+  const updated = await stripe.charges.retrieve(charge);
+  if (updated.livemode) die("refusing a live-mode charge");
+  const expectedRefunded = updated.amount_refunded;
   emit("REFUND", refund.id);
   emit("CHARGE", charge);
+  emit("AMOUNT_REFUNDED", String(expectedRefunded));
   const event = await findEvent(
     "charge.refunded",
     (candidate) => {
       const object = candidate.data?.object;
       if (!object || object.id !== charge) return false;
-      const ids = (object.refunds?.data || []).map((item) => item.id);
-      return ids.includes(refund.id);
+      if (candidate.created + 10 < refund.created) return false;
+      return object.amount_refunded === expectedRefunded;
     },
     45000,
   );
-  emit("REFUND_EVENT", event?.id || "");
+  if (!event) {
+    die(`charge.refunded for ${charge} amount_refunded=${expectedRefunded} was not found`);
+  }
+  emit("REFUND_EVENT", event.id);
 }
 
 const command = process.argv[2] || "";

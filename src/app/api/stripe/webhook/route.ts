@@ -172,24 +172,135 @@ function eventTimestamp(event: Stripe.Event): string {
   return new Date(eventCreatedMs(event)).toISOString();
 }
 
+type ListedRefund = { id: string; amount: number; created: number };
+
 /**
- * The refund this charge.refunded delivery is about.
- * Use the event payload, not a live refund list: a later partial refund
- * must not be attributed to an older event. Newest `created` in the
- * payload is the refund Stripe had just applied when it emitted the event.
+ * API version 2025-08-27.basil removed `refunds` from Charge. Load the
+ * charge's succeeded refunds from the Stripe API instead of the webhook
+ * payload.
  */
-function specificRefund(
-  charge: Stripe.Charge,
-): { id: string; amount: number } | null {
-  const refunds = charge.refunds?.data ?? [];
-  if (refunds.length === 0) return null;
-  const latest = refunds.reduce((best, refund) =>
-    (refund.created ?? 0) >= (best.created ?? 0) ? refund : best,
-  );
-  if (!latest.id || typeof latest.amount !== "number" || latest.amount <= 0) {
-    return null;
+async function listSucceededRefunds(
+  stripe: Stripe,
+  chargeId: string,
+): Promise<ListedRefund[]> {
+  const collected: ListedRefund[] = [];
+  let startingAfter: string | undefined;
+  for (let page = 0; page < 5; page += 1) {
+    const pageResult = await stripe.refunds.list({
+      charge: chargeId,
+      limit: 100,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+    const rows = pageResult?.data ?? [];
+    for (const refund of rows) {
+      if (refund.status && refund.status !== "succeeded") continue;
+      if (!refund.id || refund.amount <= 0) continue;
+      collected.push({
+        id: refund.id,
+        amount: refund.amount,
+        created: refund.created ?? 0,
+      });
+    }
+    if (!pageResult?.has_more) return collected;
+    const lastId = rows[rows.length - 1]?.id;
+    if (!lastId) return collected;
+    startingAfter = lastId;
   }
-  return { id: latest.id, amount: latest.amount };
+  throw new Error(`[stripe] charge ${chargeId}: refund list exceeded 5 pages`);
+}
+
+/**
+ * Refunds that existed when this charge.refunded snapshot was taken.
+ * `amount_refunded` on the event is the cumulative total at that moment.
+ * Walk oldest-first and stop at that total so a later partial refund is
+ * not debited by an older event. Returns [] when the list cannot be
+ * reconciled — the caller must retry rather than guess a charge-level key.
+ */
+function refundsInSnapshot(
+  refunds: ListedRefund[],
+  amountRefunded: number,
+): ListedRefund[] {
+  const ordered = [...refunds].sort(
+    (a, b) => a.created - b.created || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
+  const covered: ListedRefund[] = [];
+  let sum = 0;
+  for (const refund of ordered) {
+    if (sum === amountRefunded) break;
+    if (sum + refund.amount > amountRefunded) break;
+    covered.push(refund);
+    sum += refund.amount;
+  }
+  if (sum !== amountRefunded || covered.length === 0) return [];
+  return covered;
+}
+
+async function refundAlreadyDebited(
+  sb: AdminClient,
+  userId: string,
+  refundId: string,
+): Promise<boolean> {
+  const { data, error } = await sb
+    .from("credit_ledger")
+    .select("id")
+    .eq("user_id", userId)
+    .like("idempotency_key", `refund_${refundId}:%`)
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    throw new Error(
+      `[stripe] refund ${refundId}: ledger lookup failed: ${error.message}`,
+    );
+  }
+  return !!data;
+}
+
+/**
+ * Debit each succeeded refund in this event's amount_refunded snapshot
+ * that does not already have a ledger row. The idempotency key is
+ * `refund_{refundId}`. The webhook's event claim still runs first, so a
+ * replay of the same event never reaches this function.
+ */
+async function debitRefundSnapshot(
+  stripe: Stripe,
+  sb: AdminClient,
+  charge: Stripe.Charge,
+  userId: string,
+  credits: number,
+  context: string,
+): Promise<void> {
+  if (charge.amount <= 0 || credits <= 0 || charge.amount_refunded <= 0) return;
+  let listed: ListedRefund[];
+  try {
+    listed = await listSucceededRefunds(stripe, charge.id);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "unknown error";
+    throw new Error(
+      `[stripe] charge.refunded ${charge.id}: refund list failed: ${message}`,
+    );
+  }
+  const snapshot = refundsInSnapshot(listed, charge.amount_refunded);
+  if (snapshot.length === 0) {
+    throw new Error(
+      `[stripe] charge.refunded ${charge.id}: refund list does not match amount_refunded ${charge.amount_refunded}; refusing a charge-level idempotency key`,
+    );
+  }
+  for (const refund of snapshot) {
+    if (await refundAlreadyDebited(sb, userId, refund.id)) continue;
+    const debitBits = proratedRefundDebit(refund.amount, charge.amount, credits);
+    if (debitBits <= 0) continue;
+    await debitCreditsOrThrow(
+      sb,
+      {
+        p_user_id: userId,
+        p_amount: debitBits,
+        p_category: "refund",
+        p_description: `Refund ${refund.id} for charge ${charge.id}`,
+        p_idempotency_key: `refund_${refund.id}`,
+      },
+      `${context} ${refund.id}`,
+    );
+  }
 }
 
 function proratedRefundDebit(
@@ -1128,30 +1239,14 @@ export async function POST(req: NextRequest) {
             // a prorated amount of the monthly credit grant based on the
             // fraction of the charge that was refunded.
             if (plan.billingType === "subscription" && plan.monthlyCredits > 0 && charge.amount > 0) {
-              const refund = specificRefund(charge);
-              if (!refund) {
-                throw new Error(
-                  `[stripe] charge.refunded ${charge.id}: missing refund id; refusing a charge-level idempotency key`,
-                );
-              }
-              const debitBits = proratedRefundDebit(
-                refund.amount,
-                charge.amount,
+              await debitRefundSnapshot(
+                stripe,
+                sb,
+                charge,
+                refundUser.id,
                 plan.monthlyCredits,
+                "plan refund",
               );
-              if (debitBits > 0) {
-                await debitCreditsOrThrow(
-                  sb,
-                  {
-                    p_user_id: refundUser.id,
-                    p_amount: debitBits,
-                    p_category: "refund",
-                    p_description: `Refund ${refund.id} for charge ${charge.id}`,
-                    p_idempotency_key: `refund_${refund.id}`,
-                  },
-                  `plan refund ${refund.id}`,
-                );
-              }
             }
           }
           break;
@@ -1177,30 +1272,14 @@ export async function POST(req: NextRequest) {
             ? parseInt(refundMeta.coin_amount, 10)
             : NaN;
           if (coinAmount > 0 && charge.amount > 0) {
-            const refund = specificRefund(charge);
-            if (!refund) {
-              throw new Error(
-                `[stripe] charge.refunded ${charge.id}: missing refund id; refusing a charge-level idempotency key`,
-              );
-            }
-            const debitBits = proratedRefundDebit(
-              refund.amount,
-              charge.amount,
+            await debitRefundSnapshot(
+              stripe,
+              sb,
+              charge,
+              refundUser.id,
               coinAmount,
+              "credit pack refund",
             );
-            if (debitBits > 0) {
-              await debitCreditsOrThrow(
-                sb,
-                {
-                  p_user_id: refundUser.id,
-                  p_amount: debitBits,
-                  p_category: "refund",
-                  p_description: `Refund ${refund.id} for charge ${charge.id}`,
-                  p_idempotency_key: `refund_${refund.id}`,
-                },
-                `credit pack refund ${refund.id}`,
-              );
-            }
           }
         }
         break;
