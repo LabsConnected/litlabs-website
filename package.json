@@ -75,6 +75,7 @@
     "@types/ws": "^8.18.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "acorn": "8.17.0",
     "babel-plugin-react-compiler": "^1.0.0",
     "braintrust": "^3.27.0",
     "dotenv": "^16.4.5",

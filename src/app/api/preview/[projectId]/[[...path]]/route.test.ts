@@ -344,7 +344,9 @@ describe("GET /api/preview/[projectId]/[[...path]]", () => {
           const body = JSON.parse((opts as RequestInit).body as string);
           const content = body.path === "style.css"
             ? "body { color: rgb(1, 2, 3); }"
-            : '<html><head><link rel="stylesheet" href="style.css"><script defer src="app.js"></script></head><body></body></html>';
+            : body.path === "app.js"
+              ? "window.app = true;"
+              : '<html><head><link rel="stylesheet" href="style.css"><script defer src="app.js"></script></head><body></body></html>';
           return new Response(JSON.stringify({ content }), { status: 200 });
         }),
       );
@@ -361,6 +363,24 @@ describe("GET /api/preview/[projectId]/[[...path]]", () => {
       expect(match).not.toBeNull();
       expect(verifyPreviewToken(match![1])).toMatchObject({ userId: "user-1", projectId: "proj-1", workspaceId: "ws-1" });
       assertZeroSubprocesses();
+    });
+
+    it("does not mint a bearer token when manifest verification is incomplete", async () => {
+      authMock.mockResolvedValue({ userId: "user-1" } as never);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url, opts) => {
+          const body = JSON.parse((opts as RequestInit).body as string);
+          if (body.path === "app.js") return new Response(JSON.stringify({ error: "missing" }), { status: 404 });
+          return new Response(JSON.stringify({ content: '<script type="module" src="app.js"></script>' }), { status: 200 });
+        }),
+      );
+      const res = await GET(
+        new Request("https://x.test/api/preview/proj-1/index.html") as unknown as import("next/server").NextRequest,
+        makeParams("proj-1", ["index.html"]),
+      );
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ error: "Preview asset manifest could not be verified" });
     });
 
     it("mints a manifest covering the module import closure, and nothing beyond it", async () => {

@@ -275,10 +275,28 @@ export async function GET(
       previewToken = presentedToken;
     } else {
       const manifest = await collectPreviewAssetManifest(filePath, body, readWorkspaceText);
+      console.info("[preview-manifest]", {
+        assetsIncluded: manifest.assets.length,
+        documentsVisited: manifest.documentsVisited,
+        scriptsScanned: manifest.scriptsScanned,
+        durationMs: manifest.durationMs,
+        complete: manifest.complete,
+        truncated: manifest.truncated,
+        truncationReasons: manifest.truncationReasons,
+        readFailures: manifest.readFailures,
+        parseFailures: manifest.parseFailures,
+        timedOut: manifest.timedOut,
+      });
+      if (!manifest.complete) {
+        return NextResponse.json(
+          { error: "Preview asset manifest could not be verified" },
+          { status: 503, headers: { "Cache-Control": "no-store" } },
+        );
+      }
       previewToken = createPreviewToken(userId, {
         projectId,
         workspaceId: project.workspaceId,
-        assets: manifest,
+        assets: manifest.assets,
       }).token;
       mintedTokenHtml = true;
     }

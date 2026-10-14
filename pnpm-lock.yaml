@@ -91,6 +91,9 @@ importers:
       '@xterm/xterm':
         specifier: ^6.0.0
         version: 6.0.0
+      acorn:
+        specifier: 8.17.0
+        version: 8.17.0
       babel-plugin-react-compiler:
         specifier: ^1.0.0
         version: 1.0.0
