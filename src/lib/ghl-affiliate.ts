@@ -259,6 +259,7 @@ export async function submitGhlLead(params: {
     });
 
     if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
       console.warn("[ghl] trackLead FAILED", {
         status: response.status,
         attributed: Boolean(amId),
@@ -269,12 +270,11 @@ export async function submitGhlLead(params: {
     console.info("[ghl] trackLead OK", { attributed: Boolean(amId) });
     return { success: true };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Network error";
     console.warn("[ghl] trackLead ERROR", {
       errorType: err instanceof Error ? err.name : "unknown",
       attributed: Boolean(amId),
     });
-    return { success: false, error: msg };
+    return { success: false, error: "GHL request failed" };
   }
 }
 

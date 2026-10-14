@@ -559,4 +559,35 @@ describe("GHL Affiliate Tracking — log redaction", () => {
       infoSpy.mockRestore();
     }
   });
+
+  it("redacts thrown upstream errors and replay identifiers", async () => {
+    const clerkId = "user_sensitive_network_identifier";
+    const upstreamSecret = "socket-private-error-content";
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    try {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => {
+          throw new Error(upstreamSecret);
+        }),
+      );
+      const { submitGhlLead, trackLeadIdempotent } = await import("@/lib/ghl-affiliate");
+      const failed = await submitGhlLead({ clerkId, email: "test@example.com" });
+      expect(failed.error).toBe("GHL request failed");
+
+      mockGetSupabaseAdmin.mockReturnValue(
+        createAtomicSupabaseMock({ initialState: "tracked" }),
+      );
+      await trackLeadIdempotent({ clerkId, email: "test@example.com" });
+
+      const logs = JSON.stringify([...warnSpy.mock.calls, ...infoSpy.mock.calls]);
+      expect(logs).not.toContain(clerkId);
+      expect(logs).not.toContain(upstreamSecret);
+    } finally {
+      warnSpy.mockRestore();
+      infoSpy.mockRestore();
+    }
+  });
 });
