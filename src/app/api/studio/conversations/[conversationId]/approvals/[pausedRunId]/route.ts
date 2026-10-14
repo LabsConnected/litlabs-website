@@ -776,7 +776,7 @@ export async function POST(
           // (or wrote to the wrong workspace) still fails honestly.
           resumePreview = await ensureProjectPreviewReady(
             transport,
-            { workspaceChange: result.workspaceChange ?? null, hadSuccessfulMutation: successfulMutation },
+            { workspaceChange: result.workspaceChange ?? null, hadSuccessfulMutation: successfulMutation, isStaticWorkspace: resumeConfig.isStaticWorkspace },
             undefined,
             actionContext,
           );
@@ -790,7 +790,7 @@ export async function POST(
         // nested gate merely because a later file has not been written yet.
         resumePreview = await ensureProjectPreviewReady(
           transport,
-          { hadSuccessfulMutation: successfulMutation },
+          { hadSuccessfulMutation: successfulMutation, isStaticWorkspace: resumeConfig.isStaticWorkspace },
           undefined,
           actionContext,
         ).catch(() => null);
@@ -836,7 +836,9 @@ export async function POST(
       // pending merely because those events happened outside the LLM loop.
       if (qualityLoopState && successfulMutation) {
         const qualitySession = restoreQualityLoopSession(qualityLoopState);
-        const previewUrl = buildPreviewProxyUrl(transport.workspaceId);
+        const previewUrl = resumeConfig.isStaticWorkspace
+          ? `/api/preview/${encodeURIComponent(resolved.projectId)}/`
+          : buildPreviewProxyUrl(transport.workspaceId);
         if (resumePreview?.ok) {
           noteBuildArtifacts(qualitySession, resumePreview.files);
           notePreviewReady(qualitySession, previewUrl);

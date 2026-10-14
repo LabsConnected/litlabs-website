@@ -460,6 +460,8 @@ export async function ensureProjectPreviewReady(
      * failed by the welcome-screen gate.
      */
     hadSuccessfulMutation?: boolean;
+    /** Server-derived static workspace: preview is served by the file route. */
+    isStaticWorkspace?: boolean;
   } = {},
   progress: ProgressEmitter = new ProgressEmitter(),
   actionContext?: ActionExecutionContext,
@@ -474,6 +476,23 @@ export async function ensureProjectPreviewReady(
     if (attempt < 2) await sleep(250);
   }
   if (!artifacts.ok) return artifacts;
+
+  if (options.isStaticWorkspace) {
+    // The static preview route serves root index.html. A framework entry or
+    // filename alone cannot prove that route has readable content to serve.
+    try {
+      if (!artifacts.files.includes("index.html")) {
+        return { ok: false, files: artifacts.files, error: "Static preview requires root index.html." };
+      }
+      const { content } = await transport.readFile("index.html");
+      if (!content.trim()) {
+        return { ok: false, files: artifacts.files, error: "Static preview index.html is empty." };
+      }
+      return { ok: true, files: artifacts.files };
+    } catch {
+      return { ok: false, files: artifacts.files, error: "Static preview index.html could not be read." };
+    }
+  }
 
   try {
     const status = await startAndWaitForPreview(

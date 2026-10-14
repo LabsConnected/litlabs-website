@@ -1791,7 +1791,7 @@ async function runAgentLoopV2Inner(
 
   // Run build-fix loop if mutations were made and enabled
   let buildFixResult: BuildFixLoopResult | undefined;
-  if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
+  if (cfg.enableBuildFix && !cfg.isStaticWorkspace && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
       onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg), cfg.allowLittPaidProviders),
@@ -3060,7 +3060,7 @@ async function resumeAgentLoopV2Inner(
 
   // Run build-fix loop with autonomous repair
   let buildFixResult: BuildFixLoopResult | undefined;
-  if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
+  if (cfg.enableBuildFix && !cfg.isStaticWorkspace && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
       onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg), cfg.allowLittPaidProviders),

@@ -7,6 +7,32 @@ import type { BuildFixLoopResult } from "@/lib/litt-intelligence/build-fix-loop"
 import { recordActionEventActivity } from "@/lib/action-runtime";
 import { _resetProviderHealthForTests } from "@/lib/litt-intelligence/provider-registry";
 
+describe("static approval preview", () => {
+  it("verifies index.html without starting or polling a dev server", async () => {
+    const { ensureProjectPreviewReady } = await import("@/lib/litt-intelligence/launch-flow");
+    const transport = createMockTransport({
+      listFiles: vi.fn().mockResolvedValue({ entries: [{ name: "index.html", type: "file" }] }),
+      readFile: vi.fn().mockResolvedValue({ content: "<html><body>Built site</body></html>", size: 40 }),
+    });
+    const result = await ensureProjectPreviewReady(transport, { isStaticWorkspace: true });
+    expect(result.ok).toBe(true);
+    expect(transport.startPreview).not.toHaveBeenCalled();
+    expect(transport.getPreviewStatus).not.toHaveBeenCalled();
+    expect(transport.exec).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "unreadable", "nested-only"])("rejects a %s static entry", async (kind) => {
+    const { ensureProjectPreviewReady } = await import("@/lib/litt-intelligence/launch-flow");
+    const transport = createMockTransport({
+      listFiles: vi.fn().mockResolvedValue({ entries: [{ name: kind === "nested-only" ? "page.tsx" : "index.html", type: "file" }] }),
+      readFile: kind === "unreadable" ? vi.fn().mockRejectedValue(new Error("missing")) : vi.fn().mockResolvedValue({ content: "", size: 0 }),
+    });
+    const result = await ensureProjectPreviewReady(transport, { isStaticWorkspace: true });
+    expect(result.ok).toBe(false);
+    expect(transport.startPreview).not.toHaveBeenCalled();
+  });
+});
+
 vi.mock("@/lib/action-runtime", () => ({
   recordActionEventActivity: vi.fn(() => Promise.resolve({})),
 }));

@@ -57,6 +57,7 @@ vi.mock("@/lib/litt-intelligence/agent-loop-v2", () => ({
 
 vi.mock("@/lib/projects/project-repository", () => ({
   verifyProjectWorkspace: vi.fn(),
+  getProject: vi.fn(() => Promise.resolve(null)),
 }));
 
 vi.mock("@/lib/missions/mission-repository", () => ({

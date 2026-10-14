@@ -85,6 +85,18 @@ describe("resumeAgentLoopV2 — approved mutation executes", () => {
     });
   });
 
+  it("does not enter shell-based build checks after a static approval", async () => {
+    const { transport, mkdirCalls } = makeTransport();
+    transport.discoverPackageInfo = vi.fn(async () => { throw new Error("Gate 1: exec forbidden"); });
+    const result = await resumeAgentLoopV2(makePausedInput({
+      config: { systemPrompt: "You are LiTT.", executionMode: "act", enableBuildFix: true, isStaticWorkspace: true },
+    }), transport);
+    expect(mkdirCalls).toEqual([MKDIR_PATH]);
+    expect(transport.discoverPackageInfo).not.toHaveBeenCalled();
+    expect(result.buildFixResult).toBeUndefined();
+    expect(result.cancelled).toBe(false);
+  });
+
   it("executes the approved files.mkdir exactly once with the frozen inputs", async () => {
     const { transport, mkdirCalls } = makeTransport();
 
