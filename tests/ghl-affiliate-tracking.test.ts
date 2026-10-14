@@ -533,13 +533,18 @@ describe("GHL Affiliate Tracking — log redaction", () => {
     const clerkId = "user_sensitive_clerk_identifier";
     const amId = "affiliate_sensitive_identifier";
     const upstreamSecret = "upstream-private-error-content";
+    const failureCancel = vi.fn().mockResolvedValue(undefined);
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
 
     try {
       vi.stubGlobal(
         "fetch",
-        vi.fn(async () => new Response(upstreamSecret, { status: 500 })),
+        vi.fn(async () => ({
+          ok: false,
+          status: 500,
+          body: { cancel: failureCancel },
+        }) as unknown as Response),
       );
       const { submitGhlLead } = await import("@/lib/ghl-affiliate");
       await submitGhlLead({
@@ -547,6 +552,7 @@ describe("GHL Affiliate Tracking — log redaction", () => {
         email: "test@example.com",
         amId,
       });
+      expect(failureCancel).toHaveBeenCalledOnce();
 
       const logs = JSON.stringify([...warnSpy.mock.calls, ...infoSpy.mock.calls]);
       expect(logs).not.toContain(clerkId);
