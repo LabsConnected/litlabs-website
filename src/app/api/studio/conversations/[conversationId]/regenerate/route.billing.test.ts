@@ -155,4 +155,36 @@ describe("POST regenerate billing", () => {
       expect.anything(),
     );
   });
+
+  it("returns the debit RPC error and marks the assistant failed", async () => {
+    meteredLlmCallMock.mockResolvedValue({
+      ok: false,
+      status: 503,
+      error: "debit_credits failed: ledger down",
+      code: "billing_unavailable",
+    });
+
+    const req = new NextRequest("http://localhost/api/studio/conversations/conv-1/regenerate", {
+      method: "POST",
+      body: JSON.stringify({ assistantMessageId: "asst-old" }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-1" }) });
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error).toBe("debit_credits failed: ledger down");
+    expect(body.code).toBe("billing_unavailable");
+    expect(body.assistantMessage.status).toBe("failed");
+    expect(updateMessageStatusMock).toHaveBeenCalledWith(
+      "asst-new",
+      "clerk_studio",
+      "failed",
+      "debit_credits failed: ledger down",
+    );
+    expect(updateMessageStatusMock).not.toHaveBeenCalledWith(
+      "asst-new",
+      "clerk_studio",
+      "completed",
+      expect.anything(),
+    );
+  });
 });

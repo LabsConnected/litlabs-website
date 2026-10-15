@@ -89,4 +89,23 @@ describe("POST /api/conversations/[id]/messages billing", () => {
       }),
     );
   });
+
+  it("returns the debit RPC error and does not insert an assistant message", async () => {
+    meteredLlmCallMock.mockResolvedValue({
+      ok: false,
+      status: 503,
+      error: "debit_credits failed: ledger down",
+      code: "billing_unavailable",
+    });
+
+    const res = await POST(request(), { params: Promise.resolve({ id: "conv-1" }) });
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error).toBe("debit_credits failed: ledger down");
+    expect(body.code).toBe("billing_unavailable");
+    const inserts = fromMock.mock.results
+      .map((result) => result.value?.inserted)
+      .filter(Boolean);
+    expect(inserts).toEqual([expect.objectContaining({ role: "user" })]);
+  });
 });

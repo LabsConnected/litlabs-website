@@ -103,4 +103,20 @@ describe("POST /api/agents/chat director fallback billing", () => {
       }),
     );
   });
+
+  it("returns the debit RPC error and does not reply with model text", async () => {
+    meteredLlmCallMock.mockResolvedValue({
+      ok: false,
+      status: 503,
+      error: "debit_credits failed: ledger down",
+      code: "billing_unavailable",
+    });
+
+    const res = await POST(request({ message: "plan the landing page" }));
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error).toBe("debit_credits failed: ledger down");
+    expect(body.code).toBe("billing_unavailable");
+    expect(body.response).toBeUndefined();
+  });
 });

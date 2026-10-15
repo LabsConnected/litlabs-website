@@ -58,9 +58,9 @@ export type MeteredLlmCallResult =
   | {
       ok: false;
       /** HTTP status the route should return. */
-      status: 402 | 403;
+      status: 402 | 403 | 503;
       error: string;
-      code: "spend_ceiling_exceeded" | "insufficient_credits";
+      code: "spend_ceiling_exceeded" | "insufficient_credits" | "billing_unavailable";
     };
 
 export type SpendAuthorization =
@@ -198,16 +198,27 @@ export async function meteredLlmCall(
     meteringBillableKey: result.metering.billableIdempotencyKey,
   });
 
-  // If the debit failed for insufficient funds (balance dropped to zero
-  // between the pre-flight gate and the charge — concurrent spend race),
-  // do not hand the user free value: report 402 instead of the text.
-  // Transient billing errors are best-effort (logged by chargeLlmUsage).
-  if (billing.error === "Insufficient LiTTBits") {
+  // A debit that reports an error did not take the credits. Do not return
+  // the generated text. Insufficient funds (including a balance that dropped
+  // between the pre-flight gate and the charge) are 402. Any other billing
+  // error — debit_credits RPC failure, missing user, production admin
+  // unavailable — is 503 and carries that error string. Owner exemption,
+  // shadow mode, BYOK, and non-production missing admin return no error
+  // and still return the text.
+  if (billing.error) {
+    if (billing.error === "Insufficient LiTTBits") {
+      return {
+        ok: false,
+        status: 402,
+        error: "Insufficient LiTTBits",
+        code: "insufficient_credits",
+      };
+    }
     return {
       ok: false,
-      status: 402,
-      error: "Insufficient LiTTBits",
-      code: "insufficient_credits",
+      status: 503,
+      error: billing.error,
+      code: "billing_unavailable",
     };
   }
 
