@@ -1,0 +1,42 @@
+// @vitest-environment node
+import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { describe, expect, it } from "vitest";
+
+const sql = readFileSync("scripts/billing-migration-precheck.sql", "utf8");
+const shell = readFileSync("scripts/billing-migration-precheck.sh", "utf8");
+
+describe("billing migration precheck", () => {
+  it("orders migrations before code and records a rollback for each", () => {
+    for (const file of [
+      "20261014000000_subscriptions_stripe_subscription_id_unique.sql",
+      "20261015000000_subscriptions_cancel_at_period_end.sql",
+      "20261015120000_media_cap_holds.sql",
+    ]) {
+      expect(sql).toContain(file);
+      expect(shell).toContain(file);
+    }
+    expect(sql).toContain("before the application code");
+    expect(sql).toContain("DROP INDEX IF EXISTS public.subscriptions_stripe_subscription_id_uidx");
+    expect(sql).toContain("DROP COLUMN IF EXISTS cancel_at_period_end");
+    expect(sql).toContain("Do not drop it");
+    expect(sql).toContain("DROP TABLE IF EXISTS public.media_cap_holds");
+    expect(sql).toContain("stripe_subscription_id");
+    expect(sql).toContain("generation_jobs");
+    expect(sql).toContain("public.users");
+  });
+
+  it("does not apply schema changes", () => {
+    const executable = sql.replace(/\/\*[\s\S]*?\*\//g, "").replace(/--.*$/gm, "");
+    expect(executable).not.toMatch(/\b(CREATE|ALTER|DROP)\b/i);
+  });
+
+  it("prints the order without a database", () => {
+    const output = execFileSync("bash", ["scripts/billing-migration-precheck.sh", "--print"], {
+      encoding: "utf8",
+    });
+    expect(output).toContain("migrations run before the application code");
+    expect(output).toContain("20261014000000");
+    expect(output).toContain("20261015120000");
+  });
+});
