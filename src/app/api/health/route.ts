@@ -50,6 +50,11 @@ function checkStorage(): { status: string; detail?: string } {
   return { status: "degraded", detail: "No storage backend configured" };
 }
 
+function railwayCommitSha(): string | undefined {
+  const value = process.env.RAILWAY_GIT_COMMIT_SHA;
+  return value && /^[0-9a-f]{40}$/i.test(value) ? value : undefined;
+}
+
 /**
  * Never echo anything that looks like a secret value into a health-check
  * response. Clerk's SDK error messages are expected to contain only a
@@ -144,7 +149,7 @@ export async function GET() {
   // Build/deploy identity
   checks.build = {
     status: "ok",
-    detail: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 8) ??
+    detail: railwayCommitSha() ??
       process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 8) ??
       "dev",
   };
