@@ -9,6 +9,10 @@ import { getVideoModel, getVideoModelPricing } from "@/lib/studio-models";
 import { createVideoJob } from "@/lib/video-jobs";
 import { refundVideoCharge } from "@/lib/video-refunds";
 import { calculateRetailBits } from "@/lib/generation/cost-engine";
+import {
+  assertGenerationWithinPlanCaps,
+  planLimitResponse,
+} from "@/lib/generation/enforce-media-caps";
 import { buildChargeRating } from "@/lib/billing/canonical-pricing";
 import {
   createGenerationJob,
@@ -253,6 +257,16 @@ async function handler(req: NextRequest) {
       // Check billing exemption — owner skips balance check and debit
       const sim = await getActiveSimulation().catch(() => null);
       const exempt = isBillingExempt(userId, sim);
+      const alibabaLimit = await assertGenerationWithinPlanCaps({
+        clerkId: userId,
+        requestId,
+        modality: "video",
+        provider: "alibaba",
+        model,
+        providerCostCents: costResult.providerCostCents,
+        billingExempt: exempt,
+      });
+      if (alibabaLimit) return planLimitResponse(alibabaLimit);
       let alibabaBalance: number | null = null;
 
       if (!exempt) {
@@ -407,6 +421,16 @@ async function handler(req: NextRequest) {
     // Check billing exemption — owner skips balance check and debit
     const veoSim = await getActiveSimulation().catch(() => null);
     const veoExempt = isBillingExempt(userId, veoSim);
+    const veoLimit = await assertGenerationWithinPlanCaps({
+      clerkId: userId,
+      requestId,
+      modality: "video",
+      provider: "veo",
+      model,
+      providerCostCents: costResult.providerCostCents,
+      billingExempt: veoExempt,
+    });
+    if (veoLimit) return planLimitResponse(veoLimit);
 
     if (!veoExempt) {
       // Check balance

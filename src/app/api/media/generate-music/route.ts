@@ -5,6 +5,10 @@ import { withRateLimit } from "@/lib/rate-limiter";
 import { isBillingExempt, getActiveSimulation } from "@/lib/owner";
 import { GoogleGenAI, Modality } from "@google/genai";
 import { calculateRetailBits } from "@/lib/generation/cost-engine";
+import {
+  assertGenerationWithinPlanCaps,
+  planLimitResponse,
+} from "@/lib/generation/enforce-media-caps";
 import { buildChargeRating } from "@/lib/billing/canonical-pricing";
 
 // ── Route configuration ──────────────────────────────────────────
@@ -47,6 +51,24 @@ async function handler(req: NextRequest) {
     if (!prompt?.trim())
       return NextResponse.json({ error: "Prompt required" }, { status: 400 });
 
+    const musicSim = await getActiveSimulation().catch(() => null);
+    const musicExempt = isBillingExempt(userId, musicSim);
+    const costResult = calculateRetailBits({
+      modality: "music",
+      provider: "google",
+      model,
+    });
+    const musicLimit = await assertGenerationWithinPlanCaps({
+      clerkId: userId,
+      requestId,
+      modality: "music",
+      provider: "google",
+      model,
+      providerCostCents: costResult.providerCostCents,
+      billingExempt: musicExempt,
+    });
+    if (musicLimit) return planLimitResponse(musicLimit);
+
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
     const parts: Array<
@@ -73,10 +95,6 @@ async function handler(req: NextRequest) {
 
     const audioMime = audioPart.inlineData.mimeType || "audio/mp3";
 
-    // Check billing exemption — owner skips debit
-    const musicSim = await getActiveSimulation().catch(() => null);
-    const musicExempt = isBillingExempt(userId, musicSim);
-
     let musicBalance: number | null = null;
     if (musicExempt) {
       try {
@@ -87,11 +105,6 @@ async function handler(req: NextRequest) {
       }
     } else {
       // Atomic debit via canonical ledger — keyed on requestId.
-      const costResult = calculateRetailBits({
-        modality: "music",
-        provider: "google",
-        model,
-      });
       const reservation = await adjustWalletBalance({
         clerkId: userId,
         amount: -COST,
