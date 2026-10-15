@@ -23,7 +23,7 @@ beforeAll(async () => {
   // The route mints preview tokens with the real preview-token module,
   // which signs with TERMINAL_AUTH_SECRET (the route has always required
   // this secret — the terminal token is only mocked in this fixture).
-  vi.stubEnv("TERMINAL_AUTH_SECRET", "browser-fixture-secret-with-32-plus-chars");
+  vi.stubEnv("TERMINAL_AUTH_SECRET", "x".repeat(32));
   vi.stubGlobal("fetch", vi.fn(async (_url, options) => {
     const { path } = JSON.parse(String(options?.body));
     return new Response(JSON.stringify({ content: files[path] }), { status: files[path] ? 200 : 404 });

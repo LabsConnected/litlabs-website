@@ -42,7 +42,7 @@ let origin: string;
 const realFetch = globalThis.fetch;
 beforeAll(async () => {
   // The preview-token module is real (not mocked): it signs with this secret.
-  vi.stubEnv("TERMINAL_AUTH_SECRET", "browser-fixture-secret-with-32-plus-chars");
+  vi.stubEnv("TERMINAL_AUTH_SECRET", "x".repeat(32));
   vi.stubGlobal("fetch", vi.fn(async (_url, options) => {
     const { path } = JSON.parse(String(options?.body));
     return new Response(JSON.stringify({ content: files[path] }), { status: files[path] ? 200 : 404 });

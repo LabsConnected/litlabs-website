@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createPreviewToken, verifyPreviewToken } from "./preview-token";
 import { createTerminalToken, verifyTerminalToken } from "@/lib/terminal-auth";
 
-const SECRET = "preview-token-test-secret-with-32+chars";
+const SECRET = "x".repeat(32);
 
 beforeAll(() => {
   vi.stubEnv("TERMINAL_AUTH_SECRET", SECRET);

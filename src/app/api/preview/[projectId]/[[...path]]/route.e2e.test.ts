@@ -124,7 +124,7 @@ describe("E2E: AI build → static preview (zero subprocesses)", () => {
     vi.clearAllMocks();
     fileStore.clear();
     spyOnChildProcess();
-    vi.stubEnv("TERMINAL_AUTH_SECRET", "integration-test-preview-secret-with-at-least-32-chars");
+    vi.stubEnv("TERMINAL_AUTH_SECRET", "x".repeat(32));
     installTerminalSimulation();
     authMock.mockResolvedValue({ userId: "user-1" } as never);
     getProjectMock.mockResolvedValue({ id: "proj-1", userId: "user-1", workspaceId: "ws-1" } as never);

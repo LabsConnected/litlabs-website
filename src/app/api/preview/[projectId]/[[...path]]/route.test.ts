@@ -71,7 +71,7 @@ describe("GET /api/preview/[projectId]/[[...path]]", () => {
     // The real preview-token module signs with TERMINAL_AUTH_SECRET; the
     // route has always required this secret (createTerminalToken throws
     // without it), so the suite provides one.
-    vi.stubEnv("TERMINAL_AUTH_SECRET", "route-test-secret-with-at-least-32-chars");
+    vi.stubEnv("TERMINAL_AUTH_SECRET", "x".repeat(32));
     authMock.mockResolvedValue({ userId: "user-1" } as never);
     getProjectMock.mockResolvedValue({
       id: "proj-1",
@@ -236,7 +236,7 @@ describe("GET /api/preview/[projectId]/[[...path]]", () => {
     // The preview-token module is intentionally NOT mocked: these tests
     // exercise the real HMAC signing/verification end to end at route level.
     beforeEach(() => {
-      vi.stubEnv("TERMINAL_AUTH_SECRET", "route-test-secret-with-at-least-32-chars");
+      vi.stubEnv("TERMINAL_AUTH_SECRET", "x".repeat(32));
       authMock.mockResolvedValue({ userId: null } as never);
     });
 
