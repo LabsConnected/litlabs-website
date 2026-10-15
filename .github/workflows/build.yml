@@ -112,6 +112,9 @@ jobs:
         env:
           CI: true
 
+      - name: Install Playwright Chromium for Vitest browser tests
+        run: pnpm exec playwright install --with-deps chromium
+
       - name: Test
         run: pnpm test
 
