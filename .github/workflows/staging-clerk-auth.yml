@@ -44,17 +44,18 @@ jobs:
       - name: Validate required configuration and Clerk instance
         shell: bash
         env:
-          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
-          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          CLERK_TEST_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}
+          CLERK_TEST_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
           CLERK_TEST_USER_A_EMAIL: ${{ secrets.CLERK_TEST_USER_A_EMAIL }}
           CLERK_TEST_USER_B_EMAIL: ${{ secrets.CLERK_TEST_USER_B_EMAIL }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
         run: |
           set -euo pipefail
           required=(
-            CLERK_PUBLISHABLE_KEY
-            NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
-            CLERK_SECRET_KEY
+            CLERK_TEST_PUBLISHABLE_KEY
+            CLERK_TEST_SECRET_KEY
             CLERK_TEST_USER_A_EMAIL
             CLERK_TEST_USER_B_EMAIL
           )
@@ -65,12 +66,12 @@ jobs:
             fi
           done
 
-          if [[ "$CLERK_PUBLISHABLE_KEY" != pk_test_* ]] || [[ "$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" != pk_test_* ]]; then
-            echo "Clerk publishable keys are not Development/test keys"
+          if [[ "$CLERK_TEST_PUBLISHABLE_KEY" != pk_test_* ]]; then
+            echo "Clerk publishable key is not a Development/test key"
             exit 1
           fi
-          if [ "$CLERK_PUBLISHABLE_KEY" != "$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" ]; then
-            echo "Clerk publishable key aliases do not match"
+          if [[ "$CLERK_TEST_SECRET_KEY" != sk_test_* ]]; then
+            echo "Clerk secret key is not a Development/test key"
             exit 1
           fi
           if [ "$CLERK_TEST_USER_A_EMAIL" != "litt.test.one@example.com" ] || [ "$CLERK_TEST_USER_B_EMAIL" != "litt.test.two@example.com" ]; then
@@ -80,7 +81,7 @@ jobs:
 
           instance_json="$RUNNER_TEMP/clerk-instance.json"
           if ! curl --fail --silent --show-error \
-            --header "Authorization: Bearer $CLERK_SECRET_KEY" \
+            --header "Authorization: Bearer $CLERK_TEST_SECRET_KEY" \
             --header "Accept: application/json" \
             "https://api.clerk.com/v1/instance" > "$instance_json"; then
             echo "Clerk instance verification request failed"
@@ -143,15 +144,19 @@ jobs:
       - name: Authenticate User A and User B
         shell: bash
         env:
-          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
-          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          CLERK_TEST_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}
+          CLERK_TEST_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
           CLERK_TEST_USER_A_EMAIL: ${{ secrets.CLERK_TEST_USER_A_EMAIL }}
           CLERK_TEST_USER_B_EMAIL: ${{ secrets.CLERK_TEST_USER_B_EMAIL }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
+          PLAYWRIGHT_STAGING_AUTH: true
         run: |
           set -euo pipefail
           cleanup() {
-            rm -rf tests/playwright/.clerk playwright-report test-results
+            # Preserve Clerk storage states for the following suite step.
+            rm -rf playwright-report test-results
           }
           trap cleanup EXIT
           auth_log="$RUNNER_TEMP/staging-auth-setup.log"
@@ -167,11 +172,14 @@ jobs:
       - name: Run authenticated integration and isolation suites
         shell: bash
         env:
-          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
-          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          CLERK_TEST_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}
+          CLERK_TEST_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
           CLERK_TEST_USER_A_EMAIL: ${{ secrets.CLERK_TEST_USER_A_EMAIL }}
           CLERK_TEST_USER_B_EMAIL: ${{ secrets.CLERK_TEST_USER_B_EMAIL }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
+          PLAYWRIGHT_STAGING_AUTH: true
         run: |
           set -euo pipefail
           cleanup() {
@@ -182,8 +190,8 @@ jobs:
           if ! PLAYWRIGHT_BASE_URL="$STAGING_URL" \
             pnpm exec playwright test \
               --config playwright.config.ts \
-              --project=authenticated-chromium \
-              --project=buyer-b \
+              --project=staging-integration \
+              --project=staging-isolation \
               tests/playwright/integration.spec.ts \
               tests/playwright/isolation.spec.ts \
             > "$suite_log" 2>&1; then
