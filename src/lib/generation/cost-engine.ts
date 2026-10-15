@@ -75,6 +75,11 @@ const PROVIDER_COST_CENTS: Record<string, number> = {
  * Get the provider cost in cents for a generation.
  * Falls back to a safe default if unknown.
  */
+/** Cents stored on the catalog row, before duration and resolution rules. */
+export function catalogTableCents(provider: string, model: string): number | undefined {
+  return PROVIDER_COST_CENTS[`${provider}:${model}`];
+}
+
 export function getProviderCostCents(input: CostInput): number {
   const key = `${input.provider}:${input.model}`;
 

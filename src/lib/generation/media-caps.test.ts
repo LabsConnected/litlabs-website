@@ -6,8 +6,12 @@
  */
 import { describe, expect, it } from "vitest";
 import { PLANS } from "@/config/plans";
-import { calculateRetailBits } from "@/lib/generation/cost-engine";
-import { PLAN_MEDIA_MONTHLY_CAPS, worstCaseProviderSpend } from "@/lib/generation/media-caps";
+import { calculateRetailBits, pricedGenerationInputs } from "@/lib/generation/cost-engine";
+import {
+  modelledCatalogEconomics,
+  PLAN_MEDIA_MONTHLY_CAPS,
+  worstCaseProviderSpend,
+} from "@/lib/generation/media-caps";
 
 describe("generation retail rate and plan provider ceiling", () => {
   it("charges 1000 credits per retail dollar (10x the old 1-credit-per-cent rate)", () => {
@@ -50,6 +54,7 @@ describe("generation retail rate and plan provider ceiling", () => {
     expect(PLAN_MEDIA_MONTHLY_CAPS.owner.maxVideos).toBe(0);
 
     // Printed for the PR. Values come from PROVIDER_COST_CENTS / getProviderCostCents.
+    // Modelled, not proven.
     console.info(
       JSON.stringify({
         creator: {
@@ -66,5 +71,39 @@ describe("generation retail rate and plan provider ceiling", () => {
         },
       }),
     );
+  });
+
+  it("every priced model stays within half of Creator and Pro revenue (modelled, not proven)", () => {
+    const report = modelledCatalogEconomics();
+    const inputs = pricedGenerationInputs();
+    expect(report.label).toBe("modelled, not proven");
+    expect(report.rows).toHaveLength(inputs.length);
+    expect(report.creator.priceCents).toBe(1500);
+    expect(report.creator.credits).toBe(7500);
+    expect(report.pro.priceCents).toBe(3900);
+    expect(report.pro.credits).toBe(18000);
+    expect(report.creator.halfPriceCents).toBe(750);
+    expect(report.pro.halfPriceCents).toBe(1950);
+    expect(report.creator.caps).toEqual(PLAN_MEDIA_MONTHLY_CAPS.creator_beta);
+    expect(report.pro.caps).toEqual(PLAN_MEDIA_MONTHLY_CAPS.pro_builder_beta);
+
+    const seen = new Set<string>();
+    for (const row of report.rows) {
+      seen.add(`${row.provider}:${row.model}`);
+      expect(row.providerCostCents).toBeGreaterThanOrEqual(0);
+      expect(row.retailCredits).toBeGreaterThanOrEqual(0);
+      if (row.providerCostCents === 0) {
+        expect(row.retailCredits).toBe(0);
+        expect(row.creator.providerCents).toBe(0);
+        expect(row.pro.providerCents).toBe(0);
+      }
+      expect(row.creator.providerCents).toBeLessThanOrEqual(report.creator.halfPriceCents);
+      expect(row.pro.providerCents).toBeLessThanOrEqual(report.pro.halfPriceCents);
+    }
+    for (const input of inputs) {
+      expect(seen.has(`${input.provider}:${input.model}`)).toBe(true);
+    }
+
+    console.info(JSON.stringify(report));
   });
 });

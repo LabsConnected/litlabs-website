@@ -2,6 +2,7 @@ import "server-only";
 import { PLANS, type PlanId } from "@/config/plans";
 import {
   calculateRetailBits,
+  catalogTableCents,
   getProviderCostCents,
   pricedGenerationInputs,
 } from "@/lib/generation/cost-engine";
@@ -110,3 +111,121 @@ export const PLAN_MEDIA_MONTHLY_CAPS: Record<PlanId, PlanMediaCap> = {
   founder: capFor("founder"),
   owner: capFor("owner"),
 };
+
+export interface ModelledPlanSpend {
+  count: number;
+  providerCents: number;
+  providerUsd: number;
+}
+
+export interface ModelledCatalogRow {
+  label: string;
+  modality: GenerationModality;
+  provider: string;
+  model: string;
+  durationSeconds: number | null;
+  resolution: string | null;
+  /** PROVIDER_COST_CENTS for this provider:model, before duration rules. */
+  tableCents: number;
+  /** Cents getProviderCostCents charges for this input. */
+  providerCostCents: number;
+  retailCredits: number;
+  /** Which rule in cost-engine.ts produced providerCostCents. */
+  pricingRule: string;
+  creator: ModelledPlanSpend;
+  pro: ModelledPlanSpend;
+}
+
+export interface ModelledCatalogEconomics {
+  /** This table is computed from the repo cost catalog. It is not an invoice. */
+  label: "modelled, not proven";
+  creator: {
+    priceCents: number;
+    credits: number;
+    halfPriceCents: number;
+    caps: PlanMediaCap;
+  };
+  pro: {
+    priceCents: number;
+    credits: number;
+    halfPriceCents: number;
+    caps: PlanMediaCap;
+  };
+  rows: ModelledCatalogRow[];
+}
+
+function pricingRule(input: CostInput): string {
+  if (input.modality === "video" && input.provider === "veo") {
+    return "veo per-second: 10 cents/s at 720p, 12 cents/s at 1080p; the table stores the 4s base";
+  }
+  if (input.modality === "video") {
+    return "ceil(tableCents * durationSeconds / 4)";
+  }
+  if (input.modality === "music" && input.provider === "elevenlabs") {
+    return "ceil(durationSeconds * 0.15); the table stores the 8 cent base row";
+  }
+  return "PROVIDER_COST_CENTS";
+}
+
+function planSpend(
+  credits: number,
+  providerCostCents: number,
+  retailCredits: number,
+): ModelledPlanSpend {
+  if (providerCostCents <= 0 || retailCredits <= 0 || credits <= 0) {
+    return { count: 0, providerCents: 0, providerUsd: 0 };
+  }
+  const count = Math.floor(credits / retailCredits);
+  const providerCents = count * providerCostCents;
+  return { count, providerCents, providerUsd: providerCents / 100 };
+}
+
+/**
+ * Every input pricedGenerationInputs() emits, with the catalog cents, the
+ * credits charged, and the provider bill of spending a full Creator or Pro
+ * balance on that one input. Modelled from this repo. Not proven against
+ * a provider invoice.
+ */
+export function modelledCatalogEconomics(): ModelledCatalogEconomics {
+  const creatorCredits = PLANS.creator_beta.monthlyCredits;
+  const proCredits = PLANS.pro_builder_beta.monthlyCredits;
+  const creatorPrice = PLANS.creator_beta.monthlyPriceCents ?? 0;
+  const proPrice = PLANS.pro_builder_beta.monthlyPriceCents ?? 0;
+  const rows: ModelledCatalogRow[] = pricedGenerationInputs().map((input) => {
+    const tableCents = catalogTableCents(input.provider, input.model);
+    if (tableCents === undefined) {
+      throw new Error(`missing catalog row for ${input.provider}:${input.model}`);
+    }
+    const priced = calculateRetailBits(input);
+    return {
+      label: labelFor(input),
+      modality: input.modality,
+      provider: input.provider,
+      model: input.model,
+      durationSeconds: input.durationSeconds ?? null,
+      resolution: input.resolution ?? null,
+      tableCents,
+      providerCostCents: priced.providerCostCents,
+      retailCredits: priced.retailLiTTBits,
+      pricingRule: pricingRule(input),
+      creator: planSpend(creatorCredits, priced.providerCostCents, priced.retailLiTTBits),
+      pro: planSpend(proCredits, priced.providerCostCents, priced.retailLiTTBits),
+    };
+  });
+  return {
+    label: "modelled, not proven",
+    creator: {
+      priceCents: creatorPrice,
+      credits: creatorCredits,
+      halfPriceCents: Math.floor(creatorPrice * 0.5),
+      caps: PLAN_MEDIA_MONTHLY_CAPS.creator_beta,
+    },
+    pro: {
+      priceCents: proPrice,
+      credits: proCredits,
+      halfPriceCents: Math.floor(proPrice * 0.5),
+      caps: PLAN_MEDIA_MONTHLY_CAPS.pro_builder_beta,
+    },
+    rows,
+  };
+}
