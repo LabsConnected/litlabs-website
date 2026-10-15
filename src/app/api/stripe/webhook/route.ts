@@ -127,6 +127,12 @@ function resolveBillablePlan(
  * The subscription item price is the plan. Metadata is only a fallback
  * when the price is not in the env map, so a Creator→Pro price change
  * does not 500 on stale `plan_id` metadata.
+ *
+ * #662 (head 702b9bbd, which contains #658's grant-race commits) still
+ * throws when metadata and price disagree inside resolveBillablePlan.
+ * Subscription events go through this function instead: the price wins.
+ * A non-proration invoice.paid still throws if its price disagrees with
+ * the plan stored on the row. Unmapped prices are still not guessed.
  */
 function resolveSubscriptionPlan(
   metadataPlan: unknown,

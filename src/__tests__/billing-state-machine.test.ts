@@ -700,6 +700,25 @@ describe("Webhook event processing — state mutations", () => {
     expect(rpcCalls.filter((c) => c.fn === "grant_credits")).toHaveLength(0);
   });
 
+  it("a renewal invoice whose price disagrees with the stored plan still returns 500", async () => {
+    process.env.STRIPE_PRICE_PRO_BUILDER_BETA = "price_test_pro";
+    const { sb, rpcCalls } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockConstructEvent.mockReturnValue(makeStripeEvent("invoice.paid", {
+      object: {
+        id: "in_mismatch",
+        billing_reason: "subscription_cycle",
+        parent: { subscription_details: { subscription: "sub_mismatch" } },
+        lines: { data: [{ price: "price_test_pro", period: { end: 1702678400 } }] },
+      },
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(500);
+    expect(rpcCalls.filter((c) => c.fn === "grant_credits")).toHaveLength(0);
+  });
+
   it("a subscription_update proration invoice does not grant the full plan amount", async () => {
     process.env.STRIPE_PRICE_PRO_BUILDER_BETA = "price_test_pro";
     const { sb, rpcCalls, updates } = buildTrackingSupabase();
