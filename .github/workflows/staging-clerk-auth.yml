@@ -2,6 +2,11 @@ name: Staging Clerk Auth Validation
 
 on:
   workflow_dispatch:
+    inputs:
+      expected_staging_sha:
+        description: "Approved deployed staging commit SHA (exact 40-character lowercase hex)"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -19,6 +24,7 @@ jobs:
       STAGING_URL: https://litlabslitt-shell-staging.up.railway.app
       EXPECTED_CLERK_INSTANCE: ins_3Eel6w2QA2Id5utwcc3vDqCGZiz
       EXPECTED_CLERK_DOMAIN: eternal-chow-60.clerk.accounts.dev
+      EXPECTED_STAGING_SHA: ${{ inputs.expected_staging_sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -125,7 +131,7 @@ jobs:
           rm -f "$domain_check"
           echo "Staging Clerk domain validation: PASS"
 
-      - name: Verify staging health
+      - name: Verify staging health and approved deployment SHA
         shell: bash
         run: |
           set -euo pipefail
@@ -138,10 +144,34 @@ jobs:
             echo "Staging health/auth check failed"
             exit 1
           fi
+
+          expected="${EXPECTED_STAGING_SHA,,}"
+          actual="$(jq -r '.checks.build.detail // empty' "$health" | tr '[:upper:]' '[:lower:]')"
+          if ! [[ "$expected" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid expected_staging_sha input"
+            rm -f "$health"
+            exit 1
+          fi
+          if [ -z "$actual" ] || ! [[ "$actual" =~ ^([0-9a-f]{8}|[0-9a-f]{40})$ ]]; then
+            echo "Staging deployment SHA unavailable"
+            rm -f "$health"
+            exit 1
+          fi
+          if [[ "$actual" =~ ^[0-9a-f]{8}$ ]]; then
+            matches_target="${expected:0:8}"
+          else
+            matches_target="$expected"
+          fi
+          if [ "$actual" != "$matches_target" ]; then
+            echo "STAGING_DEPLOYMENT_DRIFT expected=$expected actual=$actual"
+            rm -f "$health"
+            exit 1
+          fi
+          echo "Staging deployment SHA validation: PASS ($actual)"
           rm -f "$health"
-          echo "Staging health validation: PASS"
 
       - name: Authenticate User A and User B
+        id: auth_setup
         shell: bash
         env:
           CLERK_TEST_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}
@@ -154,12 +184,9 @@ jobs:
           PLAYWRIGHT_STAGING_AUTH: true
         run: |
           set -euo pipefail
-          cleanup() {
-            # Preserve Clerk storage states for the following suite step.
-            rm -rf playwright-report test-results
-          }
+          cleanup() { rm -rf playwright-report test-results; }
           trap cleanup EXIT
-          auth_log="$RUNNER_TEMP/staging-auth-setup.log"
+          auth_log="$RUNNER_TEMP/staging-clerk-auth-setup.log"
           if ! PLAYWRIGHT_BASE_URL="$STAGING_URL" \
             pnpm exec playwright test --config playwright.config.ts --project=auth-setup \
             > "$auth_log" 2>&1; then
@@ -169,7 +196,10 @@ jobs:
           echo "User A authentication: PASS"
           echo "User B authentication: PASS"
 
-      - name: Run authenticated integration and isolation suites
+      - name: Run integration suite
+        id: integration
+        if: always() && steps.auth_setup.outcome == 'success'
+        continue-on-error: true
         shell: bash
         env:
           CLERK_TEST_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}
@@ -181,22 +211,168 @@ jobs:
           CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
           PLAYWRIGHT_STAGING_AUTH: true
         run: |
-          set -euo pipefail
+          set +e
+          report="$RUNNER_TEMP/staging-integration.json"
+          stderr_log="$RUNNER_TEMP/staging-integration.stderr"
+          PLAYWRIGHT_BASE_URL="$STAGING_URL" \
+            pnpm exec playwright test --config playwright.config.ts \
+              --project=staging-integration tests/playwright/integration.spec.ts \
+              --reporter=json > "$report" 2> "$stderr_log"
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      - name: Run isolation suite
+        id: isolation
+        if: always() && steps.auth_setup.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        env:
+          CLERK_TEST_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}
+          CLERK_TEST_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
+          CLERK_TEST_USER_A_EMAIL: ${{ secrets.CLERK_TEST_USER_A_EMAIL }}
+          CLERK_TEST_USER_B_EMAIL: ${{ secrets.CLERK_TEST_USER_B_EMAIL }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
+          PLAYWRIGHT_STAGING_AUTH: true
+        run: |
+          set +e
+          report="$RUNNER_TEMP/staging-isolation.json"
+          stderr_log="$RUNNER_TEMP/staging-isolation.stderr"
+          PLAYWRIGHT_BASE_URL="$STAGING_URL" \
+            pnpm exec playwright test --config playwright.config.ts \
+              --project=staging-isolation tests/playwright/isolation.spec.ts \
+              --reporter=json > "$report" 2> "$stderr_log"
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      - name: Emit sanitized suite results and final verdict
+        if: always()
+        shell: bash
+        env:
+          AUTH_OUTCOME: ${{ steps.auth_setup.outcome }}
+          INTEGRATION_STATUS: ${{ steps.integration.outputs.status }}
+          ISOLATION_STATUS: ${{ steps.isolation.outputs.status }}
+          INTEGRATION_REPORT: ${{ runner.temp }}/staging-integration.json
+          ISOLATION_REPORT: ${{ runner.temp }}/staging-isolation.json
+        run: |
+          set -u
           cleanup() {
             rm -rf tests/playwright/.clerk playwright-report test-results
+            rm -f "$INTEGRATION_REPORT" "$ISOLATION_REPORT" \
+              "$RUNNER_TEMP/staging-integration.stderr" "$RUNNER_TEMP/staging-isolation.stderr" \
+              "$RUNNER_TEMP/staging-clerk-auth-setup.log"
           }
           trap cleanup EXIT
-          suite_log="$RUNNER_TEMP/staging-authenticated-suites.log"
-          if ! PLAYWRIGHT_BASE_URL="$STAGING_URL" \
-            pnpm exec playwright test \
-              --config playwright.config.ts \
-              --project=staging-integration \
-              --project=staging-isolation \
-              tests/playwright/integration.spec.ts \
-              tests/playwright/isolation.spec.ts \
-            > "$suite_log" 2>&1; then
-            echo "Authenticated integration/isolation suites: FAIL"
+
+          summarize() {
+            local suite="$1"
+            local report="$2"
+            local status="$3"
+            SUITE="$suite" REPORT="$report" COMMAND_STATUS="$status" \
+              python3 - >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json
+          import os
+          import re
+          import sys
+
+          suite = os.environ["SUITE"]
+          report = os.environ["REPORT"]
+          command_status = os.environ.get("COMMAND_STATUS", "1")
+
+          def safe_title(value):
+              value = re.sub(r"https?://\S+", "<url>", str(value))
+              value = re.sub(r"(?i)(token|secret|cookie|authorization|bearer)\s*[:=]\s*\S+", r"\1=<redacted>", value)
+              return re.sub(r"\s+", " ", value).strip()[:180]
+
+          def category(errors):
+              text = " ".join(str(error) for error in errors).lower()
+              if "timeout" in text or "timedout" in text:
+                  return "timeout"
+              if any(term in text for term in ("401", "403", "clerk", "auth", "unauthorized")):
+                  return "auth"
+              if any(term in text for term in ("econnrefused", "enotfound", "network", "fetch", "connection")):
+                  return "network"
+              if any(term in text for term in ("expect", "assert", "to be", "tohave")):
+                  return "assertion"
+              return "runner"
+
+          counts = {"passed": 0, "failed": 0, "skipped": 0}
+          failures = []
+          parse_category = ""
+          parsed = False
+          try:
+              with open(report, encoding="utf-8") as handle:
+                  payload = json.load(handle)
+              if not isinstance(payload, dict):
+                  raise ValueError("report is not an object")
+              parsed = True
+              def visit(node, parents=()):
+                  for spec in node.get("specs", []):
+                      title = " ".join((*parents, str(spec.get("title", "")))).strip()
+                      for test in spec.get("tests", []):
+                          results = test.get("results", [])
+                          statuses = [str(result.get("status", "")) for result in results]
+                          if any(status in {"failed", "timedOut", "interrupted"} for status in statuses):
+                              counts["failed"] += 1
+                              errors = [error for result in results for error in result.get("errors", [])]
+                              failures.append((safe_title(title), category(errors)))
+                          elif all(status == "skipped" for status in statuses) and statuses:
+                              counts["skipped"] += 1
+                          else:
+                              counts["passed"] += 1
+                  for child in node.get("suites", []):
+                      visit(child, (*parents, str(node.get("title", ""))))
+              for suite_node in payload.get("suites", []):
+                  visit(suite_node)
+          except Exception:
+              parse_category = "runner"
+
+          total = counts["passed"] + counts["failed"] + counts["skipped"]
+          if not parsed or total == 0 or counts["passed"] == 0:
+              counts["failed"] = max(counts["failed"], 1)
+              failures.append(("report-unavailable", parse_category or "runner"))
+          elif command_status != "0" and counts["failed"] == 0:
+              counts["failed"] = 1
+              failures.append(("report-unavailable", "runner"))
+          status = "PASS" if command_status == "0" and parsed and total > 0 and counts["passed"] > 0 and counts["failed"] == 0 else "FAIL"
+          print(f"- {suite}: {status} (passed={counts['passed']}, failed={counts['failed']}, skipped={counts['skipped']})")
+          if failures:
+              categories = sorted({item[1] for item in failures})
+              print(f"- {suite} failure categories: {', '.join(categories)}")
+              print(f"- {suite} failing tests:")
+              for title, _ in failures[:20]:
+                  print(f"  - {title}")
+          sys.exit(0 if status == "PASS" else 1)
+          PY
+          }
+
+          failure=0
+          if [ "${AUTH_OUTCOME:-}" != "success" ]; then
+            echo "- auth-setup: FAIL" >> "$GITHUB_STEP_SUMMARY"
+            failure=1
+          fi
+          if [ -n "${INTEGRATION_STATUS:-}" ] && [ -f "$INTEGRATION_REPORT" ]; then
+            if ! summarize "integration" "$INTEGRATION_REPORT" "$INTEGRATION_STATUS"; then
+              failure=1
+            fi
+          else
+            echo "- integration: NOT_RUN" >> "$GITHUB_STEP_SUMMARY"
+            failure=1
+          fi
+          if [ -n "${ISOLATION_STATUS:-}" ] && [ -f "$ISOLATION_REPORT" ]; then
+            if ! summarize "isolation" "$ISOLATION_REPORT" "$ISOLATION_STATUS"; then
+              failure=1
+            fi
+          else
+            echo "- isolation: NOT_RUN" >> "$GITHUB_STEP_SUMMARY"
+            failure=1
+          fi
+          if [ "$failure" -eq 0 ]; then
+            echo "- overall: PASS" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- overall: FAIL" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          echo "Tenant isolation and authenticated acceptance suites: PASS"
-          echo "Sanitized result: PASS"
