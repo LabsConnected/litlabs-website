@@ -155,7 +155,8 @@ jobs:
         run: |
           set -euo pipefail
           cleanup() {
-            rm -rf tests/playwright/.clerk playwright-report test-results
+            # Preserve Clerk storage states for the following suite step.
+            rm -rf playwright-report test-results
           }
           trap cleanup EXIT
           auth_log="$RUNNER_TEMP/staging-auth-setup.log"
