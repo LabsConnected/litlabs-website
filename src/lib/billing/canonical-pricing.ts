@@ -19,8 +19,9 @@
 // existed before unification, as distinct pricing lanes inside ONE versioned
 // contract:
 //
-//   - Generation lane (image/video/music/speech): ~100 LiTTBits per USD
-//     (1 bit ≈ $0.01, CENTS_PER_BIT = 1 in generation/cost-engine.ts)
+//   - Generation lane (historical, before retail unification): ~100 LiTTBits per USD
+//     Live calculateRetailBits now uses 1000 credits per retail dollar
+//     (RETAIL_CREDITS_PER_USD in generation/cost-engine.ts), matching the LLM lane.
 //   - LLM lane: ~1,000 LiTTBits per USD-equivalent before margin
 //     (providerCostUsd * 1000 in llm-cost-engine.ts)
 //

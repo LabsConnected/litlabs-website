@@ -7,16 +7,18 @@ import type { CostInput, CostResult, LittProduct, ProductTier } from "./types";
  * Converts real provider costs (in cents USD) into retail LiTTBits.
  *
  * Formula:
- *   retailBits = ceil((providerCostCents + infraAllowanceCents) * (1 + marginPercent/100) / CENTS_PER_BIT)
+ *   retailCents = ceil((providerCostCents + infraAllowanceCents) * (1 + marginPercent/100))
+ *   retailBits = retailCents * (RETAIL_CREDITS_PER_USD / 100)
  *
- * CENTS_PER_BIT is the canonical exchange rate: 1 LiTTBit ≈ $0.01
- * (100 LiTTBits = $1.00). This keeps the math simple and transparent.
+ * Retail conversion matches the LLM cost engine: 1000 credits = $1 of
+ * retail, with the same 50% markup. Provider cost is unchanged.
  *
  * Until shadow billing is verified against real provider invoices,
  * we use a conservative margin and a small infra allowance.
  */
 
-const CENTS_PER_BIT = 1; // 1 LiTTBit = $0.01 = 1 cent
+/** 1000 credits = $1 of retail. Same rate as llm-cost-engine costEquivalentBits. */
+export const RETAIL_CREDITS_PER_USD = 1000;
 const DEFAULT_MARGIN_PERCENT = 50; // 50% margin on top of provider + infra cost
 const DEFAULT_INFRA_ALLOWANCE_CENTS = 1; // $0.01 per generation for R2/compute
 
@@ -104,12 +106,60 @@ export function getProviderCostCents(input: CostInput): number {
 }
 
 /**
+ * Inputs the cost table and the duration rules in this file actually price.
+ * Video uses the documented 4s and 8s lengths. ElevenLabs music uses the
+ * documented 30s clip and 5 minute song. Nothing here is a guessed price.
+ */
+export function pricedGenerationInputs(): CostInput[] {
+  const inputs: CostInput[] = [];
+  for (const key of Object.keys(PROVIDER_COST_CENTS)) {
+    const splitAt = key.indexOf(":");
+    const provider = key.slice(0, splitAt);
+    const model = key.slice(splitAt + 1);
+    if (provider === "veo") {
+      for (const durationSeconds of [4, 8]) {
+        for (const resolution of ["720p", "1080p"]) {
+          inputs.push({ modality: "video", provider, model, durationSeconds, resolution });
+        }
+      }
+      continue;
+    }
+    if (model.includes("i2v")) {
+      for (const durationSeconds of [4, 8]) {
+        inputs.push({ modality: "video", provider, model, durationSeconds });
+      }
+      continue;
+    }
+    if (provider === "elevenlabs" && model === "music_v2") {
+      for (const durationSeconds of [30, 300]) {
+        inputs.push({ modality: "music", provider, model, durationSeconds });
+      }
+      continue;
+    }
+    if (
+      provider === "google" ||
+      provider === "mureka" ||
+      model.includes("lyria")
+    ) {
+      inputs.push({ modality: "music", provider, model });
+      continue;
+    }
+    if (model.includes("whisper") || model === "tts") {
+      inputs.push({ modality: "speech", provider, model });
+      continue;
+    }
+    inputs.push({ modality: "image", provider, model });
+  }
+  return inputs;
+}
+
+/**
  * Calculate retail LiTTBits from provider cost.
  *
  * Formula:
  *   totalCostCents = providerCost + infraAllowance
  *   retailCents = totalCostCents * (1 + margin/100)
- *   retailBits = ceil(retailCents / CENTS_PER_BIT)
+ *   retailBits = retailCents * (RETAIL_CREDITS_PER_USD / 100)
  *
  * Minimum 1 LiTTBit for any paid generation.
  * Free providers (cost=0) return 0 LiTTBits.
@@ -133,7 +183,10 @@ export function calculateRetailBits(
 
   const totalCostCents = providerCostCents + infraAllowanceCents;
   const retailCents = Math.ceil(totalCostCents * (1 + marginPercent / 100));
-  const retailLiTTBits = Math.max(1, Math.ceil(retailCents / CENTS_PER_BIT));
+  const retailLiTTBits = Math.max(
+    1,
+    retailCents * (RETAIL_CREDITS_PER_USD / 100),
+  );
 
   return {
     providerCostCents,
