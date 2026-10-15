@@ -329,9 +329,13 @@ async function changePlan() {
   if (current.livemode) die("refusing a live-mode subscription");
   const itemId = current.items?.data?.[0]?.id;
   if (!itemId) die(`subscription ${id} has no items`);
+  const requested = arg("--proration") || "create_prorations";
+  if (!["create_prorations", "always_invoice", "none"].includes(requested)) {
+    die(`proration_behavior ${requested} is not allowed`);
+  }
   const updated = await stripe.subscriptions.update(id, {
     items: [{ id: itemId, price }],
-    proration_behavior: "create_prorations",
+    proration_behavior: requested,
   });
   if (updated.livemode) die("refusing a live-mode subscription");
 
@@ -358,6 +362,9 @@ async function changePlan() {
     (invoice) => invoice.billing_reason === "subscription_update" && !invoice.livemode,
   );
   if (proration?.livemode) die("refusing a live-mode invoice");
+  if (requested === "always_invoice" && !proration) {
+    die("always_invoice did not produce a subscription_update invoice");
+  }
   if (proration) {
     emit("INVOICE", proration.id);
     const paid = await findEvent(
@@ -365,6 +372,9 @@ async function changePlan() {
       (event) => event.data?.object?.id === proration.id,
       30000,
     );
+    if (requested === "always_invoice" && !paid?.id) {
+      die(`always_invoice invoice ${proration.id} produced no invoice.paid event`);
+    }
     emit("INVOICE_PAID_EVENT", paid?.id || "");
   }
 }

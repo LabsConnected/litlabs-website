@@ -5,12 +5,15 @@
 # resends an older invoice.paid after cancellation and checks the status
 # stays canceled. Scenarios 11 and 12 change the Creator subscription's
 # price (metadata left stale) and check the upgrade delta and downgrade.
+# Scenario 11 uses proration_behavior always_invoice so a real proration
+# invoice is paid. That invoice must grant 0. The upgrade delta is still
+# 10500 once. Scenario 12 keeps create_prorations, which does not invoice.
 # Scenario 14 creates a test-clock subscription, stores cancel_at_period_end,
 # then advances the clock so deletion sets status canceled.
 # Scenario 13 posts checkout with no Clerk session: the
 # route must refuse (401). The 409 already-subscribed contract is the
 # checkout unit test — this harness has no authenticated browser session.
-# Scenario 15 resends the plan-change invoice and the subscription update
+# Scenario 15 resends that proration invoice and the subscription update
 # out of order, with new event ids, and checks the ledger does not move.
 # Scenario 16 posts the partial-refund event again under a new event id.
 # Concurrent wallet debits need an authenticated session, so they stay in
@@ -932,7 +935,7 @@ scenario_plan_upgrade() {
   fi
   local before
   before="$(ledger_sum "$CREATOR_CLERK")"
-  if ! run_driver change-plan --subscription "$CREATOR_SUB" --price "$PRO_PRICE"; then
+  if ! run_driver change-plan --subscription "$CREATOR_SUB" --price "$PRO_PRICE" --proration always_invoice; then
     record "11" "FAIL" "driver" "price change failed"
     return 0
   fi
@@ -961,19 +964,24 @@ scenario_plan_upgrade() {
   after_sum="$(ledger_sum "$CREATOR_CLERK")"
   local upgrade_rows_after
   upgrade_rows_after="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${CREATOR_CLERK}' AND cl.idempotency_key LIKE 'plan_upgrade_${CREATOR_SUB}_%';")"
+  local invoice_grant="missing"
+  if [[ -n "${INVOICE:-}" ]]; then
+    assert_safe_id "$INVOICE"
+    invoice_grant="$(sql_value "SELECT COALESCE(SUM(cl.amount),0) FROM public.credit_ledger cl WHERE cl.idempotency_key = 'invoice_grant_${INVOICE}';")"
+  fi
   UPGRADE_UPDATED_EVENT="${UPDATED_EVENT:-}"
   UPGRADE_INVOICE_EVENT="${INVOICE_PAID_EVENT:-}"
-  if [[ "$updated_http" == "200" && "$replay_http" == "200" && "$plan" == "pro_builder_beta" && "$before" == "7500" && "$sum" == "18000" && "$after_sum" == "18000" && "$upgrade_sum" == "10500" && "$upgrade_rows" == "1" && "$upgrade_rows_after" == "1" ]]; then
+  if [[ -n "$INVOICE" && -n "$INVOICE_PAID_EVENT" && "$updated_http" == "200" && "$paid_http" == "200" && "$replay_http" == "200" && "$plan" == "pro_builder_beta" && "$before" == "7500" && "$sum" == "18000" && "$after_sum" == "18000" && "$upgrade_sum" == "10500" && "$upgrade_rows" == "1" && "$upgrade_rows_after" == "1" && "$invoice_grant" == "0" ]]; then
     record "11" "PASS" "updated=${updated_http} proration=${paid_http} replay=${replay_http}" "plan=${plan} upgrade=${upgrade_sum}"
   else
-    record "11" "FAIL" "updated=${updated_http} proration=${paid_http} replay=${replay_http}" "plan=${plan} before=${before} sum=${sum} after=${after_sum} upgrade_sum=${upgrade_sum} rows=${upgrade_rows}/${upgrade_rows_after}"
+    record "11" "FAIL" "updated=${updated_http} proration=${paid_http} replay=${replay_http}" "plan=${plan} before=${before} sum=${sum} after=${after_sum} upgrade_sum=${upgrade_sum} rows=${upgrade_rows}/${upgrade_rows_after} invoice_grant=${invoice_grant}"
   fi
 }
 
 scenario_plan_change_reorder() {
   say "scenario 15: delayed upgrade and proration events grant nothing more"
-  if [[ -z "${UPGRADE_UPDATED_EVENT:-}" ]]; then
-    record "15" "FAIL" "n/a" "upgrade event was not captured"
+  if [[ -z "${UPGRADE_UPDATED_EVENT:-}" || -z "${UPGRADE_INVOICE_EVENT:-}" ]]; then
+    record "15" "FAIL" "n/a" "upgrade or proration invoice event was not captured"
     return 0
   fi
   local before
@@ -997,7 +1005,7 @@ scenario_plan_change_reorder() {
   after="$(ledger_sum "$CREATOR_CLERK")"
   assert_safe_id "$CREATOR_SUB"
   rows="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${CREATOR_CLERK}' AND cl.idempotency_key LIKE 'plan_upgrade_${CREATOR_SUB}_%';")"
-  if [[ "$invoice_http" != "500" && "$updated_http" == "200" && "$before" == "18000" && "$after" == "18000" && "$rows" == "1" ]]; then
+  if [[ "$invoice_http" == "200" && "$updated_http" == "200" && "$before" == "18000" && "$after" == "18000" && "$rows" == "1" ]]; then
     record "15" "PASS" "invoice=${invoice_http} updated=${updated_http}" "ledger=${after} upgrade_rows=${rows}"
   else
     record "15" "FAIL" "invoice=${invoice_http} updated=${updated_http}" "before=${before} after=${after} rows=${rows}"
