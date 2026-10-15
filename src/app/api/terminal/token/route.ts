@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { createTerminalToken } from "@/lib/terminal-auth";
+import { createTerminalToken, logTerminalSecretFingerprint } from "@/lib/terminal-auth";
 import { verifyProjectWorkspace, updateProjectWorkspace } from "@/lib/projects/project-repository";
 import { getWorkspaceInternal } from "@/lib/terminal-internal-client";
 import { isFeatureEnabled } from "@/config/feature-flags";
 import { isTerminalOwnerUser } from "@/lib/terminal-owner";
+
+// Log fingerprint at module load to verify secret sync
+logTerminalSecretFingerprint("web");
 
 export const runtime = "nodejs";
 

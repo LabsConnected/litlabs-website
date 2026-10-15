@@ -114,7 +114,7 @@ describe("AppShell top bar", () => {
     const scope = within(header);
     // Canonical main pills + the More overflow button.
     // Create moved into the dashboard composer — it no longer lives in the AppShell nav.
-    for (const label of ["Home", "Studio", "Assets", "Agents", "Missions"]) {
+    for (const label of ["Home", "Studio", "Discover", "Projects", "Settings"]) {
       expect(scope.getAllByText(label).length).toBeGreaterThanOrEqual(1);
     }
     expect(scope.getAllByTestId("nav-more").length).toBeGreaterThanOrEqual(1);
@@ -128,7 +128,7 @@ describe("AppShell top bar", () => {
     );
     const header = getHeader();
     // Secondary routes are not inline — they live in the More dropdown.
-    for (const secondary of ["Projects", "Games", "Marketplace", "Wallet", "Settings", "Showcase", "Music"]) {
+    for (const secondary of ["Games", "Wallet", "Showcase", "Music"]) {
       expect(within(header).queryByText(secondary)).toBeNull();
     }
     // Open More — flag-gated Games must appear (retroGameRuntime enabled).
@@ -136,7 +136,8 @@ describe("AppShell top bar", () => {
     fireEvent.click(within(header).getAllByTestId("nav-more")[0]);
     const menu = document.querySelector('[role="menu"]');
     expect(menu).not.toBeNull();
-    for (const label of ["Projects", "Marketplace", "CLI", "Docs", "Deployments"]) {
+    // Phase 3B: Projects, Discover, Settings are top-level, not in More
+    for (const label of ["CLI", "Docs", "Deployments"]) {
       expect(within(menu as HTMLElement).getByText(label)).toBeTruthy();
     }
     // Games + Discover appear only when their flags are on; assert on the
@@ -152,12 +153,12 @@ describe("AppShell top bar", () => {
         <div>content</div>
       </AppShell>,
     );
-    // /discover is a More destination — both More buttons (desktop inline
-    // nav + mobile strip) carry aria-current when a child is active.
-    const moreButtons = Array.from(
-      getHeader().querySelectorAll('[data-testid="nav-more"][aria-current="page"]'),
+    // Phase 3B: /discover is now a top-level nav item, not in More.
+    // The Discover nav link itself carries aria-current.
+    const discoverLinks = Array.from(
+      getHeader().querySelectorAll('a[href="/discover"][aria-current="page"]'),
     );
-    expect(moreButtons.length).toBeGreaterThanOrEqual(2);
+    expect(discoverLinks.length).toBeGreaterThanOrEqual(1);
   });
 
   it("keeps a single-row bar on Studio (its own mobile chrome, no strip)", () => {

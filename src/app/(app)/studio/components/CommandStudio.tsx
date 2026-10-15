@@ -42,6 +42,7 @@ import CommandStudioHeader from "./CommandStudioHeader";
 import StudioDock, { type StudioDockTab } from "./StudioDock";
 import { ApprovalCard } from "./ApprovalCard";
 import MissionCards from "./MissionCards";
+import StudioPrimaryAction, { type PrimaryActionState } from "./StudioPrimaryAction";
 import PersistentMusicPlayer from "./PersistentMusicPlayer";
 import { MobileCommandNav, type MobileStudioSurface } from "./CommandStudioNav";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
@@ -431,6 +432,7 @@ function CommandStudioContent() {
   const approvalRetryable = useExecutionStore((s) => s.approvalRetryable);
   const approvalExpired = useExecutionStore((s) => s.approvalExpired);
 
+
   // ── StudioShell — the desktop Studio destination IS the operating
   // shell: workspace rail + central stage + contextual inspector + the
   // LiTT command layer at the bottom. Mobile keeps its sheet/nav model;
@@ -704,10 +706,28 @@ function CommandStudioContent() {
   // desktop rail, the mobile sheet, and header/activity actions.
   const [littActiveTab, setLittActiveTab] = useState<"chat" | "live">("chat");
 
+  // Mobile sheet state — declared before handleFocusApproval so the handler
+  // can open the sheet on mobile (Greptile P1: mobile approval must open chat).
+  const [mobileLittOpen, setMobileLittOpen] = useState(false);
+
+  // Phase 3B: Focus the canonical ApprovalCard (scrolls to it, no duplicate button)
+  const handleFocusApproval = useCallback(() => {
+    // Select the Chat tab so the canonical ApprovalCard is visible
+    setLittActiveTab("chat");
+    // Reveal the conversation panel if collapsed (desktop)
+    setLittCollapsed(false);
+    // Open the mobile chat sheet so the card is visible on mobile
+    setMobileLittOpen(true);
+    // Focus the approval card after the UI updates
+    setTimeout(() => {
+      const el = document.querySelector('[data-testid="approval-card"]');
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 100);
+  }, []);
+
   // Viewport tier (declared above with the canvas state) drives
   // desktop-rail vs mobile-sheet LiTT presentation — null until first
   // client measurement (SSR-safe — see hook docs).
-  const [mobileLittOpen, setMobileLittOpen] = useState(false);
   // On mobile, Studio enters with the LiTT chat surface open. Session-scoped
   // for the same reason as the desktop dock: a manual close sticks for this
   // session, a fresh entry restores it. The composer is never focused
@@ -743,16 +763,19 @@ function CommandStudioContent() {
   const [mobileBuildOpen, setMobileBuildOpen] = useState(false);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
 
-  // Workspace-first focus: selecting a real work surface collapses the large
-  // welcome/chat panel to the compact rail. Chat stays mounted and one click
-  // away through the rail, so this only changes emphasis, not availability.
+  // Phase 3B: Do NOT auto-collapse the conversation when switching work surfaces.
+  // The Studio Layout Contract requires conversation LEFT + preview RIGHT on desktop.
+  // Users can manually collapse via the dock handle or Esc key, but switching
+  // to preview should not hide the conversation automatically.
   const previousStageSurfaceRef = useRef<StudioStageSurface>(stageSurface);
   useEffect(() => {
     if (previousStageSurfaceRef.current === stageSurface) return;
     previousStageSurfaceRef.current = stageSurface;
-    setLittCollapsed(true);
-    setLittExpanded(false);
-    setMobileLittOpen(false);
+    // Intentionally NOT calling setLittCollapsed(true) here.
+    // Mobile still closes sheets via openMobileTool; desktop keeps both visible.
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+      setMobileLittOpen(false);
+    }
   }, [stageSurface]);
   // Mobile density redesign: opening a tool from the Tools sheet closes both
   // sheets so the chosen tool becomes the one dominant surface (this also
@@ -816,13 +839,14 @@ function CommandStudioContent() {
     maxWidth: 640,
     direction: "left",
   });
-  // Shell left-dock width — 360px default, clamped 300–500px, persisted
-  // under its own key so the legacy panel sizing is unaffected.
+  // Shell left-dock width — 360px default, clamped 320–480px per Phase 3B
+  // Studio Layout Contract, persisted under its own key so the legacy
+  // panel sizing is unaffected.
   const littDockResize = useResizableWidth({
     storageKey: "littree:studio:litt-dock-width",
     defaultWidth: 360,
-    minWidth: 300,
-    maxWidth: 500,
+    minWidth: 320,
+    maxWidth: 480,
     direction: "left",
   });
 
@@ -1231,6 +1255,22 @@ function CommandStudioContent() {
     // Shared capabilities — the hook must not start a second poll stack.
     capabilities,
   });
+
+  // ── Phase 3B: Primary action state derivation ──────────────────────
+  // Derives the one primary action from existing execution/approval/deployment
+  // state. Uses no new state machine; all handlers are existing.
+  // IMPORTANT: Do NOT infer deployment eligibility from execution completion.
+  // "Go Live" only appears when explicitly authorized via approval flow.
+  const primaryActionState: PrimaryActionState = (() => {
+    // Approval required takes precedence — canonical ApprovalCard is actionable
+    if (pendingApproval) return "approval_required";
+    // Building: conversation is busy (AI working)
+    if (conversation.busy) return "building";
+    // TODO: Derive ready_to_deploy, publishing, live, failed from deployment
+    // projection once verified in the preview. For now, idle is the safe
+    // default — never show Go Live without explicit approval state.
+    return "idle";
+  })();
 
   const studioTasks = useStudioTasks(capabilities.projectId);
   const refreshTasks = studioTasks.refresh;
@@ -2797,17 +2837,37 @@ function CommandStudioContent() {
         return <VisualCanvasBuilder />;
       case "preview":
         return (
-          <StudioPreviewPanel
-            projectId={projectId}
-            projectName={capabilities.projectName}
-            repositoryName={capabilities.repositoryName}
-            branch={capabilities.activeBranch}
-            sourceKind={capabilities.sourceKind}
-            sourceStatus={capabilities.sourceStatus}
-            versionControl={capabilities.versionControl}
-            workspaceStatus={capabilities.workspaceStatus ?? null}
-            onSelectionChange={setPreviewSelection}
-          />
+          <div className="min-h-0 min-w-0 flex-1 overflow-hidden flex flex-col">
+            {primaryActionState !== "idle" && (
+              <div
+                className="shrink-0 border-b px-4 py-2.5 flex items-center justify-between"
+                style={{
+                  borderColor: "var(--glass-border)",
+                  backgroundColor: "var(--glass-bg)",
+                }}
+                data-testid="studio-primary-action-bar"
+              >
+                <StudioPrimaryAction
+                  state={primaryActionState}
+                  onDeploy={handleDeployRequest}
+                  onFocusApproval={handleFocusApproval}
+                />
+              </div>
+            )}
+            <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+              <StudioPreviewPanel
+                projectId={projectId}
+                projectName={capabilities.projectName}
+                repositoryName={capabilities.repositoryName}
+                branch={capabilities.activeBranch}
+                sourceKind={capabilities.sourceKind}
+                sourceStatus={capabilities.sourceStatus}
+                versionControl={capabilities.versionControl}
+                workspaceStatus={capabilities.workspaceStatus ?? null}
+                onSelectionChange={setPreviewSelection}
+              />
+            </div>
+          </div>
         );
       case "browser":
         return <StudioBrowserJobsPanel projectId={projectId} conversationId={conversation.selectedConversationId} />;
@@ -3343,8 +3403,26 @@ function CommandStudioContent() {
                   /* Preview is the primary workspace tab — the live preview
                      consumes the full workspace width. No second preview
                      column is ever mounted beside it (canvas-first 2-zone
-                     layout). */
-                  <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                     layout).
+                     Phase 3B: Primary action bar above the preview. */
+                  <div className="min-h-0 min-w-0 flex-1 overflow-hidden flex flex-col">
+                    {primaryActionState !== "idle" && (
+                      <div
+                        className="shrink-0 border-b px-4 py-2.5 flex items-center justify-between"
+                        style={{
+                          borderColor: "var(--glass-border)",
+                          backgroundColor: "var(--glass-bg)",
+                        }}
+                        data-testid="studio-primary-action-bar"
+                      >
+                        <StudioPrimaryAction
+                          state={primaryActionState}
+                          onDeploy={handleDeployRequest}
+                          onFocusApproval={handleFocusApproval}
+                        />
+                      </div>
+                    )}
+                    <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
                     <StudioPreviewPanel
                       projectId={capabilities.projectId}
                       projectName={capabilities.projectName}
@@ -3356,6 +3434,7 @@ function CommandStudioContent() {
                       workspaceStatus={capabilities.workspaceStatus ?? null}
                       onSelectionChange={setPreviewSelection}
                     />
+                    </div>
                   </div>
                 ) : isMedia ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-auto pb-28 lg:pb-0">

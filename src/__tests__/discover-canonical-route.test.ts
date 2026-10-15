@@ -73,3 +73,18 @@ describe("canonical /discover route", () => {
     }
   });
 });
+
+// ─── Regression: /marketplace stays reachable (Greptile P1 #2) ───
+// /marketplace and its detail routes must NOT redirect to /discover
+// until Discover provides equivalent marketplace functionality.
+describe("marketplace routes stay reachable", () => {
+  it("does not redirect /marketplace to /discover", () => {
+    const redirect = findRedirect("/marketplace");
+    expect(redirect).toBeUndefined();
+  });
+
+  it("does not redirect /marketplace/:path* to /discover", () => {
+    const redirect = findRedirect("/marketplace/:path*");
+    expect(redirect).toBeUndefined();
+  });
+});

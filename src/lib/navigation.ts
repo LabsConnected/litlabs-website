@@ -16,6 +16,7 @@ import {
   Compass,
   Terminal,
   FolderOpen,
+  Settings as SettingsIcon,
 } from "lucide-react";
 
 export type NavItem = {
@@ -37,36 +38,34 @@ export type NavSection = {
 
 
 /* ─── Canonical App Shell navigation ───────────────────────────────────
- * ONE canonical authenticated global nav:
- *   Main: Home · Studio · Assets · Agents · Missions · More
- *   More: Projects · Discover · Marketplace · Showcase · Games · CLI ·
- *         Deployments · Docs
+ * Phase 3B (#627) — ONE canonical authenticated global nav:
+ *   Main: Home · Studio · Discover · Projects · Settings
  *
- * Assets/Agents/Missions resolve to their real Studio destinations
- * (?tool=assets|agents|workflows — the same canonical URLs the Studio
- * router writes back via destinationToLegacyTool). Legacy creation
- * routes (/builder, /ai-builder, /chat, /generate, …) all redirect into
- * Studio, so they are not separate destinations.
+ * Global LiTT is a persistent header trigger, NOT a sixth nav item.
+ * Marketplace merges into Discover. Assets/Agents/Missions are Studio
+ * secondary tools (?tool=assets|agents|workflows), not top-level nav.
+ * Legacy creation routes (/builder, /ai-builder, /chat, /generate, …)
+ * redirect into Studio via canonical-redirects.ts.
  */
 
 export const APP_NAV_MAIN: NavItem[] = [
-  { label: "Home", href: "/dashboard", icon: LayoutDashboard, shortcut: "⌘D" },
+  { label: "Home", href: "/", icon: LayoutDashboard, shortcut: "⌘D" },
   { label: "Studio", href: "/studio", icon: Sparkles, shortcut: "⌘S" },
-  { label: "Assets", href: "/studio?tool=assets", icon: FolderOpen },
-  { label: "Agents", href: "/studio?tool=agents", icon: Bot },
-  { label: "Missions", href: "/studio?tool=workflows", icon: Workflow },
+  { label: "Discover", href: "/discover", icon: Compass },
+  { label: "Projects", href: "/projects", icon: FolderKanban },
+  { label: "Settings", href: "/settings", icon: SettingsIcon },
 ];
 
-/* Secondary destinations behind the More menu — real routes only. */
+/* Secondary destinations — Phase 3B: demoted from primary nav.
+ * Marketplace merges into Discover (redirect in canonical-redirects.ts).
+ * These remain accessible but are not primary navigation. */
 export const APP_NAV_MORE: NavItem[] = [
-  { label: "Projects", href: "/projects", icon: FolderKanban },
-  { label: "Discover", href: "/discover", icon: Compass },
-  { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
   { label: "Showcase", href: "/showcase", icon: Star },
   { label: "Games", href: "/games", icon: GamesIcon },
   { label: "CLI", href: "/cli", icon: Terminal },
   { label: "Deployments", href: "/deployments", icon: BarChart3 },
   { label: "Docs", href: "/docs", icon: FileText },
+  { label: "Library", href: "/library/saved", icon: Bookmark },
 ];
 
 export interface NavMenuSection {
@@ -76,8 +75,8 @@ export interface NavMenuSection {
 }
 
 export const APP_NAV_MORE_SECTIONS: NavMenuSection[] = [
-  { id: "build", label: "Build", items: APP_NAV_MORE.filter((item) => ["Projects", "CLI", "Deployments"].includes(item.label)) },
-  { id: "explore", label: "Explore", items: APP_NAV_MORE.filter((item) => ["Discover", "Marketplace", "Showcase", "Games"].includes(item.label)) },
+  { id: "build", label: "Build", items: APP_NAV_MORE.filter((item) => ["CLI", "Deployments"].includes(item.label)) },
+  { id: "explore", label: "Explore", items: APP_NAV_MORE.filter((item) => ["Showcase", "Games", "Library"].includes(item.label)) },
   { id: "learn", label: "Learn", items: APP_NAV_MORE.filter((item) => item.label === "Docs") },
 ];
 
@@ -153,13 +152,14 @@ export function isAppNavActive(
 ): boolean {
   if (!pathname || !href) return false;
   const [path, query] = href.split("?");
-  // /dashboard is active only when there's no ?app= param (unless the href has one)
-  if (path === "/dashboard" && !query) {
-    return pathname === "/dashboard" && !searchParams.get("app");
+  // / is active only when there's no ?app= param (unless the href has one)
+  // Phase 3B: Home is now / (was /dashboard)
+  if ((path === "/" || path === "/dashboard") && !query) {
+    return (pathname === "/" || pathname === "/dashboard") && !searchParams.get("app");
   }
-  if (path === "/dashboard" && query) {
+  if ((path === "/" || path === "/dashboard") && query) {
     const hrefParams = new URLSearchParams(query);
-    return pathname === "/dashboard" &&
+    return (pathname === "/" || pathname === "/dashboard") &&
       Array.from(hrefParams.entries()).every(([k, v]) => searchParams.get(k) === v);
   }
   // /studio: a bare "/studio" href is the DEFAULT Studio surface — it must
