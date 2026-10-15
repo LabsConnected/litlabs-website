@@ -41,6 +41,14 @@ vi.mock("stripe", () => ({
   })),
 }));
 
+const { confirmBookingPaymentMock } = vi.hoisted(() => ({
+  confirmBookingPaymentMock: vi.fn(async () => ({ ok: true, data: {} })),
+}));
+vi.mock("@/lib/business-operations", () => ({
+  confirmBookingPayment: confirmBookingPaymentMock,
+  recordAudit: vi.fn(),
+}));
+
 // ─── Imports ─────────────────────────────────────────────────────────
 
 import { auth } from "@/lib/auth";
@@ -452,6 +460,67 @@ describe("POST /api/billing/checkout — checkout session creation", () => {
     global.fetch = originalFetch;
   });
 
+  it("parallel checkout requests in one time bucket share one idempotency key", async () => {
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "user_123" } as any);
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake_key";
+    process.env.STRIPE_PRICE_CREATOR_BETA = "price_test_creator";
+    mockCheckoutLookup({ status: "canceled", stripe_customer_id: "cus_stored" });
+    const now = 1_700_000_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now);
+    const bucket = Math.floor(now / 600_000);
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: "cs_parallel", url: "https://checkout.stripe.com/parallel" }),
+    })) as any;
+
+    try {
+      const [first, second] = await Promise.all([
+        checkoutPOST(makeNextRequest(JSON.stringify({ planId: "creator_beta" }))),
+        checkoutPOST(makeNextRequest(JSON.stringify({ planId: "creator_beta" }))),
+      ]);
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      const calls = (global.fetch as any).mock.calls;
+      expect(calls).toHaveLength(2);
+      const firstKey = calls[0][1].headers["Idempotency-Key"] as string;
+      const secondKey = calls[1][1].headers["Idempotency-Key"] as string;
+      expect(firstKey).toBe(`billing_user_123_price_test_creator_${bucket}`);
+      expect(secondKey).toBe(firstKey);
+    } finally {
+      nowSpy.mockRestore();
+      global.fetch = originalFetch;
+    }
+  });
+
+  it("parallel checkout requests for an active subscription both return 409", async () => {
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "user_123" } as any);
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake_key";
+    process.env.STRIPE_PRICE_CREATOR_BETA = "price_test_creator";
+    mockCheckoutLookup({ status: "active", stripe_customer_id: "cus_existing" });
+    const originalFetch = global.fetch;
+    const stripeCalls: string[] = [];
+    global.fetch = vi.fn(async (url: string) => {
+      stripeCalls.push(String(url));
+      return new Response("not found", { status: 404 });
+    }) as any;
+
+    try {
+      const [first, second] = await Promise.all([
+        checkoutPOST(makeNextRequest(JSON.stringify({ planId: "creator_beta" }))),
+        checkoutPOST(makeNextRequest(JSON.stringify({ planId: "creator_beta" }))),
+      ]);
+      expect(first.status).toBe(409);
+      expect(second.status).toBe(409);
+      expect((await first.json()).code).toBe("already_subscribed");
+      expect((await second.json()).code).toBe("already_subscribed");
+      expect(stripeCalls.filter((url) => url.includes("api.stripe.com"))).toHaveLength(0);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
   // Was: "uses payment mode for one-time Founder plan". The $149 tier is
   // retired, so the contract is now the opposite — no Stripe session may be
   // created for it even with STRIPE_PRICE_FOUNDER present in the environment,
@@ -653,6 +722,173 @@ describe("Webhook event processing — state mutations", () => {
     expect(replay.status).toBe(200);
     expect((await replay.json()).replayed).toBe(true);
     expect(rpcCalls.filter((c) => c.fn === "grant_credits")).toHaveLength(1);
+  });
+
+  it("parallel deliveries of one invoice.paid grant once, and a later replay grants nothing", async () => {
+    const { sb, rpcCalls } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    const event = makeStripeEvent("invoice.paid", {
+      id: "evt_parallel_invoice",
+      object: {
+        id: "in_parallel",
+        parent: { subscription_details: { subscription: "sub_test_123" } },
+        lines: { data: [{ period: { end: 1702678400 } }] },
+      },
+    });
+    mockConstructEvent.mockReturnValue(event);
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+
+    const [first, second] = await Promise.all([
+      webhookPOST(makeWebhookRequest("body", "sig")),
+      webhookPOST(makeWebhookRequest("body", "sig")),
+    ]);
+    const bodies = [await first.json(), await second.json()];
+    const statuses = [first.status, second.status].sort();
+    expect(rpcCalls.filter((c) => c.fn === "grant_credits")).toHaveLength(1);
+    expect(rpcCalls.filter((c) => c.fn === "grant_credits")[0].params.p_amount).toBe(7500);
+    const replayed = bodies.filter((body) => body.replayed === true);
+    const inProgress = bodies.filter((body) => body.error === "Webhook event is already in progress");
+    expect(replayed.length + inProgress.length).toBe(1);
+    expect(statuses).toEqual(inProgress.length === 1 ? [200, 500] : [200, 200]);
+
+    const third = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(third.status).toBe(200);
+    expect((await third.json()).replayed).toBe(true);
+    expect(rpcCalls.filter((c) => c.fn === "grant_credits")).toHaveLength(1);
+  });
+
+  it("upgrade grant RPC error returns 500 and does not write the new plan", async () => {
+    process.env.STRIPE_PRICE_CREATOR_BETA = "price_test_creator";
+    process.env.STRIPE_PRICE_PRO_BUILDER_BETA = "price_test_pro";
+    const { sb, upserts } = buildTrackingSupabase();
+    (sb as any).rpc = vi.fn(async () => ({ data: null, error: { message: "ledger down" } }));
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockConstructEvent.mockReturnValue(makeStripeEvent("customer.subscription.updated", {
+      id: "evt_upgrade_rpc_fail",
+      object: {
+        id: "sub_upgrade_fail",
+        status: "active",
+        customer: "cus_upgrade_fail",
+        metadata: { clerk_id: "user_123", plan_id: "creator_beta" },
+        items: {
+          data: [{
+            price: "price_test_pro",
+            current_period_end: 1702678400,
+          }],
+        },
+      },
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toBe("Webhook processing failed");
+    const grantCalls = (sb.rpc as any).mock.calls.filter((call: unknown[]) => call[0] === "grant_credits");
+    expect(grantCalls).toHaveLength(1);
+    expect(grantCalls[0][1].p_amount).toBe(10500);
+    expect(upserts.find((u) => u.table === "subscriptions")).toBeUndefined();
+  });
+
+  it("handles each of the ten subscribed webhook events", async () => {
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+
+    async function deliver(
+      type: string,
+      object: Record<string, unknown>,
+      opts: { marketplaceOrder?: boolean } = {},
+    ) {
+      const tracked = buildTrackingSupabase(false, opts);
+      vi.mocked(getAdminSupabase).mockReturnValue(tracked.sb as any);
+      mockConstructEvent.mockReturnValue(makeStripeEvent(type, { id: `evt_cover_${type}`, object }));
+      const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+      return { res, ...tracked };
+    }
+
+    const completed = await deliver("checkout.session.completed", {
+      id: "cs_cover_founder",
+      metadata: { product_type: "plan", clerk_id: "user_123", plan_id: "founder" },
+      customer: "cus_cover",
+    });
+    expect(completed.res.status).toBe(200);
+    expect(completed.upserts.find((u) => u.table === "subscriptions")?.row.plan).toBe("founder");
+    expect(completed.rpcCalls.filter((c) => c.fn === "grant_credits")).toHaveLength(0);
+
+    const expired = await deliver("checkout.session.expired", {
+      id: "cs_cover_expired",
+      metadata: { product_type: "agent", marketplace_order_id: "order_cover" },
+    });
+    expect(expired.res.status).toBe(200);
+    expect(expired.rpcCalls.some((c) => c.fn === "expire_pending_order" && c.params.p_order_id === "order_cover")).toBe(true);
+
+    const failedPayment = await deliver("payment_intent.payment_failed", {
+      id: "pi_cover_failed",
+    }, { marketplaceOrder: true });
+    expect(failedPayment.res.status).toBe(200);
+    expect(failedPayment.updates.some((u) => u.table === "marketplace_orders" && u.patch.status === "failed")).toBe(true);
+
+    confirmBookingPaymentMock.mockClear();
+    const paidBooking = await deliver("payment_intent.succeeded", {
+      id: "pi_cover_booking",
+      metadata: { booking_id: "book_cover", owner_id: "owner_cover" },
+    });
+    expect(paidBooking.res.status).toBe(200);
+    expect(confirmBookingPaymentMock).toHaveBeenCalledWith("owner_cover", "book_cover", "pi_cover_booking");
+
+    const created = await deliver("customer.subscription.created", {
+      id: "sub_cover_created",
+      status: "active",
+      customer: "cus_cover",
+      metadata: { clerk_id: "user_123", plan_id: "creator_beta" },
+      items: { data: [{ current_period_end: 1702678400 }] },
+    });
+    expect(created.res.status).toBe(200);
+    expect(created.upserts.find((u) => u.table === "subscriptions")?.row.plan).toBe("creator_beta");
+    expect(created.rpcCalls.filter((c) => c.fn === "grant_credits")).toHaveLength(0);
+
+    const updated = await deliver("customer.subscription.updated", {
+      id: "sub_cover_updated",
+      status: "active",
+      cancel_at_period_end: true,
+      customer: "cus_cover",
+      metadata: { clerk_id: "user_123", plan_id: "creator_beta" },
+      items: { data: [{ current_period_end: 1702678400 }] },
+    });
+    expect(updated.res.status).toBe(200);
+    expect(updated.upserts.find((u) => u.table === "subscriptions")?.row.cancel_at_period_end).toBe(true);
+
+    const deleted = await deliver("customer.subscription.deleted", { id: "sub_cover_deleted" });
+    expect(deleted.res.status).toBe(200);
+    expect(deleted.updates.some((u) => u.table === "subscriptions" && u.patch.status === "canceled")).toBe(true);
+
+    const paid = await deliver("invoice.paid", {
+      id: "in_cover",
+      parent: { subscription_details: { subscription: "sub_cover" } },
+      lines: { data: [{ period: { end: 1702678400 } }] },
+    });
+    expect(paid.res.status).toBe(200);
+    expect(paid.rpcCalls.filter((c) => c.fn === "grant_credits")).toHaveLength(1);
+    expect(paid.updates.some((u) => u.patch.status === "active")).toBe(true);
+
+    const paymentFailed = await deliver("invoice.payment_failed", {
+      id: "in_cover_fail",
+      parent: { subscription_details: { subscription: "sub_cover" } },
+    });
+    expect(paymentFailed.res.status).toBe(200);
+    expect(paymentFailed.updates.some((u) => u.patch.status === "past_due")).toBe(true);
+
+    mockSucceededRefunds([{ id: "re_cover", amount: 1000, created: 1700000001 }]);
+    const refunded = await deliver("charge.refunded", {
+      id: "ch_cover",
+      amount: 1000,
+      amount_refunded: 1000,
+      currency: "usd",
+      payment_intent: "pi_cover_pack",
+      metadata: { product_type: "credit_pack", clerk_id: "clerk_123", coin_amount: "4000" },
+    });
+    expect(refunded.res.status).toBe(200);
+    expect(refunded.rpcCalls.some((c) => c.fn === "debit_credits" && c.params.p_idempotency_key === "refund_re_cover")).toBe(true);
   });
 
   it("customer.subscription.created does not grant an upgrade delta", async () => {
