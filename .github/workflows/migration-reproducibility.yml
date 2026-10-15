@@ -1,8 +1,21 @@
 name: Migration Reproducibility
 
 on:
+  push:
+    branches:
+      - cursor/billing-paid-beta-remediation
+      - cursor/stripe-658-hardening-c039
+    paths:
+      - "supabase/migrations/**"
+      - "supabase/tests/**"
+      - "supabase/upgrade-validation/**"
+      - "supabase/config.toml"
+      - ".github/workflows/migration-reproducibility.yml"
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - cursor/stripe-658-hardening-c039
+      - fix/stripe-webhook-grant-race
     paths:
       - "supabase/migrations/**"
       - "supabase/tests/**"
