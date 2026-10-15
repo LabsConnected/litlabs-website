@@ -243,10 +243,10 @@ describe("provider registry — model hints", () => {
     vi.stubEnv("OPENROUTER_API_KEY", "x");
     vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
     const plan = planBasicRoutes(TOOL_REQ, {
-      model: "qwen/qwen-2.5-coder-32b-instruct:free",
+      model: "google/gemma-4-31b-it:free",
     });
     const or = plan.providers.find((p) => p.provider === "openrouter");
-    expect(or!.models[0]).toBe("qwen/qwen-2.5-coder-32b-instruct:free");
+    expect(or!.models[0]).toBe("google/gemma-4-31b-it:free");
   });
 
   it("maps a google/gemini slug to the direct Gemini route", () => {
@@ -268,6 +268,22 @@ describe("provider registry — model hints", () => {
     expect(or!.models).not.toContain("openai/gpt-4o");
   });
 
+  it("routes Groq namespaced models (openai/gpt-oss-*) to Groq, not BYOK", () => {
+    vi.stubEnv("GROQ_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    for (const m of ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]) {
+      const plan = planBasicRoutes(TOOL_REQ, { model: m });
+      const groq = plan.providers.find((p) => p.provider === "groq");
+      expect(groq).toBeDefined();
+      expect(groq!.models).toContain(m);
+      // Must NOT be routed to BYOK
+      const byok = plan.providers.find((p) => p.provider === "byok");
+      if (byok) {
+        expect(byok.models).not.toContain(m);
+      }
+    }
+  });
+
   it("ignores LiTT aliases and auto", () => {
     vi.stubEnv("GEMINI_API_KEY", "x");
     vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
@@ -276,6 +292,21 @@ describe("provider registry — model hints", () => {
       expect(plan.droppedModelHint).toBeUndefined();
       expect(plan.providers[0].provider).toBe("gemini");
     }
+  });
+
+  it("keeps dropped hint model in candidate list (does not mutate)", () => {
+    // Regression: dropping a hint for reliableFileWriting must NOT remove
+    // the model from the provider's normal candidate list.
+    vi.stubEnv("GROQ_API_KEY", "x");
+    vi.stubEnv("LITT_DISABLE_OLLAMA", "1");
+    const BUILD_REQ = { ...TOOL_REQ, reliableFileWriting: true };
+    const plan = planBasicRoutes(BUILD_REQ, { model: "openai/gpt-oss-20b" });
+    const groq = plan.providers.find((p) => p.provider === "groq");
+    expect(groq).toBeDefined();
+    // The hint was dropped (20B not marked reliableFileWriting)
+    expect(plan.droppedModelHint).toBe("openai/gpt-oss-20b");
+    // BUT the model must still be in the candidate list
+    expect(groq!.models).toContain("openai/gpt-oss-20b");
   });
 });
 
