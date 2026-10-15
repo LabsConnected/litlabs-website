@@ -10,6 +10,7 @@ import {
   Music,
   Palette,
   Play,
+  Sparkles,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -34,6 +35,12 @@ const SUGGESTIONS = [
   { label: "Design", href: "/studio?tool=design", icon: Palette },
   { label: "Game", href: "/studio?creator=game", icon: Gamepad2 },
 ];
+
+const EXAMPLE_PROMPTS = [
+  "Build a modern site for my business",
+  "Turn this idea into a launch-ready landing page",
+  "Fix something broken in my project",
+] as const;
 
 export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string }) {
   const router = useRouter();
@@ -160,6 +167,24 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
               {isRouting ? "Starting…" : "Create"} <ArrowRight size={17} aria-hidden />
             </button>
           </form>
+
+          <div className="mt-5 flex flex-wrap items-center gap-2" aria-label="Example prompts">
+            <span className="mr-1 inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[.16em] text-zinc-500">
+              <Sparkles size={12} style={{ color: LIME }} aria-hidden />
+              Try a brief
+            </span>
+            {EXAMPLE_PROMPTS.map((example) => (
+              <button
+                key={example}
+                type="button"
+                onClick={() => setPrompt(example)}
+                className="min-h-10 rounded-full border px-3.5 py-2 text-left text-[12px] font-semibold text-zinc-300 transition hover:-translate-y-0.5 hover:border-lime-300/50 hover:bg-lime-300/10 hover:text-white active:translate-y-0"
+                style={{ borderColor: "rgba(255,255,255,.1)", background: "rgba(255,255,255,.035)" }}
+              >
+                {example}
+              </button>
+            ))}
+          </div>
 
           {routingMessage && (
             <p
