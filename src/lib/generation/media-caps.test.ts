@@ -52,6 +52,20 @@ describe("generation retail rate and plan provider ceiling", () => {
     expect(PLAN_MEDIA_MONTHLY_CAPS.starter.maxVideos).toBe(0);
     expect(PLAN_MEDIA_MONTHLY_CAPS.founder.maxImages).toBe(0);
     expect(PLAN_MEDIA_MONTHLY_CAPS.owner.maxVideos).toBe(0);
+    expect(PLAN_MEDIA_MONTHLY_CAPS.creator_beta.creditCap).toBe(7500);
+    expect(PLAN_MEDIA_MONTHLY_CAPS.creator_beta.maxProviderSpendCents).toBe(750);
+    expect(PLAN_MEDIA_MONTHLY_CAPS.pro_builder_beta.creditCap).toBe(18000);
+    expect(PLAN_MEDIA_MONTHLY_CAPS.pro_builder_beta.maxProviderSpendCents).toBe(1950);
+    expect(PLAN_MEDIA_MONTHLY_CAPS.starter.creditCap).toBe(0);
+    expect(PLAN_MEDIA_MONTHLY_CAPS.starter.maxProviderSpendCents).toBe(0);
+    expect(PLAN_MEDIA_MONTHLY_CAPS.founder.creditCap).toBe(0);
+    expect(PLAN_MEDIA_MONTHLY_CAPS.owner.maxProviderSpendCents).toBe(0);
+    expect(creator.providerCents).toBeLessThanOrEqual(
+      PLAN_MEDIA_MONTHLY_CAPS.creator_beta.maxProviderSpendCents,
+    );
+    expect(pro.providerCents).toBeLessThanOrEqual(
+      PLAN_MEDIA_MONTHLY_CAPS.pro_builder_beta.maxProviderSpendCents,
+    );
 
     // Printed for the PR. Values come from PROVIDER_COST_CENTS / getProviderCostCents.
     // Modelled, not proven.
@@ -99,6 +113,8 @@ describe("generation retail rate and plan provider ceiling", () => {
       }
       expect(row.creator.providerCents).toBeLessThanOrEqual(report.creator.halfPriceCents);
       expect(row.pro.providerCents).toBeLessThanOrEqual(report.pro.halfPriceCents);
+      expect(row.creator.providerCents).toBeLessThanOrEqual(report.creator.caps.maxProviderSpendCents);
+      expect(row.pro.providerCents).toBeLessThanOrEqual(report.pro.caps.maxProviderSpendCents);
     }
     for (const input of inputs) {
       expect(seen.has(`${input.provider}:${input.model}`)).toBe(true);

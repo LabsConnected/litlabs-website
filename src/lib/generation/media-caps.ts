@@ -25,6 +25,13 @@ export interface PlanMediaCap {
   imageLabel: string;
   /** Catalog item the video cap was derived from. */
   videoLabel: string;
+  /** Monthly credits the plan can spend. Zero when the plan has no subscription grant. */
+  creditCap: number;
+  /**
+   * Provider-spend ceiling for a month, in cents. Half the plan price.
+   * Sits beside the image and video count caps. Modelled, not proven.
+   */
+  maxProviderSpendCents: number;
 }
 
 function labelFor(input: CostInput): string {
@@ -100,6 +107,8 @@ function capFor(planId: PlanId): PlanMediaCap {
     maxVideos: countCap(monthly, price, video),
     imageLabel: labelFor(image),
     videoLabel: labelFor(video),
+    creditCap: monthly,
+    maxProviderSpendCents: monthly > 0 && price > 0 ? Math.floor(price * 0.5) : 0,
   };
 }
 
