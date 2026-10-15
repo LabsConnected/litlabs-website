@@ -5,6 +5,8 @@
 # resends an older invoice.paid after cancellation and checks the status
 # stays canceled. Scenarios 11 and 12 change the Creator subscription's
 # price (metadata left stale) and check the upgrade delta and downgrade.
+# Scenario 14 creates a test-clock subscription, stores cancel_at_period_end,
+# then advances the clock so deletion sets status canceled.
 # Scenario 13 posts checkout with no Clerk session: the
 # route must refuse (401). The 409 already-subscribed contract is the
 # checkout unit test — this harness has no authenticated browser session.
@@ -60,6 +62,7 @@ CANCEL_CLERK="${RUN_ID}_cancel"
 GRANTFAIL_CLERK="${RUN_ID}_grantfail"
 REFUND_CLERK="${RUN_ID}_refund"
 MISSING_CLERK="${RUN_ID}_missing"
+CLOCK_CLERK="${RUN_ID}_clock"
 CANCEL_PAID_EVENT=""
 
 declare -a RESULTS=()
@@ -151,7 +154,7 @@ load_supabase_env() {
 
 insert_users() {
   local clerk email
-  for clerk in "$CREATOR_CLERK" "$PRO_CLERK" "$FAIL_CLERK" "$CANCEL_CLERK" "$GRANTFAIL_CLERK" "$REFUND_CLERK"; do
+  for clerk in "$CREATOR_CLERK" "$PRO_CLERK" "$FAIL_CLERK" "$CANCEL_CLERK" "$GRANTFAIL_CLERK" "$REFUND_CLERK" "$CLOCK_CLERK"; do
     assert_safe_id "$clerk"
     email="${clerk}@example.com"
     psql_q -v clerk="$clerk" -v email="$email" <<'SQL'
@@ -271,6 +274,9 @@ clear_kv() {
   SUBSCRIPTION_CREATED_EVENT=""
   DELETED_EVENT=""
   UPDATED_EVENT=""
+  CLOCK=""
+  PERIOD_END=""
+  FROZEN_TIME=""
   HTTP_STATUS=""
   EVENT_ID=""
   STATUS=""
@@ -301,6 +307,9 @@ run_driver() {
       SUBSCRIPTION_CREATED_EVENT) SUBSCRIPTION_CREATED_EVENT="$val" ;;
       DELETED_EVENT) DELETED_EVENT="$val" ;;
       UPDATED_EVENT) UPDATED_EVENT="$val" ;;
+      CLOCK) CLOCK="$val" ;;
+      PERIOD_END) PERIOD_END="$val" ;;
+      FROZEN_TIME) FROZEN_TIME="$val" ;;
       HTTP_STATUS) HTTP_STATUS="$val" ;;
       EVENT_ID) EVENT_ID="$val" ;;
       CREATOR_PRICE) CREATOR_PRICE="$val" ;;
@@ -479,7 +488,7 @@ sub_field() {
   local clerk="$1"
   local column="$2"
   assert_safe_id "$clerk"
-  [[ "$column" == "plan" || "$column" == "status" ]] || die "bad column"
+  [[ "$column" == "plan" || "$column" == "status" || "$column" == "cancel_at_period_end" || "$column" == "current_period_end" ]] || die "bad column"
   sql_value "SELECT COALESCE(${column},'') FROM public.subscriptions s JOIN public.users u ON u.id = s.user_id WHERE u.clerk_id = '${clerk}' LIMIT 1;"
 }
 
@@ -983,6 +992,50 @@ scenario_plan_downgrade() {
   fi
 }
 
+scenario_cancel_at_period_end() {
+  say "scenario 14: cancel at period end is stored, then a test clock deletion sets canceled"
+  if ! run_driver subscribe-clock --clerk "$CLOCK_CLERK" --plan creator_beta --price "$CREATOR_PRICE"; then
+    record "14" "FAIL" "driver" "test-clock subscription was not created"
+    return 0
+  fi
+  remember_sub "$SUBSCRIPTION"
+  local clock="$CLOCK" period_end="$PERIOD_END" sub="$SUBSCRIPTION"
+  local paid_http="n/a"
+  if [[ -n "$INVOICE_PAID_EVENT" ]]; then
+    paid_http="$(wait_new_http "$INVOICE_PAID_EVENT" 0 90)"
+  fi
+  if ! run_driver schedule-cancel --subscription "$sub"; then
+    record "14" "FAIL" "driver" "schedule-cancel failed"
+    return 0
+  fi
+  period_end="${PERIOD_END:-$period_end}"
+  local updated_http="n/a"
+  if [[ -n "$UPDATED_EVENT" ]]; then
+    updated_http="$(wait_new_http "$UPDATED_EVENT" 0 90)"
+    print_listen_lines "$UPDATED_EVENT"
+  fi
+  assert_safe_id "$CLOCK_CLERK"
+  local flag
+  flag="$(sql_value "SELECT CASE WHEN s.cancel_at_period_end IS TRUE THEN 'true' ELSE 'false' END FROM public.subscriptions s JOIN public.users u ON u.id = s.user_id WHERE u.clerk_id = '${CLOCK_CLERK}' LIMIT 1;")"
+  local advance_to deleted_http="n/a"
+  advance_to=$((period_end + 120))
+  if ! run_driver advance-clock --clock "$clock" --to "$advance_to" --subscription "$sub"; then
+    record "14" "FAIL" "driver" "test clock did not advance flag=${flag}"
+    return 0
+  fi
+  if [[ -n "$DELETED_EVENT" ]]; then
+    deleted_http="$(wait_new_http "$DELETED_EVENT" 0 90)"
+    print_listen_lines "$DELETED_EVENT"
+  fi
+  local status
+  status="$(sub_field "$CLOCK_CLERK" status)"
+  if [[ "$paid_http" == "200" && "$updated_http" == "200" && "$flag" == "true" && "$deleted_http" == "200" && "$status" == "canceled" ]]; then
+    record "14" "PASS" "paid=${paid_http} cancel=${updated_http} deleted=${deleted_http}" "flag=${flag} status=${status}"
+  else
+    record "14" "FAIL" "paid=${paid_http} cancel=${updated_http} deleted=${deleted_http}" "flag=${flag} status=${status} period_end=${period_end}"
+  fi
+}
+
 scenario_duplicate_checkout() {
   say "scenario 13: duplicate subscription checkout is blocked"
   local body="$WORKDIR/checkout-13.json"
@@ -1145,6 +1198,7 @@ main() {
   scenario_plan_upgrade
   scenario_plan_downgrade
   scenario_duplicate_checkout
+  scenario_cancel_at_period_end
 
   print_summary
   if ((FAILURES > 0)); then

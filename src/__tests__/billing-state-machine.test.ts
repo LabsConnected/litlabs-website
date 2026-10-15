@@ -700,6 +700,28 @@ describe("Webhook event processing — state mutations", () => {
     expect(rpcCalls.filter((c) => c.fn === "grant_credits")).toHaveLength(0);
   });
 
+  it("customer.subscription.updated stores cancel_at_period_end and current_period_end", async () => {
+    const { sb, upserts } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockConstructEvent.mockReturnValue(makeStripeEvent("customer.subscription.updated", {
+      object: {
+        id: "sub_cancel_later",
+        status: "active",
+        cancel_at_period_end: true,
+        customer: "cus_cancel_later",
+        metadata: { clerk_id: "user_123", plan_id: "creator_beta" },
+        items: { data: [{ current_period_start: 1700000000, current_period_end: 1702678400 }] },
+      },
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(200);
+    const row = upserts.find((u) => u.table === "subscriptions")?.row;
+    expect(row.cancel_at_period_end).toBe(true);
+    expect(row.current_period_end).toBe(new Date(1702678400 * 1000).toISOString());
+  });
+
   it("a renewal invoice whose price disagrees with the stored plan still returns 500", async () => {
     process.env.STRIPE_PRICE_PRO_BUILDER_BETA = "price_test_pro";
     const { sb, rpcCalls } = buildTrackingSupabase();

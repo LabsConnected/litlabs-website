@@ -917,6 +917,7 @@ export async function POST(req: NextRequest) {
             current_period_end: sub.items?.data?.[0]?.current_period_end
               ? new Date(sub.items.data[0].current_period_end * 1000).toISOString()
               : null,
+            cancel_at_period_end: sub.cancel_at_period_end === true,
             updated_at: new Date().toISOString(),
           },
           { onConflict: "user_id", ignoreDuplicates: false },
@@ -946,6 +947,7 @@ export async function POST(req: NextRequest) {
           .from("subscriptions")
           .update({
             status: "canceled",
+            cancel_at_period_end: false,
             updated_at: eventTimestamp(event),
           })
           .eq("user_id", delMatch.user_id);
@@ -1060,6 +1062,7 @@ export async function POST(req: NextRequest) {
                             fullSub.items.data[0].current_period_end * 1000,
                           ).toISOString()
                         : null,
+                      cancel_at_period_end: fullSub.cancel_at_period_end === true,
                       updated_at: new Date().toISOString(),
                     },
                     // subscriptions.user_id is the unique row identity.

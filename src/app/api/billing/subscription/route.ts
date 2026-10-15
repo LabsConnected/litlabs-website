@@ -41,7 +41,7 @@ async function handler(req: NextRequest) {
 
     const { data: sub } = await admin
       .from("subscriptions")
-      .select("plan, status, stripe_customer_id, stripe_subscription_id, current_period_start, current_period_end")
+      .select("plan, status, stripe_customer_id, stripe_subscription_id, current_period_start, current_period_end, cancel_at_period_end")
       .eq("user_id", user.id)
       .single();
 

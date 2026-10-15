@@ -217,6 +217,110 @@ async function subscribe() {
   }
 }
 
+async function subscribeClock() {
+  const clerk = arg("--clerk");
+  const plan = arg("--plan");
+  const price = arg("--price");
+  if (!clerk || !plan || !price) die("subscribe-clock requires --clerk --plan --price");
+  const frozen = Math.floor(Date.now() / 1000);
+  const clock = await stripe.testHelpers.testClocks.create({ frozen_time: frozen });
+  if (clock.livemode) die("refusing a live-mode test clock");
+
+  const customer = await stripe.customers.create({
+    email: `${clerk}@example.com`,
+    name: clerk,
+    test_clock: clock.id,
+    metadata: { clerk_id: clerk, e2e: "stripe-webhook" },
+  });
+  if (customer.livemode) die("refusing a live-mode customer");
+
+  const paymentMethod = await stripe.paymentMethods.create({
+    type: "card",
+    card: { token: "tok_visa" },
+  });
+  await stripe.paymentMethods.attach(paymentMethod.id, { customer: customer.id });
+  await stripe.customers.update(customer.id, {
+    invoice_settings: { default_payment_method: paymentMethod.id },
+  });
+
+  const subscription = await stripe.subscriptions.create({
+    customer: customer.id,
+    items: [{ price }],
+    default_payment_method: paymentMethod.id,
+    metadata: { clerk_id: clerk, plan_id: plan, product_type: "plan" },
+    payment_behavior: "error_if_incomplete",
+    expand: ["latest_invoice"],
+  });
+  if (subscription.livemode) die("refusing a live-mode subscription");
+  const invoice = subscription.latest_invoice;
+  const invoiceId = typeof invoice === "string" ? invoice : invoice?.id || "";
+  const periodEnd = subscription.items?.data?.[0]?.current_period_end || "";
+  emit("CLOCK", clock.id);
+  emit("CUSTOMER", customer.id);
+  emit("SUBSCRIPTION", subscription.id);
+  emit("INVOICE", invoiceId);
+  emit("PERIOD_END", periodEnd ? String(periodEnd) : "");
+
+  const created = await findEvent(
+    "customer.subscription.created",
+    (event) => event.data?.object?.id === subscription.id,
+    45000,
+  );
+  emit("SUBSCRIPTION_CREATED_EVENT", created?.id || "");
+  if (invoiceId) {
+    const paid = await findEvent(
+      "invoice.paid",
+      (event) => event.data?.object?.id === invoiceId,
+      45000,
+    );
+    emit("INVOICE_PAID_EVENT", paid?.id || "");
+  }
+}
+
+async function scheduleCancel() {
+  const id = arg("--subscription");
+  if (!id) die("schedule-cancel requires --subscription");
+  const updated = await stripe.subscriptions.update(id, { cancel_at_period_end: true });
+  if (updated.livemode) die("refusing a live-mode subscription");
+  const periodEnd = updated.items?.data?.[0]?.current_period_end || updated.cancel_at || "";
+  emit("SUBSCRIPTION", id);
+  emit("PERIOD_END", periodEnd ? String(periodEnd) : "");
+  const updatedEvent = await findEvent(
+    "customer.subscription.updated",
+    (event) =>
+      event.data?.object?.id === id && event.data?.object?.cancel_at_period_end === true,
+    45000,
+  );
+  emit("UPDATED_EVENT", updatedEvent?.id || "");
+}
+
+async function advanceClock() {
+  const id = arg("--clock");
+  const to = Number(arg("--to"));
+  const subscriptionId = arg("--subscription");
+  if (!id || !Number.isFinite(to) || to <= 0) die("advance-clock requires --clock --to");
+  let clock = await stripe.testHelpers.testClocks.retrieve(id);
+  if (clock.livemode) die("refusing a live-mode test clock");
+  clock = await stripe.testHelpers.testClocks.advance(id, { frozen_time: to });
+  const deadline = Date.now() + 90000;
+  while (clock.status === "advancing" && Date.now() < deadline) {
+    await sleep(1500);
+    clock = await stripe.testHelpers.testClocks.retrieve(id);
+  }
+  if (clock.status !== "ready") die(`test clock ${id} is ${clock.status}`);
+  emit("CLOCK", id);
+  emit("FROZEN_TIME", String(clock.frozen_time ?? to));
+  if (subscriptionId) {
+    const deleted = await findEvent(
+      "customer.subscription.deleted",
+      (event) => event.data?.object?.id === subscriptionId,
+      45000,
+    );
+    emit("DELETED_EVENT", deleted?.id || "");
+    emit("SUBSCRIPTION", subscriptionId);
+  }
+}
+
 async function changePlan() {
   const id = arg("--subscription");
   const price = arg("--price");
@@ -511,6 +615,9 @@ const command = process.argv[2] || "";
 const commands = {
   "ensure-prices": ensurePrices,
   subscribe,
+  "subscribe-clock": subscribeClock,
+  "schedule-cancel": scheduleCancel,
+  "advance-clock": advanceClock,
   "change-plan": changePlan,
   cancel,
   post,
@@ -519,7 +626,7 @@ const commands = {
 };
 
 if (!commands[command]) {
-  die("usage: ensure-prices | subscribe | change-plan | cancel | post | create-pack-charge | refund-part");
+  die("usage: ensure-prices | subscribe | subscribe-clock | schedule-cancel | advance-clock | change-plan | cancel | post | create-pack-charge | refund-part");
 }
 
 commands[command]().catch((err) => {
