@@ -221,7 +221,7 @@ async function main() {
   if (missing.length > 0) {
     console.error(
       `\nMissing required env: ${missing.join(", ")}.\n` +
-        `Put them in .env.local or export before running. See scripts/VERCEL_ENV_VARS.md.\n`,
+        `Put them in .env.local or export before running.\n`,
     );
     process.exit(1);
   }
