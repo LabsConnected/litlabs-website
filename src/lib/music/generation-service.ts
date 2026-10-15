@@ -407,6 +407,17 @@ export async function cancelGeneration(
     .update({ lbc_refunded: refunded })
     .eq("id", generationId);
 
+  if (gen.idempotency_key && typeof admin.rpc === "function") {
+    try {
+      await admin.rpc("release_media_cap_hold", {
+        p_user_id: userId,
+        p_request_id: gen.idempotency_key,
+      });
+    } catch {
+      // A missing function leaves the slot reserved. The next claim fails closed.
+    }
+  }
+
   return { success: true, refunded };
 }
 
@@ -707,7 +718,7 @@ async function failGeneration(
   // Don't refund if the generation was cancelled — cancellation has its own refund path.
   const { data: gen } = await admin
     .from("music_generations")
-    .select("status, cancel_requested_at")
+    .select("status, cancel_requested_at, user_id, idempotency_key")
     .eq("id", generationId)
     .maybeSingle();
 
@@ -728,6 +739,21 @@ async function failGeneration(
     })
     .eq("id", generationId)
     .neq("status", "cancelled");
+
+  if (
+    gen?.user_id &&
+    gen?.idempotency_key &&
+    typeof admin.rpc === "function"
+  ) {
+    try {
+      await admin.rpc("release_media_cap_hold", {
+        p_user_id: gen.user_id,
+        p_request_id: gen.idempotency_key,
+      });
+    } catch {
+      // A missing function leaves the slot reserved. The next claim fails closed.
+    }
+  }
 }
 
 async function getIdempotencyKey(generationId: string): Promise<string> {

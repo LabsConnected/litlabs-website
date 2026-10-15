@@ -5,6 +5,13 @@ import { getUserByClerkId } from "@/lib/user-db";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { createGeneration, processPendingGenerations } from "@/lib/music/generation-service";
 import { getConfiguredProviderName, isMockAllowed, getProviderHealth } from "@/lib/music/providers/factory";
+import { calculateRetailBits } from "@/lib/generation/cost-engine";
+import {
+  assertGenerationWithinPlanCaps,
+  planLimitResponse,
+  releaseMediaCapHold,
+} from "@/lib/generation/enforce-media-caps";
+import { isBillingExempt, getActiveSimulation } from "@/lib/owner";
 
 export const dynamic = "force-dynamic";
 
@@ -94,6 +101,18 @@ async function handler(req: NextRequest) {
 
   const { duration, ...rest } = parsed.data;
   const durationSeconds = duration === "concept" ? 30 : 120;
+  const musicTarget = musicCapTarget(providerName, durationSeconds);
+  const musicSim = await getActiveSimulation().catch(() => null);
+  const musicLimit = await assertGenerationWithinPlanCaps({
+    clerkId,
+    requestId: parsed.data.idempotencyKey,
+    modality: "music",
+    provider: musicTarget.provider,
+    model: musicTarget.model,
+    providerCostCents: musicTarget.providerCostCents,
+    billingExempt: isBillingExempt(clerkId, musicSim),
+  });
+  if (musicLimit) return planLimitResponse(musicLimit);
 
   try {
     const result = await createGeneration({
@@ -117,6 +136,10 @@ async function handler(req: NextRequest) {
 
     return NextResponse.json(result, { status: result.replayed ? 200 : 202 });
   } catch (err) {
+    await releaseMediaCapHold({
+      internalUserId: user.id,
+      requestId: parsed.data.idempotencyKey,
+    }).catch(() => undefined);
     const message = err instanceof Error ? err.message : "Generation failed";
     const name = err instanceof Error ? err.name : "";
     console.error(`${TAG} 500 userId=${clerkId} errName=${name} msg=${message} dur=${Date.now() - start}ms`);
@@ -135,4 +158,29 @@ async function handler(req: NextRequest) {
 // the Supabase rate_limit_store and keyed on the client IP). Generation is
 // expensive and billed, so the budget is tighter than the read-heavy routes.
 export const POST = withRateLimit(handler, 10, 60);
+
+function musicCapTarget(providerName: string, durationSeconds: number): {
+  provider: string;
+  model: string;
+  providerCostCents: number;
+} {
+  const target =
+    providerName === "elevenlabs"
+      ? { provider: "elevenlabs", model: "music_v2" }
+      : providerName === "mureka"
+        ? { provider: "mureka", model: "mureka-default" }
+        : providerName === "lyria"
+          ? { provider: "google", model: process.env.LYRIA_MODEL || "lyria-3-pro-preview" }
+          : { provider: providerName, model: providerName };
+  const providerCostCents =
+    providerName === "mock"
+      ? 0
+      : calculateRetailBits({
+          modality: "music",
+          provider: target.provider,
+          model: target.model,
+          durationSeconds,
+        }).providerCostCents;
+  return { ...target, providerCostCents };
+}
 

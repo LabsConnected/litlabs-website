@@ -1,4 +1,9 @@
 import { GoogleGenAI, Modality } from "@google/genai";
+import { calculateRetailBits } from "@/lib/generation/cost-engine";
+import {
+  assertGenerationWithinPlanCaps,
+  PlanLimitError,
+} from "@/lib/generation/enforce-media-caps";
 import { AssetInspection, VisualSourceType } from "./types";
 
 export interface StockSearchInput {
@@ -32,6 +37,37 @@ export interface ImageGenerationInput {
   width: number;
   height: number;
   sectionKey: string;
+  /** Clerk id of the caller. Required before a provider request. */
+  clerkId?: string;
+}
+
+async function reserveGeneratedImage(
+  input: ImageGenerationInput,
+  provider: string,
+  model: string,
+): Promise<void> {
+  if (!input.clerkId) {
+    throw new PlanLimitError({
+      status: 402,
+      code: "plan_limit",
+      reason: "usage_unavailable",
+      error: "Plan usage could not be read. Nothing was generated.",
+    });
+  }
+  const providerCostCents = calculateRetailBits({
+    modality: "image",
+    provider,
+    model,
+  }).providerCostCents;
+  const denial = await assertGenerationWithinPlanCaps({
+    clerkId: input.clerkId,
+    requestId: `visual:${input.missionId}:${input.sectionKey}:${provider}:${crypto.randomUUID()}`,
+    modality: "image",
+    provider,
+    model,
+    providerCostCents,
+  });
+  if (denial) throw new PlanLimitError(denial);
 }
 
 export interface GeneratedAssetResult {
@@ -141,6 +177,7 @@ class PexelsStockAssetProvider implements StockAssetProvider {
 
 class PollinationsImageGenerationProvider implements ImageGenerationProvider {
   async generate(input: ImageGenerationInput): Promise<GeneratedAssetResult> {
+    await reserveGeneratedImage(input, "pollinations", "flux");
     const url = new URL(`https://image.pollinations.ai/prompt/${encodeURIComponent(input.prompt)}`);
     url.searchParams.set("width", String(Math.min(input.width, 1024)));
     url.searchParams.set("height", String(Math.min(input.height, 1024)));
@@ -179,6 +216,7 @@ class GeminiImageGenerationProvider implements ImageGenerationProvider {
     // Migrated from deprecated Imagen 3 to Nano Banana (gemini-2.5-flash-image).
     // Imagen 3 shuts down August 17, 2026.
     const model = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image";
+    await reserveGeneratedImage(input, "gemini", model);
     const ai = new GoogleGenAI({ apiKey: this.apiKey });
 
     const response = await ai.models.generateContent({
@@ -222,6 +260,7 @@ class FalImageGenerationProvider implements ImageGenerationProvider {
   }
 
   async generate(input: ImageGenerationInput): Promise<GeneratedAssetResult> {
+    await reserveGeneratedImage(input, "fal", "flux-pro");
     const response = await fetch("https://queue.fal.run/fal-ai/flux/schnell", {
       method: "POST",
       headers: {

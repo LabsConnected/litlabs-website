@@ -11,8 +11,9 @@ import { getSupabaseAdmin } from "@/lib/supabase";
  * and the half-of-revenue spend cap do not bound them. Each plan gets a
  * daily ceiling so a script cannot farm those endpoints.
  *
- * Starter is the free plan. Creator and Pro are higher because they already
- * pay. Founder is a one-time tier. Owner stays finite.
+ * The ceiling applies to every 0-cent generation, not only the three image
+ * models below. Starter is the free plan. Creator and Pro are higher because
+ * they already pay. Founder is a one-time tier. Owner stays finite.
  */
 export const FREE_IMAGE_DAILY_CAP: Record<PlanId, number> = {
   starter: 8,
@@ -52,11 +53,27 @@ export interface PlanLimitDenial {
   error: string;
 }
 
+export class PlanLimitError extends Error {
+  readonly status: 402 | 429;
+  readonly reason: PlanLimitReason;
+  readonly code = "plan_limit" as const;
+
+  constructor(denial: PlanLimitDenial) {
+    super(denial.error);
+    this.name = "PlanLimitError";
+    this.status = denial.status;
+    this.reason = denial.reason;
+  }
+}
+
 export interface MediaUsageSnapshot {
   imagesThisMonth: number;
   videosThisMonth: number;
   providerSpendCentsThisMonth: number;
+  /** Free image rows today. Kept so older callers can still read it. */
   freeImagesToday: number;
+  /** Every 0-cent generation today, any modality. */
+  freeModelsToday: number;
 }
 
 export interface GenerationUsageRow {
@@ -69,10 +86,22 @@ export interface GenerationUsageRow {
   created_at: string;
   request_id?: string | null;
   metadata?: Record<string, unknown> | null;
+  units?: number | null;
 }
 
 export function isFreeImageModel(provider: string, model: string): boolean {
   return FREE_IMAGE_MODELS.has(`${provider}:${model}`);
+}
+
+/** Zero-cent calls and the known free image models. Paid counts do not include these. */
+export function isFreeGeneration(
+  modality: GenerationModality,
+  provider: string,
+  model: string,
+  providerCostCents: number,
+): boolean {
+  if (providerCostCents <= 0) return true;
+  return modality === "image" && isFreeImageModel(provider, model);
 }
 
 export function emptyMediaUsage(): MediaUsageSnapshot {
@@ -81,11 +110,17 @@ export function emptyMediaUsage(): MediaUsageSnapshot {
     videosThisMonth: 0,
     providerSpendCentsThisMonth: 0,
     freeImagesToday: 0,
+    freeModelsToday: 0,
   };
+}
+
+function rowUnits(row: GenerationUsageRow): number {
+  return typeof row.units === "number" && row.units > 0 ? row.units : 1;
 }
 
 function rowProviderCents(row: GenerationUsageRow): number {
   if (isFreeImageModel(row.provider, row.model)) return 0;
+  if (row.actual_provider_cost_cents === 0) return 0;
   if (
     typeof row.actual_provider_cost_cents === "number" &&
     row.actual_provider_cost_cents > 0
@@ -117,6 +152,12 @@ function rowProviderCents(row: GenerationUsageRow): number {
   });
 }
 
+function isFreeUsageRow(row: GenerationUsageRow): boolean {
+  if (row.modality === "image" && isFreeImageModel(row.provider, row.model)) return true;
+  if (row.actual_provider_cost_cents === 0) return true;
+  return rowProviderCents(row) <= 0;
+}
+
 /** Prior usage for the UTC month, excluding the request about to run. */
 export function summarizeMediaUsage(
   rows: GenerationUsageRow[],
@@ -132,11 +173,15 @@ export function summarizeMediaUsage(
     if (row.refund_status === "refunded") continue;
     const created = Date.parse(row.created_at);
     if (!Number.isFinite(created) || created < monthStart) continue;
-    const free = row.modality === "image" && isFreeImageModel(row.provider, row.model);
-    if (row.modality === "image" && !free) usage.imagesThisMonth += 1;
-    if (row.modality === "video") usage.videosThisMonth += 1;
-    usage.providerSpendCentsThisMonth += rowProviderCents(row);
-    if (free && created >= dayStart) usage.freeImagesToday += 1;
+    const units = rowUnits(row);
+    const free = isFreeUsageRow(row);
+    if (row.modality === "image" && !free) usage.imagesThisMonth += units;
+    if (row.modality === "video" && !free) usage.videosThisMonth += units;
+    if (!free) usage.providerSpendCentsThisMonth += rowProviderCents(row) * units;
+    if (free && created >= dayStart) {
+      usage.freeModelsToday += units;
+      if (row.modality === "image") usage.freeImagesToday += units;
+    }
   }
   return usage;
 }
@@ -149,10 +194,21 @@ function denial(
   return { status, code: "plan_limit", reason, error };
 }
 
+function freeTodayCount(usage: MediaUsageSnapshot): number {
+  return usage.freeModelsToday ?? usage.freeImagesToday;
+}
+
 /**
- * Decide whether this call fits the plan. Billing-exempt callers skip the
- * monthly count and spend ceilings (those are the paid-plan revenue caps)
- * and still hit the free-model daily cap.
+ * Decide whether this call fits the plan.
+ *
+ * Every catalog model hits one of these ceilings:
+ * - 0-cent models (any modality): the per-plan daily cap
+ * - paid images: the monthly image count, then the provider-spend cap
+ * - paid videos: the monthly video count, then the provider-spend cap
+ * - paid music and speech: the provider-spend cap
+ *
+ * Billing-exempt callers skip the monthly count and spend ceilings and
+ * still hit the free-model daily cap.
  */
 export function evaluateMediaCap(input: {
   planId: PlanId;
@@ -162,51 +218,60 @@ export function evaluateMediaCap(input: {
   providerCostCents: number;
   usage: MediaUsageSnapshot;
   billingExempt?: boolean;
+  units?: number;
 }): PlanLimitDenial | null {
   const caps = PLAN_MEDIA_MONTHLY_CAPS[input.planId];
   const exempt = input.billingExempt === true;
-  const freeImage =
-    input.modality === "image" &&
-    (input.providerCostCents <= 0 || isFreeImageModel(input.provider, input.model));
+  const units = input.units && input.units > 0 ? input.units : 1;
+  const free = isFreeGeneration(
+    input.modality,
+    input.provider,
+    input.model,
+    input.providerCostCents,
+  );
+  const planName = PLANS[input.planId].name;
 
-  if (freeImage) {
+  if (free) {
     const daily = FREE_IMAGE_DAILY_CAP[input.planId];
-    if (input.usage.freeImagesToday + 1 > daily) {
+    if (freeTodayCount(input.usage) + units > daily) {
       return denial(
         429,
         "free_model_daily_cap",
-        `${PLANS[input.planId].name} allows ${daily} free image generations per day. Today's limit is reached.`,
+        `${planName} allows ${daily} free generations per day. Today's limit is reached.`,
       );
     }
+    return null;
   }
 
-  if (!exempt && input.modality === "image" && !freeImage) {
-    if (input.usage.imagesThisMonth + 1 > caps.maxImages) {
+  if (exempt) return null;
+
+  if (input.modality === "image") {
+    if (input.usage.imagesThisMonth + units > caps.maxImages) {
       return denial(
         429,
         "monthly_image_cap",
-        `${PLANS[input.planId].name} allows ${caps.maxImages} paid images this month.`,
+        `${planName} allows ${caps.maxImages} paid images this month.`,
       );
     }
   }
 
-  if (!exempt && input.modality === "video" && input.providerCostCents > 0) {
-    if (input.usage.videosThisMonth + 1 > caps.maxVideos) {
+  if (input.modality === "video" && input.providerCostCents > 0) {
+    if (input.usage.videosThisMonth + units > caps.maxVideos) {
       return denial(
         429,
         "monthly_video_cap",
-        `${PLANS[input.planId].name} allows ${caps.maxVideos} videos this month.`,
+        `${planName} allows ${caps.maxVideos} videos this month.`,
       );
     }
   }
 
-  if (!exempt && input.providerCostCents > 0) {
-    const next = input.usage.providerSpendCentsThisMonth + input.providerCostCents;
+  if (input.providerCostCents > 0) {
+    const next = input.usage.providerSpendCentsThisMonth + input.providerCostCents * units;
     if (next > caps.maxProviderSpendCents) {
       return denial(
         402,
         "provider_spend_cap",
-        `${PLANS[input.planId].name} provider spend cap is ${caps.maxProviderSpendCents} cents this month. This request would reach ${next} cents.`,
+        `${planName} provider spend cap is ${caps.maxProviderSpendCents} cents this month. This request would reach ${next} cents.`,
       );
     }
   }
@@ -214,10 +279,10 @@ export function evaluateMediaCap(input: {
   return null;
 }
 
-export function planLimitResponse(denial: PlanLimitDenial): NextResponse {
+export function planLimitResponse(denialResult: PlanLimitDenial): NextResponse {
   return NextResponse.json(
-    { error: denial.error, code: denial.code, reason: denial.reason },
-    { status: denial.status },
+    { error: denialResult.error, code: denialResult.code, reason: denialResult.reason },
+    { status: denialResult.status },
   );
 }
 
@@ -255,28 +320,45 @@ async function resolvePlan(
   return { planId: plan, internalUserId: user.id };
 }
 
-async function loadMonthRows(
-  admin: AdminClient,
-  userId: string,
-  monthStartIso: string,
-): Promise<{ rows: GenerationUsageRow[] } | { error: string }> {
-  const { data, error, count } = await admin
-    .from("generation_jobs")
-    .select(
-      "modality, provider, model, status, refund_status, actual_provider_cost_cents, created_at, request_id, metadata",
-      { count: "exact" },
-    )
-    .eq("user_id", userId)
-    .gte("created_at", monthStartIso)
-    .limit(1000);
-  if (error) return { error: error.message };
-  const rows = (data ?? []) as GenerationUsageRow[];
-  if (typeof count === "number" && count > rows.length) {
-    return { error: "monthly usage exceeded the read window" };
+const UNAVAILABLE = denial(
+  402,
+  "usage_unavailable",
+  "Plan usage could not be read. Nothing was generated.",
+);
+
+function parseClaim(data: unknown): PlanLimitDenial | null | "bad" {
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row || typeof row !== "object") return "bad";
+  const claim = row as {
+    allowed?: boolean;
+    status?: number;
+    reason?: PlanLimitReason;
+    error?: string;
+  };
+  if (claim.allowed === true) return null;
+  if (
+    (claim.status === 402 || claim.status === 429) &&
+    claim.reason &&
+    typeof claim.error === "string"
+  ) {
+    return {
+      status: claim.status,
+      code: "plan_limit",
+      reason: claim.reason,
+      error: claim.error,
+    };
   }
-  return { rows };
+  return "bad";
 }
 
+/**
+ * Reserve this generation against the plan before the provider is called.
+ *
+ * The reservation is `claim_media_cap_slot`. That function holds a per-user
+ * advisory lock, counts this month's holds and completed jobs, and inserts
+ * the hold in the same transaction. Two parallel calls cannot both take the
+ * last slot. A missing user row or a failed claim fails closed.
+ */
 export async function assertGenerationWithinPlanCaps(input: {
   clerkId: string;
   requestId?: string;
@@ -285,37 +367,58 @@ export async function assertGenerationWithinPlanCaps(input: {
   model: string;
   providerCostCents: number;
   billingExempt?: boolean;
+  units?: number;
   now?: Date;
 }): Promise<PlanLimitDenial | null> {
-  const unavailable = denial(
-    402,
-    "usage_unavailable",
-    "Plan usage could not be read. Nothing was generated.",
-  );
   const admin = getSupabaseAdmin();
-  if (!admin) return unavailable;
+  if (!admin || typeof admin.rpc !== "function") return UNAVAILABLE;
 
   const plan = await resolvePlan(admin, input.clerkId);
-  if ("error" in plan) return unavailable;
+  if ("error" in plan) return UNAVAILABLE;
+  if (!plan.internalUserId) return UNAVAILABLE;
 
+  const caps = PLAN_MEDIA_MONTHLY_CAPS[plan.planId];
+  const units = input.units && input.units > 0 ? input.units : 1;
+  const free = isFreeGeneration(
+    input.modality,
+    input.provider,
+    input.model,
+    input.providerCostCents,
+  );
   const now = input.now ?? new Date();
-  const monthStart = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
-  ).toISOString();
-  let usage = emptyMediaUsage();
-  if (plan.internalUserId) {
-    const loaded = await loadMonthRows(admin, plan.internalUserId, monthStart);
-    if ("error" in loaded) return unavailable;
-    usage = summarizeMediaUsage(loaded.rows, now, input.requestId);
-  }
-
-  return evaluateMediaCap({
-    planId: plan.planId,
-    modality: input.modality,
-    provider: input.provider,
-    model: input.model,
-    providerCostCents: input.providerCostCents,
-    usage,
-    billingExempt: input.billingExempt,
+  const { data, error } = await admin.rpc("claim_media_cap_slot", {
+    p_user_id: plan.internalUserId,
+    p_request_id: input.requestId || crypto.randomUUID(),
+    p_modality: input.modality,
+    p_provider: input.provider,
+    p_model: input.model,
+    p_provider_cost_cents: Math.max(0, Math.round(input.providerCostCents)),
+    p_free_model: free,
+    p_billing_exempt: input.billingExempt === true,
+    p_max_images: caps.maxImages,
+    p_max_videos: caps.maxVideos,
+    p_max_spend_cents: caps.maxProviderSpendCents,
+    p_free_daily: FREE_IMAGE_DAILY_CAP[plan.planId],
+    p_units: units,
+    p_now: now.toISOString(),
   });
+  if (error) return UNAVAILABLE;
+  const parsed = parseClaim(data);
+  return parsed === "bad" ? UNAVAILABLE : parsed;
+}
+
+/** Drop a reservation after the provider was not used. Idempotent. */
+export async function releaseMediaCapHold(input: {
+  internalUserId: string;
+  requestId: string;
+}): Promise<void> {
+  const admin = getSupabaseAdmin();
+  if (!admin || typeof admin.rpc !== "function") return;
+  const { error } = await admin.rpc("release_media_cap_hold", {
+    p_user_id: input.internalUserId,
+    p_request_id: input.requestId,
+  });
+  if (error) {
+    console.error("[media-cap] release failed:", error.message);
+  }
 }

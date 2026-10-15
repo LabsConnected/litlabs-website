@@ -3,6 +3,13 @@ import { auth } from "@/lib/auth";
 import { GoogleGenAI, Modality } from "@google/genai";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { emitUsageEvent } from "@/lib/metering";
+import { calculateRetailBits } from "@/lib/generation/cost-engine";
+import {
+  assertGenerationWithinPlanCaps,
+  planLimitResponse,
+  releaseMediaCapHold,
+} from "@/lib/generation/enforce-media-caps";
+import { resolveInternalUserId } from "@/lib/generation/identity";
 
 async function handler(request: NextRequest) {
   const { userId, clerkId } = await auth(request);
@@ -41,9 +48,37 @@ async function handler(request: NextRequest) {
     };
 
     const { width, height } = getDimensions(aspectRatio || "1:1");
+    const clerk = clerkId ?? userId;
+    const batchCount = Math.min(Math.max(Number(batchSize) || 1, 1), 4);
+
+    async function reserve(opts: {
+      requestId: string;
+      provider: string;
+      model: string;
+      providerCostCents: number;
+      units?: number;
+    }) {
+      return assertGenerationWithinPlanCaps({
+        clerkId: clerk,
+        requestId: opts.requestId,
+        modality: "image",
+        provider: opts.provider,
+        model: opts.model,
+        providerCostCents: opts.providerCostCents,
+        units: opts.units,
+      });
+    }
 
     // Pollinations.ai fallback (always works, no API key needed)
     if (provider === "pollinations" || !provider) {
+      const pollinationsLimit = await reserve({
+        requestId: `studio:${clerk}:pollinations:${crypto.randomUUID()}`,
+        provider: "pollinations",
+        model: "flux",
+        providerCostCents: 0,
+        units: batchCount,
+      });
+      if (pollinationsLimit) return planLimitResponse(pollinationsLimit);
       // Use a stable seed based on prompt hash to prevent infinite reloading
       const promptHash = prompt
         .split("")
@@ -83,6 +118,19 @@ async function handler(request: NextRequest) {
         // Migrated from deprecated Imagen 3 to Nano Banana (gemini-2.5-flash-image).
         // Imagen 3 shuts down August 17, 2026.
         const imageModel = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image";
+        const geminiCents = calculateRetailBits({
+          modality: "image",
+          provider: "gemini",
+          model: imageModel,
+        }).providerCostCents;
+        const geminiLimit = await reserve({
+          requestId: meteringRequestId,
+          provider: "gemini",
+          model: imageModel,
+          providerCostCents: geminiCents,
+        });
+        if (geminiLimit) return planLimitResponse(geminiLimit);
+        let geminiDelivered = false;
         const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
         const response = await ai.models.generateContent({
@@ -129,6 +177,7 @@ async function handler(request: NextRequest) {
             startedAt: meteringStartedAt,
             finishedAt: new Date(),
           });
+          geminiDelivered = true;
           return NextResponse.json({
             images: [
               {
@@ -142,7 +191,23 @@ async function handler(request: NextRequest) {
             cost: 1,
           });
         }
+        if (!geminiDelivered) {
+          const internalUserId = await resolveInternalUserId(clerk).catch(() => null);
+          if (internalUserId) {
+            await releaseMediaCapHold({
+              internalUserId,
+              requestId: meteringRequestId,
+            }).catch(() => undefined);
+          }
+        }
       } catch (geminiErr) {
+        const internalUserId = await resolveInternalUserId(clerk).catch(() => null);
+        if (internalUserId) {
+          await releaseMediaCapHold({
+            internalUserId,
+            requestId: meteringRequestId,
+          }).catch(() => undefined);
+        }
         // Silenced for the caller (falls back to pollinations below), but
         // the failed attempt is still metered for retry-waste analysis.
         void emitUsageEvent({
@@ -164,6 +229,13 @@ async function handler(request: NextRequest) {
     }
 
     // Default fallback to pollinations with stable seed
+    const fallbackLimit = await reserve({
+      requestId: `studio:${clerk}:pollinations-fallback:${meteringRequestId}`,
+      provider: "pollinations",
+      model: "flux",
+      providerCostCents: 0,
+    });
+    if (fallbackLimit) return planLimitResponse(fallbackLimit);
     const promptHash2 = prompt
       .split("")
       .reduce((acc, char) => acc + char.charCodeAt(0), 0);
