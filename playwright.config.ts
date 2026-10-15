@@ -26,6 +26,7 @@ const baseURL = canonicalizeTestBaseURL(
 
 const authDir = path.join(__dirname, "tests/playwright/.clerk");
 const userAAuthFile = path.join(authDir, "user-a.json");
+const userBAuthFile = path.join(authDir, "user-b.json");
 const localEnv = existsSync(".env.local") ? readFileSync(".env.local", "utf-8") : "";
 const hasLocalAuthState = existsSync(userAAuthFile);
 
@@ -80,6 +81,27 @@ const authProjects = (hasRealClerk && hasTestUsers) ? [
     dependencies: ["auth-setup"],
   },
 ] : [];
+
+// The integration suite mixes anonymous API assertions with authenticated
+// browser contexts created by auth.setup.ts. The existing authenticated
+// projects do not match integration.spec.ts, so expose an explicit mapping
+// only for the manual staging-auth workflow. The isolation spec assigns
+// User A/User B storage state per describe block, so this project stays
+// storage-state neutral.
+const stagingAuthProjects = process.env.PLAYWRIGHT_STAGING_AUTH === "true"
+  ? [
+      {
+        name: "staging-integration",
+        testMatch: /integration\.spec\.ts/,
+        use: { ...devices["Desktop Chrome"] },
+      },
+      {
+        name: "staging-isolation",
+        testMatch: /isolation\.spec\.ts/,
+        use: { ...devices["Desktop Chrome"] },
+      },
+    ]
+  : [];
 
 const localMobileAcceptanceProject =
   !process.env.PLAYWRIGHT_BASE_URL &&
@@ -267,6 +289,7 @@ export default defineConfig({
     }] : []),
 
     // ── Authenticated projects — only when Clerk credentials are available ──
+    ...stagingAuthProjects,
     ...localMobileAcceptanceProject,
     ...authProjects,
   ],
