@@ -86,6 +86,37 @@ describe("POST /api/billing/checkout already subscribed", () => {
     }
   });
 
+  it("parallel checkout attempts by an already-subscribed user all return 409", async () => {
+    lookup({
+      users: [{ id: "db-user", clerk_id: "user_123" }],
+      subscriptions: [
+        { user_id: "db-user", status: "active", stripe_customer_id: "cus_existing" },
+      ],
+    });
+    const originalFetch = global.fetch;
+    const stripeCalls: string[] = [];
+    global.fetch = vi.fn(async (url: string | URL | Request) => {
+      stripeCalls.push(String(url));
+      return new Response("stripe", { status: 500 });
+    }) as typeof fetch;
+    try {
+      const responses = await Promise.all([
+        POST(request() as never),
+        POST(request() as never),
+        POST(request() as never),
+      ]);
+      for (const res of responses) {
+        expect(res.status).toBe(409);
+        const body = await res.json();
+        expect(body.code).toBe("already_subscribed");
+        expect(body.portalPath).toBe("/api/billing/portal");
+      }
+      expect(stripeCalls.filter((url) => url.includes("api.stripe.com"))).toHaveLength(0);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
   it("does not treat another clerk's active subscription as this user's", async () => {
     lookup({
       users: [{ id: "db-other", clerk_id: "user_other" }],
