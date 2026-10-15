@@ -265,6 +265,53 @@ function refundsInSnapshot(
   return covered;
 }
 
+function periodEndSeconds(value: string | number | null | undefined): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value) {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return Math.floor(parsed / 1000);
+  }
+  return null;
+}
+
+async function ledgerHasIdempotencyKey(
+  sb: AdminClient,
+  userId: string,
+  key: string,
+): Promise<boolean> {
+  const { data, error } = await sb
+    .from("credit_ledger")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("idempotency_key", key)
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`[stripe] ledger lookup failed for ${key}: ${error.message}`);
+  }
+  return !!data;
+}
+
+async function ledgerHasReference(
+  sb: AdminClient,
+  userId: string,
+  referenceId: string,
+): Promise<boolean> {
+  const { data, error } = await sb
+    .from("credit_ledger")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("reference_id", referenceId)
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    throw new Error(
+      `[stripe] ledger lookup failed for ${referenceId}: ${error.message}`,
+    );
+  }
+  return !!data;
+}
+
 async function refundAlreadyDebited(
   sb: AdminClient,
   userId: string,
@@ -543,6 +590,7 @@ async function grantSubscriptionCredits(
   planId: PlanId,
   idempotencyKey: string,
   expiresAt?: string | null,
+  referenceId?: string,
 ): Promise<void> {
   const plan = PLANS[planId];
   if (!plan || plan.monthlyCredits <= 0) return;
@@ -557,6 +605,7 @@ async function grantSubscriptionCredits(
       p_description: `${plan.name} monthly grant — ${plan.monthlyCredits} LiTTBits`,
       p_idempotency_key: idempotencyKey,
       p_reference_type: "subscription",
+      p_reference_id: referenceId,
       p_expires_at: expiresAt ?? undefined,
     });
     if (rpcError) {
@@ -865,9 +914,20 @@ export async function POST(req: NextRequest) {
         }
         const { data: existingSub } = await sb
           .from("subscriptions")
-          .select("plan")
+          .select("plan, current_period_end, updated_at")
           .eq("user_id", subUserId)
           .maybeSingle();
+        // A delayed subscription event must not rewind a newer plan write
+        // or grant on top of it. The newer row already decided this period.
+        const storedUpdatedMs = existingSub?.updated_at
+          ? Date.parse(existingSub.updated_at)
+          : Number.NaN;
+        if (
+          Number.isFinite(storedUpdatedMs) &&
+          storedUpdatedMs > eventCreatedMs(event)
+        ) {
+          break;
+        }
         const planId = resolveSubscriptionPlan(
           subPlanId,
           priceIdFromSubscription(sub),
@@ -881,23 +941,38 @@ export async function POST(req: NextRequest) {
         if (event.type === "customer.subscription.updated") {
           const previous = subscriptionCreditAllowance(existingSub?.plan);
           const next = subscriptionCreditAllowance(planId);
-          if (previous > 0 && next > previous) {
+          const periodEnd = sub.items?.data?.[0]?.current_period_end ?? "na";
+          const storedPeriod = periodEndSeconds(existingSub?.current_period_end);
+          const incomingPeriod = periodEndSeconds(
+            sub.items?.data?.[0]?.current_period_end,
+          );
+          // A new period is a renewal. invoice.paid grants that period once.
+          // The delta is only the mid-cycle top-up, while the period end stays put.
+          const periodRolled =
+            storedPeriod !== null &&
+            incomingPeriod !== null &&
+            storedPeriod !== incomingPeriod;
+          if (!periodRolled && previous > 0 && next > previous) {
             const delta = next - previous;
-            const periodEnd = sub.items?.data?.[0]?.current_period_end ?? "na";
-            const { error: upgradeError } = await sb.rpc("grant_credits", {
-              p_user_id: subUserId,
-              p_amount: delta,
-              p_category: "subscription_grant",
-              p_balance_bucket: "monthly",
-              p_description: `Plan upgrade to ${planId} — ${delta} LiTTBits`,
-              p_idempotency_key: `plan_upgrade_${sub.id}_${periodEnd}_${planId}`,
-              p_reference_type: "subscription",
-              p_reference_id: sub.id,
-            });
-            if (upgradeError) {
-              throw new Error(
-                `[stripe] ${event.type} ${sub.id}: upgrade grant failed: ${upgradeError.message}`,
-              );
+            const periodRef = `period_plan_${sub.id}_${periodEnd}_${planId}`;
+            // A renewal invoice for this same period and plan already paid
+            // the allowance. Do not add the delta on top.
+            if (!(await ledgerHasReference(sb, subUserId, periodRef))) {
+              const { error: upgradeError } = await sb.rpc("grant_credits", {
+                p_user_id: subUserId,
+                p_amount: delta,
+                p_category: "subscription_grant",
+                p_balance_bucket: "monthly",
+                p_description: `Plan upgrade to ${planId} — ${delta} LiTTBits`,
+                p_idempotency_key: `plan_upgrade_${sub.id}_${periodEnd}_${planId}`,
+                p_reference_type: "subscription",
+                p_reference_id: periodRef,
+              });
+              if (upgradeError) {
+                throw new Error(
+                  `[stripe] ${event.type} ${sub.id}: upgrade grant failed: ${upgradeError.message}`,
+                );
+              }
             }
           }
         }
@@ -1169,12 +1244,20 @@ export async function POST(req: NextRequest) {
           );
         }
         const periodEnd = inv.lines.data[0]?.period?.end;
+        const periodRef = `period_plan_${invSubId}_${periodEnd ?? "na"}_${planId}`;
+        const upgradeKey = `plan_upgrade_${invSubId}_${periodEnd ?? "na"}_${planId}`;
+        // The upgrade delta for this period and plan already landed.
+        // Granting the full allowance again would stack the two events.
+        if (await ledgerHasIdempotencyKey(sb, invMatch.user_id, upgradeKey)) {
+          break;
+        }
         await grantSubscriptionCredits(
           sb,
           invMatch.user_id,
           planId,
           `invoice_grant_${inv.id}`,
           periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
+          periodRef,
         );
         break;
       }

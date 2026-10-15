@@ -141,14 +141,27 @@ function mockSucceededRefunds(
  */
 function buildTrackingSupabase(
   existingEvent = false,
-  opts: { eventResult?: string; marketplaceOrder?: boolean; subscriptionPlan?: string } = {},
+  opts: {
+    eventResult?: string;
+    marketplaceOrder?: boolean;
+    subscriptionPlan?: string;
+    currentPeriodEnd?: string | null;
+    updatedAt?: string | null;
+  } = {},
 ) {
   const rpcCalls: { fn: string; params: any }[] = [];
   const upserts: { table: string; row: any; onConflict?: string }[] = [];
   const updates: { table: string; patch: any; matches: any[] }[] = [];
   const inserts: { table: string; row: any }[] = [];
   const debitedKeys = new Set<string>();
-  const storedPlan = opts.subscriptionPlan ?? "creator_beta";
+  const grantedKeys = new Set<string>();
+  const grantedRefs = new Set<string>();
+  const subscriptionState = {
+    user_id: "user_internal_123",
+    plan: opts.subscriptionPlan ?? "creator_beta",
+    current_period_end: opts.currentPeriodEnd ?? null,
+    updated_at: opts.updatedAt ?? null,
+  };
   const claimedEvents = new Map<string, { id: string; result: string; processed_at: string }>();
   if (existingEvent) {
     claimedEvents.set("evt_existing", {
@@ -176,11 +189,25 @@ function buildTrackingSupabase(
       if (table === "users") return { data: { id: "user_internal_123" }, error: null };
       if (table === "stripe_events") return { data: stripeEventRow(eqs), error: null };
       if (table === "subscriptions")
-        return { data: { user_id: "user_internal_123", plan: storedPlan }, error: null };
+        return { data: { ...subscriptionState }, error: null };
       return { data: null, error: null };
     }),
     maybeSingle: vi.fn(async () => {
       if (table === "credit_ledger") {
+        const exactKey = eqs.find((entry) => entry.col === "idempotency_key")?.val;
+        if (typeof exactKey === "string") {
+          return {
+            data: grantedKeys.has(exactKey) ? { id: "ledger_grant" } : null,
+            error: null,
+          };
+        }
+        const referenceId = eqs.find((entry) => entry.col === "reference_id")?.val;
+        if (typeof referenceId === "string") {
+          return {
+            data: grantedRefs.has(referenceId) ? { id: "ledger_ref" } : null,
+            error: null,
+          };
+        }
         const prefix = likePattern.endsWith("%") ? likePattern.slice(0, -1) : likePattern;
         const key = prefix.endsWith(":") ? prefix.slice(0, -1) : prefix;
         return {
@@ -194,11 +221,18 @@ function buildTrackingSupabase(
       if (table === "users") return { data: { id: "user_internal_123" }, error: null };
       if (table === "stripe_events") return { data: stripeEventRow(eqs), error: null };
       if (table === "subscriptions")
-        return { data: { user_id: "user_internal_123", plan: storedPlan }, error: null };
+        return { data: { ...subscriptionState }, error: null };
       return { data: null, error: null };
     }),
     upsert: vi.fn(async (row: any, options?: { onConflict?: string }) => {
       upserts.push({ table, row, onConflict: options?.onConflict });
+      if (table === "subscriptions" && row) {
+        if (typeof row.plan === "string") subscriptionState.plan = row.plan;
+        if (typeof row.current_period_end === "string") {
+          subscriptionState.current_period_end = row.current_period_end;
+        }
+        if (typeof row.updated_at === "string") subscriptionState.updated_at = row.updated_at;
+      }
       return { error: null };
     }),
     insert: vi.fn(async (row: any) => {
@@ -254,13 +288,25 @@ function buildTrackingSupabase(
     rpc: vi.fn(async (fnName: string, params: any) => {
       rpcCalls.push({ fn: fnName, params });
       if (fnName === "debit_credits" && typeof params?.p_idempotency_key === "string") {
+        if (debitedKeys.has(params.p_idempotency_key)) {
+          return { data: { success: true, remaining: 100 }, error: null };
+        }
         debitedKeys.add(params.p_idempotency_key);
+      }
+      if (fnName === "grant_credits") {
+        if (typeof params?.p_idempotency_key === "string") {
+          if (grantedKeys.has(params.p_idempotency_key)) {
+            return { data: { granted: false }, error: null };
+          }
+          grantedKeys.add(params.p_idempotency_key);
+        }
+        if (typeof params?.p_reference_id === "string") grantedRefs.add(params.p_reference_id);
       }
       return { data: { success: true, remaining: 100 }, error: null };
     }),
   };
 
-  return { sb, rpcCalls, upserts, updates, inserts };
+  return { sb, rpcCalls, upserts, updates, inserts, grantedKeys, debitedKeys };
 }
 
 // ─── Setup/teardown ──────────────────────────────────────────────────
@@ -889,6 +935,197 @@ describe("Webhook event processing — state mutations", () => {
     });
     expect(refunded.res.status).toBe(200);
     expect(refunded.rpcCalls.some((c) => c.fn === "debit_credits" && c.params.p_idempotency_key === "refund_re_cover")).toBe(true);
+  });
+
+  function effectiveGrants(rpcCalls: { fn: string; params: any }[]) {
+    const seen = new Set<string>();
+    return rpcCalls.filter((call) => {
+      if (call.fn !== "grant_credits") return false;
+      const key = call.params?.p_idempotency_key as string;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  it("upgrade and proration grant 10500 once, concurrently and out of order", async () => {
+    process.env.STRIPE_PRICE_CREATOR_BETA = "price_test_creator";
+    process.env.STRIPE_PRICE_PRO_BUILDER_BETA = "price_test_pro";
+    const tracked = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(tracked.sb as any);
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const periodEnd = 1702678400;
+    const updated = () => makeStripeEvent("customer.subscription.updated", {
+      id: `evt_up_${Math.random().toString(16).slice(2)}`,
+      object: {
+        id: "sub_race",
+        status: "active",
+        customer: "cus_race",
+        metadata: { clerk_id: "user_123", plan_id: "creator_beta" },
+        items: { data: [{ price: "price_test_pro", current_period_end: periodEnd }] },
+      },
+    });
+    const proration = () => makeStripeEvent("invoice.paid", {
+      id: `evt_pr_${Math.random().toString(16).slice(2)}`,
+      object: {
+        id: "in_proration",
+        billing_reason: "subscription_update",
+        parent: { subscription_details: { subscription: "sub_race" } },
+        lines: { data: [{ price: "price_test_pro", period: { end: periodEnd } }] },
+      },
+    });
+
+    mockConstructEvent.mockReturnValueOnce(proration());
+    const first = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(first.status).toBe(200);
+    mockConstructEvent.mockReturnValueOnce(updated());
+    const second = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(second.status).toBe(200);
+
+    mockConstructEvent.mockReturnValueOnce(updated()).mockReturnValueOnce(proration());
+    const [left, right] = await Promise.all([
+      webhookPOST(makeWebhookRequest("body", "sig")),
+      webhookPOST(makeWebhookRequest("body", "sig")),
+    ]);
+    expect([left.status, right.status].sort()).toEqual([200, 200]);
+
+    const grants = effectiveGrants(tracked.rpcCalls);
+    expect(grants).toHaveLength(1);
+    expect(grants[0].params.p_amount).toBe(10500);
+    expect(grants[0].params.p_idempotency_key).toBe(
+      "plan_upgrade_sub_race_1702678400_pro_builder_beta",
+    );
+    expect(tracked.upserts.some((row) => row.row.plan === "pro_builder_beta")).toBe(true);
+  });
+
+  it("a renewal on a new period and a late upgrade grant the new plan once", async () => {
+    process.env.STRIPE_PRICE_CREATOR_BETA = "price_test_creator";
+    process.env.STRIPE_PRICE_PRO_BUILDER_BETA = "price_test_pro";
+    const oldPeriod = new Date(1700000000 * 1000).toISOString();
+    const tracked = buildTrackingSupabase(false, { currentPeriodEnd: oldPeriod });
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(tracked.sb as any);
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const periodEnd = 1702678400;
+    const cycle = (id: string) => makeStripeEvent("invoice.paid", {
+      id,
+      object: {
+        id: "in_renewal",
+        billing_reason: "subscription_cycle",
+        parent: { subscription_details: { subscription: "sub_renew" } },
+        lines: { data: [{ price: "price_test_pro", period: { end: periodEnd } }] },
+      },
+    });
+    const rolled = (id: string) => makeStripeEvent("customer.subscription.updated", {
+      id,
+      object: {
+        id: "sub_renew",
+        status: "active",
+        customer: "cus_renew",
+        metadata: { clerk_id: "user_123", plan_id: "creator_beta" },
+        items: { data: [{ price: "price_test_pro", current_period_end: periodEnd }] },
+      },
+    });
+
+    mockConstructEvent.mockReturnValueOnce(cycle("evt_cycle_early"));
+    const early = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(early.status).toBe(500);
+    expect(effectiveGrants(tracked.rpcCalls)).toHaveLength(0);
+
+    mockConstructEvent.mockReturnValueOnce(rolled("evt_roll"));
+    const changed = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(changed.status).toBe(200);
+    expect(tracked.upserts.some((row) => row.row.plan === "pro_builder_beta")).toBe(true);
+    expect(effectiveGrants(tracked.rpcCalls)).toHaveLength(0);
+
+    mockConstructEvent.mockReturnValueOnce(cycle("evt_cycle_retry"));
+    const renewed = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(renewed.status).toBe(200);
+    const grants = effectiveGrants(tracked.rpcCalls);
+    expect(grants).toHaveLength(1);
+    expect(grants[0].params.p_amount).toBe(18000);
+    expect(grants[0].params.p_idempotency_key).toBe("invoice_grant_in_renewal");
+
+    mockConstructEvent.mockReturnValueOnce(rolled("evt_roll_late")).mockReturnValueOnce(cycle("evt_cycle_late"));
+    const [lateUpdate, lateInvoice] = await Promise.all([
+      webhookPOST(makeWebhookRequest("body", "sig")),
+      webhookPOST(makeWebhookRequest("body", "sig")),
+    ]);
+    expect([lateUpdate.status, lateInvoice.status].every((status) => status === 200 || status === 500)).toBe(true);
+    expect(effectiveGrants(tracked.rpcCalls)).toHaveLength(1);
+    expect(effectiveGrants(tracked.rpcCalls)[0].params.p_amount).toBe(18000);
+  });
+
+  it("a delayed subscription.updated does not rewind the plan or grant", async () => {
+    process.env.STRIPE_PRICE_CREATOR_BETA = "price_test_creator";
+    const tracked = buildTrackingSupabase(false, {
+      subscriptionPlan: "pro_builder_beta",
+      updatedAt: "2026-06-01T00:00:00.000Z",
+      currentPeriodEnd: new Date(1702678400 * 1000).toISOString(),
+    });
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(tracked.sb as any);
+    mockConstructEvent.mockReturnValue(makeStripeEvent("customer.subscription.updated", {
+      id: "evt_delayed_update",
+      created: 1700000000,
+      object: {
+        id: "sub_delayed",
+        status: "active",
+        customer: "cus_delayed",
+        metadata: { clerk_id: "user_123", plan_id: "creator_beta" },
+        items: { data: [{ price: "price_test_creator", current_period_end: 1702678400 }] },
+      },
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(200);
+    expect(tracked.upserts.filter((row) => row.table === "subscriptions")).toHaveLength(0);
+    expect(effectiveGrants(tracked.rpcCalls)).toHaveLength(0);
+  });
+
+  it("the same refund id debits once across a second event and a parallel delivery", async () => {
+    const tracked = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(tracked.sb as any);
+    mockSucceededRefunds([{ id: "re_once", amount: 1000, created: 1700000001 }]);
+    const charge = {
+      id: "ch_once",
+      amount: 1000,
+      amount_refunded: 1000,
+      currency: "usd",
+      payment_intent: "pi_once",
+      metadata: { product_type: "credit_pack", clerk_id: "clerk_123", coin_amount: "4000" },
+    };
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    mockConstructEvent.mockReturnValue(makeStripeEvent("charge.refunded", {
+      id: "evt_refund_first",
+      object: charge,
+    }));
+    const first = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(first.status).toBe(200);
+    mockConstructEvent.mockReturnValue(makeStripeEvent("charge.refunded", {
+      id: "evt_refund_second",
+      object: charge,
+    }));
+    const second = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(second.status).toBe(200);
+    expect(tracked.debitedKeys.size).toBe(1);
+    expect(tracked.debitedKeys.has("refund_re_once")).toBe(true);
+
+    const parallel = buildTrackingSupabase();
+    vi.mocked(getAdminSupabase).mockReturnValue(parallel.sb as any);
+    mockConstructEvent
+      .mockReturnValueOnce(makeStripeEvent("charge.refunded", { id: "evt_refund_p1", object: charge }))
+      .mockReturnValueOnce(makeStripeEvent("charge.refunded", { id: "evt_refund_p2", object: charge }));
+    const [one, two] = await Promise.all([
+      webhookPOST(makeWebhookRequest("body", "sig")),
+      webhookPOST(makeWebhookRequest("body", "sig")),
+    ]);
+    expect(one.status).toBe(200);
+    expect(two.status).toBe(200);
+    expect(parallel.debitedKeys.size).toBe(1);
+    expect([...parallel.debitedKeys]).toEqual(["refund_re_once"]);
   });
 
   it("customer.subscription.created does not grant an upgrade delta", async () => {
@@ -1617,6 +1854,7 @@ describe("Webhook event processing — state mutations", () => {
       const chainObj: any = {
         select: () => chainObj,
         eq: () => chainObj,
+        limit: () => chainObj,
         maybeSingle: async () => ({ data: null, error: null }),
         single: async () => {
           if (table === "subscriptions") {
@@ -1678,6 +1916,7 @@ describe("Webhook event processing — state mutations", () => {
       const chainObj: any = {
         select: () => chainObj,
         eq: () => chainObj,
+        limit: () => chainObj,
         maybeSingle: async () => ({ data: null, error: null }),
         single: async () => {
           if (table === "subscriptions") {
@@ -1726,6 +1965,7 @@ describe("Webhook event processing — state mutations", () => {
       const chainObj: any = {
         select: () => chainObj,
         eq: () => chainObj,
+        limit: () => chainObj,
         maybeSingle: async () => ({ data: null, error: null }),
         single: async () => {
           if (table === "subscriptions") {
@@ -1997,6 +2237,8 @@ describe("invoice.paid race condition — subscription row not yet written", () 
       const chainObj: any = {
         select: vi.fn(() => chainObj),
         eq: vi.fn(() => chainObj),
+        limit: vi.fn(() => chainObj),
+        maybeSingle: vi.fn(() => chainObj.single()),
         single: vi.fn(async () => {
           if (table === "subscriptions") {
             subLookups++;
@@ -2140,6 +2382,8 @@ describe("invoice.paid race condition — subscription row not yet written", () 
       const chainObj: any = {
         select: () => chainObj,
         eq: () => chainObj,
+        limit: () => chainObj,
+        maybeSingle: () => chainObj.single(),
         single: async () => {
           if (table === "users") return { data: { id: "user_internal_123" }, error: null };
           return { data: null, error: null };
@@ -2208,6 +2452,8 @@ describe("invoice.paid race condition — subscription row not yet written", () 
       const chainObj: any = {
         select: () => chainObj,
         eq: () => chainObj,
+        limit: () => chainObj,
+        maybeSingle: () => chainObj.single(),
         single: async () => {
           if (table === "subscriptions") {
             return { data: { user_id: "user_internal_123", plan: "creator_beta" }, error: null };
@@ -2264,6 +2510,8 @@ describe("invoice.paid race condition — subscription row not yet written", () 
       const chainObj: any = {
         select: () => chainObj,
         eq: () => chainObj,
+        limit: () => chainObj,
+        maybeSingle: () => chainObj.single(),
         single: async () => {
           if (table === "subscriptions") {
             return { data: { user_id: "user_internal_123", plan: "pro_builder_beta" }, error: null };
@@ -2301,6 +2549,8 @@ describe("invoice.paid race condition — subscription row not yet written", () 
       const chainObj: any = {
         select: () => chainObj,
         eq: () => chainObj,
+        limit: () => chainObj,
+        maybeSingle: () => chainObj.single(),
         single: async () => {
           if (table === "subscriptions") {
             return { data: { user_id: "user_internal_123", plan: "" }, error: null };

@@ -78,6 +78,8 @@ function fakeDb(opts: { subRowAfter?: number; grantError?: boolean; plan?: strin
       };
       q.select = () => q;
       q.eq = (k: string, v: any) => { q._f[k] = v; return q; };
+      q.limit = () => q;
+      q.like = () => q;
       q.update = (patch: any) => { q._op = "update"; q._patch = patch; return q; };
       q.delete = () => { q._op = "delete"; return q; };
       q.upsert = async (row: any, options?: { onConflict?: string }) => {
