@@ -85,6 +85,7 @@ function fakeDb(opts: { subRowAfter?: number; grantError?: boolean; plan?: strin
         return { error: null };
       };
       q.insert = async (row: any) => { q._op = "insert"; q._row = row; return exec(); };
+      q.maybeSingle = () => q.single();
       q.single = async () => {
         if (t === "stripe_events") {
           const row = db.events.get(q._f.stripe_event_id);

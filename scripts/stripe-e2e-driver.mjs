@@ -217,6 +217,54 @@ async function subscribe() {
   }
 }
 
+async function changePlan() {
+  const id = arg("--subscription");
+  const price = arg("--price");
+  if (!id || !price) die("change-plan requires --subscription --price");
+  const current = await stripe.subscriptions.retrieve(id);
+  if (current.livemode) die("refusing a live-mode subscription");
+  const itemId = current.items?.data?.[0]?.id;
+  if (!itemId) die(`subscription ${id} has no items`);
+  const updated = await stripe.subscriptions.update(id, {
+    items: [{ id: itemId, price }],
+    proration_behavior: "create_prorations",
+  });
+  if (updated.livemode) die("refusing a live-mode subscription");
+
+  const updatedEvent = await findEvent(
+    "customer.subscription.updated",
+    (event) => {
+      const object = event.data?.object;
+      if (!object || object.id !== id) return false;
+      const item = object.items?.data?.[0];
+      const itemPrice = item?.price;
+      const priceId = typeof itemPrice === "string" ? itemPrice : itemPrice?.id;
+      const basilPrice = item?.pricing?.price_details?.price;
+      const basilId = typeof basilPrice === "string" ? basilPrice : basilPrice?.id;
+      return priceId === price || basilId === price;
+    },
+    45000,
+  );
+
+  emit("SUBSCRIPTION", id);
+  emit("UPDATED_EVENT", updatedEvent?.id || "");
+
+  const invoices = await stripe.invoices.list({ subscription: id, limit: 10 });
+  const proration = invoices.data.find(
+    (invoice) => invoice.billing_reason === "subscription_update" && !invoice.livemode,
+  );
+  if (proration?.livemode) die("refusing a live-mode invoice");
+  if (proration) {
+    emit("INVOICE", proration.id);
+    const paid = await findEvent(
+      "invoice.paid",
+      (event) => event.data?.object?.id === proration.id,
+      30000,
+    );
+    emit("INVOICE_PAID_EVENT", paid?.id || "");
+  }
+}
+
 async function cancel() {
   const id = arg("--subscription");
   if (!id) die("cancel requires --subscription");
@@ -463,6 +511,7 @@ const command = process.argv[2] || "";
 const commands = {
   "ensure-prices": ensurePrices,
   subscribe,
+  "change-plan": changePlan,
   cancel,
   post,
   "create-pack-charge": createPackCharge,
@@ -470,7 +519,7 @@ const commands = {
 };
 
 if (!commands[command]) {
-  die("usage: ensure-prices | subscribe | cancel | post | create-pack-charge | refund-part");
+  die("usage: ensure-prices | subscribe | change-plan | cancel | post | create-pack-charge | refund-part");
 }
 
 commands[command]().catch((err) => {

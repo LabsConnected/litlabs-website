@@ -99,6 +99,8 @@ function planIdFromPrice(priceId: string | null): PlanId | null {
 /**
  * Never guess a plan. Metadata wins when it names a real plan; otherwise
  * the Stripe price must match STRIPE_PRICE_*. Disagreeing sources fail.
+ * Subscription updates do not use this directly: the price id wins there,
+ * because checkout metadata stays on the original plan after a price change.
  */
 function resolveBillablePlan(
   metadataPlan: unknown,
@@ -119,6 +121,28 @@ function resolveBillablePlan(
     );
   }
   return plan;
+}
+
+/**
+ * The subscription item price is the plan. Metadata is only a fallback
+ * when the price is not in the env map, so a Creator→Pro price change
+ * does not 500 on stale `plan_id` metadata.
+ */
+function resolveSubscriptionPlan(
+  metadataPlan: unknown,
+  priceId: string | null,
+  context: string,
+): PlanId {
+  const fromPrice = planIdFromPrice(priceId);
+  if (fromPrice) return fromPrice;
+  return resolveBillablePlan(metadataPlan, null, context);
+}
+
+function subscriptionCreditAllowance(plan: string | null | undefined): number {
+  if (!plan || !(plan in PLANS)) return 0;
+  const def = PLANS[plan as PlanId];
+  if (def.billingType !== "subscription" || def.monthlyCredits <= 0) return 0;
+  return def.monthlyCredits;
 }
 
 function requireSubscriptionGrantPlan(
@@ -833,11 +857,44 @@ export async function POST(req: NextRequest) {
             `[stripe] ${event.type} ${sub.id}: cannot resolve the customer to a user`,
           );
         }
-        const planId = resolveBillablePlan(
+        const { data: existingSub } = await sb
+          .from("subscriptions")
+          .select("plan")
+          .eq("user_id", subUserId)
+          .maybeSingle();
+        const planId = resolveSubscriptionPlan(
           subPlanId,
           priceIdFromSubscription(sub),
           `${event.type} ${sub.id}`,
         );
+        // Grant the upgrade difference before writing the new plan. A retry
+        // after a failed upsert still sees the old plan; the idempotency key
+        // makes a second grant a no-op. Created events do not grant — the
+        // first invoice.paid grants the full period. Downgrades grant nothing
+        // until the next renewal.
+        if (event.type === "customer.subscription.updated") {
+          const previous = subscriptionCreditAllowance(existingSub?.plan);
+          const next = subscriptionCreditAllowance(planId);
+          if (previous > 0 && next > previous) {
+            const delta = next - previous;
+            const periodEnd = sub.items?.data?.[0]?.current_period_end ?? "na";
+            const { error: upgradeError } = await sb.rpc("grant_credits", {
+              p_user_id: subUserId,
+              p_amount: delta,
+              p_category: "subscription_grant",
+              p_balance_bucket: "monthly",
+              p_description: `Plan upgrade to ${planId} — ${delta} LiTTBits`,
+              p_idempotency_key: `plan_upgrade_${sub.id}_${periodEnd}_${planId}`,
+              p_reference_type: "subscription",
+              p_reference_id: sub.id,
+            });
+            if (upgradeError) {
+              throw new Error(
+                `[stripe] ${event.type} ${sub.id}: upgrade grant failed: ${upgradeError.message}`,
+              );
+            }
+          }
+        }
         const { error: subUpsertError } = await sb.from("subscriptions").upsert(
           {
             user_id: subUserId,
@@ -970,7 +1027,7 @@ export async function POST(req: NextRequest) {
                 .eq("clerk_id", clerkId)
                 .single();
               if (u) {
-                const planId = resolveBillablePlan(
+                const planId = resolveSubscriptionPlan(
                   fullSub.metadata?.plan_id,
                   priceIdFromSubscription(fullSub),
                   `invoice.paid ${event.id} fallback`,
@@ -1082,8 +1139,14 @@ export async function POST(req: NextRequest) {
             `[stripe] invoice.paid ${event.id}: leaving status ${invMatch.status ?? "unknown"} (live ${liveStatus || "unknown"})`,
           );
         }
-        // Invoice payment is the only source of subscription grants. This
-        // prevents the first billing period from being granted twice.
+        // A proration invoice (plan change) must not grant the full monthly
+        // amount. The upgrade delta is granted once on subscription.updated;
+        // the next renewal (subscription_cycle) grants the plan stored then.
+        if (inv.billing_reason === "subscription_update") {
+          break;
+        }
+        // Invoice payment is the only source of full subscription grants.
+        // This prevents the first billing period from being granted twice.
         // If the grant throws, the error propagates → HTTP 500 → Stripe
         // retries. The per-invoice idempotency key makes retries safe.
         const planId = requireSubscriptionGrantPlan(

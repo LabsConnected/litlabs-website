@@ -3,7 +3,9 @@
 # Scenarios 1-8 are the original billing flows. Scenario 9 covers partial
 # refunds (one idempotency key per refund id, plus a replay). Scenario 10
 # resends an older invoice.paid after cancellation and checks the status
-# stays canceled. Scenario 13 posts checkout with no Clerk session: the
+# stays canceled. Scenarios 11 and 12 change the Creator subscription's
+# price (metadata left stale) and check the upgrade delta and downgrade.
+# Scenario 13 posts checkout with no Clerk session: the
 # route must refuse (401). The 409 already-subscribed contract is the
 # checkout unit test — this harness has no authenticated browser session.
 # A missing admin database client cannot be exercised here
@@ -268,6 +270,7 @@ clear_kv() {
   INVOICE_FAILED_EVENT=""
   SUBSCRIPTION_CREATED_EVENT=""
   DELETED_EVENT=""
+  UPDATED_EVENT=""
   HTTP_STATUS=""
   EVENT_ID=""
   STATUS=""
@@ -297,6 +300,7 @@ run_driver() {
       INVOICE_FAILED_EVENT) INVOICE_FAILED_EVENT="$val" ;;
       SUBSCRIPTION_CREATED_EVENT) SUBSCRIPTION_CREATED_EVENT="$val" ;;
       DELETED_EVENT) DELETED_EVENT="$val" ;;
+      UPDATED_EVENT) UPDATED_EVENT="$val" ;;
       HTTP_STATUS) HTTP_STATUS="$val" ;;
       EVENT_ID) EVENT_ID="$val" ;;
       CREATOR_PRICE) CREATOR_PRICE="$val" ;;
@@ -905,6 +909,80 @@ SQL
   fi
 }
 
+scenario_plan_upgrade() {
+  say "scenario 11: Creator to Pro grants 10500 once and replay is a no-op"
+  if [[ -z "${CREATOR_SUB:-}" ]]; then
+    record "11" "FAIL" "n/a" "creator subscription is missing"
+    return 0
+  fi
+  local before
+  before="$(ledger_sum "$CREATOR_CLERK")"
+  if ! run_driver change-plan --subscription "$CREATOR_SUB" --price "$PRO_PRICE"; then
+    record "11" "FAIL" "driver" "price change failed"
+    return 0
+  fi
+  local updated_http="n/a" paid_http="n/a" baseline
+  if [[ -n "$UPDATED_EVENT" ]]; then
+    updated_http="$(wait_new_http "$UPDATED_EVENT" 0 90)"
+    print_listen_lines "$UPDATED_EVENT"
+    app_notes "$UPDATED_EVENT"
+  fi
+  if [[ -n "$INVOICE_PAID_EVENT" ]]; then
+    paid_http="$(wait_new_http "$INVOICE_PAID_EVENT" 0 90)"
+    print_listen_lines "$INVOICE_PAID_EVENT"
+  fi
+  assert_safe_id "$CREATOR_SUB"
+  local plan sum upgrade_sum upgrade_rows replay_http after_sum
+  plan="$(sub_field "$CREATOR_CLERK" plan)"
+  sum="$(ledger_sum "$CREATOR_CLERK")"
+  upgrade_sum="$(sql_value "SELECT COALESCE(SUM(cl.amount),0) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${CREATOR_CLERK}' AND cl.idempotency_key LIKE 'plan_upgrade_${CREATOR_SUB}_%';")"
+  upgrade_rows="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${CREATOR_CLERK}' AND cl.idempotency_key LIKE 'plan_upgrade_${CREATOR_SUB}_%';")"
+  replay_http="n/a"
+  if [[ -n "$UPDATED_EVENT" ]]; then
+    baseline="$(hit_count "$UPDATED_EVENT")"
+    resend_event "$UPDATED_EVENT" || true
+    replay_http="$(wait_new_http "$UPDATED_EVENT" "$baseline" 60)"
+  fi
+  after_sum="$(ledger_sum "$CREATOR_CLERK")"
+  local upgrade_rows_after
+  upgrade_rows_after="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${CREATOR_CLERK}' AND cl.idempotency_key LIKE 'plan_upgrade_${CREATOR_SUB}_%';")"
+  if [[ "$updated_http" == "200" && "$replay_http" == "200" && "$plan" == "pro_builder_beta" && "$before" == "7500" && "$sum" == "18000" && "$after_sum" == "18000" && "$upgrade_sum" == "10500" && "$upgrade_rows" == "1" && "$upgrade_rows_after" == "1" ]]; then
+    record "11" "PASS" "updated=${updated_http} proration=${paid_http} replay=${replay_http}" "plan=${plan} upgrade=${upgrade_sum}"
+  else
+    record "11" "FAIL" "updated=${updated_http} proration=${paid_http} replay=${replay_http}" "plan=${plan} before=${before} sum=${sum} after=${after_sum} upgrade_sum=${upgrade_sum} rows=${upgrade_rows}/${upgrade_rows_after}"
+  fi
+}
+
+scenario_plan_downgrade() {
+  say "scenario 12: Pro to Creator grants nothing extra"
+  if [[ -z "${CREATOR_SUB:-}" ]]; then
+    record "12" "FAIL" "n/a" "creator subscription is missing"
+    return 0
+  fi
+  local before
+  before="$(ledger_sum "$CREATOR_CLERK")"
+  if ! run_driver change-plan --subscription "$CREATOR_SUB" --price "$CREATOR_PRICE"; then
+    record "12" "FAIL" "driver" "price change failed"
+    return 0
+  fi
+  local updated_http="n/a"
+  if [[ -n "$UPDATED_EVENT" ]]; then
+    updated_http="$(wait_new_http "$UPDATED_EVENT" 0 90)"
+    print_listen_lines "$UPDATED_EVENT"
+  fi
+  if [[ -n "$INVOICE_PAID_EVENT" ]]; then
+    wait_new_http "$INVOICE_PAID_EVENT" 0 90 >/dev/null || true
+  fi
+  local plan sum
+  plan="$(sub_field "$CREATOR_CLERK" plan)"
+  sum="$(ledger_sum "$CREATOR_CLERK")"
+  if [[ "$updated_http" == "200" && "$plan" == "creator_beta" && "$before" == "$sum" && "$sum" == "18000" ]]; then
+    record "12" "PASS" "$updated_http" "plan=${plan} ledger=${sum}"
+  else
+    record "12" "FAIL" "$updated_http" "plan=${plan} before=${before} sum=${sum}"
+  fi
+}
+
 scenario_duplicate_checkout() {
   say "scenario 13: duplicate subscription checkout is blocked"
   local body="$WORKDIR/checkout-13.json"
@@ -1064,6 +1142,8 @@ main() {
   scenario_partial_refunds
   scenario_late_invoice
   scenario_failed_grants
+  scenario_plan_upgrade
+  scenario_plan_downgrade
   scenario_duplicate_checkout
 
   print_summary
