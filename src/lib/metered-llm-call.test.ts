@@ -34,7 +34,7 @@ vi.mock("@/lib/wallet-ledger", () => ({
   getCreditBalances: getCreditBalancesMock,
 }));
 
-import { meteredLlmCall } from "./metered-llm-call";
+import { estimateLlmCallCredits, meteredLlmCall } from "./metered-llm-call";
 
 const CLERK_ID = "clerk_test_user_123";
 const CALL_ID = "call-test-uuid-1";
@@ -76,6 +76,22 @@ describe("meteredLlmCall — bypass prevention", () => {
     getCreditBalancesMock.mockResolvedValue({ total: 0, monthly: 0, purchased: 0, betaPromotional: 0, lastDailyClaim: null });
 
     const res = await call();
+
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error("unreachable");
+    expect(res.status).toBe(402);
+    expect(res.code).toBe("insufficient_credits");
+    expect(generateTextMock).not.toHaveBeenCalled();
+    expect(chargeLlmUsageMock).not.toHaveBeenCalled();
+  });
+
+  it("balance below estimated cost: provider NEVER called, returns 402", async () => {
+    getCreditBalancesMock.mockResolvedValue({ total: 5, monthly: 5, purchased: 0, betaPromotional: 0, lastDailyClaim: null });
+    const prompt = "x".repeat(4000);
+    const estimate = estimateLlmCallCredits({ prompt, maxTokens: 2_000_000 });
+    expect(estimate).toBeGreaterThan(5);
+
+    const res = await call({ prompt, llmOptions: { task: "chat", maxTokens: 2_000_000 } });
 
     expect(res.ok).toBe(false);
     if (res.ok) throw new Error("unreachable");

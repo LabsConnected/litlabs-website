@@ -29,6 +29,7 @@ import {
   type LlmBillingResult,
 } from "@/lib/llm-billing";
 import { getCreditBalances } from "@/lib/wallet-ledger";
+import { calculateLlmCost } from "@/lib/llm-cost-engine";
 import type { SimulatedPlan } from "@/lib/owner";
 
 export interface MeteredLlmCallInput {
@@ -67,14 +68,43 @@ export type SpendAuthorization =
   | { ok: false; status: 402 | 403; error: string; code: "spend_ceiling_exceeded" | "insufficient_credits" };
 
 /**
+ * Conservative credit estimate for a call that has not run yet.
+ * Uses the generic catalog fallback (unknown provider/model: $0.50 / $1.50
+ * per 1M tokens, 50% markup, 1000 credits per $1) so the gate never
+ * underprices whichever model the router later picks.
+ * Prompt tokens are ceil(chars/4); completion tokens are the requested max.
+ */
+export function estimateLlmCallCredits(input: {
+  prompt: string;
+  systemPrompt?: string;
+  maxTokens?: number;
+}): number {
+  const text = `${input.systemPrompt ?? ""}${input.prompt}`;
+  const promptTokens = Math.max(1, Math.ceil(text.length / 4));
+  const completionTokens = Math.max(1, input.maxTokens ?? 1024);
+  const cost = calculateLlmCost({
+    provider: "estimate",
+    model: "preflight",
+    promptTokens,
+    completionTokens,
+    isByok: false,
+  });
+  return Math.max(1, cost.retailLiTTBits);
+}
+
+/**
  * Pre-flight spend authorization: owner exemption / spend ceiling + balance
  * gate, run BEFORE any provider execution. Exported so routes that build
  * their own provider calls (via shared wrappers) can enforce the same gate
  * without duplicating the logic.
+ *
+ * Non-exempt callers must hold at least `estimatedCost` credits (default 1,
+ * which preserves the historical "balance must be positive" check).
  */
 export async function assertSpendAuthorized(
   clerkId: string,
   simulation?: SimulatedPlan | null,
+  estimatedCost: number = 1,
 ): Promise<SpendAuthorization> {
   const preflight = await preflightBillingAuth(clerkId, simulation);
   if (!preflight.allowed) {
@@ -100,7 +130,8 @@ export async function assertSpendAuthorized(
         code: "insufficient_credits",
       };
     }
-    if (total <= 0) {
+    const required = Math.max(1, Math.ceil(estimatedCost));
+    if (total < required) {
       return {
         ok: false,
         status: 402,
@@ -117,7 +148,8 @@ export async function assertSpendAuthorized(
  *
  * Guarantees:
  * - No provider call happens unless the caller is authorized to spend
- *   (pre-flight auth) AND has a positive balance (non-exempt users).
+ *   (pre-flight auth) AND holds at least the estimated credit cost
+ *   (non-exempt users).
  * - Every provider attempt is metered (usage_events + cost_events).
  * - Exactly one wallet debit per logical action (idempotent; retries reuse
  *   the billable usage_event via meteringBillableKey).
@@ -125,8 +157,17 @@ export async function assertSpendAuthorized(
 export async function meteredLlmCall(
   input: MeteredLlmCallInput,
 ): Promise<MeteredLlmCallResult> {
-  // 1+2. Pre-flight billing authorization + balance gate, BEFORE provider spend.
-  const authz = await assertSpendAuthorized(input.clerkId, input.simulation);
+  // 1+2. Pre-flight billing authorization + estimated-cost gate, BEFORE provider spend.
+  const estimatedCost = estimateLlmCallCredits({
+    prompt: input.prompt,
+    systemPrompt: input.systemPrompt,
+    maxTokens: input.llmOptions?.maxTokens,
+  });
+  const authz = await assertSpendAuthorized(
+    input.clerkId,
+    input.simulation,
+    estimatedCost,
+  );
   if (!authz.ok) {
     return authz;
   }
