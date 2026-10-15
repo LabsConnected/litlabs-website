@@ -2,9 +2,15 @@ name: Companion
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - cursor/billing-paid-beta-remediation
+      - cursor/stripe-658-hardening-c039
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - cursor/stripe-658-hardening-c039
+      - fix/stripe-webhook-grant-race
   workflow_dispatch:
 
 concurrency:
