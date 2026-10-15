@@ -89,7 +89,7 @@ export async function getTrackingState(clerkId: string): Promise<GhlTrackingStat
   if (state === "processing" && data.ghl_tracking_started_at) {
     const startedAt = new Date(data.ghl_tracking_started_at as string).getTime();
     if (Date.now() - startedAt > STALE_PROCESSING_MS) {
-      console.info(`[ghl] stale processing detected for clerkId=${clerkId}, resetting to untracked`);
+      console.info("[ghl] stale processing detected; resetting to untracked");
       await resetStaleProcessing(clerkId);
       return "untracked";
     }
@@ -144,7 +144,7 @@ export async function claimTracking(clerkId: string): Promise<boolean> {
     .select("id");
 
   if (error) {
-    console.warn(`[ghl] claimTracking error for clerkId=${clerkId}: ${error.message}`);
+    console.warn("[ghl] claimTracking error; state transition failed");
     return false;
   }
 
@@ -229,7 +229,7 @@ export async function submitGhlLead(params: {
   lastName?: string;
   amId?: string | null;
 }): Promise<{ success: boolean; error?: string }> {
-  const { clerkId, email, firstName, lastName, amId } = params;
+  const { email, firstName, lastName, amId } = params;
 
   if (!email) {
     return { success: false, error: "Email is required for GHL lead tracking" };
@@ -259,23 +259,23 @@ export async function submitGhlLead(params: {
     });
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => response.statusText);
-      console.warn(
-        `[ghl] trackLead FAILED clerkId=${clerkId} status=${response.status} amId=${amId ?? "none"} error=${errorText.slice(0, 200)}`,
-      );
+      await response.body?.cancel().catch(() => undefined);
+      console.warn("[ghl] trackLead FAILED", {
+        status: response.status,
+        attributed: Boolean(amId),
+      });
       return { success: false, error: `GHL returned ${response.status}` };
     }
 
-    console.info(
-      `[ghl] trackLead OK clerkId=${clerkId} amId=${amId ?? "none"}`,
-    );
+    await response.body?.cancel().catch(() => undefined);
+    console.info("[ghl] trackLead OK", { attributed: Boolean(amId) });
     return { success: true };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Network error";
-    console.warn(
-      `[ghl] trackLead ERROR clerkId=${clerkId} amId=${amId ?? "none"} error=${msg}`,
-    );
-    return { success: false, error: msg };
+    console.warn("[ghl] trackLead ERROR", {
+      errorType: err instanceof Error ? err.name : "unknown",
+      attributed: Boolean(amId),
+    });
+    return { success: false, error: "GHL request failed" };
   }
 }
 
@@ -299,12 +299,12 @@ export async function trackLeadIdempotent(params: {
   const state = await getTrackingState(clerkId);
 
   if (state === "tracked") {
-    console.info(`[ghl] trackLead REPLAY clerkId=${clerkId} — already tracked, skipping`);
+    console.info("[ghl] trackLead REPLAY — already tracked, skipping");
     return { tracked: true, replayed: true, reason: "already_tracked" };
   }
 
   if (state === "processing") {
-    console.info(`[ghl] trackLead IN_PROGRESS clerkId=${clerkId} — another request is tracking, skipping`);
+    console.info("[ghl] trackLead IN_PROGRESS — another request is tracking, skipping");
     return { tracked: false, replayed: true, reason: "in_progress" };
   }
 
@@ -312,7 +312,7 @@ export async function trackLeadIdempotent(params: {
   const claimed = await claimTracking(clerkId);
   if (!claimed) {
     // Someone else claimed it between our check and claim
-    console.info(`[ghl] trackLead LOST_RACE clerkId=${clerkId} — another request claimed it`);
+    console.info("[ghl] trackLead LOST_RACE — another request claimed it");
     return { tracked: false, replayed: true, reason: "lost_race" };
   }
 
