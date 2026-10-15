@@ -1,0 +1,181 @@
+name: Staging Clerk Auth Validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-clerk-auth-validation
+  cancel-in-progress: false
+
+jobs:
+  staging-clerk-auth:
+    name: Staging Clerk Auth Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      STAGING_URL: https://litlabslitt-shell-staging.up.railway.app
+      EXPECTED_CLERK_INSTANCE: ins_3Eel6w2QA2Id5utwcc3vDqCGZiz
+      EXPECTED_CLERK_DOMAIN: eternal-chow-60.clerk.accounts.dev
+      CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+      CLERK_TEST_USER_A_EMAIL: ${{ secrets.CLERK_TEST_USER_A_EMAIL }}
+      CLERK_TEST_USER_B_EMAIL: ${{ secrets.CLERK_TEST_USER_B_EMAIL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI: true
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Validate required configuration and Clerk instance
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            CLERK_PUBLISHABLE_KEY
+            NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+            CLERK_SECRET_KEY
+            CLERK_TEST_USER_A_EMAIL
+            CLERK_TEST_USER_B_EMAIL
+          )
+          for name in "${required[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required secret: $name"
+              exit 1
+            fi
+          done
+
+          if [[ "$CLERK_PUBLISHABLE_KEY" != pk_test_* ]] || [[ "$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" != pk_test_* ]]; then
+            echo "Clerk publishable keys are not Development/test keys"
+            exit 1
+          fi
+          if [ "$CLERK_PUBLISHABLE_KEY" != "$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" ]; then
+            echo "Clerk publishable key aliases do not match"
+            exit 1
+          fi
+          if [ "$CLERK_TEST_USER_A_EMAIL" != "litt.test.one@example.com" ] || [ "$CLERK_TEST_USER_B_EMAIL" != "litt.test.two@example.com" ]; then
+            echo "Configured test identities do not match the approved dedicated identities"
+            exit 1
+          fi
+
+          instance_json="$RUNNER_TEMP/clerk-instance.json"
+          if ! curl --fail --silent --show-error \
+            --header "Authorization: Bearer $CLERK_SECRET_KEY" \
+            --header "Accept: application/json" \
+            "https://api.clerk.com/v1/instance" > "$instance_json"; then
+            echo "Clerk instance verification request failed"
+            exit 1
+          fi
+          if ! jq -e --arg expected "$EXPECTED_CLERK_INSTANCE" \
+            '.id == $expected and .environment_type == "development"' \
+            "$instance_json" > /dev/null; then
+            echo "Clerk secret is not associated with the approved Development instance"
+            exit 1
+          fi
+          rm -f "$instance_json"
+          echo "Clerk configuration validation: PASS"
+
+      - name: Validate staging Clerk domain
+        shell: bash
+        run: |
+          set -euo pipefail
+          domain_check="$RUNNER_TEMP/staging-clerk-domain-check.log"
+          if ! node - <<'NODE' > "$domain_check" 2>&1
+          const { chromium } = require("@playwright/test");
+          const base = process.env.STAGING_URL;
+          const expected = process.env.EXPECTED_CLERK_DOMAIN;
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            try {
+              const page = await browser.newPage();
+              await page.goto(`${base}/sign-in`, { waitUntil: "domcontentloaded", timeout: 60000 });
+              await page.waitForFunction(() => Boolean(globalThis.Clerk?.loaded), undefined, { timeout: 30000 });
+              const frontendApi = await page.evaluate(() => String(globalThis.Clerk?.frontendApi ?? ""));
+              if (!frontendApi || !frontendApi.includes(expected)) process.exit(1);
+            } finally {
+              await browser.close();
+            }
+          })().catch(() => process.exit(1));
+          NODE
+          then
+            echo "Staging Clerk domain does not match the approved Development domain"
+            exit 1
+          fi
+          rm -f "$domain_check"
+          echo "Staging Clerk domain validation: PASS"
+
+      - name: Verify staging health
+        shell: bash
+        run: |
+          set -euo pipefail
+          health="$RUNNER_TEMP/staging-health.json"
+          if ! curl --fail --silent --show-error --max-time 30 "$STAGING_URL/api/health" > "$health"; then
+            echo "Staging health request failed"
+            exit 1
+          fi
+          if ! jq -e '.status == "ok" and .checks.auth.status == "ok"' "$health" > /dev/null; then
+            echo "Staging health/auth check failed"
+            exit 1
+          fi
+          rm -f "$health"
+          echo "Staging health validation: PASS"
+
+      - name: Authenticate User A and User B
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            rm -rf tests/playwright/.clerk playwright-report test-results
+          }
+          trap cleanup EXIT
+          auth_log="$RUNNER_TEMP/staging-auth-setup.log"
+          if ! PLAYWRIGHT_BASE_URL="$STAGING_URL" \
+            pnpm exec playwright test --config playwright.config.ts --project=auth-setup \
+            > "$auth_log" 2>&1; then
+            echo "Authenticated Clerk setup: FAIL"
+            exit 1
+          fi
+          echo "User A authentication: PASS"
+          echo "User B authentication: PASS"
+
+      - name: Run authenticated integration and isolation suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            rm -rf tests/playwright/.clerk playwright-report test-results
+          }
+          trap cleanup EXIT
+          suite_log="$RUNNER_TEMP/staging-authenticated-suites.log"
+          if ! PLAYWRIGHT_BASE_URL="$STAGING_URL" \
+            pnpm exec playwright test \
+              --config playwright.config.ts \
+              --project=authenticated-chromium \
+              --project=buyer-b \
+              tests/playwright/integration.spec.ts \
+              tests/playwright/isolation.spec.ts \
+            > "$suite_log" 2>&1; then
+            echo "Authenticated integration/isolation suites: FAIL"
+            exit 1
+          fi
+          echo "Tenant isolation and authenticated acceptance suites: PASS"
+          echo "Sanitized result: PASS"
