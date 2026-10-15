@@ -3883,5 +3883,47 @@
   "Message": "feat: rebuild Studio with clean 3-tool layout, Canvas with model switcher, Supermemory in agent chat\n\n- Studio simplified: Canvas, Agents, Generate only (removed clutter)\n- Canvas rebuilt: model switcher (Gemini/GPT-4o/Claude/Qwen/Llama), terminal-style input, Supermemory integration\n- Agent chat (/api/gemini/chat) now fetches + saves memories via Supermemory\n- Agents persist context across sessions",
   "Tags": [],
   "Fingerprint": "296087d85864372dbc8d71109921a36df853fff9:C:\\Users\\litbi\\AppData\\Local\\lighthouse.82119278/Default/Preferences:generic-api-key:1"
+ },
+ {
+  "RuleID": "generic-api-key",
+  "Description": "Synthetic test-only TERMINAL_AUTH_SECRET fixture; no credential.",
+  "File": "src/app/api/preview/[projectId]/[[...path]]/route.test.ts",
+  "Commit": "9da01ed0960a6ede35c5375f67e819514351c610",
+  "Fingerprint": "9da01ed0960a6ede35c5375f67e819514351c610:src/app/api/preview/[projectId]/[[...path]]/route.test.ts:generic-api-key:74"
+ },
+ {
+  "RuleID": "generic-api-key",
+  "Description": "Synthetic test-only TERMINAL_AUTH_SECRET fixture; no credential.",
+  "File": "src/app/api/preview/[projectId]/[[...path]]/route.test.ts",
+  "Commit": "9da01ed0960a6ede35c5375f67e819514351c610",
+  "Fingerprint": "9da01ed0960a6ede35c5375f67e819514351c610:src/app/api/preview/[projectId]/[[...path]]/route.test.ts:generic-api-key:239"
+ },
+ {
+  "RuleID": "generic-api-key",
+  "Description": "Synthetic test-only TERMINAL_AUTH_SECRET fixture; no credential.",
+  "File": "src/app/api/preview/[projectId]/[[...path]]/route.test.ts",
+  "Commit": "92ca337c3a8f015e92b33dd51d7d6873fbbdec49",
+  "Fingerprint": "92ca337c3a8f015e92b33dd51d7d6873fbbdec49:src/app/api/preview/[projectId]/[[...path]]/route.test.ts:generic-api-key:74"
+ },
+ {
+  "RuleID": "generic-api-key",
+  "Description": "Synthetic test-only TERMINAL_AUTH_SECRET fixture; no credential.",
+  "File": "src/app/api/preview/[projectId]/[[...path]]/route.test.ts",
+  "Commit": "92ca337c3a8f015e92b33dd51d7d6873fbbdec49",
+  "Fingerprint": "92ca337c3a8f015e92b33dd51d7d6873fbbdec49:src/app/api/preview/[projectId]/[[...path]]/route.test.ts:generic-api-key:239"
+ },
+ {
+  "RuleID": "generic-api-key",
+  "Description": "Synthetic test-only TERMINAL_AUTH_SECRET fixture; no credential.",
+  "File": "src/app/api/preview/[projectId]/[[...path]]/route.test.ts",
+  "Commit": "1c62064e00a6f260d85ba359090362a86ce2045d",
+  "Fingerprint": "1c62064e00a6f260d85ba359090362a86ce2045d:src/app/api/preview/[projectId]/[[...path]]/route.test.ts:generic-api-key:74"
+ },
+ {
+  "RuleID": "generic-api-key",
+  "Description": "Synthetic test-only TERMINAL_AUTH_SECRET fixture; no credential.",
+  "File": "src/app/api/preview/[projectId]/[[...path]]/route.test.ts",
+  "Commit": "1c62064e00a6f260d85ba3590362a86ce2045d",
+  "Fingerprint": "1c62064e00a6f260d85ba3590362a86ce2045d:src/app/api/preview/[projectId]/[[...path]]/route.test.ts:generic-api-key:239"
  }
 ]
