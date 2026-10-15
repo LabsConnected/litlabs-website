@@ -500,13 +500,21 @@ async function post() {
     return;
   }
 
-  if (kind === "duplicate-invoice") {
+  if (kind === "duplicate-invoice" || kind === "duplicate-event") {
     const sourceId = arg("--source-event");
-    if (!sourceId) die("duplicate-invoice requires --source-event");
+    if (!sourceId) die(`${kind} requires --source-event`);
     const source = await stripe.events.retrieve(sourceId);
     if (source.livemode) die("refusing to copy a live-mode event");
-    if (source.type !== "invoice.paid") {
+    const allowed = new Set([
+      "invoice.paid",
+      "customer.subscription.updated",
+      "charge.refunded",
+    ]);
+    if (kind === "duplicate-invoice" && source.type !== "invoice.paid") {
       die(`source event ${sourceId} is ${source.type}, expected invoice.paid`);
+    }
+    if (kind === "duplicate-event" && !allowed.has(source.type)) {
+      die(`source event ${sourceId} is ${source.type}, not a billing event this harness replays`);
     }
     const clone = JSON.parse(JSON.stringify(source));
     clone.id = `evt_e2e_dup_${run}`;

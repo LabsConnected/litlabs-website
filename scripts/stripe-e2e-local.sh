@@ -10,6 +10,11 @@
 # Scenario 13 posts checkout with no Clerk session: the
 # route must refuse (401). The 409 already-subscribed contract is the
 # checkout unit test — this harness has no authenticated browser session.
+# Scenario 15 resends the plan-change invoice and the subscription update
+# out of order, with new event ids, and checks the ledger does not move.
+# Scenario 16 posts the partial-refund event again under a new event id.
+# Concurrent wallet debits need an authenticated session, so they stay in
+# src/lib/concurrent-debit.test.ts.
 # A missing admin database client cannot be exercised here
 # without dropping the local database; that case is a unit test.
 #
@@ -878,6 +883,7 @@ SQL
   debits="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${REFUND_CLERK}' AND cl.direction = 'debit';")"
   key_a="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${REFUND_CLERK}' AND cl.idempotency_key LIKE 'refund_${refund_a}:%';")"
   key_b="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${REFUND_CLERK}' AND cl.idempotency_key LIKE 'refund_${refund_b}:%';")"
+  REFUND_SOURCE_EVENT="$event_b"
   if [[ "$http_a" == "200" && "$http_b" == "200" && "$replay_http" == "200" && "$debits" == "2" && "$key_a" == "1" && "$key_b" == "1" ]]; then
     record "9" "PASS" "a=${http_a} b=${http_b} replay=${replay_http}" "debits=${debits} keys=${refund_a},${refund_b}"
   else
@@ -955,10 +961,68 @@ scenario_plan_upgrade() {
   after_sum="$(ledger_sum "$CREATOR_CLERK")"
   local upgrade_rows_after
   upgrade_rows_after="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${CREATOR_CLERK}' AND cl.idempotency_key LIKE 'plan_upgrade_${CREATOR_SUB}_%';")"
+  UPGRADE_UPDATED_EVENT="${UPDATED_EVENT:-}"
+  UPGRADE_INVOICE_EVENT="${INVOICE_PAID_EVENT:-}"
   if [[ "$updated_http" == "200" && "$replay_http" == "200" && "$plan" == "pro_builder_beta" && "$before" == "7500" && "$sum" == "18000" && "$after_sum" == "18000" && "$upgrade_sum" == "10500" && "$upgrade_rows" == "1" && "$upgrade_rows_after" == "1" ]]; then
     record "11" "PASS" "updated=${updated_http} proration=${paid_http} replay=${replay_http}" "plan=${plan} upgrade=${upgrade_sum}"
   else
     record "11" "FAIL" "updated=${updated_http} proration=${paid_http} replay=${replay_http}" "plan=${plan} before=${before} sum=${sum} after=${after_sum} upgrade_sum=${upgrade_sum} rows=${upgrade_rows}/${upgrade_rows_after}"
+  fi
+}
+
+scenario_plan_change_reorder() {
+  say "scenario 15: delayed upgrade and proration events grant nothing more"
+  if [[ -z "${UPGRADE_UPDATED_EVENT:-}" ]]; then
+    record "15" "FAIL" "n/a" "upgrade event was not captured"
+    return 0
+  fi
+  local before
+  before="$(ledger_sum "$CREATOR_CLERK")"
+  local invoice_http="n/a" updated_http="n/a"
+  if [[ -n "${UPGRADE_INVOICE_EVENT:-}" ]]; then
+    if ! run_driver post --kind duplicate-event --url "$WEBHOOK_URL" \
+      --run "${RUN_ID}_inv" --source-event "$UPGRADE_INVOICE_EVENT"; then
+      record "15" "FAIL" "driver" "could not replay the proration invoice"
+      return 0
+    fi
+    invoice_http="$HTTP_STATUS"
+  fi
+  if ! run_driver post --kind duplicate-event --url "$WEBHOOK_URL" \
+    --run "${RUN_ID}_up" --source-event "$UPGRADE_UPDATED_EVENT"; then
+    record "15" "FAIL" "driver" "could not replay the subscription update"
+    return 0
+  fi
+  updated_http="$HTTP_STATUS"
+  local after rows
+  after="$(ledger_sum "$CREATOR_CLERK")"
+  assert_safe_id "$CREATOR_SUB"
+  rows="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${CREATOR_CLERK}' AND cl.idempotency_key LIKE 'plan_upgrade_${CREATOR_SUB}_%';")"
+  if [[ "$invoice_http" != "500" && "$updated_http" == "200" && "$before" == "18000" && "$after" == "18000" && "$rows" == "1" ]]; then
+    record "15" "PASS" "invoice=${invoice_http} updated=${updated_http}" "ledger=${after} upgrade_rows=${rows}"
+  else
+    record "15" "FAIL" "invoice=${invoice_http} updated=${updated_http}" "before=${before} after=${after} rows=${rows}"
+  fi
+}
+
+scenario_refund_new_event() {
+  say "scenario 16: a new event id for the same refund does not debit again"
+  if [[ -z "${REFUND_SOURCE_EVENT:-}" ]]; then
+    record "16" "FAIL" "n/a" "refund event was not captured"
+    return 0
+  fi
+  local before
+  before="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${REFUND_CLERK}' AND cl.direction = 'debit';")"
+  if ! run_driver post --kind duplicate-event --url "$WEBHOOK_URL" \
+    --run "${RUN_ID}_refund" --source-event "$REFUND_SOURCE_EVENT"; then
+    record "16" "FAIL" "driver" "could not replay the refund under a new event id"
+    return 0
+  fi
+  local after
+  after="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${REFUND_CLERK}' AND cl.direction = 'debit';")"
+  if [[ "$HTTP_STATUS" == "200" && "$before" == "$after" && "$after" == "2" ]]; then
+    record "16" "PASS" "$HTTP_STATUS" "debit_rows=${after}"
+  else
+    record "16" "FAIL" "$HTTP_STATUS" "before=${before} after=${after}"
   fi
 }
 
@@ -1193,9 +1257,11 @@ main() {
   scenario_signatures
   scenario_race
   scenario_partial_refunds
+  scenario_refund_new_event
   scenario_late_invoice
   scenario_failed_grants
   scenario_plan_upgrade
+  scenario_plan_change_reorder
   scenario_plan_downgrade
   scenario_duplicate_checkout
   scenario_cancel_at_period_end
