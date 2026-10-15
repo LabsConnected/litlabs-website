@@ -19,11 +19,6 @@ jobs:
       STAGING_URL: https://litlabslitt-shell-staging.up.railway.app
       EXPECTED_CLERK_INSTANCE: ins_3Eel6w2QA2Id5utwcc3vDqCGZiz
       EXPECTED_CLERK_DOMAIN: eternal-chow-60.clerk.accounts.dev
-      CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
-      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
-      CLERK_TEST_USER_A_EMAIL: ${{ secrets.CLERK_TEST_USER_A_EMAIL }}
-      CLERK_TEST_USER_B_EMAIL: ${{ secrets.CLERK_TEST_USER_B_EMAIL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -48,6 +43,12 @@ jobs:
 
       - name: Validate required configuration and Clerk instance
         shell: bash
+        env:
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          CLERK_TEST_USER_A_EMAIL: ${{ secrets.CLERK_TEST_USER_A_EMAIL }}
+          CLERK_TEST_USER_B_EMAIL: ${{ secrets.CLERK_TEST_USER_B_EMAIL }}
         run: |
           set -euo pipefail
           required=(
@@ -141,6 +142,12 @@ jobs:
 
       - name: Authenticate User A and User B
         shell: bash
+        env:
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          CLERK_TEST_USER_A_EMAIL: ${{ secrets.CLERK_TEST_USER_A_EMAIL }}
+          CLERK_TEST_USER_B_EMAIL: ${{ secrets.CLERK_TEST_USER_B_EMAIL }}
         run: |
           set -euo pipefail
           cleanup() {
@@ -159,6 +166,12 @@ jobs:
 
       - name: Run authenticated integration and isolation suites
         shell: bash
+        env:
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          CLERK_TEST_USER_A_EMAIL: ${{ secrets.CLERK_TEST_USER_A_EMAIL }}
+          CLERK_TEST_USER_B_EMAIL: ${{ secrets.CLERK_TEST_USER_B_EMAIL }}
         run: |
           set -euo pipefail
           cleanup() {
