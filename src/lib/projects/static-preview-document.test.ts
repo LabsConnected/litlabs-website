@@ -39,6 +39,19 @@ describe("authenticated static preview document", () => {
     expect(readStylesheet).not.toHaveBeenCalled();
   });
 
+  it("tokenizes same-workspace HTML navigation while preserving external and fragment links", async () => {
+    const readStylesheet = vi.fn(async () => null);
+    const { html: result } = await prepareStaticPreviewDocument(
+      '<a id="page" href="pages/two.html?tab=1#hero">Page</a><a id="external" href="https://outside.test/page.html">External</a><a id="fragment" href="#section">Section</a>',
+      "index.html",
+      { assetBase: ASSET_BASE, readStylesheet },
+    );
+    expect(result).toContain(`href="${ASSET_BASE}pages/two.html?tab=1#hero"`);
+    expect(result).toContain('href="https://outside.test/page.html"');
+    expect(result).toContain('href="#section"');
+    expect(result).not.toContain(`${ASSET_BASE}outside.test`);
+  });
+
   it("preserves async and integrity attributes untouched (native semantics)", async () => {
     const readStylesheet = vi.fn(async () => null);
     const html = '<html><head><script async defer src="x.js" integrity="sha384-abc" crossorigin="anonymous"></script></head><body></body></html>';

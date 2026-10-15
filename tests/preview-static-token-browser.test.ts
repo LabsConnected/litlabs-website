@@ -166,7 +166,7 @@ it("confines the bearer to the minted asset manifest (the Codex 9da01ed0 P1)", a
     "index.html": '<!doctype html><html><head><script type="module" src="main.js"></script></head><body><h1>Manifest</h1><a id="to-page2" href="page2.html">Page 2</a></body></html>',
     "main.js": 'import "./dep.js"; window.__mainRan = true;',
     "dep.js": 'document.querySelector("h1").dataset.dep = "loaded";',
-    "page2.html": '<!doctype html><html><head><script src="page2.js"></script></head><body><h1>Page 2</h1></body></html>',
+    "page2.html": '<!doctype html><html><head><script defer src="page2.js"></script></head><body><h1>Page 2</h1></body></html>',
     "page2.js": 'document.querySelector("h1").dataset.p2 = "yes";',
     "secret.txt": "WORKSPACE-SECRET-MARKER",
     "QUALITY_LOG.md": "# quality-log-marker",
@@ -219,15 +219,27 @@ it("confines the bearer to the minted asset manifest (the Codex 9da01ed0 P1)", a
   });
   expect(foreign.headers.get("access-control-allow-origin")).toBe("null");
 
-  // NOTE: in-frame navigation to the linked page2 document is covered
-  // deterministically at route level (session mint → token-mode GET of
-  // page2.html and page2.js, in route.test.ts): the fixture harness's
-  // navigation path intermittently trips a Next/vitest AsyncLocalStorage
-  // invariant in this environment (the same failure Codex's independent
-  // harness hit), which would make this suite report infrastructure noise
-  // instead of product signal. The browser-level facts — the closure
-  // executes, the bearer is confined, CORS is narrowed — are proven above.
+  // Same-workspace linked documents must navigate through the same bearer
+  // prefix; otherwise the opaque iframe loses its session and receives 401.
+  await frame.locator("#to-page2").click();
+  expect(await frame.locator("h1").textContent()).toBe("Page 2");
+  expect(await frame.locator("h1").getAttribute("data-p2")).toBe("yes");
+  expect(frame.url()).toContain("/api/preview/owned-project/t/");
+  expect(frame.url()).toContain("/page2.html");
   expect(pageErrors).toEqual([]);
+  await context.close();
+}, 20000);
+
+it("rejects dynamic unauthorized navigation and does not tokenize external links", async () => {
+  files = {
+    "index.html": '<!doctype html><html><body><script>const a = document.createElement("a"); a.id = "secret-link"; a.href = "secret.html"; a.textContent = "Secret"; document.body.append(a);</script><a id="external-link" href="https://evil.example/exfil.html">External</a><h1>Safe</h1></body></html>',
+    "secret.html": "WORKSPACE-SECRET-MARKER",
+  };
+  const { context, frame } = await openPreview();
+  expect(await frame.locator("#external-link").getAttribute("href")).toBe("https://evil.example/exfil.html");
+  await frame.locator("#secret-link").click();
+  expect(await frame.locator("body").textContent()).toContain("Unauthorized");
+  expect(frame.url()).toContain("/api/preview/owned-project/secret.html");
   await context.close();
 }, 20000);
 

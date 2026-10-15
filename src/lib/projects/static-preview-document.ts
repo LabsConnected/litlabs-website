@@ -11,6 +11,18 @@ function assetPath(reference: string, entryPath: string, extension: RegExp): str
   } catch { return null; }
 }
 
+function tokenizedDocumentHref(reference: string, entryPath: string, assetBase: string): string | null {
+  if (reference.startsWith("#")) return null;
+  const path = assetPath(reference, entryPath, /\.html?$/i);
+  if (!path) return null;
+  try {
+    const url = new URL(reference, `https://workspace.invalid/${entryPath}`);
+    return `${assetBase}${path}${url.search}${url.hash}`;
+  } catch {
+    return null;
+  }
+}
+
 /** Script `type` values whose `src` the preview loads as a workspace script. */
 const SCRIPT_TYPES: Array<string | undefined> = [undefined, "", "text/javascript", "application/javascript", "module"];
 
@@ -122,6 +134,14 @@ export async function prepareStaticPreviewDocument(
           // and executes it with exactly the semantics the author declared.
           attr("src")!.value = `${options.assetBase}${path}`;
           scriptAssets.push({ path, module: attr("type")?.value === "module" });
+          changed = true;
+        }
+      } else if (child.tagName === "a" && attr("href")) {
+        const href = tokenizedDocumentHref(attr("href")!.value, entryPath, options.assetBase);
+        if (href) {
+          // Same-workspace navigation must retain the opaque-origin bearer;
+          // external and fragment-only links remain untouched.
+          attr("href")!.value = href;
           changed = true;
         }
       }
