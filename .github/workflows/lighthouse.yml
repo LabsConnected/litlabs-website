@@ -2,7 +2,10 @@ name: Lighthouse CI
 
 on:
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - cursor/stripe-658-hardening-c039
+      - fix/stripe-webhook-grant-race
   workflow_dispatch:
 
 permissions:
