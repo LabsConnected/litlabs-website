@@ -1105,6 +1105,7 @@ scenario_duplicate_checkout() {
   local body="$WORKDIR/checkout-13.json"
   local code
   code="$(curl -s -o "$body" -w '%{http_code}' \
+    -A 'Mozilla/5.0 (stripe-e2e-local)' \
     -X POST "http://127.0.0.1:${PORT}/api/billing/checkout" \
     -H 'content-type: application/json' \
     -d '{"planId":"creator_beta"}' || true)"
