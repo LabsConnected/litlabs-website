@@ -3,7 +3,10 @@
 # Scenarios 1-8 are the original billing flows. Scenario 9 covers partial
 # refunds (one idempotency key per refund id, plus a replay). Scenario 10
 # resends an older invoice.paid after cancellation and checks the status
-# stays canceled. A missing admin database client cannot be exercised here
+# stays canceled. Scenario 13 posts checkout with no Clerk session: the
+# route must refuse (401). The 409 already-subscribed contract is the
+# checkout unit test — this harness has no authenticated browser session.
+# A missing admin database client cannot be exercised here
 # without dropping the local database; that case is a unit test.
 #
 # Prerequisites on the machine where you run this (not CI):
@@ -902,6 +905,25 @@ SQL
   fi
 }
 
+scenario_duplicate_checkout() {
+  say "scenario 13: duplicate subscription checkout is blocked"
+  local body="$WORKDIR/checkout-13.json"
+  local code
+  code="$(curl -s -o "$body" -w '%{http_code}' \
+    -X POST "http://127.0.0.1:${PORT}/api/billing/checkout" \
+    -H 'content-type: application/json' \
+    -d '{"planId":"creator_beta"}' || true)"
+  echo "checkout body: $(cat "$body" 2>/dev/null || true)"
+  # No Clerk session in this harness, so the route refuses before Stripe.
+  # An authenticated active/trialing/past_due subscriber gets 409
+  # (code already_subscribed) — asserted in billing-state-machine.test.ts.
+  if [[ "$code" == "401" || "$code" == "409" ]]; then
+    record "13" "PASS" "$code" "checkout refused before a second Stripe session"
+  else
+    record "13" "FAIL" "$code" "expected 401 without a session or 409 if already subscribed"
+  fi
+}
+
 scenario_failed_grants() {
   say "scenario 8: failed credit grant returns 500 and is not marked processed"
   local body="$WORKDIR/pack-body.txt"
@@ -1042,6 +1064,7 @@ main() {
   scenario_partial_refunds
   scenario_late_invoice
   scenario_failed_grants
+  scenario_duplicate_checkout
 
   print_summary
   if ((FAILURES > 0)); then

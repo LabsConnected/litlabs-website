@@ -77,6 +77,24 @@ function makeNextRequest(body: string, headers: Record<string, string> = {}): an
   } as any;
 }
 
+function mockCheckoutLookup(
+  sub: { status: string; stripe_customer_id: string | null } | null,
+) {
+  const from = vi.fn((table: string) => {
+    const builder = {
+      select: () => builder,
+      eq: () => builder,
+      maybeSingle: async () => {
+        if (table === "users") return { data: { id: "db-user" }, error: null };
+        if (table === "subscriptions") return { data: sub, error: null };
+        return { data: null, error: null };
+      },
+    };
+    return builder;
+  });
+  vi.mocked(getSupabaseAdmin).mockReturnValue({ from } as any);
+}
+
 function makeWebhookRequest(body: string, signature: string | null): any {
   const headers: Record<string, string> = {};
   if (signature) headers["stripe-signature"] = signature;
@@ -330,6 +348,7 @@ describe("POST /api/billing/checkout — checkout session creation", () => {
       return new Response("not found", { status: 404 });
     }) as any;
 
+    mockCheckoutLookup(null);
     const req = makeNextRequest(
       JSON.stringify({ planId: "creator_beta" }),
       { origin: "https://evil.example" },
@@ -343,6 +362,82 @@ describe("POST /api/billing/checkout — checkout session creation", () => {
     const params = new URLSearchParams(stripeBody);
     expect(params.get("success_url")).not.toContain("evil.example");
     expect(params.get("cancel_url")).not.toContain("evil.example");
+    global.fetch = originalFetch;
+  });
+
+  it("returns 409 and does not call Stripe when a blocking subscription exists", async () => {
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "user_123" } as any);
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake_key";
+    process.env.STRIPE_PRICE_CREATOR_BETA = "price_test_creator";
+    for (const status of ["active", "trialing", "past_due"]) {
+      mockCheckoutLookup({ status, stripe_customer_id: "cus_existing" });
+      const originalFetch = global.fetch;
+      const stripeCalls: string[] = [];
+      global.fetch = vi.fn(async (url: string) => {
+        stripeCalls.push(String(url));
+        return new Response("not found", { status: 404 });
+      }) as any;
+      const res = await checkoutPOST(makeNextRequest(JSON.stringify({ planId: "creator_beta" })));
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.code).toBe("already_subscribed");
+      expect(body.portalPath).toBe("/api/billing/portal");
+      expect(stripeCalls.filter((url) => url.includes("api.stripe.com"))).toHaveLength(0);
+      global.fetch = originalFetch;
+    }
+  });
+
+  it("reuses the stored Stripe customer and a deterministic idempotency key", async () => {
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "user_123" } as any);
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake_key";
+    process.env.STRIPE_PRICE_CREATOR_BETA = "price_test_creator";
+    mockCheckoutLookup({ status: "canceled", stripe_customer_id: "cus_stored" });
+    const now = 1_700_000_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now);
+    const bucket = Math.floor(now / 600_000);
+
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: "cs_test_reuse", url: "https://checkout.stripe.com/reuse" }),
+    })) as any;
+
+    try {
+      const first = await checkoutPOST(makeNextRequest(JSON.stringify({ planId: "creator_beta" })));
+      const second = await checkoutPOST(makeNextRequest(JSON.stringify({ planId: "creator_beta" })));
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+
+      const calls = (global.fetch as any).mock.calls;
+      expect(calls).toHaveLength(2);
+      const firstKey = calls[0][1].headers["Idempotency-Key"] as string;
+      const secondKey = calls[1][1].headers["Idempotency-Key"] as string;
+      expect(firstKey).toBe(`billing_user_123_price_test_creator_${bucket}`);
+      expect(secondKey).toBe(firstKey);
+      expect(firstKey).not.toMatch(/_\d{13}$/);
+      const params = new URLSearchParams(calls[0][1].body as string);
+      expect(params.get("customer")).toBe("cus_stored");
+    } finally {
+      nowSpy.mockRestore();
+      global.fetch = originalFetch;
+    }
+  });
+
+  it("returns 503 when the admin database client is missing", async () => {
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "user_123" } as any);
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake_key";
+    process.env.STRIPE_PRICE_CREATOR_BETA = "price_test_creator";
+    vi.mocked(getSupabaseAdmin).mockReturnValue(null);
+    const originalFetch = global.fetch;
+    const stripeCalls: string[] = [];
+    global.fetch = vi.fn(async (url: string) => {
+      stripeCalls.push(String(url));
+      return new Response("not found", { status: 404 });
+    }) as any;
+    const res = await checkoutPOST(makeNextRequest(JSON.stringify({ planId: "creator_beta" })));
+    expect(res.status).toBe(503);
+    expect(stripeCalls).toHaveLength(0);
     global.fetch = originalFetch;
   });
 

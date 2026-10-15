@@ -3,6 +3,13 @@ import { auth } from "@/lib/auth";
 import { PLANS, getStripePriceId, type PlanId } from "@/config/plans";
 import { isFeatureEnabled } from "@/config/feature-flags";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { getSupabaseAdmin } from "@/lib/supabase";
+
+/** Statuses that already entitle the user. A second Checkout would double-bill. */
+const BLOCKING_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "past_due"]);
+
+/** Double-clicks inside this window share one Stripe idempotency key. */
+const CHECKOUT_IDEMPOTENCY_BUCKET_MS = 600_000;
 
 export const runtime = "nodejs";
 
@@ -97,6 +104,45 @@ async function handler(req: NextRequest) {
     }
     const mode = plan.billingType === "one_time" ? "payment" : "subscription";
 
+    let storedCustomerId: string | null = null;
+    if (mode === "subscription") {
+      const admin = getSupabaseAdmin();
+      if (!admin) {
+        return NextResponse.json({ error: "Database not configured" }, { status: 503 });
+      }
+      const { data: user, error: userError } = await admin
+        .from("users")
+        .select("id")
+        .eq("clerk_id", clerkId)
+        .maybeSingle();
+      if (userError) {
+        return NextResponse.json({ error: "Database not configured" }, { status: 503 });
+      }
+      if (user) {
+        const { data: sub, error: subError } = await admin
+          .from("subscriptions")
+          .select("status, stripe_customer_id")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        if (subError) {
+          return NextResponse.json({ error: "Database not configured" }, { status: 503 });
+        }
+        if (sub && BLOCKING_SUBSCRIPTION_STATUSES.has(sub.status)) {
+          return NextResponse.json(
+            {
+              error: "You already have a subscription. Manage it in the billing portal.",
+              code: "already_subscribed",
+              portalPath: "/api/billing/portal",
+            },
+            { status: 409 },
+          );
+        }
+        if (typeof sub?.stripe_customer_id === "string" && sub.stripe_customer_id) {
+          storedCustomerId = sub.stripe_customer_id;
+        }
+      }
+    }
+
     const params = new URLSearchParams();
     params.append("mode", mode);
     params.append("line_items[0][price]", priceId);
@@ -105,6 +151,9 @@ async function handler(req: NextRequest) {
     params.append("cancel_url", `${appUrl}/pricing?canceled=true`);
     params.append("allow_promotion_codes", "true");
     params.append("billing_address_collection", "auto");
+    if (storedCustomerId) {
+      params.append("customer", storedCustomerId);
+    }
     // Automatic tax is disabled by default. Enable only after Stripe Tax
     // is fully configured (registrations, product tax codes, tax behavior).
     // See docs/STRIPE_CATALOG_WIRING.md for the configuration checklist.
@@ -125,9 +174,10 @@ async function handler(req: NextRequest) {
       params.append("payment_intent_data[metadata][product_type]", "plan");
     }
 
-    // Idempotency: use clerkId + planId + timestamp window to prevent
-    // duplicate checkout sessions from rapid double-clicks.
-    const idempotencyKey = `billing_${clerkId}_${plan.id}_${Date.now()}`;
+    // Deterministic for the user, price, and a 10-minute bucket. A raw
+    // millisecond timestamp made every click a new Stripe session.
+    const bucket = Math.floor(Date.now() / CHECKOUT_IDEMPOTENCY_BUCKET_MS);
+    const idempotencyKey = `billing_${clerkId}_${priceId}_${bucket}`;
 
     const stripeResponse = await fetch(
       "https://api.stripe.com/v1/checkout/sessions",
