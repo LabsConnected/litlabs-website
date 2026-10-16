@@ -3,11 +3,37 @@ import { auth } from "@/lib/auth";
 import { GoogleGenAI, Modality } from "@google/genai";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { emitUsageEvent } from "@/lib/metering";
+import { calculateRetailBits } from "@/lib/generation/cost-engine";
+import {
+  assertGenerationWithinPlanCaps,
+  planLimitResponse,
+  releaseMediaCapHold,
+  settleMediaCapHold,
+} from "@/lib/generation/enforce-media-caps";
+import { resolveInternalUserId } from "@/lib/generation/identity";
 
 async function handler(request: NextRequest) {
   const { userId, clerkId } = await auth(request);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  let openHold: string | null = null;
+  const clerk = clerkId ?? userId;
+  async function settleOpen() {
+    const requestId = openHold;
+    if (!requestId) return;
+    openHold = null;
+    const internalUserId = await resolveInternalUserId(clerk).catch(() => null);
+    if (!internalUserId) return;
+    await settleMediaCapHold({ internalUserId, requestId }).catch(() => undefined);
+  }
+  async function releaseOpen() {
+    const requestId = openHold;
+    if (!requestId) return;
+    openHold = null;
+    const internalUserId = await resolveInternalUserId(clerk).catch(() => null);
+    if (!internalUserId) return;
+    await releaseMediaCapHold({ internalUserId, requestId }).catch(() => undefined);
   }
   try {
     const body = await request.json();
@@ -41,9 +67,38 @@ async function handler(request: NextRequest) {
     };
 
     const { width, height } = getDimensions(aspectRatio || "1:1");
+    const batchCount = Math.min(Math.max(Number(batchSize) || 1, 1), 4);
+
+    async function reserve(opts: {
+      requestId: string;
+      provider: string;
+      model: string;
+      providerCostCents: number;
+      units?: number;
+    }) {
+      const denial = await assertGenerationWithinPlanCaps({
+        clerkId: clerk,
+        requestId: opts.requestId,
+        modality: "image",
+        provider: opts.provider,
+        model: opts.model,
+        providerCostCents: opts.providerCostCents,
+        units: opts.units,
+      });
+      if (!denial) openHold = opts.requestId;
+      return denial;
+    }
 
     // Pollinations.ai fallback (always works, no API key needed)
     if (provider === "pollinations" || !provider) {
+      const pollinationsLimit = await reserve({
+        requestId: `studio:${clerk}:pollinations:${crypto.randomUUID()}`,
+        provider: "pollinations",
+        model: "flux",
+        providerCostCents: 0,
+        units: batchCount,
+      });
+      if (pollinationsLimit) return planLimitResponse(pollinationsLimit);
       // Use a stable seed based on prompt hash to prevent infinite reloading
       const promptHash = prompt
         .split("")
@@ -57,6 +112,7 @@ async function handler(request: NextRequest) {
         timestamp: Date.now(),
       }));
 
+      await settleOpen();
       return NextResponse.json({
         images,
         provider: "pollinations",
@@ -83,6 +139,19 @@ async function handler(request: NextRequest) {
         // Migrated from deprecated Imagen 3 to Nano Banana (gemini-2.5-flash-image).
         // Imagen 3 shuts down August 17, 2026.
         const imageModel = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image";
+        const geminiCents = calculateRetailBits({
+          modality: "image",
+          provider: "gemini",
+          model: imageModel,
+        }).providerCostCents;
+        const geminiLimit = await reserve({
+          requestId: meteringRequestId,
+          provider: "gemini",
+          model: imageModel,
+          providerCostCents: geminiCents,
+        });
+        if (geminiLimit) return planLimitResponse(geminiLimit);
+        let geminiDelivered = false;
         const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
         const response = await ai.models.generateContent({
@@ -129,6 +198,8 @@ async function handler(request: NextRequest) {
             startedAt: meteringStartedAt,
             finishedAt: new Date(),
           });
+          geminiDelivered = true;
+          await settleOpen();
           return NextResponse.json({
             images: [
               {
@@ -142,7 +213,11 @@ async function handler(request: NextRequest) {
             cost: 1,
           });
         }
+        if (!geminiDelivered) {
+          await releaseOpen();
+        }
       } catch (geminiErr) {
+        await releaseOpen();
         // Silenced for the caller (falls back to pollinations below), but
         // the failed attempt is still metered for retry-waste analysis.
         void emitUsageEvent({
@@ -164,11 +239,19 @@ async function handler(request: NextRequest) {
     }
 
     // Default fallback to pollinations with stable seed
+    const fallbackLimit = await reserve({
+      requestId: `studio:${clerk}:pollinations-fallback:${meteringRequestId}`,
+      provider: "pollinations",
+      model: "flux",
+      providerCostCents: 0,
+    });
+    if (fallbackLimit) return planLimitResponse(fallbackLimit);
     const promptHash2 = prompt
       .split("")
       .reduce((acc, char) => acc + char.charCodeAt(0), 0);
     const stableSeed = promptHash2 % 1000000;
 
+    await settleOpen();
     return NextResponse.json({
       images: [
         {
@@ -186,6 +269,7 @@ async function handler(request: NextRequest) {
           : undefined,
     });
   } catch {
+    await releaseOpen();
     return NextResponse.json(
       { error: "Failed to generate image" },
       { status: 500 },

@@ -7,6 +7,17 @@ import { refundVideoCharge } from "@/lib/video-refunds";
 import { getGenerationJobByProviderJobId, completeGenerationJob, updateGenerationJobMetadata, failGenerationJob, setGenerationRefundStatus } from "@/lib/generation/jobs";
 import type { RefundStatus } from "@/lib/generation/types";
 import { resolveInternalUserId } from "@/lib/generation/identity";
+import { releaseMediaCapHold, settleMediaCapHold } from "@/lib/generation/enforce-media-caps";
+
+async function releaseJobHold(job: { userId: string; requestId: string } | null | undefined) {
+  if (!job?.userId || !job.requestId) return;
+  await releaseMediaCapHold({ internalUserId: job.userId, requestId: job.requestId }).catch(() => undefined);
+}
+
+async function settleJobHold(job: { userId: string; requestId: string } | null | undefined) {
+  if (!job?.userId || !job.requestId) return;
+  await settleMediaCapHold({ internalUserId: job.userId, requestId: job.requestId }).catch(() => undefined);
+}
 
 export async function POST(req: NextRequest) {
   const { userId } = await auth(req);
@@ -83,8 +94,10 @@ export async function POST(req: NextRequest) {
             // Then mark the job as completed.
             await completeGenerationJob(genJob.id, `generation_job:${genJob.id}`);
             assetId = `generation_job:${genJob.id}`;
+            await settleJobHold(genJob);
           }
         }
+        if (genRow) await settleJobHold(genRow);
 
         return NextResponse.json({
           done: true,
@@ -98,6 +111,7 @@ export async function POST(req: NextRequest) {
       } catch (saveErr) {
         // If R2 save fails, return the temporary Alibaba URL so the user
         // can still view/download the video before it expires.
+        if (genRow) await settleJobHold(genRow);
         return NextResponse.json({
           done: true,
           taskStatus: result.taskStatus,
@@ -158,7 +172,10 @@ export async function POST(req: NextRequest) {
           result.error ?? "Alibaba video task failed",
           refundStatus,
         );
+        await releaseJobHold(genRow);
       }
+    } else if (result.taskStatus === "SUCCEEDED" && genRow) {
+      await settleJobHold(genRow);
     }
 
     return NextResponse.json({

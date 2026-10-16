@@ -5,6 +5,31 @@ import { withRateLimit } from "@/lib/rate-limiter";
 
 export const runtime = "nodejs";
 
+function getAppUrl(): string {
+  const raw =
+    process.env.NEXT_PUBLIC_APP_URL ??
+    process.env.APP_URL ??
+    (process.env.NODE_ENV === "development"
+      ? "http://localhost:3000"
+      : "https://www.litlabs.net");
+
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    throw new Error("Invalid app URL");
+  }
+
+  if (process.env.NODE_ENV === "production" && url.protocol !== "https:") {
+    throw new Error("Production app URL must use HTTPS");
+  }
+
+  url.pathname = "";
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
 async function handler(req: NextRequest) {
   try {
     const { userId: clerkId } = await auth(req);
@@ -42,7 +67,19 @@ async function handler(req: NextRequest) {
       return NextResponse.json({ error: "No Stripe customer found" }, { status: 404 });
     }
 
-    const origin = req.headers.get("origin") || "https://litlabs.net";
+    let appUrl: string;
+    try {
+      appUrl = getAppUrl();
+    } catch {
+      return NextResponse.json({ error: "Server URL misconfiguration" }, { status: 500 });
+    }
+
+    const params = new URLSearchParams({
+      customer: sub.stripe_customer_id,
+      return_url: `${appUrl}/settings?section=billing`,
+    });
+    const portalConfig = process.env.STRIPE_PORTAL_CONFIG_ID?.trim();
+    if (portalConfig) params.set("configuration", portalConfig);
 
     const response = await fetch(
       `https://api.stripe.com/v1/billing_portal/sessions`,
@@ -52,10 +89,7 @@ async function handler(req: NextRequest) {
           Authorization: `Bearer ${stripeKey}`,
           "Content-Type": "application/x-www-form-urlencoded",
         },
-        body: new URLSearchParams({
-          customer: sub.stripe_customer_id,
-          return_url: `${origin}/settings?section=billing`,
-        }).toString(),
+        body: params.toString(),
       },
     );
 

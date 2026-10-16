@@ -38,9 +38,15 @@ vi.mock("@/lib/media", () => ({
     return undefined;
   },
 }));
-vi.mock("@/lib/generation/cost-engine", () => ({
-  calculateRetailBits: () => ({ providerCostCents: 2, retailLiTTBits: 50 }),
-}));
+vi.mock("@/lib/generation/cost-engine", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/generation/cost-engine")>(
+    "@/lib/generation/cost-engine",
+  );
+  return {
+    ...actual,
+    calculateRetailBits: () => ({ providerCostCents: 2, retailLiTTBits: 50 }),
+  };
+});
 
 import {
   generateImage,
@@ -159,6 +165,7 @@ function makeDeps(overrides: Partial<ImageServiceDeps> = {}) {
         downloadUrl: "https://provider/x.png",
       };
     },
+    checkPlanLimit: async () => null,
     ...overrides,
   };
   return { deps, calls, jobs };
@@ -180,6 +187,43 @@ describe("generateImage", () => {
     if (!result.success) expect(result.code).toBe("UNAUTHORIZED");
     expect(calls.dispatch).toBe(0);
     expect(calls.debit).toHaveLength(0);
+  });
+
+  it("releases the cap hold when the provider fails and settles it on success", async () => {
+    const releaseCapHold = vi.fn(async () => undefined);
+    const settleCapHold = vi.fn(async () => undefined);
+    const failed = makeDeps({
+      releaseCapHold,
+      settleCapHold,
+      dispatch: async () => {
+        throw new Error("provider down");
+      },
+    });
+    const failure = await generateImage(
+      { userId: "user_abc", requestId: "op_hold_fail" },
+      paidInput,
+      failed.deps,
+    );
+    expect(failure.success).toBe(false);
+    expect(releaseCapHold).toHaveBeenCalledWith({
+      internalUserId: "internal_1",
+      requestId: "op_hold_fail",
+    });
+    expect(settleCapHold).not.toHaveBeenCalled();
+
+    releaseCapHold.mockClear();
+    const succeeded = makeDeps({ releaseCapHold, settleCapHold });
+    const success = await generateImage(
+      { userId: "user_abc", requestId: "op_hold_ok" },
+      paidInput,
+      succeeded.deps,
+    );
+    expect(success.success).toBe(true);
+    expect(settleCapHold).toHaveBeenCalledWith({
+      internalUserId: "internal_1",
+      requestId: "op_hold_ok",
+    });
+    expect(releaseCapHold).not.toHaveBeenCalled();
   });
 
   it("happy path: generates, debits exactly once with an idempotent key", async () => {
@@ -275,6 +319,29 @@ describe("generateImage", () => {
 
     expect(result.success).toBe(false);
     if (!result.success) expect(result.code).toBe("INSUFFICIENT_FUNDS");
+    expect(calls.dispatch).toBe(0);
+    expect(calls.debit).toHaveLength(0);
+  });
+
+  it("does not call the provider when the plan cap denies the request", async () => {
+    const { deps, calls } = makeDeps({
+      checkPlanLimit: async () => ({
+        status: 429,
+        code: "plan_limit",
+        reason: "monthly_image_cap",
+        error: "Creator Beta allows 53 paid images this month.",
+      }),
+    });
+    const result = await generateImage(
+      { userId: "user_abc", requestId: "op_cap" },
+      paidInput,
+      deps,
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.code).toBe("PLAN_LIMIT");
+      expect(result.reason).toBe("monthly_image_cap");
+    }
     expect(calls.dispatch).toBe(0);
     expect(calls.debit).toHaveLength(0);
   });

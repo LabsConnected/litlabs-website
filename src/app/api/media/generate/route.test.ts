@@ -88,6 +88,34 @@ describe("POST /api/media/generate — error transport contract", () => {
     expect(body).toMatchObject({ success: false, code: "NO_PROVIDER" });
   });
 
+  it("a monthly image cap is 429 plan_limit and a spend cap is 402 plan_limit", async () => {
+    vi.mocked(generateImage).mockResolvedValue({
+      ...failure("PLAN_LIMIT"),
+      reason: "monthly_image_cap",
+      error: "Creator Beta allows 53 paid images this month.",
+    } as any);
+    const count = await POST(req({ prompt: "x", requestId: "r-count" }));
+    expect(count.status).toBe(429);
+    expect(await count.json()).toMatchObject({
+      success: false,
+      code: "plan_limit",
+      reason: "monthly_image_cap",
+    });
+
+    vi.mocked(generateImage).mockResolvedValue({
+      ...failure("PLAN_LIMIT"),
+      reason: "provider_spend_cap",
+      error: "provider spend cap",
+    } as any);
+    const spend = await POST(req({ prompt: "x", requestId: "r-spend" }));
+    expect(spend.status).toBe(402);
+    expect(await spend.json()).toMatchObject({
+      success: false,
+      code: "plan_limit",
+      reason: "provider_spend_cap",
+    });
+  });
+
   it("insufficient funds stays a structured 402 (pre-flight, no provider call)", async () => {
     vi.mocked(generateImage).mockResolvedValue(failure("INSUFFICIENT_FUNDS") as any);
     const res = await POST(req({ prompt: "x", requestId: "r4" }));

@@ -16,7 +16,27 @@ vi.mock("@/lib/auth", () => ({
   auth: vi.fn(async () => ({ userId: "user_123", clerkId: "clerk_123" })),
 }));
 
-const generateContentMock = vi.fn();
+const { limitMock, generateContentMock } = vi.hoisted(() => ({
+  limitMock: vi.fn(async (_input?: unknown): Promise<{
+    status: number;
+    code: string;
+    reason: string;
+    error: string;
+  } | null> => null),
+  generateContentMock: vi.fn(),
+}));
+vi.mock("@/lib/generation/enforce-media-caps", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/generation/enforce-media-caps")>(
+    "@/lib/generation/enforce-media-caps",
+  );
+  return {
+    ...actual,
+    assertGenerationWithinPlanCaps: (input: unknown) => limitMock(input),
+  };
+});
+vi.mock("@/lib/generation/identity", () => ({
+  resolveInternalUserId: vi.fn(async () => null),
+}));
 vi.mock("@google/genai", () => ({
   GoogleGenAI: vi.fn(function () {
     return {
@@ -39,6 +59,7 @@ function postRequest(body: unknown) {
 describe("POST /api/studio/generate metering", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    limitMock.mockResolvedValue(null);
     vi.stubEnv("GEMINI_API_KEY", "test-key");
     delete process.env.GEMINI_IMAGE_MODEL;
   });
@@ -116,5 +137,45 @@ describe("POST /api/studio/generate metering", () => {
     const data = await res.json();
     expect(data.free).toBe(true);
     expect(emitUsageEventMock).not.toHaveBeenCalled();
+  });
+
+  it("returns plan_limit and does not call Gemini when the monthly cap is exhausted", async () => {
+    limitMock.mockResolvedValue({
+      status: 429,
+      code: "plan_limit",
+      reason: "monthly_image_cap",
+      error: "Creator Beta allows 53 paid images this month.",
+    });
+    const { POST } = await import("./route");
+    const res = await POST(
+      postRequest({ prompt: "a neon city skyline", provider: "gemini" }),
+    );
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.code).toBe("plan_limit");
+    expect(body.reason).toBe("monthly_image_cap");
+    expect(generateContentMock).not.toHaveBeenCalled();
+  });
+
+  it("returns plan_limit and does not mint pollinations urls when the free daily cap is exhausted", async () => {
+    limitMock.mockResolvedValue({
+      status: 429,
+      code: "plan_limit",
+      reason: "free_model_daily_cap",
+      error: "Starter allows 8 free generations per day.",
+    });
+    const { POST } = await import("./route");
+    const res = await POST(
+      postRequest({ prompt: "a neon city skyline", provider: "pollinations", batchSize: 2 }),
+    );
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.reason).toBe("free_model_daily_cap");
+    expect(limitMock).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "pollinations",
+      model: "flux",
+      providerCostCents: 0,
+      units: 2,
+    }));
   });
 });

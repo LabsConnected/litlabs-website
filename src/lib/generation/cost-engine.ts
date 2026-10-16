@@ -11,6 +11,9 @@ import type { CostInput, CostResult, LittProduct, ProductTier } from "./types";
  *
  * CENTS_PER_BIT is the canonical exchange rate: 1 LiTTBit ≈ $0.01
  * (100 LiTTBits = $1.00). This keeps the math simple and transparent.
+ * Do not multiply this rate. A 1000-credits-per-dollar conversion would
+ * charge ten times as many LiTTBits for the same generation and devalue
+ * balances, grants, and reservations already on the ledger.
  *
  * Until shadow billing is verified against real provider invoices,
  * we use a conservative margin and a small infra allowance.
@@ -73,6 +76,11 @@ const PROVIDER_COST_CENTS: Record<string, number> = {
  * Get the provider cost in cents for a generation.
  * Falls back to a safe default if unknown.
  */
+/** Cents stored on the catalog row, before duration and resolution rules. */
+export function catalogTableCents(provider: string, model: string): number | undefined {
+  return PROVIDER_COST_CENTS[`${provider}:${model}`];
+}
+
 export function getProviderCostCents(input: CostInput): number {
   const key = `${input.provider}:${input.model}`;
 
@@ -101,6 +109,54 @@ export function getProviderCostCents(input: CostInput): number {
   }
 
   return PROVIDER_COST_CENTS[key] ?? 3;
+}
+
+/**
+ * Inputs the cost table and the duration rules in this file actually price.
+ * Video uses the documented 4s and 8s lengths. ElevenLabs music uses the
+ * documented 30s clip and 5 minute song. Nothing here is a guessed price.
+ */
+export function pricedGenerationInputs(): CostInput[] {
+  const inputs: CostInput[] = [];
+  for (const key of Object.keys(PROVIDER_COST_CENTS)) {
+    const splitAt = key.indexOf(":");
+    const provider = key.slice(0, splitAt);
+    const model = key.slice(splitAt + 1);
+    if (provider === "veo") {
+      for (const durationSeconds of [4, 8]) {
+        for (const resolution of ["720p", "1080p"]) {
+          inputs.push({ modality: "video", provider, model, durationSeconds, resolution });
+        }
+      }
+      continue;
+    }
+    if (model.includes("i2v")) {
+      for (const durationSeconds of [4, 8]) {
+        inputs.push({ modality: "video", provider, model, durationSeconds });
+      }
+      continue;
+    }
+    if (provider === "elevenlabs" && model === "music_v2") {
+      for (const durationSeconds of [30, 300]) {
+        inputs.push({ modality: "music", provider, model, durationSeconds });
+      }
+      continue;
+    }
+    if (
+      provider === "google" ||
+      provider === "mureka" ||
+      model.includes("lyria")
+    ) {
+      inputs.push({ modality: "music", provider, model });
+      continue;
+    }
+    if (model.includes("whisper") || model === "tts") {
+      inputs.push({ modality: "speech", provider, model });
+      continue;
+    }
+    inputs.push({ modality: "image", provider, model });
+  }
+  return inputs;
 }
 
 /**

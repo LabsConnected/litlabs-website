@@ -15,7 +15,7 @@
  * keeps "Preview ready".
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import StudioPreviewPanel from "./StudioPreviewPanel";
 import { useExecutionStore } from "../stores/useExecutionStore";
@@ -74,8 +74,13 @@ describe("StudioPreviewPanel — style probe honesty", () => {
   it("flips the badge when a Tailwind-intended preview renders unstyled", async () => {
     renderReadyPreview();
     await screen.findByText("Preview ready");
-    postStyleProbe({ tailwindDetected: true, styled: false });
-    await screen.findByText("Preview styling failed to apply");
+    // The listener is attached in an effect after the ready render. A probe
+    // posted in that gap is dropped, and the badge stays "Preview ready".
+    // Re-post until the listener is mounted.
+    await waitFor(() => {
+      postStyleProbe({ tailwindDetected: true, styled: false });
+      expect(screen.getByText("Preview styling failed to apply")).toBeInTheDocument();
+    });
     expect(screen.queryByText("Preview ready")).toBeNull();
   });
 

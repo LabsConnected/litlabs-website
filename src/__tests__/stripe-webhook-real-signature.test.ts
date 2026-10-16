@@ -39,7 +39,7 @@ function signed(evt: object) {
   return req(payload, stripe.webhooks.generateTestHeaderString({ payload, secret: SECRET }));
 }
 
-type EventRow = { result: string; processed_at: string };
+type EventRow = { result: string; processed_at: string; claim_token?: string | null };
 
 function fakeDb(opts: { subRowAfter?: number; grantError?: boolean; plan?: string } = {}) {
   const db = {
@@ -78,6 +78,8 @@ function fakeDb(opts: { subRowAfter?: number; grantError?: boolean; plan?: strin
       };
       q.select = () => q;
       q.eq = (k: string, v: any) => { q._f[k] = v; return q; };
+      q.limit = () => q;
+      q.like = () => q;
       q.update = (patch: any) => { q._op = "update"; q._patch = patch; return q; };
       q.delete = () => { q._op = "delete"; return q; };
       q.upsert = async (row: any, options?: { onConflict?: string }) => {
@@ -85,6 +87,7 @@ function fakeDb(opts: { subRowAfter?: number; grantError?: boolean; plan?: strin
         return { error: null };
       };
       q.insert = async (row: any) => { q._op = "insert"; q._row = row; return exec(); };
+      q.maybeSingle = () => q.single();
       q.single = async () => {
         if (t === "stripe_events") {
           const row = db.events.get(q._f.stripe_event_id);
@@ -101,9 +104,60 @@ function fakeDb(opts: { subRowAfter?: number; grantError?: boolean; plan?: strin
       q.then = (resolve: any, reject: any) => exec().then(resolve, reject);
       return q;
     },
-    async rpc(_n: string, a: any) {
-      if (opts.grantError) return { error: { message: "boom" } };
-      if (!db.ledger.has(a.p_idempotency_key)) db.ledger.set(a.p_idempotency_key, a.p_amount);
+    async rpc(name: string, a: any) {
+      if (name === "claim_stripe_event") {
+        const id = a.p_stripe_event_id as string;
+        const existing = db.events.get(id);
+        const staleBefore = new Date(a.p_stale_before).getTime();
+        if (!existing) {
+          db.events.set(id, {
+            result: "processing",
+            processed_at: new Date().toISOString(),
+            claim_token: a.p_claim_token,
+          });
+          return { data: "owned", error: null };
+        }
+        if (existing.result !== "processing") return { data: "duplicate", error: null };
+        if (new Date(existing.processed_at).getTime() > staleBefore) return { data: "in_progress", error: null };
+        existing.claim_token = a.p_claim_token;
+        existing.processed_at = new Date().toISOString();
+        return { data: "owned", error: null };
+      }
+      if (name === "finalize_stripe_event") {
+        const row = db.events.get(a.p_stripe_event_id);
+        if (!row || row.claim_token !== a.p_claim_token || row.result !== "processing") {
+          return { data: false, error: null };
+        }
+        row.result = a.p_result;
+        return { data: true, error: null };
+      }
+      if (name === "release_stripe_event") {
+        const row = db.events.get(a.p_stripe_event_id);
+        if (!row || row.claim_token !== a.p_claim_token || row.result !== "processing") {
+          return { data: row ? "lost" : "absent", error: null };
+        }
+        db.events.delete(a.p_stripe_event_id);
+        return { data: "released", error: null };
+      }
+      if (opts.grantError && (name === "grant_credits" || name === "apply_subscription_event")) {
+        return { error: { message: "boom" } };
+      }
+      if (name === "apply_subscription_event") {
+        if (a.p_update_plan) {
+          db.upserts.push({
+            table: "subscriptions",
+            row: { plan: a.p_plan, stripe_subscription_id: a.p_incoming_subscription_id },
+            onConflict: "user_id",
+          });
+        }
+        if (a.p_grant_mode === "invoice_full" && a.p_grant_idempotency_key && !db.ledger.has(a.p_grant_idempotency_key)) {
+          db.ledger.set(a.p_grant_idempotency_key, a.p_grant_amount);
+        }
+        return { data: { outcome: "applied" }, error: null };
+      }
+      if (name === "grant_credits" && a.p_idempotency_key && !db.ledger.has(a.p_idempotency_key)) {
+        db.ledger.set(a.p_idempotency_key, a.p_amount);
+      }
       return { error: null };
     },
   };

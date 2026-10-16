@@ -12,6 +12,12 @@ import {
 } from "@/lib/generation/jobs";
 import { resolveInternalUserId } from "@/lib/generation/identity";
 import { calculateRetailBits } from "@/lib/generation/cost-engine";
+import {
+  assertGenerationWithinPlanCaps,
+  planLimitResponse,
+  releaseMediaCapHold,
+  settleMediaCapHold,
+} from "@/lib/generation/enforce-media-caps";
 import { buildChargeRating } from "@/lib/billing/canonical-pricing";
 
 // ── Route configuration ──────────────────────────────────────────
@@ -89,6 +95,7 @@ async function handler(req: NextRequest) {
     );
   }
 
+  let claimedRequestId: string | null = null;
   try {
     const {
       prompt,
@@ -102,6 +109,26 @@ async function handler(req: NextRequest) {
     if (!prompt?.trim())
       return NextResponse.json({ error: "Prompt required" }, { status: 400 });
 
+    const audioSim = await getActiveSimulation().catch(() => null);
+    const audioExempt = isBillingExempt(userId, audioSim);
+    const speechModel = "gemini-2.5-flash-preview-tts";
+    const costResult = calculateRetailBits({
+      modality: "speech",
+      provider: "gemini",
+      model: speechModel,
+    });
+    const audioLimit = await assertGenerationWithinPlanCaps({
+      clerkId: userId,
+      requestId,
+      modality: "speech",
+      provider: "gemini",
+      model: speechModel,
+      providerCostCents: costResult.providerCostCents,
+      billingExempt: audioExempt,
+    });
+    if (audioLimit) return planLimitResponse(audioLimit);
+    claimedRequestId = requestId;
+
     // Compose final prompt with optional delivery direction
     const finalPrompt = styleDirection
       ? `${prompt.trim()}\n\nDelivery direction: ${styleDirection}`
@@ -110,7 +137,7 @@ async function handler(req: NextRequest) {
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-tts",
+      model: speechModel,
       contents: [{ parts: [{ text: finalPrompt }] }],
       config: {
         responseModalities: [Modality.AUDIO],
@@ -126,10 +153,6 @@ async function handler(req: NextRequest) {
       response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (!base64Audio) throw new Error("No audio data returned.");
 
-    // Check billing exemption — owner skips debit
-    const audioSim = await getActiveSimulation().catch(() => null);
-    const audioExempt = isBillingExempt(userId, audioSim);
-
     let audioBalance: number | null = null;
     if (audioExempt) {
       try {
@@ -140,11 +163,6 @@ async function handler(req: NextRequest) {
       }
     } else {
       // Atomic debit via canonical ledger — keyed on requestId.
-      const costResult = calculateRetailBits({
-        modality: "speech",
-        provider: "elevenlabs",
-        model: "tts",
-      });
       const reservation = await adjustWalletBalance({
         clerkId: userId,
         amount: -COST,
@@ -206,6 +224,11 @@ async function handler(req: NextRequest) {
       assetPersistenceFailed = true;
     }
 
+    if (internalUserId) {
+      await settleMediaCapHold({ internalUserId, requestId }).catch(() => undefined);
+    }
+    claimedRequestId = null;
+
     return NextResponse.json({
       audioBase64: `data:audio/wav;base64,${base64Audio}`,
       audioUrl: durableUrl,
@@ -216,6 +239,15 @@ async function handler(req: NextRequest) {
       assetPersistenceFailed,
     });
   } catch (err: unknown) {
+    if (claimedRequestId) {
+      const internalUserId = await resolveInternalUserId(userId).catch(() => null);
+      if (internalUserId) {
+        await releaseMediaCapHold({
+          internalUserId,
+          requestId: claimedRequestId,
+        }).catch(() => undefined);
+      }
+    }
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "TTS failed" },
       { status: 500 },

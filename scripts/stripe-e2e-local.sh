@@ -3,7 +3,22 @@
 # Scenarios 1-8 are the original billing flows. Scenario 9 covers partial
 # refunds (one idempotency key per refund id, plus a replay). Scenario 10
 # resends an older invoice.paid after cancellation and checks the status
-# stays canceled. A missing admin database client cannot be exercised here
+# stays canceled. Scenarios 11 and 12 change the Creator subscription's
+# price (metadata left stale) and check the upgrade delta and downgrade.
+# Scenario 11 uses proration_behavior always_invoice so a real proration
+# invoice is paid. That invoice must grant 0. The upgrade delta is still
+# 10500 once. Scenario 12 keeps create_prorations, which does not invoice.
+# Scenario 14 creates a test-clock subscription, stores cancel_at_period_end,
+# then advances the clock so deletion sets status canceled.
+# Scenario 13 posts checkout with no Clerk session: the
+# route must refuse (401). The 409 already-subscribed contract is the
+# checkout unit test — this harness has no authenticated browser session.
+# Scenario 15 resends that proration invoice and the subscription update
+# out of order, with new event ids, and checks the ledger does not move.
+# Scenario 16 posts the partial-refund event again under a new event id.
+# Concurrent wallet debits need an authenticated session, so they stay in
+# src/lib/concurrent-debit.test.ts.
+# A missing admin database client cannot be exercised here
 # without dropping the local database; that case is a unit test.
 #
 # Prerequisites on the machine where you run this (not CI):
@@ -55,6 +70,7 @@ CANCEL_CLERK="${RUN_ID}_cancel"
 GRANTFAIL_CLERK="${RUN_ID}_grantfail"
 REFUND_CLERK="${RUN_ID}_refund"
 MISSING_CLERK="${RUN_ID}_missing"
+CLOCK_CLERK="${RUN_ID}_clock"
 CANCEL_PAID_EVENT=""
 
 declare -a RESULTS=()
@@ -146,7 +162,7 @@ load_supabase_env() {
 
 insert_users() {
   local clerk email
-  for clerk in "$CREATOR_CLERK" "$PRO_CLERK" "$FAIL_CLERK" "$CANCEL_CLERK" "$GRANTFAIL_CLERK" "$REFUND_CLERK"; do
+  for clerk in "$CREATOR_CLERK" "$PRO_CLERK" "$FAIL_CLERK" "$CANCEL_CLERK" "$GRANTFAIL_CLERK" "$REFUND_CLERK" "$CLOCK_CLERK"; do
     assert_safe_id "$clerk"
     email="${clerk}@example.com"
     psql_q -v clerk="$clerk" -v email="$email" <<'SQL'
@@ -265,6 +281,10 @@ clear_kv() {
   INVOICE_FAILED_EVENT=""
   SUBSCRIPTION_CREATED_EVENT=""
   DELETED_EVENT=""
+  UPDATED_EVENT=""
+  CLOCK=""
+  PERIOD_END=""
+  FROZEN_TIME=""
   HTTP_STATUS=""
   EVENT_ID=""
   STATUS=""
@@ -294,6 +314,10 @@ run_driver() {
       INVOICE_FAILED_EVENT) INVOICE_FAILED_EVENT="$val" ;;
       SUBSCRIPTION_CREATED_EVENT) SUBSCRIPTION_CREATED_EVENT="$val" ;;
       DELETED_EVENT) DELETED_EVENT="$val" ;;
+      UPDATED_EVENT) UPDATED_EVENT="$val" ;;
+      CLOCK) CLOCK="$val" ;;
+      PERIOD_END) PERIOD_END="$val" ;;
+      FROZEN_TIME) FROZEN_TIME="$val" ;;
       HTTP_STATUS) HTTP_STATUS="$val" ;;
       EVENT_ID) EVENT_ID="$val" ;;
       CREATOR_PRICE) CREATOR_PRICE="$val" ;;
@@ -472,7 +496,7 @@ sub_field() {
   local clerk="$1"
   local column="$2"
   assert_safe_id "$clerk"
-  [[ "$column" == "plan" || "$column" == "status" ]] || die "bad column"
+  [[ "$column" == "plan" || "$column" == "status" || "$column" == "cancel_at_period_end" || "$column" == "current_period_end" ]] || die "bad column"
   sql_value "SELECT COALESCE(${column},'') FROM public.subscriptions s JOIN public.users u ON u.id = s.user_id WHERE u.clerk_id = '${clerk}' LIMIT 1;"
 }
 
@@ -862,6 +886,7 @@ SQL
   debits="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${REFUND_CLERK}' AND cl.direction = 'debit';")"
   key_a="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${REFUND_CLERK}' AND cl.idempotency_key LIKE 'refund_${refund_a}:%';")"
   key_b="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${REFUND_CLERK}' AND cl.idempotency_key LIKE 'refund_${refund_b}:%';")"
+  REFUND_SOURCE_EVENT="$event_b"
   if [[ "$http_a" == "200" && "$http_b" == "200" && "$replay_http" == "200" && "$debits" == "2" && "$key_a" == "1" && "$key_b" == "1" ]]; then
     record "9" "PASS" "a=${http_a} b=${http_b} replay=${replay_http}" "debits=${debits} keys=${refund_a},${refund_b}"
   else
@@ -899,6 +924,207 @@ SQL
     record "10" "PASS" "$http" "status=${status} ledger_rows=${after}"
   else
     record "10" "FAIL" "$http" "status=${status} before=${before} after=${after} event_cleared=${still}"
+  fi
+}
+
+scenario_plan_upgrade() {
+  say "scenario 11: Creator to Pro grants 10500 once and replay is a no-op"
+  if [[ -z "${CREATOR_SUB:-}" ]]; then
+    record "11" "FAIL" "n/a" "creator subscription is missing"
+    return 0
+  fi
+  local before
+  before="$(ledger_sum "$CREATOR_CLERK")"
+  if ! run_driver change-plan --subscription "$CREATOR_SUB" --price "$PRO_PRICE" --proration always_invoice; then
+    record "11" "FAIL" "driver" "price change failed"
+    return 0
+  fi
+  local updated_http="n/a" paid_http="n/a" baseline
+  if [[ -n "$UPDATED_EVENT" ]]; then
+    updated_http="$(wait_new_http "$UPDATED_EVENT" 0 90)"
+    print_listen_lines "$UPDATED_EVENT"
+    app_notes "$UPDATED_EVENT"
+  fi
+  if [[ -n "$INVOICE_PAID_EVENT" ]]; then
+    paid_http="$(wait_new_http "$INVOICE_PAID_EVENT" 0 90)"
+    print_listen_lines "$INVOICE_PAID_EVENT"
+  fi
+  assert_safe_id "$CREATOR_SUB"
+  local plan sum upgrade_sum upgrade_rows replay_http after_sum
+  plan="$(sub_field "$CREATOR_CLERK" plan)"
+  sum="$(ledger_sum "$CREATOR_CLERK")"
+  upgrade_sum="$(sql_value "SELECT COALESCE(SUM(cl.amount),0) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${CREATOR_CLERK}' AND cl.idempotency_key LIKE 'plan_upgrade_${CREATOR_SUB}_%';")"
+  upgrade_rows="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${CREATOR_CLERK}' AND cl.idempotency_key LIKE 'plan_upgrade_${CREATOR_SUB}_%';")"
+  replay_http="n/a"
+  if [[ -n "$UPDATED_EVENT" ]]; then
+    baseline="$(hit_count "$UPDATED_EVENT")"
+    resend_event "$UPDATED_EVENT" || true
+    replay_http="$(wait_new_http "$UPDATED_EVENT" "$baseline" 60)"
+  fi
+  after_sum="$(ledger_sum "$CREATOR_CLERK")"
+  local upgrade_rows_after
+  upgrade_rows_after="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${CREATOR_CLERK}' AND cl.idempotency_key LIKE 'plan_upgrade_${CREATOR_SUB}_%';")"
+  local invoice_grant="missing"
+  if [[ -n "${INVOICE:-}" ]]; then
+    assert_safe_id "$INVOICE"
+    invoice_grant="$(sql_value "SELECT COALESCE(SUM(cl.amount),0) FROM public.credit_ledger cl WHERE cl.idempotency_key = 'invoice_grant_${INVOICE}';")"
+  fi
+  UPGRADE_UPDATED_EVENT="${UPDATED_EVENT:-}"
+  UPGRADE_INVOICE_EVENT="${INVOICE_PAID_EVENT:-}"
+  if [[ -n "$INVOICE" && -n "$INVOICE_PAID_EVENT" && "$updated_http" == "200" && "$paid_http" == "200" && "$replay_http" == "200" && "$plan" == "pro_builder_beta" && "$before" == "7500" && "$sum" == "18000" && "$after_sum" == "18000" && "$upgrade_sum" == "10500" && "$upgrade_rows" == "1" && "$upgrade_rows_after" == "1" && "$invoice_grant" == "0" ]]; then
+    record "11" "PASS" "updated=${updated_http} proration=${paid_http} replay=${replay_http}" "plan=${plan} upgrade=${upgrade_sum}"
+  else
+    record "11" "FAIL" "updated=${updated_http} proration=${paid_http} replay=${replay_http}" "plan=${plan} before=${before} sum=${sum} after=${after_sum} upgrade_sum=${upgrade_sum} rows=${upgrade_rows}/${upgrade_rows_after} invoice_grant=${invoice_grant}"
+  fi
+}
+
+scenario_plan_change_reorder() {
+  say "scenario 15: delayed upgrade and proration events grant nothing more"
+  if [[ -z "${UPGRADE_UPDATED_EVENT:-}" || -z "${UPGRADE_INVOICE_EVENT:-}" ]]; then
+    record "15" "FAIL" "n/a" "upgrade or proration invoice event was not captured"
+    return 0
+  fi
+  local before
+  before="$(ledger_sum "$CREATOR_CLERK")"
+  local invoice_http="n/a" updated_http="n/a"
+  if [[ -n "${UPGRADE_INVOICE_EVENT:-}" ]]; then
+    if ! run_driver post --kind duplicate-event --url "$WEBHOOK_URL" \
+      --run "${RUN_ID}_inv" --source-event "$UPGRADE_INVOICE_EVENT"; then
+      record "15" "FAIL" "driver" "could not replay the proration invoice"
+      return 0
+    fi
+    invoice_http="$HTTP_STATUS"
+  fi
+  if ! run_driver post --kind duplicate-event --url "$WEBHOOK_URL" \
+    --run "${RUN_ID}_up" --source-event "$UPGRADE_UPDATED_EVENT"; then
+    record "15" "FAIL" "driver" "could not replay the subscription update"
+    return 0
+  fi
+  updated_http="$HTTP_STATUS"
+  local after rows
+  after="$(ledger_sum "$CREATOR_CLERK")"
+  assert_safe_id "$CREATOR_SUB"
+  rows="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${CREATOR_CLERK}' AND cl.idempotency_key LIKE 'plan_upgrade_${CREATOR_SUB}_%';")"
+  if [[ "$invoice_http" == "200" && "$updated_http" == "200" && "$before" == "18000" && "$after" == "18000" && "$rows" == "1" ]]; then
+    record "15" "PASS" "invoice=${invoice_http} updated=${updated_http}" "ledger=${after} upgrade_rows=${rows}"
+  else
+    record "15" "FAIL" "invoice=${invoice_http} updated=${updated_http}" "before=${before} after=${after} rows=${rows}"
+  fi
+}
+
+scenario_refund_new_event() {
+  say "scenario 16: a new event id for the same refund does not debit again"
+  if [[ -z "${REFUND_SOURCE_EVENT:-}" ]]; then
+    record "16" "FAIL" "n/a" "refund event was not captured"
+    return 0
+  fi
+  local before
+  before="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${REFUND_CLERK}' AND cl.direction = 'debit';")"
+  if ! run_driver post --kind duplicate-event --url "$WEBHOOK_URL" \
+    --run "${RUN_ID}_refund" --source-event "$REFUND_SOURCE_EVENT"; then
+    record "16" "FAIL" "driver" "could not replay the refund under a new event id"
+    return 0
+  fi
+  local after
+  after="$(sql_value "SELECT COUNT(*) FROM public.credit_ledger cl JOIN public.users u ON u.id = cl.user_id WHERE u.clerk_id = '${REFUND_CLERK}' AND cl.direction = 'debit';")"
+  if [[ "$HTTP_STATUS" == "200" && "$before" == "$after" && "$after" == "2" ]]; then
+    record "16" "PASS" "$HTTP_STATUS" "debit_rows=${after}"
+  else
+    record "16" "FAIL" "$HTTP_STATUS" "before=${before} after=${after}"
+  fi
+}
+
+scenario_plan_downgrade() {
+  say "scenario 12: Pro to Creator grants nothing extra"
+  if [[ -z "${CREATOR_SUB:-}" ]]; then
+    record "12" "FAIL" "n/a" "creator subscription is missing"
+    return 0
+  fi
+  local before
+  before="$(ledger_sum "$CREATOR_CLERK")"
+  if ! run_driver change-plan --subscription "$CREATOR_SUB" --price "$CREATOR_PRICE"; then
+    record "12" "FAIL" "driver" "price change failed"
+    return 0
+  fi
+  local updated_http="n/a"
+  if [[ -n "$UPDATED_EVENT" ]]; then
+    updated_http="$(wait_new_http "$UPDATED_EVENT" 0 90)"
+    print_listen_lines "$UPDATED_EVENT"
+  fi
+  if [[ -n "$INVOICE_PAID_EVENT" ]]; then
+    wait_new_http "$INVOICE_PAID_EVENT" 0 90 >/dev/null || true
+  fi
+  local plan sum
+  plan="$(sub_field "$CREATOR_CLERK" plan)"
+  sum="$(ledger_sum "$CREATOR_CLERK")"
+  if [[ "$updated_http" == "200" && "$plan" == "creator_beta" && "$before" == "$sum" && "$sum" == "18000" ]]; then
+    record "12" "PASS" "$updated_http" "plan=${plan} ledger=${sum}"
+  else
+    record "12" "FAIL" "$updated_http" "plan=${plan} before=${before} sum=${sum}"
+  fi
+}
+
+scenario_cancel_at_period_end() {
+  say "scenario 14: cancel at period end is stored, then a test clock deletion sets canceled"
+  if ! run_driver subscribe-clock --clerk "$CLOCK_CLERK" --plan creator_beta --price "$CREATOR_PRICE"; then
+    record "14" "FAIL" "driver" "test-clock subscription was not created"
+    return 0
+  fi
+  remember_sub "$SUBSCRIPTION"
+  local clock="$CLOCK" period_end="$PERIOD_END" sub="$SUBSCRIPTION"
+  local paid_http="n/a"
+  if [[ -n "$INVOICE_PAID_EVENT" ]]; then
+    paid_http="$(wait_new_http "$INVOICE_PAID_EVENT" 0 90)"
+  fi
+  if ! run_driver schedule-cancel --subscription "$sub"; then
+    record "14" "FAIL" "driver" "schedule-cancel failed"
+    return 0
+  fi
+  period_end="${PERIOD_END:-$period_end}"
+  local updated_http="n/a"
+  if [[ -n "$UPDATED_EVENT" ]]; then
+    updated_http="$(wait_new_http "$UPDATED_EVENT" 0 90)"
+    print_listen_lines "$UPDATED_EVENT"
+  fi
+  assert_safe_id "$CLOCK_CLERK"
+  local flag
+  flag="$(sql_value "SELECT CASE WHEN s.cancel_at_period_end IS TRUE THEN 'true' ELSE 'false' END FROM public.subscriptions s JOIN public.users u ON u.id = s.user_id WHERE u.clerk_id = '${CLOCK_CLERK}' LIMIT 1;")"
+  local advance_to deleted_http="n/a"
+  advance_to=$((period_end + 120))
+  if ! run_driver advance-clock --clock "$clock" --to "$advance_to" --subscription "$sub"; then
+    record "14" "FAIL" "driver" "test clock did not advance flag=${flag}"
+    return 0
+  fi
+  if [[ -n "$DELETED_EVENT" ]]; then
+    deleted_http="$(wait_new_http "$DELETED_EVENT" 0 90)"
+    print_listen_lines "$DELETED_EVENT"
+  fi
+  local status
+  status="$(sub_field "$CLOCK_CLERK" status)"
+  if [[ "$paid_http" == "200" && "$updated_http" == "200" && "$flag" == "true" && "$deleted_http" == "200" && "$status" == "canceled" ]]; then
+    record "14" "PASS" "paid=${paid_http} cancel=${updated_http} deleted=${deleted_http}" "flag=${flag} status=${status}"
+  else
+    record "14" "FAIL" "paid=${paid_http} cancel=${updated_http} deleted=${deleted_http}" "flag=${flag} status=${status} period_end=${period_end}"
+  fi
+}
+
+scenario_duplicate_checkout() {
+  say "scenario 13: duplicate subscription checkout is blocked"
+  local body="$WORKDIR/checkout-13.json"
+  local code
+  code="$(curl -s -o "$body" -w '%{http_code}' \
+    -A 'Mozilla/5.0 (stripe-e2e-local)' \
+    -X POST "http://127.0.0.1:${PORT}/api/billing/checkout" \
+    -H 'content-type: application/json' \
+    -d '{"planId":"creator_beta"}' || true)"
+  echo "checkout body: $(cat "$body" 2>/dev/null || true)"
+  # No Clerk session in this harness, so the route refuses before Stripe.
+  # An authenticated active/trialing/past_due subscriber gets 409
+  # (code already_subscribed) — asserted in billing-state-machine.test.ts.
+  if [[ "$code" == "401" || "$code" == "409" ]]; then
+    record "13" "PASS" "$code" "checkout refused before a second Stripe session"
+  else
+    record "13" "FAIL" "$code" "expected 401 without a session or 409 if already subscribed"
   fi
 }
 
@@ -1040,8 +1266,14 @@ main() {
   scenario_signatures
   scenario_race
   scenario_partial_refunds
+  scenario_refund_new_event
   scenario_late_invoice
   scenario_failed_grants
+  scenario_plan_upgrade
+  scenario_plan_change_reorder
+  scenario_plan_downgrade
+  scenario_duplicate_checkout
+  scenario_cancel_at_period_end
 
   print_summary
   if ((FAILURES > 0)); then

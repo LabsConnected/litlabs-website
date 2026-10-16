@@ -54,6 +54,10 @@ function statusForCode(result: ImageGenerationResult): number {
       return 400;
     case "INSUFFICIENT_FUNDS":
       return 402;
+    case "PLAN_LIMIT":
+      return result.reason === "provider_spend_cap" || result.reason === "usage_unavailable"
+        ? 402
+        : 429;
     case "DUPLICATE_IN_FLIGHT":
       return 409;
     case "NO_PROVIDER":
@@ -159,7 +163,20 @@ async function handler(req: NextRequest) {
       result.success ? "OK" : result.code
     } provider=${result.providerId} requestId=${result.requestId} status=${status}`,
   );
-  return NextResponse.json(result, {
+  const responseBody =
+    !result.success && result.code === "PLAN_LIMIT"
+      ? {
+          success: false,
+          requestId: result.requestId,
+          providerId: result.providerId,
+          code: "plan_limit",
+          reason: result.reason,
+          error: result.error,
+          retryable: false,
+          durationMs: result.durationMs,
+        }
+      : result;
+  return NextResponse.json(responseBody, {
     status,
     headers: {
       "Cache-Control": "no-store",

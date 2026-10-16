@@ -60,6 +60,13 @@ vi.mock("@/lib/generation/cost-engine", () => ({
   calculateRetailBits: () => ({ retailLiTTBits: 50, providerCostCents: 1 }),
 }));
 
+vi.mock("@/lib/generation/enforce-media-caps", () => ({
+  assertGenerationWithinPlanCaps: vi.fn(async () => null),
+  planLimitResponse: vi.fn(),
+  releaseMediaCapHold: vi.fn(async () => undefined),
+  settleMediaCapHold: vi.fn(async () => undefined),
+}));
+
 const VIDEO_CAPS = {
   aspectRatios: ["16:9"],
   resolutions: ["720p", "1080p"],

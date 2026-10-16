@@ -6,14 +6,17 @@
 // invoked. UI hiding is not authorization — this function is.
 //
 // Access is granted when ANY of the following is true:
-//   1. The agent's minimumPlan is covered by the user's active subscription
-//      (status active or trialing). Founder counts as Creator-level.
+//   1. The agent's minimumPlan is covered by the user's subscription and
+//      subscriptionGrantsPaidPlan(status) is true (active or trialing).
+//      Founder counts as Creator-level. past_due does not.
+//      Policy: src/lib/billing/subscription-entitlement.ts.
 //   2. The user has an active agent_entitlements row for that agent
 //      (individually purchased — survives plan downgrade until revoked).
 //
 // Access is denied when:
 //   - The user is not authenticated (caller must check first).
-//   - The subscription is past_due, unpaid, canceled, or incomplete_expired.
+//   - The subscription is not entitled (past_due, unpaid, paused,
+//     incomplete, canceled, refunded, disputed, incomplete_expired).
 //   - The entitlement is revoked or the agent is disabled.
 //
 // Billing (LiTTBits) is handled separately by chargeAgentRun() — charges
@@ -23,21 +26,13 @@
 import "server-only";
 import { getSupabaseAdmin, supabaseAdmin } from "@/lib/supabase";
 import { getAgentDefinition } from "@/lib/agent-registry";
+import {
+  ENTITLED_SUBSCRIPTION_STATUSES,
+  subscriptionGrantsPaidPlan,
+} from "@/lib/billing/subscription-entitlement";
 import { hasPlanAccess, type PlanId } from "@/config/plans";
 import { isOwnerClerkId, getActiveSimulation, isBillingExempt, simulationToPlanId, type SimulatedPlan } from "@/lib/owner";
 import { buildChargeRating, recordChargeEvidence } from "@/lib/billing/canonical-pricing";
-
-/** Subscription statuses that grant plan-based agent access. */
-const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing"]);
-
-/** Subscription statuses that deny plan-based agent access. */
-const DENIED_SUBSCRIPTION_STATUSES = new Set([
-  "past_due",
-  "unpaid",
-  "canceled",
-  "incomplete_expired",
-  "incomplete",
-]);
 
 export interface EntitlementInput {
   /** Clerk user ID (from auth().clerkId). */
@@ -123,13 +118,12 @@ export async function resolveAgentEntitlement(
   let plan: PlanId = "starter";
   let subscriptionStatus: string | null = sub?.status ?? null;
 
-  if (sub && ACTIVE_SUBSCRIPTION_STATUSES.has(sub.status)) {
+  if (sub && subscriptionGrantsPaidPlan(sub.status)) {
     plan = (sub.plan as PlanId) ?? "starter";
     if (!isValidPlan(plan)) plan = "starter";
-  } else if (sub && DENIED_SUBSCRIPTION_STATUSES.has(sub.status)) {
-    // Subscription exists but is in a denied state — do not fall back to
-    // starter; the user had a plan and lost it. They keep purchased
-    // entitlements (checked below) but not plan-based access.
+  } else if (sub) {
+    // Not entitled (including past_due). Purchased agent rows below can
+    // still allow a run. Plan-based access does not.
     plan = "starter";
     subscriptionStatus = sub.status;
   }
@@ -587,7 +581,7 @@ async function checkPlanInclusion(
     .from("subscriptions")
     .select("plan, status")
     .eq("user_id", internalUserId)
-    .in("status", ["active", "trialing"])
+    .in("status", [...ENTITLED_SUBSCRIPTION_STATUSES])
     .maybeSingle();
 
   if (!subscription) return false;

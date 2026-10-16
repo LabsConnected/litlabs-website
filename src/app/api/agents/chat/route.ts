@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { auth } from "@/lib/auth";
 import { orchestrator } from "@/lib/agents";
-import { generateText } from "@/lib/llm";
+import { meteredLlmCall } from "@/lib/metered-llm-call";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getUserByClerkId } from "@/lib/user-db";
 import { Supermemory } from "supermemory";
@@ -179,7 +180,7 @@ async function handler(req: NextRequest) {
   }
 
   try {
-    const { agentId, message } = await req.json();
+    const { agentId, message, requestId } = await req.json();
     if (!message || typeof message !== "string") {
       return NextResponse.json({ error: "Missing message" }, { status: 400 });
     }
@@ -307,17 +308,27 @@ async function handler(req: NextRequest) {
       // echo a fake tool call as a chat reply (mirrors the messages V1
       // lane's markup boundary).
       const fallbackToolIds = new Set(toolManifest.tools.map((t) => t.id));
-      const r = await generateText(
-        buildToollessPrompt(
-          `${directorPrompt}\n\n${memoryContext}USER: ${message}\n\nRespond as LiTT Director. Be direct and useful.`,
-        ),
-        {
-          task: "chat",
-          // Metering visibility: record provider attempts for reconciliation.
-          // (Full balance-gate enforcement is a separate follow-up.)
-          metering: { clerkId: userId, feature: "agents-chat-fallback" },
-        },
+      const prompt = buildToollessPrompt(
+        `${directorPrompt}\n\n${memoryContext}USER: ${message}\n\nRespond as LiTT Director. Be direct and useful.`,
       );
+      const callId =
+        typeof requestId === "string" && requestId.trim().length >= 8
+          ? `agents-chat:${requestId.trim()}`
+          : `agents-chat:${randomUUID()}`;
+      const call = await meteredLlmCall({
+        clerkId: userId,
+        prompt,
+        llmOptions: { task: "chat" },
+        feature: "agents-chat-fallback",
+        callId,
+      });
+      if (!call.ok) {
+        return NextResponse.json(
+          { error: call.error, code: call.code },
+          { status: call.status },
+        );
+      }
+      const r = call.result;
       const markupHit = scanToollessOutput(r.text, fallbackToolIds);
       // Fail honestly on invocation intent — never return or persist the
       // pseudo-call. Intent-free markup gets hygiene-stripped instead.

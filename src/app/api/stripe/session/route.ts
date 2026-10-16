@@ -22,7 +22,10 @@ async function handler(request: NextRequest) {
   }
 
   try {
-    const stripe = new Stripe(secretKey);
+    const stripe = new Stripe(secretKey, {
+      timeout: 20_000,
+      maxNetworkRetries: 2,
+    });
     const session = await stripe.checkout.sessions.retrieve(sessionId, {
       expand: ["line_items.data.price.product"],
     });

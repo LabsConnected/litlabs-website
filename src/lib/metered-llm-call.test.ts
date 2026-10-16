@@ -11,6 +11,7 @@
  *  5. Charge reuses the billable usage_event key (no double billing).
  *  6. Post-call charge race (insufficient at debit time) → 402, no text.
  *  7. Owner-exempt user skips the balance gate but still meters + records.
+ *  8. debit_credits RPC errors return that error and do not return the text.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -34,7 +35,7 @@ vi.mock("@/lib/wallet-ledger", () => ({
   getCreditBalances: getCreditBalancesMock,
 }));
 
-import { meteredLlmCall } from "./metered-llm-call";
+import { estimateLlmCallCredits, meteredLlmCall } from "./metered-llm-call";
 
 const CLERK_ID = "clerk_test_user_123";
 const CALL_ID = "call-test-uuid-1";
@@ -76,6 +77,22 @@ describe("meteredLlmCall — bypass prevention", () => {
     getCreditBalancesMock.mockResolvedValue({ total: 0, monthly: 0, purchased: 0, betaPromotional: 0, lastDailyClaim: null });
 
     const res = await call();
+
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error("unreachable");
+    expect(res.status).toBe(402);
+    expect(res.code).toBe("insufficient_credits");
+    expect(generateTextMock).not.toHaveBeenCalled();
+    expect(chargeLlmUsageMock).not.toHaveBeenCalled();
+  });
+
+  it("balance below estimated cost: provider NEVER called, returns 402", async () => {
+    getCreditBalancesMock.mockResolvedValue({ total: 5, monthly: 5, purchased: 0, betaPromotional: 0, lastDailyClaim: null });
+    const prompt = "x".repeat(4000);
+    const estimate = estimateLlmCallCredits({ prompt, maxTokens: 2_000_000 });
+    expect(estimate).toBeGreaterThan(5);
+
+    const res = await call({ prompt, llmOptions: { task: "chat", maxTokens: 2_000_000 } });
 
     expect(res.ok).toBe(false);
     if (res.ok) throw new Error("unreachable");
@@ -173,7 +190,42 @@ describe("meteredLlmCall — bypass prevention", () => {
     expect(chargeLlmUsageMock).toHaveBeenCalledTimes(1);
   });
 
-  it("transient charge errors do not block the response", async () => {
+  it("a skipped debit with no error still returns the text", async () => {
+    chargeLlmUsageMock.mockResolvedValue({
+      calculated: true,
+      debited: false,
+      balance: null,
+      replayed: false,
+    });
+
+    const res = await call();
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error("unreachable");
+    expect(res.result.text).toBe("hello world");
+  });
+
+  it("debit RPC error returns that error and does not return the text", async () => {
+    chargeLlmUsageMock.mockResolvedValue({
+      calculated: true,
+      debited: false,
+      balance: null,
+      replayed: false,
+      error: "debit_credits failed: ledger down",
+    });
+
+    const res = await call();
+
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error("unreachable");
+    expect(res.status).toBe(503);
+    expect(res.code).toBe("billing_unavailable");
+    expect(res.error).toBe("debit_credits failed: ledger down");
+    expect(res).not.toHaveProperty("result");
+    expect(generateTextMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("billing service unavailable does not return the text", async () => {
     chargeLlmUsageMock.mockResolvedValue({
       calculated: true,
       debited: false,
@@ -184,8 +236,11 @@ describe("meteredLlmCall — bypass prevention", () => {
 
     const res = await call();
 
-    expect(res.ok).toBe(true);
-    if (!res.ok) throw new Error("unreachable");
-    expect(res.result.text).toBe("hello world");
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error("unreachable");
+    expect(res.status).toBe(503);
+    expect(res.code).toBe("billing_unavailable");
+    expect(res.error).toBe("Billing service unavailable");
+    expect(res).not.toHaveProperty("result");
   });
 });

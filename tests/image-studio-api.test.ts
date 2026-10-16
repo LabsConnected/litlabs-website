@@ -47,6 +47,13 @@ vi.mock("@/lib/generation/cost-engine", () => ({
     retailLiTTBits: 1,
   })),
 }));
+vi.mock("@/lib/generation/enforce-media-caps", () => ({
+  assertGenerationWithinPlanCaps: vi.fn(async () => null),
+  planLimitResponse: vi.fn(),
+  releaseMediaCapHold: vi.fn(async () => undefined),
+  settleMediaCapHold: vi.fn(async () => undefined),
+  PlanLimitError: class PlanLimitError extends Error {},
+}));
 vi.mock("@/lib/generation/jobs", () => ({
   createGenerationJob: vi.fn(async () => null),
   completeGenerationJob: vi.fn(async () => {}),

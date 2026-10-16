@@ -6,7 +6,18 @@ import { refundVideoCharge } from "@/lib/video-refunds";
 import { getGenerationJobByProviderJobId, completeGenerationJob, updateGenerationJobMetadata, failGenerationJob, setGenerationRefundStatus } from "@/lib/generation/jobs";
 import type { RefundStatus } from "@/lib/generation/types";
 import { resolveInternalUserId } from "@/lib/generation/identity";
+import { releaseMediaCapHold, settleMediaCapHold } from "@/lib/generation/enforce-media-caps";
 import { uploadAudio } from "@/lib/r2";
+
+async function releaseJobHold(job: { userId: string; requestId: string } | null | undefined) {
+  if (!job?.userId || !job.requestId) return;
+  await releaseMediaCapHold({ internalUserId: job.userId, requestId: job.requestId }).catch(() => undefined);
+}
+
+async function settleJobHold(job: { userId: string; requestId: string } | null | undefined) {
+  if (!job?.userId || !job.requestId) return;
+  await settleMediaCapHold({ internalUserId: job.userId, requestId: job.requestId }).catch(() => undefined);
+}
 
 export async function POST(req: NextRequest) {
   const { userId } = await auth(req);
@@ -129,6 +140,7 @@ export async function POST(req: NextRequest) {
           "Video generation failed — no video output",
           refundStatus,
         );
+        await releaseJobHold(genRow);
       } else if (internalUserId) {
         const row = await getGenerationJobByProviderJobId(internalUserId, operationName);
         if (row) {
@@ -137,6 +149,7 @@ export async function POST(req: NextRequest) {
             "Video generation failed — no video output",
             refundStatus,
           );
+          await releaseJobHold(row);
         }
       }
     }
@@ -146,6 +159,7 @@ export async function POST(req: NextRequest) {
     let durableUrl: string | null = null;
     let assetId: string | null = null;
     if (updated.done && videoUri) {
+      let producedJob: { userId: string; requestId: string } | null = null;
       try {
         // Download the video from Google's signed URL and upload to R2.
         const videoResponse = await fetch(videoUri);
@@ -167,6 +181,7 @@ export async function POST(req: NextRequest) {
               });
               await completeGenerationJob(genJob.id, `generation_job:${genJob.id}`);
               assetId = `generation_job:${genJob.id}`;
+              producedJob = genJob;
             }
           }
         }
@@ -176,6 +191,10 @@ export async function POST(req: NextRequest) {
         // not appear in Asset Lake until a durable URL is available.
         durableUrl = videoUri;
       }
+      if (!producedJob && internalUserId) {
+        producedJob = await getGenerationJobByProviderJobId(internalUserId, operationName);
+      }
+      await settleJobHold(producedJob);
     }
 
     return NextResponse.json({

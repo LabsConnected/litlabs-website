@@ -337,6 +337,7 @@ export async function runVisualBuild(input: {
     width: 1600,
     height: 900,
     sectionKey: heroSection.key,
+    clerkId: input.userId,
   });
 
   const generatedInspection = await inspectGeneratedAsset(generated, 960, 540);

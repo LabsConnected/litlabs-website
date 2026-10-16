@@ -34,6 +34,12 @@ import { uploadBinaryAsset } from "@/lib/r2";
 import { supabaseAdmin, getSupabaseAdmin } from "@/lib/supabase";
 import { calculateRetailBits } from "@/lib/generation/cost-engine";
 import {
+  assertGenerationWithinPlanCaps,
+  releaseMediaCapHold,
+  settleMediaCapHold,
+  type PlanLimitDenial,
+} from "@/lib/generation/enforce-media-caps";
+import {
   buildChargeRating,
   recordChargeEvidence,
 } from "@/lib/billing/canonical-pricing";
@@ -999,6 +1005,7 @@ export type ImageGenerationFailureCode =
   | "INSUFFICIENT_FUNDS"
   | "DUPLICATE_IN_FLIGHT"
   | "QUOTA_EXCEEDED"
+  | "PLAN_LIMIT"
   | "PROVIDER_ERROR"
   | "WALLET_ERROR"
   | "SERVICE_ERROR";
@@ -1010,6 +1017,8 @@ export type ImageGenerationFailure = {
   providerId: MediaProviderId | null;
   code: ImageGenerationFailureCode;
   error: string;
+  /** Set when code is PLAN_LIMIT. The HTTP route exposes this as plan_limit. */
+  reason?: PlanLimitDenial["reason"];
   retryable: boolean;
   durationMs: number;
 };
@@ -1078,6 +1087,20 @@ export interface ImageServiceDeps {
     input: ImageGenerationInput,
     prompt: string,
   ) => Promise<MediaResult>;
+  /**
+   * Monthly count, provider-spend, and free-model daily caps.
+   * Runs before the provider call. Tests stub this to skip the ledger read.
+   */
+  checkPlanLimit: (input: {
+    clerkId: string;
+    requestId: string;
+    provider: string;
+    model: string;
+    providerCostCents: number;
+    billingExempt: boolean;
+  }) => Promise<PlanLimitDenial | null>;
+  releaseCapHold?: (input: { internalUserId: string; requestId: string }) => Promise<void>;
+  settleCapHold?: (input: { internalUserId: string; requestId: string }) => Promise<void>;
 }
 
 const defaultDeps: ImageServiceDeps = {
@@ -1108,6 +1131,16 @@ const defaultDeps: ImageServiceDeps = {
     persistImage(userId, downloadUrl, providerId, prompt),
   dispatch: (providerId, input, prompt) =>
     dispatchProvider(providerId, input, prompt),
+  checkPlanLimit: (input) =>
+    assertGenerationWithinPlanCaps({
+      clerkId: input.clerkId,
+      requestId: input.requestId,
+      modality: "image",
+      provider: input.provider,
+      model: input.model,
+      providerCostCents: input.providerCostCents,
+      billingExempt: input.billingExempt,
+    }),
 };
 
 const GEMINI_IMAGE_MODEL =
@@ -1327,7 +1360,12 @@ export async function generateImage(
     }
   }
 
+  const releaseCap = deps.releaseCapHold ?? releaseMediaCapHold;
+  const settleCap = deps.settleCapHold ?? settleMediaCapHold;
   const failJob = async (error: string): Promise<void> => {
+    if (internalUserId) {
+      await releaseCap({ internalUserId, requestId }).catch(() => undefined);
+    }
     if (job) {
       await deps
         .setJobStatus(job.id, "failed", { error: error.slice(0, 1000) })
@@ -1352,6 +1390,46 @@ export async function generateImage(
     }
   }
 
+  // ── 4b. Plan caps, before any provider call ────────────────────
+  // Monthly image count and provider-spend come from generation_jobs.
+  // Free 0-cent models use the per-plan daily cap instead.
+  let billingExempt = false;
+  try {
+    billingExempt = await deps.isBillingExempt(userId);
+  } catch {
+    billingExempt = false;
+  }
+  const enforceCap = async (
+    candidate: MediaProviderId,
+    model: string,
+    cents: number,
+  ): Promise<ImageGenerationFailure | null> => {
+    let planLimit: PlanLimitDenial | null;
+    try {
+      planLimit = await deps.checkPlanLimit({
+        clerkId: userId,
+        requestId,
+        provider: candidate,
+        model,
+        providerCostCents: cents,
+        billingExempt,
+      });
+    } catch {
+      planLimit = {
+        status: 402,
+        code: "plan_limit",
+        reason: "usage_unavailable",
+        error: "Plan usage could not be read. Nothing was generated.",
+      };
+    }
+    if (!planLimit) return null;
+    await failJob(planLimit.error);
+    return {
+      ...fail("PLAN_LIMIT", planLimit.error, false, candidate),
+      reason: planLimit.reason,
+    };
+  };
+
   // ── 5. Provider dispatch (with auto-router fallthrough) ────────
   let result: MediaResult | null = null;
   let usedProviderId: MediaProviderId = providerId;
@@ -1360,20 +1438,43 @@ export async function generateImage(
   if (generationMode === "auto-free" || generationMode === "auto-quality") {
     const order = getAutoOrder(generationMode, prompt);
     for (const candidateId of order) {
-      if (!getProvider(candidateId)) continue;
+      const candidate = getProvider(candidateId);
+      if (!candidate) continue;
+      const blocked = await enforceCap(
+        candidateId,
+        imageModelFor(candidateId, input),
+        candidate.free ? 0 : calculateRetailBits({
+          modality: "image",
+          provider: candidateId,
+          model: imageModelFor(candidateId, input),
+        }).providerCostCents,
+      );
+      if (blocked) return blocked;
       try {
         result = await deps.dispatch(candidateId, input, prompt);
         usedProviderId = candidateId;
         break;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error("Provider error");
+        if (internalUserId) {
+          await releaseCap({ internalUserId, requestId }).catch(() => undefined);
+        }
       }
     }
   } else {
+    const blocked = await enforceCap(
+      providerId,
+      requestedModel,
+      provider.free ? 0 : costResult.providerCostCents,
+    );
+    if (blocked) return blocked;
     try {
       result = await deps.dispatch(providerId, input, prompt);
     } catch (err) {
       lastError = err instanceof Error ? err : new Error("Provider error");
+      if (internalUserId) {
+        await releaseCap({ internalUserId, requestId }).catch(() => undefined);
+      }
     }
   }
 
@@ -1498,6 +1599,10 @@ export async function generateImage(
     }
   } else {
     assetPersistenceFailed = true;
+  }
+
+  if (internalUserId) {
+    await settleCap({ internalUserId, requestId }).catch(() => undefined);
   }
 
   const duration = Date.now() - startTime;

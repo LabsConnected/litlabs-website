@@ -20,12 +20,275 @@ type DbError = { code?: string; message?: string } | null;
 
 const STALE_CLAIM_MS = 120_000;
 
+/** Incoming subscription id lost to the stored protected subscription. Ack it. */
+class SupersededSubscriptionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SupersededSubscriptionError";
+  }
+}
+
 function isUniqueViolation(error: DbError): boolean {
   if (!error) return false;
   return (
     error.code === "23505" ||
     /duplicate key|unique constraint/i.test(error.message ?? "")
   );
+}
+
+function subscriptionAllowances(): Record<string, number> {
+  const allowances: Record<string, number> = {};
+  for (const plan of Object.values(PLANS)) {
+    allowances[plan.id] = subscriptionCreditAllowance(plan.id);
+  }
+  return allowances;
+}
+
+function unixSecondsToIso(value: number | null | undefined): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return new Date(value * 1000).toISOString();
+}
+
+function clerkIdFromInvoice(inv: Stripe.Invoice): string | undefined {
+  const details = inv.parent?.subscription_details as
+    | { metadata?: { clerk_id?: unknown } | null }
+    | null
+    | undefined;
+  const fromDetails = details?.metadata?.clerk_id;
+  if (typeof fromDetails === "string" && fromDetails.trim()) return fromDetails.trim();
+  const fromInvoice = inv.metadata?.clerk_id;
+  if (typeof fromInvoice === "string" && fromInvoice.trim()) return fromInvoice.trim();
+  return undefined;
+}
+
+type ApplyOutcome = "applied" | "conflict" | "stale" | "recheck";
+
+/**
+ * One locked transaction decides identity, plan, ordering, and the grant.
+ * A conflict throws SupersededSubscriptionError. The handler finalizes the
+ * claim as superseded_subscription and returns 200 so Stripe stops retrying.
+ * Any other database error throws, the claim is released, and Stripe retries.
+ */
+async function applySubscriptionEvent(
+  sb: AdminClient,
+  args: {
+    userId: string;
+    incomingSubscriptionId: string;
+    event: Stripe.Event;
+    authoritative: boolean;
+    ordering: "skip_if_older" | "apply";
+    requireExisting: boolean;
+    plan: string | null;
+    status: string | null;
+    updatePlan: boolean;
+    statusPolicy: "write" | "activate_unless_terminal" | "leave";
+    liveStatus: string | null;
+    stripeCustomerId: string | null;
+    periodStart: string | null;
+    periodEnd: string | null;
+    cancelAtPeriodEnd: boolean | null;
+    incomingPlan: string | null;
+    grantMode: "none" | "upgrade_delta" | "invoice_full";
+    grantAmount: number | null;
+    grantIdempotencyKey: string | null;
+    grantDescription: string | null;
+    grantReferenceId: string | null;
+    grantExpiresAt: string | null;
+    skipGrantIdempotencyKey: string | null;
+  },
+): Promise<{ outcome: ApplyOutcome; existingSubscriptionId?: string }> {
+  const { data, error } = await sb.rpc("apply_subscription_event", {
+    p_user_id: args.userId,
+    p_incoming_subscription_id: args.incomingSubscriptionId,
+    p_stripe_event_id: args.event.id,
+    p_event_type: args.event.type,
+    p_event_created: eventCreatedSeconds(args.event),
+    p_authoritative: args.authoritative,
+    p_ordering: args.ordering,
+    p_require_existing: args.requireExisting,
+    p_plan: args.plan,
+    p_status: args.status,
+    p_update_plan: args.updatePlan,
+    p_status_policy: args.statusPolicy,
+    p_live_status: args.liveStatus,
+    p_stripe_customer_id: args.stripeCustomerId,
+    p_period_start: args.periodStart,
+    p_period_end: args.periodEnd,
+    p_cancel_at_period_end: args.cancelAtPeriodEnd,
+    p_incoming_plan: args.incomingPlan,
+    p_grant_mode: args.grantMode,
+    p_grant_amount: args.grantAmount,
+    p_grant_idempotency_key: args.grantIdempotencyKey,
+    p_grant_description: args.grantDescription,
+    p_grant_reference_id: args.grantReferenceId,
+    p_grant_expires_at: args.grantExpiresAt,
+    p_skip_grant_idempotency_key: args.skipGrantIdempotencyKey,
+    p_allowances: subscriptionAllowances(),
+  });
+  if (error) {
+    throw new Error(
+      `[stripe] ${args.event.type} ${args.event.id}: apply_subscription_event failed: ${error.message}`,
+    );
+  }
+  const row = (Array.isArray(data) ? data[0] : data) as
+    | { outcome?: string; existing_subscription_id?: string }
+    | null
+    | undefined;
+  const outcome = row?.outcome;
+  if (
+    outcome !== "applied" &&
+    outcome !== "conflict" &&
+    outcome !== "stale" &&
+    outcome !== "recheck"
+  ) {
+    throw new Error(
+      `[stripe] ${args.event.type} ${args.event.id}: apply_subscription_event returned no outcome`,
+    );
+  }
+  if (outcome === "conflict") {
+    console.error(
+      `[stripe] ${args.event.type} ${args.event.id}: kept ${row?.existing_subscription_id}; refused overwrite by ${args.incomingSubscriptionId}`,
+    );
+    throw new SupersededSubscriptionError(
+      `[stripe] ${args.event.type} ${args.event.id}: duplicate subscription ${args.incomingSubscriptionId} conflicts with ${row?.existing_subscription_id ?? "the stored subscription"}`,
+    );
+  }
+  if (outcome === "stale") {
+    console.warn(
+      `[stripe] ${args.event.type} ${args.event.id}: subscription clock is newer than ${eventCreatedSeconds(args.event)}; plan is unchanged, status is reconciled from the live subscription`,
+    );
+  }
+  return {
+    outcome,
+    existingSubscriptionId: row?.existing_subscription_id,
+  };
+}
+
+/**
+ * An invoice for a different subscription id must not grant, and must not
+ * retry forever, when this user already holds a protected subscription.
+ * The locked apply records the conflict and throws SupersededSubscriptionError.
+ * No clerk id, or no other held id, leaves the caller on the retry path.
+ */
+async function acknowledgeIfSupersededInvoice(
+  sb: AdminClient,
+  event: Stripe.Event,
+  clerkId: string,
+  incomingSubscriptionId: string,
+): Promise<void> {
+  const { data: user, error: userError } = await sb
+    .from("users")
+    .select("id")
+    .eq("clerk_id", clerkId)
+    .maybeSingle();
+  if (userError) {
+    throw new Error(
+      `[stripe] ${event.type} ${event.id}: user lookup failed: ${userError.message}`,
+    );
+  }
+  if (!user) return;
+  const { data: held, error: heldError } = await sb
+    .from("subscriptions")
+    .select("stripe_subscription_id, status")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (heldError) {
+    throw new Error(
+      `[stripe] ${event.type} ${event.id}: subscription lookup failed: ${heldError.message}`,
+    );
+  }
+  const heldId =
+    typeof held?.stripe_subscription_id === "string" ? held.stripe_subscription_id.trim() : "";
+  const status = typeof held?.status === "string" ? held.status : "";
+  if (!heldId || heldId === incomingSubscriptionId) return;
+  if (status === "canceled" || status === "incomplete_expired") return;
+  await applySubscriptionEvent(sb, {
+    userId: user.id,
+    incomingSubscriptionId,
+    event,
+    authoritative: true,
+    ordering: "apply",
+    requireExisting: true,
+    plan: null,
+    status: null,
+    updatePlan: false,
+    statusPolicy: "leave",
+    liveStatus: null,
+    stripeCustomerId: null,
+    periodStart: null,
+    periodEnd: null,
+    cancelAtPeriodEnd: null,
+    incomingPlan: null,
+    grantMode: "none",
+    grantAmount: null,
+    grantIdempotencyKey: null,
+    grantDescription: null,
+    grantReferenceId: null,
+    grantExpiresAt: null,
+    skipGrantIdempotencyKey: null,
+  });
+}
+
+/**
+ * A newer subscription event must not erase an invoice status, and a stale
+ * event must not be acknowledged until the live Stripe status is stored.
+ * This write does not change the plan and does not move
+ * last_stripe_event_created, so an older plan change still cannot land.
+ */
+async function readLiveSubscription(
+  stripe: Stripe,
+  event: Stripe.Event,
+  subscriptionId: string,
+): Promise<Stripe.Subscription> {
+  try {
+    return await stripe.subscriptions.retrieve(subscriptionId, undefined, {
+      timeout: 8000,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "unknown error";
+    throw new Error(
+      `[stripe] ${event.type} ${event.id}: live subscription re-read failed: ${message}`,
+    );
+  }
+}
+
+async function applyReconciledStatus(
+  sb: AdminClient,
+  event: Stripe.Event,
+  userId: string,
+  subscriptionId: string,
+  status: string,
+): Promise<void> {
+  const decision = await applySubscriptionEvent(sb, {
+    userId,
+    incomingSubscriptionId: subscriptionId,
+    event,
+    authoritative: true,
+    ordering: "apply",
+    requireExisting: true,
+    plan: null,
+    status,
+    updatePlan: false,
+    statusPolicy: "write",
+    liveStatus: status,
+    stripeCustomerId: null,
+    periodStart: null,
+    periodEnd: null,
+    cancelAtPeriodEnd: null,
+    incomingPlan: null,
+    grantMode: "none",
+    grantAmount: null,
+    grantIdempotencyKey: null,
+    grantDescription: null,
+    grantReferenceId: null,
+    grantExpiresAt: null,
+    skipGrantIdempotencyKey: null,
+  });
+  if (decision.outcome !== "applied") {
+    throw new Error(
+      `[stripe] ${event.type} ${event.id}: status ${status} was not applied (${decision.outcome})`,
+    );
+  }
 }
 
 function isMissingRow(error: DbError): boolean {
@@ -99,6 +362,8 @@ function planIdFromPrice(priceId: string | null): PlanId | null {
 /**
  * Never guess a plan. Metadata wins when it names a real plan; otherwise
  * the Stripe price must match STRIPE_PRICE_*. Disagreeing sources fail.
+ * Subscription updates do not use this directly: the price id wins there,
+ * because checkout metadata stays on the original plan after a price change.
  */
 function resolveBillablePlan(
   metadataPlan: unknown,
@@ -121,6 +386,34 @@ function resolveBillablePlan(
   return plan;
 }
 
+/**
+ * The subscription item price is the plan. Metadata is only a fallback
+ * when the price is not in the env map, so a Creator→Pro price change
+ * does not 500 on stale `plan_id` metadata.
+ *
+ * #662 (head 702b9bbd, which contains #658's grant-race commits) still
+ * throws when metadata and price disagree inside resolveBillablePlan.
+ * Subscription events go through this function instead: the price wins.
+ * A non-proration invoice.paid still throws if its price disagrees with
+ * the plan stored on the row. Unmapped prices are still not guessed.
+ */
+function resolveSubscriptionPlan(
+  metadataPlan: unknown,
+  priceId: string | null,
+  context: string,
+): PlanId {
+  const fromPrice = planIdFromPrice(priceId);
+  if (fromPrice) return fromPrice;
+  return resolveBillablePlan(metadataPlan, null, context);
+}
+
+function subscriptionCreditAllowance(plan: string | null | undefined): number {
+  if (!plan || !(plan in PLANS)) return 0;
+  const def = PLANS[plan as PlanId];
+  if (def.billingType !== "subscription" || def.monthlyCredits <= 0) return 0;
+  return def.monthlyCredits;
+}
+
 function requireSubscriptionGrantPlan(
   plan: string | null | undefined,
   context: string,
@@ -140,36 +433,11 @@ function requireSubscriptionGrantPlan(
   return resolved;
 }
 
-/**
- * Statuses a late invoice.paid must not overwrite with "active".
- * `refunded` is local-only (plan refunds); the others match Stripe.
- */
-const TERMINAL_SUBSCRIPTION_STATUSES = new Set([
-  "canceled",
-  "past_due",
-  "unpaid",
-  "incomplete_expired",
-  "refunded",
-]);
-
-/** Live Stripe statuses that mean "do not mark this subscription active". */
-const LIVE_NON_ACTIVE_STATUSES = new Set([
-  "canceled",
-  "past_due",
-  "unpaid",
-  "incomplete",
-  "incomplete_expired",
-  "paused",
-]);
-
-function eventCreatedMs(event: Stripe.Event): number {
+/** Stripe `event.created` is whole seconds. Missing values use the current second. */
+function eventCreatedSeconds(event: Stripe.Event): number {
   return typeof event.created === "number" && event.created > 0
-    ? event.created * 1000
-    : Date.now();
-}
-
-function eventTimestamp(event: Stripe.Event): string {
-  return new Date(eventCreatedMs(event)).toISOString();
+    ? Math.floor(event.created)
+    : Math.floor(Date.now() / 1000);
 }
 
 type ListedRefund = { id: string; amount: number; created: number };
@@ -378,73 +646,140 @@ async function markEventProcessed(
 
 type ClaimResult = "owned" | "duplicate" | "in_progress";
 
+type ClaimOwnership = { status: ClaimResult; token: string };
+
+/**
+ * Claim, takeover, finalize, and release go through SQL so the claim token
+ * is checked in the same statement as the write. A stale retry that loses
+ * the token cannot delete or finalize the winner's row.
+ */
 async function claimStripeEvent(
   sb: AdminClient,
   eventId: string,
   eventType: string,
-  attempt = 0,
-): Promise<ClaimResult> {
-  const { error } = await sb.from("stripe_events").insert({
-    stripe_event_id: eventId,
-    event_type: eventType,
-    result: "processing",
+): Promise<ClaimOwnership> {
+  const token = crypto.randomUUID();
+  const staleBefore = new Date(Date.now() - STALE_CLAIM_MS).toISOString();
+  const { data, error } = await sb.rpc("claim_stripe_event", {
+    p_stripe_event_id: eventId,
+    p_event_type: eventType,
+    p_claim_token: token,
+    p_stale_before: staleBefore,
   });
-  if (!error) return "owned";
-  if (!isUniqueViolation(error)) {
+  if (error) {
     throw new Error(`[stripe] event claim failed: ${error.message}`);
   }
-
-  const { data, error: readError } = await sb
-    .from("stripe_events")
-    .select("result, processed_at")
-    .eq("stripe_event_id", eventId)
-    .single();
-  if (readError || !data) {
-    throw new Error(
-      `[stripe] event claim conflict for ${eventId} but the row was unreadable`,
-    );
+  if (data !== "owned" && data !== "duplicate" && data !== "in_progress") {
+    throw new Error(`[stripe] event claim for ${eventId} returned ${String(data)}`);
   }
-  if (data.result !== "processing") return "duplicate";
-
-  const processedAt = data.processed_at
-    ? new Date(data.processed_at).getTime()
-    : Number.NaN;
-  const age = Date.now() - processedAt;
-  if (attempt < 1 && Number.isFinite(age) && age > STALE_CLAIM_MS) {
-    const { error: delError } = await sb
-      .from("stripe_events")
-      .delete()
-      .eq("stripe_event_id", eventId);
-    if (delError) {
-      throw new Error(`[stripe] stale claim release failed: ${delError.message}`);
-    }
-    return claimStripeEvent(sb, eventId, eventType, attempt + 1);
-  }
-  return "in_progress";
+  return { status: data, token };
 }
 
 async function finalizeStripeEvent(
   sb: AdminClient,
   eventId: string,
+  claimToken: string,
   result: string,
 ): Promise<void> {
-  const { error } = await sb
-    .from("stripe_events")
-    .update({ result })
-    .eq("stripe_event_id", eventId);
+  const { data, error } = await sb.rpc("finalize_stripe_event", {
+    p_stripe_event_id: eventId,
+    p_claim_token: claimToken,
+    p_result: result,
+  });
   if (error) {
     throw new Error(`[stripe] finalize stripe event failed: ${error.message}`);
   }
+  if (data !== true) {
+    throw new Error(
+      `[stripe] finalize stripe event ${eventId} lost the claim token`,
+    );
+  }
 }
 
-async function releaseStripeEvent(sb: AdminClient, eventId: string): Promise<void> {
-  const { error } = await sb
-    .from("stripe_events")
-    .delete()
-    .eq("stripe_event_id", eventId);
+async function releaseStripeEvent(
+  sb: AdminClient,
+  eventId: string,
+  claimToken: string,
+): Promise<void> {
+  const { data, error } = await sb.rpc("release_stripe_event", {
+    p_stripe_event_id: eventId,
+    p_claim_token: claimToken,
+  });
   if (error) {
     throw new Error(`[stripe] release stripe event failed: ${error.message}`);
   }
+  if (data === "lost") {
+    console.error(
+      `[stripe] release skipped; claim ${eventId} is owned by another token`,
+    );
+    return;
+  }
+  if (data !== "released" && data !== "absent") {
+    throw new Error(`[stripe] release stripe event ${eventId} returned ${String(data)}`);
+  }
+}
+
+function subscriptionIdFromInvoice(invoice: Stripe.Invoice): string | null {
+  const parent = invoice.parent?.subscription_details?.subscription;
+  if (typeof parent === "string" && parent) return parent;
+  const legacy = (invoice as Stripe.Invoice & {
+    subscription?: string | { id?: string } | null;
+  }).subscription;
+  if (typeof legacy === "string" && legacy) return legacy;
+  if (legacy && typeof legacy === "object" && typeof legacy.id === "string") return legacy.id;
+  return null;
+}
+
+/** Plan metadata for a subscription invoice charge. Charge metadata is often empty. */
+async function subscriptionMetaForCharge(
+  stripe: Stripe,
+  charge: Stripe.Charge,
+): Promise<{ planId: string | null; clerkId: string | null; subscriptionId: string | null }> {
+  // Basil Charge types omit `invoice`. Webhook payloads still send it.
+  const invoiceRef = (
+    charge as Stripe.Charge & { invoice?: string | { id?: string } | null }
+  ).invoice;
+  const invoiceId = typeof invoiceRef === "string" ? invoiceRef : invoiceRef?.id ?? null;
+  if (!invoiceId) return { planId: null, clerkId: null, subscriptionId: null };
+  let invoice: Stripe.Invoice;
+  try {
+    invoice = await stripe.invoices.retrieve(invoiceId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "unknown error";
+    throw new Error(`[stripe] charge ${charge.id}: invoice retrieve failed: ${message}`);
+  }
+  const subscriptionId = subscriptionIdFromInvoice(invoice);
+  if (!subscriptionId) return { planId: null, clerkId: null, subscriptionId: null };
+  let sub: Stripe.Subscription;
+  try {
+    sub = await stripe.subscriptions.retrieve(subscriptionId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "unknown error";
+    throw new Error(`[stripe] charge ${charge.id}: subscription retrieve failed: ${message}`);
+  }
+  return {
+    planId: sub.metadata?.plan_id ?? null,
+    clerkId: sub.metadata?.clerk_id ?? null,
+    subscriptionId,
+  };
+}
+
+async function recordBillingAlert(
+  sb: AdminClient,
+  event: Stripe.Event,
+  stripeObjectId: string,
+  detail: Record<string, unknown>,
+): Promise<void> {
+  const { error } = await sb.from("billing_alerts").insert({
+    stripe_event_id: event.id,
+    alert_type: event.type,
+    stripe_object_id: stripeObjectId,
+    detail,
+  });
+  if (error && !isUniqueViolation(error)) {
+    throw new Error(`[stripe] billing alert ${event.id} failed: ${error.message}`);
+  }
+  console.error(`[stripe][alert] ${event.type} ${event.id} ${stripeObjectId}`);
 }
 
 async function creditCreditPack(
@@ -507,44 +842,6 @@ async function debitCreditsOrThrow(
   }
 }
 
-async function grantSubscriptionCredits(
-  sb: NonNullable<ReturnType<typeof getAdminSupabase>>,
-  userId: string,
-  planId: PlanId,
-  idempotencyKey: string,
-  expiresAt?: string | null,
-): Promise<void> {
-  const plan = PLANS[planId];
-  if (!plan || plan.monthlyCredits <= 0) return;
-  try {
-    // Supabase rpc() returns { data, error } — it does NOT throw on a
-    // database error. Both must be treated as failures.
-    const { error: rpcError } = await sb.rpc("grant_credits", {
-      p_user_id: userId,
-      p_amount: plan.monthlyCredits,
-      p_category: "subscription_grant",
-      p_balance_bucket: "monthly",
-      p_description: `${plan.name} monthly grant — ${plan.monthlyCredits} LiTTBits`,
-      p_idempotency_key: idempotencyKey,
-      p_reference_type: "subscription",
-      p_expires_at: expiresAt ?? undefined,
-    });
-    if (rpcError) {
-      throw new Error(`grant_credits RPC error: ${rpcError.message}`);
-    }
-  } catch (err) {
-    // Log AND propagate: a failed grant must surface as HTTP 500 so Stripe
-    // retries. The per-invoice idempotency key makes retries safe (the RPC
-    // returns granted=false instead of double-granting). Swallowing here
-    // would permanently leave the customer without purchased credits.
-    console.error(
-      `[stripe] grantSubscriptionCredits failed for user ${userId} plan ${planId}:`,
-      err,
-    );
-    throw err;
-  }
-}
-
 export async function POST(req: NextRequest) {
   const body = await req.text();
   const sig = req.headers.get("stripe-signature");
@@ -559,7 +856,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No webhook secret" }, { status: 500 });
   }
 
-  const stripe = new Stripe(key, { apiVersion: "2025-08-27.basil" });
+  const stripe = new Stripe(key, {
+    apiVersion: "2025-08-27.basil",
+    timeout: 20_000,
+    maxNetworkRetries: 2,
+  });
 
   let event: Stripe.Event;
   try {
@@ -575,25 +876,28 @@ export async function POST(req: NextRequest) {
   const sb = isAdminSupabaseConfigured() ? getAdminSupabase() : null;
   let selfClaim = false;
   let ownedClaim = false;
+  let claimToken: string | null = null;
 
   try {
     selfClaim = await eventClaimsItself(sb, event);
     if (sb && !selfClaim) {
       const claim = await claimStripeEvent(sb, event.id, event.type);
-      if (claim === "duplicate") {
+      if (claim.status === "duplicate") {
         return NextResponse.json({ received: true, replayed: true });
       }
-      if (claim === "in_progress") {
+      if (claim.status === "in_progress") {
         return NextResponse.json(
           { error: "Webhook event is already in progress" },
           { status: 500 },
         );
       }
+      claimToken = claim.token;
       ownedClaim = true;
     } else if (sb && (await isEventProcessed(sb, event.id))) {
       return NextResponse.json({ received: true, replayed: true });
     }
 
+    const eventResult = "processed";
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
@@ -698,6 +1002,11 @@ export async function POST(req: NextRequest) {
           await creditCreditPack(clerkId, coinAmount, session.id);
         }
         // If this was a one-time Founding Member purchase, grant permanent entitlement
+        if (planId && clerkId && PLANS[planId]?.billingType === "one_time" && !sb) {
+          throw new Error(
+            `[stripe] checkout.session.completed ${event.id}: admin supabase is not configured`,
+          );
+        }
         if (planId && clerkId && sb) {
           const plan = PLANS[planId];
           if (plan && plan.billingType === "one_time") {
@@ -742,11 +1051,19 @@ export async function POST(req: NextRequest) {
         // Mark the matching pending order as expired.
         // The RPC is idempotent — if the event was already processed, it returns
         // already_processed. If no pending order matches, it returns not_pending.
-        if (!sb) break;
         const expiredSession = event.data.object as Stripe.Checkout.Session;
         const expiredMeta = expiredSession.metadata || {};
         const expiredOrderId = expiredMeta.marketplace_order_id;
-        if (expiredOrderId && expiredMeta.product_type === "agent") {
+        const expiresAgentOrder = Boolean(expiredOrderId && expiredMeta.product_type === "agent");
+        if (!sb) {
+          if (expiresAgentOrder || expiredMeta.product_type === "plan") {
+            throw new Error(
+              `[stripe] checkout.session.expired ${event.id}: admin supabase is not configured`,
+            );
+          }
+          break;
+        }
+        if (expiresAgentOrder) {
           const { error: rpcError } = await sb.rpc("expire_pending_order", {
             p_order_id: expiredOrderId,
           });
@@ -754,13 +1071,25 @@ export async function POST(req: NextRequest) {
             throw new Error(`expire_pending_order failed: ${rpcError.message}`);
           }
         }
+        const { error: releaseError } = await sb.rpc("release_checkout_reservation", {
+          p_session_id: expiredSession.id,
+        });
+        if (releaseError) {
+          throw new Error(
+            `release_checkout_reservation failed: ${releaseError.message}`,
+          );
+        }
         break;
       }
 
       case "payment_intent.payment_failed": {
         // Mark the matching pending order as failed.
         // Look up by payment_intent_id first (primary), then by metadata.
-        if (!sb) break;
+        if (!sb) {
+          throw new Error(
+            `[stripe] payment_intent.payment_failed ${event.id}: admin supabase is not configured`,
+          );
+        }
         const failedIntent = event.data.object as Stripe.PaymentIntent;
         const failedPiId = failedIntent.id;
         // Try to find a pending order by payment intent ID
@@ -806,7 +1135,11 @@ export async function POST(req: NextRequest) {
 
       case "customer.subscription.created":
       case "customer.subscription.updated": {
-        if (!sb) break;
+        if (!sb) {
+          throw new Error(
+            `[stripe] ${event.type} ${event.id}: admin supabase is not configured`,
+          );
+        }
         const sub = event.data.object as Stripe.Subscription;
         const subMeta = sub.metadata || {};
         const subClerkId = subMeta.clerk_id;
@@ -833,62 +1166,145 @@ export async function POST(req: NextRequest) {
             `[stripe] ${event.type} ${sub.id}: cannot resolve the customer to a user`,
           );
         }
-        const planId = resolveBillablePlan(
-          subPlanId,
-          priceIdFromSubscription(sub),
-          `${event.type} ${sub.id}`,
-        );
-        const { error: subUpsertError } = await sb.from("subscriptions").upsert(
-          {
-            user_id: subUserId,
-            stripe_customer_id:
-              typeof sub.customer === "string"
-                ? sub.customer
-                : sub.customer?.id,
-            stripe_subscription_id: sub.id,
+        // Identity, ordering, the plan write, and any upgrade delta run in
+        // one locked transaction. A conflict throws so this delivery is 500.
+        let applied = sub;
+        let authoritative = false;
+        let settled = false;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const appliedMeta = applied.metadata || {};
+          const planId = resolveSubscriptionPlan(
+            (appliedMeta.plan_id as PlanId) || subPlanId,
+            priceIdFromSubscription(applied),
+            `${event.type} ${sub.id}`,
+          );
+          const periodEndUnix = applied.items?.data?.[0]?.current_period_end;
+          const periodStartUnix = applied.items?.data?.[0]?.current_period_start;
+          const periodToken = periodEndUnix ?? "na";
+          const decision = await applySubscriptionEvent(sb, {
+            userId: subUserId,
+            incomingSubscriptionId: sub.id,
+            event,
+            authoritative,
+            ordering: "skip_if_older",
+            requireExisting: false,
             plan: planId,
-            status: sub.status,
-            current_period_start: sub.items?.data?.[0]?.current_period_start
-              ? new Date(sub.items.data[0].current_period_start * 1000).toISOString()
-              : null,
-            current_period_end: sub.items?.data?.[0]?.current_period_end
-              ? new Date(sub.items.data[0].current_period_end * 1000).toISOString()
-              : null,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "user_id", ignoreDuplicates: false },
-        );
-        if (subUpsertError) {
+            status: applied.status,
+            updatePlan: true,
+            statusPolicy: "write",
+            liveStatus: null,
+            stripeCustomerId:
+              typeof applied.customer === "string"
+                ? applied.customer
+                : applied.customer?.id ?? null,
+            periodStart: unixSecondsToIso(periodStartUnix),
+            periodEnd: unixSecondsToIso(periodEndUnix),
+            cancelAtPeriodEnd: applied.cancel_at_period_end === true,
+            incomingPlan: planId,
+            grantMode: event.type === "customer.subscription.updated" ? "upgrade_delta" : "none",
+            grantAmount: null,
+            grantIdempotencyKey: `plan_upgrade_${sub.id}_${periodToken}_${planId}`,
+            grantDescription: null,
+            grantReferenceId: `period_plan_${sub.id}_${periodToken}_${planId}`,
+            grantExpiresAt: null,
+            skipGrantIdempotencyKey: null,
+          });
+          if (decision.outcome === "applied") {
+            settled = true;
+            break;
+          }
+          if (decision.outcome === "stale") {
+            const live = await readLiveSubscription(stripe, event, sub.id);
+            if (!live.status) {
+              throw new Error(
+                `[stripe] ${event.type} ${event.id}: live subscription has no status`,
+              );
+            }
+            await applyReconciledStatus(sb, event, subUserId, sub.id, live.status);
+            settled = true;
+            break;
+          }
+          if (decision.outcome === "recheck") {
+            try {
+              applied = await stripe.subscriptions.retrieve(sub.id, undefined, {
+                timeout: 8000,
+              });
+            } catch (readErr) {
+              const message = readErr instanceof Error ? readErr.message : "unknown error";
+              throw new Error(
+                `[stripe] ${event.type} ${event.id}: same-second subscription re-read failed: ${message}`,
+              );
+            }
+            authoritative = true;
+            continue;
+          }
+        }
+        if (!settled) {
           throw new Error(
-            `[stripe] ${event.type} ${sub.id}: subscription upsert failed: ${subUpsertError.message}`,
+            `[stripe] ${event.type} ${event.id}: subscription event was not applied`,
           );
         }
         break;
       }
 
       case "customer.subscription.deleted": {
-        if (!sb) break;
+        if (!sb) {
+          throw new Error(
+            `[stripe] customer.subscription.deleted ${event.id}: admin supabase is not configured`,
+          );
+        }
         const delSub = event.data.object as Stripe.Subscription;
-        const { data: delMatch } = await sb
+        const { data: delMatch, error: delLookupError } = await sb
           .from("subscriptions")
           .select("user_id")
           .eq("stripe_subscription_id", delSub.id)
           .single();
+        if (delLookupError && !isMissingRow(delLookupError)) {
+          throw new Error(
+            `[stripe] customer.subscription.deleted ${delSub.id}: ${delLookupError.message}`,
+          );
+        }
         if (!delMatch) {
           throw new Error(
             `[stripe] customer.subscription.deleted ${delSub.id}: no subscription row`,
           );
         }
-        const { error: cancelError } = await sb
-          .from("subscriptions")
-          .update({
-            status: "canceled",
-            updated_at: eventTimestamp(event),
-          })
-          .eq("user_id", delMatch.user_id);
-        if (cancelError) {
+        const deleted = await applySubscriptionEvent(sb, {
+          userId: delMatch.user_id,
+          incomingSubscriptionId: delSub.id,
+          event,
+          authoritative: true,
+          ordering: "skip_if_older",
+          requireExisting: true,
+          plan: null,
+          status: "canceled",
+          updatePlan: false,
+          statusPolicy: "write",
+          liveStatus: null,
+          stripeCustomerId: null,
+          periodStart: null,
+          periodEnd: null,
+          cancelAtPeriodEnd: false,
+          incomingPlan: null,
+          grantMode: "none",
+          grantAmount: null,
+          grantIdempotencyKey: null,
+          grantDescription: null,
+          grantReferenceId: null,
+          grantExpiresAt: null,
+          skipGrantIdempotencyKey: null,
+        });
+        if (deleted.outcome === "stale") {
+          const live = await readLiveSubscription(stripe, event, delSub.id);
+          if (!live.status) {
+            throw new Error(
+              `[stripe] customer.subscription.deleted ${event.id}: live subscription has no status`,
+            );
+          }
+          await applyReconciledStatus(sb, event, delMatch.user_id, delSub.id, live.status);
+        } else if (deleted.outcome !== "applied") {
           throw new Error(
-            `[stripe] customer.subscription.deleted ${delSub.id}: ${cancelError.message}`,
+            `[stripe] customer.subscription.deleted ${event.id}: cancellation was not applied`,
           );
         }
         break;
@@ -909,6 +1325,10 @@ export async function POST(req: NextRequest) {
             `[stripe] invoice.paid ${event.id}: missing parent subscription id`,
           );
         }
+        const invoiceClerk = clerkIdFromInvoice(inv);
+        if (invoiceClerk) {
+          await acknowledgeIfSupersededInvoice(sb, event, invoiceClerk, invSubId);
+        }
         // The customer.subscription.created event is usually still in flight
         // when invoice.paid arrives: it performs a multi-query upsert while
         // this handler does a single SELECT, so without a wait the lookup
@@ -922,12 +1342,12 @@ export async function POST(req: NextRequest) {
           user_id: string;
           plan: string;
           status?: string | null;
-          updated_at?: string | null;
+          last_stripe_event_created?: number | string | null;
         } | null = null;
         for (let attempt = 0; attempt < 6; attempt++) {
           const { data, error: lookupError } = await sb
             .from("subscriptions")
-            .select("user_id, plan, status, updated_at")
+            .select("user_id, plan, status, last_stripe_event_created")
             .eq("stripe_subscription_id", invSubId)
             .single();
           if (lookupError && !isMissingRow(lookupError)) {
@@ -944,21 +1364,25 @@ export async function POST(req: NextRequest) {
             await new Promise((resolve) => setTimeout(resolve, 2000));
           }
         }
-        // Self-healing fallback: if the subscription.created event was lost
-        // or is still delayed, reconstruct the row from the Stripe API
-        // instead of leaving the customer without credits.
+        // Self-healing fallback: if subscription.created was lost, resolve
+        // the user from Stripe. The write and the grant share one transaction
+        // below, so a failed grant does not leave a reconstructed row behind.
+        let reconstruct: {
+          planId: string;
+          status: string;
+          customerId: string | null;
+          periodStart: string | null;
+          periodEnd: string | null;
+          cancelAtPeriodEnd: boolean;
+        } | null = null;
         if (!invMatch) {
           console.warn(
             `[stripe] invoice.paid ${event.id}: subscription row missing after retries, resolving via Stripe API`,
           );
           try {
-            // Bounded: 8s max for the Stripe API call. Combined with the
-            // 10s retry loop, the worst case stays under Stripe's 30s
-            // webhook timeout even if the API hangs.
             const fullSub = await stripe.subscriptions.retrieve(invSubId, undefined, {
               timeout: 8000,
             });
-            // Resolve the user from the subscription's own metadata — no guessing.
             const clerkId: string | undefined =
               typeof fullSub.metadata?.clerk_id === "string"
                 ? fullSub.metadata.clerk_id
@@ -970,53 +1394,27 @@ export async function POST(req: NextRequest) {
                 .eq("clerk_id", clerkId)
                 .single();
               if (u) {
-                const planId = resolveBillablePlan(
+                const planId = resolveSubscriptionPlan(
                   fullSub.metadata?.plan_id,
                   priceIdFromSubscription(fullSub),
                   `invoice.paid ${event.id} fallback`,
                 );
-                const { error: fallbackUpsertError } = await sb
-                  .from("subscriptions")
-                  .upsert(
-                    {
-                      user_id: u.id,
-                      stripe_customer_id:
-                        typeof inv.customer === "string"
-                          ? inv.customer
-                          : inv.customer?.id ?? null,
-                      stripe_subscription_id: invSubId,
-                      plan: planId,
-                      status: fullSub.status,
-                      current_period_start: fullSub.items?.data?.[0]?.current_period_start
-                        ? new Date(
-                            fullSub.items.data[0].current_period_start * 1000,
-                          ).toISOString()
-                        : null,
-                      current_period_end: fullSub.items?.data?.[0]?.current_period_end
-                        ? new Date(
-                            fullSub.items.data[0].current_period_end * 1000,
-                          ).toISOString()
-                        : null,
-                      updated_at: new Date().toISOString(),
-                    },
-                    // subscriptions.user_id is the unique row identity.
-                    // stripe_subscription_id is additionally unique (see
-                    // migration) but is not the conflict target: a user may
-                    // already have a row whose subscription id is still null.
-                    { onConflict: "user_id", ignoreDuplicates: false },
-                  );
-                if (fallbackUpsertError) {
-                  // Do NOT proceed to grant: the row wasn't reconstructed.
-                  // Throw so Stripe retries (recoverable, not silently dropped).
-                  throw new Error(
-                    `[stripe] invoice.paid ${event.id}: fallback upsert failed: ${fallbackUpsertError.message}`,
-                  );
-                }
+                reconstruct = {
+                  planId,
+                  status: fullSub.status,
+                  customerId:
+                    typeof inv.customer === "string"
+                      ? inv.customer
+                      : inv.customer?.id ?? null,
+                  periodStart: unixSecondsToIso(fullSub.items?.data?.[0]?.current_period_start),
+                  periodEnd: unixSecondsToIso(fullSub.items?.data?.[0]?.current_period_end),
+                  cancelAtPeriodEnd: fullSub.cancel_at_period_end === true,
+                };
                 invMatch = {
                   user_id: u.id,
                   plan: planId,
                   status: fullSub.status,
-                  updated_at: eventTimestamp(event),
+                  last_stripe_event_created: null,
                 };
               }
             }
@@ -1036,18 +1434,8 @@ export async function POST(req: NextRequest) {
           );
         }
         // A late invoice.paid must not revive a newer canceled or past_due
-        // row. Compare this event's created time with the timestamp stored
-        // by the newer status write, and re-read the subscription from
-        // Stripe so a canceled/past_due object is never forced to active.
-        // A failed re-read is 500: guessing "active" is the bug.
-        const storedMs = invMatch.updated_at
-          ? Date.parse(invMatch.updated_at)
-          : Number.NaN;
-        const newerTerminalStatus =
-          !!invMatch.status &&
-          TERMINAL_SUBSCRIPTION_STATUSES.has(invMatch.status) &&
-          Number.isFinite(storedMs) &&
-          storedMs > eventCreatedMs(event);
+        // row. The locked function compares event.created with the stored
+        // Stripe second. A failed re-read is 500: guessing "active" is the bug.
         let liveStatus = "";
         try {
           const liveSub = await stripe.subscriptions.retrieve(
@@ -1063,52 +1451,74 @@ export async function POST(req: NextRequest) {
             `[stripe] invoice.paid ${event.id}: subscription status re-read failed: ${message}`,
           );
         }
-        const liveBlocksActive = LIVE_NON_ACTIVE_STATUSES.has(liveStatus);
-        if (!newerTerminalStatus && !liveBlocksActive) {
-          const { error: statusUpdateError } = await sb
-            .from("subscriptions")
-            .update({
-              status: "active",
-              updated_at: eventTimestamp(event),
-            })
-            .eq("user_id", invMatch.user_id);
-          if (statusUpdateError) {
+        // A proration invoice must not grant the full monthly amount.
+        // The price check stays after this branch: a proration whose price
+        // disagrees with the stored plan is not a failed renewal.
+        const isProration = inv.billing_reason === "subscription_update";
+        let grantMode: "none" | "invoice_full" = "none";
+        let grantAmount: number | null = null;
+        let grantKey: string | null = null;
+        let grantDescription: string | null = null;
+        let grantReferenceId: string | null = null;
+        let grantExpiresAt: string | null = null;
+        let skipGrantKey: string | null = null;
+        let planForCall = invMatch.plan;
+        if (!isProration) {
+          const planId = requireSubscriptionGrantPlan(
+            invMatch.plan,
+            `invoice.paid ${event.id}`,
+          );
+          const pricedPlan = planIdFromPrice(priceIdFromInvoice(inv));
+          if (pricedPlan && pricedPlan !== planId) {
             throw new Error(
-              `[stripe] invoice.paid ${event.id}: status update failed: ${statusUpdateError.message}`,
+              `[stripe] invoice.paid ${event.id}: price resolves to ${pricedPlan} but subscription plan is ${planId}`,
             );
           }
-        } else {
-          console.warn(
-            `[stripe] invoice.paid ${event.id}: leaving status ${invMatch.status ?? "unknown"} (live ${liveStatus || "unknown"})`,
-          );
+          const periodEnd = inv.lines.data[0]?.period?.end;
+          const periodToken = periodEnd ?? "na";
+          planForCall = planId;
+          grantMode = "invoice_full";
+          grantAmount = PLANS[planId].monthlyCredits;
+          grantKey = `invoice_grant_${inv.id}`;
+          grantDescription = `${PLANS[planId].name} monthly grant — ${PLANS[planId].monthlyCredits} LiTTBits`;
+          grantReferenceId = `period_plan_${invSubId}_${periodToken}_${planId}`;
+          grantExpiresAt = periodEnd ? new Date(periodEnd * 1000).toISOString() : null;
+          skipGrantKey = `plan_upgrade_${invSubId}_${periodToken}_${planId}`;
         }
-        // Invoice payment is the only source of subscription grants. This
-        // prevents the first billing period from being granted twice.
-        // If the grant throws, the error propagates → HTTP 500 → Stripe
-        // retries. The per-invoice idempotency key makes retries safe.
-        const planId = requireSubscriptionGrantPlan(
-          invMatch.plan,
-          `invoice.paid ${event.id}`,
-        );
-        const pricedPlan = planIdFromPrice(priceIdFromInvoice(inv));
-        if (pricedPlan && pricedPlan !== planId) {
-          throw new Error(
-            `[stripe] invoice.paid ${event.id}: price resolves to ${pricedPlan} but subscription plan is ${planId}`,
-          );
-        }
-        const periodEnd = inv.lines.data[0]?.period?.end;
-        await grantSubscriptionCredits(
-          sb,
-          invMatch.user_id,
-          planId,
-          `invoice_grant_${inv.id}`,
-          periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
-        );
+        await applySubscriptionEvent(sb, {
+          userId: invMatch.user_id,
+          incomingSubscriptionId: invSubId,
+          event,
+          authoritative: true,
+          ordering: "apply",
+          requireExisting: reconstruct === null,
+          plan: planForCall,
+          status: reconstruct?.status ?? null,
+          updatePlan: reconstruct !== null,
+          statusPolicy: "activate_unless_terminal",
+          liveStatus,
+          stripeCustomerId: reconstruct?.customerId ?? null,
+          periodStart: reconstruct?.periodStart ?? null,
+          periodEnd: reconstruct?.periodEnd ?? null,
+          cancelAtPeriodEnd: reconstruct?.cancelAtPeriodEnd ?? null,
+          incomingPlan: planForCall,
+          grantMode,
+          grantAmount,
+          grantIdempotencyKey: grantKey,
+          grantDescription,
+          grantReferenceId,
+          grantExpiresAt,
+          skipGrantIdempotencyKey: skipGrantKey,
+        });
         break;
       }
 
       case "invoice.payment_failed": {
-        if (!sb) break;
+        if (!sb) {
+          throw new Error(
+            `[stripe] invoice.payment_failed ${event.id}: admin supabase is not configured`,
+          );
+        }
         const failInv = event.data.object as Stripe.Invoice;
         const failSubId = failInv.parent?.subscription_details?.subscription;
         if (!failSubId || typeof failSubId !== "string") {
@@ -1116,9 +1526,13 @@ export async function POST(req: NextRequest) {
             `[stripe] invoice.payment_failed ${event.id}: missing subscription id`,
           );
         }
+        const failedClerk = clerkIdFromInvoice(failInv);
+        if (failedClerk) {
+          await acknowledgeIfSupersededInvoice(sb, event, failedClerk, failSubId);
+        }
         const { data: failMatch, error: failLookupError } = await sb
           .from("subscriptions")
-          .select("user_id")
+          .select("user_id, status, last_stripe_event_created")
           .eq("stripe_subscription_id", failSubId)
           .single();
         if (failLookupError && !isMissingRow(failLookupError)) {
@@ -1131,16 +1545,61 @@ export async function POST(req: NextRequest) {
             `[stripe] invoice.payment_failed ${event.id}: no subscription row for ${failSubId}`,
           );
         }
-        const { error: pastDueError } = await sb
-          .from("subscriptions")
-          .update({
-            status: "past_due",
-            updated_at: eventTimestamp(event),
-          })
-          .eq("user_id", failMatch.user_id);
-        if (pastDueError) {
+        const failed = await applySubscriptionEvent(sb, {
+          userId: failMatch.user_id,
+          incomingSubscriptionId: failSubId,
+          event,
+          authoritative: true,
+          ordering: "skip_if_older",
+          requireExisting: true,
+          plan: null,
+          status: "past_due",
+          updatePlan: false,
+          statusPolicy: "write",
+          liveStatus: null,
+          stripeCustomerId: null,
+          periodStart: null,
+          periodEnd: null,
+          cancelAtPeriodEnd: null,
+          incomingPlan: null,
+          grantMode: "none",
+          grantAmount: null,
+          grantIdempotencyKey: null,
+          grantDescription: null,
+          grantReferenceId: null,
+          grantExpiresAt: null,
+          skipGrantIdempotencyKey: null,
+        });
+        if (failed.outcome === "stale") {
+          // subscription.created can be one second newer and leave the row
+          // incomplete. That clock must not drop this status. A live
+          // active, trialing, or ended subscription still wins over past_due.
+          const live = await readLiveSubscription(stripe, event, failSubId);
+          const liveStatus = live.status ?? "";
+          const superseding = new Set([
+            "active",
+            "trialing",
+            "canceled",
+            "incomplete_expired",
+            "unpaid",
+            "paused",
+          ]);
+          const status = superseding.has(liveStatus) ? liveStatus : "past_due";
+          if (!status) {
+            throw new Error(
+              `[stripe] invoice.payment_failed ${event.id}: live subscription has no status`,
+            );
+          }
+          await applyReconciledStatus(
+            sb,
+            event,
+            failMatch.user_id,
+            failSubId,
+            status,
+          );
+        } else if (failed.outcome !== "applied") {
           throw new Error(
-            `[stripe] invoice.payment_failed ${event.id}: ${pastDueError.message}`,
+            `[stripe] invoice.payment_failed ${event.id}: past_due was not applied`,
           );
         }
         break;
@@ -1201,18 +1660,30 @@ export async function POST(req: NextRequest) {
         }
 
         // ── Plan / Founder refund: revoke entitlement ──
-        // For plan refunds (including Founder), revoke the subscription
-        // entitlement. Do NOT debit LiTTBits for Founder refunds — Founder
-        // has 0 LiTTBits. For subscription plans, the credits were already
-        // consumed; revoking access is the correct action.
-        const refundPlanId = refundMeta.plan_id as PlanId | undefined;
-        if (refundPlanId && refundClerkId) {
+        // Subscription invoice charges often have no plan metadata. Read the
+        // invoice, then the subscription, before deciding this is not a plan.
+        // Do NOT debit LiTTBits for Founder refunds — Founder has 0 LiTTBits.
+        let refundPlanId = refundMeta.plan_id as PlanId | undefined;
+        let planClerkId = refundClerkId;
+        if (refundProductType !== "credit_pack" && (!refundPlanId || !planClerkId)) {
+          const meta = await subscriptionMetaForCharge(stripe, charge);
+          if (!refundPlanId && meta.planId && meta.planId in PLANS) {
+            refundPlanId = meta.planId as PlanId;
+          }
+          if (!planClerkId && meta.clerkId) planClerkId = meta.clerkId;
+          if (meta.subscriptionId && (!refundPlanId || !planClerkId)) {
+            throw new Error(
+              `[stripe] charge.refunded ${charge.id}: subscription ${meta.subscriptionId} has no plan metadata`,
+            );
+          }
+        }
+        if (refundPlanId && planClerkId) {
           const plan = PLANS[refundPlanId];
           if (plan) {
             const { data: refundUser } = await sb
               .from("users")
               .select("id")
-              .eq("clerk_id", refundClerkId)
+              .eq("clerk_id", planClerkId)
               .single();
             if (!refundUser) {
               throw new Error(
@@ -1284,18 +1755,102 @@ export async function POST(req: NextRequest) {
         }
         break;
       }
+
+      case "charge.dispute.created":
+      case "charge.dispute.updated":
+      case "charge.dispute.closed":
+      case "charge.dispute.funds_withdrawn":
+      case "charge.dispute.funds_reinstated": {
+        if (!sb) {
+          throw new Error(
+            `[stripe] ${event.type} ${event.id}: admin supabase is not configured`,
+          );
+        }
+        const dispute = event.data.object as Stripe.Dispute;
+        const chargeId =
+          typeof dispute.charge === "string" ? dispute.charge : dispute.charge?.id;
+        if (!chargeId) {
+          throw new Error(`[stripe] ${event.type} ${event.id}: dispute has no charge`);
+        }
+        let charge: Stripe.Charge;
+        try {
+          charge = await stripe.charges.retrieve(chargeId);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "unknown error";
+          throw new Error(`[stripe] ${event.type} ${event.id}: charge retrieve failed: ${message}`);
+        }
+        const meta = await subscriptionMetaForCharge(stripe, charge);
+        const clerkId = charge.metadata?.clerk_id || meta.clerkId;
+        await recordBillingAlert(sb, event, dispute.id, {
+          charge_id: chargeId,
+          dispute_status: dispute.status,
+          reason: dispute.reason,
+          subscription_id: meta.subscriptionId,
+          amount: dispute.amount,
+        });
+        const locksAccess =
+          event.type === "charge.dispute.created" ||
+          event.type === "charge.dispute.funds_withdrawn";
+        const restoresAccess =
+          event.type === "charge.dispute.funds_reinstated" ||
+          (event.type === "charge.dispute.closed" &&
+            (dispute.status === "won" || dispute.status === "warning_closed"));
+        if (clerkId && meta.subscriptionId && (locksAccess || restoresAccess)) {
+          const { data: disputeUser, error: userError } = await sb
+            .from("users")
+            .select("id")
+            .eq("clerk_id", clerkId)
+            .maybeSingle();
+          if (userError) {
+            throw new Error(`[stripe] ${event.type} ${event.id}: user lookup failed: ${userError.message}`);
+          }
+          if (disputeUser) {
+            const nextStatus = locksAccess ? "disputed" : "active";
+            let update = sb
+              .from("subscriptions")
+              .update({ status: nextStatus, updated_at: new Date().toISOString() })
+              .eq("user_id", disputeUser.id)
+              .eq("stripe_subscription_id", meta.subscriptionId);
+            if (!locksAccess) update = update.eq("status", "disputed");
+            const { error: statusError } = await update;
+            if (statusError) {
+              throw new Error(
+                `[stripe] ${event.type} ${event.id}: subscription status update failed: ${statusError.message}`,
+              );
+            }
+          }
+        }
+        break;
+      }
     }
 
-    if (sb && ownedClaim) {
-      await finalizeStripeEvent(sb, event.id, "processed");
+    if (sb && ownedClaim && claimToken) {
+      await finalizeStripeEvent(sb, event.id, claimToken, eventResult);
     } else if (sb && selfClaim) {
       await markEventProcessed(sb, event.id, event.type, "processed");
     }
   } catch (err) {
+    if (err instanceof SupersededSubscriptionError) {
+      console.error("[stripe] superseded subscription acknowledged", event.id, err);
+      if (sb && ownedClaim && claimToken) {
+        try {
+          await finalizeStripeEvent(sb, event.id, claimToken, "superseded_subscription");
+          return NextResponse.json({ received: true, result: "superseded_subscription" });
+        } catch (finalizeErr) {
+          console.error("[stripe] failed to record superseded subscription", event.id, finalizeErr);
+          try {
+            await releaseStripeEvent(sb, event.id, claimToken);
+          } catch (releaseErr) {
+            console.error("[stripe] failed to release event claim", event.id, releaseErr);
+          }
+        }
+      }
+      return NextResponse.json({ error: "Webhook processing failed" }, { status: 500 });
+    }
     console.error("[stripe] webhook processing failed", event.id, err);
-    if (sb && ownedClaim) {
+    if (sb && ownedClaim && claimToken) {
       try {
-        await releaseStripeEvent(sb, event.id);
+        await releaseStripeEvent(sb, event.id, claimToken);
       } catch (releaseErr) {
         console.error("[stripe] failed to release event claim", event.id, releaseErr);
       }

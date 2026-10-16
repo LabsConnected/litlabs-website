@@ -5,6 +5,7 @@ import { withRateLimit } from "@/lib/rate-limiter";
 import { listVisualBuilds } from "@/lib/visual-builds/repository";
 import { VisualBuildRequestSchema } from "@/lib/visual-builds/types";
 import { runVisualBuild } from "@/lib/visual-builds/orchestrator";
+import { PlanLimitError } from "@/lib/generation/enforce-media-caps";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,6 +57,12 @@ async function postHandler(
       changedFiles: result.changedFiles,
     });
   } catch (error) {
+    if (error instanceof PlanLimitError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code, reason: error.reason },
+        { status: error.status },
+      );
+    }
     return NextResponse.json({ error: error instanceof Error ? error.message : "Visual build failed" }, { status: 500 });
   }
 }
