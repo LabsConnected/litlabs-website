@@ -19,6 +19,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { ENTITLED_SUBSCRIPTION_STATUSES } from "@/lib/billing/subscription-entitlement";
 import { getAdminSupabase } from "@/lib/supabase-admin";
 
 const ADMIN_USER_ID = process.env.ADMIN_CLERK_ID || process.env.ADMIN_USER_ID || "";
@@ -95,7 +96,8 @@ export async function GET(req: NextRequest) {
         .then((r) => ({ data: r.data, error: r.error })),
     );
 
-    // Plan per user: latest active/trialing subscription, else 'starter'.
+    // Plan per user: latest entitled subscription (active or trialing), else starter.
+    // past_due is not entitled. See subscription-entitlement.ts.
     const plans = new Map<string, string>();
     if (events.some((e) => e.user_id)) {
       const subs = await fetchAll<{ user_id: string; plan: string | null; status: string | null; updated_at: string | null }>(
@@ -103,7 +105,7 @@ export async function GET(req: NextRequest) {
           sb
             .from("subscriptions")
             .select("user_id, plan, status, updated_at")
-            .in("status", ["active", "trialing"])
+            .in("status", [...ENTITLED_SUBSCRIPTION_STATUSES])
             .order("updated_at", { ascending: false, nullsFirst: false })
             .range(from, to)
             .then((r) => ({ data: r.data, error: r.error })),

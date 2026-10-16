@@ -178,8 +178,18 @@ describe.skipIf(!ENABLED)("concurrent subscription conflict (real Postgres)", ()
       const loser = stored === a ? b : a;
       const probs: string[] = [];
       const accepted = [sa, sb].filter((code) => code === 200).length;
-      const retryable = [sa, sb].filter((code) => code >= 500 && code <= 599).length;
-      if (accepted !== 1 || retryable !== 1) probs.push(`http ${sa}/${sb}`);
+      if (accepted !== 2) probs.push(`http ${sa}/${sb}`);
+      const eventRows = (
+        await db.query(
+          `SELECT result FROM public.stripe_events
+           WHERE stripe_event_id = ANY($1::text[])`,
+          [[`evt_${TAG}_ca_${i}`, `evt_${TAG}_cb_${i}`]],
+        )
+      ).rows as { result: string }[];
+      const results = eventRows.map((row) => row.result).sort();
+      if (results.join(",") !== "processed,superseded_subscription") {
+        probs.push(`event results=${results.join(",")}`);
+      }
       if (subs.length !== 1) probs.push(`subscription rows=${subs.length}`);
       if (stored !== a && stored !== b) probs.push(`stored=${stored}`);
       if (

@@ -7,18 +7,19 @@ import type { CostInput, CostResult, LittProduct, ProductTier } from "./types";
  * Converts real provider costs (in cents USD) into retail LiTTBits.
  *
  * Formula:
- *   retailCents = ceil((providerCostCents + infraAllowanceCents) * (1 + marginPercent/100))
- *   retailBits = retailCents * (RETAIL_CREDITS_PER_USD / 100)
+ *   retailBits = ceil((providerCostCents + infraAllowanceCents) * (1 + marginPercent/100) / CENTS_PER_BIT)
  *
- * Retail conversion matches the LLM cost engine: 1000 credits = $1 of
- * retail, with the same 50% markup. Provider cost is unchanged.
+ * CENTS_PER_BIT is the canonical exchange rate: 1 LiTTBit ≈ $0.01
+ * (100 LiTTBits = $1.00). This keeps the math simple and transparent.
+ * Do not multiply this rate. A 1000-credits-per-dollar conversion would
+ * charge ten times as many LiTTBits for the same generation and devalue
+ * balances, grants, and reservations already on the ledger.
  *
  * Until shadow billing is verified against real provider invoices,
  * we use a conservative margin and a small infra allowance.
  */
 
-/** 1000 credits = $1 of retail. Same rate as llm-cost-engine costEquivalentBits. */
-export const RETAIL_CREDITS_PER_USD = 1000;
+const CENTS_PER_BIT = 1; // 1 LiTTBit = $0.01 = 1 cent
 const DEFAULT_MARGIN_PERCENT = 50; // 50% margin on top of provider + infra cost
 const DEFAULT_INFRA_ALLOWANCE_CENTS = 1; // $0.01 per generation for R2/compute
 
@@ -164,7 +165,7 @@ export function pricedGenerationInputs(): CostInput[] {
  * Formula:
  *   totalCostCents = providerCost + infraAllowance
  *   retailCents = totalCostCents * (1 + margin/100)
- *   retailBits = retailCents * (RETAIL_CREDITS_PER_USD / 100)
+ *   retailBits = ceil(retailCents / CENTS_PER_BIT)
  *
  * Minimum 1 LiTTBit for any paid generation.
  * Free providers (cost=0) return 0 LiTTBits.
@@ -188,10 +189,7 @@ export function calculateRetailBits(
 
   const totalCostCents = providerCostCents + infraAllowanceCents;
   const retailCents = Math.ceil(totalCostCents * (1 + marginPercent / 100));
-  const retailLiTTBits = Math.max(
-    1,
-    retailCents * (RETAIL_CREDITS_PER_USD / 100),
-  );
+  const retailLiTTBits = Math.max(1, Math.ceil(retailCents / CENTS_PER_BIT));
 
   return {
     providerCostCents,

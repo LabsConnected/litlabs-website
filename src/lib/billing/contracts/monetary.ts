@@ -10,11 +10,9 @@
  * The exchange rate is versioned and immutable per version. Historical charges
  * must always be reproducible from (usage + pricingVersion + exchangeRateVersion).
  *
- * Live retail conversion is one rate: 1000 credits = $1 of retail
- * (llm-cost-engine costEquivalentBits and generation RETAIL_CREDITS_PER_USD).
- * LEGACY_EXCHANGE_RATES.GENERATION_ENGINE below is the pre-unification
- * generation rate (100 credits per dollar) kept so historical charges
- * stay classifiable.
+ * CRITICAL: The existing codebase has TWO different exchange rates:
+ *   - llm-cost-engine.ts:       $1.00 ≈ 1000 BITS  (1 BIT = $0.001)
+ *   - generation/cost-engine.ts: $1.00 = 100 BITS   (1 BIT = $0.01)
  *
  * B1 does NOT pick one and rewrite balances. B1 defines the canonical contract
  * and leaves the existing rates classified as legacy until a reconciliation
@@ -139,7 +137,7 @@ export const LEGACY_EXCHANGE_RATES = {
     label: "Generation engine: 100 BITS per USD (legacy)",
     bitsPerUsdMicro: { num: 1, den: 10000 },
     source: "src/lib/generation/cost-engine.ts line 19",
-    note: "Historical. Live cost-engine uses RETAIL_CREDITS_PER_USD = 1000 (1000 credits = $1 retail).",
+    note: "CENTS_PER_BIT = 1 → 1 BIT = $0.01",
   },
 } as const;
 

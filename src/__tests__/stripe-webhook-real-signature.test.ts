@@ -39,7 +39,7 @@ function signed(evt: object) {
   return req(payload, stripe.webhooks.generateTestHeaderString({ payload, secret: SECRET }));
 }
 
-type EventRow = { result: string; processed_at: string };
+type EventRow = { result: string; processed_at: string; claim_token?: string | null };
 
 function fakeDb(opts: { subRowAfter?: number; grantError?: boolean; plan?: string } = {}) {
   const db = {
@@ -105,6 +105,40 @@ function fakeDb(opts: { subRowAfter?: number; grantError?: boolean; plan?: strin
       return q;
     },
     async rpc(name: string, a: any) {
+      if (name === "claim_stripe_event") {
+        const id = a.p_stripe_event_id as string;
+        const existing = db.events.get(id);
+        const staleBefore = new Date(a.p_stale_before).getTime();
+        if (!existing) {
+          db.events.set(id, {
+            result: "processing",
+            processed_at: new Date().toISOString(),
+            claim_token: a.p_claim_token,
+          });
+          return { data: "owned", error: null };
+        }
+        if (existing.result !== "processing") return { data: "duplicate", error: null };
+        if (new Date(existing.processed_at).getTime() > staleBefore) return { data: "in_progress", error: null };
+        existing.claim_token = a.p_claim_token;
+        existing.processed_at = new Date().toISOString();
+        return { data: "owned", error: null };
+      }
+      if (name === "finalize_stripe_event") {
+        const row = db.events.get(a.p_stripe_event_id);
+        if (!row || row.claim_token !== a.p_claim_token || row.result !== "processing") {
+          return { data: false, error: null };
+        }
+        row.result = a.p_result;
+        return { data: true, error: null };
+      }
+      if (name === "release_stripe_event") {
+        const row = db.events.get(a.p_stripe_event_id);
+        if (!row || row.claim_token !== a.p_claim_token || row.result !== "processing") {
+          return { data: row ? "lost" : "absent", error: null };
+        }
+        db.events.delete(a.p_stripe_event_id);
+        return { data: "released", error: null };
+      }
       if (opts.grantError && (name === "grant_credits" || name === "apply_subscription_event")) {
         return { error: { message: "boom" } };
       }

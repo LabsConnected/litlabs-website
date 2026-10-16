@@ -509,7 +509,7 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
       const events = await db.query(
         `SELECT result FROM public.stripe_events WHERE stripe_event_id = 'evt_local658_conflict'`,
       );
-      const ok = incoming.status === 500
+      const ok = incoming.status === 200
         && stored.rows.length === 1
         && stored.rows[0].stripe_subscription_id === "sub_local658_original"
         && stored.rows[0].plan === "creator_beta"
@@ -517,11 +517,12 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
         && conflicts.rows.length === 1
         && conflicts.rows[0].existing_subscription_id === "sub_local658_original"
         && conflicts.rows[0].incoming_subscription_id === "sub_local658_incoming"
-        && events.rows.length === 0;
+        && events.rows.length === 1
+        && events.rows[0].result === "superseded_subscription";
       return {
         http: incoming.status,
         detail: ok
-          ? `incoming ${incoming.status}, kept sub_local658_original, conflict recorded, event not acknowledged`
+          ? `incoming ${incoming.status}, kept sub_local658_original, conflict recorded, event superseded_subscription`
           : `FAIL status=${incoming.status} stored=${JSON.stringify(stored.rows)} conflicts=${JSON.stringify(conflicts.rows)} events=${JSON.stringify(events.rows)} body=${JSON.stringify(incoming.body)}`,
         db: { stored: stored.rows, conflicts: conflicts.rows, events: events.rows },
       };
@@ -579,7 +580,7 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
       };
     });
 
-    await run(11, "Eight parallel new subscriptions leave one row and 500 the rest", async () => {
+    await run(11, "Eight parallel new subscriptions leave one row and terminally record the rest", async () => {
       const clerk = "local658_parallel_subs";
       await userId(clerk);
       const deliveries = await Promise.all(
@@ -608,18 +609,22 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
          FROM public.billing_subscription_conflicts
          WHERE stripe_event_id LIKE 'evt_local658_parallel_%'`,
       );
-      const wins = deliveries.filter((delivery) => delivery.status === 200);
-      const failures = deliveries.filter((delivery) => delivery.status === 500);
+      const events = await db.query(
+        `SELECT result FROM public.stripe_events WHERE stripe_event_id LIKE 'evt_local658_parallel_%'`,
+      );
+      const processed = events.rows.filter((row) => row.result === "processed").length;
+      const superseded = events.rows.filter((row) => row.result === "superseded_subscription").length;
       const ok = stored.rows.length === 1
         && stored.rows[0].status === "active"
-        && wins.length === 1
-        && failures.length === 7
+        && deliveries.every((delivery) => delivery.status === 200)
+        && processed === 1
+        && superseded === 7
         && conflicts.rows.length === 7;
       return {
-        http: wins[0]?.status ?? failures[0]?.status ?? 0,
+        http: deliveries[0]?.status ?? 0,
         detail: ok
-          ? `one 200 for ${stored.rows[0].stripe_subscription_id}, seven 500s, seven conflicts`
-          : `FAIL wins=${wins.length} failures=${failures.map((d) => d.status).join(",")} stored=${JSON.stringify(stored.rows)} conflicts=${conflicts.rows.length} bodies=${JSON.stringify(deliveries.map((d) => d.body))}`,
+          ? `one processed event for ${stored.rows[0].stripe_subscription_id}, seven superseded, seven conflicts`
+          : `FAIL statuses=${deliveries.map((d) => d.status).join(",")} processed=${processed} superseded=${superseded} stored=${JSON.stringify(stored.rows)} conflicts=${conflicts.rows.length} bodies=${JSON.stringify(deliveries.map((d) => d.body))}`,
         db: { stored: stored.rows, conflicts: conflicts.rows.length, statuses: deliveries.map((d) => d.status) },
       };
     });
@@ -701,7 +706,7 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
       };
     });
 
-    await run(13, "invoice.paid for a second subscription grants nothing and is retryable", async () => {
+    await run(13, "invoice.paid for a second subscription grants nothing and is terminal", async () => {
       const clerk = "local658_conflict_invoice";
       await userId(clerk);
       const created = await deliver(
@@ -730,11 +735,12 @@ describe.skipIf(!ENABLED)("stripe webhook against local Postgres", () => {
         [clerk],
       );
       const amount = dbRows.ledger.reduce((sum, row) => sum + Number(row.amount), 0);
+      const superseded = dbRows.events.find((row) => row.stripe_event_id === "evt_local658_conflict_invoice_b");
       const ok = created.status === 200
-        && paid.status === 500
+        && paid.status === 200
         && amount === 0
         && stored.rows[0]?.stripe_subscription_id === "sub_local658_conflict_invoice_a"
-        && dbRows.events.every((row) => row.stripe_event_id !== "evt_local658_conflict_invoice_b");
+        && superseded?.result === "superseded_subscription";
       return {
         http: paid.status,
         detail: ok

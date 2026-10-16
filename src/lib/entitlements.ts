@@ -5,6 +5,7 @@ import {
   PLAN_ENTITLEMENTS,
   getPlanCreditAllowance,
 } from "@/config/plan-entitlements";
+import { subscriptionGrantsPaidPlan } from "@/lib/billing/subscription-entitlement";
 import {
   isOwnerClerkId,
   getActiveSimulation,
@@ -137,7 +138,9 @@ export async function getUserPlan(clerkId: string): Promise<PlanDefinition> {
       .eq("user_id", user.id)
       .single();
 
-    if (sub && sub.status === "active") {
+    // active and trialing. past_due is Starter until the invoice is paid.
+    // See src/lib/billing/subscription-entitlement.ts.
+    if (sub && subscriptionGrantsPaidPlan(sub.status)) {
       const planId = sub.plan as PlanId;
       if (PLANS[planId]) return PLANS[planId];
     }

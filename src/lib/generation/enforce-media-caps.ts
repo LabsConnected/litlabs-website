@@ -4,6 +4,7 @@ import { PLANS, type PlanId } from "@/config/plans";
 import { getProviderCostCents } from "@/lib/generation/cost-engine";
 import { PLAN_MEDIA_MONTHLY_CAPS } from "@/lib/generation/media-caps";
 import type { GenerationModality } from "@/lib/generation/types";
+import { subscriptionGrantsPaidPlan } from "@/lib/billing/subscription-entitlement";
 import { getSupabaseAdmin } from "@/lib/supabase";
 
 /**
@@ -36,8 +37,6 @@ const COUNTED_STATUSES = new Set([
   "persisting",
   "completed",
 ]);
-
-const ENTITLED_STATUSES = new Set(["active", "trialing", "past_due"]);
 
 export type PlanLimitReason =
   | "monthly_image_cap"
@@ -314,7 +313,7 @@ async function resolvePlan(
     sub &&
     typeof sub.plan === "string" &&
     isPlanId(sub.plan) &&
-    ENTITLED_STATUSES.has(sub.status)
+    subscriptionGrantsPaidPlan(sub.status)
       ? sub.plan
       : "starter";
   return { planId: plan, internalUserId: user.id };

@@ -20,6 +20,8 @@ Order:
   8. supabase/migrations/20261015200000_apply_subscription_event.sql
   9. supabase/migrations/20261015210000_checkout_session_lease.sql
   10. supabase/migrations/20261015220000_schedule_media_cap_sweep.sql
+  11. supabase/migrations/20261015230000_checkout_block_protected_subscription.sql
+  12. supabase/migrations/20261015240000_stripe_event_claim_token.sql
 
 Rollback, after the matching code is reverted:
   20261014000000: DROP INDEX IF EXISTS public.subscriptions_stripe_subscription_id_uidx;
@@ -45,6 +47,12 @@ Rollback, after the matching code is reverted:
                   DROP FUNCTION public.restore_open_checkout_reservation(text, uuid, text, text, text, text, timestamptz);
                   Restore begin_checkout_reservation from 20261015160000_checkout_reservations.sql.
   20261015220000: Unschedule sweep-expired-media-cap-holds when pg_cron is installed.
+  20261015230000: Restore begin_checkout_reservation from 20261015210000_checkout_session_lease.sql.
+  20261015240000: DROP FUNCTION public.release_stripe_event(text, uuid);
+                  DROP FUNCTION public.finalize_stripe_event(text, uuid, text);
+                  DROP FUNCTION public.claim_stripe_event(text, text, uuid, timestamptz);
+                  ALTER TABLE public.stripe_events DROP COLUMN IF EXISTS claim_token;
+                  DROP TABLE public.billing_alerts;
 EOF
 
 if [[ "${1:-}" == "--print" ]]; then

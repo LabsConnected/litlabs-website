@@ -3,10 +3,8 @@ import { auth } from "@/lib/auth";
 import { PLANS, getStripePriceId, type PlanId } from "@/config/plans";
 import { isFeatureEnabled } from "@/config/feature-flags";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { checkoutBlocksAnotherSubscription } from "@/lib/billing/subscription-entitlement";
 import { getSupabaseAdmin } from "@/lib/supabase";
-
-/** Statuses that already entitle the user. A second Checkout would double-bill. */
-const BLOCKING_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "past_due"]);
 
 /** Double-clicks inside this window share one Stripe idempotency key. */
 const CHECKOUT_IDEMPOTENCY_BUCKET_MS = 600_000;
@@ -217,7 +215,7 @@ async function handler(req: NextRequest) {
         if (subError) {
           return NextResponse.json({ error: "Database not configured" }, { status: 503 });
         }
-        if (sub && BLOCKING_SUBSCRIPTION_STATUSES.has(sub.status)) {
+        if (sub && checkoutBlocksAnotherSubscription(sub.status)) {
           return NextResponse.json(
             {
               error: "You already have a subscription. Manage it in the billing portal.",

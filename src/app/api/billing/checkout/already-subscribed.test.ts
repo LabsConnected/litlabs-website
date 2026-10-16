@@ -96,6 +96,33 @@ describe("POST /api/billing/checkout already subscribed", () => {
     }
   });
 
+  it("refuses unpaid, paused, incomplete, and refunded subscriptions before Stripe", async () => {
+    const originalFetch = global.fetch;
+    const stripeCalls: string[] = [];
+    global.fetch = vi.fn(async (url: string | URL | Request) => {
+      stripeCalls.push(String(url));
+      return new Response("stripe", { status: 500 });
+    }) as typeof fetch;
+    try {
+      for (const status of ["unpaid", "paused", "incomplete", "refunded"]) {
+        lookup({
+          users: [{ id: "db-user", clerk_id: "user_123" }],
+          subscriptions: [
+            { user_id: "db-user", status, stripe_customer_id: "cus_existing" },
+          ],
+        });
+        const res = await POST(request() as never);
+        expect(res.status, status).toBe(409);
+        const body = await res.json();
+        expect(body.code).toBe("already_subscribed");
+        expect(body.portalPath).toBe("/api/billing/portal");
+      }
+      expect(stripeCalls.filter((url) => url.includes("api.stripe.com"))).toHaveLength(0);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
   it("parallel checkout attempts by an already-subscribed user all return 409", async () => {
     lookup({
       users: [{ id: "db-user", clerk_id: "user_123" }],

@@ -20,6 +20,14 @@ type DbError = { code?: string; message?: string } | null;
 
 const STALE_CLAIM_MS = 120_000;
 
+/** Incoming subscription id lost to the stored protected subscription. Ack it. */
+class SupersededSubscriptionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SupersededSubscriptionError";
+  }
+}
+
 function isUniqueViolation(error: DbError): boolean {
   if (!error) return false;
   return (
@@ -45,8 +53,9 @@ type ApplyOutcome = "applied" | "conflict" | "stale" | "recheck";
 
 /**
  * One locked transaction decides identity, plan, ordering, and the grant.
- * conflict and any database error throw, so the claim is released and
- * Stripe retries. A conflict row committed by the function is not a 200.
+ * A conflict throws SupersededSubscriptionError. The handler finalizes the
+ * claim as superseded_subscription and returns 200 so Stripe stops retrying.
+ * Any other database error throws, the claim is released, and Stripe retries.
  */
 async function applySubscriptionEvent(
   sb: AdminClient,
@@ -128,7 +137,7 @@ async function applySubscriptionEvent(
     console.error(
       `[stripe] ${args.event.type} ${args.event.id}: kept ${row?.existing_subscription_id}; refused overwrite by ${args.incomingSubscriptionId}`,
     );
-    throw new Error(
+    throw new SupersededSubscriptionError(
       `[stripe] ${args.event.type} ${args.event.id}: duplicate subscription ${args.incomingSubscriptionId} conflicts with ${row?.existing_subscription_id ?? "the stored subscription"}`,
     );
   }
@@ -560,73 +569,137 @@ async function markEventProcessed(
 
 type ClaimResult = "owned" | "duplicate" | "in_progress";
 
+type ClaimOwnership = { status: ClaimResult; token: string };
+
+/**
+ * Claim, takeover, finalize, and release go through SQL so the claim token
+ * is checked in the same statement as the write. A stale retry that loses
+ * the token cannot delete or finalize the winner's row.
+ */
 async function claimStripeEvent(
   sb: AdminClient,
   eventId: string,
   eventType: string,
-  attempt = 0,
-): Promise<ClaimResult> {
-  const { error } = await sb.from("stripe_events").insert({
-    stripe_event_id: eventId,
-    event_type: eventType,
-    result: "processing",
+): Promise<ClaimOwnership> {
+  const token = crypto.randomUUID();
+  const staleBefore = new Date(Date.now() - STALE_CLAIM_MS).toISOString();
+  const { data, error } = await sb.rpc("claim_stripe_event", {
+    p_stripe_event_id: eventId,
+    p_event_type: eventType,
+    p_claim_token: token,
+    p_stale_before: staleBefore,
   });
-  if (!error) return "owned";
-  if (!isUniqueViolation(error)) {
+  if (error) {
     throw new Error(`[stripe] event claim failed: ${error.message}`);
   }
-
-  const { data, error: readError } = await sb
-    .from("stripe_events")
-    .select("result, processed_at")
-    .eq("stripe_event_id", eventId)
-    .single();
-  if (readError || !data) {
-    throw new Error(
-      `[stripe] event claim conflict for ${eventId} but the row was unreadable`,
-    );
+  if (data !== "owned" && data !== "duplicate" && data !== "in_progress") {
+    throw new Error(`[stripe] event claim for ${eventId} returned ${String(data)}`);
   }
-  if (data.result !== "processing") return "duplicate";
-
-  const processedAt = data.processed_at
-    ? new Date(data.processed_at).getTime()
-    : Number.NaN;
-  const age = Date.now() - processedAt;
-  if (attempt < 1 && Number.isFinite(age) && age > STALE_CLAIM_MS) {
-    const { error: delError } = await sb
-      .from("stripe_events")
-      .delete()
-      .eq("stripe_event_id", eventId);
-    if (delError) {
-      throw new Error(`[stripe] stale claim release failed: ${delError.message}`);
-    }
-    return claimStripeEvent(sb, eventId, eventType, attempt + 1);
-  }
-  return "in_progress";
+  return { status: data, token };
 }
 
 async function finalizeStripeEvent(
   sb: AdminClient,
   eventId: string,
+  claimToken: string,
   result: string,
 ): Promise<void> {
-  const { error } = await sb
-    .from("stripe_events")
-    .update({ result })
-    .eq("stripe_event_id", eventId);
+  const { data, error } = await sb.rpc("finalize_stripe_event", {
+    p_stripe_event_id: eventId,
+    p_claim_token: claimToken,
+    p_result: result,
+  });
   if (error) {
     throw new Error(`[stripe] finalize stripe event failed: ${error.message}`);
   }
+  if (data !== true) {
+    throw new Error(
+      `[stripe] finalize stripe event ${eventId} lost the claim token`,
+    );
+  }
 }
 
-async function releaseStripeEvent(sb: AdminClient, eventId: string): Promise<void> {
-  const { error } = await sb
-    .from("stripe_events")
-    .delete()
-    .eq("stripe_event_id", eventId);
+async function releaseStripeEvent(
+  sb: AdminClient,
+  eventId: string,
+  claimToken: string,
+): Promise<void> {
+  const { data, error } = await sb.rpc("release_stripe_event", {
+    p_stripe_event_id: eventId,
+    p_claim_token: claimToken,
+  });
   if (error) {
     throw new Error(`[stripe] release stripe event failed: ${error.message}`);
   }
+  if (data === "lost") {
+    console.error(
+      `[stripe] release skipped; claim ${eventId} is owned by another token`,
+    );
+    return;
+  }
+  if (data !== "released" && data !== "absent") {
+    throw new Error(`[stripe] release stripe event ${eventId} returned ${String(data)}`);
+  }
+}
+
+function subscriptionIdFromInvoice(invoice: Stripe.Invoice): string | null {
+  const parent = invoice.parent?.subscription_details?.subscription;
+  if (typeof parent === "string" && parent) return parent;
+  const legacy = (invoice as Stripe.Invoice & {
+    subscription?: string | { id?: string } | null;
+  }).subscription;
+  if (typeof legacy === "string" && legacy) return legacy;
+  if (legacy && typeof legacy === "object" && typeof legacy.id === "string") return legacy.id;
+  return null;
+}
+
+/** Plan metadata for a subscription invoice charge. Charge metadata is often empty. */
+async function subscriptionMetaForCharge(
+  stripe: Stripe,
+  charge: Stripe.Charge,
+): Promise<{ planId: string | null; clerkId: string | null; subscriptionId: string | null }> {
+  const invoiceRef = charge.invoice;
+  const invoiceId = typeof invoiceRef === "string" ? invoiceRef : invoiceRef?.id ?? null;
+  if (!invoiceId) return { planId: null, clerkId: null, subscriptionId: null };
+  let invoice: Stripe.Invoice;
+  try {
+    invoice = await stripe.invoices.retrieve(invoiceId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "unknown error";
+    throw new Error(`[stripe] charge ${charge.id}: invoice retrieve failed: ${message}`);
+  }
+  const subscriptionId = subscriptionIdFromInvoice(invoice);
+  if (!subscriptionId) return { planId: null, clerkId: null, subscriptionId: null };
+  let sub: Stripe.Subscription;
+  try {
+    sub = await stripe.subscriptions.retrieve(subscriptionId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "unknown error";
+    throw new Error(`[stripe] charge ${charge.id}: subscription retrieve failed: ${message}`);
+  }
+  return {
+    planId: sub.metadata?.plan_id ?? null,
+    clerkId: sub.metadata?.clerk_id ?? null,
+    subscriptionId,
+  };
+}
+
+async function recordBillingAlert(
+  sb: AdminClient,
+  event: Stripe.Event,
+  stripeObjectId: string,
+  detail: Record<string, unknown>,
+): Promise<void> {
+  const { error } = await sb.from("billing_alerts").insert({
+    stripe_event_id: event.id,
+    alert_type: event.type,
+    stripe_object_id: stripeObjectId,
+    detail,
+  });
+  if (error && !isUniqueViolation(error)) {
+    throw new Error(`[stripe] billing alert ${event.id} failed: ${error.message}`);
+  }
+  console.error(`[stripe][alert] ${event.type} ${event.id} ${stripeObjectId}`);
 }
 
 async function creditCreditPack(
@@ -723,20 +796,22 @@ export async function POST(req: NextRequest) {
   const sb = isAdminSupabaseConfigured() ? getAdminSupabase() : null;
   let selfClaim = false;
   let ownedClaim = false;
+  let claimToken: string | null = null;
 
   try {
     selfClaim = await eventClaimsItself(sb, event);
     if (sb && !selfClaim) {
       const claim = await claimStripeEvent(sb, event.id, event.type);
-      if (claim === "duplicate") {
+      if (claim.status === "duplicate") {
         return NextResponse.json({ received: true, replayed: true });
       }
-      if (claim === "in_progress") {
+      if (claim.status === "in_progress") {
         return NextResponse.json(
           { error: "Webhook event is already in progress" },
           { status: 500 },
         );
       }
+      claimToken = claim.token;
       ownedClaim = true;
     } else if (sb && (await isEventProcessed(sb, event.id))) {
       return NextResponse.json({ received: true, replayed: true });
@@ -1497,18 +1572,30 @@ export async function POST(req: NextRequest) {
         }
 
         // ── Plan / Founder refund: revoke entitlement ──
-        // For plan refunds (including Founder), revoke the subscription
-        // entitlement. Do NOT debit LiTTBits for Founder refunds — Founder
-        // has 0 LiTTBits. For subscription plans, the credits were already
-        // consumed; revoking access is the correct action.
-        const refundPlanId = refundMeta.plan_id as PlanId | undefined;
-        if (refundPlanId && refundClerkId) {
+        // Subscription invoice charges often have no plan metadata. Read the
+        // invoice, then the subscription, before deciding this is not a plan.
+        // Do NOT debit LiTTBits for Founder refunds — Founder has 0 LiTTBits.
+        let refundPlanId = refundMeta.plan_id as PlanId | undefined;
+        let planClerkId = refundClerkId;
+        if (refundProductType !== "credit_pack" && (!refundPlanId || !planClerkId)) {
+          const meta = await subscriptionMetaForCharge(stripe, charge);
+          if (!refundPlanId && meta.planId && meta.planId in PLANS) {
+            refundPlanId = meta.planId as PlanId;
+          }
+          if (!planClerkId && meta.clerkId) planClerkId = meta.clerkId;
+          if (meta.subscriptionId && (!refundPlanId || !planClerkId)) {
+            throw new Error(
+              `[stripe] charge.refunded ${charge.id}: subscription ${meta.subscriptionId} has no plan metadata`,
+            );
+          }
+        }
+        if (refundPlanId && planClerkId) {
           const plan = PLANS[refundPlanId];
           if (plan) {
             const { data: refundUser } = await sb
               .from("users")
               .select("id")
-              .eq("clerk_id", refundClerkId)
+              .eq("clerk_id", planClerkId)
               .single();
             if (!refundUser) {
               throw new Error(
@@ -1580,18 +1667,102 @@ export async function POST(req: NextRequest) {
         }
         break;
       }
+
+      case "charge.dispute.created":
+      case "charge.dispute.updated":
+      case "charge.dispute.closed":
+      case "charge.dispute.funds_withdrawn":
+      case "charge.dispute.funds_reinstated": {
+        if (!sb) {
+          throw new Error(
+            `[stripe] ${event.type} ${event.id}: admin supabase is not configured`,
+          );
+        }
+        const dispute = event.data.object as Stripe.Dispute;
+        const chargeId =
+          typeof dispute.charge === "string" ? dispute.charge : dispute.charge?.id;
+        if (!chargeId) {
+          throw new Error(`[stripe] ${event.type} ${event.id}: dispute has no charge`);
+        }
+        let charge: Stripe.Charge;
+        try {
+          charge = await stripe.charges.retrieve(chargeId);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "unknown error";
+          throw new Error(`[stripe] ${event.type} ${event.id}: charge retrieve failed: ${message}`);
+        }
+        const meta = await subscriptionMetaForCharge(stripe, charge);
+        const clerkId = charge.metadata?.clerk_id || meta.clerkId;
+        await recordBillingAlert(sb, event, dispute.id, {
+          charge_id: chargeId,
+          dispute_status: dispute.status,
+          reason: dispute.reason,
+          subscription_id: meta.subscriptionId,
+          amount: dispute.amount,
+        });
+        const locksAccess =
+          event.type === "charge.dispute.created" ||
+          event.type === "charge.dispute.funds_withdrawn";
+        const restoresAccess =
+          event.type === "charge.dispute.funds_reinstated" ||
+          (event.type === "charge.dispute.closed" &&
+            (dispute.status === "won" || dispute.status === "warning_closed"));
+        if (clerkId && meta.subscriptionId && (locksAccess || restoresAccess)) {
+          const { data: disputeUser, error: userError } = await sb
+            .from("users")
+            .select("id")
+            .eq("clerk_id", clerkId)
+            .maybeSingle();
+          if (userError) {
+            throw new Error(`[stripe] ${event.type} ${event.id}: user lookup failed: ${userError.message}`);
+          }
+          if (disputeUser) {
+            const nextStatus = locksAccess ? "disputed" : "active";
+            let update = sb
+              .from("subscriptions")
+              .update({ status: nextStatus, updated_at: new Date().toISOString() })
+              .eq("user_id", disputeUser.id)
+              .eq("stripe_subscription_id", meta.subscriptionId);
+            if (!locksAccess) update = update.eq("status", "disputed");
+            const { error: statusError } = await update;
+            if (statusError) {
+              throw new Error(
+                `[stripe] ${event.type} ${event.id}: subscription status update failed: ${statusError.message}`,
+              );
+            }
+          }
+        }
+        break;
+      }
     }
 
-    if (sb && ownedClaim) {
-      await finalizeStripeEvent(sb, event.id, eventResult);
+    if (sb && ownedClaim && claimToken) {
+      await finalizeStripeEvent(sb, event.id, claimToken, eventResult);
     } else if (sb && selfClaim) {
       await markEventProcessed(sb, event.id, event.type, "processed");
     }
   } catch (err) {
+    if (err instanceof SupersededSubscriptionError) {
+      console.error("[stripe] superseded subscription acknowledged", event.id, err);
+      if (sb && ownedClaim && claimToken) {
+        try {
+          await finalizeStripeEvent(sb, event.id, claimToken, "superseded_subscription");
+          return NextResponse.json({ received: true, result: "superseded_subscription" });
+        } catch (finalizeErr) {
+          console.error("[stripe] failed to record superseded subscription", event.id, finalizeErr);
+          try {
+            await releaseStripeEvent(sb, event.id, claimToken);
+          } catch (releaseErr) {
+            console.error("[stripe] failed to release event claim", event.id, releaseErr);
+          }
+        }
+      }
+      return NextResponse.json({ error: "Webhook processing failed" }, { status: 500 });
+    }
     console.error("[stripe] webhook processing failed", event.id, err);
-    if (sb && ownedClaim) {
+    if (sb && ownedClaim && claimToken) {
       try {
-        await releaseStripeEvent(sb, event.id);
+        await releaseStripeEvent(sb, event.id, claimToken);
       } catch (releaseErr) {
         console.error("[stripe] failed to release event claim", event.id, releaseErr);
       }

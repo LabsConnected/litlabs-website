@@ -19,6 +19,8 @@ describe("billing migration precheck", () => {
       "20261015200000_apply_subscription_event.sql",
       "20261015210000_checkout_session_lease.sql",
       "20261015220000_schedule_media_cap_sweep.sql",
+      "20261015230000_checkout_block_protected_subscription.sql",
+      "20261015240000_stripe_event_claim_token.sql",
     ]) {
       expect(sql).toContain(file);
       expect(shell).toContain(file);

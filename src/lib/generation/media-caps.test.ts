@@ -1,8 +1,10 @@
 // @vitest-environment node
 /**
- * Image and video credits use the same 1000-credits-per-retail-dollar rate
- * as the LLM engine. A plan's full balance, spent on the catalog item that
- * maximizes provider cost, must stay within about half the plan price.
+ * Generation credits stay on main's rate: 1 LiTTBit per retail cent.
+ * Spending a whole plan balance at that rate can exceed half the plan
+ * price. The monthly image, video, and provider-spend caps are what keep
+ * a month inside that ceiling. Do not rescale the credit unit to make the
+ * uncapped balance fit.
  */
 import { describe, expect, it } from "vitest";
 import { PLANS } from "@/config/plans";
@@ -13,20 +15,37 @@ import {
   worstCaseProviderSpend,
 } from "@/lib/generation/media-caps";
 
+/** Generations the monthly cap would allow, times provider cents. */
+function cappedProviderCents(
+  credits: number,
+  halfPriceCents: number,
+  providerCostCents: number,
+  retailCredits: number,
+): number {
+  if (providerCostCents <= 0 || retailCredits <= 0 || credits <= 0 || halfPriceCents <= 0) {
+    return 0;
+  }
+  const count = Math.min(
+    Math.floor(credits / retailCredits),
+    Math.floor(halfPriceCents / providerCostCents),
+  );
+  return count * providerCostCents;
+}
+
 describe("generation retail rate and plan provider ceiling", () => {
-  it("charges 1000 credits per retail dollar (10x the old 1-credit-per-cent rate)", () => {
+  it("charges 1 LiTTBit per retail cent, the same rate as main", () => {
     const image = calculateRetailBits({
       modality: "image",
       provider: "gemini",
       model: "gemini-3-pro-image",
     });
     // Catalog provider cost is 8 cents. Plus 1 cent infra, 50% markup:
-    // ceil(9 * 1.5) = 14 retail cents = 140 credits.
+    // ceil(9 * 1.5) = 14 retail cents = 14 LiTTBits. Not 140.
     expect(image.providerCostCents).toBe(8);
-    expect(image.retailLiTTBits).toBe(140);
+    expect(image.retailLiTTBits).toBe(14);
   });
 
-  it("Creator and Pro worst-case provider cost stays within half the plan price", () => {
+  it("plan caps keep a month inside half the plan price without rescaling credits", () => {
     const creatorCredits = PLANS.creator_beta.monthlyCredits;
     const proCredits = PLANS.pro_builder_beta.monthlyCredits;
     const creatorPrice = PLANS.creator_beta.monthlyPriceCents ?? 0;
@@ -38,10 +57,11 @@ describe("generation retail rate and plan provider ceiling", () => {
     expect(proCredits).toBe(18000);
     expect(creatorPrice).toBe(1500);
     expect(proPrice).toBe(3900);
-    expect(creator.providerCents).toBeLessThanOrEqual(Math.floor(creatorPrice * 0.5));
-    expect(pro.providerCents).toBeLessThanOrEqual(Math.floor(proPrice * 0.5));
-    expect(creator.providerCents).toBeGreaterThan(0);
-    expect(pro.providerCents).toBeGreaterThan(0);
+    // Uncapped full-balance spend at the preserved rate is larger than half
+    // the plan price. That is why the cap exists. It is not a reason to
+    // charge 10x LiTTBits per generation.
+    expect(creator.providerCents).toBeGreaterThan(Math.floor(creatorPrice * 0.5));
+    expect(pro.providerCents).toBeGreaterThan(Math.floor(proPrice * 0.5));
 
     expect(PLAN_MEDIA_MONTHLY_CAPS.creator_beta.maxImages).toBeGreaterThan(0);
     expect(PLAN_MEDIA_MONTHLY_CAPS.creator_beta.maxVideos).toBeGreaterThan(0);
@@ -60,11 +80,11 @@ describe("generation retail rate and plan provider ceiling", () => {
     expect(PLAN_MEDIA_MONTHLY_CAPS.starter.maxProviderSpendCents).toBe(0);
     expect(PLAN_MEDIA_MONTHLY_CAPS.founder.creditCap).toBe(0);
     expect(PLAN_MEDIA_MONTHLY_CAPS.owner.maxProviderSpendCents).toBe(0);
-    expect(creator.providerCents).toBeLessThanOrEqual(
-      PLAN_MEDIA_MONTHLY_CAPS.creator_beta.maxProviderSpendCents,
+    expect(PLAN_MEDIA_MONTHLY_CAPS.creator_beta.maxProviderSpendCents).toBe(
+      Math.floor(creatorPrice * 0.5),
     );
-    expect(pro.providerCents).toBeLessThanOrEqual(
-      PLAN_MEDIA_MONTHLY_CAPS.pro_builder_beta.maxProviderSpendCents,
+    expect(PLAN_MEDIA_MONTHLY_CAPS.pro_builder_beta.maxProviderSpendCents).toBe(
+      Math.floor(proPrice * 0.5),
     );
 
     // Printed for the PR. Values come from PROVIDER_COST_CENTS / getProviderCostCents.
@@ -111,10 +131,22 @@ describe("generation retail rate and plan provider ceiling", () => {
         expect(row.creator.providerCents).toBe(0);
         expect(row.pro.providerCents).toBe(0);
       }
-      expect(row.creator.providerCents).toBeLessThanOrEqual(report.creator.halfPriceCents);
-      expect(row.pro.providerCents).toBeLessThanOrEqual(report.pro.halfPriceCents);
-      expect(row.creator.providerCents).toBeLessThanOrEqual(report.creator.caps.maxProviderSpendCents);
-      expect(row.pro.providerCents).toBeLessThanOrEqual(report.pro.caps.maxProviderSpendCents);
+      const creatorCapped = cappedProviderCents(
+        report.creator.credits,
+        report.creator.halfPriceCents,
+        row.providerCostCents,
+        row.retailCredits,
+      );
+      const proCapped = cappedProviderCents(
+        report.pro.credits,
+        report.pro.halfPriceCents,
+        row.providerCostCents,
+        row.retailCredits,
+      );
+      expect(creatorCapped).toBeLessThanOrEqual(report.creator.halfPriceCents);
+      expect(proCapped).toBeLessThanOrEqual(report.pro.halfPriceCents);
+      expect(creatorCapped).toBeLessThanOrEqual(report.creator.caps.maxProviderSpendCents);
+      expect(proCapped).toBeLessThanOrEqual(report.pro.caps.maxProviderSpendCents);
     }
     for (const input of inputs) {
       expect(seen.has(`${input.provider}:${input.model}`)).toBe(true);

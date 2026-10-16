@@ -33,12 +33,16 @@ vi.mock("@/lib/rate-limiter", () => ({
 const mockConstructEvent = vi.fn();
 const mockSubscriptionsRetrieve = vi.fn();
 const mockRefundsList = vi.fn();
+const mockChargesRetrieve = vi.fn();
+const mockInvoicesRetrieve = vi.fn();
 vi.mock("stripe", () => {
   class StripeInvalidRequestError extends Error {}
   const ctor = vi.fn().mockImplementation(() => ({
     webhooks: { constructEvent: mockConstructEvent },
     subscriptions: { retrieve: mockSubscriptionsRetrieve },
     refunds: { list: mockRefundsList },
+    charges: { retrieve: mockChargesRetrieve },
+    invoices: { retrieve: mockInvoicesRetrieve },
   }));
   (ctor as unknown as { errors: { StripeInvalidRequestError: typeof StripeInvalidRequestError } }).errors = {
     StripeInvalidRequestError,
@@ -363,6 +367,80 @@ function simulateApplySubscriptionEvent(
   return { data: { outcome: "applied" }, error: null };
 }
 
+function handleStripeClaim(
+  fnName: string,
+  params: any,
+  claimedEvents: Map<string, { id: string; result: string; processed_at: string; claim_token?: string | null }>,
+  inserts: { table: string; row: any }[],
+  updates: { table: string; patch: any; matches: any[] }[],
+  deletes: { table: string; matches: { col: string; val: unknown }[] }[],
+  existingEvent: boolean,
+): { data: unknown; error: null } {
+  const id = params?.p_stripe_event_id as string;
+  const token = params?.p_claim_token as string;
+  if (fnName === "claim_stripe_event") {
+    let existing = claimedEvents.get(id);
+    if (!existing && existingEvent) existing = claimedEvents.get("evt_existing");
+    const staleBefore = new Date(params.p_stale_before).getTime();
+    if (!existing) {
+      claimedEvents.set(id, {
+        id,
+        result: "processing",
+        processed_at: new Date().toISOString(),
+        claim_token: token,
+      });
+      inserts.push({
+        table: "stripe_events",
+        row: {
+          stripe_event_id: id,
+          event_type: params.p_event_type,
+          result: "processing",
+          claim_token: token,
+        },
+      });
+      return { data: "owned", error: null };
+    }
+    if (existing.result !== "processing") return { data: "duplicate", error: null };
+    const processedAt = new Date(existing.processed_at).getTime();
+    if (!Number.isFinite(processedAt) || processedAt > staleBefore) {
+      return { data: "in_progress", error: null };
+    }
+    existing.claim_token = token;
+    existing.processed_at = new Date().toISOString();
+    existing.result = "processing";
+    return { data: "owned", error: null };
+  }
+  if (fnName === "finalize_stripe_event") {
+    const row = claimedEvents.get(id);
+    if (!row || row.claim_token !== token || row.result !== "processing") {
+      return { data: false, error: null };
+    }
+    row.result = params.p_result;
+    updates.push({
+      table: "stripe_events",
+      patch: { result: params.p_result },
+      matches: [
+        { col: "stripe_event_id", val: id },
+        { col: "claim_token", val: token },
+      ],
+    });
+    return { data: true, error: null };
+  }
+  const row = claimedEvents.get(id);
+  if (!row || row.claim_token !== token || row.result !== "processing") {
+    return { data: row ? "lost" : "absent", error: null };
+  }
+  claimedEvents.delete(id);
+  deletes.push({
+    table: "stripe_events",
+    matches: [
+      { col: "stripe_event_id", val: id },
+      { col: "claim_token", val: token },
+    ],
+  });
+  return { data: "released", error: null };
+}
+
 /**
  * Builds a mock Supabase admin that tracks all RPC calls and table mutations.
  */
@@ -398,12 +476,13 @@ function buildTrackingSupabase(
     stripe_subscription_id: opts.stripeSubscriptionId ?? null,
     status: opts.subscriptionStatus ?? null,
   };
-  const claimedEvents = new Map<string, { id: string; result: string; processed_at: string }>();
+  const claimedEvents = new Map<string, { id: string; result: string; processed_at: string; claim_token?: string | null }>();
   if (existingEvent) {
     claimedEvents.set("evt_existing", {
       id: "evt_existing",
       result: opts.eventResult ?? "processed",
       processed_at: new Date().toISOString(),
+      claim_token: null,
     });
   }
   const stripeEventRow = (eqs: { col: string; val: unknown }[]) => {
@@ -493,6 +572,7 @@ function buildTrackingSupabase(
           id: row.stripe_event_id,
           result: row.result ?? "processing",
           processed_at: new Date().toISOString(),
+          claim_token: row.claim_token ?? null,
         });
       }
       return { error: null };
@@ -540,6 +620,13 @@ function buildTrackingSupabase(
     from: vi.fn((table: string) => chain(table)),
     rpc: vi.fn(async (fnName: string, params: any) => {
       rpcCalls.push({ fn: fnName, params });
+      if (
+        fnName === "claim_stripe_event" ||
+        fnName === "finalize_stripe_event" ||
+        fnName === "release_stripe_event"
+      ) {
+        return handleStripeClaim(fnName, params, claimedEvents, inserts, updates, deletes, existingEvent);
+      }
       if (fnName === "apply_subscription_event") {
         if (opts.failApply) {
           return { data: null, error: { message: "row locked" } };
@@ -1248,7 +1335,8 @@ describe("Webhook event processing — state mutations", () => {
     }));
     const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
     const res = await webhookPOST(makeWebhookRequest("body", "sig"));
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ result: "superseded_subscription" });
     expect(upserts.filter((u) => u.table === "subscriptions")).toHaveLength(0);
     expect(rpcCalls.filter((c) => c.fn === "grant_credits")).toHaveLength(0);
     expect(inserts.find((row) => row.table === "billing_subscription_conflicts")?.row).toMatchObject({
@@ -1257,8 +1345,12 @@ describe("Webhook event processing — state mutations", () => {
       stripe_event_id: "evt_dup_sub",
       event_type: "customer.subscription.updated",
     });
-    expect(updates.find((u) => u.table === "stripe_events" && u.patch?.result === "duplicate_subscription")).toBeUndefined();
+    expect(updates.find((u) => u.table === "stripe_events" && u.patch?.result === "superseded_subscription")).toBeDefined();
     expect(updates.find((u) => u.table === "stripe_events" && u.patch?.result === "processed")).toBeUndefined();
+    const replay = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({ replayed: true });
+    expect(rpcCalls.filter((c) => c.fn === "grant_credits")).toHaveLength(0);
   });
 
   it("still applies an update for the same subscription id", async () => {
@@ -2200,6 +2292,9 @@ describe("Webhook event processing — state mutations", () => {
       }),
       rpc: vi.fn(async (fnName: string, params: any) => {
         rpcCalls.push({ fn: fnName, params });
+        if (fnName === "claim_stripe_event") return { data: "owned", error: null };
+        if (fnName === "finalize_stripe_event") return { data: true, error: null };
+        if (fnName === "release_stripe_event") return { data: "released", error: null };
         if (fnName === "apply_subscription_event") {
           return simulateApplySubscriptionEvent(params, chainState, {
             rpcCalls,
@@ -2492,6 +2587,94 @@ describe("Webhook event processing — state mutations", () => {
     // Creator Beta: 7500 credits over $15 (1500c). Refunding 750c = 50% → 3750 credits.
     expect(debits[0].params.p_amount).toBe(3750);
     expect(debits[0].params.p_idempotency_key).toBe("refund_re_creator");
+  });
+
+  it("charge.refunded on a subscription invoice uses subscription metadata", async () => {
+    const { sb, rpcCalls, updates } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockSucceededRefunds([{ id: "re_invoice_sub", amount: 1500, created: 1700000002 }]);
+    mockInvoicesRetrieve.mockResolvedValue({
+      id: "in_sub_refund",
+      parent: { subscription_details: { subscription: "sub_refunded" } },
+    });
+    mockSubscriptionsRetrieve.mockResolvedValue({
+      id: "sub_refunded",
+      metadata: { clerk_id: "user_123", plan_id: "creator_beta" },
+    });
+    mockConstructEvent.mockReturnValue(makeStripeEvent("charge.refunded", {
+      id: "evt_invoice_refund",
+      object: {
+        id: "ch_invoice_refund",
+        amount: 1500,
+        amount_refunded: 1500,
+        invoice: "in_sub_refund",
+        payment_intent: "pi_invoice_refund",
+        metadata: {},
+      },
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(200);
+    expect(updates.find((u) => u.patch.status === "refunded")).toBeDefined();
+    const debits = rpcCalls.filter((c) => c.fn === "debit_credits");
+    expect(debits).toHaveLength(1);
+    expect(debits[0].params.p_amount).toBe(7500);
+    expect(debits[0].params.p_idempotency_key).toBe("refund_re_invoice_sub");
+  });
+
+  it("charge.dispute.created locks the subscription and alerts without moving credits", async () => {
+    const { sb, rpcCalls, updates, inserts } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+    mockChargesRetrieve.mockResolvedValue({
+      id: "ch_dispute",
+      invoice: "in_dispute",
+      metadata: {},
+    });
+    mockInvoicesRetrieve.mockResolvedValue({
+      id: "in_dispute",
+      parent: { subscription_details: { subscription: "sub_dispute" } },
+    });
+    mockSubscriptionsRetrieve.mockResolvedValue({
+      id: "sub_dispute",
+      metadata: { clerk_id: "user_123", plan_id: "creator_beta" },
+    });
+    mockConstructEvent.mockReturnValue(makeStripeEvent("charge.dispute.created", {
+      id: "evt_dispute_created",
+      object: {
+        id: "dp_1",
+        charge: "ch_dispute",
+        amount: 1500,
+        status: "needs_response",
+        reason: "fraudulent",
+      },
+    }));
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const res = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(res.status).toBe(200);
+    expect(updates.find((u) => u.table === "subscriptions" && u.patch.status === "disputed")).toBeDefined();
+    expect(inserts.find((row) => row.table === "billing_alerts")?.row).toMatchObject({
+      stripe_event_id: "evt_dispute_created",
+      alert_type: "charge.dispute.created",
+      stripe_object_id: "dp_1",
+    });
+    expect(rpcCalls.filter((c) => c.fn === "grant_credits" || c.fn === "debit_credits")).toHaveLength(0);
+
+    mockConstructEvent.mockReturnValue(makeStripeEvent("charge.dispute.closed", {
+      id: "evt_dispute_won",
+      object: {
+        id: "dp_1",
+        charge: "ch_dispute",
+        amount: 1500,
+        status: "won",
+        reason: "fraudulent",
+      },
+    }));
+    const won = await webhookPOST(makeWebhookRequest("body", "sig"));
+    expect(won.status).toBe(200);
+    expect(updates.find((u) => u.table === "subscriptions" && u.patch.status === "active")).toBeDefined();
+    expect(rpcCalls.filter((c) => c.fn === "grant_credits" || c.fn === "debit_credits")).toHaveLength(0);
   });
 
   it("charge.refunded (credit pack) claims the event before debiting", async () => {

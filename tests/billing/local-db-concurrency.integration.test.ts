@@ -92,6 +92,7 @@ describe.skipIf(!dbUp)("local billing database", () => {
         "supabase/migrations/20261015180000_media_cap_hold_expiry.sql",
         "supabase/migrations/20261015210000_checkout_session_lease.sql",
         "supabase/migrations/20261015220000_schedule_media_cap_sweep.sql",
+        "supabase/migrations/20261015230000_checkout_block_protected_subscription.sql",
       ]) {
         await client.query(readFileSync(file, "utf8"));
       }

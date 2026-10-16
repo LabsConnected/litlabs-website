@@ -1,4 +1,5 @@
 import "server-only";
+import { ENTITLED_SUBSCRIPTION_STATUSES } from "@/lib/billing/subscription-entitlement";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import {
   PLAN_ENTITLEMENTS,
@@ -98,7 +99,7 @@ export async function getCreditBalances(clerkId: string): Promise<CreditBalances
     .from("subscriptions")
     .select("status")
     .eq("user_id", userId)
-    .in("status", ["active", "trialing"])
+    .in("status", [...ENTITLED_SUBSCRIPTION_STATUSES])
     .maybeSingle();
   if (!subscription) {
     // Starter plan: one-time grant (PLAN_ENTITLEMENTS.starter.oneTimeGrantBits)

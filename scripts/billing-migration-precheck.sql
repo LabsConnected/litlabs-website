@@ -27,6 +27,13 @@
 --   8. supabase/migrations/20261015200000_apply_subscription_event.sql
 --   9. supabase/migrations/20261015210000_checkout_session_lease.sql
 --  10. supabase/migrations/20261015220000_schedule_media_cap_sweep.sql
+--  11. supabase/migrations/20261015230000_checkout_block_protected_subscription.sql
+--  12. supabase/migrations/20261015240000_stripe_event_claim_token.sql
+--
+-- 11 replaces begin_checkout_reservation so unpaid, paused, incomplete,
+-- refunded, and disputed cannot open a second Checkout. 12 adds
+-- stripe_events.claim_token, the claim/finalize/release functions, and
+-- billing_alerts. Apply 12 before the webhook that calls claim_stripe_event.
 --
 -- Preflight (this file):
 --   - public.users and public.generation_jobs exist
@@ -71,6 +78,14 @@
 --   20261015220000:
 --     Unschedule sweep-expired-media-cap-holds when pg_cron is installed.
 --     The 24 hour claim filter still ignores stale unsettled holds.
+--   20261015230000:
+--     Restore begin_checkout_reservation from 20261015210000_checkout_session_lease.sql.
+--   20261015240000:
+--     DROP FUNCTION IF EXISTS public.release_stripe_event(text, uuid);
+--     DROP FUNCTION IF EXISTS public.finalize_stripe_event(text, uuid, text);
+--     DROP FUNCTION IF EXISTS public.claim_stripe_event(text, text, uuid, timestamptz);
+--     ALTER TABLE public.stripe_events DROP COLUMN IF EXISTS claim_token;
+--     DROP TABLE IF EXISTS public.billing_alerts;
 
 DO $$
 DECLARE

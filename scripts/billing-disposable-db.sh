@@ -197,6 +197,8 @@ migrations=(
   "supabase/migrations/20261015200000_apply_subscription_event.sql"
   "supabase/migrations/20261015210000_checkout_session_lease.sql"
   "supabase/migrations/20261015220000_schedule_media_cap_sweep.sql"
+  "supabase/migrations/20261015230000_checkout_block_protected_subscription.sql"
+  "supabase/migrations/20261015240000_stripe_event_claim_token.sql"
 )
 
 for mig in "${migrations[@]}"; do
