@@ -184,7 +184,10 @@ const OPENROUTER_LEGACY_TAIL_MODELS = [
   "nvidia/nemotron-3.5-lightning:free",
   "nvidia/nemotron-3-super-120b-a12b:free",
   "nvidia/nemotron-3-ultra-550b-a55b:free",
-  "nex-agi/nex-n2.5-pro:free",
+  // gemma-4-26b-a4b-it replaces nex-agi/nex-n2.5-pro:free — delisted
+  // upstream (404s on every attempt, verified against the live OpenRouter
+  // catalog Oct 2026).
+  "google/gemma-4-26b-a4b-it:free",
   "openrouter/free",
 ];
 
@@ -323,7 +326,12 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
       credentialState: () => (envPresent("GROQ_API_KEY") ? "available" : "missing"),
       models: () => [
         process.env.GROQ_MODEL || "openai/gpt-oss-120b",
-        "llama-3.1-8b-instant",
+        // gpt-oss-20b is the live lighter Groq fallback. The llama entries
+        // this replaced (3.1-8b-instant, 3.3-70b-versatile) are retired —
+        // Groq's live catalog has neither, so the old fallbacks 404'd on
+        // every attempt (verified against the live Groq catalog Oct 2026).
+        "openai/gpt-oss-20b",
+        "qwen/qwen3.8-27b",
       ],
     },
     {

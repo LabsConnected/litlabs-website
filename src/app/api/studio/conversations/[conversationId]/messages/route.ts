@@ -683,6 +683,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
     executionMode: canonicalCtx.executionMode,
     enableBuildFix: true,
+    isStaticWorkspace: canonicalCtx.framework === "static",
     model: typeof body.model === "string" ? body.model : undefined,
     // Authenticated user — injected server-side into user-scoped tools
     // (browser.*) at execution time; the model never supplies userId.
@@ -1159,6 +1160,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           model: cfg.model,
           executionMode: cfg.executionMode,
           enableBuildFix: true,
+          isStaticWorkspace: cfg.isStaticWorkspace,
           // Quality loop: the launch flow passes this to the main agent-loop
           // phase (it was silently dropped before AUTO-mode support).
           qualityLoop: cfg.qualityLoop,
@@ -1359,7 +1361,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 : "failed";
           const verified = finalMessageStatus === "completed"
             && (!v2Result?.qualityLoop || v2Result.qualityLoop.verdict.ok);
-          await settleConversationTask(userId, conversation.id, taskStatus, verified).catch((taskErr) => {
+          await settleConversationTask(userId, conversation.id, taskStatus, verified, actionContext.actionRunId).catch((taskErr) => {
             studioLog("message:task_settle_failed", {
               conversationId: conversation.id,
               userId,

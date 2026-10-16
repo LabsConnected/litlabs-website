@@ -53,10 +53,12 @@ import {
   noteDeployment,
   noteToolResult,
   noteMutationReadBack,
+  noteStaticArtifactCheck,
   runQualityInspection,
   snapshotQualityLoopSession,
   startQualityLoopSession,
   verifyLiveUrl,
+  type InspectionResult,
   type QualityFinale,
   type QualityLoopSession,
   type QualityLoopSnapshot,
@@ -139,6 +141,8 @@ export interface AgentLoopConfig {
   model?: string;
   systemPrompt: string;
   enableBuildFix: boolean;
+  /** Static workspaces allow file tools but cannot execute shell commands. */
+  isStaticWorkspace?: boolean;
   /** Require a structured tool call on the first model turn of an execution flow. */
   requireToolCallOnFirstStep?: boolean;
   /**
@@ -373,6 +377,76 @@ function detectRepeatedCalls(
   );
 
   return identical.length >= 3;
+}
+
+/**
+ * Rebuild the repeated-call ledger from a paused run's message history.
+ *
+ * Approval pauses split one logical run into many loop invocations, and
+ * the ledger used to restart empty on every resume — so
+ * detectRepeatedCalls could never fire across a pause, and a model
+ * retrying a failing approval-gated tool re-entered the gate on every
+ * resume (Gate B, 2026-10-13: preview.launch was approved seven times
+ * in one run). The history carries every executed call (assistant
+ * tool_calls) and its outcome (tool results) — everything the detector
+ * consults is the tool id + inputs hash. A gated call that never
+ * executed has no tool result in the history and is correctly absent:
+ * it has not happened yet.
+ *
+ * Wire names in history have dots replaced with underscores
+ * (buildAssistantToolCallMessage); map them back through the registry
+ * so seeded ids match the live ToolCall.toolId values. resultHash is
+ * not reconstructed (the detector does not consult it) and is left
+ * empty rather than fabricating a value.
+ */
+export function seedToolCallRecordsFromHistory(
+  messages: LLMMessage[],
+): ToolCallRecord[] {
+  const wireNameToToolId = new Map<string, string>();
+  for (const tool of toolRegistry.listEnabled()) {
+    wireNameToToolId.set(tool.id.replace(/\./g, "_"), tool.id);
+  }
+  const executedCallIds = new Set<string>();
+  for (const m of messages) {
+    if (m.role === "tool" && m.tool_call_id) executedCallIds.add(m.tool_call_id);
+  }
+  const records: ToolCallRecord[] = [];
+  let step = 0;
+  for (const m of messages) {
+    if (m.role !== "assistant" || !m.tool_calls) continue;
+    for (const call of m.tool_calls) {
+      if (!executedCallIds.has(call.id)) continue;
+      let inputs: Record<string, unknown> = {};
+      try {
+        inputs = JSON.parse(call.function.arguments || "{}") as Record<string, unknown>;
+      } catch {
+        inputs = {};
+      }
+      records.push({
+        toolId: wireNameToToolId.get(call.function.name) ?? call.function.name,
+        inputsHash: hashInputs(inputs),
+        resultHash: "",
+        step: step++,
+      });
+    }
+  }
+  return records;
+}
+
+const FILE_GENERATION_TOOL_IDS = new Set([...FILE_WRITE_TOOL_IDS, "code.writeFile", "code.refactor", "files.patch"]);
+export function isFileWritingTool(toolId: string): boolean { return FILE_GENERATION_TOOL_IDS.has(toolId); }
+
+/** Server-persisted tool results, not assistant completion claims. */
+export function hasSuccessfulFileWriteInHistory(messages: LLMMessage[]): boolean {
+  const writeIds = new Set(messages.flatMap((message) =>
+    message.role === "assistant" ? (message.tool_calls ?? [])
+      .filter((call) => [...FILE_GENERATION_TOOL_IDS].some((id) => id.replace(/\./g, "_") === call.function.name))
+      .map((call) => call.id) : [],
+  ));
+  return messages.some((message) => {
+    if (message.role !== "tool" || !message.tool_call_id || !writeIds.has(message.tool_call_id)) return false;
+    try { return JSON.parse(message.content)?.success === true; } catch { return false; }
+  });
 }
 
 // ─── Mid-build stall recovery ─────────────────────────────────────
@@ -620,8 +694,11 @@ async function verifyMutationReadBack(
   toolId: string,
   inputs: Record<string, unknown> | undefined,
   mutated: boolean,
+  isStaticWorkspace?: boolean,
 ): Promise<void> {
   if (!mutated || !inputs) return;
+  if (toolId === "code.writeFile") toolId = "files.write";
+  if (toolId === "code.refactor") toolId = "apply_patch";
   if (toolId !== "files.write" && toolId !== "files.patch" && toolId !== "apply_patch") return;
   const path = typeof inputs.path === "string" ? inputs.path : null;
   if (!path) return;
@@ -642,6 +719,11 @@ async function verifyMutationReadBack(
     contentMatches = replaces.length > 0 ? replaces.every((r) => content.includes(r)) : null;
   }
   noteMutationReadBack(session, { path, readable: true, contentMatches });
+  // Static workspaces cannot run the command checks (Gate 1): the verified
+  // read-back IS the executed check there, and it is the only one recorded.
+  if (isStaticWorkspace) {
+    noteStaticArtifactCheck(session, { path, contentMatches });
+  }
 }
 
 /**
@@ -675,7 +757,13 @@ async function maybeInspectBeforeFinal(
     ) {
       qualitySession.inspectionRan = false;
     }
-    const inspection = await runQualityInspection(qualitySession);
+    // The static lane has no browser-inspection path (see
+    // requiredStagesFor): the judge can only ever report "unavailable"
+    // here, so we do not attempt the capture — inspect/critique are
+    // recorded as not-applicable stages, verified by read-back instead.
+    const inspection: InspectionResult = qualitySession.state.isStaticWorkspace === true
+      ? { ran: false, needsRedesign: false, fixes: [], reason: qualitySession.inspectionNote ?? "Static workspace: no visual-inspection path." }
+      : await runQualityInspection(qualitySession);
     if (inspection.needsRedesign && stepsUsed < maxSteps) {
       localProgress.emit({ type: "phase", phase: "quality_redesign", step: stepsUsed });
       localProgress.emit({
@@ -924,6 +1012,7 @@ async function runAgentLoopV2Inner(
       userId: cfg.qualityLoop.userId,
       userRequest: cfg.qualityLoop.userRequest ?? userMessage,
       snapshot: cfg.qualityLoop.state,
+      isStaticWorkspace: cfg.isStaticWorkspace,
     });
     cfg.systemPrompt += buildQualityLoopPrompt(qualitySession.taskScope);
   }
@@ -1002,6 +1091,7 @@ async function runAgentLoopV2Inner(
         // reporting only. Undefined (unknown) → degraded, not unavailable.
         isTerminalOwner:
           cfg.userId != null ? isTerminalOwnerUser(cfg.userId) : undefined,
+        isStaticWorkspace: cfg.isStaticWorkspace,
       },
     },
   );
@@ -1275,7 +1365,7 @@ async function runAgentLoopV2Inner(
     const toolCallLogLenBeforeBatch = toolCallLog.length;
 
     for (const toolCall of llmResponse.toolCalls) {
-      const toolDef = availableTools.find((t) => t.id === toolCall.toolId);
+      const toolDef = offerableTools.find((t) => t.id === toolCall.toolId);
 
       if (!toolDef) {
         const result: ToolCallResult = {
@@ -1603,7 +1693,7 @@ async function runAgentLoopV2Inner(
           { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
           transport.workspaceId,
         );
-        await verifyMutationReadBack(qualitySession, transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly);
+        await verifyMutationReadBack(qualitySession, transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly, cfg.isStaticWorkspace);
       }
 
       localProgress.emit({
@@ -1636,7 +1726,7 @@ async function runAgentLoopV2Inner(
     // through the resolveZeroToolCalls stall handling above.
     if (buildGuardMaxSteps > 0) {
       const stepCalls = toolCallLog.slice(toolCallLogLenBeforeBatch);
-      const fileWrites = stepCalls.filter((c) => FILE_WRITE_TOOL_IDS.has(c.toolId)).length;
+      const fileWrites = stepCalls.filter((c) => isFileWritingTool(c.toolId)).length;
       if (fileWrites > 0) {
         buildGuardZeroWriteSteps = 0;
         buildGuardWindowModels.clear();
@@ -1725,9 +1815,16 @@ async function runAgentLoopV2Inner(
     });
   }
 
+  if (cfg.buildCapabilityGuard && !cancelled && !modelFailed && !failedHonestly &&
+      !toolCallLog.some((call) => call.success && isFileWritingTool(call.toolId)) &&
+      !hasSuccessfulFileWriteInHistory(cfg.initialMessages ?? [])) {
+    failedHonestly = "The build produced no successful file-writing operation, so it is not complete.";
+    finalText = failedHonestly;
+  }
+
   // Run build-fix loop if mutations were made and enabled
   let buildFixResult: BuildFixLoopResult | undefined;
-  if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
+  if (cfg.enableBuildFix && !cfg.isStaticWorkspace && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
       onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg), cfg.allowLittPaidProviders),
@@ -2018,6 +2115,8 @@ export interface DeferredToolBatchContext {
   conversationId?: string;
   /** Parent ActionRun for server-side ActionExecutionContext propagation. */
   actionRunId?: string;
+  /** Static workspace (no host execution) — gates static read-back TEST evidence. */
+  isStaticWorkspace?: boolean;
   /** Full trusted context propagated to ToolRegistry.execute. */
   actionContext?: ActionExecutionContext;
 }
@@ -2240,7 +2339,7 @@ export async function executeDeferredToolCalls(
         { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
         ctx.transport.workspaceId,
       );
-      await verifyMutationReadBack(ctx.qualitySession, ctx.transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly);
+      await verifyMutationReadBack(ctx.qualitySession, ctx.transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly, ctx.isStaticWorkspace);
     }
 
     ctx.localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: result.success, summary, durationMs: 0 });
@@ -2311,6 +2410,7 @@ async function resumeAgentLoopV2Inner(
       userId: cfg.qualityLoop.userId,
       userRequest: cfg.qualityLoop.userRequest ?? "",
       snapshot: cfg.qualityLoop.state,
+      isStaticWorkspace: cfg.isStaticWorkspace,
     });
     cfg.systemPrompt += buildQualityLoopPrompt(qualitySession.taskScope);
   }
@@ -2339,7 +2439,12 @@ async function resumeAgentLoopV2Inner(
   });
 
   const events: ProgressEvent[] = [];
-  const toolCallRecords: ToolCallRecord[] = [];
+  // Seed the repeated-call ledger from the paused history: without this,
+  // loop detection restarts blind on every resume and a failing gated
+  // tool can re-enter the approval gate indefinitely.
+  const toolCallRecords: ToolCallRecord[] = seedToolCallRecordsFromHistory(
+    resume.pausedMessages,
+  );
   let hasInterveningMutation = resume.hadInterveningMutation;
   const executedMutations = new Map<string, ToolCallResult>();
 
@@ -2383,6 +2488,10 @@ async function resumeAgentLoopV2Inner(
         userId: cfg.userId,
         isTerminalOwner:
           cfg.userId != null ? isTerminalOwnerUser(cfg.userId) : undefined,
+        // Mirror the initial run's static gating: without this, a resumed
+        // static run re-advertises tools that cannot execute there
+        // (terminal.execute, preview dev-server tools).
+        isStaticWorkspace: cfg.isStaticWorkspace,
       },
     },
   );
@@ -2444,6 +2553,9 @@ async function resumeAgentLoopV2Inner(
         success: false,
         error: "Cancelled by user",
       };
+    } else if (resumeToolHealthMap.get(resume.toolId)?.health === "unavailable") {
+      result = { toolCallId: resume.toolCallId, toolId: resume.toolId, result: null, success: false,
+        error: resumeToolHealthMap.get(resume.toolId)?.detail ?? "The approved tool is no longer available in this workspace." };
     } else try {
       const execResult = await toolRegistry.execute(resume.toolId, withUserScopeForBrowserTools(resume.toolId, resume.inputs, cfg.userId ?? actionContextFrom(cfg)?.userId, cfg.conversationId ?? actionContextFrom(cfg)?.conversationId), {
         hasApproval: true,
@@ -2526,7 +2638,7 @@ async function resumeAgentLoopV2Inner(
         { success: result.success, result: result.result, mutating: !resumedReadOnly, summary },
         transport.workspaceId,
       );
-      await verifyMutationReadBack(qualitySession, transport, resume.toolId, resume.inputs, result.success && !resumedReadOnly);
+      await verifyMutationReadBack(qualitySession, transport, resume.toolId, resume.inputs, result.success && !resumedReadOnly, cfg.isStaticWorkspace);
     }
 
     localProgress.emit({
@@ -2591,7 +2703,7 @@ async function resumeAgentLoopV2Inner(
       completedDeployment,
     };
     const deferredResult = await executeDeferredToolCalls(resume.deferredToolCalls, {
-      availableTools,
+      availableTools: resumeOfferableTools,
       executionMode: cfg.executionMode,
       transport,
       llmMessages,
@@ -2609,6 +2721,7 @@ async function resumeAgentLoopV2Inner(
       conversationId: cfg.conversationId,
       actionRunId: cfg.actionRunId,
       actionContext: actionContextFrom(cfg),
+      isStaticWorkspace: cfg.isStaticWorkspace,
     });
     hasInterveningMutation = deferredState.hasInterveningMutation;
     cancelled = deferredState.cancelled;
@@ -2632,6 +2745,7 @@ async function resumeAgentLoopV2Inner(
   }
 
   // Continue the loop
+  let resumeZeroWriteSteps = 0;
   while (stepsUsed < cfg.maxSteps && !cancelled) {
     const elapsed = Date.now() - startTime;
     if (elapsed > cfg.maxRuntimeMs) {
@@ -2784,9 +2898,10 @@ async function resumeAgentLoopV2Inner(
     }
 
     let batchHasMutation = false;
+    const logBeforeBatch = toolCallLog.length;
 
     for (const toolCall of llmResponse.toolCalls) {
-      const toolDef = availableTools.find((t) => t.id === toolCall.toolId);
+      const toolDef = resumeOfferableTools.find((t) => t.id === toolCall.toolId);
 
       if (!toolDef) {
         const result: ToolCallResult = {
@@ -2963,7 +3078,7 @@ async function resumeAgentLoopV2Inner(
           { success: result.success, result: result.result, mutating: !toolDef.readOnly, summary },
           transport.workspaceId,
         );
-        await verifyMutationReadBack(qualitySession, transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly);
+        await verifyMutationReadBack(qualitySession, transport, toolCall.toolId, toolCall.inputs, result.success && !toolDef.readOnly, cfg.isStaticWorkspace);
       }
 
       localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: result.success, summary, durationMs: 0 });
@@ -2979,12 +3094,30 @@ async function resumeAgentLoopV2Inner(
     }
 
     if (cancelled) break;
+    if (cfg.buildCapabilityGuard) {
+      const wroteFile = toolCallLog.slice(logBeforeBatch).some((call) => call.success && isFileWritingTool(call.toolId));
+      resumeZeroWriteSteps = wroteFile ? 0 : resumeZeroWriteSteps + 1;
+      if ((cfg.buildCapabilityGuard.maxStepsWithoutFileWrite ?? 3) > 0 &&
+          resumeZeroWriteSteps >= (cfg.buildCapabilityGuard.maxStepsWithoutFileWrite ?? 3)) {
+        failedHonestly = `The resumed build made no successful file writes in ${resumeZeroWriteSteps} steps; stopping to preserve the remaining budget.`;
+        finalText = failedHonestly;
+        localProgress.emit({ type: "status", summary: failedHonestly });
+        break;
+      }
+    }
     if (!batchHasMutation) mutationBatchPending = false;
+  }
+
+  if (cfg.buildCapabilityGuard && !cancelled && !modelFailed && !failedHonestly &&
+      !toolCallLog.some((call) => call.success && isFileWritingTool(call.toolId)) &&
+      !hasSuccessfulFileWriteInHistory(resume.pausedMessages)) {
+    failedHonestly = "The build produced no successful file-writing operation, so it is not complete.";
+    finalText = failedHonestly;
   }
 
   // Run build-fix loop with autonomous repair
   let buildFixResult: BuildFixLoopResult | undefined;
-  if (cfg.enableBuildFix && hasInterveningMutation && !cancelled) {
+  if (cfg.enableBuildFix && !cfg.isStaticWorkspace && hasInterveningMutation && !cancelled) {
     localProgress.emit({ type: "phase", phase: "build_fix", step: stepsUsed });
     buildFixResult = await runBuildFixLoop(transport, localProgress, {
       onRepair: createAutonomousRepairCallback(transport, cfg.systemPrompt, toolDefs, startTime + cfg.maxRuntimeMs, cfg.signal, cfg.executionMode, undefined, actionContextFrom(cfg), cfg.allowLittPaidProviders),

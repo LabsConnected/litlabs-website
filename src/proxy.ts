@@ -896,6 +896,9 @@ export default middleware;
 
 export const config = {
   matcher: [
+    // Generated assets require the same authenticated middleware context as
+    // their HTML entry; the broad static-extension exclusion must not skip it.
+    "/api/preview/(.*)",
     // Exclude: Next.js internals, static images, the self-hosted EmulatorJS
     // runtime (large binary .data/.wasm/.js assets in public/), and other
     // static asset extensions. Running Clerk + bot middleware on these caused

@@ -1030,7 +1030,7 @@ describe("runAgentLoopV2 — build capability guard", () => {
     expect(fourthCall[3]).toMatchObject({ model: "gemini-flash-latest" });
 
     // The run continued the same conversation instead of failing.
-    expect(result.finalText).toContain("Done — wrote the files.");
+    expect(result.failedHonestly).toContain("no successful file-writing operation");
     expect(result.modelFailed).toBeUndefined();
   });
 
@@ -1070,10 +1070,11 @@ describe("runAgentLoopV2 — build capability guard", () => {
     expect(result.modelFailed).toBe("NO_BUILD_CAPABLE_MODEL");
     expect(result.modelFailureText).toContain("No build-capable model is available");
     // Chain: north-mini-code → gemini-flash → gemini-2.5-flash →
-    // gemma-4-31b → exhausted. 4 windows × 3 steps = 12 calls, bounded
-    // far below maxSteps. (qwen3.8-27b:free is tool-capable but not
-    // run-proven as a file writer, so it never enters the build chain.)
-    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBe(12);
+    // nemotron-3-super → laguna-s-2.1 → nemotron-3-ultra → gemma-4-31b →
+    // exhausted. 7 windows × 3 steps = 21 calls, bounded far below
+    // maxSteps. (qwen3.8-27b:free is tool-capable but not run-proven as
+    // a file writer, so it never enters the build chain.)
+    expect(vi.mocked(callLLMWithTools).mock.calls.length).toBe(21);
   });
 
   it("resets the window when the model finally writes", async () => {
@@ -1225,6 +1226,35 @@ describe("runAgentLoopV2 — build capability guard", () => {
     // Structured events back the text: one per ruled-out window.
     const incompatible = result.events.filter((e) => e.type === "build_model_incompatible");
     expect(incompatible.length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe("BUILD resume completion evidence", () => {
+  beforeEach(() => vi.mocked(callLLMWithTools).mockReset());
+
+  function resumeInput(): ResumeInput {
+    return {
+      pausedMessages: [{ role: "user", content: "Build a site" }],
+      toolId: "files.mkdir", toolCallId: "mkdir-1", inputs: { path: "assets" }, decision: "approved",
+      stepsUsedBeforePause: 1, hadInterveningMutation: false,
+      config: { systemPrompt: "Build the site", userId: "u-test", executionMode: "auto", enableBuildFix: false, isStaticWorkspace: true, buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 } },
+    };
+  }
+
+  it("does not accept a completion claim after only creating a directory", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValue({ text: "Done.", toolCalls: [], finishReason: "stop", model: "test" });
+    const transport = { ...fakeTransport, mkdir: vi.fn(async () => ({ created: true })) } as unknown as WorkspaceTransport;
+    const result = await resumeAgentLoopV2(resumeInput(), transport);
+    expect(result.failedHonestly).toContain("no successful file-writing operation");
+  });
+
+  it("bounds a resumed read-only run at three steps", async () => {
+    let step = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async () => ({ text: "", toolCalls: [{ toolId: "files.read", toolCallId: `read-${++step}`, inputs: { projectId: "p-test", path: `page-${step}.html` } }], finishReason: "tool_calls", model: "test" }));
+    const transport = { ...fakeTransport, mkdir: vi.fn(async () => ({ created: true })), readFile: vi.fn(async () => ({ content: "<html/>", size: 7 })) } as unknown as WorkspaceTransport;
+    const result = await resumeAgentLoopV2(resumeInput(), transport);
+    expect(callLLMWithTools).toHaveBeenCalledTimes(3);
+    expect(result.failedHonestly).toContain("3 steps");
   });
 });
 

@@ -155,6 +155,34 @@ export const REQUIRED_STAGES_BY_SCOPE: Record<QualityTaskScope, readonly Quality
 };
 
 /**
+ * The stages a run must actually validate, given the workspace's
+ * capabilities. Task scope sets the intent; capability narrows it to the
+ * stages that can produce evidence there.
+ *
+ * A static (gitless) workspace has no host execution and no browser
+ * screenshot/judge path, so INSPECT and CRITIQUE can never produce their
+ * required machine evidence. They are not applicable stages in the static
+ * lane — requiring them made every successful static build report failure
+ * (the run wrote a verified site and still ended "Quality gate failed:
+ * N required stage(s) lack evidence"). RUN and TEST stay required: the
+ * served static preview reaching ready is the RUN evidence, and a
+ * verified read-back is the TEST check. Everything else is unchanged —
+ * a static run cannot skip understand/plan/design/build, and a failed
+ * stage still blocks.
+ *
+ * Non-static workspaces keep the strict set: once host execution and
+ * browser inspection exist, verification stays mandatory.
+ */
+export function requiredStagesFor(
+  taskScope: QualityTaskScope,
+  opts?: { isStaticWorkspace?: boolean },
+): readonly QualityStage[] {
+  const base = REQUIRED_STAGES_BY_SCOPE[taskScope];
+  if (opts?.isStaticWorkspace !== true) return base;
+  return base.filter((stage) => stage !== "inspect" && stage !== "critique");
+}
+
+/**
  * Request patterns that ask for a whole product surface. Checked BEFORE
  * the trivial patterns: "build me a website and fix a typo" is a full
  * build, not a typo fix.
@@ -226,6 +254,12 @@ export interface QualityLoopState {
   stages: Record<QualityStage, StageState>;
   /** How many DESIGN←CRITIQUE fix passes have run (bounded by MAX_DESIGN_PASSES). */
   designPasses: number;
+  /**
+   * Static (gitless) workspace flag — set at session start, persisted with
+   * the state so an approval-resume keeps the same required-stage set.
+   * Narrows required stages via {@link requiredStagesFor}.
+   */
+  isStaticWorkspace?: boolean;
   startedAt: string;
   updatedAt: string;
 }
@@ -391,6 +425,7 @@ export function skipStageOutOfScope(
   stage: QualityStage,
   taskScope: QualityTaskScope,
   reason: string,
+  requiredStages?: readonly QualityStage[],
 ): void {
   const current = currentStage(state);
   if (current !== stage) {
@@ -399,7 +434,7 @@ export function skipStageOutOfScope(
       `Cannot skip stage "${stage}" while stage "${current ?? "none"}" is current.`,
     );
   }
-  if (REQUIRED_STAGES_BY_SCOPE[taskScope].includes(stage)) {
+  if ((requiredStages ?? requiredStagesFor(taskScope, state)).includes(stage)) {
     throw new StageGateError(
       stage,
       `Stage "${stage}" is required for ${taskScope}-scope tasks and cannot be skipped as out of scope.`,
@@ -460,7 +495,7 @@ export function declareSuccess(
   opts: { deployRequested: boolean; taskScope?: QualityTaskScope },
 ): SuccessVerdict {
   const taskScope: QualityTaskScope = opts.taskScope ?? "full";
-  const required = new Set<QualityStage>(REQUIRED_STAGES_BY_SCOPE[taskScope]);
+  const required = new Set<QualityStage>(requiredStagesFor(taskScope, state));
   const missing: QualityStage[] = [];
 
   for (const stage of QUALITY_STAGES) {
