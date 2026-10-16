@@ -3,12 +3,14 @@ import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { createServer, type Server } from "node:http";
 import { chromium, type Browser } from "@playwright/test";
 import { NextRequest } from "next/server";
+import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 vi.mock("@clerk/nextjs/server", () => ({ clerkMiddleware: vi.fn(() => vi.fn()), createRouteMatcher: vi.fn(() => vi.fn()) }));
 vi.mock("@clerk/backend/proxy", () => ({ clerkFrontendApiProxy: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ auth: vi.fn(async (req: NextRequest) => ({ userId: req?.headers.get("x-fixture-auth-context") === "matched" && req.cookies.get("__session")?.value === "fixture-owner" ? "owner" : null })) }));
 vi.mock("@/lib/projects/project-repository", () => ({ getProject: vi.fn(async (id: string, user: string) => id === "owned-project" && user === "owner" ? { workspaceId: "fixture-workspace" } : null) }));
 vi.mock("@/lib/terminal-auth", () => ({ createTerminalToken: vi.fn(() => ({ token: "fixture-terminal-token" })) }));
 vi.mock("@/lib/terminal-config", () => ({ requireTerminalBaseUrl: vi.fn(() => "http://fixture-terminal") }));
+import { config } from "@/proxy";
 import { GET } from "@/app/api/preview/[projectId]/[[...path]]/route";
 
 const files: Record<string, string> = {
@@ -20,10 +22,6 @@ let server: Server;
 let browser: Browser;
 let origin: string;
 beforeAll(async () => {
-  // The route mints preview tokens with the real preview-token module,
-  // which signs with TERMINAL_AUTH_SECRET (the route has always required
-  // this secret — the terminal token is only mocked in this fixture).
-  vi.stubEnv("TERMINAL_AUTH_SECRET", "x".repeat(32));
   vi.stubGlobal("fetch", vi.fn(async (_url, options) => {
     const { path } = JSON.parse(String(options?.body));
     return new Response(JSON.stringify({ content: files[path] }), { status: files[path] ? 200 : 404 });
@@ -40,12 +38,7 @@ beforeAll(async () => {
       if (!match) { res.writeHead(404); res.end(); return; }
       const headers = new Headers();
       if (req.headers.cookie) headers.set("cookie", req.headers.cookie);
-      // The Next experimental matcher invokes AsyncLocalStorage in a way that
-      // is unavailable under this pinned Vitest fixture. The production
-      // matcher explicitly includes /api/preview/(.*), so this equivalent
-      // fixture predicate preserves route authentication without that brittle
-      // test-only dependency.
-      if (url.pathname.startsWith("/api/preview/")) headers.set("x-fixture-auth-context", "matched");
+      if (unstable_doesMiddlewareMatch({ config, url: url.href })) headers.set("x-fixture-auth-context", "matched");
       const response = await GET(new NextRequest(url, { headers }), { params: Promise.resolve({ projectId: match[1], path: match[2] ? match[2].split("/") : [] }) });
       res.writeHead(response.status, Object.fromEntries(response.headers));
       res.end(Buffer.from(await response.arrayBuffer()));
@@ -60,7 +53,6 @@ afterAll(async () => {
   await browser?.close();
   if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
   vi.unstubAllGlobals();
-  vi.unstubAllEnvs();
 });
 
 it("loads CSS and classic JS in an authenticated opaque-origin preview", async () => {

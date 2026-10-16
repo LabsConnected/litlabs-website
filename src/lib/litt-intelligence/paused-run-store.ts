@@ -751,7 +751,11 @@ export async function getRunOutcomeForPausedRun(
     // the RunResult in payload.result (written atomically with the status
     // change by action_runtime_transition_event_activity).
     for (let i = events.length - 1; i >= 0; i--) {
-      const payload = (events[i].payload ?? {}) as { result?: RunResult };
+      const payload = (events[i].payload ?? {}) as { result?: RunResult; pausedRunId?: string };
+      // Gates share a parent run. An outcome for a later gate is never the
+      // outcome of this one. Legacy terminal events without a gate ID still
+      // describe the parent attempt and remain valid fallback evidence.
+      if (payload.pausedRunId && payload.pausedRunId !== record.id) continue;
       const result = payload.result ?? null;
       if (events[i].type === "run.completed") {
         return {

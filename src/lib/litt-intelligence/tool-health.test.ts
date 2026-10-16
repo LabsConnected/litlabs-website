@@ -79,6 +79,41 @@ describe("resolveToolHealth", () => {
   });
 });
 
+describe("preview dev-server tools in static workspaces", () => {
+  it("preview.start / preview.launch / preview.reload are unavailable for static workspaces", () => {
+    const health = resolveToolHealth(
+      ["preview.start", "preview.launch", "preview.reload", "files.write"],
+      { terminal: { userId: "u", isStaticWorkspace: true } },
+    );
+    for (const id of ["preview.start", "preview.launch", "preview.reload"]) {
+      expect(health.get(id)?.health).toBe("unavailable");
+      expect(health.get(id)?.reason).toBe("static_workspace_no_dev_server");
+    }
+    expect(health.get("files.write")?.health).toBe("available");
+    const { offerable, dropped } = filterOfferableTools(health);
+    expect(dropped).toEqual(
+      expect.arrayContaining(["preview.start", "preview.launch", "preview.reload"]),
+    );
+    expect(offerable).toContain("files.write");
+    expect(offerable).not.toContain("preview.launch");
+  });
+
+  it("preview dev-server tools stay available for non-static workspaces", () => {
+    const health = resolveToolHealth(["preview.start", "preview.launch"], {
+      terminal: { userId: "u", isStaticWorkspace: false },
+    });
+    expect(health.get("preview.start")?.health).toBe("available");
+    expect(health.get("preview.launch")?.health).toBe("available");
+  });
+
+  it("preview dev-server tools stay available when static-ness is unknown", () => {
+    const health = resolveToolHealth(["preview.start"], {
+      terminal: { userId: "u" },
+    });
+    expect(health.get("preview.start")?.health).toBe("available");
+  });
+});
+
 describe("filterOfferableTools", () => {
   it("Test 6: unavailable tools are dropped, never advertised", () => {
     const health = resolveToolHealth(["terminal.execute", "files.write"], {

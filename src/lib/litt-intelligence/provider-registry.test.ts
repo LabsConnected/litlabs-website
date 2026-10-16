@@ -495,7 +495,7 @@ describe("provider registry — env override safety (no silent unknown-model fal
       expect(or!.models).not.toContain(bad);
       // Registry defaults are used instead: the plan still has models.
       expect(or!.models.length).toBeGreaterThan(0);
-      expect(or!.models).toContain("qwen/qwen3.8-27b:free");
+      expect(or!.models).toContain("cohere/north-mini-code:free");
     }
   });
 

@@ -160,7 +160,12 @@ function seedRecords(): Map<string, ModelRecord> {
       provider: "openrouter",
       canonicalId: "openrouter-qwen3.8-27b",
       providerModelId: "qwen/qwen3.8-27b:free",
-      enabled: true,
+      // Delisted upstream (Oct 2026): absent from the live OpenRouter
+      // catalog — every attempt 404s. The model id IS live on Groq
+      // (qwen/qwen3.8-27b) and is routed there via the Groq provider.
+      // Record kept disabled for the audit trail; re-enable if OpenRouter
+      // relists the :free variant.
+      enabled: false,
       capabilities: {
         text: true,
         structuredOutput: true,
@@ -181,6 +186,67 @@ function seedRecords(): Map<string, ModelRecord> {
       healthState: "unknown",
     },
     {
+      // BUILD-writer candidates added Oct 2026: the sole proven writer
+      // (gemma-4-31b-it:free) is chronically rate-limited upstream
+      // (Google AI Studio free capacity returns 429, which is
+      // provider-scoped — one saturated model ended every BUILD run).
+      // These catalog-verified :free models (tools in
+      // supported_parameters, checked against the live OpenRouter
+      // catalog 2026-10-13) sit on non-Google upstreams and are tried
+      // BEFORE gemma so a Google-side 429 can no longer kill the route
+      // first. Promotion is provisional: a real build run is the proof,
+      // and recorded failures demote via health state as usual.
+      provider: "openrouter",
+      canonicalId: "openrouter-nemotron-3-super",
+      providerModelId: "nvidia/nemotron-3-super-120b-a12b:free",
+      enabled: true,
+      capabilities: {
+        text: true,
+        structuredOutput: true,
+        toolCalling: true,
+        reliableFileWriting: true,
+        vision: false,
+        // Verified from the OpenRouter catalog (Oct 2026).
+        contextWindow: 262_144,
+      },
+      priority: 35,
+      healthState: "unknown",
+    },
+    {
+      provider: "openrouter",
+      canonicalId: "openrouter-laguna-s-2.1",
+      providerModelId: "poolside/laguna-s-2.1:free",
+      enabled: true,
+      capabilities: {
+        text: true,
+        structuredOutput: true,
+        toolCalling: true,
+        reliableFileWriting: true,
+        vision: false,
+        // Verified from the OpenRouter catalog (Oct 2026).
+        contextWindow: 262_144,
+      },
+      priority: 36,
+      healthState: "unknown",
+    },
+    {
+      provider: "openrouter",
+      canonicalId: "openrouter-nemotron-3-ultra",
+      providerModelId: "nvidia/nemotron-3-ultra-550b-a55b:free",
+      enabled: true,
+      capabilities: {
+        text: true,
+        structuredOutput: true,
+        toolCalling: true,
+        reliableFileWriting: true,
+        vision: false,
+        // Verified from the OpenRouter catalog (Oct 2026).
+        contextWindow: 1_000_000,
+      },
+      priority: 37,
+      healthState: "unknown",
+    },
+    {
       provider: "openrouter",
       canonicalId: "openrouter-gemma-4-31b",
       providerModelId: "google/gemma-4-31b-it:free",
@@ -191,9 +257,8 @@ function seedRecords(): Map<string, ModelRecord> {
         toolCalling: true,
         reliableFileWriting: true,
         vision: false,
-        // Conservative seed estimate (unverified) — informational only;
-        // no routing decision filters on contextWindow today.
-        contextWindow: 131_072,
+        // Verified from the OpenRouter catalog (Oct 2026).
+        contextWindow: 262_144,
       },
       priority: 40,
       healthState: "unknown",

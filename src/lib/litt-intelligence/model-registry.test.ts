@@ -42,15 +42,15 @@ describe("model registry — eligibility", () => {
 
   it("excludes vision-incapable openrouter models from vision queries", () => {
     const vision = getEligibleModels({ vision: true });
-    // qwen3.8-27b:free takes image input per the OpenRouter catalog
-    // (modality text+image+video->text); gemma/north-mini/nemotron do not.
-    // Managed OpenAI is listed because gpt-4o does accept image input. This is
-    // capability only — planBasicRoutes still withholds the LITT_PAID route
-    // from unentitled runs, and selectBuildModel does the same.
+    // The qwen3.8-27b:free record is disabled (delisted upstream Oct 2026 —
+    // every attempt 404s), so it is no longer eligible; gemma/north-mini/
+    // nemotron are not vision-capable. Managed OpenAI is listed because
+    // gpt-4o does accept image input. This is capability only —
+    // planBasicRoutes still withholds the LITT_PAID route from unentitled
+    // runs, and selectBuildModel does the same.
     expect(vision.map((m) => m.canonicalId)).toEqual([
       "gemini-flash",
       "gemini-2.5-flash",
-      "openrouter-qwen3.8-27b",
       "openai-gpt-4o",
     ]);
   });
@@ -108,6 +108,9 @@ describe("model registry — eligibility", () => {
       "gemini-flash",
       "gemini-2.5-flash",
       "openrouter-qwen3.8-27b",
+      "openrouter-nemotron-3-super",
+      "openrouter-laguna-s-2.1",
+      "openrouter-nemotron-3-ultra",
       "openrouter-gemma-4-31b",
     ]);
     expect(none).toBeNull();
@@ -128,6 +131,9 @@ describe("model registry — eligibility", () => {
       "gemini-flash",
       "gemini-2.5-flash",
       "openrouter-qwen3.8-27b",
+      "openrouter-nemotron-3-super",
+      "openrouter-laguna-s-2.1",
+      "openrouter-nemotron-3-ultra",
       "openrouter-gemma-4-31b",
     ]);
     expect(none).toBeNull();

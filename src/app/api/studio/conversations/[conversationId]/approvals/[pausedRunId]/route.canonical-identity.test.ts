@@ -70,10 +70,16 @@ vi.mock("@/lib/litt-intelligence/workspace-transport", () => ({
 
 vi.mock("@/lib/litt-intelligence/agent-loop-v2", () => ({
   resumeAgentLoopV2: vi.fn(),
+  isFileWritingTool: (id: string) => ["files.write", "apply_patch", "edit", "code.writeFile", "code.refactor", "files.patch"].includes(id),
 }));
 
 vi.mock("@/lib/projects/project-repository", () => ({
+  getProject: vi.fn(() => Promise.resolve(null)),
   verifyProjectWorkspace: vi.fn(),
+}));
+vi.mock("@/lib/studio/task-service", () => ({
+  attachActionRunToConversationTask: vi.fn(() => Promise.resolve()),
+  settleConversationTask: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("@/lib/missions/mission-repository", () => ({
@@ -108,6 +114,8 @@ import {
 } from "@/lib/litt-intelligence/paused-run-store";
 import { resumeAgentLoopV2 } from "@/lib/litt-intelligence/agent-loop-v2";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
+import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
+import { attachActionRunToConversationTask } from "@/lib/studio/task-service";
 import {
   getActionRun,
   listActionEvents,
@@ -346,6 +354,8 @@ describe("canonical identity — retry mints a new run", () => {
       expect.objectContaining({ userId: USER_ID, kind: "agent" }),
     );
     expect(updatePausedRunActionRun).toHaveBeenCalledWith(PAUSED_ID, USER_ID, "run-new");
+    expect(attachActionRunToConversationTask).toHaveBeenCalledWith(USER_ID, CONV_ID, "run-new");
+    expect(createWorkspaceTransport).toHaveBeenCalledWith("proj-123", USER_ID, { operationId: PAUSED_ID });
 
     // The claim-path transition ran against the NEW run, never the failed one.
     await vi.waitFor(() =>
