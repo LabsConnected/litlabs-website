@@ -1,0 +1,189 @@
+/**
+ * BuildConsole — "Create something new" contract.
+ *
+ * Regression coverage for the golden-journey defect: a descriptive prompt
+ * submitted on the dashboard used to navigate to /studio?prompt=… with no
+ * project, where Studio silently resolved the most-recently-touched
+ * project and ran inside it. The console must now create the project
+ * first and pin its id in the URL.
+ */
+
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+
+const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock, replace: vi.fn() }),
+}));
+
+vi.mock("@/hooks/useClerkAuth", () => ({
+  useClerkAuth: () => ({ getToken: vi.fn().mockResolvedValue("test-token") }),
+}));
+
+import { BuildConsole } from "./BuildConsole";
+
+function mockFetch(handlers: {
+  intent?: () => Response;
+  create?: () => Response | Promise<Response>;
+}) {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (url.includes("/api/litt/intent")) return handlers.intent!();
+    if (url.includes("/api/studio-projects")) return handlers.create!();
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+}
+
+function pushedUrl(): URL {
+  expect(pushMock).toHaveBeenCalledTimes(1);
+  return new URL(`http://localhost${pushMock.mock.calls[0][0] as string}`);
+}
+
+beforeEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  pushMock.mockClear();
+});
+
+describe("BuildConsole project creation", () => {
+  it("creates a new project and navigates to it with prompt, intent and planId", async () => {
+    const fetchMock = mockFetch({
+      intent: () =>
+        new Response(
+          JSON.stringify({
+            type: "intent",
+            result: { primaryIntent: "build-website" },
+            plan: { id: "plan-1" },
+          }),
+          { status: 200 },
+        ),
+      create: () =>
+        new Response(JSON.stringify({ project: { id: "proj-new", name: "A site" } }), { status: 201 }),
+    });
+    const user = userEvent.setup();
+    render(<BuildConsole />);
+
+    await user.type(
+      screen.getByLabelText("Describe what you want to make"),
+      "A website for my landscaping business",
+    );
+    await user.click(screen.getByRole("button", { name: /create/i }));
+
+    const url = pushedUrl();
+    expect(url.pathname).toBe("/studio");
+    expect(url.searchParams.get("project")).toBe("proj-new");
+    expect(url.searchParams.get("prompt")).toBe("A website for my landscaping business");
+    expect(url.searchParams.get("intent")).toBe("build-website");
+    expect(url.searchParams.get("planId")).toBe("plan-1");
+
+    const createCalls = fetchMock.mock.calls.filter(([i]) =>
+      String(i instanceof Request ? i.url : String(i)).includes("/api/studio-projects"),
+    );
+    expect(createCalls).toHaveLength(1);
+    const body = JSON.parse((createCalls[0][1] as RequestInit).body as string);
+    expect(body.sourceType).toBe("blank");
+    expect(body.name.length).toBeGreaterThan(0);
+    expect(body.name.length).toBeLessThanOrEqual(120);
+  });
+
+  it("still creates the project when the intent router is unreachable", async () => {
+    const fetchMock = mockFetch({
+      intent: () => {
+        throw new Error("network down");
+      },
+      create: () =>
+        new Response(JSON.stringify({ project: { id: "proj-new" } }), { status: 201 }),
+    });
+    const user = userEvent.setup();
+    render(<BuildConsole />);
+
+    await user.type(screen.getByLabelText("Describe what you want to make"), "A landing page");
+    await user.click(screen.getByRole("button", { name: /create/i }));
+
+    const url = pushedUrl();
+    expect(url.searchParams.get("project")).toBe("proj-new");
+    expect(
+      fetchMock.mock.calls.some(([i]) =>
+        String(i instanceof Request ? i.url : String(i)).includes("/api/studio-projects"),
+      ),
+    ).toBe(true);
+  });
+
+  it("shows the clarification and does NOT create a project", async () => {
+    const fetchMock = mockFetch({
+      intent: () =>
+        new Response(
+          JSON.stringify({ type: "clarification", request: { question: "What kind of site?" } }),
+          { status: 200 },
+        ),
+      create: () => {
+        throw new Error("create must not be called");
+      },
+    });
+    const user = userEvent.setup();
+    render(<BuildConsole />);
+
+    await user.type(screen.getByLabelText("Describe what you want to make"), "Website");
+    await user.click(screen.getByRole("button", { name: /create/i }));
+
+    await waitFor(() => expect(screen.getByText("What kind of site?")).toBeTruthy());
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(
+      fetchMock.mock.calls.some(([i]) =>
+        String(i instanceof Request ? i.url : String(i)).includes("/api/studio-projects"),
+      ),
+    ).toBe(false);
+    // Button must not stay stuck busy after a clarification.
+    expect((screen.getByRole("button", { name: /create/i }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("shows the create error and does not navigate when project creation fails", async () => {
+    mockFetch({
+      intent: () =>
+        new Response(JSON.stringify({ type: "intent", result: {} }), { status: 200 }),
+      create: () =>
+        new Response(JSON.stringify({ error: "quota exceeded" }), { status: 402 }),
+    });
+    const user = userEvent.setup();
+    render(<BuildConsole />);
+
+    await user.type(screen.getByLabelText("Describe what you want to make"), "A portfolio site");
+    await user.click(screen.getByRole("button", { name: /create/i }));
+
+    await waitFor(() => expect(screen.getByText("quota exceeded")).toBeTruthy());
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("issues a single create POST on rapid double submit", async () => {
+    let resolveCreate: ((r: Response) => void) | undefined;
+    const fetchMock = mockFetch({
+      intent: () => new Response(JSON.stringify({ type: "intent", result: {} }), { status: 200 }),
+      create: () =>
+        new Promise<Response>((resolve) => {
+          resolveCreate = resolve;
+        }),
+    });
+    const user = userEvent.setup();
+    render(<BuildConsole />);
+
+    await user.type(screen.getByLabelText("Describe what you want to make"), "A dashboard app");
+    const button = screen.getByRole("button", { name: /create/i });
+    await user.click(button);
+    await user.click(button);
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.filter(([i]) =>
+          String(i instanceof Request ? i.url : String(i)).includes("/api/studio-projects"),
+        ),
+      ).toHaveLength(1);
+    });
+    resolveCreate?.(
+      new Response(JSON.stringify({ project: { id: "proj-new" } }), { status: 201 }),
+    );
+    await waitFor(() => expect(pushMock).toHaveBeenCalledTimes(1));
+    expect(pushedUrl().searchParams.get("project")).toBe("proj-new");
+  });
+});

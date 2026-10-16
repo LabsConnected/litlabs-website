@@ -231,6 +231,14 @@ export interface CreateBlankProjectInput {
   name: string;
   templateId: ProjectTemplateId;
   accessMode?: ProjectAccessMode;
+  /**
+   * Idempotent-create window. When set, a same-slug project owned by this
+   * user created within the window is returned instead of inserting a
+   * second row — double submits and client retries collapse onto the
+   * project they already created. Off by default: programmatic flows
+   * (canvas promotion, agent tool calls) keep exact create semantics.
+   */
+  dedupeWithinMs?: number;
 }
 
 /** Input for creating a GitHub-backed project. */

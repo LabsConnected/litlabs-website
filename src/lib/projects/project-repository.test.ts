@@ -23,6 +23,11 @@ vi.mock("@/lib/supabase", () => {
     // When true, the first github_repository_id=4242 lookup reports "free"
     // and subsequent lookups see the connected row — simulates a create race.
     _simulateCreateRace: false,
+    // When true, a non-single select filtered by slug returns a recent
+    // same-slug row — simulates the project a repeated create made already.
+    _simulateDuplicateCreate: false,
+    // Counts awaited insert() queries so tests can prove no row was minted.
+    _insertCount: 0,
 
     from(table: string) {
       this._table = table;
@@ -40,6 +45,7 @@ vi.mock("@/lib/supabase", () => {
     },
     insert() {
       this._method = "insert";
+      this._insertCount++;
       return this;
     },
     update() {
@@ -60,6 +66,13 @@ vi.mock("@/lib/supabase", () => {
     },
     lt(column: string, value: unknown) {
       this._filters.push({ column, value });
+      return this;
+    },
+    gte(column: string, value: unknown) {
+      this._filters.push({ column, value });
+      return this;
+    },
+    limit(_n: number) {
       return this;
     },
     maybeSingle() {
@@ -89,6 +102,56 @@ vi.mock("@/lib/supabase", () => {
       // Return mock data based on filters
       const userIdFilter = this._filters.find((f) => f.column === "user_id");
       const idFilter = this._filters.find((f) => f.column === "id");
+
+      // Dedupe lookup: non-single select filtered by slug. Only returns a
+      // row when the test simulates a project the repeated create made.
+      if (this._method === "select" && !this._isMaybeSingle && !this._isSingle) {
+        const slugFilter = this._filters.find((f) => f.column === "slug");
+        if (slugFilter && this._simulateDuplicateCreate) {
+          this._simulateDuplicateCreate = false;
+          resolve({
+            data: [
+              {
+                id: "proj-deduped",
+                user_id: "user-A",
+                name: "Test Project",
+                slug: "test-project",
+                source_type: "blank",
+                access_mode: "private",
+                template_id: "blank-static",
+                github_installation_id: null,
+                github_repository_id: null,
+                github_owner: null,
+                github_repo: null,
+                github_full_name: null,
+                github_default_branch: null,
+                github_branch: null,
+                latest_commit_sha: null,
+                workspace_id: null,
+                workspace_status: "not_prepared",
+                workspace_root: null,
+                workspace_error: null,
+                workspace_prepared_at: null,
+                runtime_status: "stopped",
+                preview_url: null,
+                runtime_error: null,
+                framework: "static",
+                package_manager: "none",
+                root_directory: ".",
+                development_command: null,
+                build_command: null,
+                test_command: null,
+                install_command: null,
+                workspace_type: "website",
+                created_at: "2024-01-01T00:00:00Z",
+                updated_at: "2024-01-01T00:00:00Z",
+              },
+            ],
+            error: null,
+          });
+          return;
+        }
+      }
 
       if (this._method === "delete") {
         // Simulate ownership-scoped delete: only return data if userId matches
@@ -324,6 +387,8 @@ const supabaseMock = supabaseAdmin as unknown as {
   _injectError: { message: string; code?: string } | null;
   _injectErrorAfterQueries: number;
   _simulateCreateRace: boolean;
+  _simulateDuplicateCreate: boolean;
+  _insertCount: number;
 };
 
 describe("project-repository ownership enforcement", () => {
@@ -332,6 +397,8 @@ describe("project-repository ownership enforcement", () => {
     supabaseMock._injectError = null;
     supabaseMock._injectErrorAfterQueries = 0;
     supabaseMock._simulateCreateRace = false;
+    supabaseMock._simulateDuplicateCreate = false;
+    supabaseMock._insertCount = 0;
   });
 
   describe("getProject", () => {
@@ -589,6 +656,33 @@ describe("project-repository ownership enforcement", () => {
       // directly (no build step). This is the "STATIC" badge in the UI.
       expect(project.framework).toBe("static");
       expect(project.packageManager).toBe("none");
+    });
+  });
+
+  describe("createBlankProject — idempotent create (dedupeWithinMs)", () => {
+    it("returns the recently created same-slug project instead of inserting a duplicate", async () => {
+      supabaseMock._simulateDuplicateCreate = true;
+      const insertsBefore = supabaseMock._insertCount;
+      const project = await createBlankProject({
+        userId: "user-A",
+        name: "Test Project",
+        templateId: "blank-static",
+        dedupeWithinMs: 30_000,
+      });
+      expect(project.id).toBe("proj-deduped");
+      expect(supabaseMock._insertCount).toBe(insertsBefore);
+    });
+
+    it("inserts normally when no recent same-slug project exists", async () => {
+      const insertsBefore = supabaseMock._insertCount;
+      const project = await createBlankProject({
+        userId: "user-A",
+        name: "Test Project",
+        templateId: "blank-static",
+        dedupeWithinMs: 30_000,
+      });
+      expect(project.id).toBe("proj-new");
+      expect(supabaseMock._insertCount).toBe(insertsBefore + 1);
     });
   });
 

@@ -12,6 +12,11 @@ import {
   Play,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
+import {
+  createManagedStudioProject,
+  deriveProjectNameFromPrompt,
+} from "@/lib/projects/create-project-request";
 
 /**
  * BuildConsole — the dashboard's one universal composer.
@@ -37,6 +42,7 @@ const SUGGESTIONS = [
 
 export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string }) {
   const router = useRouter();
+  const { getToken } = useClerkAuth();
   const [prompt, setPrompt] = useState(initialPrompt);
   const [isRouting, setIsRouting] = useState(false);
   const [routingMessage, setRoutingMessage] = useState<string | null>(null);
@@ -52,6 +58,8 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
     if (!text || isRouting) return;
     setIsRouting(true);
     setRoutingMessage(null);
+    let planId: string | undefined;
+    let primaryIntent: string | undefined;
     try {
       const response = await fetch("/api/litt/intent", {
         method: "POST",
@@ -70,17 +78,38 @@ export function BuildConsole({ initialPrompt = "" }: { initialPrompt?: string })
         setRoutingMessage(
           payload.request?.question || "Tell LiTT what you want to work on.",
         );
+        setIsRouting(false);
         return;
       }
-      const params = new URLSearchParams({ tool: "chat", prompt: text });
-      if (payload.result?.primaryIntent)
-        params.set("intent", payload.result.primaryIntent);
-      if (payload.plan?.id) params.set("planId", payload.plan.id);
-      router.push(`/studio?${params.toString()}`);
+      primaryIntent = payload.result?.primaryIntent;
+      planId = payload.plan?.id;
     } catch {
-      // Intent router unreachable — hand the raw prompt to Studio instead
-      // of leaving the user on a dead button.
-      router.push(`/studio?tool=chat&prompt=${encodeURIComponent(text)}`);
+      // Intent router unreachable — still create the project and hand the
+      // raw prompt to Studio instead of leaving the user on a dead button.
+    }
+    try {
+      // Create the project BEFORE navigating: /studio?prompt=… without an
+      // explicit ?project= resolves to the most-recently-touched project,
+      // which silently attached "create something new" runs to an existing
+      // one. The new project id is pinned in the URL so the prompt can
+      // only ever land in the project this submission created.
+      const project = await createManagedStudioProject({
+        name: deriveProjectNameFromPrompt(text),
+        templateId: "blank-static",
+        getToken,
+      });
+      const params = new URLSearchParams({
+        tool: "chat",
+        prompt: text,
+        project: project.id,
+      });
+      if (primaryIntent) params.set("intent", primaryIntent);
+      if (planId) params.set("planId", planId);
+      router.push(`/studio?${params.toString()}`);
+    } catch (err) {
+      setRoutingMessage(
+        err instanceof Error ? err.message : "Couldn't create your project. Try again.",
+      );
     } finally {
       setIsRouting(false);
     }

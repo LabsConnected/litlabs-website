@@ -178,6 +178,7 @@ describe("blank creation", () => {
       name: "My Site",
       templateId: "blank-static",
       accessMode: "private",
+      dedupeWithinMs: 30_000,
     });
     expect(mockProvision).toHaveBeenCalledWith("p1", USER);
     const payload = await res.json();

@@ -30,6 +30,7 @@ import type { LiTTLiveSessionContext } from "@/lib/litt/live/types";
 import type { ArtifactAction } from "@/lib/canvas/types";
 import { STUDIO_EVENT_OPEN_DOCK, STUDIO_EVENT_OPEN_FILE, STUDIO_EVENT_REQUEST_DEPLOY } from "@/lib/canvas/panel-actions";
 import { INITIAL_RUNTIME_STATE, deriveExecutionHint } from "@/lib/projects/runtime-state";
+import { createManagedStudioProject } from "@/lib/projects/create-project-request";
 import { useLiTTRuntime } from "@/hooks/useLiTTRuntime";
 import {
   isOnboardingComplete,
@@ -1820,29 +1821,7 @@ function CommandStudioContent() {
     setCreatingProject(true);
     setProjectCreateError(null);
     try {
-      const token = await getToken?.();
-      const res = await fetch("/api/studio-projects", {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          sourceType: "blank",
-          name,
-          templateId: "blank-static",
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        const msg = (err as { error?: string }).error || `Failed to create project (${res.status})`;
-        setProjectCreateError(msg);
-        console.error("[handleStartBlank] Failed to create project:", err);
-        if (isMobileLitt) mobileDiag("project", "create_failed", { status: res.status });
-        return;
-      }
-      const { project } = await res.json();
+      const project = await createManagedStudioProject({ name, templateId: "blank-static", getToken });
       // Persist the new project ID to localStorage immediately so that
       // the conversation controller can find it via getActiveProjectId's
       // localStorage fallback. The key is scoped by user.

@@ -2,8 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import PageShell from "@/components/PageShell";
 import { useTheme } from "@/context/ThemeContext";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { createManagedStudioProject } from "@/lib/projects/create-project-request";
+import ProjectNameDialog from "@/app/(app)/studio/components/ProjectNameDialog";
 import {
   ArrowRight,
   AlertTriangle,
@@ -11,6 +15,7 @@ import {
   GitPullRequest,
   Loader2,
   Play,
+  Plus,
   RefreshCw,
   Search,
   Sparkles,
@@ -44,10 +49,15 @@ type Installation = {
 
 export default function ProjectsPage() {
   const { resolvedColors: T } = useTheme();
+  const router = useRouter();
+  const { getToken } = useClerkAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [installations, setInstallations] = useState<Installation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [lastOpenedId, setLastOpenedId] = useState<string | null>(null);
@@ -102,6 +112,23 @@ export default function ProjectsPage() {
     recordLastOpenedProject(id);
     setLastOpenedId(id);
   }, []);
+
+  const handleCreateProject = useCallback(
+    async (name: string) => {
+      if (creatingProject) return;
+      setCreatingProject(true);
+      setCreateError(null);
+      try {
+        const project = await createManagedStudioProject({ name, getToken });
+        router.push(`/studio?project=${encodeURIComponent(project.id)}`);
+      } catch (err) {
+        setCreateError(err instanceof Error ? err.message : "Couldn't create your project. Try again.");
+      } finally {
+        setCreatingProject(false);
+      }
+    },
+    [creatingProject, getToken, router],
+  );
 
   const retrySetup = useCallback(
     async (projectId: string) => {
@@ -211,10 +238,18 @@ export default function ProjectsPage() {
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row lg:flex-col">
-              <Link
-                href="/studio"
+              <button
+                type="button"
+                onClick={() => { setCreateError(null); setCreateDialogOpen(true); }}
                 className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-black"
                 style={{ backgroundColor: T.accentColor, color: T.bgColor }}
+              >
+                <Plus size={16} /> New project
+              </button>
+              <Link
+                href="/studio"
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-5 py-3 text-sm font-bold"
+                style={{ borderColor: `${T.borderColor}55`, color: T.textColor }}
               >
                 <Play size={16} /> Start in Studio
               </Link>
@@ -519,6 +554,14 @@ export default function ProjectsPage() {
           </div>
         </div>
       )}
+
+      <ProjectNameDialog
+        open={createDialogOpen}
+        busy={creatingProject}
+        error={createError}
+        onCancel={() => { if (!creatingProject) setCreateDialogOpen(false); }}
+        onSubmit={(name) => { void handleCreateProject(name); }}
+      />
     </PageShell>
   );
 }

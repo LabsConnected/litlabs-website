@@ -89,6 +89,10 @@ export async function POST(request: NextRequest) {
         name,
         templateId,
         accessMode: body.accessMode === "shared" ? "shared" : "private",
+        // A repeated submission of the same create — double click,
+        // client retry, concurrent POSTs resolved sequentially — returns
+        // the project it already made instead of minting a duplicate.
+        dedupeWithinMs: 30_000,
       });
 
       // Provision durable source at create time — a managed project must

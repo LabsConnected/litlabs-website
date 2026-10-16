@@ -126,6 +126,111 @@ describe("StudioProjectPicker project deletion", () => {
   });
 });
 
+describe("StudioProjectPicker New project affordance", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    cleanup();
+  });
+
+  it("fires onCreateProject and closes the menu", async () => {
+    mockListFetch();
+    const onCreateProject = vi.fn();
+    render(
+      <StudioProjectPicker
+        projectId="p1"
+        projectName="Alpha"
+        onSelect={vi.fn()}
+        onCreateProject={onCreateProject}
+      />,
+    );
+    fireEvent.click(screen.getByTitle("Switch active project"));
+    await waitFor(() => expect(screen.getByText("Beta")).toBeTruthy());
+
+    fireEvent.click(screen.getByText("New project"));
+    expect(onCreateProject).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("project-picker-menu")).toBeNull();
+  });
+
+  it("stays reachable while the project list is still loading", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise(() => {}));
+    render(
+      <StudioProjectPicker
+        projectId="p1"
+        projectName="Alpha"
+        onSelect={vi.fn()}
+        onCreateProject={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTitle("Switch active project"));
+    await waitFor(() => expect(screen.getByText("Loading projects…")).toBeTruthy());
+    // The create affordance must not be gated on list-load success.
+    expect(screen.getByText("New project")).toBeTruthy();
+  });
+
+  it("stays reachable when the project list fails to load", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
+    render(
+      <StudioProjectPicker
+        projectId="p1"
+        projectName="Alpha"
+        onSelect={vi.fn()}
+        onCreateProject={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTitle("Switch active project"));
+    await waitFor(() => expect(screen.getByText("network down")).toBeTruthy());
+    expect(screen.getByText("New project")).toBeTruthy();
+  });
+
+  it("keeps the menu open when scrolling inside it (long project lists)", async () => {
+    // 12 projects overflow the 320px menu — the user must scroll inside
+    // the list to reach "New project". A capture-phase scroll listener on
+    // window must not treat that inner scroll as an "outside scroll".
+    const manyProjects = {
+      projects: Array.from({ length: 12 }, (_, i) => ({
+        id: `p${i}`,
+        name: `Project ${i}`,
+        sourceType: "litt-managed",
+      })),
+      legacyOnly: [],
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify(manyProjects), { status: 200 }),
+    );
+    render(
+      <StudioProjectPicker
+        projectId="p0"
+        projectName="Project 0"
+        onSelect={vi.fn()}
+        onCreateProject={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTitle("Switch active project"));
+    await waitFor(() => expect(screen.getByText("Project 11")).toBeTruthy());
+
+    fireEvent.scroll(screen.getByTestId("project-picker-menu"));
+    expect(screen.getByTestId("project-picker-menu")).toBeTruthy();
+    expect(screen.getByText("New project")).toBeTruthy();
+  });
+
+  it("still closes the menu on an outside scroll", async () => {
+    mockListFetch();
+    render(
+      <StudioProjectPicker
+        projectId="p1"
+        projectName="Alpha"
+        onSelect={vi.fn()}
+        onCreateProject={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTitle("Switch active project"));
+    await waitFor(() => expect(screen.getByText("Beta")).toBeTruthy());
+
+    fireEvent.scroll(document);
+    expect(screen.queryByTestId("project-picker-menu")).toBeNull();
+  });
+});
+
 describe("StudioProjectPicker dropdown placement (mobile regression)", () => {
   beforeEach(() => {
     vi.restoreAllMocks();

@@ -121,6 +121,28 @@ export async function createBlankProject(
   const name = normalizeProjectName(input.name);
   const slug = slugify(name) || `project-${Date.now()}`;
 
+  // Idempotent create: a repeated submission of the same project —
+  // double click, network retry, or two concurrent POSTs that resolve
+  // sequentially — must not mint a second project. The slug is derived
+  // deterministically from the name, so a same-slug row created inside
+  // the dedupe window IS the same logical request. The UI-layer busy
+  // guards cover in-flight repeats; this closes the sequential-retry gap
+  // the guards can't see.
+  if (input.dedupeWithinMs && input.dedupeWithinMs > 0) {
+    const { data: recent } = await supabaseAdmin
+      .from(TABLE)
+      .select("*")
+      .eq("user_id", input.userId)
+      .eq("slug", slug)
+      .gte("created_at", new Date(Date.now() - input.dedupeWithinMs).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const existing = Array.isArray(recent) ? recent[0] : null;
+    if (existing) {
+      return rowToCanonical(existing as StudioProjectRow);
+    }
+  }
+
   const insert: Record<string, unknown> = {
     user_id: input.userId,
     name,
