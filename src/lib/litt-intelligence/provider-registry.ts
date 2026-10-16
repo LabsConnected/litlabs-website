@@ -331,7 +331,6 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
         // Groq's live catalog has neither, so the old fallbacks 404'd on
         // every attempt (verified against the live Groq catalog Oct 2026).
         "openai/gpt-oss-20b",
-        "qwen/qwen3.8-27b",
       ],
     },
     {
